@@ -19,7 +19,7 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 3. **Show.** A session start shows at most two pending notes, one line each, after jouet's primer:
 
    ```text
-   jouet wind noticed: `mytool sync --all` failed 4 times in 2 sessions (last exit 127, not found) and never worked. It drafted rule `wind-mytool-sync-fails` (warn mode): `jouet wind show n1` to read it, `jouet rule new wind-mytool-sync-fails --from-note n1 --author s-42` to adopt it, `jouet wind dismiss n1` to drop it.
+   jouet wind noticed: `mytool <arg> --all` failed 4 times in 2 sessions (last exit 127, not found) and never worked. It drafted rule `wind-mytool-fails` (warn mode): `jouet wind show n1` to read it, `jouet rule new wind-mytool-fails --from-note n1 --author s-42` to adopt it, `jouet wind dismiss n1` to drop it.
    ```
 
    A note shown to three sessions without being adopted lapses.

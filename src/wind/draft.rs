@@ -70,7 +70,13 @@ pub fn name_for(evidence: &Evidence) -> String {
 
 /// What a pattern cost and what to do about it, in one line each.
 fn describe(e: &Evidence) -> (String, String) {
-    let command = e.signature.text();
+    // The first shape seen reads better than the signature: `mytool <arg>
+    // --all` rather than `mytool --all`.
+    let command = e
+        .examples
+        .first()
+        .cloned()
+        .unwrap_or_else(|| e.signature.text());
     let sessions = e.sessions.len();
     match e.pattern {
         Pattern::NeverWorks => {
@@ -170,8 +176,37 @@ pub fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
     }
 }
 
-/// A command whose program and subcommands are `WORDS` and which has every
-/// flag in `FLAGS`, whatever their values.
+/// Whether a draft loads as a warn-mode user rule and passes every one of
+/// its examples.
+pub fn sound(draft: &Draft) -> bool {
+    let engine = jouet_rules::Engine::new(
+        vec![jouet_rules::Source {
+            name: draft.name.clone(),
+            origin: jouet_rules::Origin::User(format!("{}.luau", draft.name).into()),
+            code: draft.code.clone(),
+            trusted: true,
+        }],
+        jouet_rules::Options {
+            has_command: Box::new(|_| true),
+            disabled: Vec::new(),
+            budget: jouet_rules::Budget::default(),
+            cache_dir: None,
+        },
+    );
+    let Ok(engine) = engine else { return false };
+    let Some(rule) = engine.rule(&draft.name) else {
+        return false;
+    };
+    rule.state == jouet_rules::State::Enabled
+        && rule.mode == jouet_rules::Mode::Warn
+        && engine
+            .examples(rule)
+            .is_ok_and(|examples| !examples.is_empty() && examples.iter().all(|e| e.ok))
+}
+
+/// A command whose program and subcommands are `WORDS` and whose flags are
+/// exactly `FLAGS`, whatever their values: the signature the detector saw
+/// fail, so a variant with another flag (often what worked) is left alone.
 const MATCHES: &str = "
 local function matches(command: JouetCommand): boolean
 \tif command.program ~= WORDS[1] then
@@ -182,14 +217,22 @@ local function matches(command: JouetCommand): boolean
 \t\t\treturn false
 \t\tend
 \tend
-\tfor _, flag in FLAGS do
-\t\tlocal found = false
-\t\tfor _, arg in jouet.options(command.argv) do
-\t\t\tif arg == flag or string.sub(arg, 1, #flag + 1) == flag .. \"=\" then
-\t\t\t\tfound = true
+\tlocal seen: { [string]: boolean } = {}
+\tlocal count = 0
+\tfor _, arg in jouet.options(command.argv) do
+\t\tif #arg > 1 and string.sub(arg, 1, 1) == \"-\" then
+\t\t\tlocal name = string.match(arg, \"^([^=]+)\") or arg
+\t\t\tif not seen[name] then
+\t\t\t\tseen[name] = true
+\t\t\t\tcount += 1
 \t\t\tend
 \t\tend
-\t\tif not found then
+\tend
+\tif count ~= #FLAGS then
+\t\treturn false
+\tend
+\tfor _, flag in FLAGS do
+\t\tif not seen[flag] then
 \t\t\treturn false
 \t\tend
 \tend
@@ -272,6 +315,7 @@ mod tests {
         for example in examples {
             assert!(example.ok, "{example:?}\n{}", draft.code);
         }
+        assert!(sound(draft));
     }
 
     #[test]
@@ -284,9 +328,9 @@ mod tests {
         ]);
         assert_eq!(out.len(), 1);
         let (draft, engine) = &out[0];
-        assert_eq!(draft.name, "wind-mytool-sync-fails");
+        assert_eq!(draft.name, "wind-mytool-fails");
         assert!(
-            draft.message.contains("`mytool pull` worked"),
+            draft.message.contains("`mytool <arg>` worked"),
             "{}",
             draft.message
         );
@@ -303,7 +347,28 @@ mod tests {
         };
         assert!(fires("/opt/bin/mytool sync --all=no x"));
         assert!(!fires("mytool sync x"));
-        assert!(!fires("mytool pull --all"));
+        assert!(!fires("mytool sync --all --offline"));
+    }
+
+    #[test]
+    fn a_variant_with_another_flag_that_worked_is_left_alone() {
+        let out = drafts(&[
+            ("a", "mytool sync --all", 1, None),
+            ("a", "mytool sync --all --offline", 0, None),
+            ("b", "mytool sync --all", 1, None),
+            ("b", "mytool sync --all", 1, None),
+        ]);
+        assert_eq!(out.len(), 1);
+        let (draft, engine) = &out[0];
+        assert!(
+            draft
+                .message
+                .contains("`mytool <arg> --all --offline` worked"),
+            "{}",
+            draft.message
+        );
+        assert!(sound(draft), "{}", draft.code);
+        assert_sound(draft, engine);
     }
 
     #[test]
