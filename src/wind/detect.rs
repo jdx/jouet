@@ -360,13 +360,13 @@ pub(crate) mod tests {
         d.observe(&ran(4, "b", "cd x && mytool sync --all", 127), &never);
         d.observe(&ran(5, "b", "mytool sync --all", 127), &never);
         let ready: Vec<_> = d.ready().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(ready, ["never-works:mytool sync --all"]);
-        let e = &d.evidence["never-works:mytool sync --all"];
-        assert_eq!(e.fix.as_deref(), Some("mytool pull"));
+        assert_eq!(ready, ["never-works:mytool --all"]);
+        let e = &d.evidence["never-works:mytool --all"];
+        assert_eq!(e.fix.as_deref(), Some("mytool <arg>"));
         assert_eq!(e.exit_code, Some(127));
         assert_eq!(
             e.examples,
-            ["mytool sync --all", "cd x && mytool sync --all"]
+            ["mytool <arg> --all", "cd <arg> && mytool <arg> --all"]
         );
     }
 

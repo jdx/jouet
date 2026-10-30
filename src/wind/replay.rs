@@ -175,7 +175,7 @@ end }"#;
         assert_eq!(
             report.fired[0],
             Hit {
-                command: "git tag v1".into(),
+                command: "git tag <arg>".into(),
                 count: 2,
                 verdict: "warn".into()
             }

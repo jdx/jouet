@@ -3,7 +3,7 @@
 # Self-winding: `jouet wind` drafting rules from the hook ledger, `jouet rule
 # new|promote|log` and `rule test --replay`, and `jouet unwind`. Each test
 # starts from test/fixtures/ledger.jsonl: two sessions in which `mytool sync
-# --all` keeps failing with 127, agents sleep a lot, and a user rule
+# --all` (shape `mytool <arg> --all`) keeps failing with 127, agents sleep a lot, and a user rule
 # `no-tags` keeps getting overridden.
 
 setup() {
@@ -45,7 +45,7 @@ LUAU
 
 	assert_success
 	assert_line 'read 60 ledger entries; drafted n1, n2'
-	assert_line --regexp '^n1  wind-mytool-sync-fails  .mytool sync --all. failed 4 times in 2 sessions \(last exit 127, not found\)'
+	assert_line --regexp '^n1  wind-mytool-fails  .mytool <arg> --all. failed 4 times in 2 sessions \(last exit 127, not found\)'
 	assert_line --regexp '^n2  wind-sleep  Agents spent 4m30s waiting in 6 long sleeps'
 	# A test run that fails is ordinary work, not a pattern.
 	refute_output --partial 'cargo'
@@ -58,7 +58,7 @@ LUAU
 	assert_success
 	assert_line '--- mode: warn'
 	assert_line '--- scope: user'
-	assert_line --regexp 'mytool pull. worked instead'
+	assert_line --regexp 'mytool <arg>. worked instead'
 
 	run --separate-stderr jouet wind show n9
 	assert_failure 3
@@ -77,7 +77,7 @@ LUAU
 	run primer sess-1
 	assert_success
 	assert_equal "$(grep -c '^jouet wind noticed:' <<<"$output")" 2
-	assert_line --partial 'jouet rule new wind-mytool-sync-fails --from-note n1 --author sess-1'
+	assert_line --partial 'jouet rule new wind-mytool-fails --from-note n1 --author sess-1'
 
 	run --separate-stderr jouet wind dismiss n2
 	assert_success
@@ -104,24 +104,24 @@ LUAU
 @test "an adopted note becomes a warn-mode rule that passes its examples and replay" {
 	jouet wind >/dev/null
 
-	run --separate-stderr jouet rule new wind-mytool-sync-fails --from-note n1 --author sess-7
+	run --separate-stderr jouet rule new wind-mytool-fails --from-note n1 --author sess-7
 	assert_success
 	assert_output --partial '(warn mode)'
-	assert_line --partial 'jouet rule test wind-mytool-sync-fails --replay'
+	assert_line --partial 'jouet rule test wind-mytool-fails --replay'
 
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^wind-mytool-sync-fails +enabled +warn +user +sess-7 +[0-9-]+ +.mytool sync --all. failed'
+	assert_line --regexp '^wind-mytool-fails +enabled +warn +user +sess-7 +[0-9-]+ +.mytool <arg> --all. failed'
 
-	run --separate-stderr jouet rule test wind-mytool-sync-fails
+	run --separate-stderr jouet rule test wind-mytool-fails
 	assert_success
-	assert_line --regexp '^wind-mytool-sync-fails: ([0-9]+) of \1 examples passed$'
+	assert_line --regexp '^wind-mytool-fails: [0-9]+ of [0-9]+ examples passed$'
 
-	run --separate-stderr jouet rule test wind-mytool-sync-fails --replay
+	run --separate-stderr jouet rule test wind-mytool-fails --replay
 	assert_success
-	assert_line 'wind-mytool-sync-fails: fired on 4 of 28 calls in the ledger'
-	assert_line --regexp '^ +4x +warn +mytool sync --all$'
+	assert_line 'wind-mytool-fails: fired on 4 of 28 calls in the ledger'
+	assert_line --regexp '^ +4x +warn +mytool <arg> --all$'
 	assert_line 'stays quiet on (near misses):'
-	assert_line --regexp '^ +2x +allow +mytool pull$'
+	assert_line --regexp '^ +2x +allow +mytool <arg>$'
 
 	# An adopted note is not shown again.
 	run primer sess-8

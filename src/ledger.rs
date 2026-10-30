@@ -179,8 +179,12 @@ pub fn shape(script: &str) -> String {
         let Some(program) = argv.first() else {
             continue;
         };
-        out.push_str(&redact(shell::basename(program)));
-        let mut state = ArgState::default();
+        let program = shell::basename(program);
+        out.push_str(&redact(program));
+        let mut state = ArgState {
+            program,
+            ..ArgState::default()
+        };
         for arg in &argv[1..] {
             out.push(' ');
             out.push_str(&shape_arg(arg, &mut state));
@@ -198,7 +202,10 @@ pub fn shape(script: &str) -> String {
 }
 
 #[derive(Default)]
-struct ArgState {
+struct ArgState<'a> {
+    program: &'a str,
+    /// The first subcommand kept, which decides the second.
+    first: Option<&'static str>,
     /// Subcommand words kept so far.
     subcommands: usize,
     /// Positionals have started, so no more words are kept.
@@ -208,10 +215,10 @@ struct ArgState {
     after_flag: bool,
 }
 
-/// One argument's shape. Up to two words that read like subcommands (`stash
-/// push`, `pr checks`) stay; a flag's value and every other positional is
-/// `<arg>`.
-fn shape_arg(arg: &str, state: &mut ArgState) -> String {
+/// One argument's shape. Up to two known subcommands of the program (`stash
+/// push`, `pr checks`) stay; a flag's value and every other positional,
+/// including a task, target or script name, is `<arg>`.
+fn shape_arg(arg: &str, state: &mut ArgState<'_>) -> String {
     let after_flag = std::mem::take(&mut state.after_flag);
     // Flags after a subcommand end the subcommand words; global options
     // before it (`git -C dir stash push`) do not.
@@ -228,8 +235,9 @@ fn shape_arg(arg: &str, state: &mut ArgState) -> String {
         };
     }
     if let Some(short) = arg.strip_prefix('-') {
+        // A short cluster such as `-fu`; longer, it may be `-mmessage`.
         let flags =
-            !short.is_empty() && short.len() <= 5 && short.chars().all(|c| c.is_ascii_alphabetic());
+            !short.is_empty() && short.len() <= 3 && short.chars().all(|c| c.is_ascii_alphabetic());
         state.after_flag = flags;
         return if flags {
             arg.to_string()
@@ -237,21 +245,395 @@ fn shape_arg(arg: &str, state: &mut ArgState) -> String {
             "<arg>".into()
         };
     }
-    let word = arg.len() <= 24
-        && arg.starts_with(|c: char| c.is_ascii_lowercase())
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
     if after_flag {
         return "<arg>".into();
     }
-    if word && !state.done && state.subcommands < 2 {
-        state.subcommands += 1;
-        return arg.to_string();
+    let known = match (state.done, state.first) {
+        (true, _) => None,
+        (false, None) => subcommand(FIRST, state.program, arg),
+        (false, Some(first)) => SECOND
+            .iter()
+            .find(|(p, f, _)| programs(p).contains(&state.program) && *f == first)
+            .and_then(|(_, _, words)| words.iter().copied().find(|w| *w == arg)),
+    };
+    match known {
+        Some(word) => {
+            state.subcommands += 1;
+            state.first = state.first.or(Some(word));
+            if state.subcommands == 2 {
+                state.done = true;
+            }
+            redact(word)
+        }
+        None => {
+            state.done = true;
+            "<arg>".into()
+        }
     }
-    state.done = true;
-    "<arg>".into()
 }
+
+/// The subcommand `arg` names, if it is one of the program's known ones.
+fn subcommand(table: &[(&str, &[&'static str])], program: &str, arg: &str) -> Option<&'static str> {
+    table
+        .iter()
+        .find(|(p, _)| programs(p).contains(&program))
+        .and_then(|(_, words)| words.iter().copied().find(|w| *w == arg))
+}
+
+/// A table key: one program, or several separated by `|`.
+fn programs(key: &str) -> Vec<&str> {
+    key.split('|').collect()
+}
+
+/// Subcommands a shape keeps, per program. Any other positional, and every
+/// positional of a program not listed, is a placeholder: task, target and
+/// script names are the user's own words.
+const FIRST: &[(&str, &[&str])] = &[
+    (
+        "git",
+        &[
+            "add",
+            "am",
+            "apply",
+            "bisect",
+            "blame",
+            "branch",
+            "checkout",
+            "cherry-pick",
+            "clean",
+            "clone",
+            "commit",
+            "config",
+            "describe",
+            "diff",
+            "fetch",
+            "format-patch",
+            "grep",
+            "init",
+            "log",
+            "ls-files",
+            "merge",
+            "mv",
+            "notes",
+            "pull",
+            "push",
+            "rebase",
+            "reflog",
+            "remote",
+            "reset",
+            "restore",
+            "rev-parse",
+            "revert",
+            "rm",
+            "show",
+            "stash",
+            "status",
+            "submodule",
+            "switch",
+            "tag",
+            "worktree",
+        ],
+    ),
+    (
+        "gh",
+        &[
+            "api", "auth", "browse", "cache", "gist", "issue", "label", "pr", "release", "repo",
+            "run", "search", "secret", "status", "variable", "workflow",
+        ],
+    ),
+    (
+        "cargo|mbx|cross",
+        &[
+            "add",
+            "audit",
+            "b",
+            "bench",
+            "build",
+            "c",
+            "check",
+            "clean",
+            "clippy",
+            "deny",
+            "doc",
+            "fetch",
+            "fix",
+            "fmt",
+            "insta",
+            "install",
+            "metadata",
+            "nextest",
+            "package",
+            "publish",
+            "r",
+            "remove",
+            "run",
+            "t",
+            "test",
+            "tree",
+            "uninstall",
+            "update",
+        ],
+    ),
+    (
+        "mise",
+        &[
+            "activate",
+            "cache",
+            "config",
+            "doctor",
+            "env",
+            "exec",
+            "i",
+            "install",
+            "latest",
+            "lock",
+            "ls",
+            "ls-remote",
+            "outdated",
+            "plugins",
+            "prune",
+            "r",
+            "registry",
+            "run",
+            "self-update",
+            "set",
+            "settings",
+            "tasks",
+            "trust",
+            "uninstall",
+            "unset",
+            "upgrade",
+            "use",
+            "where",
+            "which",
+            "x",
+        ],
+    ),
+    (
+        "npm|pnpm|yarn|bun|aube",
+        &[
+            "add", "audit", "ci", "create", "dlx", "exec", "i", "init", "install", "link", "list",
+            "ls", "outdated", "pack", "publish", "remove", "rm", "run", "t", "test", "update", "x",
+        ],
+    ),
+    (
+        "go",
+        &[
+            "build", "clean", "doc", "env", "fmt", "generate", "get", "install", "list", "mod",
+            "run", "test", "tool", "vet", "work",
+        ],
+    ),
+    (
+        "docker|podman",
+        &[
+            "build", "buildx", "compose", "cp", "exec", "images", "inspect", "login", "logs",
+            "network", "ps", "pull", "push", "restart", "rm", "rmi", "run", "start", "stop",
+            "system", "tag", "volume",
+        ],
+    ),
+    (
+        "kubectl",
+        &[
+            "apply",
+            "config",
+            "create",
+            "delete",
+            "describe",
+            "diff",
+            "edit",
+            "exec",
+            "explain",
+            "get",
+            "logs",
+            "port-forward",
+            "rollout",
+            "scale",
+            "top",
+        ],
+    ),
+    (
+        "jouet",
+        &[
+            "agent-help",
+            "edit",
+            "hook",
+            "pr",
+            "rule",
+            "setup",
+            "skill",
+            "wait",
+        ],
+    ),
+    (
+        "hk",
+        &[
+            "check", "config", "fix", "init", "install", "run", "validate",
+        ],
+    ),
+    (
+        "rustup",
+        &[
+            "component",
+            "default",
+            "install",
+            "override",
+            "run",
+            "show",
+            "target",
+            "toolchain",
+            "update",
+            "which",
+        ],
+    ),
+    (
+        "uv",
+        &[
+            "add", "build", "init", "lock", "pip", "publish", "python", "remove", "run", "sync",
+            "tool", "venv",
+        ],
+    ),
+    (
+        "pip|pip3",
+        &["download", "freeze", "install", "list", "show", "uninstall"],
+    ),
+    (
+        "brew",
+        &[
+            "cleanup",
+            "doctor",
+            "info",
+            "install",
+            "list",
+            "outdated",
+            "reinstall",
+            "search",
+            "services",
+            "tap",
+            "uninstall",
+            "update",
+            "upgrade",
+        ],
+    ),
+];
+
+/// Second-level subcommands, per program and first subcommand.
+const SECOND: &[(&str, &str, &[&str])] = &[
+    (
+        "git",
+        "stash",
+        &[
+            "apply", "branch", "clear", "create", "drop", "list", "pop", "push", "save", "show",
+            "store",
+        ],
+    ),
+    (
+        "git",
+        "worktree",
+        &["add", "list", "lock", "move", "prune", "remove", "unlock"],
+    ),
+    (
+        "git",
+        "remote",
+        &[
+            "add", "get-url", "prune", "remove", "rename", "set-url", "show",
+        ],
+    ),
+    (
+        "git",
+        "submodule",
+        &[
+            "add", "deinit", "foreach", "init", "status", "sync", "update",
+        ],
+    ),
+    (
+        "git",
+        "bisect",
+        &["bad", "good", "reset", "run", "skip", "start"],
+    ),
+    (
+        "gh",
+        "pr",
+        &[
+            "checkout", "checks", "close", "comment", "create", "diff", "edit", "list", "merge",
+            "ready", "reopen", "review", "status", "view",
+        ],
+    ),
+    (
+        "gh",
+        "issue",
+        &[
+            "close", "comment", "create", "edit", "list", "reopen", "view",
+        ],
+    ),
+    (
+        "gh",
+        "run",
+        &["cancel", "download", "list", "rerun", "view", "watch"],
+    ),
+    (
+        "gh",
+        "workflow",
+        &["disable", "enable", "list", "run", "view"],
+    ),
+    ("gh", "api", &["graphql"]),
+    (
+        "gh",
+        "repo",
+        &["clone", "create", "fork", "list", "sync", "view"],
+    ),
+    (
+        "gh",
+        "release",
+        &[
+            "create", "delete", "download", "edit", "list", "upload", "view",
+        ],
+    ),
+    (
+        "gh",
+        "auth",
+        &["login", "logout", "refresh", "setup-git", "status", "token"],
+    ),
+    ("cargo|mbx|cross", "nextest", &["list", "run"]),
+    ("cargo|mbx|cross", "insta", &["accept", "review", "test"]),
+    (
+        "go",
+        "mod",
+        &[
+            "download", "edit", "graph", "init", "tidy", "vendor", "verify", "why",
+        ],
+    ),
+    (
+        "docker|podman",
+        "compose",
+        &[
+            "build", "down", "exec", "logs", "ps", "pull", "restart", "run", "stop", "up",
+        ],
+    ),
+    (
+        "kubectl",
+        "rollout",
+        &["history", "restart", "status", "undo"],
+    ),
+    ("jouet", "edit", &["hash", "replace"]),
+    (
+        "jouet",
+        "wait",
+        &[
+            "ci", "cmd", "file", "http", "log", "pid", "port", "pr", "run",
+        ],
+    ),
+    ("jouet", "pr", &["status", "threads"]),
+    (
+        "jouet",
+        "rule",
+        &["list", "test", "trust", "types", "untrust"],
+    ),
+    (
+        "uv|pip|pip3",
+        "pip",
+        &["freeze", "install", "list", "show", "uninstall"],
+    ),
+];
 
 /// Replaces anything that looks like a credential.
 fn redact(word: &str) -> String {
@@ -307,7 +689,20 @@ mod tests {
                 "gh pr checks <arg> --repo <arg>",
             ),
             ("git commit -m fix", "git commit -m <arg>"),
+            ("git commit -mwip", "git commit <arg>"),
             ("git push -f origin main", "git push -f <arg> <arg>"),
+            // Programs without subcommands keep no positional.
+            ("echo confidential", "echo <arg>"),
+            ("cat credentials secrets.txt", "cat <arg> <arg>"),
+            ("rm -rf build", "rm -rf <arg>"),
+            // A task, target or script name is the user's own word.
+            ("make deploy-prod", "make <arg>"),
+            ("mise run release-secret", "mise run <arg>"),
+            ("npm run deploy", "npm run <arg>"),
+            // Only known subcommands, at either level.
+            ("git stash push -m wip", "git stash push -m <arg>"),
+            ("git checkout main", "git checkout <arg>"),
+            ("jouet rule test git-stash", "jouet rule test <arg>"),
             (
                 "curl -H 'Authorization: token ghp_abcdefghijklmnopqrstuvwxyz0123' https://x",
                 "curl -H <arg> <arg>",

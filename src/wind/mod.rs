@@ -264,6 +264,12 @@ fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u
         }
         let name = free_name(&draft::name_for(&evidence), state, paths, engine);
         let d = draft::draft(&evidence, &name, &today);
+        // A draft that fails its own examples (it would warn about what
+        // worked, say) is never offered; the pattern is not drafted again.
+        if !draft::sound(&d) {
+            state.noted.insert(key);
+            continue;
+        }
         state.next_id += 1;
         let id = format!("n{}", state.next_id);
         state.notes.push(Note {

@@ -198,7 +198,7 @@ fn unwind_proposes_overridden_user_rules_never_built_ins() {
 fn drafted_names_avoid_existing_rules() {
     let f = fixture();
     std::fs::write(
-        f.paths.rules.join("wind-baz-tool-test-fails.luau"),
+        f.paths.rules.join("wind-baz-tool-fails.luau"),
         USER_RULE.replace("no tags", "taken"),
     )
     .unwrap();
@@ -206,5 +206,5 @@ fn drafted_names_avoid_existing_rules() {
     run(&f.paths, &settings(), DAY + 100, false);
     let state = State::load(&f.paths.state);
     let names: Vec<&str> = state.notes.iter().map(|n| n.rule.as_str()).collect();
-    assert!(names.contains(&"wind-baz-tool-test-fails-2"), "{names:?}");
+    assert!(names.contains(&"wind-baz-tool-fails-2"), "{names:?}");
 }

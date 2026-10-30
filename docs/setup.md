@@ -98,7 +98,7 @@ Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger
 {"ts":1793380090,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"cargo test -p <arg>","exit_code":101,"duration_ms":41200,"decisions":[{"rule":"checks","action":"record:test"}]}
 ```
 
-- **A shape never holds values.** It keeps each command's program, up to two subcommand words and its flag names. Paths, flag values, message text, here-documents and environment assignments become placeholders, and anything token-like is redacted. `GH_TOKEN=... git -C /repo commit -m "fix it"` is recorded as `git -C <arg> commit -m <arg>`.
+- **A shape never holds values.** It keeps each command's program, up to two of that program's known subcommands (`git stash push`, `gh pr checks`) and its flag names. Every other positional (paths, task and script names, `echo`'s words), flag values, message text, here-documents and environment assignments become placeholders, and anything token-like is redacted. `GH_TOKEN=... git -C /repo commit -m "fix it"` is recorded as `git -C <arg> commit -m <arg>`.
 - **Overrides.** When a command is denied or warned about and the session runs a command of the same shape within ten minutes, and it goes ahead this time, the ledger records an `override` of that rule. It is a heuristic for measuring rules later: same shape means the same program, subcommands and flags, whatever the values. Each denial or warning is counted once.
 - **Rotation.** The file is rotated at 4 MiB, and rotated files are removed after 30 days.
 - **Turning it off.** `[hooks] ledger = false` or `JOUET_HOOKS_LEDGER=0`.
