@@ -72,7 +72,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"git stash",
 			"git stash -u",
 			"git stash push",
@@ -83,8 +83,10 @@ local rule: JouetRule = {
 			"git stash clear",
 			"git stash save",
 			"git stash branch rescue",
+			"rtk git stash",
+			{ command = "git stash pop", harness = "codex" },
 		},
-		allow = {
+		quiet = {
 			"git stash push -m wip-ab12",
 			"git stash push -u -m 'wip ab12'",
 			"git stash push --message=wip",
@@ -96,6 +98,7 @@ local rule: JouetRule = {
 			"git stash drop stash@{2}",
 			"git stash branch rescue stash@{1}",
 			"echo 'git stash'",
+			"echo rtk git stash",
 			"git commit -m 'avoid git stash'",
 		},
 	},

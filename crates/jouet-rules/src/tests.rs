@@ -17,8 +17,14 @@ fn engine_with(sources: Vec<Source>, budget: Budget, disabled: Vec<String>) -> E
     .unwrap()
 }
 
-/// A user rule whose header makes it deny, as most tests need.
+/// Examples of both kinds, which a rule of yours needs before it may deny.
+/// Loading only checks they are there; `jouet rule test` runs them.
+const EXAMPLES: &str = "examples = { fires = { 'x' }, quiet = { 'y' } }";
+
+/// A user rule whose header makes it deny, with examples so that it may, as
+/// most tests need.
 fn user(name: &str, code: &str) -> Source {
+    let code = code.replacen("return {", &format!("return {{ {EXAMPLES},"), 1);
     user_raw(
         name,
         &format!("--- why: a test rule\n--- mode: deny\n{code}"),
@@ -55,11 +61,19 @@ fn every_builtin_rule_loads_and_passes_its_examples() {
             (rule.scope, rule.author.as_str()),
             (Scope::Builtin, "builtin")
         );
+        assert_eq!(rule.missing_examples, None, "{}", rule.name);
         let examples = engine.examples(rule).unwrap();
-        assert!(examples.len() >= 4, "{} has too few examples", rule.name);
-        for example in examples {
+        let fires = examples.iter().filter(|e| e.fires).count();
+        assert!(fires >= 1, "{} has no fires example", rule.name);
+        assert!(
+            examples.len() > fires,
+            "{} has no quiet near miss",
+            rule.name
+        );
+        for example in &examples {
             assert!(example.ok, "{}: {example:?}", rule.name);
         }
+        assert_eq!(engine.proven(rule), Ok(examples.len()));
     }
 }
 
@@ -384,7 +398,7 @@ fn calls_are_read_from_hook_payloads() {
 
 #[test]
 fn a_users_rule_warns_unless_its_header_says_deny() {
-    let code = "return { check = function() return jouet.deny('no') end }";
+    let code = format!("return {{ {EXAMPLES}, check = function() return jouet.deny('no') end }}");
     let engine = engine(vec![
         user_raw("soft", &format!("--- why: x\n{code}")),
         user_raw("hard", &format!("--- why: x\n--- mode: deny\n{code}")),
@@ -398,6 +412,189 @@ fn a_users_rule_warns_unless_its_header_says_deny() {
     repo.origin = Origin::Repo(PathBuf::from("team.luau"));
     let engine = engine_with(vec![repo], Budget::default(), Vec::new());
     assert_eq!(engine.rule("team").unwrap().mode, Mode::Deny);
+}
+
+#[test]
+fn a_rule_without_examples_of_both_kinds_only_warns() {
+    let check = "check = function() return jouet.deny('no') end";
+    let rule = |name: &str, examples: &str| {
+        user_raw(
+            name,
+            &format!("--- why: x\n--- mode: deny\nreturn {{ {check}, {examples} }}"),
+        )
+    };
+    let mut team = user_raw("team", &format!("--- why: x\nreturn {{ {check} }}"));
+    team.origin = Origin::Repo(PathBuf::from("team.luau"));
+    let mut builtin_like = user_raw("core", &format!("--- why: x\nreturn {{ {check} }}"));
+    builtin_like.origin = Origin::Builtin;
+    let engine = engine(vec![
+        rule("none", "x = 1"),
+        rule("fires-only", "examples = { fires = { 'ls' } }"),
+        rule("quiet-only", "examples = { fires = {}, quiet = { 'ls' } }"),
+        rule(
+            "old-keys",
+            "examples = { deny = { 'ls' }, allow = { 'pwd' } }",
+        ),
+        rule(
+            "proven",
+            "examples = { fires = { 'ls' }, quiet = { 'pwd' } }",
+        ),
+        team,
+        builtin_like,
+    ]);
+    let missing = |name: &str| {
+        let rule = engine.rule(name).unwrap();
+        assert_eq!(rule.state, State::Enabled, "{name}");
+        (rule.mode, rule.missing_examples.clone().unwrap_or_default())
+    };
+    assert_eq!(missing("none"), (Mode::Warn, "it has no examples".into()));
+    assert_eq!(missing("team"), (Mode::Warn, "it has no examples".into()));
+    assert!(missing("fires-only").1.contains("no `quiet` examples"));
+    assert!(missing("quiet-only").1.contains("no `fires` examples"));
+    let (mode, old) = missing("old-keys");
+    assert_eq!(mode, Mode::Warn);
+    assert!(
+        old.contains("listed under `deny`") && old.contains("`fires`"),
+        "{old}"
+    );
+    // Built-in rules are held to their examples by tests, not at load.
+    assert_eq!(missing("core").0, Mode::Deny);
+    assert_eq!(missing("proven"), (Mode::Deny, String::new()));
+
+    let outcome = engine.evaluate(&bash("ls"));
+    assert_eq!(outcome.deny.unwrap().rule, "proven");
+    let warned: Vec<&str> = outcome.warnings.iter().map(|w| w.rule.as_str()).collect();
+    assert_eq!(warned, ["none", "fires-only", "quiet-only", "old-keys"]);
+
+    // What it has still runs, and it is not proven until it has both.
+    let fires_only = engine.rule("fires-only").unwrap();
+    assert_eq!(engine.examples(fires_only).unwrap().len(), 1);
+    assert!(engine.proven(fires_only).unwrap_err().contains("quiet"));
+    // `proven`'s quiet example denies too, so it fails.
+    let proven = engine.rule("proven").unwrap();
+    assert_eq!(
+        engine.proven(proven),
+        Err("1 of its 2 examples fail".into())
+    );
+}
+
+#[test]
+fn examples_are_tool_calls_in_compact_form() {
+    let engine = engine(vec![user_raw(
+        "fetch",
+        r#"--- why: x
+return {
+	check = function(call)
+		if call.tool == "WebFetch" then return jouet.warn("use the cache") end
+		if call.harness == "codex" and call.command == "ls" then return jouet.deny("codex") end
+		return nil
+	end,
+	examples = {
+		fires = {
+			{ tool = "WebFetch", action = "warn" },
+			{ command = "ls", harness = "codex", action = "deny" },
+			{ command = "ls", harness = "codex", action = "warn" },
+		},
+		quiet = { "ls", { tool = "Read", harness = "claude" } },
+	},
+}"#,
+    )]);
+    let rule = engine.rule("fetch").unwrap();
+    assert_eq!(rule.missing_examples, None);
+    assert_eq!(
+        rule.examples[1],
+        Case {
+            command: Some("ls".into()),
+            tool: "Bash".into(),
+            harness: "codex".into(),
+            exit_code: None,
+            expect: Expect::Fires {
+                action: Some(Action::Deny),
+                kind: None,
+            },
+        }
+    );
+    let results: Vec<(String, String, String, bool)> = engine
+        .examples(rule)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.label(), e.expected, e.actual, e.ok))
+        .collect();
+    let row = |label: &str, expected: &str, actual: &str, ok: bool| {
+        (
+            label.to_string(),
+            expected.to_string(),
+            actual.to_string(),
+            ok,
+        )
+    };
+    assert_eq!(
+        results,
+        [
+            row("(tool WebFetch)", "fires warn", "warn", true),
+            row("ls (harness codex)", "fires deny", "deny", true),
+            row("ls (harness codex)", "fires warn", "deny", false),
+            row("ls", "quiet", "quiet", true),
+            row("(tool Read, harness claude)", "quiet", "quiet", true),
+        ]
+    );
+}
+
+#[test]
+fn malformed_examples_say_where() {
+    let cases = [
+        ("examples = 'ls'", "`examples` must be a table"),
+        (
+            "examples = { fires = 'ls', quiet = { 'x' } }",
+            "`examples.fires` must be a list",
+        ),
+        (
+            "examples = { fire = { 'ls' } }",
+            "`examples.fire` is not `fires` or `quiet`",
+        ),
+        (
+            "examples = { fires = { 1 }, quiet = { 'x' } }",
+            "`examples.fires[1]`: an example is a command or a table",
+        ),
+        (
+            "examples = { fires = { { cmd = 'ls' } }, quiet = { 'x' } }",
+            "unknown key `cmd`",
+        ),
+        (
+            "examples = { fires = { {} }, quiet = { 'x' } }",
+            "needs a `command`",
+        ),
+        (
+            "examples = { fires = { 'ls' }, quiet = { { command = 'x', action = 'deny' } } }",
+            "`examples.quiet[1]`: a `quiet` example takes no",
+        ),
+        (
+            "examples = { fires = { { command = 'ls', action = 'block' } }, quiet = { 'x' } }",
+            "`action` must be",
+        ),
+        (
+            "examples = { fires = { { command = 'ls', kind = 'bench' } }, quiet = { 'x' } }",
+            "`kind` must be",
+        ),
+    ];
+    let sources = cases
+        .iter()
+        .enumerate()
+        .map(|(i, (examples, _))| {
+            user_raw(
+                &format!("r{i}"),
+                &format!("--- why: x\nreturn {{ check = function() end, {examples} }}"),
+            )
+        })
+        .collect();
+    let engine = engine(sources);
+    for (i, (_, want)) in cases.iter().enumerate() {
+        let rule = engine.rule(&format!("r{i}")).unwrap();
+        assert_eq!(rule.state, State::Enabled);
+        let problem = rule.missing_examples.clone().unwrap_or_default();
+        assert!(problem.contains(want), "{i}: {problem}");
+        assert!(rule.examples.is_empty());
+    }
 }
 
 #[test]
@@ -511,7 +708,8 @@ fn a_rules_metamethods_never_run_outside_its_budget() {
 
 #[test]
 fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
-    let examples = "examples = { deny = { 'rm -r x' }, allow = { 'ls' } }";
+    let examples =
+        "examples = { fires = { { command = 'rm -r x', action = 'deny' } }, quiet = { 'ls' } }";
     let engine = engine(vec![
         // Denies, so its deny example passes, though enforced it only warns.
         user_raw(
@@ -538,7 +736,7 @@ fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
     assert!(
         warns
             .iter()
-            .any(|e| !e.ok && e.expected == "deny" && e.actual == "warn")
+            .any(|e| !e.ok && e.expected == "fires deny" && e.actual == "warn")
     );
 }
 

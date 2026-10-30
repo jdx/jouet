@@ -1,11 +1,18 @@
 //! Drafting a rule from a noticed pattern: a Luau file against the public
-//! `jouet` API, in warn mode, whose examples are the calls that motivated it
-//! and the near misses it must leave alone.
+//! `jouet` API, in warn mode, whose `fires` examples are the calls that
+//! motivated it and whose `quiet` examples are the near misses it must leave
+//! alone: what worked instead, and calls from the ledger that run the same
+//! programs.
 
 use super::detect::{Evidence, Pattern};
 use super::reader;
+use super::replay;
 use super::rulefile::{self, Header};
+use crate::ledger::Entry;
 use std::fmt::Write as _;
+
+/// Near misses from the ledger a draft takes as `quiet` examples, at most.
+const MAX_NEAR_MISSES: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Draft {
@@ -111,8 +118,10 @@ fn describe(e: &Evidence) -> (String, String) {
     }
 }
 
-/// The rule for a pattern, named `name`, as `jouet wind` writes it.
-pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
+/// The rule for a pattern, named `name`, as `jouet wind` writes it. `near`
+/// holds ledger calls it leaves alone, from [`near_misses`], which join its
+/// `quiet` examples.
+pub(crate) fn draft(e: &Evidence, name: &str, created: &str, near: &[String]) -> Draft {
     let (why, message) = describe(e);
     let header = rulefile::header(&Header {
         name,
@@ -122,10 +131,10 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
     });
     // Examples are commands: the ledger's placeholders become plain words.
     let examples: Vec<String> = e.examples.iter().map(|x| reader::script(x)).collect();
-    let (body, allow) = match e.pattern {
+    let (body, mut quiet) = match e.pattern {
         Pattern::NeverWorks => {
-            let mut allow: Vec<String> = e.fix.iter().map(|f| reader::script(f)).collect();
-            allow.push(format!("echo {}", e.signature.words.join(" ")));
+            let mut quiet: Vec<String> = e.fix.iter().map(|f| reader::script(f)).collect();
+            quiet.push(format!("echo {}", e.signature.words.join(" ")));
             // Without one of its flags, the command is a near miss.
             if let Some(flag) = e.signature.flags.first() {
                 let fewer: Vec<&str> = e
@@ -141,7 +150,7 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
                             .filter(|f| f != flag),
                     )
                     .collect();
-                allow.push(fewer.join(" "));
+                quiet.push(fewer.join(" "));
             }
             (
                 format!(
@@ -150,7 +159,7 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
                     list(&e.signature.flags),
                     lua_str(&message)
                 ),
-                allow,
+                quiet,
             )
         }
         Pattern::Sleep => (
@@ -158,15 +167,21 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
             vec!["sleep 1".to_string(), "echo sleep 60".to_string()],
         ),
     };
+    for shape in near {
+        let script = reader::script(shape);
+        if !quiet.contains(&script) && !examples.contains(&script) {
+            quiet.push(script);
+        }
+    }
     let needs = if e.pattern == Pattern::Sleep {
         "\tneeds = { \"wait\" },\n"
     } else {
         ""
     };
     let code = format!(
-        "{header}\n-- Drafted by `jouet wind` from this machine's hook ledger. Check it with\n-- `jouet rule test {name} --replay` before relying on it.\n\n{body}\nlocal rule: JouetRule = {{\n{needs}\tcheck = function(call: JouetCall): JouetDecision?\n\t\tfor _, command in call.commands do\n\t\t\tif not command.nested and matches(command) then\n\t\t\t\treturn jouet.deny(MESSAGE)\n\t\t\tend\n\t\tend\n\t\treturn nil\n\tend,\n\texamples = {{\n\t\tdeny = {examples},\n\t\tallow = {allow},\n\t}},\n}}\n\nreturn rule\n",
+        "{header}\n-- Drafted by `jouet wind` from this machine's hook ledger. Check it with\n-- `jouet rule test {name} --replay` before relying on it.\n\n{body}\nlocal rule: JouetRule = {{\n{needs}\tcheck = function(call: JouetCall): JouetDecision?\n\t\tfor _, command in call.commands do\n\t\t\tif not command.nested and matches(command) then\n\t\t\t\treturn jouet.deny(MESSAGE)\n\t\t\tend\n\t\tend\n\t\treturn nil\n\tend,\n\texamples = {{\n\t\t-- The calls that showed the pattern.\n\t\tfires = {examples},\n\t\t-- What worked instead, and calls running the same programs.\n\t\tquiet = {quiet},\n\t}},\n}}\n\nreturn rule\n",
         examples = list(&examples),
-        allow = list(&allow),
+        quiet = list(&quiet),
     );
     Draft {
         name: name.to_string(),
@@ -176,14 +191,13 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
     }
 }
 
-/// Whether a draft loads as a warn-mode user rule and passes every one of
-/// its examples.
-pub(crate) fn sound(draft: &Draft) -> bool {
-    let engine = jouet_rules::Engine::new(
+/// A draft's rule, loaded on its own as a rule of yours.
+fn load(name: &str, code: &str) -> Option<jouet_rules::Engine> {
+    jouet_rules::Engine::new(
         vec![jouet_rules::Source {
-            name: draft.name.clone(),
-            origin: jouet_rules::Origin::User(format!("{}.luau", draft.name).into()),
-            code: draft.code.clone(),
+            name: name.to_string(),
+            origin: jouet_rules::Origin::User(format!("{name}.luau").into()),
+            code: code.to_string(),
             trusted: true,
         }],
         jouet_rules::Options {
@@ -192,16 +206,43 @@ pub(crate) fn sound(draft: &Draft) -> bool {
             budget: jouet_rules::Budget::default(),
             cache_dir: None,
         },
-    );
-    let Ok(engine) = engine else { return false };
-    let Some(rule) = engine.rule(&draft.name) else {
-        return false;
+    )
+    .ok()
+}
+
+/// The calls in the ledger that run the pattern's program and that a draft
+/// leaves alone, most frequent first: near misses for its `quiet` examples.
+pub(crate) fn near_misses(draft: &Draft, e: &Evidence, entries: &[Entry]) -> Vec<String> {
+    let Some(program) = e.signature.words.first() else {
+        return Vec::new();
     };
-    rule.state == jouet_rules::State::Enabled
-        && rule.mode == jouet_rules::Mode::Warn
-        && engine
-            .examples(rule)
-            .is_ok_and(|examples| !examples.is_empty() && examples.iter().all(|e| e.ok))
+    let Some(engine) = load(&draft.name, &draft.code) else {
+        return Vec::new();
+    };
+    let Some(rule) = engine.rule(&draft.name) else {
+        return Vec::new();
+    };
+    replay::replay(&engine, rule, entries)
+        .near_misses
+        .into_iter()
+        .filter(|hit| replay::programs(&hit.command).contains(program))
+        .take(MAX_NEAR_MISSES)
+        .map(|hit| hit.command)
+        .collect()
+}
+
+/// Checks that a drafted rule loads as a warn-mode rule of yours and passes
+/// examples of both kinds, returning how many, or what is wrong.
+pub(crate) fn verify(name: &str, code: &str) -> Result<usize, String> {
+    let engine = load(name, code).ok_or("the rule engine did not start")?;
+    let rule = engine.rule(name).ok_or("the rule did not load")?;
+    if let jouet_rules::State::Broken(e) = &rule.state {
+        return Err(format!("it does not load: {e}"));
+    }
+    if rule.mode != jouet_rules::Mode::Warn {
+        return Err("it is not in warn mode".into());
+    }
+    engine.proven(rule)
 }
 
 /// A command whose program and subcommands are `WORDS` and whose flags are
@@ -298,7 +339,7 @@ mod tests {
         d.ready()
             .map(|(_, e)| {
                 let name = name_for(e);
-                let draft = draft(e, &name, "2026-10-30");
+                let draft = draft(e, &name, "2026-10-30", &[]);
                 let engine = load(&name, &draft.code);
                 (draft, engine)
             })
@@ -311,11 +352,12 @@ mod tests {
         assert_eq!(rule.mode, Mode::Warn);
         assert_eq!(rule.scope, jouet_rules::Scope::User);
         let examples = engine.examples(rule).unwrap();
-        assert!(!examples.is_empty());
-        for example in examples {
+        assert!(examples.iter().any(|e| e.fires), "{}", draft.code);
+        assert!(examples.iter().any(|e| !e.fires), "{}", draft.code);
+        for example in &examples {
             assert!(example.ok, "{example:?}\n{}", draft.code);
         }
-        assert!(sound(draft));
+        assert_eq!(verify(&draft.name, &draft.code), Ok(examples.len()));
     }
 
     #[test]
@@ -367,7 +409,6 @@ mod tests {
             "{}",
             draft.message
         );
-        assert!(sound(draft), "{}", draft.code);
         assert_sound(draft, engine);
     }
 

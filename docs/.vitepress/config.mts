@@ -83,6 +83,9 @@ export default defineConfig({
           { text: "jouet run", link: "/commands/run" },
           { text: "jouet audit", link: "/commands/audit" },
           { text: "jouet stats", link: "/commands/stats" },
+          { text: "jouet commit", link: "/commands/commit" },
+          { text: "jouet review-package", link: "/commands/review-package" },
+          { text: "jouet handoff", link: "/commands/handoff" },
         ],
       },
       {
@@ -95,6 +98,7 @@ export default defineConfig({
             items: [
               { text: "audit", link: "/cli/audit" },
               { text: "stats", link: "/cli/stats" },
+              { text: "commit", link: "/cli/commit" },
               {
                 text: "edit",
                 link: "/cli/edit/",
@@ -104,6 +108,8 @@ export default defineConfig({
                   { text: "hash", link: "/cli/edit/hash" },
                 ],
               },
+              { text: "handoff", link: "/cli/handoff" },
+              { text: "pickup", link: "/cli/pickup" },
               {
                 text: "pr",
                 link: "/cli/pr/",
@@ -123,6 +129,7 @@ export default defineConfig({
                   },
                 ],
               },
+              { text: "review-package", link: "/cli/review-package" },
               {
                 text: "wait",
                 link: "/cli/wait/",

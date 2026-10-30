@@ -69,3 +69,27 @@ assert_content() {
 	actual="$(cat "$1" && printf x)"
 	assert_equal "${actual%x}" "$2"
 }
+
+# Turns the work directory into a git repository that the developer's git
+# config cannot reach: no system or global config, a fixed identity, and hooks
+# only from .git/hooks. The usual agent markers are cleared too, but the agent
+# running the tests may set others, so a test that depends on `jouet commit`'s
+# trailers sets AI_AGENT or JOUET_COMMIT_TRAILERS itself.
+init_repo() {
+	export GIT_CONFIG_NOSYSTEM=1
+	export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/gitconfig"
+	: >"$GIT_CONFIG_GLOBAL"
+	export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com
+	export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+	unset AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID JOUET_SESSION_ID JOUET_COMMIT_TRAILERS
+	git init -q -b main
+	git config core.hooksPath .git/hooks
+}
+
+# Writes FILE with CONTENT and commits it with MESSAGE.
+commit_file() {
+	mkdir -p "$(dirname "$1")"
+	printf '%s' "$2" >"$1"
+	git add -- "$1"
+	git commit -q -m "$3"
+}

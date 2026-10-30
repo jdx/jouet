@@ -3,8 +3,9 @@
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
-`jouet audit` (where your agent sessions spend tokens and time) and `jouet stats` (what jouet
-saved). It is in early development; the commands land one at a time.
+`jouet audit` (where your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
+and the git recipes `jouet commit`, `jouet review-package` and `jouet handoff`/`pickup`. It is in
+early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
 
@@ -66,6 +67,9 @@ helpers, and the setup, hook, ledger and agent-guide code. The rest lives in lib
 - `jouet-audit`: the transcript readers (Claude Code, Codex), command shapes, redaction,
   categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
   `stats`, the ledger reader and estimates behind `jouet stats`.
+- `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
+  `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
+  in the binary, so the crate makes no network calls.
 
 The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
 workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,
@@ -145,8 +149,8 @@ acronym such as `CLI`, in the imperative mood.
 **Types:** `feat`, `fix`, `refactor`, `docs`, `style`, `perf`, `test`, `chore`, `ci`, `revert`,
 `security`
 
-**Scopes:** a command (`wait`, `threads`, `status`, `edit`, `rule`, `setup`) or a subsystem (`github`, `output`,
-`config`, `release`, `deps`).
+**Scopes:** a command (`wait`, `threads`, `status`, `edit`, `rule`, `setup`, `commit`, `handoff`) or a
+subsystem (`github`, `git`, `output`, `config`, `release`, `deps`).
 
 CI validates the pull request title and re-runs when it is edited. Intermediate commit subjects
 are not checked because pull requests are squash-merged. Only `fix:` and `feat:` commits cause

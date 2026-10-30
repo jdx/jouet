@@ -15,6 +15,7 @@
 //! probes ([`probe`]), and recipes ([`recipe`]) sequence jouet's commands.
 
 mod cache;
+mod examples;
 mod header;
 mod json;
 pub mod probe;
@@ -22,6 +23,7 @@ pub mod recipe;
 pub mod shell;
 mod trust;
 
+pub use examples::{Case, Example, Expect};
 pub use header::{Mode, Scope};
 pub use probe::Probes;
 pub use trust::{Trust, TrustStore};
@@ -144,6 +146,12 @@ pub struct Rule {
     pub event: Event,
     pub needs: Vec<String>,
     pub state: State,
+    /// Its examples, as far as they could be read.
+    pub examples: Vec<Case>,
+    /// Why its examples do not cover both kinds, or could not be read, such
+    /// as `it has no examples`. A rule of yours or a repository's with a
+    /// reason here only warns, and cannot be promoted or shared.
+    pub missing_examples: Option<String>,
     table: Option<Table>,
 }
 
@@ -219,7 +227,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "test" => Some(Self::Test),
             "lint" => Some(Self::Lint),
@@ -596,6 +604,8 @@ impl Engine {
             event: Event::PreToolUse,
             needs: Vec::new(),
             state: State::Enabled,
+            examples: Vec::new(),
+            missing_examples: None,
             table: None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {
@@ -619,6 +629,12 @@ impl Engine {
         if let Err(e) = read_fields(&mut rule, &table) {
             rule.state = State::Broken(e);
             return rule;
+        }
+        (rule.examples, rule.missing_examples) = examples::read(&table);
+        // A rule of yours or a repository's proves itself on examples of
+        // both kinds before it may deny anything.
+        if rule.scope != Scope::Builtin && rule.missing_examples.is_some() {
+            rule.mode = Mode::Warn;
         }
         rule.table = Some(table);
         let needs: Vec<&str> = rule.needs.iter().map(String::as_str).collect();
@@ -700,7 +716,7 @@ impl Engine {
 
     /// `check`, with `enforce` deciding whether the rule's mode and the floor
     /// apply to its decision. Examples describe what a rule decides, so they
-    /// are run without them: a warn-mode rule's `deny` examples must deny.
+    /// are run without them: a warn-mode rule that denies fires as `deny`.
     fn run_check(
         &self,
         rule: &Rule,
@@ -774,69 +790,6 @@ impl Engine {
         };
         Ok((decision, records))
     }
-
-    /// Runs a rule's `examples` and compares each with what it expects.
-    pub fn examples(&self, rule: &Rule) -> Result<Vec<Example>, String> {
-        let Some(table) = &rule.table else {
-            return Err(match &rule.state {
-                State::Broken(e) => e.clone(),
-                _ => "the rule is not loaded".into(),
-            });
-        };
-        let examples: Option<Table> = table.raw_get("examples").map_err(|e| e.to_string())?;
-        let Some(examples) = examples else {
-            return Ok(Vec::new());
-        };
-        let mut out = Vec::new();
-        for expect in ["deny", "warn", "allow", "record"] {
-            let list: Option<Table> = examples.raw_get(expect).map_err(|e| e.to_string())?;
-            for case in list.iter().flat_map(|l| l.sequence_values::<Value>()) {
-                let case = case.map_err(|e| e.to_string())?;
-                let (command, exit_code, kind) = match case {
-                    Value::String(s) => (s.to_string_lossy(), 0, None),
-                    Value::Table(t) => (
-                        t.raw_get::<String>("command").map_err(|e| e.to_string())?,
-                        t.raw_get::<Option<i32>>("exit_code")
-                            .map_err(|e| e.to_string())?
-                            .unwrap_or(0),
-                        t.raw_get::<Option<String>>("kind")
-                            .map_err(|e| e.to_string())?,
-                    ),
-                    other => {
-                        return Err(format!(
-                            "examples.{expect} holds a {}, not a command",
-                            other.type_name()
-                        ));
-                    }
-                };
-                let call = Call {
-                    event: Some(rule.event),
-                    harness: "test".into(),
-                    tool: "Bash".into(),
-                    command: Some(command.clone()),
-                    cwd: None,
-                    exit_code: (rule.event == Event::PostToolUse).then_some(exit_code),
-                };
-                let expected = match (expect, kind) {
-                    ("record", Some(kind)) => format!("record {kind}"),
-                    (e, _) => e.to_string(),
-                };
-                self.vm.new_call();
-                let actual = match self.run_check(rule, &call, false) {
-                    Ok((decision, records)) => summarize(decision.as_ref(), &records),
-                    Err(e) => format!("error: {e}"),
-                };
-                out.push(Example {
-                    ok: actual == expected,
-                    command,
-                    exit_code: call.exit_code,
-                    expected,
-                    actual,
-                });
-            }
-        }
-        Ok(out)
-    }
 }
 
 /// A rule reading a field of the `jouet` module that does not exist, such
@@ -845,17 +798,6 @@ impl Engine {
 pub struct Gap {
     pub rule: String,
     pub primitive: String,
-}
-
-/// One example's result.
-#[derive(Debug, Serialize)]
-pub struct Example {
-    pub command: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i32>,
-    pub expected: String,
-    pub actual: String,
-    pub ok: bool,
 }
 
 /// A rule's verdict in a word: `deny`, `warn`, `record test` or `allow`.

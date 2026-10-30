@@ -182,7 +182,9 @@ pub(crate) struct Evidence {
     pub fired: u64,
     pub overridden: u64,
     pub sessions: u64,
-    pub examples: usize,
+    /// Its `fires` and `quiet` examples, all passing.
+    pub fires: usize,
+    pub quiet: usize,
     pub replay_fired: u64,
     pub replay_calls: u64,
     #[serde(skip)]
@@ -213,16 +215,10 @@ pub(crate) fn check_rule(
         return Err(vec![format!("`{name}` does not load: {e}")]);
     }
     let mut problems = Vec::new();
-    match engine.examples(rule) {
-        Ok(examples) if examples.is_empty() => {
-            problems
-                .push("it has no examples; add some and check them with `jouet rule test`".into());
-        }
-        Ok(examples) if examples.iter().any(|e| !e.ok) => {
-            problems.push("some of its examples fail `jouet rule test`".into());
-        }
-        Ok(_) => {}
-        Err(e) => problems.push(format!("its examples do not run: {e}")),
+    if let Err(problem) = engine.proven(rule) {
+        problems.push(format!(
+            "{problem}; it needs passing examples of both kinds, `fires` and `quiet`: check them with `jouet rule test {name}`"
+        ));
     }
     let entries = wind::reader::read_all(&paths.ledger);
     let replayed = replay::replay(&engine, rule, &entries);
@@ -267,14 +263,16 @@ pub(crate) fn check_rule(
     }
     let code = std::fs::read_to_string(paths.rules.join(format!("{name}.luau")))
         .map_err(|e| vec![e.to_string()])?;
-    let examples = engine.examples(rule).map(|e| e.len()).unwrap_or(0);
+    let examples = engine.examples(rule).unwrap_or_default();
+    let fires = examples.iter().filter(|e| e.fires).count();
     Ok((
         Evidence {
             deny_days,
             fired: s.fired,
             overridden: s.overridden,
             sessions: s.sessions,
-            examples,
+            fires,
+            quiet: examples.len() - fires,
             replay_fired: replayed.fired_total,
             replay_calls: replayed.calls,
             fires_on: replayed.fired,
@@ -378,8 +376,8 @@ pub(crate) fn rule_proposal(
     );
     let _ = writeln!(
         body,
-        "- `jouet rule test`: {} examples pass. `--replay` fires on {} of {} calls in the ledger.",
-        e.examples, e.replay_fired, e.replay_calls
+        "- `jouet rule test`: {} `fires` and {} `quiet` examples pass. `--replay` fires on {} of {} calls in the ledger.",
+        e.fires, e.quiet, e.replay_fired, e.replay_calls
     );
     body.push_str("\n### Calls it fires on (shapes, values replaced)\n\n");
     shapes(&mut body, &e.fires_on);
