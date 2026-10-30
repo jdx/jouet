@@ -1,8 +1,9 @@
 # jouet Development Guide
 
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
-(review threads), `jouet pr status` (many PRs at once) and `jouet edit` (exact, all-or-nothing file
-edits). It is in early development; the commands land one at a time.
+(review threads), `jouet pr status` (many PRs at once), `jouet edit` (exact, all-or-nothing file
+edits), and the git recipes `jouet commit`, `jouet review-package` and `jouet handoff`/`pickup`. It
+is in early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
 
@@ -58,6 +59,9 @@ helpers. The rest lives in library crates under `crates/`:
   `JOUET_GITHUB_API_URL`), TLS, and the `pr` model shared by `pr status`, `pr threads` and `wait`.
 - `jouet-edit`: the edit engine behind `jouet edit`.
 - `jouet-wait`: the conditions and polling behind `jouet wait`.
+- `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
+  `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
+  in the binary, so the crate makes no network calls.
 
 The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
 workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,
@@ -115,8 +119,8 @@ acronym such as `CLI`, in the imperative mood.
 **Types:** `feat`, `fix`, `refactor`, `docs`, `style`, `perf`, `test`, `chore`, `ci`, `revert`,
 `security`
 
-**Scopes:** a command (`wait`, `threads`, `status`, `edit`) or a subsystem (`github`, `output`,
-`config`, `release`, `deps`).
+**Scopes:** a command (`wait`, `threads`, `status`, `edit`, `commit`, `handoff`) or a subsystem
+(`github`, `git`, `output`, `config`, `release`, `deps`).
 
 CI validates the pull request title and re-runs when it is edited. Intermediate commit subjects
 are not checked because pull requests are squash-merged. Only `fix:` and `feat:` commits cause

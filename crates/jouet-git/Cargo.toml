@@ -1,0 +1,25 @@
+[package]
+name = "jouet-git"
+version = "0.0.1"
+description = "The git recipes behind jouet commit, review-package, handoff and pickup"
+keywords = ["agents", "git", "commit", "review"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/LICENSE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+jouet-output.workspace = true
+mise-agent-env.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true

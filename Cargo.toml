@@ -18,6 +18,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
+jouet-git = { path = "crates/jouet-git", version = "0.0.1" }
 jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
 jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
 jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
@@ -66,6 +67,7 @@ workspace = true
 
 [dependencies]
 jouet-edit.workspace = true
+jouet-git.workspace = true
 jouet-github.workspace = true
 jouet-output.workspace = true
 jouet-wait.workspace = true

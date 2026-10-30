@@ -65,6 +65,9 @@ export default defineConfig({
           { text: "jouet wait", link: "/commands/wait" },
           { text: `jouet pr status ${soon}`, link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
+          { text: `jouet commit ${soon}`, link: "/commands/commit" },
+          { text: `jouet review-package ${soon}`, link: "/commands/review-package" },
+          { text: `jouet handoff ${soon}`, link: "/commands/handoff" },
         ],
       },
       {
@@ -75,6 +78,7 @@ export default defineConfig({
             link: "/cli/",
             collapsed: true,
             items: [
+              { text: "commit", link: "/cli/commit" },
               {
                 text: "edit",
                 link: "/cli/edit/",
@@ -84,6 +88,8 @@ export default defineConfig({
                   { text: "hash", link: "/cli/edit/hash" },
                 ],
               },
+              { text: "handoff", link: "/cli/handoff" },
+              { text: "pickup", link: "/cli/pickup" },
               {
                 text: "pr",
                 link: "/cli/pr/",
@@ -93,6 +99,7 @@ export default defineConfig({
                   { text: "threads", link: "/cli/pr/threads" },
                 ],
               },
+              { text: "review-package", link: "/cli/review-package" },
               {
                 text: "wait",
                 link: "/cli/wait/",
