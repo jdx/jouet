@@ -96,7 +96,8 @@ The header is a few `--- key: value` lines at the top of the file, which `jouet 
 - **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
 - **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
 - **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` are included**, marked `nested`.
-- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --`, and `program` is the basename of what runs.
+- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup` and `mise x tool --`, and `program` is the basename of what runs.
+- **rtk is looked through too.** [rtk](https://github.com/rtk-ai/rtk) compresses command output, and its hook rewrites `git status` to `rtk git status`. jouet's rules see the wrapped command, so `rtk git add -A` is denied like `git add -A`. A command it wrapped has `via = "rtk"`, and so does the call. rtk's own commands, such as `rtk gain`, are left alone.
 
 The `jouet` module has helpers for the common cases:
 - `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`.

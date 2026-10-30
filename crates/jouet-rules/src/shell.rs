@@ -143,9 +143,22 @@ impl Command {
     /// The words with wrappers such as `env FOO=1`, `sudo`, `timeout 60`,
     /// `rtk` and `mise x tool --` removed, so `[0]` is the program that runs.
     pub fn argv(&self) -> &[String] {
+        self.unwrap().0
+    }
+
+    /// `Some("rtk")` when rtk wraps the command (`rtk git status`, the form
+    /// rtk's hook rewrites commands to), so a rule can tell.
+    pub fn via(&self) -> Option<&'static str> {
+        self.unwrap().1.then_some("rtk")
+    }
+
+    fn unwrap(&self) -> (&[String], bool) {
         let mut w = &self.words[..];
+        let mut via_rtk = false;
         loop {
-            let Some(first) = w.first() else { return w };
+            let Some(first) = w.first() else {
+                return (w, via_rtk);
+            };
             let rest = &w[1..];
             w = match basename(first) {
                 "env" => skip_options(rest, &["-u", "-C", "-S", "--unset", "--chdir"], true),
@@ -155,14 +168,30 @@ impl Command {
                     let rest = skip_options(rest, &["-s", "-k", "--signal", "--kill-after"], false);
                     rest.get(1..).unwrap_or_default()
                 }
-                "command" | "exec" | "nohup" | "time" | "rtk" => skip_options(rest, &[], false),
+                "command" | "exec" | "nohup" | "time" => skip_options(rest, &[], false),
+                "rtk" => {
+                    // `rtk [-v] CMD ...` and `rtk bypass CMD ...` run CMD;
+                    // `rtk gain` and the like are rtk's own commands.
+                    let rest = skip_options(rest, &[], false);
+                    match rest.first().map(String::as_str) {
+                        Some("bypass") => {
+                            via_rtk = true;
+                            &rest[1..]
+                        }
+                        Some(sub) if !RTK_OWN.contains(&sub) => {
+                            via_rtk = true;
+                            rest
+                        }
+                        _ => return (w, via_rtk),
+                    }
+                }
                 "mise" if matches!(rest.first().map(String::as_str), Some("x" | "exec")) => {
                     match rest.iter().position(|a| a == "--") {
                         Some(i) => &rest[i + 1..],
-                        None => return w,
+                        None => return (w, via_rtk),
                     }
                 }
-                _ => return w,
+                _ => return (w, via_rtk),
             };
         }
     }
@@ -172,6 +201,22 @@ impl Command {
         self.argv().first().map(|p| basename(p))
     }
 }
+
+/// rtk's own subcommands, which run no other command.
+const RTK_OWN: &[&str] = &[
+    "config",
+    "discover",
+    "gain",
+    "help",
+    "init",
+    "proxy",
+    "read",
+    "rewrite",
+    "session",
+    "uninstall",
+    "update",
+    "version",
+];
 
 pub fn basename(word: &str) -> &str {
     let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
@@ -613,6 +658,32 @@ mod tests {
         assert_eq!(c.program(), Some("npm"));
         let c = &parse("/usr/bin/git.exe add").commands[0];
         assert_eq!(c.program(), Some("git"));
+    }
+
+    #[test]
+    fn rtk_wrapped_commands_are_seen_through() {
+        let c = &parse("rtk git add -A").commands[0];
+        assert_eq!(
+            (c.argv(), c.via()),
+            (&["git", "add", "-A"].map(String::from)[..], Some("rtk"))
+        );
+        let c = &parse("rtk -v bypass git stash").commands[0];
+        assert_eq!(c.argv(), ["git", "stash"]);
+        assert_eq!(c.via(), Some("rtk"));
+        // rtk's own commands are not unwrapped.
+        for script in [
+            "rtk gain --graph",
+            "rtk init -g",
+            "rtk",
+            "rtk read src/lib.rs",
+        ] {
+            let c = &parse(script).commands[0];
+            assert_eq!((c.program(), c.via()), (Some("rtk"), None), "{script}");
+        }
+        // rtk as an argument to another command is just a word.
+        let c = &parse("echo rtk git add -A").commands[0];
+        assert_eq!((c.program(), c.via()), (Some("echo"), None));
+        assert_eq!(parse("git status").commands[0].via(), None);
     }
 
     #[test]
