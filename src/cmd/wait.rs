@@ -33,9 +33,14 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
         Ok(timing) => timing,
         Err(message) => return out.error(Exit::Usage, &message),
     };
+    let confirm_conflict = match args.confirm_conflict.as_deref().map(parse_duration) {
+        None => jouet_wait::CONFLICT_CONFIRM,
+        Some(Ok(d)) => d,
+        Some(Err(e)) => return out.error(Exit::Usage, &format!("--confirm-conflict: {e}")),
+    };
     let reporter = |label: String| Reporter::new(out.mode, out.json, args.jsonl, args.quiet, label);
     match args.cmd {
-        WaitCmd::Ci(a) => match ci_wait(&a) {
+        WaitCmd::Ci(a) => match ci_wait(&a, confirm_conflict) {
             Ok((t, sha, options)) => watch(reporter, &timing, &mut Client::from_env(), |c| {
                 let (repo, number) = ci::resolve(c, t)?;
                 Ok(CiWait::new(repo, number, sha, options))
@@ -50,7 +55,7 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
         },
         WaitCmd::Pr(a) => match pr_args(&a) {
             Ok((t, until)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
-                Ok(PrWait::new(t, until))
+                Ok(PrWait::new(t, until, confirm_conflict))
             }),
             Err(message) => out.error(Exit::Usage, &message),
         },
@@ -146,7 +151,10 @@ fn log_lines(lines: Option<usize>, no_logs: bool) -> Result<Option<usize>, Strin
     }
 }
 
-fn ci_wait(a: &WaitCiArgs) -> Result<(Target, Option<String>, ci::Options), String> {
+fn ci_wait(
+    a: &WaitCiArgs,
+    confirm_conflict: Duration,
+) -> Result<(Target, Option<String>, ci::Options), String> {
     let appear_timeout = match &a.appear_timeout {
         Some(d) => parse_duration(d).map_err(|e| format!("--appear-timeout: {e}"))?,
         None => DEFAULT_APPEAR_TIMEOUT,
@@ -165,6 +173,7 @@ fn ci_wait(a: &WaitCiArgs) -> Result<(Target, Option<String>, ci::Options), Stri
         all: a.all,
         log_lines: log_lines(a.log_lines, a.no_logs)?,
         appear_timeout,
+        confirm_conflict,
     };
     Ok((
         target(a.pr.as_deref(), a.repo.as_deref())?,

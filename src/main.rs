@@ -397,6 +397,10 @@ pub struct NextArgs {
 /// printed. It asks first only when a person is at a terminal (stdin and
 /// stderr are terminals and no coding agent is detected); anyone else must
 /// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
+///
+/// While jouet's hooks keep a ledger, it also refuses (exit 4) unless they
+/// recorded a full test run passing at the PR head's tree; pass
+/// --skip-verify with a reason, which the ledger keeps, to land anyway.
 #[derive(Args)]
 pub struct LandArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
@@ -430,6 +434,10 @@ pub struct LandArgs {
     /// (default 20s; 0 disables)
     #[usage(long, value_name = "DUR")]
     settle: Option<String>,
+    /// Land without a full test pass recorded at the PR head's tree, and
+    /// say why; the reason is kept in the hook ledger
+    #[usage(long, value_name = "REASON")]
+    skip_verify: Option<String>,
 }
 
 /// Block until a condition holds, then print one summary
@@ -448,6 +456,10 @@ pub struct WaitArgs {
     /// Time between the first checks; backs off to 60s (default 10s)
     #[usage(long, global, value_name = "DUR")]
     interval: Option<String>,
+    /// How long a conflict GitHub reports must persist before `wait ci` and
+    /// `wait pr` believe it (default 10s). For tests
+    #[usage(long, global, hide, value_name = "DUR")]
+    confirm_conflict: Option<String>,
     /// Print one JSON event per line, then the result document
     #[usage(long, global)]
     jsonl: bool,

@@ -99,6 +99,7 @@ pub(crate) mod tests {
                 .map(|(rule, action)| Decision {
                     rule: (*rule).into(),
                     action: (*action).into(),
+                    scope: None,
                 })
                 .collect(),
             ..Entry::default()
