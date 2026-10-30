@@ -508,3 +508,36 @@ fn a_rules_metamethods_never_run_outside_its_budget() {
     );
     assert_eq!(outcome.deny.unwrap().rule, "deny");
 }
+
+#[test]
+fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
+    let examples = "examples = { deny = { 'rm -r x' }, allow = { 'ls' } }";
+    let engine = engine(vec![
+        // Denies, so its deny example passes, though enforced it only warns.
+        user_raw(
+            "soft",
+            &format!(
+                "--- why: x\nreturn {{ check = function(c) if c.commands[1].program == 'rm' then return jouet.deny('no') end end, {examples} }}"
+            ),
+        ),
+        // Only ever warns, so a deny example still catches that.
+        user_raw(
+            "warns",
+            &format!(
+                "--- why: x\nreturn {{ check = function(c) if c.commands[1].program == 'rm' then return jouet.warn('no') end end, {examples} }}"
+            ),
+        ),
+    ]);
+    let soft = engine.rule("soft").unwrap();
+    assert_eq!(soft.mode, Mode::Warn);
+    assert!(engine.examples(soft).unwrap().iter().all(|e| e.ok));
+    let (decision, _) = engine.check(soft, &bash("rm -r x")).unwrap();
+    assert_eq!(decision.unwrap().action, Action::Warn);
+
+    let warns = engine.examples(engine.rule("warns").unwrap()).unwrap();
+    assert!(
+        warns
+            .iter()
+            .any(|e| !e.ok && e.expected == "deny" && e.actual == "warn")
+    );
+}

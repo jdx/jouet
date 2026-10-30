@@ -605,12 +605,25 @@ impl Engine {
         outcome
     }
 
-    /// Runs one rule's `check`, whatever its state, and returns its decision
-    /// and anything it recorded.
+    /// Runs one rule's `check`, whatever its state, and returns its decision,
+    /// as enforced (a warn-mode rule's denial is a warning), and anything it
+    /// recorded.
     pub fn check(
         &self,
         rule: &Rule,
         call: &Call,
+    ) -> Result<(Option<Decision>, Vec<Record>), String> {
+        self.run_check(rule, call, true)
+    }
+
+    /// `check`, with `enforce` deciding whether the rule's mode and the floor
+    /// apply to its decision. Examples describe what a rule decides, so they
+    /// are run without them: a warn-mode rule's `deny` examples must deny.
+    fn run_check(
+        &self,
+        rule: &Rule,
+        call: &Call,
+        enforce: bool,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
         let Some(table) = &rule.table else {
             return Err(match &rule.state {
@@ -652,8 +665,9 @@ impl Engine {
                     // A warn-mode rule only warns, and the floor: a rule of
                     // yours or a repository's cannot lock you out of jouet.
                     "deny"
-                        if rule.mode == Mode::Warn
-                            || (rule.scope != Scope::Builtin && only_jouet(call)) =>
+                        if enforce
+                            && (rule.mode == Mode::Warn
+                                || (rule.scope != Scope::Builtin && only_jouet(call))) =>
                     {
                         Action::Warn
                     }
@@ -723,7 +737,7 @@ impl Engine {
                     ("record", Some(kind)) => format!("record {kind}"),
                     (e, _) => e.to_string(),
                 };
-                let actual = match self.check(rule, &call) {
+                let actual = match self.run_check(rule, &call, false) {
                     Ok((decision, records)) => summarize(decision.as_ref(), &records),
                     Err(e) => format!("error: {e}"),
                 };
