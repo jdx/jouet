@@ -5,6 +5,7 @@ pub(crate) mod edit;
 pub(crate) mod land;
 pub(crate) mod next;
 pub(crate) mod pr;
+pub(crate) mod rule;
 pub(crate) mod threads;
 pub(crate) mod wait;
 
