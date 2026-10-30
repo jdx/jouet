@@ -8,6 +8,24 @@ description: Block until CI finishes, a PR is ready, or a file, log line, port, 
 
 Two traps catch those loops when they wait on CI. `gh run view --log-failed` refuses while the run is still in progress, so a failure cannot be read until every other job finishes. And a conflicted pull request never gets `pull_request` CI, so the loop waits forever. `jouet wait ci` returns on the first failure with the failed step's log, and returns `conflict` at once for a conflicted PR.
 
+## Pick a subject
+
+| Waiting for | Run |
+|---|---|
+| A pull request's checks | `jouet wait ci` |
+| One GitHub Actions run | `jouet wait run 41083340820` |
+| A pull request to be mergeable, merged, approved or ready | `jouet wait pr --until merged` |
+| A server to log a line | `jouet wait log app.log --match 'Listening on'` |
+| A port to accept connections | `jouet wait port 3000` |
+| A URL to answer | `jouet wait http http://localhost:3000/health` |
+| A file to appear, or to contain a line | `jouet wait file out/done.txt --contains ok` |
+| A process to exit | `jouet wait pid 4242` |
+| A command to succeed | `jouet wait cmd -- pg_isready -h localhost` |
+
+Every subject takes `--timeout` (default `30m`) and exits `124` when it runs out, so running the same command again keeps waiting.
+
+## Synopsis
+
 ```text
 jouet wait ci [PR]       [--sha SHA] [--required] [--check GLOB]... [--ignore GLOB]...
                          [--all] [--log-lines N] [--no-logs] [--appear-timeout DUR]
@@ -38,7 +56,7 @@ done
 
 The old "Listening on" line matches straight away, so the loop exits before this server is up. And if the server never gets there, the loop never ends. `jouet wait log` reads only what is appended after it starts, and gives up at `--timeout`:
 
-```console
+```output
 $ jouet wait log app.log --match 'Listening on' --timeout 2m
 [0s] log app.log: following
 [10s] log app.log: matched
@@ -48,7 +66,7 @@ MET log app.log: matched (10s)
 
 ## `wait ci`
 
-```console
+```output
 $ jouet wait ci 15195 --repo jdx/mise --check release --log-lines 15
 [3s] ci jdx/mise#15195: head moved from e44754d to 843cc16
 [3s] ci jdx/mise#15195: release fail
@@ -77,7 +95,9 @@ The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CO
 - When the rate limit is used up, the wait sleeps until it resets if that comes before `--timeout`, and otherwise exits `5`.
 - Every wait on the same PR shares one state file, `$XDG_STATE_HOME/jouet/watch/<owner>-<repo>-<pr>.json`, guarded by a lock. A wait polls GitHub only when that state is older than its own interval, so a second wait on the same PR, from another session or another agent, reads what the first one fetched instead of polling again. A restarted wait replays the events it missed for the current head, marked `replayed: true`.
 
-Agents should run long waits as background tasks where the harness supports it (Claude Code's `run_in_background`, which notifies the agent when the command exits), or pass a `--timeout` shorter than the harness's command timeout and run the command again on exit `124`.
+::: tip Long waits from an agent
+Run long waits as background tasks where the harness supports it (Claude Code's `run_in_background`, which notifies the agent when the command exits). Otherwise, pass a `--timeout` shorter than the harness's command timeout and run the command again on exit `124`.
+:::
 
 ## `wait run`
 
@@ -118,7 +138,7 @@ On timeout, jouet exits `124`. Running the same command again keeps waiting.
 
 ## Output
 
-```console
+```output
 $ jouet wait log app.log --match 'Listening on'
 [0s] log app.log: missing
 [4s] log app.log: matched

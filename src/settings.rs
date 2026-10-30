@@ -10,6 +10,9 @@
 //!
 //! [stats]
 //! summary = "plain"
+//!
+//! [wind]
+//! enabled = false
 //! ```
 
 use usage_rs::config::{EnvLayer, FileLayer, FileScope, Layers, resolve};
@@ -22,6 +25,23 @@ pub(crate) struct Settings {
     pub hooks: HookSettings,
     #[usage(flatten)]
     pub stats: StatsSettings,
+    #[usage(flatten)]
+    pub wind: WindSettings,
+}
+
+/// Self-winding: the ledger the hooks keep, and the rules drafted from it.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "wind")]
+pub(crate) struct WindSettings {
+    /// Draft rules from costly patterns in the hook ledger, and show them at session start
+    #[usage(env = "JOUET_WIND", default = true)]
+    pub enabled: bool,
+    /// Promote a user rule from warn to deny once it has fired often with no overrides
+    #[usage(env = "JOUET_WIND_AUTO_PROMOTE", default = false)]
+    pub auto_promote: bool,
+    /// Firings, with no overrides, before a rule is promoted automatically
+    #[usage(env = "JOUET_WIND_PROMOTE_AFTER", default = 20)]
+    pub promote_after: u64,
 }
 
 /// What the hooks `jouet setup` installs do.
@@ -138,6 +158,15 @@ mod tests {
         assert_eq!(s.stats.summary, "plain");
         let s = Settings::load_from(&env(&[("JOUET_STATS_SUMMARY", "off")]), Some(path));
         assert_eq!(s.stats.summary, "off");
+    }
+
+    #[test]
+    fn winding_is_on_and_promotion_off_until_changed() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(s.wind.enabled && !s.wind.auto_promote);
+        assert_eq!(s.wind.promote_after, 20);
+        let s = Settings::load_from(&env(&[("JOUET_WIND", "0")]), None);
+        assert!(!s.wind.enabled);
     }
 
     #[test]

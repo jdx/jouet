@@ -40,7 +40,7 @@ for path, old, new in [
 EOF
 ```
 
-```text
+```output
 AssertionError: Cargo.toml
 ```
 
@@ -48,7 +48,7 @@ The assert catches the stale version, but only after `src/main.rs` was rewritten
 
 <p class="jouet-label is-after">After</p>
 
-```sh
+```spec
 jouet edit <<'JOUET_EDIT'
 === src/main.rs
 <<<<<<< SEARCH
@@ -65,7 +65,7 @@ version = "0.2.0"
 JOUET_EDIT
 ```
 
-```text
+```output
 not written src/main.rs  1 edit  +1 -1
 failed      Cargo.toml   1 edit
   edit 1: no match
@@ -97,7 +97,7 @@ The old "Listening on" line matches straight away, so the loop exits before this
 jouet wait log app.log --match 'Listening on' --timeout 2m
 ```
 
-```text
+```output
 [0s] log app.log: following
 [10s] log app.log: matched
 MET log app.log: matched (10s)
@@ -124,7 +124,19 @@ This loop stops only when every check passes. A failing check keeps it polling, 
 jouet wait ci
 ```
 
-`jouet wait ci` waits on the current branch's pull request, follows it when a new commit is pushed, and returns at the first failure with the failed step's log, even while the rest of the run is still going. A conflicted pull request is reported straight away, with exit code `4`.
+`jouet wait ci` waits on the current branch's pull request, follows it when a new commit is pushed, and returns at the first failure with the failed step's log, even while the rest of the run is still going. A conflicted pull request is reported straight away, with exit code `4`. Watching the `release` check on a mise release PR, it came back three seconds in:
+
+```output
+FAIL jdx/mise#15195 @ 843cc16  0 pass, 1 fail, 0 skipped, 0 pending  (3s)
+
+FAIL release  step "Require auto-merge on the release PR"  required
+  https://github.com/jdx/mise/actions/runs/41083340820/job/124157989724
+  ##[error]Enable auto-merge on this pull request to build and test the release tarballs.
+  ##[error]Process completed with exit code 1.
+  full log: ~/.local/state/jouet/logs/jdx-mise-job-124157989724.log
+```
+
+The `until` loop above would still be polling: a failed check never makes `gh pr checks` succeed.
 
 ## What jouet does instead
 
@@ -146,9 +158,9 @@ Every command follows the same [conventions](/conventions), so an agent learns t
 
 ## What comes next
 
-The commands are the first layer. The next one helps agents use them without being told every time: hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, and rules you can write yourself. After that, a report built from your own agent sessions that shows where their time and tokens go.
+The commands are the first layer. The second helps agents use them without being told every time: [`jouet setup`](/setup) installs hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, driven by [rules](/rules) you can add to.
 
-None of this exists yet, and the details will change as it is built.
+Next is a report built from your own agent sessions that shows where their time and tokens go. It does not exist yet, and the details will change as it is built.
 
 ## The name
 

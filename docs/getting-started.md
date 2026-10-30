@@ -65,7 +65,7 @@ jouet edit --help
 
 Hand `jouet edit` a spec on stdin. It checks every edit before it writes any file, so this changes both files or neither:
 
-```sh
+```spec
 jouet edit <<'JOUET_EDIT'
 === src/main.rs
 <<<<<<< SEARCH
@@ -82,7 +82,7 @@ version = "0.2.0"
 JOUET_EDIT
 ```
 
-```text
+```output
 ok          src/main.rs  1 edit  +1 -1
 ok          Cargo.toml   1 edit  +1 -1
 2 of 2 files written
@@ -90,7 +90,7 @@ ok          Cargo.toml   1 edit  +1 -1
 
 If `Cargo.toml` had moved on to `0.1.1` since you read it, neither file would change, and the report would show the closest match:
 
-```text
+```output
 not written src/main.rs  1 edit  +1 -1
 failed      Cargo.toml   1 edit
   edit 1: no match
@@ -119,3 +119,11 @@ jouet setup claude   # or: jouet setup codex
 See [agent setup and hooks](/setup) for what that changes and how to turn each part off. For another harness, add the snippet `jouet skill --format agents-md` prints to its `AGENTS.md`; it points the agent at `jouet agent-help`, which always describes the installed version.
 
 jouet notices when an agent runs it and switches to compact output by itself. See [display modes](/conventions#display-modes).
+
+## Next steps
+
+- [`jouet edit`](/commands/edit): spec formats, previews, `--check` and stale-read guards.
+- [`jouet wait`](/commands/wait): CI, pull requests, logs, ports, URLs, processes and commands.
+- [`jouet pr status`](/commands/pr-status) and [`jouet pr threads`](/commands/pr-threads): pull requests and their review threads.
+- [Shared conventions](/conventions): display modes, JSON output and the exit codes every command shares.
+- [Agent setup and hooks](/setup) and [rules](/rules): what `jouet setup` installs, and the Luau rules behind its hooks.

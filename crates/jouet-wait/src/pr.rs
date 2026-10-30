@@ -375,6 +375,7 @@ mod tests {
             base: "main".into(),
             head: "feat".into(),
             head_sha: "3f2a1bc9e0".into(),
+            head_oid: "3f2a1bc9e0".into(),
             pushed_at: None,
             mergeable: Mergeability::Unknown,
             merge_state: "unknown".into(),

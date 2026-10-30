@@ -5,7 +5,7 @@
 
 Run a rule against a command or hook payload, or against its examples
 
-With neither --command nor --payload, runs the rule's `examples` and fails if any does not do what it expects, so a rule can be checked before it is enabled.
+With neither --command nor --payload, runs the rule's `examples` and fails if any does not do what it expects, so a rule can be checked before it is enabled. --replay runs it over every call in the hook ledger instead, and fails if it fires on none of them.
 
 ## Arguments
 - **`<RULE>`** — A rule's name, or the path to a .luau file
@@ -14,4 +14,5 @@ With neither --command nor --payload, runs the rule's `examples` and fails if an
 - **`--command <CMD>`** — A shell command to test the rule against
 - **`--payload <FILE>`** — A Claude Code or Codex hook payload (JSON) to test against; `-` is stdin
 - **`--exit-code <N>`** — The command's exit code, for a post-tool-use rule (default 0)
+- **`--replay`** — Run the rule over the hook ledger's calls: what it fires on, and the near misses
 - **`-h --help`** — Print help

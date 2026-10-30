@@ -20,7 +20,7 @@ jouet pr threads apply     (--file FILE | -) [PR]
 
 The flags are listed in the [CLI reference](/cli/pr/threads).
 
-```text
+```output
 $ jouet pr threads jdx/mise#14922
 jdx/mise#14922  3 unresolved of 6 threads (1 outdated)
 
@@ -69,7 +69,7 @@ Suggestion blocks are always kept whole, even inside a collapsed `<details>`. `-
 
 ## Replying and resolving
 
-```text
+```output
 $ jouet pr threads apply - <<'JSON'
 [{"id": 4385981140, "reply": "Fixed in {sha}.", "resolve": true},
  {"id": 4386056098, "resolve": true}]

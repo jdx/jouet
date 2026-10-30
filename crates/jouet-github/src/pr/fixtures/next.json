@@ -1,0 +1,830 @@
+{
+  "data": {
+    "l0": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T03:40:39Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 21,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 25,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKGUxZDkzMDU4ODQzZDVkYmEzNDA0MDAxNTA1MzU0Yjk0MWUyMTkyMDM"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "claude/github-issue-discussion-e01ea6",
+        "headRefOid": "e1d93058843d5dba3404001505354b941e219203",
+        "id": "PR_kwDOIvux3s8AAAABLrPLuA",
+        "isDraft": false,
+        "mergeStateStatus": "UNKNOWN",
+        "mergeable": "UNKNOWN",
+        "number": 15187,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQwMzoyODoyMVrOsdX6Eg==",
+            "hasNextPage": false
+          }
+        },
+        "state": "MERGED",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "fix(dotfiles): keep saving a directory tracked in place of narrower paths",
+        "url": "https://github.com/jdx/mise/pull/15187"
+      }
+    },
+    "l1": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-29T19:30:44Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 22,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 31,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKDU4ODVhMGNiMWMzMDg5MGUwZGVlMjBmZDQ1MzQ0MmU0Y2I3MzBhOTU"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "stanhu/mise-invalid-tool-fix",
+        "headRefOid": "5885a0cb1c30890e0dee20fd453442e4cb730a95",
+        "id": "PR_kwDOIvux3s8AAAABLkQLWQ",
+        "isDraft": false,
+        "mergeStateStatus": "CLEAN",
+        "mergeable": "MERGEABLE",
+        "number": 15169,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0yOVQxOTozMDo1M1rOsbiCCw==",
+            "hasNextPage": false
+          }
+        },
+        "state": "CLOSED",
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-10-29T19:30:47Z"
+            }
+          ]
+        },
+        "title": "fix(ruby): stop asdf plugins turning a Gemfile into an invalid version",
+        "url": "https://github.com/jdx/mise/pull/15169"
+      }
+    },
+    "l2": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T12:02:07Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 23,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 27,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKGIyMTI4YTM3YTA5Njk0OGE0MWEyOTIwOTUwMjJkYThhNmM4MTViYjY"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "add-github-mirror-support",
+        "headRefOid": "b2128a37a096948a41a292095022da8a6c815bb6",
+        "id": "PR_kwDOIvux3s8AAAABLl9mVg",
+        "isDraft": true,
+        "mergeStateStatus": "CLEAN",
+        "mergeable": "MERGEABLE",
+        "number": 15172,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false
+            },
+            {
+              "isResolved": false
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": false
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxMjowNzo1N1rOsfT91g==",
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-10-29T17:53:25Z"
+            }
+          ]
+        },
+        "title": "feat(install): support installs from GitHub mirrors",
+        "url": "https://github.com/jdx/mise/pull/15172"
+      }
+    },
+    "l3": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T17:36:23Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 3,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 2,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 3,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 6,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOVdIDQdoAKDg0MDlkNGQxMjBkYTk4YTdhMGM0ZWE3YWQ0MjMxZGFhMjI5ZDRmNjM"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "refactor/crates",
+        "headRefOid": "8409d4d120da98a7a0c4ea7ad4231daa229d4f63",
+        "id": "PR_kwDOVdIDQc8AAAABL00LTQ",
+        "isDraft": false,
+        "mergeStateStatus": "BLOCKED",
+        "mergeable": "MERGEABLE",
+        "number": 19,
+        "repository": {
+          "nameWithOwner": "jdx/jouet"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [],
+          "pageInfo": {
+            "endCursor": null,
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "refactor: split jouet into workspace crates",
+        "url": "https://github.com/jdx/jouet/pull/19"
+      }
+    },
+    "l4": {
+      "pullRequest": {
+        "autoMergeRequest": {
+          "enabledAt": "2026-10-30T16:42:17Z"
+        },
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T17:22:56Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 2,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 6,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 22,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 14,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKGU3OTkyMmI2OTFiOWVmNTY3ZDdhYWQ5YTE4NjhkYzAyZDA5ZjViZDU"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "renovate/aube",
+        "headRefOid": "e79922b691b9ef567d7aad9a1868dc02d09f5bd5",
+        "id": "PR_kwDOIvux3s8AAAABL0Hrew",
+        "isDraft": false,
+        "mergeStateStatus": "BLOCKED",
+        "mergeable": "MERGEABLE",
+        "number": 15205,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [],
+          "pageInfo": {
+            "endCursor": null,
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-10-30T17:22:58Z"
+            }
+          ]
+        },
+        "title": "chore(deps): update aube to v2.8.5",
+        "url": "https://github.com/jdx/mise/pull/15205"
+      }
+    },
+    "l5": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "feat/rules",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T17:52:32Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 1,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 13,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 2,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOVdIDQdoAKDU1NTJjNTgwNjc3MThiZDEyMzFmOGRjYjNhODQ5NDkxMGVjYmQ4MjU"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "feat/setup",
+        "headRefOid": "5552c58067718bd1231f8dcb3a8494910ecbd825",
+        "id": "PR_kwDOVdIDQc8AAAABLz8OVw",
+        "isDraft": false,
+        "mergeStateStatus": "BLOCKED",
+        "mergeable": "MERGEABLE",
+        "number": 15,
+        "repository": {
+          "nameWithOwner": "jdx/jouet"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": false
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxNzo1MToxNFrOshRURg==",
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-10-30T17:10:26Z"
+            }
+          ]
+        },
+        "title": "feat(setup): add agent-help, skill and harness hooks that run jouet's rules",
+        "url": "https://github.com/jdx/jouet/pull/15"
+      }
+    }
+  }
+}
