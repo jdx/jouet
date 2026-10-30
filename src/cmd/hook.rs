@@ -55,6 +55,10 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         dir: if hooks.ledger { ledger::dir() } else { None },
         harness: harness.name(),
         session: payload.get("session_id").and_then(Value::as_str),
+        repo: payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .and_then(|cwd| ledger::repo_key(cwd.as_ref())),
     };
     match event {
         "session-start" => {
@@ -142,11 +146,15 @@ struct Log<'a> {
     dir: Option<PathBuf>,
     harness: &'static str,
     session: Option<&'a str>,
+    repo: Option<String>,
 }
 
 impl Log<'_> {
     fn entry(&self, event: &str) -> Entry {
-        Entry::new(self.harness, self.session, event)
+        Entry {
+            repo: self.repo.clone(),
+            ..Entry::new(self.harness, self.session, event)
+        }
     }
 
     fn append(&self, entry: Entry) {
