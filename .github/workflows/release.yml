@@ -89,14 +89,16 @@ jobs:
       # uploading, so a later target failing cannot leave a half-populated
       # release behind — everything is attached in one step at the end.
       #
-      # `cross` for every GNU target, so Cross.toml's pinned images set a
+      # `cross` for every Linux target, so Cross.toml's pinned images set a
       # deliberate glibc floor instead of inheriting the rolling runner's, and
-      # for aarch64 musl; plain cargo elsewhere.
+      # supply the C++ compilers Luau needs (musl ones included); plain cargo
+      # on macOS and Windows. ci-impl.yml's release-build job builds the same
+      # matrix on every pull request.
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1
         with:
           bin: jouet
           target: ${{ matrix.target }}
-          build-tool: ${{ (endsWith(matrix.target, '-linux-gnu') || matrix.target == 'aarch64-unknown-linux-musl') && 'cross' || 'cargo' }}
+          build-tool: ${{ contains(matrix.target, '-linux-') && 'cross' || 'cargo' }}
           token: ${{ secrets.GITHUB_TOKEN }}
           dry-run: true
 

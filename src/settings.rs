@@ -51,11 +51,8 @@ impl Settings {
     /// falls back to the defaults for what it broke, because a hook must not
     /// stop working over a typo.
     pub fn load() -> Self {
-        let file = crate::paths::config_dir().join("config.toml");
-        Self::load_from(
-            &EnvLayer::from_process(),
-            Some(file).filter(|p| p.is_file()),
-        )
+        let file = crate::paths::config_dir().map(|d| d.join("config.toml"));
+        Self::load_from(&EnvLayer::from_process(), file.filter(|p| p.is_file()))
     }
 
     fn load_from(env: &EnvLayer, file: Option<std::path::PathBuf>) -> Self {

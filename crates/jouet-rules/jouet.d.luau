@@ -4,9 +4,20 @@
 --   jouet rule types > jouet.d.luau
 --   luau-lsp analyze --definitions=jouet.d.luau my-rule.luau
 --
--- A rule is a `.luau` file that returns a `JouetRule`. It runs in a sandboxed
--- Luau VM: the standard library minus `require`, with `jouet` as its only way
--- to see the tool call.
+-- A rule is a `.luau` file that starts with a header and returns a
+-- `JouetRule`:
+--
+--   --- name: my-rule        (optional; must match the file name)
+--   --- why: what the rule is for, in one line   (required)
+--   --- mode: warn           (warn or deny; a user's rules default to warn)
+--   --- scope: user          (optional; must match where the file lives)
+--   --- author: <who wrote it: a person, or the session that did>
+--   --- created: 2026-10-30
+--
+-- It runs in a sandboxed Luau VM: the standard library minus `require`, with
+-- `jouet` as its only way to see the tool call. A rule of yours or a
+-- repository's only adds decisions: it cannot replace a built-in rule, and
+-- its denial of a command that only runs jouet becomes a warning.
 
 -- One simple command, after quote removal.
 export type JouetCommand = {
@@ -65,8 +76,6 @@ export type JouetExample = string | {
 }
 
 export type JouetRule = {
-	-- One line, shown by `jouet rule list`.
-	description: string,
 	-- When the rule runs; "pre-tool-use" if omitted.
 	on: JouetEvent?,
 	-- A jouet command the rule's advice names, such as { "wait", "ci" }. The
@@ -84,7 +93,8 @@ export type JouetRule = {
 }
 
 declare jouet: {
-	-- Refuse the tool call; the agent sees the message.
+	-- Refuse the tool call; the agent sees the message. In a warn-mode rule
+	-- this warns instead.
 	deny: (message: string) -> JouetDecision,
 	-- Let the call run, and show the agent the message.
 	warn: (message: string) -> JouetDecision,

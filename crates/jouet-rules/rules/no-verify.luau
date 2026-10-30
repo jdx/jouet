@@ -1,5 +1,10 @@
 --!strict
--- Skipping git hooks hides what they would have caught.
+--- name: no-verify
+--- why: Skipping git hooks with `--no-verify` hides what they would have caught.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local MESSAGE = "Do not skip git hooks with --no-verify: fix what the hook reports, or ask the user."
 
@@ -19,16 +24,16 @@ local VALUE_LONGS = {
 	"--cleanup",
 }
 
--- `git commit -n` is `--no-verify`; option values are skipped, so `-m -n`
--- is a message.
-local function commit_short_n(opts: { string }): boolean
+-- `git commit -n` and `--no-verify`, skipping option values, so `-m -n` and
+-- `-m --no-verify` are messages.
+local function commit_skips_hooks(opts: { string }): boolean
 	local i = 1
 	while i <= #opts do
 		local arg = opts[i]
 		i += 1
 		if jouet.contains(VALUE_LONGS, arg) then
 			i += 1
-		elseif jouet.short_flag(arg, "n", VALUE_SHORTS) then
+		elseif arg == "--no-verify" or jouet.short_flag(arg, "n", VALUE_SHORTS) then
 			return true
 		elseif string.sub(arg, 1, 1) == "-" and string.sub(arg, 2, 2) ~= "-" then
 			-- A cluster ending in an option that takes a value takes the next word.
@@ -42,13 +47,13 @@ local function commit_short_n(opts: { string }): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny `--no-verify` and `git commit -n`",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local sub, args = jouet.git(command)
 			if sub then
 				local opts = jouet.options(args)
-				if jouet.contains(opts, "--no-verify") or (sub == "commit" and commit_short_n(opts)) then
+				local skips = if sub == "commit" then commit_skips_hooks(opts) else jouet.contains(opts, "--no-verify")
+				if skips then
 					return jouet.deny(MESSAGE)
 				end
 			end
@@ -66,6 +71,8 @@ local rule: JouetRule = {
 		allow = {
 			"git commit -m 'drop --no-verify'",
 			"git commit -m -n",
+			"git commit -m '--no-verify'",
+			"git commit --message --no-verify",
 			"git commit -mn",
 			"git push -n",
 			"git log --no-verify-sig",

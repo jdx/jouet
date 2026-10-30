@@ -1,6 +1,10 @@
 --!strict
--- `git add -A` and `git add .` stage everything in the worktree: caches,
--- scratch files, and work another session left there.
+--- name: git-add-all
+--- why: `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local MESSAGE =
 	"Stage explicit paths (`git add path/to/file ...`): `git add -A` and `git add .` sweep in caches, scratch files and other sessions' work."
@@ -8,7 +12,6 @@ local MESSAGE =
 local EVERYTHING = { ".", "./", ":/", ":/." }
 
 local rule: JouetRule = {
-	description = "Deny `git add -A`, `--all` and `.`; stage explicit paths",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local sub, args = jouet.git(command)

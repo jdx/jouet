@@ -12,9 +12,11 @@
 //! in [`Outcome::errors`] and treated as having said nothing.
 
 mod cache;
+mod header;
 pub mod shell;
 mod trust;
 
+pub use header::{Mode, Scope};
 pub use trust::{Trust, TrustStore};
 
 use mlua::{Lua, Table, Value, Variadic, VmState};
@@ -80,6 +82,14 @@ pub enum Origin {
 }
 
 impl Origin {
+    pub fn scope(&self) -> Scope {
+        match self {
+            Self::Builtin => Scope::Builtin,
+            Self::User(_) => Scope::User,
+            Self::Repo(_) => Scope::Repo,
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
             Self::Builtin => "builtin".into(),
@@ -117,7 +127,12 @@ pub enum State {
 pub struct Rule {
     pub name: String,
     pub origin: Origin,
-    pub description: String,
+    /// From the header: what the rule is for.
+    pub why: String,
+    pub mode: Mode,
+    pub scope: Scope,
+    pub author: String,
+    pub created: String,
     pub event: Event,
     pub needs: Vec<String>,
     pub state: State,
@@ -322,10 +337,9 @@ pub fn rule_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Every rule source: built-in, then the user's, then a trusted repository's.
-/// A later rule replaces an earlier one with the same name; an untrusted
-/// repository rule replaces nothing. Unreadable files are reported, not
-/// fatal.
+/// Every rule source: built-in, then the user's, then a repository's
+/// (marked untrusted unless its directory is trusted). Unreadable files are
+/// reported, not fatal.
 pub fn discover(
     user_dir: Option<&Path>,
     repo_dir: Option<&Path>,
@@ -364,10 +378,7 @@ pub fn discover(
                 code,
                 trusted,
             };
-            match sources.iter().position(|s| s.name == source.name) {
-                Some(i) if trusted => sources[i] = source,
-                _ => sources.push(source),
-            }
+            sources.push(source);
         }
     };
     if let Some(dir) = user_dir {
@@ -428,22 +439,56 @@ impl Engine {
             has_command: &*has_command,
         };
         for source in sources {
-            let rule = engine.load(source, &loader);
+            let mut rule = engine.load(source, &loader);
+            // The floor: a rule of yours or a repository's adds decisions,
+            // and never takes the place of a built-in one.
+            if rule.state != State::Untrusted
+                && let Some(other) = engine
+                    .rules
+                    .iter()
+                    .find(|r| r.name == rule.name && r.state != State::Untrusted)
+            {
+                rule.state = State::Broken(match other.scope {
+                    Scope::Builtin => format!(
+                        "`{}` is a built-in rule, which cannot be replaced; rename this file",
+                        rule.name
+                    ),
+                    _ => format!(
+                        "{} already defines `{}`",
+                        other.origin.describe(),
+                        rule.name
+                    ),
+                });
+                rule.table = None;
+            }
             engine.rules.push(rule);
         }
         Ok(engine)
     }
 
     fn load(&self, source: Source, loader: &Loader<'_>) -> Rule {
+        let scope = source.origin.scope();
+        let header = header::parse(&source.code);
         let mut rule = Rule {
             name: source.name,
             origin: source.origin,
-            description: String::new(),
+            why: header.why.clone().unwrap_or_default(),
+            mode: scope.default_mode(),
+            scope,
+            author: header.author.clone().unwrap_or_else(|| match scope {
+                Scope::Builtin => "builtin".into(),
+                _ => "unknown".into(),
+            }),
+            created: header.created.clone().unwrap_or_default(),
             event: Event::PreToolUse,
             needs: Vec::new(),
             state: State::Enabled,
             table: None,
         };
+        if let Err(e) = apply_header(&mut rule, &header) {
+            rule.state = State::Broken(e);
+            return rule;
+        }
         if !source.trusted {
             rule.state = State::Untrusted;
             return rule;
@@ -481,20 +526,13 @@ impl Engine {
         code: &str,
         cache_dir: Option<&Path>,
     ) -> Result<Table, String> {
-        let bytecode = cache::compile(code, cache_dir)?;
-        let env = self.lua.create_table().map_err(|e| e.to_string())?;
-        let meta = self.lua.create_table().map_err(|e| e.to_string())?;
-        meta.set("__index", self.lua.globals())
-            .map_err(|e| e.to_string())?;
-        env.set_metatable(Some(meta)).map_err(|e| e.to_string())?;
-        let value: Value = self.guarded(|| {
-            self.lua
-                .load(&bytecode)
-                .set_name(format!("={name}"))
-                .set_mode(mlua::chunk::ChunkMode::Binary)
-                .set_environment(env)
-                .eval()
-        })?;
+        let (bytecode, cached) = cache::compile(code, cache_dir)?;
+        let value = match self.run_chunk(name, &bytecode) {
+            // A cached chunk from another Luau version, or a damaged file:
+            // compile it again rather than leave the rule broken.
+            Err(_) if cached => self.run_chunk(name, &cache::recompile(code, cache_dir)?)?,
+            result => result?,
+        };
         match value {
             Value::Table(table) => Ok(table),
             other => Err(format!(
@@ -502,6 +540,23 @@ impl Engine {
                 other.type_name()
             )),
         }
+    }
+
+    /// Runs a compiled rule file in an environment of its own.
+    fn run_chunk(&self, name: &str, bytecode: &[u8]) -> Result<Value, String> {
+        let env = self.lua.create_table().map_err(|e| e.to_string())?;
+        let meta = self.lua.create_table().map_err(|e| e.to_string())?;
+        meta.set("__index", self.lua.globals())
+            .map_err(|e| e.to_string())?;
+        env.set_metatable(Some(meta)).map_err(|e| e.to_string())?;
+        self.guarded(|| {
+            self.lua
+                .load(bytecode)
+                .set_name(format!("={name}"))
+                .set_mode(mlua::chunk::ChunkMode::Binary)
+                .set_environment(env)
+                .eval()
+        })
     }
 
     /// Runs `f` under the per-rule budget.
@@ -563,10 +618,21 @@ impl Engine {
                 _ => "the rule is not loaded".into(),
             });
         };
-        let check: mlua::Function = table.get("check").map_err(|e| e.to_string())?;
+        // Raw reads throughout: a rule's tables can carry metamethods, which
+        // must never run outside the budget.
+        let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
         let call_table = call_table(&self.lua, call).map_err(|e| e.to_string())?;
         self.shared.records.borrow_mut().clear();
-        let value: Value = self.guarded(|| check.call(call_table))?;
+        let returned = self.guarded(|| {
+            Ok(match check.call::<Value>(call_table)? {
+                Value::Nil => None,
+                Value::Table(t) => Some(Ok((
+                    t.raw_get::<Option<String>>("action")?.unwrap_or_default(),
+                    t.raw_get::<Option<String>>("message")?,
+                ))),
+                other => Some(Err(other.type_name())),
+            })
+        })?;
         let records = self
             .shared
             .records
@@ -579,27 +645,32 @@ impl Engine {
                 exit_code,
             })
             .collect();
-        let decision = match value {
-            Value::Nil => None,
-            Value::Table(t) => {
-                let action: String = t.get("action").unwrap_or_default();
+        let decision = match returned {
+            None => None,
+            Some(Ok((action, message))) => {
                 let action = match action.as_str() {
+                    // A warn-mode rule only warns, and the floor: a rule of
+                    // yours or a repository's cannot lock you out of jouet.
+                    "deny"
+                        if rule.mode == Mode::Warn
+                            || (rule.scope != Scope::Builtin && only_jouet(call)) =>
+                    {
+                        Action::Warn
+                    }
                     "deny" => Action::Deny,
                     "warn" => Action::Warn,
                     "allow" => Action::Allow,
                     other => return Err(format!("check returned an unknown action `{other}`")),
                 };
-                let message: Option<String> = t.get("message").ok().flatten();
                 Some(Decision {
                     rule: rule.name.clone(),
                     action,
                     message,
                 })
             }
-            other => {
+            Some(Err(type_name)) => {
                 return Err(format!(
-                    "check must return jouet.deny(...), jouet.warn(...), jouet.allow() or nil, not {}",
-                    other.type_name()
+                    "check must return jouet.deny(...), jouet.warn(...), jouet.allow() or nil, not {type_name}"
                 ));
             }
         };
@@ -614,23 +685,24 @@ impl Engine {
                 _ => "the rule is not loaded".into(),
             });
         };
-        let examples: Option<Table> = table.get("examples").map_err(|e| e.to_string())?;
+        let examples: Option<Table> = table.raw_get("examples").map_err(|e| e.to_string())?;
         let Some(examples) = examples else {
             return Ok(Vec::new());
         };
         let mut out = Vec::new();
         for expect in ["deny", "warn", "allow", "record"] {
-            let list: Option<Table> = examples.get(expect).map_err(|e| e.to_string())?;
+            let list: Option<Table> = examples.raw_get(expect).map_err(|e| e.to_string())?;
             for case in list.iter().flat_map(|l| l.sequence_values::<Value>()) {
                 let case = case.map_err(|e| e.to_string())?;
                 let (command, exit_code, kind) = match case {
                     Value::String(s) => (s.to_string_lossy(), 0, None),
                     Value::Table(t) => (
-                        t.get::<String>("command").map_err(|e| e.to_string())?,
-                        t.get::<Option<i32>>("exit_code")
+                        t.raw_get::<String>("command").map_err(|e| e.to_string())?,
+                        t.raw_get::<Option<i32>>("exit_code")
                             .map_err(|e| e.to_string())?
                             .unwrap_or(0),
-                        t.get::<Option<String>>("kind").map_err(|e| e.to_string())?,
+                        t.raw_get::<Option<String>>("kind")
+                            .map_err(|e| e.to_string())?,
                     ),
                     other => {
                         return Err(format!(
@@ -699,27 +771,70 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
+/// Checks the header against the file: its name, its scope, and a `why`.
+fn apply_header(rule: &mut Rule, header: &header::Header) -> Result<(), String> {
+    if header.why.is_none() {
+        return Err("start the file with a `--- why: ...` header line".into());
+    }
+    if let Some(name) = &header.name
+        && name != &rule.name
+    {
+        return Err(format!(
+            "the header names `{name}`, but the file is `{}.luau`",
+            rule.name
+        ));
+    }
+    if let Some(scope) = &header.scope
+        && scope != rule.scope.name()
+    {
+        return Err(format!(
+            "the header says scope `{scope}`, but this is a {} rule",
+            rule.scope.name()
+        ));
+    }
+    if let Some(mode) = &header.mode {
+        rule.mode = match mode.as_str() {
+            "warn" => Mode::Warn,
+            "deny" => Mode::Deny,
+            other => return Err(format!("`mode` must be warn or deny, not `{other}`")),
+        };
+    }
+    Ok(())
+}
+
+/// Whether every top-level command in the call runs jouet itself.
+fn only_jouet(call: &Call) -> bool {
+    let Some(script) = &call.command else {
+        return false;
+    };
+    let commands = shell::parse(script).commands;
+    !commands.is_empty() && commands.iter().all(|c| c.program() == Some("jouet"))
+}
+
+/// Reads the rule table's fields with raw access, so no metamethod of the
+/// rule's runs outside its budget.
 fn read_fields(rule: &mut Rule, table: &Table) -> Result<(), String> {
-    let check: Value = table.get("check").map_err(|e| e.to_string())?;
+    let check: Value = table.raw_get("check").map_err(|e| e.to_string())?;
     if !check.is_function() {
         return Err("the rule table needs a `check` function".into());
     }
-    rule.description = table
-        .get::<Option<String>>("description")
-        .map_err(|e| format!("`description`: {e}"))?
-        .unwrap_or_default();
     if let Some(on) = table
-        .get::<Option<String>>("on")
+        .raw_get::<Option<String>>("on")
         .map_err(|e| format!("`on`: {e}"))?
     {
         rule.event = Event::parse(&on).ok_or_else(|| {
             format!("`on` must be \"pre-tool-use\" or \"post-tool-use\", not `{on}`")
         })?;
     }
-    rule.needs = table
-        .get::<Option<Vec<String>>>("needs")
+    if let Some(needs) = table
+        .raw_get::<Option<Table>>("needs")
         .map_err(|e| format!("`needs`: {e}"))?
-        .unwrap_or_default();
+    {
+        rule.needs = needs
+            .sequence_values::<String>()
+            .collect::<mlua::Result<_>>()
+            .map_err(|e| format!("`needs`: {e}"))?;
+    }
     Ok(())
 }
 
@@ -754,8 +869,8 @@ fn install_module(
                 ))
             })?;
             // A command whose exit status is unknown says nothing.
-            if let Some(status) = command.get::<Option<i32>>("status")? {
-                let text: String = command.get("text")?;
+            if let Some(status) = command.raw_get::<Option<i32>>("status")? {
+                let text: String = command.raw_get("text")?;
                 records.records.borrow_mut().push((kind, text, status));
             }
             Ok(())

@@ -124,6 +124,42 @@ jobs:
       - name: Check MSRV
         run: cargo check --locked --all-targets
 
+  # Builds every release target the way release.yml does, so a change one of
+  # them cannot build (Luau's C++ on an old cross image, say) fails here and
+  # not at release time. Compiles and links only; nothing is uploaded.
+  release-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1
+        with:
+          bin: jouet
+          target: ${{ matrix.target }}
+          build-tool: ${{ contains(matrix.target, '-linux-') && 'cross' || 'cargo' }}
+          token: ${{ github.token }}
+          dry-run: true
+
   # Single fan-in gate, so branch protection requires one check instead of an
   # enumerated list that goes stale every time a job is added or renamed. It
   # also catches *skipped* jobs, which a required check would otherwise treat
@@ -135,6 +171,7 @@ jobs:
       - test-macos
       - test-windows
       - msrv
+      - release-build
     runs-on: ubuntu-latest
     timeout-minutes: 1
     # Run on success or upstream failure but skip when the workflow is cancelled
@@ -146,6 +183,7 @@ jobs:
           needs.test.result != 'success' ||
           needs.test-macos.result != 'success' ||
           needs.test-windows.result != 'success' ||
-          needs.msrv.result != 'success'
+          needs.msrv.result != 'success' ||
+          needs.release-build.result != 'success'
         run: exit 1
       - run: echo "All CI jobs completed successfully"
