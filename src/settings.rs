@@ -35,6 +35,9 @@ pub struct HookSettings {
     /// Block finishing while the last test, lint or build run failed
     #[usage(env = "JOUET_HOOKS_VERIFY", default = true)]
     pub verify: bool,
+    /// Keep a ledger of command shapes and rule decisions
+    #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
+    pub ledger: bool,
 }
 
 /// Which rules run.

@@ -9,14 +9,16 @@
 
 use crate::HookArgs;
 use crate::guide;
+use crate::ledger::{self, Entry};
 use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
 use crate::verify::{self, State};
-use jouet_rules::{Call, Engine, Event, Outcome};
+use jouet_rules::{Call, Engine, Event, Outcome, Record};
 use serde_json::{Value, json};
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(args: &HookArgs) -> crate::exit::Exit {
     let result = std::panic::catch_unwind(|| {
@@ -48,21 +50,131 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
     if !hooks.enabled {
         return None;
     }
+    let log = Log {
+        dir: if hooks.ledger { ledger::dir() } else { None },
+        harness: harness.name(),
+        session: payload.get("session_id").and_then(Value::as_str),
+    };
     match event {
-        "session-start" if hooks.prime => {
-            let engine = load(payload)?;
+        "session-start" => {
+            log.append(log.entry("session-start"));
+            let engine = load(payload).filter(|_| hooks.prime)?;
             Some(session_start(&engine, hooks.steer, hooks.verify))
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
-            pre_tool_use(&engine, &Call::from_hook(payload, harness.name()))
+            let call = Call::from_hook(payload, harness.name());
+            let (output, outcome) = pre_tool_use(&engine, &call);
+            if let Some(outcome) = &outcome {
+                log.pre_tool_use(&call, outcome);
+            }
+            output
         }
-        "post-tool-use" | "post-tool-use-failure" if hooks.verify => {
-            record(payload, harness);
+        "post-tool-use" | "post-tool-use-failure" => {
+            let call = Call::from_hook(payload, harness.name());
+            let records = if hooks.verify {
+                record(payload, &call)
+            } else {
+                Vec::new()
+            };
+            log.post_tool_use(payload, &call, &records);
             None
         }
-        "stop" if hooks.verify => stop(harness, payload),
+        "stop" => {
+            let output = if hooks.verify {
+                stop(harness, payload)
+            } else {
+                None
+            };
+            let mut entry = log.entry("stop");
+            if output.is_some() {
+                entry.decisions.push(ledger::Decision {
+                    rule: "verify".into(),
+                    action: "block".into(),
+                });
+            }
+            log.append(entry);
+            output
+        }
         _ => None,
+    }
+}
+
+/// Where this hook's ledger entries go, and whose they are.
+struct Log<'a> {
+    dir: Option<PathBuf>,
+    harness: &'static str,
+    session: Option<&'a str>,
+}
+
+impl Log<'_> {
+    fn entry(&self, event: &str) -> Entry {
+        Entry::new(self.harness, self.session, event)
+    }
+
+    fn append(&self, entry: Entry) {
+        if let Some(dir) = &self.dir {
+            ledger::append(dir, &entry);
+        }
+    }
+
+    /// The call's shape and decisions, after any overrides it is: a retry
+    /// of a command of the same shape that a rule denied or warned about.
+    fn pre_tool_use(&self, call: &Call, outcome: &Outcome) {
+        let (Some(dir), Some(command)) = (&self.dir, &call.command) else {
+            return;
+        };
+        let shape = ledger::shape(command);
+        if outcome.deny.is_none()
+            && let Some(session) = self.session
+        {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            for rule in ledger::overrides(&ledger::recent(dir, session), &shape, now) {
+                let mut entry = self.entry("override");
+                entry.tool = Some(call.tool.clone());
+                entry.shape = Some(shape.clone());
+                entry.decisions.push(ledger::Decision {
+                    rule,
+                    action: "override".into(),
+                });
+                ledger::append(dir, &entry);
+            }
+        }
+        let mut entry = self.entry("pre-tool-use");
+        entry.tool = Some(call.tool.clone());
+        entry.shape = Some(shape);
+        entry.decisions = outcome
+            .deny
+            .iter()
+            .chain(&outcome.warnings)
+            .map(|d| ledger::Decision {
+                rule: d.rule.clone(),
+                action: if d.action == jouet_rules::Action::Deny {
+                    "deny".into()
+                } else {
+                    "warn".into()
+                },
+            })
+            .collect();
+        ledger::append(dir, &entry);
+    }
+
+    fn post_tool_use(&self, payload: &Value, call: &Call, records: &[Record]) {
+        let mut entry = self.entry("post-tool-use");
+        entry.tool = Some(call.tool.clone());
+        entry.shape = call.command.as_deref().map(ledger::shape);
+        entry.exit_code = call.exit_code;
+        entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
+        entry.decisions = records
+            .iter()
+            .map(|r| ledger::Decision {
+                rule: r.rule.clone(),
+                action: format!("record:{}", r.kind.name()),
+            })
+            .collect();
+        self.append(entry);
     }
 }
 
@@ -115,15 +227,20 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
 }
 
 /// Denies a shell command a rule denies; otherwise passes on any warnings.
-fn pre_tool_use(engine: &Engine, call: &Call) -> Option<Value> {
+/// Also returns what the rules decided, for the ledger.
+fn pre_tool_use(engine: &Engine, call: &Call) -> (Option<Value>, Option<Outcome>) {
     if call.tool != "Bash" || call.command.is_none() {
-        return None;
+        return (None, None);
     }
     let call = Call {
         event: Some(Event::PreToolUse),
         ..call.clone()
     };
     let outcome = evaluate(engine, &call);
+    (respond(&outcome), Some(outcome))
+}
+
+fn respond(outcome: &Outcome) -> Option<Value> {
     let tag = |d: &jouet_rules::Decision| {
         format!(
             "{} [jouet rule: {}]",
@@ -154,8 +271,7 @@ fn pre_tool_use(engine: &Engine, call: &Call) -> Option<Value> {
 
 /// Runs the post-tool-use rules on a finished Bash command and keeps what
 /// they record in the session's state file.
-fn record(payload: &Value, harness: Harness) {
-    let call = Call::from_hook(payload, harness.name());
+fn record(payload: &Value, call: &Call) -> Vec<Record> {
     // A background command has not finished when this hook runs.
     let background = payload
         .get("tool_input")
@@ -163,21 +279,23 @@ fn record(payload: &Value, harness: Harness) {
         .and_then(Value::as_bool)
         == Some(true);
     if call.tool != "Bash" || call.exit_code.is_none() || background {
-        return;
+        return Vec::new();
     }
     let Some(path) = session_state_path(payload) else {
-        return;
+        return Vec::new();
     };
-    let Some(engine) = load(payload) else { return };
+    let Some(engine) = load(payload) else {
+        return Vec::new();
+    };
     let call = Call {
         event: Some(Event::PostToolUse),
-        ..call
+        ..call.clone()
     };
     let records = evaluate(&engine, &call).records;
-    if records.is_empty() {
-        return;
+    if !records.is_empty() {
+        let _ = verify::update(&path, |state| state.record(records.clone()));
     }
-    let _ = verify::update(&path, |state| state.record(records));
+    records
 }
 
 fn session_state_path(payload: &Value) -> Option<PathBuf> {
@@ -253,7 +371,9 @@ mod tests {
 
     #[test]
     fn denies_with_the_rules_advice_and_name() {
-        let out = pre_tool_use(&engine(Vec::new()), &bash("git add -A")).unwrap();
+        let out = pre_tool_use(&engine(Vec::new()), &bash("git add -A"))
+            .0
+            .unwrap();
         let output = &out["hookSpecificOutput"];
         assert_eq!(output["permissionDecision"], "deny");
         let reason = output["permissionDecisionReason"].as_str().unwrap();
@@ -264,9 +384,9 @@ mod tests {
     #[test]
     fn says_nothing_about_other_commands_and_tools() {
         let engine = engine(Vec::new());
-        assert_eq!(pre_tool_use(&engine, &bash("git add src/main.rs")), None);
+        assert_eq!(pre_tool_use(&engine, &bash("git add src/main.rs")).0, None);
         let edit = Call::from_hook(&json!({"tool_name": "Edit"}), "claude");
-        assert_eq!(pre_tool_use(&engine, &edit), None);
+        assert_eq!(pre_tool_use(&engine, &edit).0, None);
     }
 
     #[test]
@@ -274,10 +394,10 @@ mod tests {
         let warn = Source {
             name: "warn-ls".into(),
             origin: Origin::User("warn-ls.luau".into()),
-            code: "return { check = function(c) if c.command == 'ls' then return jouet.warn('try eza') end end }".into(),
+            code: "--- why: test\nreturn { check = function(c) if c.command == 'ls' then return jouet.warn('try eza') end end }".into(),
             trusted: true,
         };
-        let out = pre_tool_use(&engine(vec![warn]), &bash("ls")).unwrap();
+        let out = pre_tool_use(&engine(vec![warn]), &bash("ls")).0.unwrap();
         assert_eq!(
             out["hookSpecificOutput"]["additionalContext"],
             "try eza [jouet rule: warn-ls]"
