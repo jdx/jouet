@@ -14,17 +14,21 @@ if (!versionMatch) {
 }
 const latestVersion = versionMatch[1];
 const siteUrl = "https://jouet.jdx.dev";
+// Marks commands whose pull requests are still open.
+const soon = '<span class="jouet-status is-soon">soon</span>';
 
 export default defineConfig({
   title: "jouet",
   description:
-    "A toolkit CLI for coding agents: one command for each chore agents keep rebuilding by hand.",
+    "Wind-up tools for coding agents: one command for each shell chore agents keep scripting by hand.",
   lang: "en-US",
   lastUpdated: true,
-  appearance: "force-dark",
+  // Dark by default, like the rest of jdx's docs, with a light theme a click away.
+  appearance: "dark",
   cleanUrls: true,
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
+    "cli/pr.md": "cli/pr/index.md",
     "cli/wait.md": "cli/wait/index.md",
     "cli/rule.md": "cli/rule/index.md",
   },
@@ -62,7 +66,7 @@ export default defineConfig({
         items: [
           { text: "jouet edit", link: "/commands/edit" },
           { text: "jouet wait", link: "/commands/wait" },
-          { text: "jouet pr status", link: "/commands/pr-status" },
+          { text: `jouet pr status ${soon}`, link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
         ],
       },
@@ -84,10 +88,22 @@ export default defineConfig({
                 ],
               },
               {
+                text: "pr",
+                link: "/cli/pr/",
+                collapsed: true,
+                items: [
+                  { text: "status", link: "/cli/pr/status" },
+                  { text: "threads", link: "/cli/pr/threads" },
+                ],
+              },
+              {
                 text: "wait",
                 link: "/cli/wait/",
                 collapsed: true,
                 items: [
+                  { text: "ci", link: "/cli/wait/ci" },
+                  { text: "run", link: "/cli/wait/run" },
+                  { text: "pr", link: "/cli/wait/pr" },
                   { text: "file", link: "/cli/wait/file" },
                   { text: "log", link: "/cli/wait/log" },
                   { text: "port", link: "/cli/wait/port" },
@@ -135,6 +151,7 @@ export default defineConfig({
     footer: false,
   },
   head: [
+    ["link", { rel: "icon", href: "/favicon.ico", sizes: "48x48" }],
     ["link", { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }],
     [
       "link",
@@ -148,13 +165,37 @@ export default defineConfig({
     [
       "link",
       {
+        rel: "icon",
+        href: "/favicon-16x16.png",
+        type: "image/png",
+        sizes: "16x16",
+      },
+    ],
+    [
+      "link",
+      {
         rel: "apple-touch-icon",
         href: "/apple-touch-icon.png",
         sizes: "180x180",
       },
     ],
     ["link", { rel: "manifest", href: "/site.webmanifest" }],
-    ["meta", { name: "theme-color", content: "#121317" }],
+    [
+      "meta",
+      {
+        name: "theme-color",
+        media: "(prefers-color-scheme: light)",
+        content: "#fffaf2",
+      },
+    ],
+    [
+      "meta",
+      {
+        name: "theme-color",
+        media: "(prefers-color-scheme: dark)",
+        content: "#16171c",
+      },
+    ],
     ["meta", { property: "og:site_name", content: "jouet" }],
     ["meta", { property: "og:locale", content: "en_US" }],
     ["meta", { property: "og:type", content: "website" }],
@@ -163,7 +204,9 @@ export default defineConfig({
   ],
   transformHead({ pageData, title, description, siteConfig }) {
     const heading = pageData.title || "jouet";
-    const card = socialCard(heading);
+    const card = socialCard(heading, {
+      home: pageData.frontmatter.layout === "home",
+    });
     writeSocialCard(siteConfig.outDir, card);
     const image = new URL(card.path, `${siteUrl}/`).toString();
     const imageAlt = `${heading} — jouet docs`;

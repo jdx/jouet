@@ -1,0 +1,20 @@
+{
+ "data": {
+  "node": {
+   "commits": {
+    "pageInfo": {
+     "hasNextPage": false,
+     "endCursor": "MQ"
+    },
+    "nodes": [
+     {
+      "commit": {
+       "oid": "c42414f907109526b406d2b72bef0bfe5cf07209",
+       "committedDate": "2026-10-27T07:03:13Z"
+      }
+     }
+    ]
+   }
+  }
+ }
+}

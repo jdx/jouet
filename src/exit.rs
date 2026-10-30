@@ -2,8 +2,7 @@
 //!
 //! `Failed` and `Precondition` are deliberately separate: `Failed` says the
 //! work was done and the answer is no (fix the code), `Precondition` says the
-//! work was refused before it started (fix the request). `remote` (5) joins
-//! this list with the GitHub commands that return it.
+//! work was refused before it started (fix the request).
 
 use std::process::ExitCode;
 
@@ -14,6 +13,8 @@ pub enum Exit {
     Usage,
     NotFound,
     Precondition,
+    /// Authentication, network or rate-limit failure talking to the host.
+    Remote,
     /// Still pending when `--timeout` expired; running the same command
     /// again keeps waiting.
     Timeout,
@@ -21,12 +22,13 @@ pub enum Exit {
 
 impl Exit {
     /// Every code, in the order `jouet agent-help` lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Ok,
         Self::Failed,
         Self::Usage,
         Self::NotFound,
         Self::Precondition,
+        Self::Remote,
         Self::Timeout,
     ];
 
@@ -37,6 +39,7 @@ impl Exit {
             Self::Usage => 2,
             Self::NotFound => 3,
             Self::Precondition => 4,
+            Self::Remote => 5,
             Self::Timeout => 124,
         }
     }
@@ -49,6 +52,7 @@ impl Exit {
             Self::Usage => "usage",
             Self::NotFound => "not_found",
             Self::Precondition => "precondition",
+            Self::Remote => "remote",
             Self::Timeout => "timeout",
         }
     }
@@ -61,6 +65,7 @@ impl Exit {
             Self::Usage => "bad arguments",
             Self::NotFound => "no such file, PR or thread",
             Self::Precondition => "refused before doing anything: fix the request",
+            Self::Remote => "GitHub could not be reached or refused: check auth, then retry",
             Self::Timeout => "still pending: run the same command again to keep waiting",
         }
     }

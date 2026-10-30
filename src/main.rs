@@ -3,12 +3,16 @@
 //! Early development: commands land one at a time.
 
 mod cmd;
+mod config;
 mod display;
 mod edit;
 mod exit;
+mod git;
+mod github;
 mod guide;
 mod ledger;
 mod paths;
+mod pr;
 mod rules;
 mod settings;
 mod setup;
@@ -46,6 +50,8 @@ struct Jouet {
 enum Cmd {
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Inspect pull requests
+    Pr(PrArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
@@ -130,6 +136,51 @@ pub struct HashArgs {
     paths: Vec<String>,
 }
 
+/// Inspect pull requests
+#[derive(Args)]
+pub struct PrArgs {
+    #[usage(subcommand)]
+    cmd: PrCmd,
+}
+
+#[derive(Subcommands)]
+pub enum PrCmd {
+    /// Show where PRs stand and why any need attention
+    Status(StatusArgs),
+    /// List, reply to and resolve review threads
+    Threads(ThreadsArgs),
+}
+
+/// Show where PRs stand and why any need attention
+///
+/// Prints one line per PR, then a summary. All PRs are fetched in one batched
+/// GraphQL query. Each PR lists fixed attention codes: conflict,
+/// checks_failing, checks_missing, changes_requested, unresolved_threads,
+/// behind_base, draft and mergeable_unknown.
+#[derive(Args)]
+pub struct StatusArgs {
+    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
+    /// current branch's PR
+    prs: Vec<String>,
+    /// Add the open PRs authored by the token's user
+    #[usage(long)]
+    mine: bool,
+    /// Add the PRs matching a GitHub search query
+    #[usage(long, value_name = "QUERY")]
+    search: Option<String>,
+    /// The repository for bare numbers, branches, --mine and --search.
+    /// Repeatable. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Vec<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
+    /// Exit 1 when any PR needs attention
+    #[usage(long)]
+    fail_on_attention: bool,
+}
+
 /// Block until a condition holds, then print one summary
 ///
 /// Replaces `sleep N; check; repeat` loops. The first check is immediate;
@@ -159,6 +210,12 @@ pub struct WaitArgs {
 
 #[derive(Subcommands)]
 pub enum WaitCmd {
+    /// Wait for a PR's checks, and show why any failed
+    Ci(WaitCiArgs),
+    /// Wait for a GitHub Actions run
+    Run(WaitRunArgs),
+    /// Wait for a PR to become mergeable, merged, approved, ready, ...
+    Pr(WaitPrArgs),
     /// Wait for a file to exist, contain a match, or be gone
     File(WaitFileArgs),
     /// Wait for a line matching a regex to be appended to a log
@@ -171,6 +228,99 @@ pub enum WaitCmd {
     Pid(WaitPidArgs),
     /// Re-run a command until it exits with the expected code
     Cmd(WaitCmdArgs),
+}
+
+/// Wait for a PR's checks, and show why any failed
+///
+/// Follows the PR head, switching to a new head when one is pushed, unless
+/// --sha pins a commit. Returns on the first failed check unless --all.
+/// Skipped and neutral checks count as passing. A conflicted PR returns
+/// `conflict` (exit 4), since pull_request workflows will not run, once
+/// GitHub reports it again 10s later (right after a push it can still answer
+/// for the old head); no checks within --appear-timeout returns `no_checks`
+/// (exit 1).
+/// For each
+/// failed Actions job, the failed step's log is excerpted and the full log
+/// saved. Waits on the same PR share their state, so they poll GitHub once.
+#[derive(Args)]
+pub struct WaitCiArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Wait on this commit's checks instead of following the PR head
+    #[usage(long, value_name = "SHA")]
+    sha: Option<String>,
+    /// Only checks that branch protection requires
+    #[usage(long)]
+    required: bool,
+    /// Only checks whose name matches GLOB (`*` and `?`). Repeatable
+    #[usage(long, value_name = "GLOB")]
+    check: Vec<String>,
+    /// Leave out checks whose name matches GLOB. Repeatable
+    #[usage(long, value_name = "GLOB")]
+    ignore: Vec<String>,
+    /// Wait for every check to finish, even after one fails
+    #[usage(long)]
+    all: bool,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+    /// How long checks may take to appear on a commit (default 3m)
+    #[usage(long, value_name = "DUR")]
+    appear_timeout: Option<String>,
+}
+
+/// Wait for a GitHub Actions run
+///
+/// Returns when the run completes, or on its first failed job, with the
+/// failed step's log excerpted as for `wait ci`.
+#[derive(Args)]
+pub struct WaitRunArgs {
+    /// The run ID, or its Actions URL
+    run: String,
+    /// The repository for a bare run ID. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Wait for a PR to become mergeable, merged, approved, ready, ...
+///
+/// --until is one of: mergeable (keeps waiting while GitHub reports
+/// UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged),
+/// closed, approved (exit 1 when changes are requested), checks-registered
+/// (any check on the head), ready (no `pr status` attention codes and no
+/// pending checks; exit 1 on conflict, checks_failing, changes_requested or
+/// unresolved_threads), or any-change (the next push, check result, review,
+/// thread or state change, printed as one event). A conflict counts once
+/// GitHub reports it again 10s later, since right after a push it can still
+/// answer for the old head.
+#[derive(Args)]
+pub struct WaitPrArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// The condition to wait for
+    #[usage(long, value_name = "CONDITION")]
+    until: String,
 }
 
 /// Wait for a file to exist, contain a match, or be gone
@@ -365,6 +515,161 @@ pub struct HookArgs {
     event: Option<String>,
 }
 
+/// List, reply to and resolve review threads
+///
+/// Lists unresolved threads by default, outdated ones included and marked.
+/// Each thread is addressed by its first comment's ID, the number in the web
+/// UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges
+/// are removed, `<details>` collapse to their summary and each comment is cut
+/// at 30 lines with a marker; suggestion blocks are always kept whole.
+#[derive(Args)]
+pub struct ThreadsArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current
+    /// branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git remote
+    #[usage(long, global, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// List resolved threads too
+    #[usage(long, conflicts = "--resolved")]
+    all: bool,
+    /// List only resolved threads
+    #[usage(long)]
+    resolved: bool,
+    /// List only outdated threads
+    #[usage(long, conflicts = "--no-outdated")]
+    outdated: bool,
+    /// Leave out outdated threads
+    #[usage(long)]
+    no_outdated: bool,
+    /// Only threads started by LOGIN. Repeatable
+    #[usage(long, var, value_name = "LOGIN")]
+    author: Vec<String>,
+    /// Only threads started by bots: logins ending in `[bot]`, and the config's
+    /// `bots`
+    #[usage(long, conflicts = "--no-bots")]
+    bots: bool,
+    /// Leave out threads started by bots
+    #[usage(long)]
+    no_bots: bool,
+    /// Only threads with a comment posted at or after TIME: RFC 3339, a
+    /// duration ago such as 2h, or @SHA for when that commit was pushed. Goes
+    /// by when comments were posted, never by the commit they are on
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Only threads on paths matching GLOB, a directory, or (without a /) a
+    /// file name. Repeatable
+    #[usage(long, var, value_name = "GLOB")]
+    path: Vec<String>,
+    /// Also list review summaries and PR conversation comments
+    #[usage(long)]
+    include_reviews: bool,
+    /// Show N lines of the file around each thread's line
+    #[usage(long, value_name = "N")]
+    context: Option<u32>,
+    /// Show comment bodies unaltered
+    #[usage(long)]
+    full: bool,
+    /// Exit 1 when any listed thread is unresolved
+    #[usage(long)]
+    fail_if_unresolved: bool,
+    #[usage(subcommand)]
+    cmd: Option<ThreadsCmd>,
+}
+
+#[derive(Subcommands)]
+pub enum ThreadsCmd {
+    /// Reply to a thread
+    Reply(ReplyArgs),
+    /// Resolve threads
+    Resolve(ResolveArgs),
+    /// Unresolve threads
+    Unresolve(UnresolveArgs),
+    /// Reply to and resolve many threads from a JSON list
+    Apply(ApplyArgs),
+}
+
+/// Reply to a thread
+///
+/// `{sha}` in the reply becomes the short HEAD SHA, and is refused unless
+/// HEAD is on the PR's branch on GitHub. The configured reply footer is
+/// appended. A reply that is already the thread's last comment from you is
+/// not posted again.
+#[derive(Args)]
+pub struct ReplyArgs {
+    /// The thread's ID
+    id: String,
+    /// The PR. Defaults to the current branch's PR
+    pr: Option<String>,
+    /// The reply
+    #[usage(long, value_name = "TEXT", conflicts = "--body-file")]
+    body: Option<String>,
+    /// Read the reply from FILE (`-` is stdin)
+    #[usage(long, value_name = "FILE")]
+    body_file: Option<String>,
+    /// Resolve the thread after replying
+    #[usage(long)]
+    resolve: bool,
+    /// Skip a thread that is already resolved instead of failing
+    #[usage(long)]
+    ignore_resolved: bool,
+    /// Check everything and show what would be posted, posting nothing
+    #[usage(long)]
+    dry_run: bool,
+}
+
+/// Resolve threads
+///
+/// Every ID is checked before any thread is resolved. A PR given after the
+/// IDs must not be a bare number: write it as #N.
+#[derive(Args)]
+pub struct ResolveArgs {
+    /// Thread IDs, then optionally the PR
+    args: Vec<String>,
+    /// Reply with TEXT before resolving each thread
+    #[usage(long, value_name = "TEXT")]
+    reply: Option<String>,
+    /// Skip threads that are already resolved instead of failing
+    #[usage(long)]
+    ignore_resolved: bool,
+    /// Check everything and show what would happen, changing nothing
+    #[usage(long)]
+    dry_run: bool,
+}
+
+/// Unresolve threads
+///
+/// A PR given after the IDs must not be a bare number: write it as #N.
+#[derive(Args)]
+pub struct UnresolveArgs {
+    /// Thread IDs, then optionally the PR
+    args: Vec<String>,
+    /// Check everything and show what would happen, changing nothing
+    #[usage(long)]
+    dry_run: bool,
+}
+
+/// Reply to and resolve many threads from a JSON list
+///
+/// The list holds {"id": N, "reply": "...", "resolve": true} entries. Every
+/// entry is checked before anything is posted. Re-running the same list after
+/// a failure is safe: resolved threads and replies already posted are
+/// skipped.
+#[derive(Args)]
+pub struct ApplyArgs {
+    /// `-` to read the list from stdin, and optionally the PR
+    args: Vec<String>,
+    /// Read the list from FILE (`-` is stdin)
+    #[usage(long, value_name = "FILE")]
+    file: Option<String>,
+    /// Skip threads that are already resolved instead of failing
+    #[usage(long)]
+    ignore_resolved: bool,
+    /// Check everything and show what would be posted, posting nothing
+    #[usage(long)]
+    dry_run: bool,
+}
+
 fn main() -> ExitCode {
     let cli = Jouet::parse();
     // Before the output mode is chosen: a bad JOUET_DISPLAY must not make a
@@ -375,6 +680,7 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),

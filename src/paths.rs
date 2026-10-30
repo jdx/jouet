@@ -41,6 +41,14 @@ fn xdg(var: &str, fallback: &[&str]) -> Option<PathBuf> {
     Some(base.join("jouet"))
 }
 
+/// Where `wait` keeps the shared state of the PRs being watched:
+/// `<state dir>/watch`, else a directory under the system temp dir.
+pub fn watch_dir() -> PathBuf {
+    state_dir()
+        .unwrap_or_else(|| std::env::temp_dir().join("jouet"))
+        .join("watch")
+}
+
 pub fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|d| !d.is_empty())
