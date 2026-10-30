@@ -8,9 +8,12 @@ use crate::github::Client;
 use crate::pr::target::{self, Arg, Repo, Target};
 use crate::pr::threads::condense::{self, condense};
 use crate::pr::threads::write::{self, Entry, Options, Outcome};
-use crate::pr::threads::{self, Context, Counts, Filter, Kind, Lookup, PrThreads, Status, Thread};
+use crate::pr::threads::{
+    self, Context, Counts, Filter, Kind, Lookup, PrThreads, Side, Status, Thread,
+};
 use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git, time};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
 
@@ -181,50 +184,91 @@ fn push_time(client: &mut Client, pr: &PrThreads, sha: &str) -> Result<i64, Stop
     Ok(pushed.at)
 }
 
-/// Adds lines of the file around each current thread's line: from the
-/// working tree when it is at the PR's head and the file is unchanged, else
-/// from GitHub. A file that cannot be read gets no context.
+/// Adds lines of the file around each current thread's line. A thread on
+/// the head's side reads the working tree when HEAD is the PR's head and the
+/// file is unchanged, else the head from GitHub. A thread on the base's side
+/// (a deleted or replaced line) reads the merge base, which is what GitHub's
+/// diff shows on that side. A file that cannot be read gets no context.
 fn add_context(client: &mut Client, pr: &PrThreads, shown: &mut [Thread], n: u32) {
+    let paths = |side: Side| {
+        let mut paths: Vec<String> = shown
+            .iter()
+            .filter(|t| t.line.is_some() && t.side == side)
+            .filter_map(|t| t.path.clone())
+            .collect();
+        paths.sort();
+        paths.dedup();
+        paths
+    };
+    let (right, left) = (paths(Side::Right), paths(Side::Left));
+    let mut files: HashMap<(Side, String), String> = HashMap::new();
     let local = git::toplevel().filter(|_| git::head().as_deref() == Some(pr.head_oid.as_str()));
-    let mut paths: Vec<String> = shown
-        .iter()
-        .filter(|t| t.line.is_some())
-        .filter_map(|t| t.path.clone())
-        .collect();
-    paths.sort();
-    paths.dedup();
-    let mut files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut remote = Vec::new();
-    for path in paths {
+    for path in right {
         match local.as_ref().filter(|top| git::unchanged(top, &path)) {
             Some(top) => {
                 if let Ok(text) = std::fs::read_to_string(top.join(&path)) {
-                    files.insert(path, text);
+                    files.insert((Side::Right, path), text);
                 }
             }
             None => remote.push(path),
         }
     }
-    if !remote.is_empty() {
-        match remote_files(client, pr, &remote) {
-            Ok(fetched) => files.extend(fetched),
-            Err(e) => eprintln!("jouet: could not fetch files for --context ({e})"),
+    fetch_files(client, pr, &pr.head_oid, Side::Right, &remote, &mut files);
+    if !left.is_empty() {
+        match merge_base(client, pr) {
+            Ok(oid) => fetch_files(client, pr, &oid, Side::Left, &left, &mut files),
+            Err(e) => eprintln!("jouet: could not find the PR's merge base for --context ({e})"),
         }
     }
     for t in shown {
         let (Some(path), Some(line)) = (&t.path, t.line) else {
             continue;
         };
-        if let Some(text) = files.get(path) {
+        if let Some(text) = files.get(&(t.side, path.clone())) {
             t.context = context(text, t.start_line.unwrap_or(line), line, n);
         }
     }
 }
 
-/// Reads files at the PR's head, all in one query.
+/// Adds `paths` at commit `oid`, for threads on `side`, to `files`.
+fn fetch_files(
+    client: &mut Client,
+    pr: &PrThreads,
+    oid: &str,
+    side: Side,
+    paths: &[String],
+    files: &mut HashMap<(Side, String), String>,
+) {
+    if paths.is_empty() {
+        return;
+    }
+    match remote_files(client, pr, oid, paths) {
+        Ok(fetched) => files.extend(fetched.into_iter().map(|(p, text)| ((side, p), text))),
+        Err(e) => eprintln!("jouet: could not fetch files for --context ({e})"),
+    }
+}
+
+/// The commit the PR's diff is taken against.
+fn merge_base(client: &mut Client, pr: &PrThreads) -> Result<String, String> {
+    let path = format!(
+        "/repos/{}/compare/{}...{}?per_page=1",
+        pr.repo, pr.base_oid, pr.head_oid
+    );
+    let compare = client
+        .rest_get(&path)?
+        .ok_or("GitHub could not compare the PR's base and head")?;
+    compare["merge_base_commit"]["sha"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "GitHub's comparison names no merge base".into())
+}
+
+/// Reads files at commit `oid`, all in one query.
 fn remote_files(
     client: &mut Client,
     pr: &PrThreads,
+    oid: &str,
     paths: &[String],
 ) -> Result<Vec<(String, String)>, String> {
     let mut q = String::from("query($o: String!, $r: String!");
@@ -236,7 +280,7 @@ fn remote_files(
             body,
             " f{i}: object(expression: $e{i}) {{ ... on Blob {{ text }} }}"
         );
-        vars[format!("e{i}")] = format!("{}:{path}", pr.head_oid).into();
+        vars[format!("e{i}")] = format!("{oid}:{path}").into();
     }
     let _ = write!(q, ") {{ repository(owner: $o, name: $r) {{{body} }} }}");
     let data = client.graphql(&q, &vars)?;
@@ -328,7 +372,11 @@ fn render_thread(s: &mut String, t: &Thread, now: i64) {
     if t.comments.len() > 1 {
         let _ = write!(s, "  {} comments", t.comments.len());
     }
-    for (on, word) in [(t.outdated, "outdated"), (t.resolved, "resolved")] {
+    for (on, word) in [
+        (t.side == Side::Left, "base side"),
+        (t.outdated, "outdated"),
+        (t.resolved, "resolved"),
+    ] {
         if on {
             let _ = write!(s, "  {word}");
         }

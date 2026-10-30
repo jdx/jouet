@@ -49,7 +49,7 @@ The pull request is chosen as for [`jouet pr status`](/commands/pr-status#choosi
 - **Who started it.** `--author LOGIN` (repeatable) keeps threads started by that user; `coderabbitai` matches `coderabbitai[bot]`. `--bots` and `--no-bots` keep or drop threads started by bots: logins ending in `[bot]`, plus any listed in the config's `bots` or in `JOUET_BOTS`.
 - **Where.** `--path` (repeatable) takes a glob, where `*` and `?` stay within a directory and `**` crosses them, a directory such as `src/backend`, or a file name such as `*.rs`.
 - **Reviews and comments.** `--include-reviews` also lists review summaries and the pull request's conversation comments, as `kind: "review"` and `kind: "comment"`. They cannot be replied to or resolved here.
-- **Context.** `--context N` shows N lines of the file around each thread's line. They come from the working tree when HEAD is the pull request's head and the file is unchanged, and from GitHub otherwise.
+- **Context.** `--context N` shows N lines of the file around each thread's line. They come from the working tree when HEAD is the pull request's head and the file is unchanged, and from GitHub otherwise. A comment on the base side of the diff, such as one on a deleted line, is marked `base side`: its line numbers belong to the base version, so its context comes from the merge base, as GitHub's diff shows it.
 
 ### `--since`
 
@@ -128,7 +128,8 @@ Each thread gets one line: `replied`, `resolved`, `unresolved`, `reply already p
 - `counts.outdated` counts unresolved threads that are outdated.
 - `since` is the `--since` cutoff in UTC, when one was given.
 - A comment's `suggestion` holds the text of its first suggestion block; `body` keeps every block.
-- `start_line` is the first line of a comment on a range of lines.
+- `start_line` is the first line of a comment on a range of lines. A range that starts on the other side of the diff has none.
+- `side` is `left` for a comment on the base side of the diff, whose `line` is a line of the base version. It is absent for the head's side.
 - `context` is `{"start": N, "lines": [...]}` with `--context`.
 
 Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per thread with `replied`, `already_replied`, `resolved`, `unresolved`, `url`, `skipped` or `failed`, and in a dry run the `body` that would be posted.

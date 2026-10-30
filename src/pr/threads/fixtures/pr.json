@@ -10,6 +10,7 @@
     "url": "https://github.com/jdx/mise/pull/14922",
     "headRefName": "feat/hook-env-json",
     "headRefOid": "c42414f907109526b406d2b72bef0bfe5cf07209",
+    "baseRefOid": "118797e7b63bc6579693dfc04fa7113a80d4ae02",
     "headRepository": {
      "nameWithOwner": "refractalize/mise"
     },
@@ -28,6 +29,8 @@
        "startLine": 275,
        "originalLine": 263,
        "originalStartLine": 259,
+       "diffSide": "RIGHT",
+       "startDiffSide": "RIGHT",
        "comments": {
         "pageInfo": {
          "hasNextPage": false,
@@ -56,6 +59,8 @@
        "startLine": null,
        "originalLine": 137,
        "originalStartLine": 136,
+       "diffSide": "RIGHT",
+       "startDiffSide": "RIGHT",
        "comments": {
         "pageInfo": {
          "hasNextPage": false,
@@ -84,6 +89,8 @@
        "startLine": 491,
        "originalLine": 487,
        "originalStartLine": 486,
+       "diffSide": "RIGHT",
+       "startDiffSide": "RIGHT",
        "comments": {
         "pageInfo": {
          "hasNextPage": false,
@@ -112,6 +119,8 @@
        "startLine": 515,
        "originalLine": 515,
        "originalStartLine": null,
+       "diffSide": "RIGHT",
+       "startDiffSide": null,
        "comments": {
         "pageInfo": {
          "hasNextPage": false,
@@ -140,6 +149,8 @@
        "startLine": 139,
        "originalLine": 139,
        "originalStartLine": null,
+       "diffSide": "RIGHT",
+       "startDiffSide": null,
        "comments": {
         "pageInfo": {
          "hasNextPage": false,

@@ -87,6 +87,36 @@ fn a_recorded_pr_reads_into_threads() {
 }
 
 #[test]
+fn threads_keep_their_side_of_the_diff() {
+    assert!(pr().threads.iter().all(|t| t.side == Side::Right));
+    // A comment on lines 4-6 of the base version, and one whose range starts
+    // on the base side and ends on the head's.
+    let mut data: Value = serde_json::from_str(PR).unwrap();
+    let nodes = &mut data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"];
+    for (i, start_side) in [(0, "LEFT"), (1, "LEFT")] {
+        let side = if i == 0 { "LEFT" } else { "RIGHT" };
+        let node = &mut nodes[i];
+        node["diffSide"] = side.into();
+        node["startDiffSide"] = start_side.into();
+        node["line"] = 6.into();
+        node["startLine"] = 4.into();
+    }
+    let repo = Repo::parse("jdx/mise").unwrap();
+    let pr = read(&repo, &data["data"], &[], &mut Pages::default())
+        .unwrap()
+        .unwrap();
+    let (left, mixed) = (&pr.threads[0], &pr.threads[1]);
+    assert_eq!(
+        (left.side, left.start_line, left.line),
+        (Side::Left, Some(4), Some(6))
+    );
+    assert_eq!(serde_json::to_value(left).unwrap()["side"], "left");
+    // Line 4 is in the other file, so the range has no first line here.
+    assert_eq!((mixed.side, mixed.start_line), (Side::Right, None));
+    assert!(serde_json::to_value(mixed).unwrap().get("side").is_none());
+}
+
+#[test]
 fn counts_cover_every_thread() {
     assert_eq!(
         counts(&pr()),
