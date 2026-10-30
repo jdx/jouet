@@ -6,6 +6,8 @@ pub(crate) mod commit;
 pub(crate) mod edit;
 pub(crate) mod handoff;
 pub(crate) mod hook;
+pub(crate) mod land;
+pub(crate) mod next;
 pub(crate) mod pr;
 pub(crate) mod review;
 pub(crate) mod rule;

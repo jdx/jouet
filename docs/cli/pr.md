@@ -10,5 +10,7 @@ Inspect pull requests
 
 ## Subcommands
 
+- [`jouet pr land [FLAGS] [PR]`](/cli/pr/land.md)
+- [`jouet pr next [FLAGS] [PRS]…`](/cli/pr/next.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
 - [`jouet pr threads [FLAGS] [PR] [SUBCOMMAND]`](/cli/pr/threads.md)

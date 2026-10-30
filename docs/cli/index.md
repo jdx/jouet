@@ -21,6 +21,8 @@
 - [`jouet pickup [FILE]`](/cli/pickup.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
+- [`jouet pr next [FLAGS] [PRS]…`](/cli/pr/next.md)
+- [`jouet pr land [FLAGS] [PR]`](/cli/pr/land.md)
 - [`jouet pr threads [FLAGS] [PR] [SUBCOMMAND]`](/cli/pr/threads.md)
 - [`jouet pr threads reply [FLAGS] <ID> [PR]`](/cli/pr/threads/reply.md)
 - [`jouet pr threads resolve [FLAGS] [ARGS]…`](/cli/pr/threads/resolve.md)

@@ -67,12 +67,33 @@ pub trait Watch {
     fn exit(&self, doc: &Self::Doc) -> Exit;
 }
 
+/// Waits, then prints the result document (or the error) and returns the
+/// exit code.
 pub fn run<W: Watch>(
     w: &mut W,
     client: &mut Client,
     timing: &Timing,
     reporter: &mut Reporter,
 ) -> Exit {
+    match wait(w, client, timing, reporter) {
+        Ok(doc) => {
+            let text = w.text(&doc, reporter);
+            reporter.finish_doc(&doc, &text);
+            w.exit(&doc)
+        }
+        Err(stop) => reporter.fail(&stop),
+    }
+}
+
+/// Waits until the subject answers or `--timeout` expires, reporting
+/// progress but not the result, so a caller such as `pr land` can carry on
+/// from it. A timeout is a document, not an error.
+pub fn wait<W: Watch>(
+    w: &mut W,
+    client: &mut Client,
+    timing: &Timing,
+    reporter: &mut Reporter,
+) -> Result<W::Doc, Stop> {
     let start = Instant::now();
     let deadline = start + timing.timeout;
     let mut interval = timing.interval;
@@ -95,12 +116,12 @@ pub fn run<W: Watch>(
                 }
                 None
             }
-            Err(Halt::Stop(stop)) => return reporter.fail(&stop),
+            Err(Halt::Stop(stop)) => return Err(stop),
             Err(Halt::RateLimited { reset }) => {
                 // A second past the reset, so the next request is allowed.
                 let wait = Duration::from_secs(u64::try_from(reset - now() + 1).unwrap_or(1));
                 if Instant::now() + wait > deadline {
-                    return reporter.fail(&Stop {
+                    return Err(Stop {
                         exit: Exit::Remote,
                         message: format!(
                             "GitHub rate limit exhausted; it resets in {}, after --timeout",
@@ -122,16 +143,11 @@ pub fn run<W: Watch>(
             }
         };
         if let Some(doc) = doc {
-            let text = w.text(&doc, reporter);
-            reporter.finish_doc(&doc, &text);
-            return w.exit(&doc);
+            return Ok(doc);
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            let doc = w.timed_out(client);
-            let text = w.text(&doc, reporter);
-            reporter.finish_doc(&doc, &text);
-            return w.exit(&doc);
+            return Ok(w.timed_out(client));
         }
         let state = last_state.clone().unwrap_or_default();
         reporter.pause(interval.min(left), start, &state);
