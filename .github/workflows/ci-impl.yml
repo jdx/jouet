@@ -29,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # bats and its helpers are submodules under test/.
+          submodules: recursive
           persist-credentials: false
 
       # The tasks live in mise.toml so that a laptop and this runner invoke the
@@ -65,6 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # bats and its helpers are submodules under test/.
+          submodules: recursive
           persist-credentials: false
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
@@ -80,8 +84,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  # Plain cargo, without mise: the Linux job compiles out `#[cfg(windows)]`
-  # code, so Windows-only lints and test failures surface only here.
+  # Windows runs only what can differ there: clippy over the `#[cfg(windows)]`
+  # code the other jobs compile out, and the Pester tests in e2e-win/ (line
+  # endings, path syntax, cmd.exe as the --check shell, file locking). The Rust
+  # tests and bats cover everything else on Linux and macOS; running them here
+  # too would only make this the slowest job. Plain cargo, without mise.
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -94,8 +101,10 @@ jobs:
           save-if: ${{ inputs.trusted && github.ref == 'refs/heads/main' }}
       - name: Install Rust lint components
         run: rustup component add clippy
-      - run: cargo test --locked --all-targets
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo build --locked
+      - name: Windows end-to-end tests
+        run: pwsh -NoProfile e2e-win/run.ps1
 
   # Cargo.toml's rust-version is a promise to anyone building from crates.io.
   msrv:

@@ -2,6 +2,11 @@
 # from 2026.9.16.
 min_version = "2026.9.16"
 
+# bats and its helpers are git submodules under test/, pinned so a checkout runs
+# the same test runner as CI. `git submodule update --init --recursive` once.
+[env]
+_.path = ["test/bats/bin"]
+
 [tools]
 # hk.pkl amends a pinned hk package; the tool itself floats and is resolved by mise.lock.
 hk = { version = "latest", minimum_release_age = "0s" }
@@ -11,6 +16,11 @@ mr-boxington = { version = "latest", minimum_release_age = "0s" }
 # so release-plz.yml's MISE_LOCKED install cannot pick up an unreviewed build.
 # Bump with `mise lock`, deliberately.
 communique = { version = "latest", minimum_release_age = "0s" }
+# The bats tests parse `--json` output with it.
+jq = "latest"
+# hk.pkl lints the bats tests with these.
+shellcheck = "latest"
+shfmt = "latest"
 # Rust is deliberately absent: it comes from the runner image in CI and from
 # rustup locally, so a new stable is caught by CI rather than by a user.
 
@@ -25,8 +35,26 @@ run = "cargo build --all-targets"
 
 [tasks.test]
 alias = "t"
-description = "Run the test suite"
+description = "Run the Rust tests and the end-to-end tests"
+depends = ["test:cargo", "test:e2e"]
+
+[tasks."test:cargo"]
+description = "Run the Rust unit and integration tests"
+# After `build`, not beside it: the end-to-end tests run target/debug/jouet,
+# and a cargo writing that file while a test starts it fails the test.
+depends = ["build"]
 run = "cargo test --all-targets"
+
+[tasks."test:e2e"]
+description = "Run the end-to-end tests: bats on Unix, Pester (e2e-win/) on Windows"
+depends = ["build"]
+run = "bats test"
+run_windows = "pwsh -NoProfile e2e-win/run.ps1"
+
+[tasks."test:bats"]
+description = "Run the bats end-to-end tests"
+depends = ["build"]
+run = "bats test"
 
 [tasks.lint]
 description = "Check formatting and run clippy"

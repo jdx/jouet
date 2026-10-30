@@ -16,9 +16,13 @@ Install [mise](https://mise.jdx.dev) and a Rust toolchain through
 [rustup](https://rustup.rs), then run from the repository root:
 
 ```sh
+git submodule update --init --recursive
 mise install
 mise run build
 ```
+
+The submodules are [bats](https://github.com/bats-core/bats-core) and its
+helpers, pinned so that `mise run test` uses the same test runner as CI.
 
 mise provides the repository's tools. Rust is not among them: the toolchain is
 whichever one rustup makes current, and any stable release from 1.91, the

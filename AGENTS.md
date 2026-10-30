@@ -27,7 +27,8 @@ same commands. mise wraps `cargo` with mbx; see CONTRIBUTING.md.
 
 ```sh
 mise run build        # cargo build --all-targets
-mise run test         # cargo test --all-targets
+mise run test         # cargo test --all-targets, then the bats tests in test/
+mise run test:bats    # only the bats tests
 mise run lint         # cargo fmt --check + clippy --all-targets --all-features -D warnings
 mise run lint-fix     # auto-fix what can be auto-fixed
 mise run ci           # build + test + lint
@@ -42,8 +43,8 @@ mise x hk -- hk fix             # auto-fix
 mise x hk -- hk install --mise  # pre-commit hook
 ```
 
-CI also runs `cargo deny check` (`deny.toml`), tests on macOS and Windows, and `cargo check` on
-the MSRV in `Cargo.toml`'s `rust-version`.
+CI also runs `cargo deny check` (`deny.toml`), the same tests on macOS, and `cargo check` on the
+MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester tests in `e2e-win/`.
 
 ## Code rules
 
@@ -59,6 +60,10 @@ the MSRV in `Cargo.toml`'s `rust-version`.
   update, change only `Cargo.lock`, and keep lockfile churn to the requested crate.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub
   responses are to be recorded as fixtures and replayed, never fetched live in tests.
+- **End-to-end tests** run a command the way an agent does, from a shell: one bats file per
+  command in `test/` (bats is a git submodule; `git submodule update --init --recursive`). Windows
+  gets Pester tests in `e2e-win/` only for what can differ there (line endings, paths, cmd.exe,
+  file locking) and for Windows regressions; Windows CI does not run the full suite.
 
 ## Shared output conventions
 
