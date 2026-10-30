@@ -62,11 +62,12 @@ setup() {
 	kill "$pid"
 
 	assert_success
-	assert_line "  - $pid \`sleep 30\`: attach with \`tail -f $PWD/server.log\`"
+	assert_line "  - $pid \`sleep 30\`: attach with \`tail -f $(pwd -P)/server.log\`"
 }
 
 @test "pickup without a handoff is not found" {
 	run --separate-stderr jouet pickup
 	assert_failure 3
-	assert_equal "$stderr" "jouet: no handoff at $PWD/.git/jouet/handoff.md; \`jouet handoff\` writes one"
+	# git reports the resolved path: on macOS, /tmp is /private/tmp.
+	assert_equal "$stderr" "jouet: no handoff at $(pwd -P)/.git/jouet/handoff.md; \`jouet handoff\` writes one"
 }
