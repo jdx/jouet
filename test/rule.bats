@@ -114,7 +114,8 @@ LUAU
 
 	run --separate-stderr jouet rule test spin --command ls
 	assert_failure 1
-	assert_equal "$stderr" "jouet: rule spin: exceeded its time budget"
+	# Which limit stops a busy loop first depends on the machine's speed.
+	assert_regex "$stderr" '^jouet: rule spin: exceeded its (time|instruction) budget$'
 }
 
 @test "repository rules run only once trusted, and again after every change" {
