@@ -1,5 +1,5 @@
 ---
-description: How jouet is measured: the same agent tasks run with and without its hooks, compared on tokens, requests, time and success.
+description: How jouet is measured, by running the same agent tasks with and without its hooks and comparing tokens, requests, time and success.
 ---
 
 # Benchmarks
