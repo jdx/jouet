@@ -1,0 +1,166 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitepress";
+import { socialCard, writeSocialCard } from "./social-images.mjs";
+
+const configDir = dirname(fileURLToPath(import.meta.url));
+const cargoToml = readFileSync(resolve(configDir, "../../Cargo.toml"), "utf8");
+const versionMatch = cargoToml.match(
+  /^\[package\][\s\S]*?^\s*version\s*=\s*"([^"]+)"/m,
+);
+if (!versionMatch) {
+  throw new Error("could not read the jouet version from Cargo.toml");
+}
+const latestVersion = versionMatch[1];
+const siteUrl = "https://jouet.jdx.dev";
+
+export default defineConfig({
+  title: "jouet",
+  description:
+    "A toolkit CLI for coding agents: one command for each chore agents keep rebuilding by hand.",
+  lang: "en-US",
+  lastUpdated: true,
+  appearance: "force-dark",
+  cleanUrls: true,
+  rewrites: {
+    "cli/edit.md": "cli/edit/index.md",
+  },
+  sitemap: {
+    hostname: siteUrl,
+  },
+  themeConfig: {
+    logo: "/logo.svg",
+    nav: [
+      {
+        text: "Guide",
+        link: "/getting-started",
+        activeMatch: "^/(getting-started|why|conventions)",
+      },
+      { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
+      { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
+      {
+        text: `v${latestVersion}`,
+        link: "https://github.com/jdx/jouet/releases",
+      },
+    ],
+    sidebar: [
+      {
+        text: "Start here",
+        items: [
+          { text: "Getting started", link: "/getting-started" },
+          { text: "Why jouet", link: "/why" },
+          { text: "Shared conventions", link: "/conventions" },
+        ],
+      },
+      {
+        text: "Commands",
+        items: [
+          { text: "jouet edit", link: "/commands/edit" },
+          { text: "jouet wait", link: "/commands/wait" },
+          { text: "jouet pr status", link: "/commands/pr-status" },
+          { text: "jouet pr threads", link: "/commands/pr-threads" },
+        ],
+      },
+      {
+        text: "Reference",
+        items: [
+          {
+            text: "CLI commands",
+            link: "/cli/",
+            collapsed: true,
+            items: [
+              {
+                text: "edit",
+                link: "/cli/edit/",
+                collapsed: true,
+                items: [
+                  { text: "replace", link: "/cli/edit/replace" },
+                  { text: "hash", link: "/cli/edit/hash" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    outline: { level: [2, 3] },
+    socialLinks: [
+      { icon: "github", link: "https://github.com/jdx/jouet" },
+    ],
+    editLink: {
+      // The CLI reference is generated from the usage-rs declaration in
+      // src/main.rs, so that is where its pages are edited.
+      pattern: ({ filePath }) => {
+        const source = filePath.startsWith("cli/")
+          ? "src/main.rs"
+          : `docs/${filePath}`;
+        return `https://github.com/jdx/jouet/edit/main/${source}`;
+      },
+      text: "Edit this page on GitHub",
+    },
+    search: { provider: "local" },
+    footer: false,
+  },
+  head: [
+    ["link", { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }],
+    [
+      "link",
+      { rel: "icon", href: "/favicon.png", type: "image/png", sizes: "64x64" },
+    ],
+    [
+      "link",
+      {
+        rel: "apple-touch-icon",
+        href: "/apple-touch-icon.png",
+        sizes: "180x180",
+      },
+    ],
+    ["link", { rel: "manifest", href: "/site.webmanifest" }],
+    ["meta", { name: "theme-color", content: "#121317" }],
+    ["meta", { property: "og:site_name", content: "jouet" }],
+    ["meta", { property: "og:locale", content: "en_US" }],
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:site", content: "@jdxcode" }],
+  ],
+  transformHead({ pageData, title, description, siteConfig }) {
+    const heading = pageData.title || "jouet";
+    const card = socialCard(heading);
+    writeSocialCard(siteConfig.outDir, card);
+    const image = new URL(card.path, `${siteUrl}/`).toString();
+    const imageAlt = `${heading} — jouet docs`;
+    const url = new URL(
+      pageData.relativePath.replace(/index\.md$/, "").replace(/\.md$/, ""),
+      `${siteUrl}/`,
+    ).toString();
+
+    return [
+      ["link", { rel: "canonical", href: url }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:image", content: image }],
+      // Structured properties follow the image they describe (ogp.me).
+      ["meta", { property: "og:image:width", content: "1200" }],
+      ["meta", { property: "og:image:height", content: "630" }],
+      ["meta", { property: "og:image:alt", content: imageAlt }],
+      ["meta", { name: "twitter:image", content: image }],
+      ["meta", { name: "twitter:image:alt", content: imageAlt }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { name: "twitter:title", content: title }],
+      ["meta", { name: "twitter:description", content: description }],
+      [
+        "script",
+        { type: "application/ld+json" },
+        JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: title,
+          description,
+          url,
+          isPartOf: { "@type": "WebSite", name: "jouet", url: siteUrl },
+        }),
+      ],
+    ];
+  },
+});
