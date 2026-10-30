@@ -105,12 +105,16 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "command",
             "exact_flags",
             "flags",
+            "input",
             "max_args",
             "paths",
+            "seen",
             "text",
             "tool",
             "unless_args",
             "unless_flags",
+            "unless_input",
+            "unless_with",
             "value_flags",
             "via",
             "with"
@@ -123,9 +127,11 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "command",
             "exit_code",
             "harness",
+            "input",
             "kind",
             "path",
             "scope",
+            "seen",
             "tool"
         ]
     );

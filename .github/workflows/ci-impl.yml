@@ -53,6 +53,10 @@ jobs:
         env:
           JACTIONLINT_ONLINE: 1
           GITHUB_TOKEN: ${{ github.token }}
+      # The `grammars` feature is on by default and in --all-features, so
+      # neither checks a build without it, where search has no symbols.
+      - name: Clippy without grammars
+        run: cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
       - run: mise run test
         env:
           GITHUB_TOKEN: ${{ github.token }}

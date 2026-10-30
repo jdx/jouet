@@ -24,18 +24,45 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
             return false;
         }
     }
+    if !input(m, call) {
+        return false;
+    }
+    if m.seen
+        .is_some_and(|want| call.seen.unwrap_or(false) != want)
+    {
+        return false;
+    }
     if m.command.is_empty() {
         return true;
     }
     commands.iter().enumerate().any(|(i, c)| {
+        let other = |with: &Matcher| {
+            commands
+                .iter()
+                .enumerate()
+                .any(|(j, other)| j != i && command(with, other))
+        };
         command(m, c)
-            && m.with.as_deref().is_none_or(|with| {
-                commands
-                    .iter()
-                    .enumerate()
-                    .any(|(j, other)| j != i && command(with, other))
-            })
+            && m.with.as_deref().is_none_or(other)
+            && !m.unless_with.as_deref().is_some_and(other)
     })
+}
+
+/// Whether the tool's input has the fields `input` names, with matching
+/// values, and none of those `unless_input` names.
+fn input(m: &Matcher, call: &Call) -> bool {
+    let field = |name: &str| {
+        call.input
+            .as_ref()
+            .and_then(|i| i.get(name))
+            .filter(|v| !v.is_null())
+    };
+    m.input.iter().all(|(name, want)| {
+        field(name).is_some_and(|v| match v {
+            serde_json::Value::String(text) => glob::matches(&want.0, text),
+            other => glob::matches(&want.0, &other.to_string()),
+        })
+    }) && !m.unless_input.iter().any(|name| field(name).is_some())
 }
 
 /// The path from the working directory, when it is inside it.

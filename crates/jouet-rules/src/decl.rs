@@ -28,6 +28,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
 use serde::de::{self, Deserializer, IntoDeserializer, Visitor};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -100,8 +101,8 @@ pub(crate) struct RuleDecl {
 
 /// Which calls a rule matches. Every key given must hold; a list in a key
 /// matches if any of its items does (`text` excepted: every pattern must
-/// match). Every key but `tool` and `paths` is about a command, and needs
-/// `command`.
+/// match). Every key but `tool`, `paths`, `input`, `unless_input` and
+/// `seen` is about a command, and needs `command`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Matcher {
@@ -167,6 +168,26 @@ pub(crate) struct Matcher {
     /// 60 && gh pr checks`. It takes the command keys, not `tool`, `paths`
     /// or another `with`.
     pub with: Option<Box<Matcher>>,
+    /// No other command in the same call may match this, as in `rg x |
+    /// head`. It takes the command keys, like `with`.
+    pub unless_with: Option<Box<Matcher>>,
+    /// The tool's input has these fields with these values, such as
+    /// `{ output_mode = "content" }` for Claude Code's Grep. A value that
+    /// is not a string is matched as its JSON text; `*` and `?` are
+    /// wildcards.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, String>")]
+    pub input: BTreeMap<String, Glob>,
+    /// The tool's input has none of these fields, such as `head_limit`.
+    #[serde(default, deserialize_with = "one_or_many")]
+    #[schemars(with = "OneOrMany<String>")]
+    pub unless_input: Vec<String>,
+    /// Whether this agent session was already shown everything the call
+    /// reads, every line, in files unchanged since. jouet's hook works it
+    /// out for Claude Code's Read tool and for shell calls that only read
+    /// files with `cat`, `head`, `tail`, `sed -n` or `nl`; any other call is
+    /// unseen. In an example, set it with `seen = true`.
+    pub seen: Option<bool>,
 }
 
 impl Matcher {
@@ -175,6 +196,9 @@ impl Matcher {
         let Self {
             tool: _,
             paths: _,
+            input: _,
+            unless_input: _,
+            seen: _,
             command,
             via,
             flags,
@@ -186,6 +210,7 @@ impl Matcher {
             max_args,
             text,
             with,
+            unless_with,
         } = self;
         !command.is_empty()
             || !via.is_empty()
@@ -198,12 +223,20 @@ impl Matcher {
             || max_args.is_some()
             || !text.is_empty()
             || with.is_some()
+            || unless_with.is_some()
     }
 
     /// What is wrong with it, beyond what its types check.
     pub(crate) fn problem(&self, nested: bool) -> Option<String> {
-        if nested && (!self.tool.is_empty() || !self.paths.is_empty() || self.with.is_some()) {
-            return Some("`with` matches another command: give it command keys, not `tool`, `paths` or `with`".into());
+        let not_command = !self.tool.is_empty()
+            || !self.paths.is_empty()
+            || !self.input.is_empty()
+            || !self.unless_input.is_empty()
+            || self.seen.is_some()
+            || self.with.is_some()
+            || self.unless_with.is_some();
+        if nested && not_command {
+            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `input`, `unless_input`, `seen`, `with` or `unless_with`".into());
         }
         if self.command.is_empty() && self.about_a_command() {
             return Some("it says how a command looks, but not which: add `command`".into());
@@ -213,7 +246,10 @@ impl Matcher {
                 "it would match every call: give it a `command`, `tool` or `paths`".into(),
             );
         }
-        self.with.as_ref().and_then(|w| w.problem(true))
+        self.with
+            .iter()
+            .chain(&self.unless_with)
+            .find_map(|w| w.problem(true))
     }
 }
 
@@ -261,6 +297,12 @@ pub(crate) struct CaseTable {
     /// For a `fires` example with a `kind`: the scope the record must have,
     /// `full`, or `partial` and its selector, such as `partial -p jouet`.
     pub scope: Option<String>,
+    /// The tool's input, for a tool other than `Bash`, such as `{ pattern =
+    /// "todo", output_mode = "content" }`.
+    pub input: Option<BTreeMap<String, serde_json::Value>>,
+    /// Whether the session was already shown everything the call reads,
+    /// as jouet's hook would work it out; `false` if omitted.
+    pub seen: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -276,7 +318,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind` or `scope`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input` or `seen`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

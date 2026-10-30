@@ -78,6 +78,10 @@ pub struct Case {
     /// For a `fires` example with a `kind`: the scope the record must
     /// have, `full` or `partial` and its selector, as [`Record::scope`].
     pub scope: Option<String>,
+    /// The tool's input, for a file or search tool.
+    pub input: Option<serde_json::Value>,
+    /// Whether the session already saw what the call reads.
+    pub seen: Option<bool>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -91,6 +95,9 @@ pub struct Example {
     pub harness: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    /// The session had already seen what the call reads.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub seen: bool,
     /// `fires`, `fires deny`, `fires record test` or `quiet`.
     pub expected: String,
     /// `deny`, `warn`, `record test`, `quiet` or `error: ...`.
@@ -118,6 +125,9 @@ impl Example {
         }
         if self.harness != "test" {
             extra.push(format!("harness {}", self.harness));
+        }
+        if self.seen {
+            extra.push("seen".into());
         }
         if !extra.is_empty() {
             if !text.is_empty() {
@@ -212,6 +222,8 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         harness: "test".into(),
         exit_code: None,
         scope: None,
+        input: None,
+        seen: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -345,6 +357,11 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
         harness: t.harness.clone().unwrap_or_else(|| "test".into()),
         exit_code: t.exit_code,
         scope: t.scope.clone(),
+        input: t
+            .input
+            .as_ref()
+            .map(|i| serde_json::Value::Object(i.clone().into_iter().collect())),
+        seen: t.seen,
         expect: if fires {
             Expect::Fires {
                 action,
@@ -414,6 +431,8 @@ impl Engine {
                     Event::PostToolUse => Some(case.exit_code.unwrap_or(0)),
                     Event::PreToolUse => case.exit_code,
                 },
+                input: case.input.clone(),
+                seen: case.seen,
             };
             // Each example is a call of its own: probes are asked afresh.
             self.new_call();
@@ -442,6 +461,7 @@ impl Engine {
                 path: case.path.clone(),
                 harness: case.harness.clone(),
                 exit_code: call.exit_code,
+                seen: case.seen == Some(true),
                 expected: match &case.scope {
                     Some(scope) => format!("{} {scope}", case.expect.text()),
                     None => case.expect.text(),

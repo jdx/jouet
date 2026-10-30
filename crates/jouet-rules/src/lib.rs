@@ -68,6 +68,11 @@ const BUILTIN: &[(&str, &str)] = &[
     ("force-push", include_str!("../rules/force-push.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("checks", include_str!("../rules/checks.toml")),
+    ("reread", include_str!("../rules/reread.toml")),
+    (
+        "unbudgeted-search",
+        include_str!("../rules/unbudgeted-search.toml"),
+    ),
 ];
 
 /// The scripts built-in rules name.
@@ -288,6 +293,11 @@ pub struct Call {
     pub cwd: Option<String>,
     /// The command's exit code, for post-tool-use.
     pub exit_code: Option<i32>,
+    /// The tool's input, as the harness sent it.
+    pub input: Option<serde_json::Value>,
+    /// Whether the session was already shown everything the call reads,
+    /// unchanged; worked out by the caller, which knows the session.
+    pub seen: Option<bool>,
 }
 
 impl Call {
@@ -325,6 +335,8 @@ impl Call {
                 .find_map(|key| text(payload.get("tool_input").and_then(|i| i.get(*key)))),
             cwd: text(payload.get("cwd")),
             exit_code,
+            input: payload.get("tool_input").cloned(),
+            seen: None,
         }
     }
 }
