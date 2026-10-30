@@ -18,6 +18,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "diag",
+        Some(
+            "after an edit: the errors and warnings in just the files you changed (`diag check --changed`), or only the ones your edit introduced (`diag delta`, same arguments), from the project's hk checks, instead of a full `mise run lint` or `cargo clippy | head`; `diag fix` formats them",
+        ),
+    ),
+    (
         "wait",
         Some(
             "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process or command, instead of a sleep loop",
@@ -87,7 +93,14 @@ const WHEN: &[(&str, Option<&str>)] = &[
 /// Subcommands an agent is told about where it needs them, in a line jouet
 /// prints (a proposal's note, the review prompt), so the overview leaves
 /// them out. `jouet agent-help COMMAND` still lists them.
-const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
+const PROMPTED: &[(&str, &str)] = &[
+    ("wind", "adopt"),
+    ("wind", "propose"),
+    ("wind", "dismiss"),
+    // `diag`'s when line names them, and they take check's arguments.
+    ("diag", "delta"),
+    ("diag", "fix"),
+];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -149,7 +162,11 @@ pub(crate) fn overview() -> String {
         let name = meta.cmd.name;
         let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
-        let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
+        let own = synopsis(&format!("jouet {name}"), meta);
+        // A command that only groups subcommands has nothing to add here.
+        if own != format!("jouet {name}") || meta.subcommands.is_empty() {
+            let _ = writeln!(out, "  {own}");
+        }
         let listed = meta
             .subcommands
             .iter()

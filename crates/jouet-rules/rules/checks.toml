@@ -15,7 +15,7 @@ command = [
   "cargo", "mbx", "cross", "mise", "npm", "pnpm", "yarn", "bun", "aube",
   "make", "just", "task", "go", "hk", "pytest", "vitest", "jest", "bats",
   "rspec", "python", "python3", "ruff", "eslint", "mypy", "shellcheck",
-  "actionlint", "tsc", "dotnet", "swift", "gradle", "gradlew", "mvn",
+  "actionlint", "tsc", "dotnet", "swift", "gradle", "gradlew", "mvn", "jouet",
 ]
 
 [rule.examples]
@@ -53,10 +53,20 @@ fires = [
   { command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
   { command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
   { command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
+  { command = "hk check", exit_code = 1, kind = "lint", scope = "partial changed files" },
+  { command = "hk run check --all", exit_code = 0, kind = "lint", scope = "full" },
+  { command = "hk check src/a.rs", exit_code = 0, kind = "lint", scope = "partial files" },
+  { command = "git diff --name-only -z | hk run check --safe --files0-from -", exit_code = 0, kind = "lint", scope = "partial files" },
+  { command = "jouet diag check --changed", exit_code = 1, kind = "lint", scope = "partial changed files" },
+  { command = "jouet diag delta src/a.rs", exit_code = 0, kind = "lint", scope = "partial files" },
   { command = "bats test/edit.bats", exit_code = 0, kind = "test", scope = "partial" },
 ]
 quiet = [
   { command = "cargo fmt", exit_code = 0 },
+  { command = "hk fix", exit_code = 0 },
+  { command = "hk run fix --all", exit_code = 0 },
+  { command = "jouet diag fix --changed", exit_code = 0 },
+  { command = "jouet edit replace a.rs --old a --new b", exit_code = 0 },
   { command = "mise run lint-fix", exit_code = 0 },
   { command = "cargo run", exit_code = 0 },
   { command = "npm install", exit_code = 0 },

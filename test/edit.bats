@@ -335,7 +335,7 @@ EOF
 
 	run --separate-stderr jouet edit replace a.txt --old one --new 1 --revert-on-fail
 	assert_failure 2
-	assert_equal "$stderr" "jouet: --revert-on-fail needs --check"
+	assert_equal "$stderr" "jouet: --revert-on-fail needs --check or --diag"
 
 	assert_content a.txt $'one\n'
 }

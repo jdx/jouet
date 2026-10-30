@@ -33,6 +33,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [

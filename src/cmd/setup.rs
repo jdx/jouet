@@ -139,6 +139,9 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
             ));
         }
     }
+    if !args.uninstall {
+        notes.extend(hk_stop_notes(harness, &config, &home, &cwd));
+    }
     let skill_text = (!args.uninstall).then(|| stamp(&skill::render(format)));
     match plan_skill(&skill, skill_text) {
         Ok((change, note)) => {
@@ -193,6 +196,36 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     };
     out.result(&report, || text(&report));
     Exit::Ok
+}
+
+/// Where hk's stop hook is: merged into jouet's in `config`, or in another
+/// of the harness's hook files, where it still blocks on its own.
+fn hk_stop_notes(harness: Harness, config: &Path, home: &Path, cwd: &Path) -> Vec<String> {
+    let mut notes = Vec::new();
+    let has = |path: &Path| read_hooks(path).is_ok_and(|(_, doc)| setup::has_hk_stop(&doc));
+    if has(config) {
+        notes.push(format!(
+            "hk's stop hook in {} now runs inside jouet's, so a stop gets one verdict; \
+             `jouet setup {} --uninstall` puts it back",
+            config.display(),
+            harness.name()
+        ));
+    }
+    let mut others: Vec<PathBuf> = Vec::new();
+    for scope in [Scope::Global, Scope::Local, Scope::Shared] {
+        let path = harness.config_path(scope, home, &project_root(cwd, harness, scope));
+        if path != config && !others.contains(&path) && has(&path) {
+            others.push(path);
+        }
+    }
+    for path in others {
+        notes.push(format!(
+            "{} has hk's stop hook too: it runs beside jouet's and can block on its own; \
+             run `jouet setup` for that file to merge them",
+            path.display()
+        ));
+    }
+    notes
 }
 
 /// Whether a hook file holds jouet hooks other than the ones this version

@@ -297,6 +297,7 @@ dependencies = [
  "jouet-routines",
  "jouet-rules",
  "jouet-wait",
+ "libc",
  "mise-agent-env",
  "regex",
  "serde",

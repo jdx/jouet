@@ -291,9 +291,32 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		local kind: Kind? = if first == "test" then "test" elseif first == "vet" then "lint" elseif first == "build" then "build" else nil
 		return kind, go_scope(args)
 	elseif program == "hk" then
-		local kind: Kind? = if first == "check" or first == "run" then "lint" else nil
-		-- Without `--all`, hk checks the changed files.
-		return kind, if first == "check" and jouet.contains(args, "--all") then FULL else partial("changed files")
+		-- `hk run fix` and `hk run pre-commit` change files rather than
+		-- check them; `hk run check` checks, like `hk check`.
+		local hook = if first == "run" then args[2] else first
+		local kind: Kind? = if hook == "check" then "lint" else nil
+		local from = if first == "run" then 3 else 2
+		if jouet.contains(args, "--all") then
+			return kind, FULL
+		end
+		-- Without files, hk checks the changed files.
+		for i = from, #args do
+			local arg = args[i]
+			if arg == "--files0-from" or string.sub(arg, 1, 1) ~= "-" then
+				return kind, partial("files")
+			end
+		end
+		return kind, partial("changed files")
+	elseif program == "jouet" and first == "diag" then
+		-- `jouet diag check|delta` runs `hk run check` on the files given,
+		-- or on the changed files.
+		local kind: Kind? = if args[2] == "check" or args[2] == "delta" then "lint" else nil
+		for i = 3, #args do
+			if string.sub(args[i], 1, 1) ~= "-" then
+				return kind, partial("files")
+			end
+		end
+		return kind, partial("changed files")
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)

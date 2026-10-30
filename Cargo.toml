@@ -99,6 +99,10 @@ toml.workspace = true
 usage-config.workspace = true
 usage-rs = { workspace = true, features = ["config", "completions"] }
 
+[target.'cfg(unix)'.dependencies]
+# Asks hk to stop its own steps (SIGTERM) when a check runs past its time.
+libc.workspace = true
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -77,6 +77,7 @@ export default defineConfig({
         text: "Commands",
         items: [
           { text: "jouet edit", link: "/commands/edit" },
+          { text: "jouet diag", link: "/commands/diag" },
           { text: "jouet wait", link: "/commands/wait" },
           { text: "jouet pr status", link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
@@ -100,6 +101,16 @@ export default defineConfig({
               { text: "audit", link: "/cli/audit" },
               { text: "stats", link: "/cli/stats" },
               { text: "commit", link: "/cli/commit" },
+              {
+                text: "diag",
+                link: "/cli/diag",
+                collapsed: true,
+                items: [
+                  { text: "check", link: "/cli/diag/check" },
+                  { text: "delta", link: "/cli/diag/delta" },
+                  { text: "fix", link: "/cli/diag/fix" },
+                ],
+              },
               {
                 text: "edit",
                 link: "/cli/edit/",
