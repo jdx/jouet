@@ -28,7 +28,7 @@ const MAX_COMMITS: usize = 250;
 fn thread_fields() -> String {
     format!(
         "id isResolved isOutdated path line startLine originalLine originalStartLine \
-         comments(first: 100) {{ {PAGE} nodes {{ {COMMENT} }} }}"
+         diffSide startDiffSide comments(first: 100) {{ {PAGE} nodes {{ {COMMENT} }} }}"
     )
 }
 
@@ -39,7 +39,7 @@ pub fn query() -> String {
         "query($o: String!, $r: String!, $n: Int!, $extra: Boolean!) {{
   viewer {{ login }}
   repository(owner: $o, name: $r) {{ pullRequest(number: $n) {{
-    id number url headRefName headRefOid headRepository {{ nameWithOwner }}
+    id number url headRefName headRefOid baseRefOid headRepository {{ nameWithOwner }}
     reviewThreads(first: 100) {{ {PAGE} nodes {{ {threads} }} }}
     reviews(first: 100) @include(if: $extra) {{ {PAGE} nodes {{ state {COMMENT} }} }}
     comments(first: 100) @include(if: $extra) {{ {PAGE} nodes {{ {COMMENT} }} }}
@@ -65,12 +65,33 @@ pub struct PrThreads {
     pub node_id: String,
     pub head_ref: String,
     pub head_oid: String,
+    /// The base branch's head, from which the merge base is found.
+    pub base_oid: String,
     pub head_repo: Option<Repo>,
     /// The token's user, whose earlier replies a retry must not repeat.
     pub viewer: String,
     pub threads: Vec<Thread>,
     /// Review summaries and conversation comments, oldest first.
     pub others: Vec<Thread>,
+}
+
+/// Which side of the diff a thread's lines are on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    /// The base version: lines the PR deleted or kept.
+    #[serde(alias = "LEFT")]
+    Left,
+    /// The head version.
+    #[default]
+    #[serde(alias = "RIGHT")]
+    Right,
+}
+
+impl Side {
+    fn is_right(&self) -> bool {
+        *self == Self::Right
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -91,11 +112,17 @@ pub struct Thread {
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
-    /// The first line of a multi-line comment.
+    /// The first line of a multi-line comment, when it is on the same side
+    /// of the diff as `line`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_line: Option<u32>,
+    /// `left` for a comment on the base version's lines (a deleted or
+    /// replaced line), whose numbers are not lines of the head's file.
+    /// Absent for the head's side.
+    #[serde(skip_serializing_if = "Side::is_right")]
+    pub side: Side,
     #[serde(skip_serializing_if = "is_false")]
     pub outdated: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -147,6 +174,7 @@ struct RawPr {
     number: u64,
     head_ref_name: String,
     head_ref_oid: String,
+    base_ref_oid: String,
     head_repository: Option<NameWithOwner>,
     review_threads: Page<RawThread>,
     reviews: Option<Page<RawComment>>,
@@ -190,6 +218,8 @@ struct RawThread {
     start_line: Option<u32>,
     original_line: Option<u32>,
     original_start_line: Option<u32>,
+    diff_side: Option<Side>,
+    start_diff_side: Option<Side>,
     comments: Page<RawComment>,
 }
 
@@ -352,10 +382,14 @@ impl Pages {
                 kind: Kind::Thread,
                 path: raw.path,
                 line: raw.line,
+                // A range that starts on the other side of the diff has no
+                // first line in `line`'s file.
                 start_line: raw
                     .start_line
-                    .or(raw.original_start_line.filter(|_| raw.line.is_none())),
+                    .or(raw.original_start_line.filter(|_| raw.line.is_none()))
+                    .filter(|_| raw.start_diff_side.is_none_or(|s| Some(s) == raw.diff_side)),
                 original_line: raw.original_line,
+                side: raw.diff_side.unwrap_or_default(),
                 outdated: raw.is_outdated,
                 resolved: raw.is_resolved,
                 is_bot: is_bot(&first.author, bots),
@@ -387,6 +421,7 @@ fn read(
         node_id: raw.id,
         head_ref: raw.head_ref_name,
         head_oid: raw.head_ref_oid,
+        base_oid: raw.base_ref_oid,
         head_repo: raw
             .head_repository
             .and_then(|r| Repo::parse(&r.name_with_owner)),
@@ -432,6 +467,7 @@ fn add_others(
             line: None,
             start_line: None,
             original_line: None,
+            side: Side::Right,
             outdated: false,
             resolved: false,
             is_bot: is_bot(&c.author, bots),

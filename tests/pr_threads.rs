@@ -14,6 +14,9 @@ const COMMITS: &str = include_str!("../src/pr/threads/fixtures/commits.json");
 const ACTIVITY: &str = include_str!("../src/pr/threads/fixtures/activity.json");
 
 const HEAD: &str = "c42414f907109526b406d2b72bef0bfe5cf07209";
+const BASE: &str = "118797e7b63bc6579693dfc04fa7113a80d4ae02";
+/// The merge base the fake's compare of the PR's base and head names.
+const MERGE_BASE: &str = "0123456789abcdef0123456789abcdef01234567";
 const OPEN_CODE: &str = "4385981140";
 const OPEN_DOCS: &str = "4386056098";
 const RESOLVED: &str = "4361752342";
@@ -32,6 +35,8 @@ struct Script {
     cut_at: Option<usize>,
     /// Answer the activity log with an exhausted rate limit.
     activity_rate_limited: bool,
+    /// A thread to put on the base side of the diff.
+    left: Option<&'static str>,
 }
 
 fn github(script: Script) -> Fake {
@@ -58,6 +63,12 @@ fn respond(script: &Script, request: &Request, index: usize) -> (u16, String) {
             }
             return (200, ACTIVITY.into());
         }
+        if request.path.contains(&format!("/compare/{BASE}...{HEAD}")) {
+            return (
+                200,
+                json!({ "merge_base_commit": { "sha": MERGE_BASE } }).to_string(),
+            );
+        }
         if request.path.contains("/compare/") {
             return match script.compare {
                 Some(status) => (200, json!({ "status": status }).to_string()),
@@ -78,12 +89,22 @@ fn respond(script: &Script, request: &Request, index: usize) -> (u16, String) {
     } else if q.contains("resolveReviewThread") {
         json!({ "data": { "resolveReviewThread": { "thread": { "isResolved": true } } } })
     } else if q.contains("object(expression:") {
-        // Every file read for --context is 600 numbered lines.
-        let text: String = (1..=600).map(|i| format!("line {i}\n")).collect();
+        // Every file read for --context is 600 numbered lines, marked
+        // `base` at the merge base.
         let files: serde_json::Map<String, Value> = (0..)
             .map_while(|i| {
                 vars.get(format!("e{i}"))
-                    .map(|_| (format!("f{i}"), json!({ "text": text })))
+                    .and_then(Value::as_str)
+                    .map(|e| (i, e))
+            })
+            .map(|(i, expression)| {
+                let mark = if expression.starts_with(MERGE_BASE) {
+                    "base "
+                } else {
+                    ""
+                };
+                let text: String = (1..=600).map(|n| format!("{mark}line {n}\n")).collect();
+                (format!("f{i}"), json!({ "text": text }))
             })
             .collect();
         json!({ "data": { "repository": files } })
@@ -102,6 +123,13 @@ fn respond(script: &Script, request: &Request, index: usize) -> (u16, String) {
         }
         if let Some(head) = &script.head {
             node["headRefOid"] = head.as_str().into();
+        }
+        if let Some(id) = script.left {
+            for thread in node["reviewThreads"]["nodes"].as_array_mut().unwrap() {
+                if thread["comments"]["nodes"][0]["fullDatabaseId"] == json!(id) {
+                    thread["diffSide"] = "LEFT".into();
+                }
+            }
         }
         pr
     };
@@ -788,5 +816,57 @@ fn a_failed_request_keeps_the_token_for_the_next_one() {
     assert_eq!(
         t["context"],
         json!({ "start": 514, "lines": ["line 514", "line 515", "line 516"] })
+    );
+}
+
+#[test]
+fn context_for_a_base_side_thread_comes_from_the_merge_base() {
+    let fake = github(Script {
+        left: Some(OPEN_CODE),
+        ..Script::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let args = [
+        "pr",
+        "threads",
+        "jdx/mise#14922",
+        "--context",
+        "1",
+        "--json",
+    ];
+    let out = jouet(&fake, dir.path(), &args, None);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json(&out);
+    let (left, right) = (&doc["threads"][0], &doc["threads"][1]);
+    assert_eq!(left["side"], json!("left"));
+    assert_eq!(
+        left["context"],
+        json!({ "start": 514, "lines": ["base line 514", "base line 515", "base line 516"] })
+    );
+    assert!(right.get("side").is_none());
+    assert_eq!(
+        right["context"],
+        json!({ "start": 138, "lines": ["line 138", "line 139", "line 140"] })
+    );
+    let gets: Vec<String> = fake
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "GET")
+        .map(|r| r.path)
+        .collect();
+    assert_eq!(
+        gets,
+        [format!(
+            "/repos/jdx/mise/compare/{BASE}...{HEAD}?per_page=1"
+        )]
+    );
+
+    let args = ["pr", "threads", "jdx/mise#14922", "--display", "plain"];
+    let text = stdout(&jouet(&fake, dir.path(), &args, None));
+    assert!(
+        text.lines().any(|l| l.starts_with(&format!(
+            "[{OPEN_CODE}] src/hook_env.rs:515  coderabbitai[bot]  "
+        )) && l.ends_with("  base side")),
+        "{text}"
     );
 }
