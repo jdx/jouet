@@ -28,6 +28,10 @@ use std::path::{Path, PathBuf};
 const MAX_EVENTS: usize = 1000;
 /// Pages of check runs or files read at most (100 each).
 const MAX_PAGES: u32 = 30;
+/// How long after a push GitHub's report of a conflict is not trusted.
+/// For a few seconds after a push it still reports the old head's
+/// mergeability, so a conflict that a rebase just fixed looks unfixed.
+pub const CONFLICT_SETTLE_SECS: i64 = 30;
 
 /// The PR fields a wait needs, from `GET /repos/{o}/{r}/pulls/{n}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +44,8 @@ pub struct Pr {
     /// `None` while GitHub is still computing it.
     pub mergeable: Option<bool>,
     pub mergeable_state: String,
+    /// When the PR last changed, in Unix seconds; a push updates it.
+    pub updated_at: Option<i64>,
 }
 
 impl Pr {
@@ -56,12 +62,20 @@ impl Pr {
             base_ref: v["base"]["ref"].as_str()?.to_string(),
             mergeable: v["mergeable"].as_bool(),
             mergeable_state: v["mergeable_state"].as_str().unwrap_or("unknown").into(),
+            updated_at: v["updated_at"].as_str().and_then(crate::time::parse_utc),
         })
     }
 
     /// GitHub has finished computing mergeability and found a conflict.
     pub fn conflicted(&self) -> bool {
         self.mergeable == Some(false) && self.mergeable_state == "dirty"
+    }
+
+    /// Whether the PR has gone [`CONFLICT_SETTLE_SECS`] without an update,
+    /// so a conflict GitHub reports is about the current head.
+    pub fn conflict_settled(&self, now: i64) -> bool {
+        self.updated_at
+            .is_none_or(|t| now - t >= CONFLICT_SETTLE_SECS)
     }
 }
 
@@ -249,7 +263,7 @@ fn keep_pr(v: Value) -> Value {
         "number": v["number"], "state": v["state"], "merged": v["merged"],
         "merged_at": v["merged_at"], "head": { "sha": v["head"]["sha"] },
         "base": { "ref": v["base"]["ref"] }, "mergeable": v["mergeable"],
-        "mergeable_state": v["mergeable_state"],
+        "mergeable_state": v["mergeable_state"], "updated_at": v["updated_at"],
     })
 }
 

@@ -45,6 +45,8 @@ struct World {
     head: &'static str,
     mergeable: Option<bool>,
     mergeable_state: &'static str,
+    /// Whether the PR was updated (pushed to) just now, rather than long ago.
+    just_updated: bool,
     checks: BTreeMap<&'static str, Vec<CheckRun>>,
     base_sha: &'static str,
     /// Files changed on the base between two SHAs, and in the PR.
@@ -65,6 +67,7 @@ impl Default for World {
             head: SHA_A,
             mergeable: Some(true),
             mergeable_state: "clean",
+            just_updated: false,
             checks: BTreeMap::new(),
             base_sha: "base000",
             base_files: Vec::new(),
@@ -172,6 +175,7 @@ fn respond(
             "number": 7, "state": "open", "merged": false, "merged_at": null,
             "head": { "sha": world.head }, "base": { "ref": "main" },
             "mergeable": world.mergeable, "mergeable_state": world.mergeable_state,
+            "updated_at": if world.just_updated { utc_now() } else { "2026-01-01T00:00:00Z".into() },
         })),
         ["pulls"] => ok(json!([{ "number": 7 }])),
         ["pulls", "7", "files"] => ok(Value::Array(
@@ -254,6 +258,31 @@ fn graphql(world: &World, body: &[u8]) -> String {
         } }
     } })
     .to_string()
+}
+
+/// The current time as GitHub writes it, such as `2026-10-30T10:55:01Z`.
+fn utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    // Howard Hinnant's civil_from_days.
+    let z = secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let t = secs.rem_euclid(86_400);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        t / 3600,
+        t / 60 % 60,
+        t % 60
+    )
 }
 
 fn etag(body: &str) -> String {
@@ -654,6 +683,40 @@ fn a_conflicted_pr_returns_at_once() {
             .unwrap()
             .contains("conflicts with main")
     );
+}
+
+#[test]
+fn a_conflict_reported_just_after_a_push_is_checked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    // GitHub still says "conflict" right after the push that fixed it.
+    let mut world = World {
+        mergeable: Some(false),
+        mergeable_state: "dirty",
+        just_updated: true,
+        ..World::default()
+    };
+    world
+        .checks
+        .insert(SHA_A, vec![check(1, "unit", "completed", Some("success"))]);
+    let fake = serve(world);
+    let child = spawn(&fake, dir.path(), &[&CI[..], &["1s", "--json"]].concat());
+    let w = handle(&fake);
+    after(1500, move || {
+        let mut w = w.lock().unwrap();
+        w.mergeable = Some(true);
+        w.mergeable_state = "clean";
+    })
+    .join()
+    .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    assert_eq!(json_doc(&out)["result"], "success");
 }
 
 #[test]

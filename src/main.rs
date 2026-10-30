@@ -217,8 +217,10 @@ pub enum WaitCmd {
 /// Follows the PR head, switching to a new head when one is pushed, unless
 /// --sha pins a commit. Returns on the first failed check unless --all.
 /// Skipped and neutral checks count as passing. A conflicted PR returns
-/// `conflict` (exit 4) at once, since pull_request workflows will not run;
-/// no checks within --appear-timeout returns `no_checks` (exit 1). For each
+/// `conflict` (exit 4) at once, since pull_request workflows will not run,
+/// except within 30s of an update, when GitHub may still be reporting the
+/// old head; no checks within --appear-timeout returns `no_checks` (exit 1).
+/// For each
 /// failed Actions job, the failed step's log is excerpted and the full log
 /// saved. Waits on the same PR share their state, so they poll GitHub once.
 #[derive(Args)]
@@ -285,7 +287,9 @@ pub struct WaitRunArgs {
 /// (any check on the head), ready (no `pr status` attention codes and no
 /// pending checks; exit 1 on conflict, checks_failing, changes_requested or
 /// unresolved_threads), or any-change (the next push, check result, review,
-/// thread or state change, printed as one event).
+/// thread or state change, printed as one event). A conflict reported within
+/// 30s of a push keeps the wait going, since GitHub may still be reporting
+/// the old head.
 #[derive(Args)]
 pub struct WaitPrArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the

@@ -45,7 +45,7 @@ FAIL release  step "Require auto-merge on the release PR"  required
 - **Which commit.** It follows the PR head. When a new commit is pushed (by an autofix bot, say), it switches to that commit, emits `head_changed`, and reports `head_changed: true`. `--sha SHA` waits on one commit instead.
 - **Fail fast.** It returns on the first failed or cancelled check, with exit `1`, unless `--all` is given. Skipped and neutral checks count as passing.
 - **Which checks.** `--required` keeps only the checks that branch protection requires. `--check GLOB` and `--ignore GLOB` select checks by name, where `*` matches any run of characters and `?` any one character.
-- **Checks that will never come.** A conflicted PR returns `conflict` with exit `4` straight away, because `pull_request` workflows do not run until it is rebased. If no checks appear on the commit within `--appear-timeout` (default `3m`), the result is `no_checks` with exit `1`. Use `wait pr --until checks-registered` right after pushing if you only want to know that CI has started.
+- **Checks that will never come.** A conflicted PR returns `conflict` with exit `4` straight away, because `pull_request` workflows do not run until it is rebased. For 30 seconds after the PR is updated, a reported conflict is checked again instead, because GitHub keeps reporting the old head's mergeability for a few seconds after a push, so a conflict that a rebase just fixed can look unfixed. If no checks appear on the commit within `--appear-timeout` (default `3m`), the result is `no_checks` with exit `1`. Use `wait pr --until checks-registered` right after pushing if you only want to know that CI has started.
 - **Failure logs.** For each failed GitHub Actions job, jouet fetches that job's log, which GitHub serves once the job is done even while the rest of the run is in progress. It cuts out the failed step, strips timestamps and ANSI colours, and keeps the step's last `--log-lines` lines (default `60`; `0` keeps the whole step), plus earlier lines matching `error|FAILED|panicked|assert` with two lines of context. Every gap is marked `... N lines skipped`. The full log is saved once to `<log dir>/<owner>-<repo>-job-<id>.log`, and its path is printed. Checks that are not Actions jobs report their name, conclusion and URL only. `--no-logs` skips all of this.
 - **Base branch moved.** When new commits on the base branch touch files this PR changes, a `base_touched` event names the files. The wait keeps going.
 
@@ -77,7 +77,7 @@ Agents should run long waits as background tasks where the harness supports it (
 | `ready` | the PR has no [`pr status`](/commands/pr-status) attention codes and no pending checks | `conflict`, `checks_failing`, `changes_requested` or `unresolved_threads` appears, since only the agent can clear those |
 | `any-change` | anything changes: a push, a check result, a review, the number of unresolved threads, or the PR's state | |
 
-Every condition except `closed` counts a merged PR as met and a PR closed without merging as failed. `any-change` prints the one change it saw, which makes `wait pr --until any-change --jsonl` under Claude Code's Monitor tool a way to babysit a PR.
+Every condition except `closed` counts a merged PR as met and a PR closed without merging as failed. As with `wait ci`, a conflict reported within 30 seconds of a push keeps the wait going instead of failing it. `any-change` prints the one change it saw, which makes `wait pr --until any-change --jsonl` under Claude Code's Monitor tool a way to babysit a PR.
 
 ## Local subjects
 

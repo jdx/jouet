@@ -2,7 +2,7 @@
 //! batched query and attention codes as `pr status`.
 
 use super::remote::{Halt, Poll, Watch};
-use super::watch::short;
+use super::watch::{CONFLICT_SETTLE_SECS, short};
 use super::{Event, Reporter};
 use crate::exit::Exit;
 use crate::github::Client;
@@ -70,7 +70,18 @@ enum Judgement {
     Pending(String),
 }
 
-fn judge(until: Until, pr: &PrStatus) -> Judgement {
+/// Whether the head was pushed too recently for a reported conflict to be
+/// about it (see [`CONFLICT_SETTLE_SECS`]).
+fn just_pushed(pr: &PrStatus, now: i64) -> bool {
+    pr.pushed_at
+        .as_deref()
+        .and_then(crate::time::parse_utc)
+        .is_some_and(|t| now - t < CONFLICT_SETTLE_SECS)
+}
+
+const RECHECKING: &str = "GitHub reports a conflict just after a push; checking again";
+
+fn judge(until: Until, pr: &PrStatus, now: i64) -> Judgement {
     use Judgement::{Failed, Met, Pending};
     let open = matches!(pr.state, State::Open | State::Draft);
     match until {
@@ -81,6 +92,7 @@ fn judge(until: Until, pr: &PrStatus) -> Judgement {
         Until::Merged => Pending(pr.state.as_str().into()),
         Until::Mergeable => match pr.mergeable {
             Mergeability::Mergeable => Met("mergeable".into()),
+            Mergeability::Conflicting if just_pushed(pr, now) => Pending(RECHECKING.into()),
             Mergeability::Conflicting => Failed(format!("conflicts with {}", pr.base)),
             Mergeability::Unknown => Pending("mergeability unknown".into()),
         },
@@ -103,6 +115,9 @@ fn judge(until: Until, pr: &PrStatus) -> Judgement {
                 .iter()
                 .filter(|a| BLOCKING.contains(&a.code))
                 .collect();
+            if blocking.iter().any(|a| a.code == "conflict") && just_pushed(pr, now) {
+                return Pending(RECHECKING.into());
+            }
             if !blocking.is_empty() {
                 return Failed(codes(&blocking));
             }
@@ -299,7 +314,7 @@ impl Watch for PrWait {
                 None => Poll::Pending("watching".into()),
             });
         }
-        Ok(match judge(self.until, &pr) {
+        Ok(match judge(self.until, &pr, crate::time::now()) {
             Judgement::Met(state) => Poll::Done(self.doc("met", state, None)),
             Judgement::Failed(state) => Poll::Done(self.doc("failed", state, None)),
             Judgement::Pending(state) => Poll::Pending(state),
@@ -308,9 +323,11 @@ impl Watch for PrWait {
 
     fn timed_out(&mut self, _client: &mut Client) -> Doc {
         let state = match &self.last {
-            Some(pr) if self.until != Until::AnyChange => match judge(self.until, pr) {
-                Judgement::Met(s) | Judgement::Failed(s) | Judgement::Pending(s) => s,
-            },
+            Some(pr) if self.until != Until::AnyChange => {
+                match judge(self.until, pr, crate::time::now()) {
+                    Judgement::Met(s) | Judgement::Failed(s) | Judgement::Pending(s) => s,
+                }
+            }
             _ => "no change".into(),
         };
         self.doc("timeout", state, None)
@@ -356,6 +373,9 @@ mod tests {
     use super::*;
     use crate::pr::status::Checks;
 
+    /// 2026-10-30T10:55:01Z.
+    const NOW: i64 = 1_793_357_701;
+
     fn pr() -> PrStatus {
         PrStatus {
             repo: "jdx/mise".into(),
@@ -380,14 +400,20 @@ mod tests {
     #[test]
     fn unknown_mergeability_keeps_waiting() {
         let mut p = pr();
-        assert!(matches!(judge(Until::Mergeable, &p), Judgement::Pending(_)));
+        assert!(matches!(
+            judge(Until::Mergeable, &p, NOW),
+            Judgement::Pending(_)
+        ));
         p.mergeable = Mergeability::Conflicting;
         assert_eq!(
-            judge(Until::Mergeable, &p),
+            judge(Until::Mergeable, &p, NOW),
             Judgement::Failed("conflicts with main".into())
         );
         p.state = State::Merged;
-        assert_eq!(judge(Until::Mergeable, &p), Judgement::Met("merged".into()));
+        assert_eq!(
+            judge(Until::Mergeable, &p, NOW),
+            Judgement::Met("merged".into())
+        );
     }
 
     #[test]
@@ -398,28 +424,62 @@ mod tests {
             message: String::new(),
         };
         p.attention = vec![code("mergeable_unknown")];
-        assert!(matches!(judge(Until::Ready, &p), Judgement::Pending(_)));
+        assert!(matches!(
+            judge(Until::Ready, &p, NOW),
+            Judgement::Pending(_)
+        ));
         p.attention = vec![code("draft"), code("checks_failing")];
         assert_eq!(
-            judge(Until::Ready, &p),
+            judge(Until::Ready, &p, NOW),
             Judgement::Failed("checks_failing".into())
         );
         p.attention.clear();
         p.checks.pending = 2;
         assert_eq!(
-            judge(Until::Ready, &p),
+            judge(Until::Ready, &p, NOW),
             Judgement::Pending("2 checks pending".into())
         );
         p.checks.pending = 0;
-        assert_eq!(judge(Until::Ready, &p), Judgement::Met("ready".into()));
+        assert_eq!(judge(Until::Ready, &p, NOW), Judgement::Met("ready".into()));
+    }
+
+    #[test]
+    fn a_conflict_just_after_a_push_is_checked_again() {
+        let mut p = pr();
+        p.mergeable = Mergeability::Conflicting;
+        p.attention = vec![Attention {
+            code: "conflict",
+            message: String::new(),
+        }];
+        p.pushed_at = Some("2026-10-30T10:54:51Z".into());
+        assert_eq!(
+            judge(Until::Mergeable, &p, NOW),
+            Judgement::Pending(RECHECKING.into())
+        );
+        assert_eq!(
+            judge(Until::Ready, &p, NOW),
+            Judgement::Pending(RECHECKING.into())
+        );
+        p.pushed_at = Some("2026-10-30T10:50:00Z".into());
+        assert!(matches!(
+            judge(Until::Mergeable, &p, NOW),
+            Judgement::Failed(_)
+        ));
+        assert!(matches!(judge(Until::Ready, &p, NOW), Judgement::Failed(_)));
     }
 
     #[test]
     fn merged_ends_merged_and_closed_waits() {
         let mut p = pr();
         p.state = State::Closed;
-        assert!(matches!(judge(Until::Merged, &p), Judgement::Failed(_)));
-        assert_eq!(judge(Until::Closed, &p), Judgement::Met("closed".into()));
+        assert!(matches!(
+            judge(Until::Merged, &p, NOW),
+            Judgement::Failed(_)
+        ));
+        assert_eq!(
+            judge(Until::Closed, &p, NOW),
+            Judgement::Met("closed".into())
+        );
     }
 
     #[test]

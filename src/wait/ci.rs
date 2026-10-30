@@ -238,6 +238,11 @@ impl Watch for CiWait {
         let pr = snap.pr.clone();
         self.last = snap;
         if let Some(pr) = pr.filter(|p| p.conflicted()) {
+            if !pr.conflict_settled(crate::time::now()) {
+                return Ok(Poll::Pending(
+                    "GitHub reports a conflict just after an update; checking again".into(),
+                ));
+            }
             let message = format!(
                 "{}#{} conflicts with {}; pull_request workflows will not run until it is rebased",
                 self.repo, self.number, pr.base_ref

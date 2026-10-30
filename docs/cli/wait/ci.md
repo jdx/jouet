@@ -5,7 +5,7 @@
 
 Wait for a PR's checks, and show why any failed
 
-Follows the PR head, switching to a new head when one is pushed, unless --sha pins a commit. Returns on the first failed check unless --all. Skipped and neutral checks count as passing. A conflicted PR returns `conflict` (exit 4) at once, since pull_request workflows will not run; no checks within --appear-timeout returns `no_checks` (exit 1). For each failed Actions job, the failed step's log is excerpted and the full log saved. Waits on the same PR share their state, so they poll GitHub once.
+Follows the PR head, switching to a new head when one is pushed, unless --sha pins a commit. Returns on the first failed check unless --all. Skipped and neutral checks count as passing. A conflicted PR returns `conflict` (exit 4) at once, since pull_request workflows will not run, except within 30s of an update, when GitHub may still be reporting the old head; no checks within --appear-timeout returns `no_checks` (exit 1). For each failed Actions job, the failed step's log is excerpted and the full log saved. Waits on the same PR share their state, so they poll GitHub once.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
