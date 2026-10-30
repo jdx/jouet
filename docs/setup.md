@@ -144,6 +144,6 @@ enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 
 ## The skill and `agent-help`
 
-`jouet skill` prints the skill `jouet setup` installs, about 20 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
+`jouet skill` prints the skill `jouet setup` installs, about 25 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
 
-`jouet agent-help` prints a guide for the whole tool in under 60 lines, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk or beads (`bd`) is on `PATH`, the guide says what each is for instead of jouet duplicating it.
+`jouet agent-help` prints a guide for the whole tool in under 80 lines, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk or beads (`bd`) is on `PATH`, the guide says what each is for instead of jouet duplicating it.

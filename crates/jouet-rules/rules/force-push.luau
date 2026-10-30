@@ -40,13 +40,13 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"git push --force",
 			"git push -f origin main",
 			"git push -fu origin feat",
 			"git push origin +main",
 		},
-		allow = {
+		quiet = {
 			"git push --force-with-lease",
 			"git push --force-with-lease=main:abc123 --force-if-includes",
 			"git push --force --force-with-lease",

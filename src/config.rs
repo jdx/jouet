@@ -3,6 +3,8 @@
 //! override it. Keys this build does not read are ignored, so one file serves
 //! every jouet version.
 
+use jouet_git::agent::Agent;
+use jouet_git::conventional::{self, Policy};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -11,6 +13,20 @@ pub(crate) struct Config {
     reply_footer: Option<String>,
     #[serde(default)]
     bots: Vec<String>,
+    #[serde(default)]
+    commit: CommitConfig,
+}
+
+/// The `[commit]` table, for `jouet commit`.
+#[derive(Debug, Default, Deserialize)]
+struct CommitConfig {
+    /// Trailers to append; `{tool}`, `{model}` and `{version}` are filled in
+    /// from the environment. An empty list turns the defaults off.
+    trailers: Option<Vec<String>>,
+    /// `warn`, `refuse` or `off`.
+    conventional: Option<String>,
+    /// The conventional-commit types to accept.
+    types: Option<Vec<String>>,
 }
 
 impl Config {
@@ -49,6 +65,50 @@ impl Config {
             .map(str::to_ascii_lowercase)
             .collect()
     }
+
+    /// The trailers `jouet commit` appends: `JOUET_COMMIT_TRAILERS` (one per
+    /// line) when it is set, set but empty for none; else `[commit]
+    /// trailers`; else the agent's defaults. Templates are filled in.
+    pub(crate) fn commit_trailers(&self, agent: &Agent) -> Vec<String> {
+        let templates = match std::env::var("JOUET_COMMIT_TRAILERS") {
+            Ok(lines) => lines
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect(),
+            Err(_) => self
+                .commit
+                .trailers
+                .clone()
+                .unwrap_or_else(|| agent.default_trailers()),
+        };
+        templates.iter().map(|t| agent.expand(t)).collect()
+    }
+
+    /// What to do with a subject that is not a conventional commit:
+    /// `JOUET_COMMIT_CONVENTIONAL`, else `[commit] conventional`, else warn.
+    pub(crate) fn commit_conventional(&self) -> Result<Policy, String> {
+        let (name, source) = match std::env::var("JOUET_COMMIT_CONVENTIONAL") {
+            Ok(name) if !name.is_empty() => (name, "JOUET_COMMIT_CONVENTIONAL"),
+            _ => match &self.commit.conventional {
+                Some(name) => (name.clone(), "[commit] conventional"),
+                None => return Ok(Policy::default()),
+            },
+        };
+        Policy::parse(&name)
+            .ok_or_else(|| format!("{source} must be warn, refuse or off, not `{name}`"))
+    }
+
+    /// The conventional-commit types to accept.
+    pub(crate) fn commit_types(&self) -> Vec<String> {
+        self.commit.types.clone().unwrap_or_else(|| {
+            conventional::DEFAULT_TYPES
+                .iter()
+                .map(|t| (*t).to_string())
+                .collect()
+        })
+    }
 }
 
 fn path() -> Option<PathBuf> {
@@ -70,5 +130,22 @@ mod tests {
                 .unwrap();
         assert_eq!(config.reply_footer.as_deref(), Some("-- sent by an agent"));
         assert!(config.bots.is_empty());
+    }
+
+    #[test]
+    fn the_commit_table() {
+        let config: Config = toml::from_str(
+            "[commit]\ntrailers = [\"AI-Assisted: Tool: {tool}; model: anthropic/claude-opus-5-5\"]\n\
+             conventional = \"refuse\"\ntypes = [\"feat\", \"registry\"]\n",
+        )
+        .unwrap();
+        assert_eq!(config.commit_types(), ["feat", "registry"]);
+        assert_eq!(
+            config.commit.trailers.as_deref(),
+            Some(&["AI-Assisted: Tool: {tool}; model: anthropic/claude-opus-5-5".to_string()][..])
+        );
+        assert_eq!(config.commit.conventional.as_deref(), Some("refuse"));
+        let empty = Config::default();
+        assert!(empty.commit_types().contains(&"fix".to_string()));
     }
 }

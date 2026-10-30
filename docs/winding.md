@@ -15,7 +15,7 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 1. **Notice.** At the end of each turn and at session start, `jouet wind` reads the ledger from where it last stopped. It looks for two patterns:
    - **A command that never works:** the same program, subcommands and flags failing at least three times, across at least two sessions, and never succeeding, such as a tool that is not installed. Test, lint and build runs are left out, because they fail while code is being fixed.
    - **Long sleeps:** at least five sleeps of ten seconds or more, across at least two sessions, where `jouet wait` would wait for the thing itself.
-2. **Draft.** For each pattern, it writes a rule against the public `jouet` API. The rule is in warn mode, and its examples are the shapes that motivated it plus the near misses it must allow. It keeps the draft as a note, and drafts at most two notes a day.
+2. **Draft.** For each pattern, it writes a rule against the public `jouet` API. The rule is in warn mode. Its `fires` examples are the calls that motivated it. Its `quiet` examples are near misses it must leave alone: what worked instead, and calls in the ledger running the same program. A draft that fails its own examples is dropped. It keeps the draft as a note, and drafts at most two notes a day.
 3. **Show.** A session start shows at most two pending notes, one line each, after jouet's primer:
 
    ```text
@@ -25,7 +25,7 @@ Winding is new. The patterns it notices, and its thresholds, will change between
    A note shown to three sessions without being adopted lapses.
 4. **Adopt.** `jouet rule new NAME --from-note ID` writes the rule to `~/.config/jouet/rules/NAME.luau`, with the session that adopted it as its author.
 5. **Test.** `jouet rule test NAME` runs its examples. `jouet rule test NAME --replay` runs it over every call in the ledger, lists the calls it fires on and the near misses it leaves alone, and fails if it fires on nothing.
-6. **Promote.** A rule stays in warn mode until `jouet rule promote NAME` switches it to deny. With `auto_promote` on, a rule that has fired `promote_after` times, in at least two sessions, with no overrides, is promoted on its own.
+6. **Promote.** A rule stays in warn mode until `jouet rule promote NAME` switches it to deny, which it does only for a rule that passes examples of both kinds. With `auto_promote` on, a rule that has fired `promote_after` times, in at least two sessions, with no overrides, is promoted on its own.
 7. **Unwind.** `jouet unwind` proposes retiring rules that are nearly always overridden, fire on a large share of calls, or no longer load. `jouet unwind --apply` moves your rules to `~/.config/jouet/rules/retired/`.
 
 `jouet rule log` lists every change (created, promoted, retired), when, by whom and why.

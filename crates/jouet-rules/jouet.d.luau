@@ -5,7 +5,8 @@
 --   luau-lsp analyze --definitions=jouet.d.luau my-rule.luau
 --
 -- A rule is a `.luau` file that starts with a header and returns a
--- `JouetRule`:
+-- `JouetRule`, with examples of calls it must fire on and near misses it
+-- must stay quiet on:
 --
 --   --- name: my-rule        (optional; must match the file name)
 --   --- why: what the rule is for, in one line   (required)
@@ -58,7 +59,8 @@ export type JouetEvent = "pre-tool-use" | "post-tool-use"
 -- The tool call a rule is checking.
 export type JouetCall = {
 	event: JouetEvent,
-	-- "claude", "codex", or "test" under `jouet rule test`.
+	-- "claude", "codex", or "test" under `jouet rule test` unless an example
+	-- names a harness.
 	harness: string,
 	-- The harness's tool name, such as "Bash".
 	tool: string,
@@ -78,13 +80,21 @@ export type JouetDecision = {
 	message: string?,
 }
 
+-- A tool call in compact form: a shell command, or a table that also names
+-- the tool and harness, which default to "Bash" and "test".
 export type JouetExample = string | {
-	command: string,
+	command: string?,
+	tool: string?,
+	harness: string?,
+	-- For a post-tool-use rule; 0 if omitted.
 	exit_code: number?,
-	-- For `record` examples: the kind the rule must record, "test", "lint"
-	-- or "build".
+	-- For a `fires` example: the action `check` must return, when it matters
+	-- whether the rule denies or warns.
+	action: ("deny" | "warn")?,
+	-- For a `fires` example of a post-tool-use rule: the kind it must
+	-- record, "test", "lint" or "build".
 	kind: string?,
-	-- For `record` examples with a `kind`: the scope it must record, "full",
+	-- For a `fires` example with a `kind`: the scope it must record, "full",
 	-- or "partial" and what the run selected, such as "partial -p jouet".
 	scope: string?,
 }
@@ -97,16 +107,16 @@ export type JouetRule = {
 	needs: { string }?,
 	-- Returns a decision, or nil to say nothing. The first rule to deny wins.
 	check: (call: JouetCall) -> JouetDecision?,
-	-- Commands and what the rule must make of each, run by `jouet rule test`.
-	-- They check what `check` returns, before the mode turns a deny into a
-	-- warning. They run without probes, so they give the same answer
-	-- anywhere: every probe returns nil and a reason.
+	-- Tool calls the rule must fire on (deny, warn or record), and near
+	-- misses it must stay quiet on, run by `jouet rule test`. They check what
+	-- `check` returns, before the mode turns a deny into a warning. A rule
+	-- of yours or a repository's without both kinds only warns, and cannot
+	-- be promoted to deny or shared. They run without probes, so they give
+	-- the same answer anywhere: every probe returns nil and a reason.
 	examples: {
-		deny: { JouetExample }?,
-		warn: { JouetExample }?,
-		allow: { JouetExample }?,
-		record: { JouetExample }?,
-	}?,
+		fires: { JouetExample },
+		quiet: { JouetExample },
+	},
 }
 
 -- `jouet pr status --json`'s entry for one PR. Fields that are empty are

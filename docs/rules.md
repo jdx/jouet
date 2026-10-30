@@ -55,7 +55,7 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 
 ## Writing a rule
 
-A rule file starts with a header and returns a table with a `check` function. `check` gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing:
+A rule file starts with a header and returns a table with its `examples` and a `check` function. Write the examples first. They are the tool calls the rule must fire on, and the near misses it must leave alone, after [ast-grep](https://ast-grep.github.io/guide/test-rule.html)'s valid and invalid rule tests. They pin down what the rule is for more exactly than its `why`, and jouet holds every rule to them before it can block anything:
 
 ```lua
 --!strict
@@ -64,6 +64,12 @@ A rule file starts with a header and returns a table with a `check` function. `c
 --- author: jdx
 --- created: 2026-10-30
 local rule: JouetRule = {
+	examples = {
+		-- Calls the rule must fire on.
+		fires = { "rm -rf target", "sudo rm -r build" },
+		-- Near misses it must leave alone.
+		quiet = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
+	},
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			if command.program == "rm" and jouet.short_flag(command.argv[2] or "", "r") then
@@ -72,14 +78,42 @@ local rule: JouetRule = {
 		end
 		return nil
 	end,
-	examples = {
-		warn = { "rm -rf target", "sudo rm -r build" },
-		allow = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
-	},
 }
 
 return rule
 ```
+
+`check` gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing.
+
+### Examples
+
+Every `fires` example must make `check` deny, warn, or record a check. Every `quiet` example must make it say nothing and record nothing. Examples check what `check` decides before the mode applies, so a warn-mode rule that calls `jouet.deny` fires with `deny`.
+
+An example is a shell command, or a table for a call that needs more than that:
+
+```lua
+fires = {
+	"git stash",
+	{ command = "git stash pop", harness = "codex" },
+	{ tool = "WebFetch", action = "warn" },
+},
+```
+
+| Key | Meaning |
+|---|---|
+| `command` | The shell command. Required for a `Bash` call. |
+| `tool` | The harness's tool name; `Bash` if omitted. |
+| `harness` | `claude`, `codex` or another harness; `test` if omitted. |
+| `exit_code` | For a post-tool-use rule; `0` if omitted. |
+| `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
+| `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
+
+Every rule needs at least one example of each kind:
+
+- **Built-in rules** are held to theirs by jouet's own test suite.
+- **A rule of yours or a repository's** without them still runs, but only warns, whatever its header says. `jouet rule list` notes why.
+- **Promotion and sharing.** `jouet rule promote` and `jouet share` refuse a rule until it passes examples of both kinds.
+- **Drafted rules.** [Self-winding](/winding) writes both kinds into every rule it drafts, and drops a draft that fails its own.
 
 The header is a few `--- key: value` lines at the top of the file, which `jouet rule list` shows without running the rule:
 
@@ -110,23 +144,42 @@ The `jouet` module has helpers for the common cases:
 
 A rule that names a jouet command in its advice declares it with `needs = { "wait", "ci" }`, and stays off until the installed jouet has that command.
 
-A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `record` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
+A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce. Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason.
+`jouet rule test` runs a rule's examples. It fails if one does not do what it expects, showing what was expected and what the rule did, or if the rule lacks either kind. Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason. Say you add `rm -ri build` as a near miss, since `-i` asks before each file:
 
 ```output
 $ jouet rule test ./no-rm-rf.luau
-ok    warn          rm -rf target
-ok    warn          sudo rm -r build
-ok    allow         rm file.txt
-ok    allow         echo 'rm -rf /'
-ok    allow         git commit -m 'rm -rf old code'
-no-rm-rf: 5 of 5 examples passed
+ok    fires         rm -rf target
+ok    fires         sudo rm -r build
+ok    quiet         rm file.txt
+ok    quiet         echo 'rm -rf /'
+ok    quiet         git commit -m 'rm -rf old code'
+FAIL  quiet         rm -ri build
+      - expected: quiet
+      + actual:   deny: rm -r deletes for good; is this path right?
+no-rm-rf: 5 of 6 examples passed
 ```
 
-It also runs a rule against one command or a recorded hook payload:
+`jouet rule test --all` runs every rule's examples: built in, yours, and this repository's, trusted or not.
+
+```output
+$ jouet rule test --all
+ok    sleep-poll      10 examples passed
+ok    review-threads  5 examples passed
+ok    python-edit     7 examples passed
+ok    git-add-all     14 examples passed
+ok    git-stash       25 examples passed
+ok    no-verify       13 examples passed
+ok    force-push      11 examples passed
+ok    checks          20 examples passed
+FAIL  no-rm-rf        it has no `quiet` examples: near misses it must leave alone
+8 of 9 rules passed their examples
+```
+
+It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
 
 ```sh
 jouet rule test git-stash --command 'git stash pop'
@@ -146,7 +199,7 @@ stays quiet on (near misses):
      2x  allow        git status
 ```
 
-`jouet rule new NAME --why "..."` writes a rule of yours from a template, in warn mode, and `jouet rule promote NAME` switches it to deny. [Self-winding](/winding) drafts rules like this from the ledger on its own.
+`jouet rule new NAME --why "..."` writes a rule of yours from a template, in warn mode, with empty `fires` and `quiet` lists to fill in first. `jouet rule promote NAME` switches it to deny once it passes them. [Self-winding](/winding) drafts rules like this from the ledger on its own.
 
 ### Type checking
 

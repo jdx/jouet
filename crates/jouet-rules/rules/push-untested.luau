@@ -70,14 +70,14 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		warn = {
+		fires = {
 			"git push",
 			"git push -u origin feat/verify",
 			"git -C ../repo push --force-with-lease",
 			"cargo test -p x && git push",
 			"gh pr create --fill",
 		},
-		allow = {
+		quiet = {
 			"git push --dry-run",
 			"git push origin --delete old-branch",
 			"git push origin :old-branch",

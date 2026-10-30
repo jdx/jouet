@@ -42,12 +42,20 @@ struct Jouet {
 enum Cmd {
     /// Report where coding-agent sessions spend tokens and time
     Audit(AuditArgs),
+    /// Commit only the named paths, with trailers
+    Commit(CommitArgs),
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Record the facts about this checkout for the next session
+    Handoff(HandoffArgs),
+    /// Print a handoff and check that it still holds
+    Pickup(PickupArgs),
     /// Show what jouet saved: measured from its ledger, estimated from your history
     Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
+    /// Write one file for reviewing a range of commits
+    ReviewPackage(ReviewPackageArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
@@ -69,6 +77,104 @@ enum Cmd {
     /// Answer a Claude Code or Codex hook
     #[usage(hide)]
     Hook(HookArgs),
+}
+
+/// Commit only the named paths, with trailers
+///
+/// Commits exactly the paths given, as they are in the working tree (`git
+/// commit --only`): anything else already staged stays staged, and untracked
+/// files are added only when a named path covers them. Refuses -A, `.`, the
+/// repository root and a path with no changes. Paths are literal, never
+/// globs. Appends the configured trailers; inside an agent the default is a
+/// co-author line (Claude Code) and the AI disclosure, with the tool and
+/// version from AI_AGENT. Warns about a subject that is not a conventional
+/// commit when the repository checks them. Hooks always run; when one fails,
+/// the end of its output is shown and the whole of it kept in a log.
+#[derive(Args)]
+pub struct CommitArgs {
+    /// The files and directories to commit
+    paths: Vec<String>,
+    /// The message. Repeatable: each is a paragraph, as with git
+    #[usage(short = 'm', long, var, value_name = "MSG")]
+    message: Vec<String>,
+    /// Read the message from FILE (`-` is stdin)
+    #[usage(short = 'F', long, value_name = "FILE")]
+    file: Option<String>,
+    /// Append a trailer, `Key: value`. Repeatable
+    #[usage(long, var, value_name = "TRAILER")]
+    trailer: Vec<String>,
+    /// Leave out the configured and default trailers
+    #[usage(long)]
+    no_trailers: bool,
+    /// Show what would be committed, committing nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// Refused: name the paths to commit instead
+    #[usage(short = 'A', long, hide)]
+    all: bool,
+    /// Refused: jouet commit always runs hooks
+    #[usage(long, hide)]
+    no_verify: bool,
+}
+
+/// Write one file for reviewing a range of commits
+///
+/// The file holds the commits, oldest first, a diffstat, and the full diff
+/// with --context lines around each change. Refuses an empty range, and a
+/// BASE that is not an ancestor of HEAD (exit 4), since the diff would then
+/// show changes HEAD does not make. Written to
+/// `<git dir>/jouet/review-BASE-HEAD.md` unless -o names a file (`-` is
+/// stdout).
+#[derive(Args)]
+pub struct ReviewPackageArgs {
+    /// The commit the review starts after, such as origin/main
+    base: String,
+    /// The last commit to review (default HEAD)
+    head: Option<String>,
+    /// Write the package to FILE (`-` is stdout)
+    #[usage(short = 'o', long, value_name = "FILE")]
+    output: Option<String>,
+    /// Lines of context around each change (default 10)
+    #[usage(long, value_name = "N")]
+    context: Option<u32>,
+}
+
+/// Record the facts about this checkout for the next session
+///
+/// Gathers the branch, its upstream and ahead/behind counts, HEAD, an
+/// operation in progress, uncommitted and untracked files, the branch's PR
+/// and its `pr status` attention codes, the session's last test, lint and
+/// build runs (recorded by `jouet setup`'s hooks) and background processes
+/// running in the worktree (Linux). Writes them as markdown with the data
+/// embedded, to `<git dir>/jouet/handoff.md` unless -o names a file (`.json`
+/// writes JSON; `-` is stdout). Facts only: what the work is and what to do
+/// next is the agent's to add.
+#[derive(Args)]
+pub struct HandoffArgs {
+    /// Write the handoff to FILE (`-` is stdout)
+    #[usage(short = 'o', long, value_name = "FILE")]
+    output: Option<String>,
+    /// Do not look up the branch's PR on GitHub
+    #[usage(long)]
+    no_pr: bool,
+    /// The agent session whose check runs to include (default
+    /// JOUET_SESSION_ID, else CLAUDE_CODE_SESSION_ID)
+    #[usage(long, value_name = "ID")]
+    session: Option<String>,
+}
+
+/// Print a handoff and check that it still holds
+///
+/// Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it
+/// with the checkout: the branch, HEAD, the upstream, an operation in
+/// progress, uncommitted and untracked files, and whether its background
+/// processes still run. Exits 0 when nothing has drifted and 1 when
+/// something has. The PR is not fetched again: run `jouet pr status` for
+/// its current state.
+#[derive(Args)]
+pub struct PickupArgs {
+    /// The handoff to read (`-` is stdin)
+    file: Option<String>,
 }
 
 /// Report where coding-agent sessions spend tokens and time
@@ -626,14 +732,19 @@ pub struct RuleListArgs {}
 
 /// Run a rule against a command or hook payload, or against its examples
 ///
-/// With neither --command nor --payload, runs the rule's `examples` and
-/// fails if any does not do what it expects, so a rule can be checked
-/// before it is enabled. --replay runs it over every call in the hook
-/// ledger instead, and fails if it fires on none of them.
+/// With neither --command nor --payload, runs the rule's `examples`: every
+/// `fires` example must make it deny, warn or record, and every `quiet`
+/// one must leave it silent. It fails, showing what was expected and what
+/// the rule did, when one does not, or when the rule lacks either kind.
+/// --all does this for every rule. --replay runs the rule over every call
+/// in the hook ledger instead, and fails if it fires on none of them.
 #[derive(Args)]
 pub struct RuleTestArgs {
     /// A rule's name, or the path to a .luau file
-    rule: String,
+    rule: Option<String>,
+    /// Run the examples of every rule: built in, yours and this repository's
+    #[usage(long)]
+    all: bool,
     /// A shell command to test the rule against
     #[usage(long, value_name = "CMD")]
     command: Option<String>,
@@ -1001,7 +1112,11 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
+        Cmd::Commit(args) => cmd::commit::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
+        Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
+        Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
