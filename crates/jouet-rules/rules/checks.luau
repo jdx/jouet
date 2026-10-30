@@ -115,6 +115,7 @@ local rule: JouetRule = {
 			{ command = "npm install", exit_code = 0 },
 			{ command = "cargo test; echo done", exit_code = 1 },
 			{ command = "cargo test || true", exit_code = 0 },
+			{ command = "cargo test 2>&1 | tail -5", exit_code = 0 },
 			{ command = "cargo test &", exit_code = 0 },
 		},
 	},

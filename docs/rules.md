@@ -72,7 +72,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		warn = { "rm -rf target", "sudo rm -r build" },
+		deny = { "rm -rf target", "sudo rm -r build" },
 		allow = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
 	},
 }
@@ -110,16 +110,16 @@ The `jouet` module has helpers for the common cases:
 
 A rule that names a jouet command in its advice declares it with `needs = { "wait", "ci" }`, and stays off until the installed jouet has that command.
 
-A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
+A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one that feeds a pipe: without `set -o pipefail`, `cargo test | tail` exiting 0 is `tail`'s success, so `cargo test` gets no status. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
+`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce, so this rule's denials print as `warn` there:
 
 ```console
 $ jouet rule test ./no-rm-rf.luau
-ok    warn          rm -rf target
-ok    warn          sudo rm -r build
+ok    deny          rm -rf target
+ok    deny          sudo rm -r build
 ok    allow         rm file.txt
 ok    allow         echo 'rm -rf /'
 ok    allow         git commit -m 'rm -rf old code'
