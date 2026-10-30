@@ -26,7 +26,7 @@ publish = true
 version_group = "jouet"
 # One changelog for the whole tool: a fix that only touches a library crate is
 # still a change to the jouet people install.
-changelog_include = ["jouet-output", "jouet-github", "jouet-edit", "jouet-wait", "jouet-rules"]
+changelog_include = ["jouet-output", "jouet-github", "jouet-edit", "jouet-rules", "jouet-wait"]
 # The tag people reference, and the one release.yml's archives hang off.
 git_tag_name = "v{{ version }}"
 
@@ -59,7 +59,7 @@ git_tag_enable = false
 git_release_enable = false
 
 [[package]]
-name = "jouet-wait"
+name = "jouet-rules"
 publish = true
 version_group = "jouet"
 changelog_update = false
@@ -67,7 +67,7 @@ git_tag_enable = false
 git_release_enable = false
 
 [[package]]
-name = "jouet-rules"
+name = "jouet-wait"
 publish = true
 version_group = "jouet"
 changelog_update = false

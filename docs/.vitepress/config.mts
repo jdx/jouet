@@ -41,7 +41,7 @@ export default defineConfig({
       {
         text: "Guide",
         link: "/getting-started",
-        activeMatch: "^/(getting-started|why|conventions|rules)",
+        activeMatch: "^/(getting-started|why|conventions|rules|setup)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -58,6 +58,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Rules", link: "/rules" },
+          { text: "Agent setup and hooks", link: "/setup" },
         ],
       },
       {
@@ -127,6 +128,9 @@ export default defineConfig({
                 ],
               },
               { text: "run", link: "/cli/run" },
+              { text: "agent-help", link: "/cli/agent-help" },
+              { text: "skill", link: "/cli/skill" },
+              { text: "setup", link: "/cli/setup" },
             ],
           },
         ],

@@ -94,6 +94,7 @@ local rule: JouetRule = {
 	examples = {
 		record = {
 			{ command = "cargo test --all-targets", exit_code = 101, kind = "test" },
+			{ command = "rtk cargo test", exit_code = 101, kind = "test" },
 			{ command = "cd crate && cargo test", exit_code = 101, kind = "test" },
 			{ command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
 			{ command = "cargo clippy -- -D warnings", exit_code = 101, kind = "lint" },
@@ -114,6 +115,7 @@ local rule: JouetRule = {
 			{ command = "npm install", exit_code = 0 },
 			{ command = "cargo test; echo done", exit_code = 1 },
 			{ command = "cargo test || true", exit_code = 0 },
+			{ command = "cargo test 2>&1 | tail -5", exit_code = 0 },
 			{ command = "cargo test &", exit_code = 0 },
 		},
 	},

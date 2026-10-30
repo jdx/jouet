@@ -40,6 +40,7 @@ pub(crate) fn repo_recipe_dir(cwd: &Path) -> Option<PathBuf> {
 pub(crate) fn probes(cwd: &Path, network: bool) -> Probes {
     let ledger = jouet_output::paths::state_dir().map(|d| d.join("ledger"));
     Probes::new(Some(cwd.to_path_buf()), ledger, network)
+        .with_repo_key(crate::ledger::repo_key(cwd))
 }
 
 pub(crate) fn trust_store() -> TrustStore {

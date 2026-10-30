@@ -168,9 +168,7 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
 
 #[test]
 fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
-    let dir = repo();
-    let work = dir.path().join("work");
-    let ours = git::repo_key(&work.canonicalize().unwrap().display().to_string());
+    let ours = "1111222233334444";
     let ledger = tempfile::tempdir().unwrap();
     let lines = [
         json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "shape": "cargo test", "exit_code": 0,
@@ -196,32 +194,24 @@ fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
         return `{t.kind} {t.exit_code} {t.ok} {t.ts} {t.duration_ms} {t.shape} | {any.kind} {any.ts}`
     end)()"#;
     let e = engine(expr, Budget::default());
-    e.set_probes(Probes::new(
-        Some(work.clone()),
-        Some(ledger.path().into()),
-        false,
-    ));
+    let probes = Probes::new(None, Some(ledger.path().into()), false);
+    e.set_probes(probes.clone().with_repo_key(Some(ours.into())));
     // The run in another repository (ts 5) is passed over; the lint run is
     // older than the newest test run.
     assert_eq!(said(&e), "test 101 false 3 900 cargo test | test 3");
+    // A work tree the ledger has no key for matches every run.
+    e.set_probes(probes);
+    assert_eq!(said(&e), "test 0 true 5 nil npm test | test 5");
 
     let e = engine(
         r#"(function() local r, err = jouet.ci.last_run("build"); return `{r} {err}` end)()"#,
         Budget::default(),
     );
-    e.set_probes(Probes::new(
-        Some(work.clone()),
-        Some(ledger.path().into()),
-        false,
-    ));
+    e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
     assert_eq!(said(&e), "nil nil");
     // No ledger at all: nothing to report, and no error.
     let none = tempfile::tempdir().unwrap();
-    e.set_probes(Probes::new(
-        Some(work),
-        Some(none.path().join("missing")),
-        false,
-    ));
+    e.set_probes(Probes::new(None, Some(none.path().join("missing")), false));
     assert_eq!(said(&e), "nil nil");
     let e = engine(r#"jouet.ci.last_run("deploy")"#, Budget::default());
     e.set_probes(Probes::new(None, None, false));

@@ -5,6 +5,9 @@
 //! [rules]
 //! disable = ["git-stash", "no-verify"]
 //! network = true
+//!
+//! [hooks]
+//! verify = false
 //! ```
 
 use usage_rs::config::{EnvLayer, FileLayer, FileScope, Layers, resolve};
@@ -13,6 +16,29 @@ use usage_rs::config::{EnvLayer, FileLayer, FileScope, Layers, resolve};
 pub(crate) struct Settings {
     #[usage(flatten)]
     pub rules: RuleSettings,
+    #[usage(flatten)]
+    pub hooks: HookSettings,
+}
+
+/// What the hooks `jouet setup` installs do.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "hooks")]
+pub(crate) struct HookSettings {
+    /// Run jouet's hooks at all
+    #[usage(env = "JOUET_HOOKS", default = true)]
+    pub enabled: bool,
+    /// Run the pre-tool-use rules, which deny or warn about commands
+    #[usage(env = "JOUET_HOOKS_STEER", default = true)]
+    pub steer: bool,
+    /// Print a short jouet guide when a session starts
+    #[usage(env = "JOUET_HOOKS_PRIME", default = true)]
+    pub prime: bool,
+    /// Block finishing while the last test, lint or build run failed
+    #[usage(env = "JOUET_HOOKS_VERIFY", default = true)]
+    pub verify: bool,
+    /// Keep a ledger of command shapes and rule decisions
+    #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
+    pub ledger: bool,
 }
 
 /// Which rules run.
@@ -87,6 +113,17 @@ mod tests {
         let mut disabled = s.rules.disable.unwrap();
         disabled.sort();
         assert_eq!(disabled, ["git-stash", "no-verify"]);
+    }
+
+    #[test]
+    fn every_hook_is_on_until_turned_off() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(s.hooks.enabled && s.hooks.steer && s.hooks.prime && s.hooks.verify);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[hooks]\nverify = false\n").unwrap();
+        let s = Settings::load_from(&env(&[("JOUET_HOOKS_PRIME", "false")]), Some(path));
+        assert!(!s.hooks.verify && !s.hooks.prime && s.hooks.steer);
     }
 
     #[test]

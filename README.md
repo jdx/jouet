@@ -112,9 +112,11 @@ Every command follows the same
 output that adapts to whoever is reading, `--json` that prints exactly one
 document, and one table of exit codes.
 
-After the commands, jouet will help agents reach for them: hooks that catch a
-costly pattern and point to the command that replaces it, and rules you write
-yourself. See [what comes next](https://jouet.jdx.dev/why#what-comes-next).
+`jouet setup claude` (or `codex`) installs a thin skill and hooks that steer an
+agent toward these commands, deny habits such as `git add -A` and a bare
+`git stash`, and stop it finishing while its last test run failed. The rules
+behind the hooks are [Luau scripts](https://jouet.jdx.dev/rules) you can add
+to. See [agent setup and hooks](https://jouet.jdx.dev/setup).
 
 ## Development
 

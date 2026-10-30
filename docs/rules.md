@@ -72,7 +72,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		warn = { "rm -rf target", "sudo rm -r build" },
+		deny = { "rm -rf target", "sudo rm -r build" },
 		allow = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
 	},
 }
@@ -96,7 +96,8 @@ The header is a few `--- key: value` lines at the top of the file, which `jouet 
 - **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
 - **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
 - **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` are included**, marked `nested`.
-- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --`, and `program` is the basename of what runs.
+- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup` and `mise x tool --`, and `program` is the basename of what runs.
+- **rtk is looked through too.** [rtk](https://github.com/rtk-ai/rtk) compresses command output, and its hook rewrites `git status` to `rtk git status`. jouet's rules see the wrapped command, so `rtk git add -A` is denied like `git add -A`. A command it wrapped has `via = "rtk"`, and so does the call. rtk's own commands, such as `rtk gain`, are left alone.
 
 The `jouet` module has helpers for the common cases:
 - `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`. (`jouet.git` is also where the `jouet.git.state()` probe lives.)
@@ -109,16 +110,16 @@ The `jouet` module has helpers for the common cases:
 
 A rule that names a jouet command in its advice declares it with `needs = { "wait", "ci" }`, and stays off until the installed jouet has that command.
 
-A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
+A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one that feeds a pipe: without `set -o pipefail`, `cargo test | tail` exiting 0 is `tail`'s success, so `cargo test` gets no status. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
+`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce, so this rule's denials print as `warn` there:
 
 ```console
 $ jouet rule test ./no-rm-rf.luau
-ok    warn          rm -rf target
-ok    warn          sudo rm -r build
+ok    deny          rm -rf target
+ok    deny          sudo rm -r build
 ok    allow         rm file.txt
 ok    allow         echo 'rm -rf /'
 ok    allow         git commit -m 'rm -rf old code'
@@ -176,7 +177,7 @@ network = true
 
 A probe still has to answer within the rule's 50 ms. [Recipes](/commands/run) always have the GitHub probes, with a budget of their own.
 
-`jouet.ci.last_run` passes over runs that another repository recorded, when the ledger says which repository a run was in. The ledger names a repository by a hash of its root, never its path.
+The hooks record which work tree each run was in, by a hash of its root rather than its path, so `jouet.ci.last_run` passes over runs from other repositories.
 
 ## The sandbox and its limits
 

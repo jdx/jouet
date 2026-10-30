@@ -51,6 +51,10 @@ export type JouetCommand = {
 	status: number?,
 	-- `argv` joined with spaces, cut to 80 characters, for messages.
 	text: string,
+	-- "rtk" when rtk wraps the command (`rtk git status`, as rtk's hook
+	-- rewrites commands); `argv` is then the wrapped command. rtk's own
+	-- commands, such as `rtk gain`, are not unwrapped.
+	via: string?,
 }
 
 export type JouetEvent = "pre-tool-use" | "post-tool-use"
@@ -71,6 +75,8 @@ export type JouetCall = {
 	-- `$(...)` and `sh -c '...'`. Quoted text, here-documents and comments are
 	-- never commands.
 	commands: { JouetCommand },
+	-- "rtk" when rtk wraps any of the top-level commands.
+	via: string?,
 }
 
 export type JouetDecision = {

@@ -2,7 +2,6 @@
 //! `git`, each run killed when the budget runs out.
 
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -145,15 +144,4 @@ pub(crate) fn repo(dir: Option<&Path>, timeout: Duration) -> Result<Value, Strin
         repo["repo"] = github.to_string().into();
     }
     Ok(repo)
-}
-
-/// The key a ledger entry's optional `repo` field holds for a work tree:
-/// the first 16 hex digits of the SHA-256 of its root, so the ledger names
-/// a repository without storing its path.
-pub(crate) fn repo_key(root: &str) -> String {
-    Sha256::digest(root.as_bytes())
-        .iter()
-        .take(8)
-        .map(|b| format!("{b:02x}"))
-        .collect()
 }

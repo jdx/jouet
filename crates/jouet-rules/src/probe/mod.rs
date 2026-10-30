@@ -67,6 +67,8 @@ pub struct Probes {
     network: bool,
     dir: Option<PathBuf>,
     ledger: Option<PathBuf>,
+    /// The key the ledger names this work tree by, if it has one.
+    repo_key: Option<String>,
     github: Arc<PrFetch>,
 }
 
@@ -80,8 +82,17 @@ impl Probes {
             network,
             dir,
             ledger,
+            repo_key: None,
             github: Arc::new(github::fetch),
         }
+    }
+
+    /// The same probes, with the key the ledger's writer gives this work
+    /// tree (`repo` on each entry), so `jouet.ci.last_run` passes over runs
+    /// recorded in other repositories. Without one, every run matches.
+    pub fn with_repo_key(mut self, key: Option<String>) -> Self {
+        self.repo_key = key;
+        self
     }
 
     fn pr(
@@ -101,13 +112,8 @@ impl Probes {
         Ok(view.map(|v| serde_json::json!({ "status": v.status, "next": v.next })))
     }
 
-    fn last_run(&self, kind: Option<&str>, timeout: Duration) -> Option<serde_json::Value> {
-        let dir = self.ledger.as_deref()?;
-        let probe_dir = self.dir.clone();
-        ledger::last_run(dir, kind, || {
-            let repo = git::repo(probe_dir.as_deref(), timeout).ok()?;
-            Some(git::repo_key(repo["root"].as_str()?))
-        })
+    fn last_run(&self, kind: Option<&str>) -> Option<serde_json::Value> {
+        ledger::last_run(self.ledger.as_deref()?, kind, self.repo_key.as_deref())
     }
 }
 
@@ -203,7 +209,7 @@ pub(crate) fn install(
                 )));
             }
             let key = format!("ci:{}", kind.as_deref().unwrap_or(""));
-            let found = cached(&s, &key, |p, left| Ok(p.last_run(kind.as_deref(), left)))?;
+            let found = cached(&s, &key, |p, _| Ok(p.last_run(kind.as_deref())))?;
             answer(lua, found)
         })?,
     )?;

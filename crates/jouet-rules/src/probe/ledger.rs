@@ -3,9 +3,9 @@
 //!
 //! The ledger is written by `jouet hook`; without one there is no last run.
 //! Each post-tool-use entry carries a `record:<kind>` decision for a run a
-//! rule recorded. An entry may also carry `repo`, a key for the work tree
-//! it ran in ([`super::git::repo_key`]); when it does, a run from another
-//! repository is passed over. Entries without it match any repository.
+//! rule recorded, and `repo`, the key the hook gives the work tree it ran
+//! in. A run whose `repo` is another work tree's is passed over; entries
+//! without one, and every entry when this work tree has no key, match.
 
 use serde_json::{Value, json};
 use std::io::{Read, Seek, SeekFrom};
@@ -14,14 +14,9 @@ use std::path::Path;
 /// How much of the end of the ledger is read.
 const TAIL: u64 = 256 * 1024;
 
-/// The newest recorded run of `kind` (any kind when None). `repo_key` is
-/// asked for this work tree's key, at most once, and only when an entry
-/// names a repository.
-pub(crate) fn last_run(
-    dir: &Path,
-    kind: Option<&str>,
-    mut repo_key: impl FnMut() -> Option<String>,
-) -> Option<Value> {
+/// The newest recorded run of `kind` (any kind when None) in the work tree
+/// whose key is `here`.
+pub(crate) fn last_run(dir: &Path, kind: Option<&str>, here: Option<&str>) -> Option<Value> {
     let mut file = std::fs::File::open(dir.join("ledger.jsonl")).ok()?;
     let len = file.metadata().ok()?.len();
     let start = len.saturating_sub(TAIL);
@@ -34,7 +29,6 @@ pub(crate) fn last_run(
         // The read started mid-line.
         lines.remove(0);
     }
-    let mut here: Option<Option<String>> = None;
     for line in lines.iter().rev() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -45,11 +39,10 @@ pub(crate) fn last_run(
         let Some((rule, recorded)) = record(&entry, kind) else {
             continue;
         };
-        if let Some(theirs) = entry["repo"].as_str() {
-            let ours = here.get_or_insert_with(&mut repo_key);
-            if ours.as_deref().is_some_and(|ours| ours != theirs) {
-                continue;
-            }
+        if let (Some(theirs), Some(ours)) = (entry["repo"].as_str(), here)
+            && theirs != ours
+        {
+            continue;
         }
         let exit_code = entry["exit_code"].as_i64();
         let mut run = json!({

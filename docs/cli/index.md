@@ -42,3 +42,6 @@
 - [`jouet rule trust`](/cli/rule/trust.md)
 - [`jouet rule untrust`](/cli/rule/untrust.md)
 - [`jouet run [FLAGS] [RECIPE] [ARGS]…`](/cli/run.md)
+- [`jouet agent-help [COMMAND]…`](/cli/agent-help.md)
+- [`jouet skill [--format <FORMAT>]`](/cli/skill.md)
+- [`jouet setup [FLAGS] <HARNESS>`](/cli/setup.md)
