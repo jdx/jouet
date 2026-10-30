@@ -90,12 +90,12 @@ See [`jouet edit`](/commands/edit) for the other spec formats, `--check`, `--rev
 
 ## Tell your agent
 
-Agents reach for whatever their instructions mention. Add a line like this to `AGENTS.md`, `CLAUDE.md` or a skill:
+Agents reach for whatever their instructions mention. For Claude Code or Codex, let jouet install a skill and hooks that steer the agent toward its commands:
 
-```md
-Edit files with `jouet edit` (search/replace blocks or a Codex-style patch on stdin)
-instead of Python heredocs. Run `jouet edit --help` for the formats; exit code 4
-means nothing was written and the output shows why.
+```sh
+jouet setup claude   # or: jouet setup codex
 ```
+
+See [agent setup and hooks](/setup) for what that changes and how to turn each part off. For another harness, add the snippet `jouet skill --format agents-md` prints to its `AGENTS.md`; it points the agent at `jouet agent-help`, which always describes the installed version.
 
 jouet notices when an agent is running it and switches to compact output on its own; see [shared conventions](/conventions#display-modes).

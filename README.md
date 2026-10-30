@@ -22,6 +22,11 @@ first four commands turn each of those into one command (`edit` and `wait` for l
 | `jouet pr status` | per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` handling |
 | `jouet edit` | heredoc edits with hand-written `assert s.count(old) == 1`; all-or-nothing, never partially written |
 
+`jouet setup claude` (or `codex`) installs a thin skill and hooks that steer an agent toward these
+commands, deny habits such as `git add -A` and a bare `git stash`, and stop it finishing while its last
+test run failed. The rules behind the hooks are Luau scripts you can replace or add to. See
+[agent setup and hooks](https://jouet.jdx.dev/setup).
+
 Each command is designed to work without a TTY and never prompt. Output adapts to who is
 reading (an agent, a human at a terminal, or a pipe), `--json` prints exactly one token-lean
 document, lists are never truncated silently, and every command shares one exit-code table.

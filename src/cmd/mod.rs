@@ -1,7 +1,11 @@
 //! Command implementations, and the output conventions they share.
 
+pub mod agent_help;
 pub mod edit;
+pub mod hook;
 pub mod rule;
+pub mod setup;
+pub mod skill;
 pub mod wait;
 
 use crate::display::Mode;

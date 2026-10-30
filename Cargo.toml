@@ -36,7 +36,7 @@ include = ["/src/**", "/LICENSE", "/README.md"]
 jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
 mise-agent-env = "2026"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 sha2 = "0.11"
 similar = "3"
