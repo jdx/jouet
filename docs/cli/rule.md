@@ -17,7 +17,7 @@ Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository'
 - [`jouet rule log [NAME]`](/cli/rule/log.md)
 - [`jouet rule new [FLAGS] <NAME>`](/cli/rule/new.md)
 - [`jouet rule promote [--reason <TEXT>] <NAME>`](/cli/rule/promote.md)
-- [`jouet rule test [FLAGS] <RULE>`](/cli/rule/test.md)
+- [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
 - [`jouet rule trust`](/cli/rule/trust.md)
 - [`jouet rule types`](/cli/rule/types.md)
 - [`jouet rule untrust`](/cli/rule/untrust.md)

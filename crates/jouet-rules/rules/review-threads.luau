@@ -48,11 +48,11 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"gh api graphql -f query='{ repository(owner:\"a\",name:\"b\") { pullRequest(number:1) { reviewThreads(first:100) { nodes { id } } } } }'",
 			"gh api graphql -F query=@- <<'EOF'\n{ reviewThreads(first: 50) { nodes { isResolved } } }\nEOF",
 		},
-		allow = {
+		quiet = {
 			"rg reviewThreads src/",
 			"gh api graphql -f query='{ viewer { login } }'",
 			"echo 'gh api graphql reviewThreads'",

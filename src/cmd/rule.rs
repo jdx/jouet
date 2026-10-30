@@ -48,6 +48,9 @@ struct ListedRule<'a> {
     event: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
     why: &'a str,
+    /// Why its examples fall short, so that it only warns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing_examples: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -90,8 +93,27 @@ fn list(cwd: &Path, out: &Output) -> Exit {
             source: rule.origin.describe(),
             event: rule.event.name(),
             why: &rule.why,
+            missing_examples: rule.missing_examples.as_deref(),
         })
         .collect();
+    // Listing is not on a hook's path, so it can afford to run examples.
+    for rule in loaded.engine.rules() {
+        if rule.scope == jouet_rules::Scope::Builtin
+            || matches!(rule.state, State::Broken(_) | State::Untrusted)
+        {
+            continue;
+        }
+        let name = &rule.name;
+        match (&rule.missing_examples, loaded.engine.proven(rule)) {
+            (Some(missing), _) => notes.push(format!(
+                "{name} only warns, and cannot be promoted, until it has examples of both kinds: {missing}; see `jouet rule test {name}`"
+            )),
+            (None, Err(failing)) => notes.push(format!(
+                "{name}: {failing}; see `jouet rule test {name}`"
+            )),
+            (None, Ok(_)) => {}
+        }
+    }
     let report = List {
         rules: listed,
         notes,
@@ -161,21 +183,90 @@ struct Tested {
     records: Vec<jouet_rules::Record>,
 }
 
+/// One rule's examples and how they went.
 #[derive(Serialize)]
 struct Examples {
     rule: String,
     passed: usize,
     failed: usize,
+    /// Why the examples do not cover both kinds, or could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing: Option<String>,
+    /// Why the rule could not run at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
     examples: Vec<jouet_rules::Example>,
 }
 
+impl Examples {
+    fn run(engine: &Engine, rule: &Rule) -> Self {
+        let (examples, error) = match &rule.state {
+            State::Broken(e) => (Vec::new(), Some(format!("it does not load: {e}"))),
+            _ => match engine.examples(rule) {
+                Ok(examples) => (examples, None),
+                Err(e) => (Vec::new(), Some(e)),
+            },
+        };
+        crate::share::record_gaps(engine);
+        let failed = examples.iter().filter(|e| !e.ok).count();
+        Self {
+            rule: rule.name.clone(),
+            passed: examples.len() - failed,
+            failed,
+            missing: rule.missing_examples.clone(),
+            error,
+            examples,
+        }
+    }
+
+    fn ok(&self) -> bool {
+        self.failed == 0 && self.missing.is_none() && self.error.is_none()
+    }
+
+    /// Each example on a line (or only those that failed), and under one
+    /// that failed, what it expected and what the rule did, as a diff.
+    fn lines(&self, indent: &str, failed_only: bool) -> String {
+        let mut text = String::new();
+        for e in self.examples.iter().filter(|e| !(failed_only && e.ok)) {
+            let mark = if e.ok { "ok  " } else { "FAIL" };
+            let _ = writeln!(text, "{indent}{mark}  {:<12}  {}", e.expected, e.label());
+            if !e.ok {
+                let actual = match &e.message {
+                    Some(message) => format!("{}: {message}", e.actual),
+                    None => e.actual.clone(),
+                };
+                let _ = writeln!(text, "{indent}      - expected: {}", e.expected);
+                let _ = writeln!(text, "{indent}      + actual:   {actual}");
+            }
+        }
+        text
+    }
+}
+
+/// How to give a rule what it lacks.
+const ADD_EXAMPLES: &str = "give it `examples = { fires = { ... }, quiet = { ... } }`";
+
 fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
-    let (engine, name) = match engine_for(&args.rule, cwd) {
+    let name = match (&args.rule, args.all) {
+        (Some(_), true) => return out.error(Exit::Usage, "pass a rule or --all, not both"),
+        (None, false) => return out.error(Exit::Usage, "name a rule to test, or pass --all"),
+        (None, true) => {
+            if args.command.is_some() || args.payload.is_some() || args.replay {
+                return out.error(
+                    Exit::Usage,
+                    "--all runs every rule's examples; leave out --command, --payload and --replay",
+                );
+            }
+            return test_all(cwd, out);
+        }
+        (Some(name), false) => name,
+    };
+    let (engine, name) = match engine_for(name, cwd) {
         Ok(found) => found,
         Err((exit, message)) => return out.error(exit, &message),
     };
     let Some(rule) = engine.rule(&name) else {
-        return out.error(Exit::NotFound, &format!("no rule named `{}`", args.rule));
+        return out.error(Exit::NotFound, &format!("no rule named `{name}`"));
     };
     if let State::Broken(error) = &rule.state {
         return out.error(
@@ -252,45 +343,113 @@ fn tested_text(t: &Tested) -> String {
 }
 
 fn examples(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
-    let examples = engine.examples(rule);
-    crate::share::record_gaps(engine);
-    let examples = match examples {
-        Ok(examples) => examples,
-        Err(e) => return out.error(Exit::Failed, &format!("rule {}: {e}", rule.name)),
-    };
-    if examples.is_empty() {
+    let report = Examples::run(engine, rule);
+    if let Some(error) = &report.error {
+        return out.error(Exit::Failed, &format!("rule {}: {error}", rule.name));
+    }
+    if let (true, Some(missing)) = (report.examples.is_empty(), &report.missing) {
         return out.error(
             Exit::Precondition,
             &format!(
-                "{} has no examples; add some, or pass --command or --payload",
+                "{}: {missing}; {ADD_EXAMPLES}. Or pass --command or --payload",
                 rule.name
             ),
         );
     }
-    let failed = examples.iter().filter(|e| !e.ok).count();
-    let report = Examples {
-        rule: rule.name.clone(),
-        passed: examples.len() - failed,
-        failed,
-        examples,
-    };
     out.result(&report, || {
-        let mut text = String::new();
-        for e in &report.examples {
-            let mark = if e.ok { "ok  " } else { "FAIL" };
-            let command = e.command.replace('\n', "\\n");
-            let _ = write!(text, "{mark}  {:<12}  {command}", e.expected);
-            if !e.ok {
-                let _ = write!(text, "  (got {})", e.actual);
-            }
-            text.push('\n');
-        }
+        let mut text = report.lines("", false);
         let _ = writeln!(
             text,
             "{}: {} of {} examples passed",
             report.rule,
             report.passed,
             report.examples.len()
+        );
+        if let Some(missing) = &report.missing {
+            let _ = writeln!(text, "{}: {missing}; {ADD_EXAMPLES}", report.rule);
+        }
+        text
+    });
+    if report.ok() { Exit::Ok } else { Exit::Failed }
+}
+
+#[derive(Serialize)]
+struct All {
+    passed: usize,
+    failed: usize,
+    rules: Vec<Examples>,
+}
+
+/// `rule test --all`: every rule's examples, including a repository's
+/// untrusted ones, since testing only prints.
+fn test_all(cwd: &Path, out: &Output) -> Exit {
+    let loaded = match rules::load(cwd) {
+        Ok(loaded) => loaded,
+        Err(e) => return out.error(Exit::Failed, &format!("starting the rule engine: {e}")),
+    };
+    let mut reports = Vec::new();
+    for rule in loaded.engine.rules() {
+        let report = match (&rule.state, &rule.origin) {
+            (State::Untrusted, origin @ Origin::Repo(_)) => match single(origin.clone()) {
+                Ok((engine, name)) => match engine.rule(&name) {
+                    Some(rule) => Examples::run(&engine, rule),
+                    None => continue,
+                },
+                Err((_, error)) => Examples {
+                    rule: rule.name.clone(),
+                    passed: 0,
+                    failed: 0,
+                    missing: None,
+                    error: Some(error),
+                    examples: Vec::new(),
+                },
+            },
+            _ => Examples::run(&loaded.engine, rule),
+        };
+        reports.push(report);
+    }
+    let failed = reports.iter().filter(|r| !r.ok()).count();
+    let report = All {
+        passed: reports.len() - failed,
+        failed,
+        rules: reports,
+    };
+    out.result(&report, || {
+        let width = report
+            .rules
+            .iter()
+            .map(|r| r.rule.chars().count())
+            .max()
+            .unwrap_or(0);
+        let mut text = String::new();
+        for r in &report.rules {
+            let mut problems = Vec::new();
+            if let Some(error) = &r.error {
+                problems.push(error.clone());
+            }
+            if r.failed > 0 {
+                problems.push(format!(
+                    "{} of {} examples failed",
+                    r.failed,
+                    r.examples.len()
+                ));
+            }
+            if let Some(missing) = &r.missing {
+                problems.push(missing.clone());
+            }
+            let (mark, detail) = if problems.is_empty() {
+                ("ok  ", format!("{} examples passed", r.passed))
+            } else {
+                ("FAIL", problems.join("; "))
+            };
+            let _ = writeln!(text, "{mark}  {:width$}  {detail}", r.rule);
+            text.push_str(&r.lines("      ", true));
+        }
+        let _ = writeln!(
+            text,
+            "{} of {} rules passed their examples",
+            report.passed,
+            report.rules.len()
         );
         text
     });
@@ -432,6 +591,16 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
                 Some(why) => rulefile::set_field(&code, "why", why),
                 None => code,
             };
+            // A note drafted by an older jouet may not pass examples of both
+            // kinds; adopting it would only give a rule that cannot deny.
+            if let Err(problem) = wind::draft::verify(name, &code) {
+                return out.error(
+                    Exit::Precondition,
+                    &format!(
+                        "note {id}'s draft does not pass examples of both kinds ({problem}); `jouet wind dismiss {id}`, or write the rule with `jouet rule new {name} --why ...`"
+                    ),
+                );
+            }
             (code, format!("from winding note {id}: {}", note.why))
         }
         None => {
@@ -485,7 +654,9 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
         let next = if args.from_note.is_some() {
             format!("check it: `jouet rule test {name}` and `jouet rule test {name} --replay`")
         } else {
-            format!("fill in its check and examples, then `jouet rule test {name}`")
+            format!(
+                "fill in its examples (calls it must fire on, near misses it must leave alone) and its check, then `jouet rule test {name}`"
+            )
         };
         format!(
             "wrote {} (warn mode); {next}; `jouet rule promote {name}` when it is right\n",

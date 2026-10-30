@@ -32,7 +32,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "rule",
         Some(
-            "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: `jouet rule test` runs one before it is enabled",
+            "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
         ),
     ),
     (

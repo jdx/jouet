@@ -50,6 +50,14 @@ pub(crate) fn scaffold(h: &Header) -> String {
 -- `jouet rule types` prints the API; `jouet rule test {name} --replay` runs this
 -- rule over the calls jouet's hooks have seen.
 local rule: JouetRule = {{
+	-- Fill these in first: the rule only warns, and cannot be promoted, until
+	-- it passes at least one of each.
+	examples = {{
+		-- Calls the rule must fire on.
+		fires = {{}},
+		-- Near misses it must leave alone.
+		quiet = {{}},
+	}},
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			-- Match the command this rule is about, for example:
@@ -60,11 +68,6 @@ local rule: JouetRule = {{
 		end
 		return nil
 	end,
-	examples = {{
-		-- Commands the rule must stop, and near misses it must allow.
-		deny = {{}},
-		allow = {{}},
-	}},
 }}
 
 return rule

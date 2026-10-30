@@ -47,12 +47,12 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"python3 - <<'EOF'\nfrom pathlib import Path\np = Path('a.rs')\np.write_text(p.read_text().replace('a', 'b'))\nEOF",
 			"python3 -c \"s=open('f').read().replace('x','y'); open('f','w').write(s)\"",
 			"cd src && python3.12 <<EOF\nt = open('x').read()\nt = t.replace('a', 'b')\nopen('x', 'w').write(t)\nEOF",
 		},
-		allow = {
+		quiet = {
 			"python3 - <<'EOF'\nprint(open('f').read().replace('a', 'b'))\nEOF",
 			"python3 fix.py",
 			"cat <<'EOF' > fix.py\nopen('f','w').write(s.replace('a','b'))\nEOF",

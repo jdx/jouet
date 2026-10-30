@@ -92,7 +92,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		record = {
+		fires = {
 			{ command = "cargo test --all-targets", exit_code = 101, kind = "test" },
 			{ command = "cd crate && cargo test", exit_code = 101, kind = "test" },
 			{ command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
@@ -107,7 +107,7 @@ local rule: JouetRule = {
 			{ command = "make check", exit_code = 0, kind = "lint" },
 			{ command = "set -o pipefail; cargo test | tee log", exit_code = 101, kind = "test" },
 		},
-		allow = {
+		quiet = {
 			{ command = "cargo fmt", exit_code = 0 },
 			{ command = "mise run lint-fix", exit_code = 0 },
 			{ command = "cargo run", exit_code = 0 },

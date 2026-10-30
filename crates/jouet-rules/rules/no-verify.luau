@@ -61,14 +61,14 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"git commit --no-verify -m x",
 			"git push --no-verify",
 			"git commit -n -m x",
 			"git commit -nm x",
 			"git -c core.x=1 commit -am x --no-verify",
 		},
-		allow = {
+		quiet = {
 			"git commit -m 'drop --no-verify'",
 			"git commit -m -n",
 			"git commit -m '--no-verify'",
