@@ -30,7 +30,7 @@ features:
   - title: jouet pr status
     details: One line per PR with the reasons it needs attention, in place of a for loop over gh pr view.
     link: /commands/pr-status
-    linkText: Coming soon
+    linkText: Available now
   - title: jouet pr threads
     details: List, reply to and resolve review threads without hand-written reviewThreads GraphQL.
     link: /commands/pr-threads

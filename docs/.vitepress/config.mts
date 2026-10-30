@@ -25,6 +25,7 @@ export default defineConfig({
   cleanUrls: true,
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
+    "cli/pr.md": "cli/pr/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -78,6 +79,12 @@ export default defineConfig({
                   { text: "replace", link: "/cli/edit/replace" },
                   { text: "hash", link: "/cli/edit/hash" },
                 ],
+              },
+              {
+                text: "pr",
+                link: "/cli/pr/",
+                collapsed: true,
+                items: [{ text: "status", link: "/cli/pr/status" }],
               },
             ],
           },
