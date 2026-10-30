@@ -117,17 +117,22 @@ end }
     );
     assert!(fake.requests().is_empty());
 
-    // The round trip has to fit in the rule's 50ms budget. The local fake
-    // server's does, but a loaded machine can miss it, so it gets three
-    // tries; a miss fails open, saying nothing.
-    let network = [("JOUET_RULES_NETWORK", "true")];
-    let said: Vec<String> = (0..3)
-        .map(|_| {
-            stdout(&jouet(&fake, home.path(), &network, &args))
-                .trim()
-                .to_string()
-        })
-        .collect();
-    assert!(said.iter().any(|s| s == "deny: draft"), "{said:?}");
-    assert!(!fake.requests().is_empty());
+    // With the setting on, the probe goes to GitHub. Whether the answer
+    // arrives within the rule's 50 ms depends on the machine, so either
+    // outcome is right: the PR's state, or the rule failing open over its
+    // budget. What must not happen is the probe being refused. The fetch
+    // itself is checked, without a deadline that matters, by the recipe test
+    // above.
+    let out = jouet(
+        &fake,
+        home.path(),
+        &[("JOUET_RULES_NETWORK", "true")],
+        &args,
+    );
+    let (said, err) = (stdout(&out), stderr(&out));
+    let answered = said.trim() == "deny: draft";
+    let failed_open = (said.trim().is_empty() && err.contains("budget"))
+        || said.contains("did not answer within the budget");
+    assert!(answered || failed_open, "stdout: {said}\nstderr: {err}");
+    assert!(!said.contains("network probes are off"));
 }
