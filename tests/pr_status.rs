@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{CUT_SHORT, Fake, Request, json, query, serve, stderr, stdout};
+use common::{CUT_SHORT, Fake, RATE_LIMITED, Request, json, query, serve, stderr, stdout};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output};
@@ -243,6 +243,30 @@ fn every_token_rejected_is_a_remote_failure() {
     assert_eq!(json(&out)["error"]["code"], "remote");
     let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
     assert!(message.contains("GH_TOKEN and GITHUB_TOKEN"), "{message}");
+}
+
+#[test]
+fn an_exhausted_rate_limit_fails_at_once_and_says_when_it_resets() {
+    let fake = serve(|_, _| {
+        (
+            RATE_LIMITED,
+            r#"{"message":"API rate limit exceeded"}"#.into(),
+        )
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[("JOUET_GITHUB_TOKEN", GOOD)],
+        &["pr", "status", "--repo", "jdx/jouet", "3", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
+    let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
+    assert!(
+        message.contains("rate limit exhausted; it resets in "),
+        "{message}"
+    );
+    assert_eq!(fake.requests().len(), 1);
 }
 
 #[test]

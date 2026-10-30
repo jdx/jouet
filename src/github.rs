@@ -142,7 +142,15 @@ impl Client {
                 Some(token) => token,
                 None => self.next_token()?,
             };
-            let (status, text) = self.request(&token.value, url, body, idempotent)?;
+            let (status, text) = match self.request(&token.value, url, body, idempotent) {
+                Ok(sent) => sent,
+                // The token was not rejected, so it is kept for the next
+                // request (such as the one after a rate limit resets).
+                Err(e) => {
+                    self.token = Some(token);
+                    return Err(e);
+                }
+            };
             if status == 401 {
                 self.rejected.push(token.source);
                 continue;
