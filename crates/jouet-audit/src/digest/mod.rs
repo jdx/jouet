@@ -796,7 +796,7 @@ fn read_target(call: &Call) -> Option<String> {
             // The first command, or the first after a `cd`.
             let first = &words
                 .iter()
-                .find(|(w, _)| !w.first().is_some_and(|p| p == "cd"))?
+                .find(|(w, _)| w.first().is_none_or(|p| p != "cd"))?
                 .0;
             let program = first.first()?.rsplit('/').next()?;
             if !matches!(

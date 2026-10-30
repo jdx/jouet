@@ -75,7 +75,7 @@ impl Reader for Codex {
             t.lines += 1;
             state.line = t.lines;
             let found = |k: &&[u8]| memchr::memmem::find(line, k).is_some();
-            if !RELEVANT.iter().any(found) && !(state.detail && DETAIL.iter().any(found)) {
+            if !(RELEVANT.iter().any(found) || state.detail && DETAIL.iter().any(found)) {
                 return true;
             }
             let parsed: Line = match serde_json::from_slice(line) {
