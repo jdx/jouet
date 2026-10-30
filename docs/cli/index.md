@@ -17,6 +17,7 @@
 - [`jouet edit [FLAGS] [SUBCOMMAND]`](/cli/edit.md)
 - [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
+- [`jouet stats [FLAGS]`](/cli/stats.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
 - [`jouet pr threads [FLAGS] [PR] [SUBCOMMAND]`](/cli/pr/threads.md)

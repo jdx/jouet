@@ -17,6 +17,18 @@ pub fn watch_dir() -> PathBuf {
     state_dir().join("watch")
 }
 
+/// Where jouet's hooks keep their ledger: `$XDG_STATE_HOME/jouet/ledger`,
+/// else `~/.local/state/jouet/ledger`.
+pub fn ledger_dir() -> PathBuf {
+    state_dir().join("ledger")
+}
+
+/// Where `jouet stats` keeps what it worked out, such as the baseline from
+/// before setup: `$XDG_STATE_HOME/jouet/stats`.
+pub fn stats_dir() -> PathBuf {
+    state_dir().join("stats")
+}
+
 fn state_dir() -> PathBuf {
     let state = std::env::var_os("XDG_STATE_HOME")
         .filter(|d| !d.is_empty())

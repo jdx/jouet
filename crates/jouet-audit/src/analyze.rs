@@ -56,6 +56,9 @@ struct CatAcc {
     repeat_tokens: f64,
     /// Tokens of requests whose call in this category failed.
     failed_tokens: f64,
+    /// Runs of consecutive requests in this category: a CI wait polled
+    /// eight times is one run of eight requests.
+    runs: u64,
     shapes: HashMap<String, ShapeAcc>,
 }
 
@@ -172,6 +175,9 @@ impl Analyzer {
                 if previous & bit(Category::Reply) != 0 {
                     reply.repeat_tokens += tokens as f64;
                 }
+                if previous & bit(Category::Reply) == 0 {
+                    reply.runs += 1;
+                }
                 previous = bit(Category::Reply);
                 continue;
             }
@@ -180,6 +186,7 @@ impl Analyzer {
             let mut mask = 0;
             for call in calls {
                 let category = categorize(call);
+                let first_here = mask & bit(category) == 0;
                 mask |= bit(category);
                 let duration = call.duration_ms.unwrap_or(0);
                 acc.calls += 1;
@@ -202,6 +209,8 @@ impl Analyzer {
                 }
                 if previous & bit(category) != 0 {
                     c.repeat_tokens += tokens;
+                } else if first_here {
+                    c.runs += 1;
                 }
                 let call_shape = call.command.as_deref().map(shape);
                 if let (Some(command), Some(call_shape)) = (&call.command, &call_shape) {
@@ -273,6 +282,7 @@ impl Analyzer {
                 o.failed += t.failed;
                 o.repeat_tokens += t.repeat_tokens;
                 o.failed_tokens += t.failed_tokens;
+                o.runs += t.runs;
                 merge_shapes(&mut o.shapes, t.shapes);
             }
             for (o, t) in ours.patterns.iter_mut().zip(theirs.patterns) {
@@ -366,6 +376,7 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
                 duration_ms: c.duration_ms,
                 output_bytes: c.output_bytes,
                 failed: c.failed,
+                runs: c.runs,
                 shape_count: c.shapes.len() as u64,
                 top_shapes: top(&c.shapes, top_shapes),
             })
@@ -596,6 +607,10 @@ pub struct CategoryReport {
     pub output_bytes: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub failed: u64,
+    /// Runs of consecutive requests in the category, such as one CI wait
+    /// polled eight times. `requests / runs` is the polls per wait.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub runs: u64,
     /// How many distinct command shapes the category holds.
     #[serde(skip_serializing_if = "is_zero")]
     pub shape_count: u64,
@@ -774,6 +789,9 @@ mod tests {
         assert_eq!(ci.fix, "jouet wait ci");
         // The second and third polls repeat the one before them.
         assert_eq!(ci.saving.as_ref().map(|s| s.input_tokens), Some(230));
+        // Two runs of polls: three in a row, then one after the push.
+        assert_eq!(r.categories[0].runs, 2);
+        assert_eq!(r.categories[0].requests, 4);
     }
 
     #[test]

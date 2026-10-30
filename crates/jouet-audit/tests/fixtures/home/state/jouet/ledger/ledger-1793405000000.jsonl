@@ -1,0 +1,6 @@
+{"ts":1793404800,"harness":"claude","session":"s1","event":"session-start"}
+{"ts":1793404805,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg> && gh pr checks <arg>","decisions":[{"rule":"sleep-poll","action":"deny"}]}
+{"ts":1793404809,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"jouet wait ci <arg>"}
+{"ts":1793405049,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"jouet wait ci <arg>","exit_code":1,"duration_ms":240000}
+{"ts":1793405060,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"cargo test --workspace"}
+{"ts":1793405120,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"cargo test --workspace","exit_code":101,"duration_ms":60000,"decisions":[{"rule":"checks","action":"record:test"}]}

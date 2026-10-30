@@ -34,6 +34,8 @@ enum Cmd {
     Audit(AuditArgs),
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Show what jouet saved: measured from its ledger, estimated from your history
+    Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
     /// Block until a condition holds, then print one summary
@@ -70,6 +72,34 @@ pub struct AuditArgs {
     /// Show one redacted example command per shape and pattern
     #[usage(long)]
     examples: bool,
+}
+
+/// Show what jouet saved: measured from its ledger, estimated from your history
+///
+/// Counts what the hook ledger recorded (jouet command runs, rule decisions
+/// and what the agent did after a denial, checks, and failing CI logs
+/// returned as excerpts), then estimates the input tokens those runs saved
+/// against your own Claude Code and Codex history from before `jouet setup`.
+/// Every estimate shows its basis, and a kind of work with fewer than 20 runs
+/// before setup is not estimated. Without a ledger, it shows what one run of
+/// each command would save.
+#[derive(Args)]
+pub struct StatsArgs {
+    /// Only ledger entries since TIME: a duration ago such as 7d or 12h, a
+    /// date such as 2026-10-01, or RFC 3339
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which harness: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+    /// Only one session's ledger entries
+    #[usage(long, value_name = "ID")]
+    session: Option<String>,
+    /// Print one line about what jouet saved, or nothing, for a stop hook.
+    /// The `stats_summary` config key or JOUET_STATS_SUMMARY sets its style:
+    /// quips (default), plain or off
+    #[usage(long)]
+    summary: bool,
 }
 
 /// Make exact, all-or-nothing edits across files
@@ -568,6 +598,7 @@ fn main() -> ExitCode {
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
     };

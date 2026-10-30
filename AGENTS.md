@@ -2,7 +2,8 @@
 
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet edit` (exact, all-or-nothing file
-edits) and `jouet audit` (where your agent sessions spend tokens and time). It is in early development; the commands land one at a time.
+edits), `jouet audit` (where your agent sessions spend tokens and time) and `jouet stats`
+(what jouet saved). It is in early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
 
@@ -59,7 +60,8 @@ helpers. The rest lives in library crates under `crates/`:
 - `jouet-edit`: the edit engine behind `jouet edit`.
 - `jouet-wait`: the conditions and polling behind `jouet wait`.
 - `jouet-audit`: the transcript readers (Claude Code, Codex), command shapes, redaction,
-  categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`.
+  categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
+  `stats`, the ledger reader and estimates behind `jouet stats`.
 
 The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
 workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,

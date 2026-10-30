@@ -42,6 +42,9 @@ pub struct Filter {
     /// Only requests made at or after this time, in milliseconds since the
     /// Unix epoch.
     pub since_ms: Option<i64>,
+    /// Only requests made before this time, in milliseconds since the Unix
+    /// epoch: the history before `jouet setup`, for a baseline.
+    pub until_ms: Option<i64>,
     /// Only sessions that ran in this directory or below it.
     pub project: Option<PathBuf>,
 }
@@ -244,6 +247,11 @@ fn read_one(
                 transcript
                     .requests
                     .retain(|r| r.at.is_none_or(|at| at >= since));
+            }
+            if let Some(until) = filter.until_ms {
+                transcript
+                    .requests
+                    .retain(|r| r.at.is_none_or(|at| at < until));
             }
             analyzer.add(reader.harness(), &transcript);
         }
