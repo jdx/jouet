@@ -1,0 +1,18 @@
+# The packslip manifest for release.yml's packslip step, for what the action's
+# inputs cannot say per artifact. Paths are relative to the job's workspace,
+# where the archives are collected.
+#
+# The GNU builds come from Cross.toml's Ubuntu 24.04 images, so they need glibc
+# 2.39. Declaring it lets a consumer such as mise take the static musl build on
+# an older host instead. Set it on each GNU artifact, never in a top-level
+# `requires`, which the macOS, Windows and musl artifacts would inherit.
+# .github/scripts/check-glibc-min.py fails the build when a binary needs a
+# newer glibc than declared here.
+
+[[artifact]]
+path = "release-assets/jouet-x86_64-unknown-linux-gnu.tar.gz"
+requires = { glibc_min = "2.39" }
+
+[[artifact]]
+path = "release-assets/jouet-aarch64-unknown-linux-gnu.tar.gz"
+requires = { glibc_min = "2.39" }

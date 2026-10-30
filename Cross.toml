@@ -1,14 +1,25 @@
-# Pin the GNU release images to an old userspace rather than inheriting the
-# runner's glibc floor. These are the same 0.2.5 images mise uses for its GNU
-# release artifacts and remain compatible with glibc 2.23 and newer.
+# Images for the Linux release builds, pinned by digest so a rebuilt tag cannot
+# change a release without review.
+#
+# jouet embeds Luau, which is C++17. The GNU targets therefore need a newer
+# compiler than the cross-rs 0.2.5 images' GCC 5.4. These `main` images are
+# Ubuntu 24.04 (GCC 13), so the GNU archives need glibc 2.39 or newer. The
+# musl archives are static and run on older systems; the 0.2.5 musl images'
+# musl-cross-make GCC 9.2 compiles Luau.
 [target.x86_64-unknown-linux-gnu]
-image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5"
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main@sha256:7a5f9b99c256d778a893e40fc9fa61cbca601e6760241b6fdc5abebe389fc7d0"
 
 [target.x86_64-unknown-linux-gnu.env]
 passthrough = ["RUSTFLAGS"]
 
 [target.aarch64-unknown-linux-gnu]
-image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5"
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main@sha256:9773ac9e520dccfa7b5fe8756e14674be3e7dc7b7abcab1a5c7f377ef6b8b7e0"
 
 [target.aarch64-unknown-linux-gnu.env]
 passthrough = ["RUSTFLAGS"]
+
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl:0.2.5@sha256:77db671d8356a64ae72a3e1415e63f547f26d374fbe3c4762c1cd36c7eac7b99"
+
+[target.aarch64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:0.2.5@sha256:702154f52b2d8091671aa2c84d5582d849f949977228c735ff8462f93cc0e1e4"

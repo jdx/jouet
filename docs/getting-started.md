@@ -50,6 +50,8 @@ Each [GitHub release](https://github.com/jdx/jouet/releases) has an archive per 
 | Windows x64 | `jouet-x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `jouet-aarch64-pc-windows-msvc.zip` |
 
+The glibc archives need glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40). On older distributions, use the musl archive for your architecture: it is static and runs anywhere. mise picks it for you on those hosts.
+
 Unpack the archive and put `jouet` (`jouet.exe` on Windows) on your `PATH`.
 
 ## Check it works

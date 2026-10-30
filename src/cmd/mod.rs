@@ -2,6 +2,7 @@
 
 pub mod edit;
 pub mod pr;
+pub mod rule;
 pub mod threads;
 pub mod wait;
 

@@ -43,7 +43,8 @@ cargo install jouet --locked
 
 Release archives for Linux, macOS (Apple Silicon) and Windows are on the
 [releases page](https://github.com/jdx/jouet/releases), each with a signed
-[packslip](https://packslip.dev).
+[packslip](https://packslip.dev). The glibc Linux archives need glibc 2.39 or newer; on older
+distributions use the static musl archive, which mise picks automatically.
 [All installation options →](https://jouet.jdx.dev/getting-started)
 
 ## Before and after

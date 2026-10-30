@@ -1,21 +1,39 @@
-[package]
-name = "jouet"
-version = "0.0.1"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# `cargo test`, `clippy` and `check` at the root cover every crate.
+default-members = [".", "crates/*"]
+
+[workspace.package]
+# `version` is deliberately absent: each crate carries its own, and
+# release-plz.toml says how they move.
 edition = "2024"
 # usage-rs 7's own floor. CI checks it in the msrv job.
 rust-version = "1.91"
+license = "MIT"
+repository = "https://github.com/jdx/jouet"
+# Every crate ships the workspace README, so a crates.io page describes the
+# whole tool rather than repeating a paragraph per crate.
+readme = "README.md"
+
+[package]
+name = "jouet"
+version = "0.0.1"
 description = "A toolkit CLI for coding agents"
 keywords = ["cli", "agents", "github", "ci"]
 categories = ["command-line-utilities", "development-tools"]
-readme = "README.md"
-license = "MIT"
-repository = "https://github.com/jdx/jouet"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
 # Published crates carry the source and its licence, not the machinery used to
 # develop and ship it. A list of what to ship, so files added to the repository
 # (or left untracked in a checkout) are never published by accident.
 include = ["/src/**", "/LICENSE", "/README.md"]
 
 [dependencies]
+jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
 mise-agent-env = "2026"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -31,7 +49,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-native-certs = "0.8"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
-usage-rs = "7"
+usage-config = { version = "7", features = ["toml"] }
+usage-rs = { version = "7", features = ["config"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
