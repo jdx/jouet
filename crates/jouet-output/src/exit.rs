@@ -28,7 +28,19 @@ pub enum Exit {
 }
 
 impl Exit {
-    pub(crate) const fn code(self) -> u8 {
+    /// The shared codes, in the order `jouet agent-help` lists them. `Act`
+    /// and `Waiting` are left out: only `pr next` uses them.
+    pub const ALL: [Self; 7] = [
+        Self::Ok,
+        Self::Failed,
+        Self::Usage,
+        Self::NotFound,
+        Self::Precondition,
+        Self::Remote,
+        Self::Timeout,
+    ];
+
+    pub const fn code(self) -> u8 {
         match self {
             Self::Ok => 0,
             Self::Failed => 1,
@@ -54,6 +66,21 @@ impl Exit {
             Self::Timeout => "timeout",
             Self::Act => "act",
             Self::Waiting => "waiting",
+        }
+    }
+
+    /// What the code tells an agent to do next.
+    pub const fn meaning(self) -> &'static str {
+        match self {
+            Self::Ok => "done",
+            Self::Failed => "the answer is no: fix the code",
+            Self::Usage => "bad arguments",
+            Self::NotFound => "no such file, PR or thread",
+            Self::Precondition => "refused before doing anything: fix the request",
+            Self::Remote => "GitHub could not be reached or refused: check auth, then retry",
+            Self::Timeout => "still pending: run the same command again to keep waiting",
+            Self::Act => "the agent has something to do: run the suggested command",
+            Self::Waiting => "waiting on CI, a reviewer or GitHub: wait, then ask again",
         }
     }
 }
