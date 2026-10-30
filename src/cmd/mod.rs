@@ -3,6 +3,7 @@
 pub mod edit;
 pub mod pr;
 pub mod threads;
+pub mod wait;
 
 use crate::display::Mode;
 use crate::exit::Exit;

@@ -25,6 +25,7 @@ export default defineConfig({
   cleanUrls: true,
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
+    "cli/wait.md": "cli/wait/index.md",
     "cli/pr.md": "cli/pr/index.md",
   },
   sitemap: {
@@ -81,6 +82,19 @@ export default defineConfig({
                 ],
               },
               {
+                text: "wait",
+                link: "/cli/wait/",
+                collapsed: true,
+                items: [
+                  { text: "file", link: "/cli/wait/file" },
+                  { text: "log", link: "/cli/wait/log" },
+                  { text: "port", link: "/cli/wait/port" },
+                  { text: "http", link: "/cli/wait/http" },
+                  { text: "pid", link: "/cli/wait/pid" },
+                  { text: "cmd", link: "/cli/wait/cmd" },
+                ],
+              },
+              {
                 text: "pr",
                 link: "/cli/pr/",
                 collapsed: true,
@@ -113,7 +127,12 @@ export default defineConfig({
     ["link", { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }],
     [
       "link",
-      { rel: "icon", href: "/favicon.png", type: "image/png", sizes: "64x64" },
+      {
+        rel: "icon",
+        href: "/favicon-32x32.png",
+        type: "image/png",
+        sizes: "32x32",
+      },
     ],
     [
       "link",
