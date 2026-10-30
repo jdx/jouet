@@ -8,7 +8,7 @@ Every jouet command follows these rules, so an agent that has learned one comman
 
 ## No prompts, no TTY
 
-No command ever asks a question or needs a terminal. jouet runs the same way under an agent harness, in CI, in a pipe, or in your shell.
+No command needs a terminal, and only one ever asks a question: [`jouet pr land`](/commands/pr-land) asks before merging, and only when a person is at a terminal. Everyone else passes `--yes`. jouet runs the same way under an agent harness, in CI, in a pipe, or in your shell.
 
 ## Display modes
 
@@ -67,6 +67,8 @@ One table covers every command:
 | 130 | `interrupted` | Stopped by a signal |
 
 `1` and `4` are deliberately separate. After a `1`, fix the code: jouet did what was asked, and the result is a failure. After a `4`, fix the request: jouet refused, and nothing changed. `remote` and `timeout` arrive with the GitHub commands.
+
+[`jouet pr next`](/commands/pr-next) also exits `10` when the agent must act and `20` when it is waiting on someone else. Those two codes are outside this table on purpose, so they can never be mistaken for an error.
 
 ## Nothing truncated silently
 

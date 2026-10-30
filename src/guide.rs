@@ -26,7 +26,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pr",
         Some(
-            "checking many PRs at once (`pr status`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
+            "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
         ),
     ),
     (
