@@ -1,0 +1,32 @@
+{
+  "name": "jouet-docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "node --test .vitepress/social-images.test.mjs && vitepress build && node .vitepress/check-social-images.mjs",
+    "docs:preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "vitepress": "^1.6.3"
+  },
+  "pnpm": {
+    "supportedArchitectures": {
+      "os": [
+        "linux",
+        "darwin"
+      ],
+      "cpu": [
+        "x64",
+        "arm64"
+      ],
+      "libc": [
+        "glibc"
+      ]
+    },
+    "allowBuilds": {
+      "esbuild": true
+    }
+  }
+}
