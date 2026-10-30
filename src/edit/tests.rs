@@ -142,10 +142,9 @@ fn blocks_only_match_whole_lines_but_json_matches_anywhere() {
     let (report, _) = f.run(&block("a.rs", "foo\n", "baz\n"), Format::Blocks);
     assert!(report.applied);
     assert_eq!(f.read("a.rs"), "barfoo\nbaz\n");
-    let json = format!(
-        r#"[{{"path":"{}","old":"foo","new":"baz"}}]"#,
-        f.path("b.rs")
-    );
+    // Built with serde_json so a Windows path's backslashes are escaped.
+    let json =
+        serde_json::json!([{ "path": f.path("b.rs"), "old": "foo", "new": "baz" }]).to_string();
     let (report, _) = f.run(&json, Format::Json);
     assert!(report.applied);
     assert_eq!(f.read("b.rs"), "barbaz\n");
