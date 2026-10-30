@@ -334,7 +334,7 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Reads every routine's header. As with rules and recipes, a routine of
+    /// Reads every routine's header. As with rules, a routine of
     /// yours or a repository's never takes a built-in one's name, and two
     /// with one name are an error on the second.
     pub fn new(sources: Vec<Source>) -> Self {

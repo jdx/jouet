@@ -179,3 +179,13 @@ LUAU
 	assert_failure 5
 	assert_equal "$(jq -r '.error.code' <<<"$output")" "remote"
 }
+
+@test "joue's completion script asks jouet, which answers for joue's command line" {
+	run --separate-stderr jouet completion bash --joue
+	assert_success
+	assert_line "complete -F _usage_complete_joue 'joue'"
+
+	run --separate-stderr jouet __complete_word__ --shell bash --line "joue --li" --bash-word "--li" --bash-wordbreaks " "
+	assert_success
+	assert_output "--list"
+}

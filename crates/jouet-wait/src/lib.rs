@@ -19,6 +19,9 @@ pub mod run;
 mod watch;
 
 pub use report::Reporter;
+/// How long a conflict GitHub reports must persist before a wait believes
+/// it: right after a push, GitHub can still answer for the old head.
+pub const CONFLICT_CONFIRM: Duration = watch::CONFLICT_CONFIRM;
 
 use jouet_output::exit::Exit;
 use serde::Serialize;

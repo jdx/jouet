@@ -1,0 +1,1308 @@
+.TH JOUET 1
+.SH NAME
+jouet \- A toolkit CLI for coding agents
+.SH SYNOPSIS
+\fBjouet\fR [OPTIONS] <COMMAND>
+.SH DESCRIPTION
+A toolkit CLI for coding agents
+.PP
+.SH OPTIONS
+.TP
+\fB\-\-json\fR
+Print one JSON document instead of text
+.TP
+\fB\-\-display\fR \fI<MODE>\fR
+Who the output is for: agent, human or plain. Detected when not given
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.TP
+\fB\-V, \-\-version\fR
+Print version
+.SH COMMANDS
+.TP
+\fBaudit\fR
+Report where coding\-agent sessions spend tokens and time
+.TP
+\fBcommit\fR
+Commit only the named paths, with trailers
+.TP
+\fBedit\fR
+Make exact, all\-or\-nothing edits across files
+.TP
+\fBedit replace\fR
+Replace text in one file, given on the command line
+.TP
+\fBedit hash\fR
+Print the SHA\-256 hash of files, for \-\-expect\-hash
+.TP
+\fBhandoff\fR
+Record the facts about this checkout for the next session
+.TP
+\fBpickup\fR
+Print a handoff and check that it still holds
+.TP
+\fBstats\fR
+Show what jouet saved: measured from its ledger, estimated from your history
+.TP
+\fBpr\fR
+Inspect pull requests
+.TP
+\fBpr status\fR
+Show where PRs stand and why any need attention
+.TP
+\fBpr next\fR
+Say the one thing each PR needs next, and the command for it
+.TP
+\fBpr land\fR
+Merge a PR that is ready, honouring branch protection
+.TP
+\fBpr threads\fR
+List, reply to and resolve review threads
+.TP
+\fBpr threads reply\fR
+Reply to a thread
+.TP
+\fBpr threads resolve\fR
+Resolve threads
+.TP
+\fBpr threads unresolve\fR
+Unresolve threads
+.TP
+\fBpr threads apply\fR
+Reply to and resolve many threads from a JSON list
+.TP
+\fBreview\-package\fR
+Write one file for reviewing a range of commits
+.TP
+\fBwait\fR
+Block until a condition holds, then print one summary
+.TP
+\fBwait ci\fR
+Wait for a PR's checks, and show why any failed
+.TP
+\fBwait run\fR
+Wait for a GitHub Actions run
+.TP
+\fBwait pr\fR
+Wait for a PR to become mergeable, merged, approved, ready, ...
+.TP
+\fBwait file\fR
+Wait for a file to exist, contain a match, or be gone
+.TP
+\fBwait log\fR
+Wait for a line matching a regex to be appended to a log
+.TP
+\fBwait port\fR
+Wait for a TCP port to accept connections, or to stop
+.TP
+\fBwait http\fR
+Wait for a URL to answer with a status, and optionally a match
+.TP
+\fBwait pid\fR
+Wait for a process to exit
+.TP
+\fBwait cmd\fR
+Re\-run a command until it exits with the expected code
+.TP
+\fBrule\fR
+List, test and trust the rules jouet's hooks run
+.TP
+\fBrule list\fR
+List every rule, where it comes from and whether it runs
+.TP
+\fBrule test\fR
+Run a rule against a command or hook payload, or against its examples
+.TP
+\fBrule types\fR
+Print the Luau type definitions of the jouet module
+.TP
+\fBrule trust\fR
+Trust this repository's .jouet/rules as they are now
+.TP
+\fBrule untrust\fR
+Stop trusting this repository's .jouet/rules
+.TP
+\fBrule new\fR
+Write a new rule of yours, in warn mode, from a template or a winding note
+.TP
+\fBrule promote\fR
+Switch a rule of yours from warn to deny
+.TP
+\fBrule log\fR
+Show every change made to your rules, and why
+.TP
+\fBrule gap\fR
+Record something a rule could not express, for `jouet share \-\-idea`
+.TP
+\fBrun\fR
+Run a routine: a Luau program on jouet's primitives (also `joue`)
+.TP
+\fBrun test\fR
+Run routines' examples against their recorded responses
+.TP
+\fBrun types\fR
+Print the Luau type definitions of the primitives
+.TP
+\fBwind\fR
+Notice costly patterns in the hook ledger and draft rules for them
+.TP
+\fBwind show\fR
+Show a note: what was noticed, and the rule drafted for it
+.TP
+\fBwind dismiss\fR
+Drop a note, so it is never shown again
+.TP
+\fBunwind\fR
+Propose retiring rules that are noisy or always overridden
+.TP
+\fBshare\fR
+Propose a proven rule, or a missing primitive, to jouet's maintainers
+.TP
+\fBagent\-help\fR
+Print a short usage guide written for agents
+.TP
+\fBskill\fR
+Print jouet's agent skill
+.TP
+\fBsetup\fR
+Install jouet's hooks and skill into Claude Code or Codex
+.TP
+\fBcompletion\fR
+Print a shell completion script
+.SH "JOUET AUDIT"
+Report where coding\-agent sessions spend tokens and time
+
+Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless \-\-examples asks for redacted examples.
+.PP
+\fBUsage:\fR jouet audit [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Only requests made since TIME: a duration ago such as 7d or 12h, a date such as 2026\-10\-01, or RFC 3339
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-top\fR \fI<N>\fR
+Categories to list per harness in text (default 10; 0 lists all). \-\-json lists every category
+.TP
+\fB\-\-examples\fR
+Show one redacted example command per shape and pattern
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET COMMIT"
+Commit only the named paths, with trailers
+
+Commits exactly the paths given, as they are in the working tree (`git commit \-\-only`): anything else already staged stays staged, and untracked files are added only when a named path covers them. Refuses \-A, `.`, the repository root and a path with no changes. Paths are literal, never globs. Appends the configured trailers; inside an agent the default is a co\-author line (Claude Code) and the AI disclosure, with the tool and version from AI_AGENT. Warns about a subject that is not a conventional commit when the repository checks them. Hooks always run; when one fails, the end of its output is shown and the whole of it kept in a log.
+.PP
+\fBUsage:\fR jouet commit [OPTIONS] [<PATHS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-m, \-\-message\fR \fI<MSG>\fR
+The message. Repeatable: each is a paragraph, as with git
+.TP
+\fB\-F, \-\-file\fR \fI<FILE>\fR
+Read the message from FILE (`\-` is stdin)
+.TP
+\fB\-\-trailer\fR \fI<TRAILER>\fR
+Append a trailer, `Key: value`. Repeatable
+.TP
+\fB\-\-no\-trailers\fR
+Leave out the configured and default trailers
+.TP
+\fB\-\-dry\-run\fR
+Show what would be committed, committing nothing
+.TP
+\fB\-A, \-\-all\fR
+Refused: name the paths to commit instead
+.TP
+\fB\-\-no\-verify\fR
+Refused: jouet commit always runs hooks
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+The files and directories to commit
+.SH "JOUET EDIT"
+Make exact, all\-or\-nothing edits across files
+
+Reads a spec from \-\-spec or stdin: search/replace blocks, a Codex\-style patch, or JSON. Every edit is checked before any file is written, so a failed edit leaves every file as it was.
+.PP
+\fBUsage:\fR jouet edit [OPTIONS] [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-spec\fR \fI<FILE>\fR
+Read the spec from FILE instead of stdin (`\-` is stdin)
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR
+Spec format: blocks, patch or json. Detected from the first line
+.TP
+\fB\-\-dry\-run\fR
+Report what would change without writing anything
+.TP
+\fB\-\-diff\fR
+Include a unified diff of each changed file
+.TP
+\fB\-\-check\fR \fI<CMD>\fR
+Run CMD through the shell after writing
+.TP
+\fB\-\-revert\-on\-fail\fR
+Restore every edited file if \-\-check fails
+.TP
+\fB\-\-expect\-hash\fR \fI<PATH=SHA256>\fR
+Refuse unless PATH's contents have this SHA\-256 hash. Repeatable
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET EDIT REPLACE"
+Replace text in one file, given on the command line
+
+Matches anywhere in the file, like `str::replace`, and requires exactly one match unless \-\-count or \-\-all says otherwise.
+.PP
+\fBUsage:\fR jouet edit replace [OPTIONS] <PATH>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-old\fR \fI<TEXT>\fR
+The text to find
+.TP
+\fB\-\-new\fR \fI<TEXT>\fR
+The text to put in its place
+.TP
+\fB\-\-count\fR \fI<N>\fR
+How many matches there must be
+.TP
+\fB\-\-all\fR
+Replace every match (at least one)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATH>\fR
+The file to edit
+.SH "JOUET EDIT HASH"
+Print the SHA\-256 hash of files, for \-\-expect\-hash
+.PP
+\fBUsage:\fR jouet edit hash [OPTIONS] [<PATHS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+Files to hash
+.SH "JOUET HANDOFF"
+Record the facts about this checkout for the next session
+
+Gathers the branch, its upstream and ahead/behind counts, HEAD, an operation in progress, uncommitted and untracked files, the branch's PR and its `pr status` attention codes, the session's last test, lint and build runs (recorded by `jouet setup`'s hooks) and background processes running in the worktree (Linux). Writes them as markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless \-o names a file (`.json` writes JSON; `\-` is stdout). Facts only: what the work is and what to do next is the agent's to add.
+.PP
+\fBUsage:\fR jouet handoff [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-o, \-\-output\fR \fI<FILE>\fR
+Write the handoff to FILE (`\-` is stdout)
+.TP
+\fB\-\-no\-pr\fR
+Do not look up the branch's PR on GitHub
+.TP
+\fB\-\-session\fR \fI<ID>\fR
+The agent session whose check runs to include (default JOUET_SESSION_ID, else CLAUDE_CODE_SESSION_ID)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PICKUP"
+Print a handoff and check that it still holds
+
+Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it with the checkout: the branch, HEAD, the upstream, an operation in progress, uncommitted and untracked files, and whether its background processes still run. Exits 0 when nothing has drifted and 1 when something has. The PR is not fetched again: run `jouet pr status` for its current state.
+.PP
+\fBUsage:\fR jouet pickup [OPTIONS] [<FILE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<FILE>\fR
+The handoff to read (`\-` is stdin)
+.SH "JOUET STATS"
+Show what jouet saved: measured from its ledger, estimated from your history
+
+Counts what the hook ledger recorded (jouet command runs, rule decisions and what the agent did after a denial, checks, and failing CI logs returned as excerpts), then estimates the input tokens those runs saved against your own Claude Code and Codex history from before `jouet setup`. Every estimate shows its basis, and a kind of work with fewer than 20 runs before setup is not estimated. Without a ledger, it shows what one run of each command would save.
+.PP
+\fBUsage:\fR jouet stats [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Only ledger entries since TIME: a duration ago such as 7d or 12h, a date such as 2026\-10\-01, or RFC 3339
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which harness: claude, codex or all (default all)
+.TP
+\fB\-\-session\fR \fI<ID>\fR
+Only one session's ledger entries
+.TP
+\fB\-\-summary\fR
+Print one line about what jouet saved, or nothing, for a stop hook. `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PR"
+Inspect pull requests
+.PP
+\fBUsage:\fR jouet pr [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PR STATUS"
+Show where PRs stand and why any need attention
+
+Prints one line per PR, then a summary. All PRs are fetched in one batched GraphQL query. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, behind_base, draft and mergeable_unknown.
+.PP
+\fBUsage:\fR jouet pr status [OPTIONS] [<PRS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-mine\fR
+Add the open PRs authored by the token's user
+.TP
+\fB\-\-search\fR \fI<QUERY>\fR
+Add the PRs matching a GitHub search query
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for bare numbers, branches, \-\-mine and \-\-search. Repeatable. Defaults to the git remote
+.TP
+\fB\-\-settle\fR \fI<DUR>\fR
+How long to wait for GitHub to compute an unknown mergeable state (default 20s; 0 disables)
+.TP
+\fB\-\-fail\-on\-attention\fR
+Exit 1 when any PR needs attention
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PRS>\fR
+PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the current branch's PR
+.SH "JOUET PR NEXT"
+Say the one thing each PR needs next, and the command for it
+
+Works through a fixed order and stops at the first state that applies: merged, closed, draft, conflict, mergeable_unknown, behind_base, checks_failing, checks_pending, changes_requested, unresolved_threads, awaiting_approval, blocked, auto_merge, ready_to_merge. The states come from the same data and attention codes as `pr status`. Exits 0 when nothing is left to do, 10 when the agent must act and 20 when waiting on someone or something else; with several PRs, 10 wins over 20. These two codes are outside the shared table on purpose.
+.PP
+\fBUsage:\fR jouet pr next [OPTIONS] [<PRS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-mine\fR
+Add the open PRs authored by the token's user
+.TP
+\fB\-\-search\fR \fI<QUERY>\fR
+Add the PRs matching a GitHub search query
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for bare numbers, branches, \-\-mine and \-\-search. Repeatable. Defaults to the git remote
+.TP
+\fB\-\-settle\fR \fI<DUR>\fR
+How long to wait for GitHub to compute an unknown mergeable state (default 20s; 0 disables)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PRS>\fR
+PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the current branch's PR
+.SH "JOUET PR LAND"
+Merge a PR that is ready, honouring branch protection
+
+Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is missing. With \-\-update, a branch behind its base is first updated on GitHub by merging the base in (never a force\-push), and its new checks are waited for. The merge goes through the API with the head SHA as a guard, the way the merge button does, so branch protection applies and is never bypassed. Then the PR is confirmed merged and the merge commit printed. It asks first only when a person is at a terminal (stdin and stderr are terminals and no coding agent is detected); anyone else must pass \-\-yes or \-\-dry\-run, or it exits 2 before contacting GitHub.
+
+While jouet's hooks keep a ledger, it also refuses (exit 4) unless they recorded a full test run passing at the PR head's tree; pass \-\-skip\-verify with a reason, which the ledger keeps, to land anyway.
+.PP
+\fBUsage:\fR jouet pr land [OPTIONS] [<PR>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for a bare number or branch. Defaults to the git remote
+.TP
+\fB\-\-method\fR \fI<METHOD>\fR
+How to merge: squash, merge or rebase (default squash)
+.TP
+\fB\-\-update\fR
+Update a branch that is behind its base by merging the base in on GitHub, then wait for its checks
+.TP
+\fB\-\-yes\fR
+Merge without asking
+.TP
+\fB\-\-dry\-run\fR
+Print the plan and change nothing
+.TP
+\fB\-\-timeout\fR \fI<DUR>\fR
+How long to wait for checks after \-\-update (default 30m)
+.TP
+\fB\-\-interval\fR \fI<DUR>\fR
+Time between the first checks of that wait; backs off to 60s (default 10s)
+.TP
+\fB\-\-settle\fR \fI<DUR>\fR
+How long to wait for GitHub to compute an unknown mergeable state (default 20s; 0 disables)
+.TP
+\fB\-\-skip\-verify\fR \fI<REASON>\fR
+Land without a full test pass recorded at the PR head's tree, and say why; the reason is kept in the hook ledger
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PR>\fR
+The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
+.SH "JOUET PR THREADS"
+List, reply to and resolve review threads
+
+Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
+.PP
+\fBUsage:\fR jouet pr threads [OPTIONS] [<PR>] [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for a bare number or branch. Defaults to the git remote
+.TP
+\fB\-\-all\fR
+List resolved threads too
+.TP
+\fB\-\-resolved\fR
+List only resolved threads
+.TP
+\fB\-\-outdated\fR
+List only outdated threads
+.TP
+\fB\-\-no\-outdated\fR
+Leave out outdated threads
+.TP
+\fB\-\-author\fR \fI<LOGIN>\fR
+Only threads started by LOGIN. Repeatable
+.TP
+\fB\-\-bots\fR
+Only threads started by bots: logins ending in `[bot]`, and the config's `bots`
+.TP
+\fB\-\-no\-bots\fR
+Leave out threads started by bots
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Only threads with a comment posted at or after TIME: RFC 3339, a duration ago such as 2h, or @SHA for when that commit was pushed. Goes by when comments were posted, never by the commit they are on
+.TP
+\fB\-\-path\fR \fI<GLOB>\fR
+Only threads on paths matching GLOB, a directory, or (without a /) a file name. Repeatable
+.TP
+\fB\-\-include\-reviews\fR
+Also list review summaries and PR conversation comments
+.TP
+\fB\-\-context\fR \fI<N>\fR
+Show N lines of the file around each thread's line
+.TP
+\fB\-\-full\fR
+Show comment bodies unaltered
+.TP
+\fB\-\-fail\-if\-unresolved\fR
+Exit 1 when any listed thread is unresolved
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PR>\fR
+The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
+.SH "JOUET PR THREADS REPLY"
+Reply to a thread
+
+`{sha}` in the reply becomes the short HEAD SHA, and is refused unless HEAD is on the PR's branch on GitHub. The configured reply footer is appended. A reply that is already the thread's last comment from you is not posted again.
+.PP
+\fBUsage:\fR jouet pr threads reply [OPTIONS] <ID> [<PR>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-body\fR \fI<TEXT>\fR
+The reply
+.TP
+\fB\-\-body\-file\fR \fI<FILE>\fR
+Read the reply from FILE (`\-` is stdin)
+.TP
+\fB\-\-resolve\fR
+Resolve the thread after replying
+.TP
+\fB\-\-ignore\-resolved\fR
+Skip a thread that is already resolved instead of failing
+.TP
+\fB\-\-dry\-run\fR
+Check everything and show what would be posted, posting nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The thread's ID
+.TP
+\fB<PR>\fR
+The PR. Defaults to the current branch's PR
+.SH "JOUET PR THREADS RESOLVE"
+Resolve threads
+
+Every ID is checked before any thread is resolved. A PR given after the IDs must not be a bare number: write it as #N.
+.PP
+\fBUsage:\fR jouet pr threads resolve [OPTIONS] [<ARGS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-reply\fR \fI<TEXT>\fR
+Reply with TEXT before resolving each thread
+.TP
+\fB\-\-ignore\-resolved\fR
+Skip threads that are already resolved instead of failing
+.TP
+\fB\-\-dry\-run\fR
+Check everything and show what would happen, changing nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ARGS>\fR
+Thread IDs, then optionally the PR
+.SH "JOUET PR THREADS UNRESOLVE"
+Unresolve threads
+
+A PR given after the IDs must not be a bare number: write it as #N.
+.PP
+\fBUsage:\fR jouet pr threads unresolve [OPTIONS] [<ARGS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-dry\-run\fR
+Check everything and show what would happen, changing nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ARGS>\fR
+Thread IDs, then optionally the PR
+.SH "JOUET PR THREADS APPLY"
+Reply to and resolve many threads from a JSON list
+
+The list holds {"id": N, "reply": "...", "resolve": true} entries. Every entry is checked before anything is posted. Re\-running the same list after a failure is safe: resolved threads and replies already posted are skipped.
+.PP
+\fBUsage:\fR jouet pr threads apply [OPTIONS] [<ARGS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Read the list from FILE (`\-` is stdin)
+.TP
+\fB\-\-ignore\-resolved\fR
+Skip threads that are already resolved instead of failing
+.TP
+\fB\-\-dry\-run\fR
+Check everything and show what would be posted, posting nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ARGS>\fR
+`\-` to read the list from stdin, and optionally the PR
+.SH "JOUET REVIEW-PACKAGE"
+Write one file for reviewing a range of commits
+
+The file holds the commits, oldest first, a diffstat, and the full diff with \-\-context lines around each change. Refuses an empty range, and a BASE that is not an ancestor of HEAD (exit 4), since the diff would then show changes HEAD does not make. Written to `<git dir>/jouet/review\-BASE\-HEAD.md` unless \-o names a file (`\-` is stdout).
+.PP
+\fBUsage:\fR jouet review\-package [OPTIONS] <BASE> [<HEAD>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-o, \-\-output\fR \fI<FILE>\fR
+Write the package to FILE (`\-` is stdout)
+.TP
+\fB\-\-context\fR \fI<N>\fR
+Lines of context around each change (default 10)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<BASE>\fR
+The commit the review starts after, such as origin/main
+.TP
+\fB<HEAD>\fR
+The last commit to review (default HEAD)
+.SH "JOUET WAIT"
+Block until a condition holds, then print one summary
+
+Replaces `sleep N; check; repeat` loops. The first check is immediate; later ones back off from \-\-interval to 60s and speed up again when the state changes. Exits 0 when the condition holds and 124 on timeout, where running the same command again keeps waiting. In human mode a live status line is shown on stderr; otherwise each change of state is one line on stderr, so a backgrounded wait's log stays small.
+.PP
+\fBUsage:\fR jouet wait [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-timeout\fR \fI<DUR>\fR
+Give up after DUR, such as 90s, 10m or 1h30m (default 30m)
+.TP
+\fB\-\-interval\fR \fI<DUR>\fR
+Time between the first checks; backs off to 60s (default 10s)
+.TP
+\fB\-\-confirm\-conflict\fR \fI<DUR>\fR
+How long a conflict GitHub reports must persist before `wait ci` and `wait pr` believe it (default 10s). For tests
+.TP
+\fB\-\-jsonl\fR
+Print one JSON event per line, then the result document
+.TP
+\fB\-\-quiet\fR
+Print no progress and no text result, only the exit code (and JSON when asked for)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET WAIT CI"
+Wait for a PR's checks, and show why any failed
+
+Follows the PR head, switching to a new head when one is pushed, unless \-\-sha pins a commit. Returns on the first failed check unless \-\-all. Skipped and neutral checks count as passing. A conflicted PR returns `conflict` (exit 4), since pull_request workflows will not run, once GitHub reports it again 10s later (right after a push it can still answer for the old head); no checks within \-\-appear\-timeout returns `no_checks` (exit 1). For each failed Actions job, the failed step's log is excerpted and the full log saved. Waits on the same PR share their state, so they poll GitHub once.
+.PP
+\fBUsage:\fR jouet wait ci [OPTIONS] [<PR>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for a bare number or branch. Defaults to the git remote
+.TP
+\fB\-\-sha\fR \fI<SHA>\fR
+Wait on this commit's checks instead of following the PR head
+.TP
+\fB\-\-required\fR
+Only checks that branch protection requires
+.TP
+\fB\-\-check\fR \fI<GLOB>\fR
+Only checks whose name matches GLOB (`*` and `?`). Repeatable
+.TP
+\fB\-\-ignore\fR \fI<GLOB>\fR
+Leave out checks whose name matches GLOB. Repeatable
+.TP
+\fB\-\-all\fR
+Wait for every check to finish, even after one fails
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of each failure log to show (default 60; 0 shows the whole failed step)
+.TP
+\fB\-\-no\-logs\fR
+Do not fetch failure logs
+.TP
+\fB\-\-appear\-timeout\fR \fI<DUR>\fR
+How long checks may take to appear on a commit (default 3m)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PR>\fR
+The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
+.SH "JOUET WAIT RUN"
+Wait for a GitHub Actions run
+
+Returns when the run completes, or on its first failed job, with the failed step's log excerpted as for `wait ci`.
+.PP
+\fBUsage:\fR jouet wait run [OPTIONS] <RUN>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for a bare run ID. Defaults to the git remote
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of each failure log to show (default 60; 0 shows the whole failed step)
+.TP
+\fB\-\-no\-logs\fR
+Do not fetch failure logs
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<RUN>\fR
+The run ID, or its Actions URL
+.SH "JOUET WAIT PR"
+Wait for a PR to become mergeable, merged, approved, ready, ...
+
+\-\-until is one of: mergeable (keeps waiting while GitHub reports UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged), closed, approved (exit 1 when changes are requested), checks\-registered (any check on the head), ready (no `pr status` attention codes and no pending checks; exit 1 on conflict, checks_failing, changes_requested or unresolved_threads), or any\-change (the next push, check result, review, thread or state change, printed as one event). A conflict counts once GitHub reports it again 10s later, since right after a push it can still answer for the old head.
+.PP
+\fBUsage:\fR jouet wait pr [OPTIONS] [<PR>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR \fI<OWNER/NAME>\fR
+The repository for a bare number or branch. Defaults to the git remote
+.TP
+\fB\-\-until\fR \fI<CONDITION>\fR
+The condition to wait for
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PR>\fR
+The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
+.SH "JOUET WAIT FILE"
+Wait for a file to exist, contain a match, or be gone
+.PP
+\fBUsage:\fR jouet wait file [OPTIONS] <PATH>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-contains\fR \fI<REGEX>\fR
+Wait until a line of the file matches REGEX, and print that line
+.TP
+\fB\-\-gone\fR
+Wait until nothing exists at PATH
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATH>\fR
+The file (or directory) to watch
+.SH "JOUET WAIT LOG"
+Wait for a line matching a regex to be appended to a log
+
+Follows the path like `tail \-F`: a file that is rotated or truncated is read again from its start, and one that does not exist yet is waited for. Starts at the current end of the file and prints the matching line.
+.PP
+\fBUsage:\fR jouet wait log [OPTIONS] <PATH>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-match\fR \fI<REGEX>\fR
+The regex a line must match
+.TP
+\fB\-\-from\-start\fR
+Also search what the file already holds
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATH>\fR
+The log file to follow
+.SH "JOUET WAIT PORT"
+Wait for a TCP port to accept connections, or to stop
+.PP
+\fBUsage:\fR jouet wait port [OPTIONS] <ADDR>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-closed\fR
+Wait until the port refuses connections instead
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ADDR>\fR
+HOST:PORT, or just PORT for localhost
+.SH "JOUET WAIT HTTP"
+Wait for a URL to answer with a status, and optionally a match
+
+Any 2xx status counts unless \-\-status says otherwise. Redirects are followed, except when \-\-status asks for a 3xx.
+.PP
+\fBUsage:\fR jouet wait http [OPTIONS] <URL>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-status\fR \fI<CODE>\fR
+The status code to wait for (default: any 2xx)
+.TP
+\fB\-\-contains\fR \fI<REGEX>\fR
+Also wait until a line of the body matches REGEX, and print that line
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<URL>\fR
+The http:// or https:// URL to GET
+.SH "JOUET WAIT PID"
+Wait for a process to exit
+.PP
+\fBUsage:\fR jouet wait pid [OPTIONS] <PID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PID>\fR
+The process ID
+.SH "JOUET WAIT CMD"
+Re\-run a command until it exits with the expected code
+
+Runs CMD directly, not through a shell, every \-\-interval. A run still going at the timeout is stopped, though every run gets at least one \-\-interval, so `\-\-timeout 0` runs it once. Prints the last run's exit code and the tail of its output, and saves the full output to a log.
+.PP
+\fBUsage:\fR jouet wait cmd [OPTIONS] [<CMD>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-expect\-exit\fR \fI<N>\fR
+The exit code to wait for (default 0)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<CMD>\fR
+The command and its arguments, after `\-\-`
+.SH "JOUET RULE"
+List, test and trust the rules jouet's hooks run
+
+Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule types` prints the API they are written against.
+.PP
+\fBUsage:\fR jouet rule [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE LIST"
+List every rule, where it comes from and whether it runs
+.PP
+\fBUsage:\fR jouet rule list [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE TEST"
+Run a rule against a command or hook payload, or against its examples
+
+With neither \-\-command nor \-\-payload, runs the rule's `examples`: every `fires` example must make it deny, warn or record, and every `quiet` one must leave it silent. It fails, showing what was expected and what the rule did, when one does not, or when the rule lacks either kind. \-\-all does this for every rule. \-\-replay runs the rule over every call in the hook ledger instead, and fails if it fires on none of them.
+.PP
+\fBUsage:\fR jouet rule test [OPTIONS] [<RULE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-all\fR
+Run the examples of every rule: built in, yours and this repository's
+.TP
+\fB\-\-command\fR \fI<CMD>\fR
+A shell command to test the rule against
+.TP
+\fB\-\-payload\fR \fI<FILE>\fR
+A Claude Code or Codex hook payload (JSON) to test against; `\-` is stdin
+.TP
+\fB\-\-exit\-code\fR \fI<N>\fR
+The command's exit code, for a post\-tool\-use rule (default 0)
+.TP
+\fB\-\-replay\fR
+Run the rule over the hook ledger's calls: what it fires on, and the near misses
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<RULE>\fR
+A rule's name, or the path to a .luau file
+.SH "JOUET RULE TYPES"
+Print the Luau type definitions of the jouet module
+.PP
+\fBUsage:\fR jouet rule types [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE TRUST"
+Trust this repository's .jouet/rules as they are now
+.PP
+\fBUsage:\fR jouet rule trust [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE UNTRUST"
+Stop trusting this repository's .jouet/rules
+.PP
+\fBUsage:\fR jouet rule untrust [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE NEW"
+Write a new rule of yours, in warn mode, from a template or a winding note
+
+Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists, who wrote it and when. It starts in warn mode: `jouet rule promote` makes its denials real. With \-\-from\-note, the rule is the one `jouet wind` drafted.
+.PP
+\fBUsage:\fR jouet rule new [OPTIONS] <NAME>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-from\-note\fR \fI<ID>\fR
+Start from the rule a winding note drafted, such as n3
+.TP
+\fB\-\-why\fR \fI<TEXT>\fR
+What the rule is for, in one line (the template's `why`)
+.TP
+\fB\-\-author\fR \fI<WHO>\fR
+Who is writing it: your session's id (default: $JOUET_SESSION_ID, or the harness's)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The rule's name: lowercase words joined by dashes
+.SH "JOUET RULE PROMOTE"
+Switch a rule of yours from warn to deny
+
+Only rules in ~/.config/jouet/rules: built\-in rules are part of jouet, and a repository's change through a reviewed PR. Logged in `jouet rule log`.
+.PP
+\fBUsage:\fR jouet rule promote [OPTIONS] <NAME>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-reason\fR \fI<TEXT>\fR
+Why, for the log
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The rule's name
+.SH "JOUET RULE LOG"
+Show every change made to your rules, and why
+.PP
+\fBUsage:\fR jouet rule log [OPTIONS] [<NAME>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+Only this rule's changes
+.SH "JOUET RULE GAP"
+Record something a rule could not express, for `jouet share \-\-idea`
+
+jouet records on its own when a rule reads a `jouet` primitive that does not exist. This records a wish in your words: "I kept doing X; there is no primitive for Y".
+.PP
+\fBUsage:\fR jouet rule gap [OPTIONS] <TEXT>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-rule\fR \fI<NAME>\fR
+The rule you were writing, if any
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<TEXT>\fR
+What you wanted a rule to do, and what was missing
+.SH "JOUET RUN"
+Run a routine: a Luau program on jouet's primitives (also `joue`)
+
+`joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
+.PP
+\fBUsage:\fR jouet run [OPTIONS] [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-list\fR
+List every routine, where it comes from and what it reaches
+.TP
+\fB\-\-trust\fR
+Trust this repository's .jouet/routines as they are now
+.TP
+\fB\-\-untrust\fR
+Stop trusting this repository's .jouet/routines
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RUN TEST"
+Run routines' examples against their recorded responses
+
+Each example runs the routine with its arguments against a fixture: a local fake GitHub serves its recorded responses, and jouet's commands, git, mise and the ledger answer from it too. Nothing real is reached, and file edits are only previewed. Fails (exit 1) when an example's exit code, output, JSON, previewed writes or requests differ from what it expects, or when a routine has no examples.
+.PP
+\fBUsage:\fR jouet run test [OPTIONS] [<ROUTINE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ROUTINE>\fR
+The routine (default: every one)
+.SH "JOUET RUN TYPES"
+Print the Luau type definitions of the primitives
+.PP
+\fBUsage:\fR jouet run types [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET WIND"
+Notice costly patterns in the hook ledger and draft rules for them
+
+Reads the ledger jouet's hooks keep from where it last stopped. When a command keeps failing across sessions, or agents keep sleeping instead of waiting, it drafts a rule in warn mode and keeps a note of it, which the next session start shows (two at most). The hooks run it on their own; running it by hand reads the ledger now. Off with JOUET_WIND=0.
+.PP
+\fBUsage:\fR jouet wind [OPTIONS] [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET WIND SHOW"
+Show a note: what was noticed, and the rule drafted for it
+.PP
+\fBUsage:\fR jouet wind show [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The note's id, such as n3
+.SH "JOUET WIND DISMISS"
+Drop a note, so it is never shown again
+.PP
+\fBUsage:\fR jouet wind dismiss [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The note's id, such as n3
+.SH "JOUET UNWIND"
+Propose retiring rules that are noisy or always overridden
+
+Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built\-in rules are never proposed. \-\-apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR.
+.PP
+\fBUsage:\fR jouet unwind [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-apply\fR
+Retire the proposed rules of yours
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET SHARE"
+Propose a proven rule, or a missing primitive, to jouet's maintainers
+
+Builds a proposal and prints the exact text, with paths, repository names, hostnames and emails replaced, and a diff of what that changed. Nothing is posted without \-\-yes, which a person must approve: it posts a Discussion in the "Rules & ideas" category of jdx/jouet with your GitHub login. A rule is shared only once it passes its tests, has denied for a week and fired often with few overrides. At most three posts a week.
+.PP
+\fBUsage:\fR jouet share [OPTIONS] [<NAME>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-idea\fR
+Share an idea from recorded gaps instead of a rule
+.TP
+\fB\-\-yes\fR
+Post it; without this, only show what would be posted
+.TP
+\fB\-\-redact\fR \fI<WORD>\fR
+Hide WORD as well, such as an internal tool's name. Repeatable
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The rule to share; with \-\-idea, the idea's key (default: the most recorded)
+.SH "JOUET AGENT-HELP"
+Print a short usage guide written for agents
+
+When to reach for each command, its key flags, the exit codes and the output modes, generated from this binary's own CLI definition.
+.PP
+\fBUsage:\fR jouet agent\-help [OPTIONS] [<COMMAND>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<COMMAND>\fR
+A command to describe in full, such as `edit`
+.SH "JOUET SKILL"
+Print jouet's agent skill
+
+A short skill that says when to reach for jouet and points at `jouet agent\-help` for the flags. `jouet setup` installs it.
+.PP
+\fBUsage:\fR jouet skill [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR
+claude or codex (a SKILL.md), or agents\-md (a snippet for AGENTS.md)
+.TP
+\fB\-\-contribute\fR
+Print the optional skill for proposing rules and ideas to jouet instead
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET SETUP"
+Install jouet's hooks and skill into Claude Code or Codex
+
+Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+.PP
+\fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-global\fR
+Install for every project, under your home directory (the default)
+.TP
+\fB\-\-project\fR
+Install into this repository for you alone: Claude Code's untracked .claude/settings.local.json
+.TP
+\fB\-\-shared\fR
+Install into the repository's tracked .claude/settings.json, or .codex/hooks.json, for everyone who clones it (implies \-\-project)
+.TP
+\fB\-\-dry\-run\fR
+Show what would change without writing anything
+.TP
+\fB\-\-uninstall\fR
+Remove jouet's hooks and skill
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<HARNESS>\fR
+claude or codex
+.SH "JOUET COMPLETION"
+Print a shell completion script
+
+The script asks this binary for each completion, so it needs nothing else installed and follows whichever jouet is on PATH. Write it where your shell loads completions, or source it from your shell's startup file.
+.PP
+\fBUsage:\fR jouet completion [OPTIONS] <SHELL>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-joue\fR
+Complete `joue` instead, the name routines run under
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SHELL>\fR
+The shell to complete for

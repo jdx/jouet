@@ -185,6 +185,7 @@ export default defineConfig({
               { text: "agent-help", link: "/cli/agent-help" },
               { text: "skill", link: "/cli/skill" },
               { text: "setup", link: "/cli/setup" },
+              { text: "completion", link: "/cli/completion" },
             ],
           },
         ],

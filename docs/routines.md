@@ -29,6 +29,8 @@ sweep       List a PR's unresolved review threads as a compact work list, postin
             reaches github.read
 ```
 
+`jouet completion SHELL --joue` prints the shell completion script for `joue`; it completes `joue`'s own flags and commands, and routine names are not completed yet.
+
 The two names point at each other: `joue pr status` says "did you mean `jouet pr status`?", and `jouet triage`, when `triage` is a routine, says to run `joue triage`.
 
 ## The built-in routines

@@ -48,3 +48,35 @@ pub(crate) fn unchanged(top: &Path, path: &str) -> bool {
         .output()
         .is_ok_and(|o| o.status.success() && o.stdout.is_empty())
 }
+
+/// The root of the main checkout when the current directory is in one of its
+/// linked worktrees, or the main checkout itself; `None` outside a
+/// repository, in a bare one, or in a submodule.
+pub(crate) fn main_checkout() -> Option<PathBuf> {
+    let common = PathBuf::from(git(&[
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ])?);
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    common.parent().map(Path::to_path_buf)
+}
+
+/// Whether git ignores `path` (relative to `top`); `None` when git cannot
+/// tell, such as outside a repository.
+pub(crate) fn ignored(top: &Path, path: &str) -> Option<bool> {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(top)
+        .args(["check-ignore", "--quiet", "--", path])
+        .output()
+        .ok()?
+        .status;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}

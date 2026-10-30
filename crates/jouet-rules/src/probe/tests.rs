@@ -318,3 +318,94 @@ fn without_probes_set_up_every_probe_says_why() {
     );
     assert_eq!(said(&e), "nil probes are not available here");
 }
+
+#[test]
+fn last_run_filters_by_scope_and_reports_the_tree() {
+    let ledger = tempfile::tempdir().unwrap();
+    let lines = [
+        // Before jouet kept a scope: partial, with no tree.
+        json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "exit_code": 0,
+               "decisions": [{"rule": "checks", "action": "record:test"}]}),
+        json!({"ts": 2, "harness": "claude", "event": "post-tool-use", "exit_code": 0, "tree": "t1",
+               "decisions": [{"rule": "checks", "action": "record:test", "scope": "full"}]}),
+        json!({"ts": 3, "harness": "claude", "event": "post-tool-use", "exit_code": 0, "tree": "t2",
+               "decisions": [{"rule": "checks", "action": "record:test", "scope": "partial"}]}),
+    ];
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    std::fs::write(ledger.path().join("ledger.jsonl"), text).unwrap();
+    let e = engine(
+        r#"(function()
+            local last = jouet.ci.last_run("test")
+            local full = jouet.ci.last_run("test", "full")
+            local partial = jouet.ci.last_run(nil, "partial")
+            return `{last.scope} {last.tree} | {full.scope} {full.tree} {full.ts} | {partial.ts}`
+        end)()"#,
+        Budget::default(),
+    );
+    e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
+    assert_eq!(said(&e), "partial t2 | full t1 2 | 3");
+    let e = engine(r#"jouet.ci.last_run("test", "most")"#, Budget::default());
+    e.set_probes(Probes::new(None, None, false));
+    assert!(said(&e).contains("scope must be"));
+}
+
+#[test]
+fn push_untested_warns_until_the_full_suite_passed_at_this_tree() {
+    let dir = repo();
+    let work = dir.path().join("work");
+    let tree = crate::tree::work_tree(Some(&work), Duration::from_secs(10)).unwrap();
+    let ledger = tempfile::tempdir().unwrap();
+    let engine = Engine::new(
+        crate::builtin()
+            .into_iter()
+            .filter(|s| s.name == "push-untested")
+            .collect(),
+        Options {
+            has_command: Box::new(|_| true),
+            disabled: Vec::new(),
+            budget: Budget {
+                time: Duration::from_secs(10),
+                ..Budget::default()
+            },
+            cache_dir: None,
+        },
+    )
+    .unwrap();
+    engine.set_probes(Probes::new(
+        Some(work.clone()),
+        Some(ledger.path().into()),
+        false,
+    ));
+    let push = Call {
+        command: Some("git push".into()),
+        ..bash()
+    };
+    let warning = |lines: &[serde_json::Value]| {
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(ledger.path().join("ledger.jsonl"), text).unwrap();
+        engine
+            .evaluate(&push)
+            .warnings
+            .first()
+            .and_then(|w| w.message.clone())
+    };
+    let run = |scope: &str, exit_code: i32, tree: &str| {
+        json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "exit_code": exit_code,
+               "tree": tree, "decisions": [{"rule": "checks", "action": "record:test", "scope": scope}]})
+    };
+    // Nothing recorded here: nothing to judge by.
+    assert_eq!(warning(&[]), None);
+    let why = warning(&[run("partial", 0, &tree)]).unwrap();
+    assert!(why.contains("no full test run is recorded"), "{why}");
+    let why = warning(&[run("full", 101, &tree)]).unwrap();
+    assert!(why.contains("the last full test run failed"), "{why}");
+    assert_eq!(warning(&[run("full", 0, &tree)]), None);
+    // A later partial run at the same tree changes nothing.
+    assert_eq!(
+        warning(&[run("full", 0, &tree), run("partial", 0, &tree)]),
+        None
+    );
+    std::fs::write(work.join("a.txt"), "edited\n").unwrap();
+    let why = warning(&[run("full", 0, &tree)]).unwrap();
+    assert!(why.contains("the tree has changed"), "{why}");
+}

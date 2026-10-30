@@ -1,7 +1,8 @@
 //! Probes: read-only views of jouet's state that rules can ask for.
 //! `jouet.pr.status()` and `jouet.pr.next()` (GitHub), `jouet.ci.last_run()`
-//! (the hooks' ledger), `jouet.git.state()` and `jouet.repo()` (plain
-//! `git`), and `jouet.env()` (an allowlist).
+//! (the hooks' ledger), `jouet.git.state()`, `jouet.git.tree()` and
+//! `jouet.repo()` (plain `git`), `jouet.cargo.workspace()` (`Cargo.toml`
+//! files), and `jouet.env()` (an allowlist).
 //!
 //! Every probe:
 //! - only reads;
@@ -15,7 +16,8 @@
 //! The GitHub probes are off in hooks unless the `rules.network` setting
 //! turns them on, so a hook never waits on the network by default.
 
-mod git;
+mod cargo;
+pub(crate) mod git;
 mod github;
 mod ledger;
 
@@ -110,8 +112,13 @@ impl Probes {
         Ok(view.map(|v| serde_json::json!({ "status": v.status, "next": v.next })))
     }
 
-    fn last_run(&self, kind: Option<&str>) -> Option<serde_json::Value> {
-        ledger::last_run(self.ledger.as_deref()?, kind, self.repo_key.as_deref())
+    fn last_run(&self, kind: Option<&str>, scope: Option<&str>) -> Option<serde_json::Value> {
+        ledger::last_run(
+            self.ledger.as_deref()?,
+            kind,
+            scope,
+            self.repo_key.as_deref(),
+        )
     }
 }
 
@@ -198,18 +205,33 @@ pub(crate) fn install(
     let s = shared.clone();
     ci.set(
         "last_run",
-        lua.create_function(move |lua, kind: Option<String>| {
-            if let Some(kind) = kind.as_deref()
-                && !["test", "lint", "build"].contains(&kind)
-            {
-                return Err(mlua::Error::runtime(format!(
-                    "jouet.ci.last_run: kind must be \"test\", \"lint\" or \"build\", not `{kind}`"
-                )));
-            }
-            let key = format!("ci:{}", kind.as_deref().unwrap_or(""));
-            let found = cached(&s, &key, |p, _| Ok(p.last_run(kind.as_deref())))?;
-            answer(lua, found)
-        })?,
+        lua.create_function(
+            move |lua, (kind, scope): (Option<String>, Option<String>)| {
+                if let Some(kind) = kind.as_deref()
+                    && !["test", "lint", "build"].contains(&kind)
+                {
+                    return Err(mlua::Error::runtime(format!(
+                        "jouet.ci.last_run: kind must be \"test\", \"lint\" or \"build\", not `{kind}`"
+                    )));
+                }
+                if let Some(scope) = scope.as_deref()
+                    && !["full", "partial"].contains(&scope)
+                {
+                    return Err(mlua::Error::runtime(format!(
+                        "jouet.ci.last_run: scope must be \"full\" or \"partial\", not `{scope}`"
+                    )));
+                }
+                let key = format!(
+                    "ci:{}:{}",
+                    kind.as_deref().unwrap_or(""),
+                    scope.as_deref().unwrap_or("")
+                );
+                let found = cached(&s, &key, |p, _| {
+                    Ok(p.last_run(kind.as_deref(), scope.as_deref()))
+                })?;
+                answer(lua, found)
+            },
+        )?,
     )?;
     jouet.set("ci", ci)?;
 
@@ -223,6 +245,35 @@ pub(crate) fn install(
             answer(lua, found)
         })?,
     )?;
+
+    let s = shared.clone();
+    git_table.set(
+        "tree",
+        lua.create_function(move |lua, ()| {
+            let found = cached(&s, "tree", |p, left| {
+                crate::tree::work_tree(p.dir.as_deref(), left).map(|t| Some(t.into()))
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+
+    let cargo_table = lua.create_table()?;
+    let s = shared.clone();
+    cargo_table.set(
+        "workspace",
+        lua.create_function(move |lua, dir: Option<String>| {
+            let key = format!("cargo:{}", dir.as_deref().unwrap_or(""));
+            let found = cached(&s, &key, |p, _| {
+                let base = match &p.dir {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_dir().map_err(|e| e.to_string())?,
+                };
+                cargo::workspace(&base.join(dir.as_deref().unwrap_or(".")))
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("cargo", cargo_table)?;
 
     let s = shared.clone();
     jouet.set(
