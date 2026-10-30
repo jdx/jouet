@@ -3,7 +3,7 @@
 
 - **Usage:** `jouet rule types`
 
-Print the Luau type definitions of the jouet module
+Print the Luau type definitions of the jouet module, for rule scripts
 
 ## Flags
 - **`-h --help`** — Print help

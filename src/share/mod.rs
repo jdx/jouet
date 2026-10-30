@@ -193,15 +193,58 @@ pub(crate) struct Evidence {
     pub near_misses: Vec<replay::Hit>,
 }
 
+/// What sharing a rule publishes of it: its `[[rule]]` table (or a Luau
+/// rule file), and the script it names, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuleText {
+    /// The rule's TOML, or a whole Luau rule file.
+    pub code: String,
+    pub format: jouet_rules::Format,
+    /// The script's path, as the rule names it, and its code.
+    pub script: Option<(String, String)>,
+}
+
+/// A rule of yours as sharing publishes it: only its own table from a file
+/// that holds several, and its script.
+fn shared_code(rule: &jouet_rules::Rule) -> Result<RuleText, String> {
+    let jouet_rules::Origin::User(path) = &rule.origin else {
+        return Err(format!("`{}` has no file of yours", rule.name));
+    };
+    let read = |path: &Path| {
+        std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))
+    };
+    let file = read(path)?;
+    let code = match rule.format {
+        jouet_rules::Format::Luau => file,
+        jouet_rules::Format::Toml => match rulefile::block(&file, &rule.name) {
+            Some(range) => file[range].to_string(),
+            None => file,
+        },
+    };
+    let script = match &rule.script {
+        Some(script) => {
+            let dir = path.parent().unwrap_or(Path::new("."));
+            Some((script.clone(), read(&dir.join(script))?))
+        }
+        None => None,
+    };
+    Ok(RuleText {
+        code,
+        format: rule.format,
+        script,
+    })
+}
+
 /// Checks a rule of yours against what sharing needs, returning its
-/// evidence or every reason it is not ready.
+/// evidence, its `why` and what is published of it, or every reason it is
+/// not ready.
 pub(crate) fn check_rule(
     paths: &Paths,
     name: &str,
     now: u64,
-) -> Result<(Evidence, String, String), Vec<String>> {
-    let engine =
-        wind::user_engine(&paths.rules).ok_or(vec!["the rule engine did not start".to_string()])?;
+) -> Result<(Evidence, String, RuleText), Vec<String>> {
+    let mut engine = wind::user_engine(&paths.rules);
+    engine.load_scripts();
     let Some(rule) = engine.rule(name) else {
         return Err(vec![format!("no rule named `{name}`")]);
     };
@@ -261,8 +304,7 @@ pub(crate) fn check_rule(
     if !problems.is_empty() {
         return Err(problems);
     }
-    let code = std::fs::read_to_string(paths.rules.join(format!("{name}.luau")))
-        .map_err(|e| vec![e.to_string()])?;
+    let code = shared_code(rule).map_err(|e| vec![e])?;
     let examples = engine.examples(rule).unwrap_or_default();
     let fires = examples.iter().filter(|e| e.fires).count();
     Ok((
@@ -351,15 +393,26 @@ fn shapes(out: &mut String, hits: &[replay::Hit]) {
 pub(crate) fn rule_proposal(
     name: &str,
     why: &str,
-    code: &str,
+    text: &RuleText,
     e: &Evidence,
     words: &[String],
     footer: &str,
 ) -> Proposal {
+    let lang = match text.format {
+        jouet_rules::Format::Toml => "toml",
+        jouet_rules::Format::Luau => "lua",
+    };
     let mut body = format!(
-        "A rule of mine that has proven itself, proposed for jouet's built-in rules or an official rule pack.\n\n**Why:** {why}\n\n### The rule\n\n```lua\n{}\n```\n\n",
-        code.trim_end()
+        "A rule of mine that has proven itself, proposed for jouet's built-in rules or an official rule pack.\n\n**Why:** {why}\n\n### The rule\n\n```{lang}\n{}\n```\n\n",
+        text.code.trim()
     );
+    if let Some((path, script)) = &text.script {
+        let _ = writeln!(
+            body,
+            "### Its script, `{path}`\n\n```lua\n{}\n```\n",
+            script.trim_end()
+        );
+    }
     let _ = writeln!(body, "### How it has done\n");
     let _ = writeln!(body, "- In deny mode for {} days.", e.deny_days);
     let _ = writeln!(

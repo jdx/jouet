@@ -97,15 +97,22 @@ Pester tests stay at the root, since they run the binary.
   `src/guide.rs` (a test fails until it does). If it replaces a pattern agents hand-roll, add a
   built-in rule with `needs` naming the command. Hooks must fail open: `jouet hook` always exits
   0, never 2.
-- **Rules:** the hooks' steering rules are Luau scripts in `crates/jouet-rules/rules/`, written
-  against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`, printed by `jouet rule
-  types`), each starting with a `--- why:` header (plus `mode`, `scope`, `author`, `created`). User
-  and repository rules may only add decisions; keep that floor (no replacing built-in rules, no
-  locking out `jouet`) when changing the engine. A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
-  matching and near-miss commands with each change. A rule whose advice names a jouet command
-  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module`, `prelude.luau`,
-  the probes and `recipe::COMMANDS`, and check it with `luau-lsp analyze
-  --definitions=jouet.d.luau rules/*.luau recipes/*.luau`.
+- **Rules:** the hooks' steering rules are `[[rule]]` tables in TOML, one file per built-in rule
+  in `crates/jouet-rules/rules/`: a matcher (`match`), a `message` and `suggest`, and `why`,
+  `mode`, `scope`, `author`, `created`. The types in `crates/jouet-rules/src/decl.rs` are both the
+  parser and the JSON schema (`jouet rule schema`, published as `docs/public/schema/rules.json`;
+  regenerate it with `jouet rule schema >docs/public/schema/rules.json`, or a bats test fails).
+  Matching is plain Rust (`matcher.rs`), so a rule without a script never starts a Luau VM; keep
+  the matcher small, and give a rule with real logic a `script` instead (only `checks` has one).
+  Scripts are written against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`,
+  printed by `jouet rule types`). User and repository rules may only add decisions; keep that
+  floor (no replacing built-in rules, no locking out `jouet`) when changing the engine. A rule's
+  `examples` are its tests: `cargo test` runs every built-in rule's, so add matching and near-miss
+  commands with each change. A rule whose advice names a jouet command declares it in `needs`.
+  Keep `jouet.d.luau` in step with `install_module`, `prelude.luau`, the probes and
+  `recipe::COMMANDS`, and check it with `luau-lsp analyze --definitions=jouet.d.luau
+  rules/*.luau recipes/*.luau`. Whole-file `.luau` rules still load but are deprecated
+  (`LUAU_RULES_REMOVED_IN`); a test fails once jouet reaches that version.
 - **Probes and recipes:** probes only read, are cached per hook call or recipe step, and run within
   the caller's remaining budget; the GitHub ones stay off in hooks unless `rules.network` is set.
   A recipe reaches the world only through `jouet.cmd`, whose commands are listed in

@@ -1,0 +1,322 @@
+{
+  "$id": "https://jouet.jdx.dev/schema/rules.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "jouet rules",
+  "description": "A file of jouet rules: `[[rule]]` tables that steer an agent's tool calls. See https://jouet.jdx.dev/rules",
+  "type": "object",
+  "properties": {
+    "rule": {
+      "description": "The rules in this file.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Rule"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Rule": {
+      "description": "One rule: what it matches, what it tells the agent, and the examples\nthat prove it.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The rule's name: lowercase words joined by dashes, unique among\nevery rule jouet loads.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}[a-z0-9]$|^[a-z]$"
+        },
+        "why": {
+          "description": "What the rule is for, in one line.",
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "description": "`deny` blocks a call it matches; `warn` lets the call run and shows\nthe message. A rule of yours defaults to `warn`, and only warns until\nit passes examples of both kinds.",
+          "$ref": "#/$defs/Mode"
+        },
+        "scope": {
+          "description": "Where the rule lives, if it says: it must match the directory.",
+          "$ref": "#/$defs/Scope"
+        },
+        "author": {
+          "description": "Who wrote it: a person, or the agent session that did.",
+          "type": "string"
+        },
+        "created": {
+          "description": "When, as a date.",
+          "type": "string"
+        },
+        "on": {
+          "description": "When the rule runs. Only a `script` rule can run after a tool\n(`post-tool-use`), to record a test, lint or build run.",
+          "$ref": "#/$defs/Event"
+        },
+        "needs": {
+          "description": "The jouet command the rule's advice names, such as `[\"wait\", \"ci\"]`:\nthe rule stays off until the installed jouet has it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "message": {
+          "description": "What the agent is told when the rule matches. Required unless a\n`script` decides.",
+          "type": "string"
+        },
+        "suggest": {
+          "description": "A command to run instead, shown before the message as \"Run `...`\ninstead.\"",
+          "type": "string"
+        },
+        "match": {
+          "description": "The calls the rule fires on: a table, or a list of tables of which\nany may match.",
+          "$ref": "#/$defs/OneOrMany_Matcher"
+        },
+        "script": {
+          "description": "A Luau file beside this one, for logic a matcher cannot express. It\nreturns a table with a `check` function (`jouet rule types` prints\nthe API). With a `match` too, the script only runs on calls the\nmatcher matches.",
+          "type": "string",
+          "pattern": "^[^/\\\\].*\\.luau$"
+        },
+        "examples": {
+          "description": "Calls the rule must fire on, and near misses it must leave alone.",
+          "$ref": "#/$defs/Examples"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "why"
+      ]
+    },
+    "Mode": {
+      "description": "What a rule's denials do.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "deny"
+          ]
+        },
+        {
+          "description": "A denial is shown as a warning, and the call goes ahead.",
+          "type": "string",
+          "const": "warn"
+        }
+      ]
+    },
+    "Scope": {
+      "description": "Where a rule lives, which decides what it may do.",
+      "type": "string",
+      "enum": [
+        "builtin",
+        "user",
+        "repo"
+      ]
+    },
+    "Event": {
+      "oneOf": [
+        {
+          "description": "Before a tool runs: a rule may deny it.",
+          "type": "string",
+          "const": "pre-tool-use"
+        },
+        {
+          "description": "After a tool ran, with its exit code: a rule may record a check.",
+          "type": "string",
+          "const": "post-tool-use"
+        }
+      ]
+    },
+    "OneOrMany_Matcher": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Matcher"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Matcher"
+          }
+        }
+      ]
+    },
+    "Matcher": {
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool` and `paths` is about a command, and needs\n`command`.",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "description": "The harness's tool name, such as `Bash`, `Edit` or `WebFetch`; `*`\nand `?` are wildcards. Without it, a matcher with `command` matches\nany tool that runs a command.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "paths": {
+          "description": "For file tools: the path the tool reads or writes. A pattern without\na `/` matches the file name, one with a `/` the path from the working\ndirectory; `*` stays within a directory and `**` crosses them.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "command": {
+          "description": "The program and its subcommands, such as `\"git stash pop\"`. Matched\nafter wrappers such as `rtk`, `sudo` and `env`, and past the options\nbefore the first subcommand (`git -C dir add`). Words may use `*` and\n`?`.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "via": {
+          "description": "The wrapper the command ran through, such as `rtk`, `sudo` or\n`mise`.",
+          "$ref": "#/$defs/OneOrMany_string",
+          "default": []
+        },
+        "flags": {
+          "description": "The command has one of these options, such as `-f` or `--force`.\n`-f` matches inside a cluster such as `-fu`, and `--force` matches\n`--force=...`.",
+          "$ref": "#/$defs/OneOrMany_Flag"
+        },
+        "unless_flags": {
+          "description": "The command has none of these options.",
+          "$ref": "#/$defs/OneOrMany_Flag"
+        },
+        "exact_flags": {
+          "description": "The command's options are exactly these, whatever their values.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(-[^-]|--[^=]+)$"
+          }
+        },
+        "value_flags": {
+          "description": "The command's options that take a value, so that in `git commit -m\n-n` the `-n` is a message, not an option, and `-mn` is `-m n`.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(-[^-]|--[^=]+)$"
+          }
+        },
+        "args": {
+          "description": "One of the command's arguments (the words after its subcommands\nthat are not options or their values) matches one of these. `*` and\n`?` are wildcards.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "unless_args": {
+          "description": "None of the command's arguments matches any of these.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "max_args": {
+          "description": "The command has at most this many arguments.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "text": {
+          "description": "Regular expressions that must each match one of the command's words\nafter the program, or one of its here-documents. `|` gives\nalternatives within one.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "with": {
+          "description": "Another command in the same call must match this too, as in `sleep\n60 && gh pr checks`. It takes the command keys, not `tool`, `paths`\nor another `with`.",
+          "$ref": "#/$defs/Matcher"
+        }
+      },
+      "additionalProperties": false
+    },
+    "OneOrMany_string": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "OneOrMany_Flag": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(-[^-]|--[^=]+)$"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(-[^-]|--[^=]+)$"
+          }
+        }
+      ]
+    },
+    "Examples": {
+      "description": "A rule's examples. Each is a shell command, or a table for a call that\nneeds more than that.",
+      "type": "object",
+      "properties": {
+        "fires": {
+          "description": "Calls the rule must fire on: deny, warn or record a check.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Example"
+          }
+        },
+        "quiet": {
+          "description": "Near misses it must leave alone.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Example"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Example": {
+      "anyOf": [
+        {
+          "description": "A shell command.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/ExampleCall"
+        }
+      ]
+    },
+    "ExampleCall": {
+      "description": "An example call that needs more than a shell command.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The shell command. Required for a `Bash` call.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "The harness's tool name; `Bash` if omitted.",
+          "type": "string"
+        },
+        "path": {
+          "description": "For a file tool: the path it reads or writes.",
+          "type": "string"
+        },
+        "harness": {
+          "description": "`claude`, `codex` or another harness; `test` if omitted.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "For a post-tool-use rule; `0` if omitted.",
+          "type": "integer",
+          "format": "int32"
+        },
+        "action": {
+          "description": "For a `fires` example: `deny` or `warn`, when it matters which.",
+          "$ref": "#/$defs/ExpectAction"
+        },
+        "kind": {
+          "description": "For a `fires` example of a post-tool-use rule: the kind it must\nrecord.",
+          "$ref": "#/$defs/Kind"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExpectAction": {
+      "type": "string",
+      "enum": [
+        "deny",
+        "warn"
+      ]
+    },
+    "Kind": {
+      "type": "string",
+      "enum": [
+        "test",
+        "lint",
+        "build"
+      ]
+    }
+  }
+}

@@ -14,7 +14,6 @@ fn engine_with(sources: Vec<Source>, budget: Budget, disabled: Vec<String>) -> E
             cache_dir: None,
         },
     )
-    .unwrap()
 }
 
 /// Examples of both kinds, which a rule of yours needs before it may deny.
@@ -33,13 +32,35 @@ fn user(name: &str, code: &str) -> Source {
 
 /// A user rule exactly as written, header and all.
 fn user_raw(name: &str, code: &str) -> Source {
-    Source {
-        name: name.into(),
-        origin: Origin::User(PathBuf::from(format!("{name}.luau"))),
-        code: code.into(),
-        trusted: true,
-    }
+    Source::luau(
+        name,
+        Origin::User(PathBuf::from(format!("{name}.luau"))),
+        code,
+    )
 }
+
+/// A user rule file in TOML.
+fn toml_user(file: &str, code: &str) -> Source {
+    Source::toml(
+        file,
+        Origin::User(PathBuf::from(format!("{file}.toml"))),
+        code,
+    )
+}
+
+/// A TOML rule with examples of both kinds, which match it.
+const DENY_LS: &str = r#"[[rule]]
+name = "no-ls"
+why = "a test rule"
+mode = "deny"
+message = "use eza"
+suggest = "eza"
+[rule.match]
+command = "ls"
+[rule.examples]
+fires = ["ls -la"]
+quiet = ["eza"]
+"#;
 
 fn bash(command: &str) -> Call {
     Call {
@@ -82,7 +103,12 @@ fn the_first_denial_wins_and_names_its_rule() {
     let outcome = engine(builtin()).evaluate(&bash("git add -A && git stash"));
     let deny = outcome.deny.unwrap();
     assert_eq!(deny.rule, "git-add-all");
-    assert!(deny.message.unwrap().starts_with("Stage explicit paths"));
+    assert_eq!(deny.suggest.as_deref(), Some("git add path/to/file ..."));
+    assert!(
+        deny.message
+            .unwrap()
+            .starts_with("Run `git add path/to/file ...` instead. `git add -A`")
+    );
     assert!(outcome.errors.is_empty());
 }
 
@@ -115,8 +141,7 @@ fn disabled_rules_and_missing_commands_do_not_run() {
             budget: Budget::default(),
             cache_dir: None,
         },
-    )
-    .unwrap();
+    );
     assert_eq!(engine.rule("git-stash").unwrap().state, State::Disabled);
     assert_eq!(
         engine.rule("sleep-poll").unwrap().state,
@@ -366,8 +391,7 @@ fn a_damaged_cache_entry_is_recompiled() {
             budget: Budget::default(),
             cache_dir: Some(dir.path().to_path_buf()),
         },
-    )
-    .unwrap();
+    );
     assert_eq!(engine.rules()[0].state, State::Enabled);
     assert!(engine.evaluate(&bash("ls")).deny.is_some());
 }
@@ -506,6 +530,7 @@ return {
         Case {
             command: Some("ls".into()),
             tool: "Bash".into(),
+            path: None,
             harness: "codex".into(),
             exit_code: None,
             expect: Expect::Fires {
@@ -768,4 +793,335 @@ fn a_missing_primitive_is_recorded_as_a_gap() {
     );
     fine.evaluate(&bash("ls"));
     assert!(fine.take_gaps().is_empty());
+}
+
+#[test]
+fn matcher_rules_never_start_a_vm() {
+    let engine = engine(builtin());
+    for command in [
+        "git status && cargo test --workspace",
+        "git add -A",
+        "sleep 60 && gh pr checks",
+        "python3 -c 'print(1)'",
+    ] {
+        engine.evaluate(&bash(command));
+    }
+    assert!(!engine.vm_started());
+    // `checks` runs after a tool, behind a matcher of the programs it knows.
+    let post = |command: &str| Call {
+        event: Some(Event::PostToolUse),
+        exit_code: Some(0),
+        ..bash(command)
+    };
+    assert!(engine.evaluate(&post("ls -la src")).records.is_empty());
+    assert!(!engine.vm_started());
+    assert_eq!(engine.evaluate(&post("cargo test")).records.len(), 1);
+    assert!(engine.vm_started());
+}
+
+#[test]
+fn a_toml_rule_denies_with_its_suggestion_in_front() {
+    let engine = engine(vec![toml_user("mine", DENY_LS)]);
+    let rule = engine.rule("no-ls").unwrap();
+    assert_eq!(
+        (rule.format, rule.line, rule.mode),
+        (Format::Toml, 1, Mode::Deny)
+    );
+    assert_eq!(rule.deprecation(), None);
+    let deny = engine.evaluate(&bash("cd x && ls -la")).deny.unwrap();
+    assert_eq!(deny.message.as_deref(), Some("Run `eza` instead. use eza"));
+    assert_eq!(deny.suggest.as_deref(), Some("eza"));
+    assert!(engine.evaluate(&bash("echo ls")).deny.is_none());
+    assert_eq!(engine.proven(rule), Ok(2));
+}
+
+#[test]
+fn a_toml_rule_of_yours_warns_until_it_has_examples_of_both_kinds() {
+    let code = DENY_LS.replace("quiet = [\"eza\"]\n", "");
+    let engine = engine(vec![toml_user("mine", &code)]);
+    let rule = engine.rule("no-ls").unwrap();
+    assert_eq!(rule.mode, Mode::Warn);
+    assert!(
+        rule.missing_examples
+            .as_deref()
+            .unwrap()
+            .contains("`quiet`")
+    );
+    let outcome = engine.evaluate(&bash("ls"));
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.warnings.len(), 1);
+    // Without `mode`, a rule of yours warns.
+    let code = DENY_LS.replace("mode = \"deny\"\n", "");
+    let unset = self::engine(vec![toml_user("mine", &code)]);
+    assert_eq!(unset.rule("no-ls").unwrap().mode, Mode::Warn);
+}
+
+#[test]
+fn a_broken_toml_rule_names_its_file_and_line() {
+    let engine = engine(vec![
+        toml_user(
+            "typo",
+            "[[rule]]\nname = \"a\"\nwhy = \"w\"\n[rule.match]\ncomand = \"ls\"\n",
+        ),
+        toml_user(
+            "two",
+            &format!(
+                "{DENY_LS}\n[[rule]]\nname = \"no-msg\"\nwhy = \"w\"\nmatch = {{ command = \"rm\" }}\n"
+            ),
+        ),
+        toml_user("empty", "# nothing yet\n"),
+    ]);
+    let state = |name: &str| match &engine.rule(name).unwrap().state {
+        State::Broken(e) => e.clone(),
+        other => panic!("{name}: {other:?}"),
+    };
+    let typo = state("typo");
+    assert!(
+        typo.starts_with("typo.toml:5: unknown field `comand`"),
+        "{typo}"
+    );
+    assert!(
+        state("no-msg").starts_with("two.toml:13: give it a `message`"),
+        "{}",
+        state("no-msg")
+    );
+    assert!(state("empty").contains("no `[[rule]]` tables"));
+    // The file's other rule loads.
+    assert_eq!(engine.rule("no-ls").unwrap().state, State::Enabled);
+}
+
+#[test]
+fn rule_keys_that_do_not_fit_together_are_refused() {
+    let broken = |rule: &str| {
+        let code = format!("[[rule]]\nname = \"r\"\nwhy = \"w\"\n{rule}");
+        let engine = engine(vec![toml_user("r", &code)]);
+        match &engine.rule("r").unwrap().state {
+            State::Broken(e) => e.clone(),
+            other => panic!("{rule}: {other:?}"),
+        }
+    };
+    assert!(broken("message = \"m\"\n").contains("give it a `match`"));
+    assert!(broken("match = { command = \"ls\" }\n").contains("`message`"));
+    assert!(broken("message = \"m\"\nscript = \"r.luau\"\n").contains("leave out `message`"));
+    assert!(
+        broken("on = \"post-tool-use\"\nmessage = \"m\"\nmatch = { command = \"ls\" }\n")
+            .contains("needs a `script`")
+    );
+    assert!(
+        broken("scope = \"repo\"\nmessage = \"m\"\nmatch = { command = \"ls\" }\n")
+            .contains("scope")
+    );
+    assert!(
+        broken(
+            "message = \"m\"\n[[rule.match]]\ncommand = \"ls\"\n[[rule.match]]\nflags = \"-f\"\n"
+        )
+        .contains("`match` 2: ")
+    );
+    assert!(
+        broken("message = \"m\"\nmatch = { command = \"ls\" }\n[rule.examples]\nfires = [{ tool = \"Bash\" }]\n")
+            .contains("needs a `command`")
+    );
+    assert!(broken("script = \"missing.luau\"\n").contains("reading its script missing.luau"));
+}
+
+#[test]
+fn a_toml_rule_cannot_replace_a_builtin_or_another_rule() {
+    let mut sources = builtin();
+    sources.push(toml_user("mine", &DENY_LS.replace("no-ls", "git-stash")));
+    sources.push(toml_user("a", DENY_LS));
+    sources.push(toml_user("b", DENY_LS));
+    let engine = engine(sources);
+    let states: Vec<String> = engine
+        .rules()
+        .iter()
+        .filter(|r| r.name == "git-stash" || r.name == "no-ls")
+        .map(|r| match &r.state {
+            State::Broken(e) => e.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(states[0], "Enabled");
+    assert!(states[1].contains("is a built-in rule"), "{}", states[1]);
+    assert_eq!(states[2], "Enabled");
+    assert!(
+        states[3].contains("a.toml already defines `no-ls`"),
+        "{}",
+        states[3]
+    );
+    assert!(engine.evaluate(&bash("git stash")).deny.is_some());
+}
+
+#[test]
+fn a_script_runs_behind_its_matcher_and_is_not_a_rule_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let rules = dir.path().join("rules");
+    std::fs::create_dir(&rules).unwrap();
+    std::fs::write(
+        rules.join("big-rm.toml"),
+        r#"[[rule]]
+name = "big-rm"
+why = "a test rule"
+mode = "deny"
+script = "big-rm.luau"
+match = { command = "rm" }
+[rule.examples]
+fires = ["rm -r a b c d"]
+quiet = ["rm -r a", "ls a b c d"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        rules.join("big-rm.luau"),
+        "return { check = function(call)\n  for _, c in call.commands do\n    if #c.argv > 4 then return jouet.deny('one at a time') end\n  end\n  return nil\nend }\n",
+    )
+    .unwrap();
+    let (sources, errors) = discover(Some(&rules), None, &TrustStore::load(None));
+    assert!(errors.is_empty());
+    // A script beside a TOML file that does not load is still a script.
+    std::fs::write(rules.join("broken.toml"), "[[rule]]\nname = 1\n").unwrap();
+    std::fs::write(rules.join("broken.luau"), "return {}\n").unwrap();
+    let broken = self::engine(discover(Some(&rules), None, &TrustStore::load(None)).0);
+    let formats: Vec<(&str, Format)> = broken
+        .rules()
+        .iter()
+        .filter(|r| r.scope == Scope::User)
+        .map(|r| (r.name.as_str(), r.format))
+        .collect();
+    assert_eq!(
+        formats,
+        [("big-rm", Format::Toml), ("broken", Format::Toml)]
+    );
+    let mut engine = engine(sources);
+    let mine: Vec<&str> = engine
+        .rules()
+        .iter()
+        .filter(|r| r.scope == Scope::User)
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(mine, ["big-rm"]);
+    engine.load_scripts();
+    let rule = engine.rule("big-rm").unwrap();
+    assert_eq!(rule.state, State::Enabled);
+    assert_eq!(rule.script.as_deref(), Some("big-rm.luau"));
+    assert_eq!(engine.proven(rule), Ok(3));
+    // `ls a b c d` never reached the script: no VM for it.
+    let fresh = self::engine(discover(Some(&rules), None, &TrustStore::load(None)).0);
+    assert!(fresh.evaluate(&bash("ls a b c d e")).deny.is_none());
+    assert!(!fresh.vm_started());
+    assert_eq!(
+        fresh
+            .evaluate(&bash("rm a b c d e"))
+            .deny
+            .unwrap()
+            .message
+            .as_deref(),
+        Some("one at a time")
+    );
+}
+
+#[test]
+fn a_script_that_does_not_load_fails_open_and_lists_as_broken() {
+    let code = "[[rule]]\nname = \"bad\"\nwhy = \"w\"\nscript = \"bad.luau\"\n";
+    let sources = || {
+        vec![
+            toml_user("bad", code).with_script("bad.luau", "return { check = "),
+            toml_user("examples", &code.replace("bad", "ex")).with_script(
+                "ex.luau",
+                "return { check = function() end, examples = { fires = {'x'} } }",
+            ),
+        ]
+    };
+    let engine = engine(sources());
+    assert_eq!(engine.rule("bad").unwrap().state, State::Enabled);
+    let outcome = engine.evaluate(&bash("ls"));
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.errors.len(), 2, "{:?}", outcome.errors);
+    let mut engine = self::engine(sources());
+    engine.load_scripts();
+    let state = |name: &str| match &engine.rule(name).unwrap().state {
+        State::Broken(e) => e.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        state("bad").starts_with("bad.toml:1: bad.luau: "),
+        "{}",
+        state("bad")
+    );
+    assert!(
+        state("ex").contains("belongs in the rule's TOML"),
+        "{}",
+        state("ex")
+    );
+}
+
+#[test]
+fn an_untrusted_toml_rule_is_listed_and_never_runs() {
+    let source = Source::toml(
+        "team",
+        Origin::Repo(PathBuf::from(".jouet/rules/team.toml")),
+        DENY_LS,
+    )
+    .untrusted();
+    let engine = engine(vec![source]);
+    let rule = engine.rule("no-ls").unwrap();
+    assert_eq!(rule.state, State::Untrusted);
+    assert_eq!(rule.why, "a test rule");
+    assert!(engine.evaluate(&bash("ls")).deny.is_none());
+}
+
+#[test]
+fn a_file_tool_example_carries_its_path() {
+    let code = r#"[[rule]]
+name = "no-lock-edits"
+why = "lockfiles are generated"
+mode = "deny"
+message = "regenerate it instead"
+[rule.match]
+tool = ["Edit", "Write"]
+paths = "*.lock"
+[rule.examples]
+fires = [{ tool = "Edit", path = "/repo/Cargo.lock" }]
+quiet = [{ tool = "Edit", path = "/repo/src/main.rs" }, { tool = "Read", path = "Cargo.lock" }]
+"#;
+    let engine = engine(vec![toml_user("locks", code)]);
+    let rule = engine.rule("no-lock-edits").unwrap();
+    let examples = engine.examples(rule).unwrap();
+    assert!(examples.iter().all(|e| e.ok), "{examples:?}");
+    assert_eq!(examples[0].label(), "(tool Edit, path /repo/Cargo.lock)");
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": { "file_path": "/repo/mise.lock", "content": "x" },
+        "cwd": "/repo",
+    });
+    let call = Call::from_hook(&payload, "claude");
+    assert_eq!(call.path.as_deref(), Some("/repo/mise.lock"));
+    assert!(engine.evaluate(&call).deny.is_some());
+}
+
+#[test]
+fn a_luau_rule_file_still_loads_and_says_how_to_convert() {
+    let engine = engine(vec![user(
+        "old",
+        "return { check = function() return jouet.deny('x') end }",
+    )]);
+    let rule = engine.rule("old").unwrap();
+    assert_eq!((rule.format, &rule.state), (Format::Luau, &State::Enabled));
+    let note = rule.deprecation().unwrap();
+    assert!(note.contains("old.luau is a Luau rule file"), "{note}");
+    assert!(note.contains("old.toml"), "{note}");
+    assert!(engine.evaluate(&bash("ls")).deny.is_some());
+    assert!(builtin().iter().all(|s| s.format == Format::Toml));
+}
+
+/// Like mise's `deprecated_at!`: once jouet reaches the version that stops
+/// loading Luau rule files, this fails until their support is removed.
+#[test]
+fn luau_rule_files_are_removed_on_time() {
+    let version = |v: &str| -> Vec<u64> { v.split('.').map(|n| n.parse().unwrap_or(0)).collect() };
+    assert!(
+        version(env!("CARGO_PKG_VERSION")) < version(LUAU_RULES_REMOVED_IN),
+        "jouet {} has reached {LUAU_RULES_REMOVED_IN}: remove Luau rule files (Format::Luau, header.rs, examples::read)",
+        env!("CARGO_PKG_VERSION")
+    );
 }

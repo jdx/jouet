@@ -28,6 +28,9 @@ pub(crate) struct Proposal {
     pub overridden: u64,
     /// False for a repository rule, which changes through a PR.
     pub can_apply: bool,
+    /// The file of yours it lives in, and the script it names.
+    #[serde(skip)]
+    pub file: Option<(std::path::PathBuf, Option<String>)>,
 }
 
 /// The rules worth retiring, with why.
@@ -64,6 +67,10 @@ pub(crate) fn proposals(engine: &Engine, stats: &Stats) -> Vec<Proposal> {
             fired: s.fired,
             overridden: s.overridden,
             can_apply: matches!(rule.origin, Origin::User(_)),
+            file: match &rule.origin {
+                Origin::User(path) => Some((path.clone(), rule.script.clone())),
+                _ => None,
+            },
         });
     }
     out
@@ -80,8 +87,10 @@ pub(crate) fn apply(
     let mut changes = Vec::new();
     let mut errors = Vec::new();
     for p in proposals.iter().filter(|p| p.can_apply) {
-        let path = paths.rules.join(format!("{}.luau", p.rule));
-        match rulefile::retire(&path) {
+        let Some((path, script)) = &p.file else {
+            continue;
+        };
+        match rulefile::retire_rule(path, &p.rule, script.as_deref()) {
             Ok(to) => {
                 let change = Change {
                     ts: now,

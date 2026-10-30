@@ -174,7 +174,7 @@ fn idea(
     let why: Vec<String> = entries
         .iter()
         .filter_map(|g| g.rule.as_deref())
-        .filter_map(|r| engine.as_ref()?.rule(r).map(|rule| rule.why.clone()))
+        .filter_map(|r| engine.rule(r).map(|rule| rule.why.clone()))
         .filter(|w| !w.is_empty())
         .collect();
     Ok((

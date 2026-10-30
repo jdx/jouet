@@ -1,24 +1,22 @@
--- Type definitions for the `jouet` module that jouet rules run against.
--- `jouet rule types` prints this file. Check a rule with luau-lsp:
+-- Type definitions for the `jouet` module that rule scripts run against.
+-- `jouet rule types` prints this file. Check a script with luau-lsp:
 --
 --   jouet rule types > jouet.d.luau
 --   luau-lsp analyze --definitions=jouet.d.luau my-rule.luau
 --
--- A rule is a `.luau` file that starts with a header and returns a
--- `JouetRule`, with examples of calls it must fire on and near misses it
--- must stay quiet on:
+-- A rule is a `[[rule]]` table in a TOML file (`jouet rule schema`). One
+-- with logic a matcher cannot express names a script, `script =
+-- "my-rule.luau"`, which returns a `JouetRule` with a `check` function. The
+-- rule's name, mode, `on`, `needs` and examples stay in its TOML.
 --
---   --- name: my-rule        (optional; must match the file name)
---   --- why: what the rule is for, in one line   (required)
---   --- mode: warn           (warn or deny; a user's rules default to warn)
---   --- scope: user          (optional; must match where the file lives)
---   --- author: <who wrote it: a person, or the session that did>
---   --- created: 2026-10-30
+-- A script runs in a sandboxed Luau VM: the standard library minus
+-- `require`, with `jouet` as its only way to see the tool call. A rule of
+-- yours or a repository's only adds decisions: it cannot replace a built-in
+-- rule, and its denial of a command that only runs jouet becomes a warning.
 --
--- It runs in a sandboxed Luau VM: the standard library minus `require`, with
--- `jouet` as its only way to see the tool call. A rule of yours or a
--- repository's only adds decisions: it cannot replace a built-in rule, and
--- its denial of a command that only runs jouet becomes a warning.
+-- A whole `.luau` rule file, with a `--- why:` header and its `on`, `needs`
+-- and `examples` in the table, still loads, but is deprecated: move those
+-- into a `[[rule]]` table.
 --
 -- A recipe (`jouet run`) is a `.luau` file with the same `--- why:` header
 -- that returns a `JouetRecipe`. It runs in the same sandbox, and also has
@@ -43,6 +41,9 @@ export type JouetCommand = {
 	program: string?,
 	-- The bodies of the command's here-documents.
 	heredocs: { string },
+	-- The wrappers `argv` looked through, by basename, outermost first:
+	-- `rtk git status` ran via { "rtk" }.
+	via: { string },
 	-- The operator after the command; nil at the end of the script.
 	op: ("seq" | "and" | "or" | "pipe" | "background")?,
 	-- Inside `$(...)` or a script passed to `sh -c`.
@@ -66,6 +67,8 @@ export type JouetCall = {
 	tool: string,
 	-- The shell command, for a shell tool.
 	command: string?,
+	-- The file a file tool reads or writes.
+	path: string?,
 	cwd: string?,
 	-- The command's exit code (post-tool-use only).
 	exit_code: number?,
@@ -85,6 +88,8 @@ export type JouetDecision = {
 export type JouetExample = string | {
 	command: string?,
 	tool: string?,
+	-- For a file tool: the path it reads or writes.
+	path: string?,
 	harness: string?,
 	-- For a post-tool-use rule; 0 if omitted.
 	exit_code: number?,
@@ -97,13 +102,15 @@ export type JouetExample = string | {
 }
 
 export type JouetRule = {
+	-- Returns a decision, or nil to say nothing. The first rule to deny wins.
+	check: (call: JouetCall) -> JouetDecision?,
+	-- The rest is for a deprecated whole-file Luau rule; a script's rule
+	-- says these in its TOML.
 	-- When the rule runs; "pre-tool-use" if omitted.
 	on: JouetEvent?,
 	-- A jouet command the rule's advice names, such as { "wait", "ci" }. The
 	-- rule is off when the installed jouet does not have it.
 	needs: { string }?,
-	-- Returns a decision, or nil to say nothing. The first rule to deny wins.
-	check: (call: JouetCall) -> JouetDecision?,
 	-- Tool calls the rule must fire on (deny, warn or record), and near
 	-- misses it must stay quiet on, run by `jouet rule test`. They check what
 	-- `check` returns, before the mode turns a deny into a warning. A rule
@@ -112,7 +119,7 @@ export type JouetRule = {
 	examples: {
 		fires: { JouetExample },
 		quiet: { JouetExample },
-	},
+	}?,
 }
 
 -- `jouet pr status --json`'s entry for one PR. Fields that are empty are

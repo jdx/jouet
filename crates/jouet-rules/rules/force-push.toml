@@ -1,0 +1,42 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "force-push"
+why = "A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+suggest = "git push --force-with-lease"
+message = "It refuses a push that would drop commits you have not seen."
+
+[[rule.match]]
+command = "git push"
+flags = ["-f", "--force"]
+unless_flags = ["--force-with-lease"]
+# `-o` takes a value, so `-of` is a push option, not a force.
+value_flags = ["-o", "--push-option"]
+
+# A `+` refspec forces that one ref.
+[[rule.match]]
+command = "git push"
+args = "+?*"
+unless_flags = ["--force-with-lease"]
+value_flags = ["-o", "--push-option"]
+
+[rule.examples]
+fires = [
+  "git push --force",
+  "git push -f origin main",
+  "git push -fu origin feat",
+  "git push origin +main",
+]
+quiet = [
+  "git push --force-with-lease",
+  "git push --force-with-lease=main:abc123 --force-if-includes",
+  "git push --force --force-with-lease",
+  "git push origin main",
+  "git push -o ci.skip origin main",
+  "git push -of origin main",
+  "git commit -m 'git push --force'",
+  "rm -f file && git push",
+]

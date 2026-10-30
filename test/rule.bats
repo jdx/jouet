@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# `jouet rule`: the Luau rules jouet's hooks run. HOME is a scratch directory,
-# so user rules live in $HOME/.config/jouet/rules and trust in $XDG_STATE_HOME.
+# `jouet rule`: the rules jouet's hooks run. HOME is a scratch directory, so
+# user rules live in $HOME/.config/jouet/rules and trust in $XDG_STATE_HOME.
 
 setup() {
 	load "test_helper/common_setup"
@@ -45,16 +45,15 @@ setup() {
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
 	assert_line '8 of 8 rules passed their examples'
 
-	cat >"$RULES/no-rm.luau" <<'LUAU'
---- why: rm deletes for good
-return {
-	check = function(call)
-		return if call.commands[1].program == "rm" then jouet.deny("rm deletes for good") else nil
-	end,
-	examples = { fires = { "rm -rf target" }, quiet = { "rm notes.txt", "echo rm" } },
-}
-LUAU
-	printf -- '--- why: x\nreturn { check = function() end }\n' >"$RULES/bare.luau"
+	cat >"$RULES/no-rm.toml" <<'TOML'
+[[rule]]
+name = "no-rm"
+why = "rm deletes for good"
+message = "rm deletes for good"
+match = { command = "rm" }
+examples = { fires = ["rm -rf target"], quiet = ["rm notes.txt", "echo rm"] }
+TOML
+	printf '[[rule]]\nname = "bare"\nwhy = "x"\nmessage = "x"\nmatch = { command = "x" }\n' >"$RULES/bare.toml"
 
 	run --separate-stderr jouet rule test --all
 	assert_failure 1
@@ -79,16 +78,17 @@ LUAU
 }
 
 @test "a rule of yours without examples of both kinds only warns, and says why" {
-	cat >"$RULES/no-rm.luau" <<'LUAU'
---- why: rm deletes for good
---- mode: deny
-return {
-	check = function(call)
-		return if call.commands[1].program == "rm" then jouet.deny("Think twice.") else nil
-	end,
-	examples = { fires = { "rm -rf target" } },
-}
-LUAU
+	cat >"$RULES/no-rm.toml" <<'TOML'
+[[rule]]
+name = "no-rm"
+why = "rm deletes for good"
+mode = "deny"
+message = "Think twice."
+match = { command = "rm" }
+examples = { fires = ["rm -rf target"] }
+TOML
+	# A Luau rule file from an older jouet, with its examples under keys
+	# jouet no longer reads.
 	cat >"$RULES/old-style.luau" <<'LUAU'
 --- why: an older rule
 --- mode: deny
@@ -100,7 +100,7 @@ LUAU
 
 	run --separate-stderr jouet rule list
 	assert_success
-	# The header says deny, but it has not shown what it leaves alone.
+	# It says deny, but it has not shown what it leaves alone.
 	assert_line --regexp '^no-rm +enabled +warn +user'
 	assert_line --regexp '^note: no-rm only warns, and cannot be promoted, until it has examples of both kinds: it has no .quiet. examples'
 	assert_line --regexp '^note: old-style only warns, .* listed under .(deny|allow)., which jouet no longer reads'
@@ -126,7 +126,7 @@ LUAU
 @test "test runs a rule against a command, an exit code or a hook payload" {
 	run --separate-stderr jouet rule test force-push --command 'git push -f'
 	assert_success
-	assert_output --partial 'deny: Use'
+	assert_output --regexp '^deny: Run .git push --force-with-lease. instead\. It refuses a push that would drop commits you have not seen\.$'
 
 	run --separate-stderr jouet rule test force-push --command 'git push --force-with-lease'
 	assert_output 'allow'
@@ -140,18 +140,17 @@ LUAU
 }
 
 @test "a user rule warns by default and cannot replace a built-in rule" {
-	cat >"$RULES/no-rm.luau" <<'LUAU'
---- why: rm deletes for good
---- author: session-42
---- created: 2026-10-31
-return {
-	check = function(call)
-		return if call.commands[1].program == "rm" then jouet.deny("Think twice.") else nil
-	end,
-	examples = { fires = { "rm -rf target" }, quiet = { "ls" } },
-}
-LUAU
-	printf -- '--- why: allow every stash\nreturn { check = function() return nil end }\n' >"$RULES/git-stash.luau"
+	cat >"$RULES/no-rm.toml" <<'TOML'
+[[rule]]
+name = "no-rm"
+why = "rm deletes for good"
+author = "session-42"
+created = "2026-10-31"
+message = "Think twice."
+match = { command = "rm" }
+examples = { fires = ["rm -rf target"], quiet = ["ls"] }
+TOML
+	printf '[[rule]]\nname = "git-stash"\nwhy = "allow every stash"\nmessage = "x"\nmatch = { command = "true" }\n' >"$RULES/git-stash.toml"
 
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^no-rm +enabled +warn +user +session-42 +2026-10-31 +rm deletes for good$'
@@ -168,45 +167,84 @@ LUAU
 }
 
 @test "an agent can check a new rule file before installing it" {
-	cat >draft.luau <<'LUAU'
---- why: rm -r deletes for good
-return {
-	check = function(call)
-		for _, command in call.commands do
-			if command.program == "rm" and jouet.short_flag(command.argv[2] or "", "r") then
-				return jouet.warn("rm -r deletes for good")
-			end
-		end
-		return nil
-	end,
-	examples = {
-		fires = { "rm -rf target", { command = "rm -r src", action = "deny" } },
-		quiet = { "rm file", "echo 'rm -rf /'" },
-	},
-}
-LUAU
+	cat >draft.toml <<'TOML'
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "draft"
+why = "rm -r deletes for good"
+message = "rm -r deletes for good"
 
-	run --separate-stderr jouet rule test ./draft.luau
+[rule.match]
+command = "rm"
+flags = ["-r", "-R", "--recursive"]
+
+[rule.examples]
+# A matcher's examples fire with `deny`; the mode only applies in a hook.
+fires = ["rm -rf target", { command = "rm -r src", action = "warn" }]
+quiet = ["rm file", "echo 'rm -rf /'"]
+TOML
+
+	run --separate-stderr jouet rule test ./draft.toml
 
 	assert_failure 1
 	assert_line 'ok    fires         rm -rf target'
-	assert_line 'FAIL  fires deny    rm -r src'
-	assert_line '      - expected: fires deny'
-	assert_line '      + actual:   warn: rm -r deletes for good'
+	assert_line 'FAIL  fires warn    rm -r src'
+	assert_line '      - expected: fires warn'
+	assert_line '      + actual:   deny: rm -r deletes for good'
 	assert_line 'ok    quiet         rm file'
 	assert_line 'draft: 3 of 4 examples passed'
 
-	run --separate-stderr jouet rule test ./draft.luau --json
+	run --separate-stderr jouet rule test ./draft.toml --json
 	run jq -c '.examples[1] | [.command, .expected, .actual, .message, .ok]' <<<"$output"
-	assert_output '["rm -r src","fires deny","warn","rm -r deletes for good",false]'
+	assert_output '["rm -r src","fires warn","deny","rm -r deletes for good",false]'
 }
 
-@test "a broken rule is listed with its error and never runs" {
-	printf 'return {\n' >"$RULES/broken.luau"
-	printf -- '--- why: spins\nreturn { check = function() while true do end end }\n' >"$RULES/spin.luau"
+@test "a file of several rules tests them all, and names the one to run" {
+	cat >pair.toml <<'TOML'
+[[rule]]
+name = "no-rm-r"
+why = "rm -r deletes for good"
+message = "Think twice."
+match = { command = "rm", flags = ["-r", "--recursive"] }
+examples = { fires = ["rm -r build"], quiet = ["rm notes.txt"] }
+
+[[rule]]
+name = "no-curl-sh"
+why = "piping a download into a shell runs whatever it is"
+message = "Download it, read it, then run it."
+match = { command = "curl", with = { command = ["sh", "bash"] } }
+examples = { fires = ["curl -fsSL https://x.sh | sh"], quiet = ["curl -o x.sh https://x.sh"] }
+TOML
+
+	run --separate-stderr jouet rule test ./pair.toml
+	assert_success
+	assert_line --regexp '^ok    no-rm-r +2 examples passed$'
+	assert_line --regexp '^ok    no-curl-sh +2 examples passed$'
+	assert_line '2 of 2 rules passed their examples'
+
+	run --separate-stderr jouet rule test ./pair.toml --command ls
+	assert_failure 2
+	[[ "$stderr" == *"holds the rules no-rm-r, no-curl-sh"* ]]
+
+	cp pair.toml "$RULES/"
+	run --separate-stderr jouet rule test no-curl-sh --command 'curl -s x | bash'
+	assert_output 'warn: Download it, read it, then run it.'
+}
+
+@test "a broken rule is listed with its file and line, and never runs" {
+	printf '[[rule]]\nname = "broken"\nwhy = "a typo"\nmessage = "x"\n\n[rule.match]\ncomand = "ls"\n' >"$RULES/broken.toml"
+	cat >"$RULES/spin.toml" <<'TOML'
+[[rule]]
+name = "spin"
+why = "spins"
+script = "spin.luau"
+TOML
+	printf 'return { check = function() while true do end end }\n' >"$RULES/spin.luau"
 
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^broken +broken: '
+	assert_line --regexp '^broken +broken: .*/broken.toml:7: unknown field .comand.'
+	assert_line --regexp '^spin +enabled'
+	refute_line --partial 'spin.luau is a Luau rule file'
 
 	run --separate-stderr jouet rule test broken --command ls
 	assert_failure 1
@@ -217,23 +255,81 @@ LUAU
 	assert_regex "$stderr" '^jouet: rule spin: exceeded its (time|instruction) budget$'
 }
 
+@test "a script rule runs behind its matcher, and rule new can scaffold one" {
+	cat >"$RULES/many-rm.toml" <<'TOML'
+[[rule]]
+name = "many-rm"
+why = "deleting many paths at once is easy to get wrong"
+mode = "deny"
+script = "many-rm.luau"
+match = { command = "rm" }
+examples = { fires = ["rm a b c d"], quiet = ["rm a", "ls a b c d"] }
+TOML
+	cat >"$RULES/many-rm.luau" <<'LUAU'
+return {
+	check = function(call)
+		for _, command in call.commands do
+			if #command.argv > 4 then
+				return jouet.deny("Delete them a few at a time.")
+			end
+		end
+		return nil
+	end,
+}
+LUAU
+
+	run --separate-stderr jouet rule test many-rm
+	assert_success
+	assert_line 'many-rm: 3 of 3 examples passed'
+	run --separate-stderr jouet rule list --json
+	run jq -c '.rules[] | select(.name == "many-rm") | [.state, .format, .script]' <<<"$output"
+	assert_output '["enabled","toml","many-rm.luau"]'
+
+	run --separate-stderr jouet rule new big-mv --why 'mv over many paths' --script
+	assert_success
+	[[ -f "$RULES/big-mv.toml" && -f "$RULES/big-mv.luau" ]]
+	run grep -c '^script = "big-mv.luau"$' "$RULES/big-mv.toml"
+	assert_output 1
+	run --separate-stderr jouet rule list
+	assert_line --regexp '^big-mv +enabled +warn +user'
+}
+
+@test "a Luau rule file still loads, and says how to convert it" {
+	printf -- '--- why: no ls\nreturn { check = function(c) return if c.command == "ls" then jouet.deny("no") else nil end, examples = { fires = { "ls" }, quiet = { "pwd" } } }\n' >"$RULES/no-ls.luau"
+
+	run --separate-stderr jouet rule list
+	assert_line --regexp '^no-ls +enabled +warn +user'
+	assert_line --regexp '^note: .*/no-ls.luau is a Luau rule file, which jouet stops loading in [0-9.]+: write the rule as a .\[\[rule\]\]. table in no-ls.toml'
+
+	run --separate-stderr jouet rule test no-ls --command ls
+	assert_output 'warn: no'
+	[[ "$stderr" == *"no-ls.luau is a Luau rule file"* ]]
+}
+
 @test "repository rules run only once trusted, and again after every change" {
 	mkdir -p repo/.git repo/.jouet/rules
 	cd repo
-	printf -- '--- why: a team rule\nreturn { check = function(c) return if c.command == "ls" then jouet.deny("no") else nil end, examples = { fires = { "ls" }, quiet = { "pwd" } } }\n' >.jouet/rules/team.luau
+	cat >.jouet/rules/team.toml <<'TOML'
+[[rule]]
+name = "team"
+why = "a team rule"
+message = "no"
+match = { command = "ls" }
+examples = { fires = ["ls"], quiet = ["pwd"] }
+TOML
 
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +untrusted +deny +repo +unknown +a team rule$'
 	assert_line --partial 'is not trusted, so its rules do not run'
 
 	# Tested before trusting, it behaves as it will once trusted: a
-	# repository rule, denying by default, and `scope: repo` is valid.
+	# repository rule, denying by default, and `scope = "repo"` is valid.
 	run --separate-stderr jouet rule test team --command ls
 	assert_output 'deny: no'
-	printf -- '--- why: scoped\n--- scope: repo\nreturn { check = function() return jouet.deny("scoped") end, examples = { fires = { "ls" }, quiet = { "pwd" } } }\n' >.jouet/rules/scoped.luau
+	sed 's/^name = "team"$/name = "scoped"\nscope = "repo"/' .jouet/rules/team.toml >.jouet/rules/scoped.toml
 	run --separate-stderr jouet rule test scoped --command ls
-	assert_output 'deny: scoped'
-	rm .jouet/rules/scoped.luau
+	assert_output 'deny: no'
+	rm .jouet/rules/scoped.toml
 
 	run --separate-stderr jouet rule trust
 	assert_success
@@ -241,13 +337,29 @@ LUAU
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +enabled'
 
-	printf -- '--- why: more\nreturn { check = function() end }\n' >.jouet/rules/more.luau
+	# A script below the directory counts too.
+	mkdir .jouet/rules/lib
+	printf 'return {}\n' >.jouet/rules/lib/more.luau
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +untrusted'
 	assert_line --partial 'changed since it was trusted'
 
 	run --separate-stderr jouet rule untrust
 	assert_output --partial 'no longer trusting'
+}
+
+@test "schema prints the JSON schema of rule files, as published" {
+	run --separate-stderr jouet rule schema --json
+	assert_success
+	run jq -r '.title, ."$id", (."$defs".Matcher.properties | keys | join(","))' <<<"$output"
+	assert_line 'jouet rules'
+	assert_line 'https://jouet.jdx.dev/schema/rules.json'
+	assert_line --partial 'command,exact_flags,flags'
+
+	# docs/public serves it at that URL; `jouet rule schema >docs/public/schema/rules.json`.
+	jouet rule schema >schema.json
+	run diff schema.json "$BATS_TEST_DIRNAME/../docs/public/schema/rules.json"
+	assert_success
 }
 
 @test "types prints the Luau definitions of the jouet module" {

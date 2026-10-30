@@ -20,9 +20,12 @@ workspace = true
 jouet-github.workspace = true
 jouet-output.workspace = true
 mlua.workspace = true
+regex.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

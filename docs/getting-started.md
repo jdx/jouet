@@ -126,4 +126,4 @@ jouet notices when an agent runs it and switches to compact output by itself. Se
 - [`jouet wait`](/commands/wait): CI, pull requests, logs, ports, URLs, processes and commands.
 - [`jouet pr status`](/commands/pr-status) and [`jouet pr threads`](/commands/pr-threads): pull requests and their review threads.
 - [Shared conventions](/conventions): display modes, JSON output and the exit codes every command shares.
-- [Agent setup and hooks](/setup) and [rules](/rules): what `jouet setup` installs, and the Luau rules behind its hooks.
+- [Agent setup and hooks](/setup) and [rules](/rules): what `jouet setup` installs, and the rules behind its hooks.

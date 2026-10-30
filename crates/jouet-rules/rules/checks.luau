@@ -1,9 +1,8 @@
 --!strict
---- name: checks
---- why: Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
---- scope: builtin
---- author: builtin
---- created: 2026-10-30
+-- The `checks` rule's script (checks.toml): which test, lint and build runs
+-- to record. It is a script because it reads task names (`mise run
+-- test:e2e`, but not `lint-fix`) and each tool's subcommands, and records
+-- rather than denies.
 
 type Kind = "test" | "lint" | "build"
 
@@ -80,7 +79,6 @@ local function classify(command: JouetCommand): Kind?
 end
 
 local rule: JouetRule = {
-	on = "post-tool-use",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local kind = classify(command)
@@ -91,32 +89,6 @@ local rule: JouetRule = {
 		end
 		return nil
 	end,
-	examples = {
-		fires = {
-			{ command = "cargo test --all-targets", exit_code = 101, kind = "test" },
-			{ command = "cd crate && cargo test", exit_code = 101, kind = "test" },
-			{ command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
-			{ command = "cargo clippy -- -D warnings", exit_code = 101, kind = "lint" },
-			{ command = "cargo fmt --check", exit_code = 1, kind = "lint" },
-			{ command = "mise run test:e2e edit", exit_code = 0, kind = "test" },
-			{ command = "mise run lint", exit_code = 1, kind = "lint" },
-			{ command = "npm run build", exit_code = 0, kind = "build" },
-			{ command = "pnpm test", exit_code = 0, kind = "test" },
-			{ command = "python3 -m pytest -x", exit_code = 1, kind = "test" },
-			{ command = "go vet ./...", exit_code = 0, kind = "lint" },
-			{ command = "make check", exit_code = 0, kind = "lint" },
-			{ command = "set -o pipefail; cargo test | tee log", exit_code = 101, kind = "test" },
-		},
-		quiet = {
-			{ command = "cargo fmt", exit_code = 0 },
-			{ command = "mise run lint-fix", exit_code = 0 },
-			{ command = "cargo run", exit_code = 0 },
-			{ command = "npm install", exit_code = 0 },
-			{ command = "cargo test; echo done", exit_code = 1 },
-			{ command = "cargo test || true", exit_code = 0 },
-			{ command = "cargo test &", exit_code = 0 },
-		},
-	},
 }
 
 return rule

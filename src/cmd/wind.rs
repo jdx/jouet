@@ -106,8 +106,12 @@ fn show(paths: &Paths, id: &str, out: &Output) -> Exit {
         return out.error(Exit::NotFound, &format!("no winding note `{id}`"));
     };
     out.result(note, || {
+        let script = match &note.script {
+            Some(script) => format!("\n-- {}.luau, its script:\n{script}", note.rule),
+            None => String::new(),
+        };
         format!(
-            "{} ({}): {}\nseen {} times in {} sessions\nadopt: jouet rule new {} --from-note {}\n\n{}",
+            "{} ({}): {}\nseen {} times in {} sessions\nadopt: jouet rule new {} --from-note {}\n\n{}{script}",
             note.id,
             note.status.name(),
             note.why,
@@ -136,10 +140,8 @@ pub(crate) fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
         Err(exit) => return exit,
     };
     let cwd = std::env::current_dir().unwrap_or_default();
-    let loaded = match crate::rules::load(&cwd) {
-        Ok(loaded) => loaded,
-        Err(e) => return out.error(Exit::Failed, &format!("starting the rule engine: {e}")),
-    };
+    let mut loaded = crate::rules::load(&cwd);
+    loaded.engine.load_scripts();
     let stats = stats::compute(&wind::reader::read_all(&paths.ledger));
     let proposals = retire::proposals(&loaded.engine, &stats);
     let (retired, errors) = if args.apply {
