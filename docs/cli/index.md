@@ -54,3 +54,4 @@
 - [`jouet agent-help [COMMAND]…`](/cli/agent-help.md)
 - [`jouet skill [--format <FORMAT>] [--contribute]`](/cli/skill.md)
 - [`jouet setup [FLAGS] <HARNESS>`](/cli/setup.md)
+- [`jouet completion <SHELL>`](/cli/completion.md)

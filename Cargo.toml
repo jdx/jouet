@@ -83,7 +83,7 @@ similar.workspace = true
 tempfile.workspace = true
 toml.workspace = true
 usage-config.workspace = true
-usage-rs = { workspace = true, features = ["config"] }
+usage-rs = { workspace = true, features = ["config", "completions"] }
 
 [profile.release]
 lto = true
