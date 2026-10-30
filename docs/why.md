@@ -1,5 +1,5 @@
 ---
-description: Coding agents rebuild the same few chores by hand and get them subtly wrong. jouet replaces each with one command.
+description: Coding agents rebuild the same few shell chores by hand and get them subtly wrong. What jouet replaces, how, and what comes next.
 ---
 
 # Why jouet
@@ -17,20 +17,125 @@ jouet was designed from a survey of about 2,600 Claude Code and Codex sessions, 
 | Status of many PRs | `for n in …; do gh pr view $n; done` loops | `mergeable: UNKNOWN` read as an answer, and missing CI runs never traced back to a merge conflict |
 | File edits | Python heredocs that call `str.replace`, often with a hand-written `assert s.count(old) == 1` | A formatter re-wrapped the line so the literal matches nothing, or an assertion aborts the script after some files were already written |
 
-Each of these is a few lines of shell that looks right and usually works, which is why agents keep writing them and why the failures are easy to miss.
+Each of these is a few lines of shell that looks right and usually works. That is why agents keep writing them, and why the failures are easy to miss.
+
+## Before and after
+
+### Editing two files
+
+An agent read `src/main.rs` and `Cargo.toml` a while ago. Since then, `Cargo.toml` moved on to version `0.1.1`.
+
+<p class="jouet-label is-before">Before</p>
+
+```sh
+python3 - <<'EOF'
+from pathlib import Path
+for path, old, new in [
+    ("src/main.rs", "let x = 1;", "let x = 2;"),
+    ("Cargo.toml", 'version = "0.1.0"', 'version = "0.2.0"'),
+]:
+    s = Path(path).read_text()
+    assert s.count(old) == 1, path
+    Path(path).write_text(s.replace(old, new))
+EOF
+```
+
+```text
+AssertionError: Cargo.toml
+```
+
+The assert catches the stale version, but only after `src/main.rs` was rewritten. The tree is half edited, and the error does not say so.
+
+<p class="jouet-label is-after">After</p>
+
+```sh
+jouet edit <<'JOUET_EDIT'
+=== src/main.rs
+<<<<<<< SEARCH
+    let x = 1;
+=======
+    let x = 2;
+>>>>>>> REPLACE
+=== Cargo.toml
+<<<<<<< SEARCH
+version = "0.1.0"
+=======
+version = "0.2.0"
+>>>>>>> REPLACE
+JOUET_EDIT
+```
+
+```text
+not written src/main.rs  1 edit  +1 -1
+failed      Cargo.toml   1 edit
+  edit 1: no match
+    closest at line 3 (94% similar), - spec / + file:
+    -version = "0.1.0"
+    +version = "0.1.1"
+0 of 2 files written
+```
+
+jouet checks every edit before it writes any file. Nothing changed, exit code `4` says the request was refused, and the closest match shows what moved.
+
+### Waiting for a server to start
+
+`app.log` still holds the lines from the server's last run.
+
+<p class="jouet-label is-before">Before</p>
+
+```sh
+until grep -q 'Listening on' app.log; do
+  sleep 2
+done
+```
+
+The old "Listening on" line matches straight away, so the loop exits before this server is up. And if the server never gets there, the loop never ends.
+
+<p class="jouet-label is-after">After</p>
+
+```sh
+jouet wait log app.log --match 'Listening on' --timeout 2m
+```
+
+```text
+[0s] log app.log: following
+[10s] log app.log: matched
+MET log app.log: matched (10s)
+  12:06:31 Listening on http://localhost:3000
+```
+
+Only lines written after the wait starts count. If none matches, the wait stops at `--timeout` with exit code `124`.
+
+### Waiting on CI <Badge type="warning" text="coming soon" />
+
+<p class="jouet-label is-before">Before</p>
+
+```sh
+until gh pr checks 42; do
+  sleep 60
+done
+```
+
+This loop stops only when every check passes. A failing check keeps it polling, and so does a conflicted pull request, which never gets CI at all. Either way it runs until the agent's harness times it out.
+
+<p class="jouet-label is-after">After</p>
+
+```sh
+jouet wait ci
+```
+
+`jouet wait ci` is being built. It is meant to wait on the current branch's pull request, return at the first failure with the failed step's log, and report a conflicted pull request straight away.
 
 ## What jouet does instead
 
 | Command | Replaces |
 |---|---|
-| [`jouet edit`](/commands/edit) | Heredoc edits with hand-written `assert s.count(old) == 1`; all or nothing, never partially written |
-| [`jouet wait`](/commands/wait) | `sleep`/`until` loops around `gh pr checks` and `gh run view`; reports conflicted PRs that will never get CI |
-| [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` handling |
+| [`jouet edit`](/commands/edit) | Heredoc edits with a hand-written `assert s.count(old) == 1`; all or nothing, never partly written |
+| [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; waiting on `gh pr checks` and `gh run view` is coming soon |
+| [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
 
-`jouet edit`, `jouet pr status`, `jouet pr threads` and `jouet wait` for local conditions have landed. `jouet wait` for CI is being built.
-
-Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is truncated without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
+Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is cut without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
 
 ## What jouet is not
 
@@ -38,3 +143,13 @@ Every command follows the same [conventions](/conventions), so an agent learns t
 - **A worktree, stacked-PR, memory or code-search tool.** Each of those already has a healthy dedicated tool.
 - **Interactive.** Every command works without a TTY and never prompts.
 - **Multi-host, yet.** The PR commands start with GitHub.
+
+## What comes next
+
+The commands are the first layer. The next one helps agents use them without being told every time: hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, and rules you can write yourself. After that, a report built from your own agent sessions that shows where their time and tokens go.
+
+None of this exists yet, and the details will change as it is built.
+
+## The name
+
+jouet is pronounced "zhweh" (/ʒwɛ/, one syllable, with the "zh" of "measure") and is French for "toy". Like a wind-up toy, each command does one job when you set it going, then stops and tells you how it went.

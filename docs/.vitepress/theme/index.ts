@@ -4,7 +4,11 @@ import { h, onMounted, onUnmounted } from "vue";
 import { data as starsData } from "../stars.data";
 import EndevFooter from "./EndevFooter.vue";
 import EndevSponsors from "./EndevSponsors.vue";
+import HomeBeforeAfter from "./HomeBeforeAfter.vue";
+import HomeConventions from "./HomeConventions.vue";
+import HomeHeading from "./HomeHeading.vue";
 import HomeQuickStart from "./HomeQuickStart.vue";
+import HomeRobot from "./HomeRobot.vue";
 import { initBanner } from "./banner";
 import "./custom.css";
 
@@ -12,7 +16,26 @@ export default {
   extends: DefaultTheme,
   Layout() {
     return h(DefaultTheme.Layout, null, {
+      "home-hero-image": () => h(HomeRobot),
       "home-hero-actions-after": () => h(HomeQuickStart),
+      "home-features-before": () => [
+        h(HomeBeforeAfter),
+        h("div", { class: "jouet-section JouetCommandsHeading" }, [
+          h("div", { class: "jouet-container" }, [
+            h(
+              HomeHeading,
+              {
+                id: "jouet-commands",
+                eyebrow: "Commands",
+                title: "One command per chore",
+              },
+              () =>
+                "Each command replaces a script agents keep rewriting. jouet edit and jouet wait have shipped; waiting on CI and the PR commands are being built in the open.",
+            ),
+          ]),
+        ]),
+      ],
+      "home-features-after": () => h(HomeConventions),
       "layout-bottom": () => [h(EndevSponsors), h(EndevFooter)],
     });
   },
