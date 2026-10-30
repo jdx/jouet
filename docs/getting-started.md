@@ -50,6 +50,8 @@ Each [GitHub release](https://github.com/jdx/jouet/releases) has an archive per 
 | Windows x64 | `jouet-x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `jouet-aarch64-pc-windows-msvc.zip` |
 
+The glibc archives need glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40). On older distributions, use the musl archive for your architecture: it is static and runs anywhere. mise picks it for you on those hosts.
+
 Unpack the archive and put `jouet` (`jouet.exe` on Windows) on your `PATH`.
 
 ## Check it works
@@ -108,19 +110,13 @@ jouet edit replace src/main.rs --old 'let x = 2;' --new 'let x = 3;'
 
 ## Tell your agent
 
-Agents use what their instructions mention. Add a line like this to `AGENTS.md`, `CLAUDE.md` or a skill:
+Agents use what their instructions mention. For Claude Code or Codex, let jouet install a skill and hooks that steer the agent toward its commands:
 
-```md
-Use jouet instead of hand-written shell scripts:
-- Edit files with `jouet edit` (search/replace blocks or a Codex-style patch on
-  stdin), not Python heredocs.
-- Wait with `jouet wait`, not sleep loops: `jouet wait ci` for a PR's checks,
-  and `jouet wait log`, `port`, `http`, `pid` or `cmd` for local things.
-- Check PRs with `jouet pr status`, and read, reply to and resolve review
-  threads with `jouet pr threads`, not loops over `gh pr view` or GraphQL.
-Run `jouet <command> --help` for details. Exit code 4 means jouet refused and
-changed nothing; 124 means a wait timed out and can be run again.
+```sh
+jouet setup claude   # or: jouet setup codex
 ```
+
+See [agent setup and hooks](/setup) for what that changes and how to turn each part off. For another harness, add the snippet `jouet skill --format agents-md` prints to its `AGENTS.md`; it points the agent at `jouet agent-help`, which always describes the installed version.
 
 jouet notices when an agent runs it and switches to compact output by itself. See [display modes](/conventions#display-modes).
 
@@ -130,3 +126,4 @@ jouet notices when an agent runs it and switches to compact output by itself. Se
 - [`jouet wait`](/commands/wait): CI, pull requests, logs, ports, URLs, processes and commands.
 - [`jouet pr status`](/commands/pr-status) and [`jouet pr threads`](/commands/pr-threads): pull requests and their review threads.
 - [Shared conventions](/conventions): display modes, JSON output and the exit codes every command shares.
+- [Agent setup and hooks](/setup) and [rules](/rules): what `jouet setup` installs, and the Luau rules behind its hooks.

@@ -158,9 +158,9 @@ Every command follows the same [conventions](/conventions), so an agent learns t
 
 ## What comes next
 
-The commands are the first layer. The next one helps agents use them without being told every time: hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, and rules you can write yourself. After that, a report built from your own agent sessions that shows where their time and tokens go.
+The commands are the first layer. The second helps agents use them without being told every time: [`jouet setup`](/setup) installs hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, driven by [rules](/rules) you can add to.
 
-None of this exists yet, and the details will change as it is built.
+Next is a report built from your own agent sessions that shows where their time and tokens go. It does not exist yet, and the details will change as it is built.
 
 ## The name
 

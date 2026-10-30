@@ -1,0 +1,23 @@
+[package]
+name = "jouet-rules"
+version = "0.0.1"
+description = "The Luau rule engine behind jouet's agent hooks"
+keywords = ["agents", "luau", "hooks"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source, the built-in rules, the type definitions they are embedded
+# from and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/rules/**", "/jouet.d.luau", "/LICENSE"]
+
+[dependencies]
+mlua = { version = "0.12", features = ["luau"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "3"
