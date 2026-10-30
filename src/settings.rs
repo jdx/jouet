@@ -65,6 +65,10 @@ pub(crate) struct HookSettings {
     /// Keep a ledger of command shapes and rule decisions
     #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
     pub ledger: bool,
+    /// Re-index the files an agent edits in the code graph, when the
+    /// repository has one
+    #[usage(env = "JOUET_HOOKS_GRAPH", default = true)]
+    pub graph: bool,
 }
 
 /// What `jouet stats` prints.

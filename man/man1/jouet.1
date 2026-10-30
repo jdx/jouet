@@ -36,6 +36,15 @@ Replace text in one file, given on the command line
 \fBedit hash\fR
 Print the SHA\-256 hash of files, for \-\-expect\-hash
 .TP
+\fBgraph\fR
+Query the code graph: symbols, callers, impact and affected tests
+.TP
+\fBgraph index\fR
+Build the graph, or bring it up to date
+.TP
+\fBgraph status\fR
+Show where the graph lives and what it holds
+.TP
 \fBhandoff\fR
 Record the facts about this checkout for the next session
 .TP
@@ -309,6 +318,45 @@ Print help
 .TP
 \fB<PATHS>\fR
 Files to hash
+.SH "JOUET GRAPH"
+Query the code graph: symbols, callers, impact and affected tests
+
+The graph is built with tree\-sitter from Rust, Python, TypeScript and JavaScript, Go, Ruby, Java, C and C++ files, and kept in a database in $XDG_CACHE_HOME/jouet/graph, one per work tree: nothing is written into the repository. There is no daemon: every query first re\-indexes the files that changed since the last one, and jouet's post\-tool\-use hook re\-indexes files an agent edits. The code graph builds on codegraph's design and extraction.
+.PP
+\fBUsage:\fR jouet graph [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET GRAPH INDEX"
+Build the graph, or bring it up to date
+
+Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF\-8 are recorded without symbols.
+.PP
+\fBUsage:\fR jouet graph index [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-full\fR
+Drop the graph and index everything from scratch
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET GRAPH STATUS"
+Show where the graph lives and what it holds
+
+Prints the database's path and size, and how many files, symbols, edges and references it holds. Does not index.
+.PP
+\fBUsage:\fR jouet graph status [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET HANDOFF"
 Record the facts about this checkout for the next session
 

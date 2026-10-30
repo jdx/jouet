@@ -29,6 +29,9 @@ export default defineConfig({
     "cli/pr.md": "cli/pr/index.md",
     "cli/wait.md": "cli/wait/index.md",
     "cli/rule.md": "cli/rule/index.md",
+    "cli/graph.md": "cli/graph/index.md",
+    // `jouet graph index` would otherwise take the group page's place.
+    "cli/graph/index.md": "cli/graph/index/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -76,6 +79,7 @@ export default defineConfig({
         text: "Commands",
         items: [
           { text: "jouet edit", link: "/commands/edit" },
+          { text: "jouet graph", link: "/commands/graph" },
           { text: "jouet wait", link: "/commands/wait" },
           { text: "jouet pr status", link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
@@ -107,6 +111,15 @@ export default defineConfig({
                 items: [
                   { text: "replace", link: "/cli/edit/replace" },
                   { text: "hash", link: "/cli/edit/hash" },
+                ],
+              },
+              {
+                text: "graph",
+                link: "/cli/graph/",
+                collapsed: true,
+                items: [
+                  { text: "index", link: "/cli/graph/index/" },
+                  { text: "status", link: "/cli/graph/status" },
                 ],
               },
               { text: "handoff", link: "/cli/handoff" },

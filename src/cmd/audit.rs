@@ -476,7 +476,7 @@ fn duration(ms: u64) -> String {
 }
 
 /// `512 B`, `14 KB`, `3.2 MB`, `1.4 GB`.
-fn bytes(n: u64) -> String {
+pub(crate) fn bytes(n: u64) -> String {
     let f = n as f64;
     if f >= 1e9 {
         format!("{:.1} GB", f / 1e9)

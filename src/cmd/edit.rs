@@ -109,6 +109,18 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         plan.report.check = Some(check);
     }
     print_report(out, &plan.report);
+    // Keep the code graph in step with what was just written, when the
+    // repository has one, as the post-tool-use hook does for file tools.
+    if let Ok(cwd) = std::env::current_dir() {
+        let written: Vec<_> = plan
+            .report
+            .files
+            .iter()
+            .flat_map(|f| std::iter::once(&f.path).chain(&f.moved_to))
+            .map(|p| cwd.join(p))
+            .collect();
+        super::graph::reindex(&cwd, &written);
+    }
     exit
 }
 

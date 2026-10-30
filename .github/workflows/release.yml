@@ -99,6 +99,9 @@ jobs:
           bin: jouet
           target: ${{ matrix.target }}
           build-tool: ${{ contains(matrix.target, '-linux-') && 'cross' || 'cargo' }}
+          # The licence, and codegraph's notice for the code graph derived
+          # from it, travel with the binary.
+          include: LICENSE,NOTICE
           token: ${{ secrets.GITHUB_TOKEN }}
           dry-run: true
 

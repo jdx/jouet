@@ -75,6 +75,9 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
+    // Agents get a line once the graph answers questions; building it is
+    // setup.
+    ("graph", None),
     ("share", None),
     ("agent-help", None),
     ("audit", None),
