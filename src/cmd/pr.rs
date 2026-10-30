@@ -18,6 +18,7 @@ const TITLE_WIDTH: usize = 40;
 pub fn run(args: PrArgs, out: &Output) -> Exit {
     match args.cmd {
         PrCmd::Status(args) => run_status(&args, out),
+        PrCmd::Threads(args) => super::threads::run(args, out),
     }
 }
 

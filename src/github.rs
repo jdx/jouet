@@ -1,4 +1,5 @@
-//! A small blocking GitHub client: finding a token that works, and GraphQL.
+//! A small blocking GitHub client: finding a token that works, GraphQL, and
+//! the few REST reads GraphQL has no equivalent for.
 //!
 //! Tokens are tried in order: `JOUET_GITHUB_TOKEN`, `GH_TOKEN`,
 //! `GITHUB_TOKEN`, then `gh auth token`. There is no separate probe: the
@@ -21,7 +22,7 @@ const MAX_RETRY_AFTER: u64 = 60;
 
 pub struct Client {
     agent: ureq::Agent,
-    graphql_url: String,
+    api_url: String,
     /// Token sources not yet tried, in order.
     sources: Vec<&'static str>,
     tried: Vec<String>,
@@ -63,7 +64,7 @@ impl Client {
             .into();
         Self {
             agent,
-            graphql_url: format!("{}/graphql", api.trim_end_matches('/')),
+            api_url: api.trim_end_matches('/').to_string(),
             sources: ENV_SOURCES.into_iter().chain([GH_SOURCE]).collect(),
             tried: Vec::new(),
             token: None,
@@ -75,13 +76,79 @@ impl Client {
     /// `NOT_FOUND` come back as `null` in the data; every other error fails
     /// the call.
     pub fn graphql(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
+        self.graphql_with(query, variables, true)
+    }
+
+    /// Runs a GraphQL mutation. Unlike a query it is not retried after a 5xx
+    /// or a dropped connection, which can follow a write that succeeded.
+    pub fn mutate(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
+        self.graphql_with(query, variables, false)
+    }
+
+    fn graphql_with(
+        &mut self,
+        query: &str,
+        variables: &Value,
+        idempotent: bool,
+    ) -> Result<Value, String> {
         let body = serde_json::json!({ "query": query, "variables": variables }).to_string();
+        let url = format!("{}/graphql", self.api_url);
+        let (status, text) = self.send(&url, Some(&body), idempotent)?;
+        if status != 200 {
+            return Err(format!("GitHub returned {status}: {}", message(&text)));
+        }
+        let resp: GraphqlResponse = serde_json::from_str(&text)
+            .map_err(|e| format!("GitHub sent a response jouet could not read: {e}"))?;
+        if let Some(e) = resp
+            .errors
+            .iter()
+            .find(|e| e.kind.as_deref() != Some("NOT_FOUND"))
+        {
+            return Err(match e.kind.as_deref() {
+                Some("RATE_LIMITED") => format!("GitHub rate limit: {}", e.message),
+                _ => format!("GitHub: {}", e.message),
+            });
+        }
+        resp.data
+            .ok_or_else(|| "GitHub returned no data".to_string())
+    }
+
+    /// GETs a REST path such as `/repos/OWNER/NAME/activity`. A 404 comes
+    /// back as `None`.
+    pub fn rest_get(&mut self, path: &str) -> Result<Option<Value>, String> {
+        let url = format!("{}{path}", self.api_url);
+        let (status, text) = self.send(&url, None, true)?;
+        match status {
+            200 => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|e| format!("GitHub sent a response jouet could not read: {e}")),
+            404 => Ok(None),
+            _ => Err(format!("GitHub returned {status}: {}", message(&text))),
+        }
+    }
+
+    /// Sends a request with the first token GitHub accepts: a POST of `body`
+    /// when there is one, else a GET.
+    fn send(
+        &mut self,
+        url: &str,
+        body: Option<&str>,
+        idempotent: bool,
+    ) -> Result<(u16, String), String> {
         loop {
             let token = match self.token.take() {
                 Some(token) => token,
                 None => self.next_token()?,
             };
-            let (status, text) = self.post(&token.value, &body)?;
+            let (status, text) = match self.request(&token.value, url, body, idempotent) {
+                Ok(sent) => sent,
+                // The token was not rejected, so it is kept for the next
+                // request (such as the one after a rate limit resets).
+                Err(e) => {
+                    self.token = Some(token);
+                    return Err(e);
+                }
+            };
             if status == 401 {
                 self.rejected.push(token.source);
                 continue;
@@ -96,24 +163,7 @@ impl Client {
                 );
             }
             self.token = Some(token);
-            if status != 200 {
-                return Err(format!("GitHub returned {status}: {}", message(&text)));
-            }
-            let resp: GraphqlResponse = serde_json::from_str(&text)
-                .map_err(|e| format!("GitHub sent a response jouet could not read: {e}"))?;
-            if let Some(e) = resp
-                .errors
-                .iter()
-                .find(|e| e.kind.as_deref() != Some("NOT_FOUND"))
-            {
-                return Err(match e.kind.as_deref() {
-                    Some("RATE_LIMITED") => format!("GitHub rate limit: {}", e.message),
-                    _ => format!("GitHub: {}", e.message),
-                });
-            }
-            return resp
-                .data
-                .ok_or_else(|| "GitHub returned no data".to_string());
+            return Ok((status, text));
         }
     }
 
@@ -149,34 +199,50 @@ impl Client {
         })
     }
 
-    /// POSTs `body`, retrying 5xx responses, connections dropped before or
-    /// during the response, and secondary rate limits with jittered backoff.
-    fn post(&self, token: &str, body: &str) -> Result<(u16, String), String> {
+    /// Sends one request, retrying secondary rate limits with jittered
+    /// backoff, and when it is `idempotent` 5xx responses and connections
+    /// dropped before or during the response too.
+    fn request(
+        &self,
+        token: &str,
+        url: &str,
+        body: Option<&str>,
+        idempotent: bool,
+    ) -> Result<(u16, String), String> {
         let mut attempt = 0;
         loop {
-            let sent = self
-                .agent
-                .post(&self.graphql_url)
-                .header("Authorization", format!("bearer {token}"))
-                .content_type("application/json")
-                .send(body)
-                .and_then(|mut resp| {
-                    let text = resp
-                        .body_mut()
-                        .with_config()
-                        .limit(256 * 1024 * 1024)
-                        .read_to_string()?;
-                    Ok((resp, text))
-                });
+            let auth = format!("bearer {token}");
+            let sent = match body {
+                Some(body) => self
+                    .agent
+                    .post(url)
+                    .header("Authorization", auth)
+                    .content_type("application/json")
+                    .send(body),
+                None => self
+                    .agent
+                    .get(url)
+                    .header("Authorization", auth)
+                    .header("Accept", "application/vnd.github+json")
+                    .call(),
+            }
+            .and_then(|mut resp| {
+                let text = resp
+                    .body_mut()
+                    .with_config()
+                    .limit(256 * 1024 * 1024)
+                    .read_to_string()?;
+                Ok((resp, text))
+            });
             let (resp, text) = match sent {
                 Ok(sent) => sent,
-                Err(e) if attempt < RETRIES => {
+                Err(e) if idempotent && attempt < RETRIES => {
                     eprintln!("jouet: request to GitHub failed ({e}); retrying");
                     attempt += 1;
                     std::thread::sleep(backoff(attempt));
                     continue;
                 }
-                Err(e) => return Err(format!("could not reach {}: {e}", self.graphql_url)),
+                Err(e) => return Err(format!("could not reach {url}: {e}")),
             };
             let status = resp.status().as_u16();
             let header = |name: &str| {
@@ -217,7 +283,7 @@ impl Client {
                     return Err(format!("GitHub secondary rate limit: {}", message(&text)));
                 }
             }
-            if status >= 500 && attempt < RETRIES {
+            if status >= 500 && idempotent && attempt < RETRIES {
                 eprintln!("jouet: GitHub returned {status}; retrying");
                 attempt += 1;
                 std::thread::sleep(backoff(attempt));

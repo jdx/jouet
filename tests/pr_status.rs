@@ -1,93 +1,16 @@
 //! `jouet pr status` against a local fake GitHub, replaying GraphQL responses
 //! recorded from github.com. Nothing here talks to the real API.
 
+mod common;
+
+use common::{CUT_SHORT, Fake, RATE_LIMITED, Request, json, query, serve, stderr, stdout};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::{Arc, Mutex};
 
 const BATCH: &str = include_str!("../src/pr/fixtures/batch.json");
 const FAILING_CHECKS: &str = include_str!("../src/pr/fixtures/failing_checks.json");
 const SEARCH: &str = include_str!("../src/pr/fixtures/search.json");
-
-/// A request the fake server received: its token and its GraphQL body.
-#[derive(Debug, Clone)]
-struct Request {
-    token: String,
-    body: Value,
-}
-
-struct Fake {
-    url: String,
-    requests: Arc<Mutex<Vec<Request>>>,
-}
-
-impl Fake {
-    fn requests(&self) -> Vec<Request> {
-        self.requests.lock().unwrap().clone()
-    }
-}
-
-/// A status for `respond` to return: a 200 whose body is cut short.
-const CUT_SHORT: u16 = 0;
-
-/// Serves `respond(request, index)` for each request, one per connection.
-fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let seen = Arc::clone(&requests);
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let (mut token, mut length) = (String::new(), 0);
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                    break;
-                }
-                let (name, value) = line.split_once(':').unwrap_or_default();
-                let value = value.trim();
-                match name.to_ascii_lowercase().as_str() {
-                    "authorization" => token = value.trim_start_matches("bearer ").into(),
-                    "content-length" => length = value.parse().unwrap(),
-                    _ => {}
-                }
-            }
-            let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
-            let request = Request {
-                token,
-                body: serde_json::from_slice(&body).unwrap(),
-            };
-            let index = {
-                let mut seen = seen.lock().unwrap();
-                seen.push(request.clone());
-                seen.len() - 1
-            };
-            let (status, text) = respond(&request, index);
-            // `CUT_SHORT` promises a longer body than it sends, then hangs up.
-            let (status, length) = if status == CUT_SHORT {
-                (200, text.len() + 100)
-            } else {
-                (status, text.len())
-            };
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
-                 Content-Length: {length}\r\nConnection: close\r\n\r\n{text}"
-            );
-        }
-    });
-    Fake { url, requests }
-}
-
-fn query(request: &Request) -> &str {
-    request.body["query"].as_str().unwrap()
-}
 
 /// Runs jouet with only the given tokens and a PATH holding `path_dir`, so
 /// `gh` is found only when a test puts one there.
@@ -115,18 +38,6 @@ fn jouet(fake: &Fake, path_dir: &Path, tokens: &[(&str, &str)], args: &[&str]) -
         cmd.env(name, value);
     }
     cmd.output().expect("jouet should start")
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
-fn json(out: &Output) -> Value {
-    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", stdout(out)))
 }
 
 const GOOD: &str = "good-token";
@@ -198,6 +109,11 @@ fn prs_are_fetched_in_one_query_and_missing_ones_exit_3() {
     // Six PRs in one query, then one for the failing check names.
     let requests = fake.requests();
     assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.method == "POST" && r.path == "/graphql")
+    );
     let vars = &requests[0].body["variables"];
     assert_eq!(vars["n1"], json!(15147));
     assert_eq!(vars["o4"], json!("jdx"));
@@ -327,6 +243,30 @@ fn every_token_rejected_is_a_remote_failure() {
     assert_eq!(json(&out)["error"]["code"], "remote");
     let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
     assert!(message.contains("GH_TOKEN and GITHUB_TOKEN"), "{message}");
+}
+
+#[test]
+fn an_exhausted_rate_limit_fails_at_once_and_says_when_it_resets() {
+    let fake = serve(|_, _| {
+        (
+            RATE_LIMITED,
+            r#"{"message":"API rate limit exceeded"}"#.into(),
+        )
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[("JOUET_GITHUB_TOKEN", GOOD)],
+        &["pr", "status", "--repo", "jdx/jouet", "3", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
+    let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
+    assert!(
+        message.contains("rate limit exhausted; it resets in "),
+        "{message}"
+    );
+    assert_eq!(fake.requests().len(), 1);
 }
 
 #[test]

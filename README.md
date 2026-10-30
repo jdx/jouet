@@ -24,9 +24,9 @@ notices. jouet turns each chore into one command that never prompts, never
 cuts output silently, and exits with a code an agent can act on.
 
 > [!CAUTION]
-> **jouet is in early development.** `jouet edit`, `jouet pr status` and
-> `jouet wait`'s local subjects have shipped; waiting on CI and `pr threads`
-> are being built. Commands, flags, exit codes and JSON output may change
+> **jouet is in early development.** `jouet edit`, `jouet pr status`,
+> `jouet pr threads` and `jouet wait`'s local subjects have shipped; waiting on
+> CI is being built. Commands, flags, exit codes and JSON output may change
 > incompatibly between releases.
 
 ## Install
@@ -105,7 +105,7 @@ match shows what moved.
 | [`jouet edit`](https://jouet.jdx.dev/commands/edit) | Available | heredoc edits with a hand-written `assert s.count(old) == 1` |
 | [`jouet wait`](https://jouet.jdx.dev/commands/wait) | Available; CI coming soon | `sleep` and `until` loops around log files, ports, URLs, processes, and `gh pr checks` |
 | [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | Available | `for` loops over `gh pr view` |
-| [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | Coming soon | hand-written `reviewThreads` GraphQL |
+| [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | Available | hand-written `reviewThreads` GraphQL |
 
 Every command follows the same
 [conventions](https://jouet.jdx.dev/conventions): no prompts and no TTY,

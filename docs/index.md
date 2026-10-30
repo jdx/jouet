@@ -28,7 +28,7 @@ features:
     link: /commands/wait
     linkText: Read the guide
   - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'
-    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code>, which lists, replies to and resolves review threads without hand-written GraphQL, is coming soon.
+    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code> lists, replies to and resolves review threads without hand-written GraphQL.
     link: /commands/pr-status
     linkText: Read the guide
   - title: 'Agent steering <span class="jouet-status is-later">later</span>'
