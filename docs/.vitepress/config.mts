@@ -68,6 +68,8 @@ export default defineConfig({
           { text: "jouet wait", link: "/commands/wait" },
           { text: `jouet pr status ${soon}`, link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
+          { text: `jouet pr next ${soon}`, link: "/commands/pr-next" },
+          { text: `jouet pr land ${soon}`, link: "/commands/pr-land" },
         ],
       },
       {

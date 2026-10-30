@@ -121,7 +121,7 @@ fn github_failure(reset: i64) -> String {
 
 /// The PR an argument names, in `--repo` or this checkout's repository,
 /// defaulting to the current branch's PR.
-fn target(pr: Option<&str>, repo: Option<&str>) -> Result<Target, String> {
+pub(crate) fn target(pr: Option<&str>, repo: Option<&str>) -> Result<Target, String> {
     let repo = || match repo {
         Some(r) => Repo::parse(r).ok_or_else(|| format!("--repo takes OWNER/NAME, not `{r}`")),
         None => target::repo_from_git()

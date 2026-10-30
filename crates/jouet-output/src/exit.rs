@@ -18,10 +18,18 @@ pub enum Exit {
     /// Still pending when `--timeout` expired; running the same command
     /// again keeps waiting.
     Timeout,
+    /// `pr next` only: the agent has something to do. Outside the shared
+    /// table on purpose, as in Kent C. Dodds' `ship-pr`, so a script can
+    /// tell "act" and "wait" apart from every error.
+    Act,
+    /// `pr next` only: waiting on someone or something else, such as CI
+    /// or a reviewer.
+    Waiting,
 }
 
 impl Exit {
-    /// Every code, in the order `jouet agent-help` lists them.
+    /// The shared codes, in the order `jouet agent-help` lists them. `Act`
+    /// and `Waiting` are left out: only `pr next` uses them.
     pub const ALL: [Self; 7] = [
         Self::Ok,
         Self::Failed,
@@ -41,6 +49,8 @@ impl Exit {
             Self::Precondition => 4,
             Self::Remote => 5,
             Self::Timeout => 124,
+            Self::Act => 10,
+            Self::Waiting => 20,
         }
     }
 
@@ -54,6 +64,8 @@ impl Exit {
             Self::Precondition => "precondition",
             Self::Remote => "remote",
             Self::Timeout => "timeout",
+            Self::Act => "act",
+            Self::Waiting => "waiting",
         }
     }
 
@@ -67,6 +79,8 @@ impl Exit {
             Self::Precondition => "refused before doing anything: fix the request",
             Self::Remote => "GitHub could not be reached or refused: check auth, then retry",
             Self::Timeout => "still pending: run the same command again to keep waiting",
+            Self::Act => "the agent has something to do: run the suggested command",
+            Self::Waiting => "waiting on CI, a reviewer or GitHub: wait, then ask again",
         }
     }
 }

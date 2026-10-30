@@ -63,6 +63,13 @@ impl Mode {
     }
 }
 
+/// Whether a person can answer a prompt: stdin and stderr are terminals and
+/// no coding agent is detected. `--display` and `JOUET_DISPLAY` do not
+/// count, since they choose how output looks, not who is there to answer.
+pub fn person_at_terminal() -> bool {
+    !mise_agent_env::is_agent() && std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

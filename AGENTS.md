@@ -1,8 +1,8 @@
 # jouet Development Guide
 
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
-(review threads), `jouet pr status` (many PRs at once) and `jouet edit` (exact, all-or-nothing file
-edits). It is in early development; the commands land one at a time.
+(review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
+PR needs next, and merging one that is ready) and `jouet edit` (exact, all-or-nothing file edits). It is in early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
 
@@ -116,9 +116,12 @@ Every command follows these, so an agent learns them once. Keep new commands con
   outside a major version.
 - **Exit codes** come from one shared table: `0` ok, `1` failed (the answer is no), `2` usage,
   `3` not found, `4` precondition (refused before doing anything), `5` remote, `124` timeout,
-  `130` interrupted. `1` and `4` are deliberately separate.
+  `130` interrupted. `1` and `4` are deliberately separate. `pr next` alone adds `10` (act) and
+  `20` (waiting), outside the table on purpose.
 - **No prompts and no TTY requirement.** Display style is chosen from an explicit flag,
-  `JOUET_DISPLAY`, agent detection (`mise-agent-env`), then whether stdout is a TTY.
+  `JOUET_DISPLAY`, agent detection (`mise-agent-env`), then whether stdout is a TTY. The one
+  prompt is `pr land`'s confirmation, shown only when `display::person_at_terminal()` (stdin and
+  stderr are terminals, no agent detected); everyone else passes `--yes` or gets exit 2.
 
 ## Conventional commits
 

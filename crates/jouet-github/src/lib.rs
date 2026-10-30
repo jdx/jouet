@@ -8,6 +8,9 @@
 //! failed command. `JOUET_GITHUB_API_URL` points the client at another API
 //! root, such as a GitHub Enterprise server or a test's fake server.
 //!
+//! [`Client::put`] is the one REST write, for the merge and update-branch
+//! endpoints GraphQL has no safe equivalent of.
+//!
 //! [`Client::get`] sends `If-None-Match` when given an ETag, so an unchanged
 //! poll comes back as a 304 that costs nothing against the rate limit.
 
@@ -78,6 +81,14 @@ impl From<Failure> for String {
     }
 }
 
+/// What a request sends: a GraphQL POST, a REST PUT, or (with neither) a
+/// GET.
+#[derive(Clone, Copy)]
+enum Body<'a> {
+    Post(&'a str),
+    Put(&'a str),
+}
+
 /// A response: its status, ETag and body.
 struct Sent {
     status: u16,
@@ -143,7 +154,8 @@ impl Client {
     ) -> Result<Value, String> {
         let body = serde_json::json!({ "query": query, "variables": variables }).to_string();
         let url = format!("{}/graphql", self.api_url);
-        let Sent { status, text, .. } = self.send(&url, Some(&body), None, idempotent)?;
+        let Sent { status, text, .. } =
+            self.send(&url, Some(Body::Post(&body)), None, idempotent)?;
         if status != 200 {
             return Err(format!("GitHub returned {status}: {}", message(&text)));
         }
@@ -195,12 +207,27 @@ impl Client {
         })
     }
 
-    /// Sends a request with the first token GitHub accepts: a POST of `body`
-    /// when there is one, else a GET (conditional when `etag` is given).
+    /// PUTs a JSON body to a REST path such as `/repos/o/r/pulls/1/merge`.
+    /// A write is not retried after a 5xx or a dropped connection, which can
+    /// follow one that succeeded. Statuses other than 401 are the caller's to
+    /// read.
+    pub fn put(&mut self, path: &str, body: &Value) -> Result<Rest, Failure> {
+        let url = format!("{}{path}", self.api_url);
+        let body = body.to_string();
+        let sent = self.send(&url, Some(Body::Put(&body)), None, false)?;
+        Ok(Rest {
+            status: sent.status,
+            etag: sent.etag,
+            body: sent.text,
+        })
+    }
+
+    /// Sends a request with the first token GitHub accepts: `body` when
+    /// there is one, else a GET (conditional when `etag` is given).
     fn send(
         &mut self,
         url: &str,
-        body: Option<&str>,
+        body: Option<Body<'_>>,
         etag: Option<&str>,
         idempotent: bool,
     ) -> Result<Sent, Failure> {
@@ -275,7 +302,7 @@ impl Client {
         &self,
         token: &str,
         url: &str,
-        body: Option<&str>,
+        body: Option<Body<'_>>,
         etag: Option<&str>,
         idempotent: bool,
     ) -> Result<Sent, Failure> {
@@ -283,10 +310,18 @@ impl Client {
         loop {
             let auth = format!("bearer {token}");
             let sent = match body {
-                Some(body) => self
+                Some(Body::Post(body)) => self
                     .agent
                     .post(url)
                     .header("Authorization", auth)
+                    .content_type("application/json")
+                    .send(body),
+                Some(Body::Put(body)) => self
+                    .agent
+                    .put(url)
+                    .header("Authorization", auth)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
                     .content_type("application/json")
                     .send(body),
                 None => {
