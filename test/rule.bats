@@ -126,6 +126,15 @@ LUAU
 	assert_line --regexp '^team +untrusted +deny +repo +unknown +a team rule$'
 	assert_line --partial 'is not trusted, so its rules do not run'
 
+	# Tested before trusting, it behaves as it will once trusted: a
+	# repository rule, denying by default, and `scope: repo` is valid.
+	run --separate-stderr jouet rule test team --command ls
+	assert_output 'deny: no'
+	printf -- '--- why: scoped\n--- scope: repo\nreturn { check = function() return jouet.deny("scoped") end }\n' >.jouet/rules/scoped.luau
+	run --separate-stderr jouet rule test scoped --command ls
+	assert_output 'deny: scoped'
+	rm .jouet/rules/scoped.luau
+
 	run --separate-stderr jouet rule trust
 	assert_success
 	assert_output --partial '(1 rules)'
