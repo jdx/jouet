@@ -31,8 +31,8 @@ features:
     details: One line per PR with what needs attention, from one batched query. <code>pr threads</code> lists, replies to and resolves review threads without hand-written GraphQL.
     link: /commands/pr-status
     linkText: Read the guide
-  - title: 'Agent steering <span class="jouet-status is-later">later</span>'
-    details: Hooks that catch an agent's costly patterns and point it to the command that replaces them, and rules you write yourself.
-    link: /why#what-comes-next
-    linkText: The plan
+  - title: 'jouet setup <span class="jouet-status is-ready">available</span>'
+    details: A skill and hooks for Claude Code and Codex. Luau rules deny an agent's costly habits and name the command to use instead, and it cannot finish while its last test run failed.
+    link: /setup
+    linkText: Read the guide
 ---

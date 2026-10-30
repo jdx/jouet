@@ -15,7 +15,7 @@ The flags are listed in the [CLI reference](/cli/pr/status).
 
 For the single next action on each pull request, with the command that does it, use [`jouet pr next`](/commands/pr-next).
 
-```text
+```output
 $ jouet pr status --repo jdx/mise 14955 15147 15187 99999999
 #14955 draft  fix(hook-env): install the error...        CONFLICT  ci 25/51 fail: untrusted / lint, untrusted / test-ci, test-ci  threads 0  review -
 #15147 draft  fix(backend): lock pipx dependency...      CONFLICT  ci 28/50                                                       threads 1  review -
@@ -53,6 +53,8 @@ Every open pull request lists the reasons it needs attention, as fixed codes wit
 | `mergeable_unknown` | GitHub still had not computed mergeability after `--settle` |
 
 Merged and closed pull requests never need attention.
+
+To block until a pull request has no attention codes left, or until one appears that only the agent can clear, use [`jouet wait pr --until ready`](/commands/wait#wait-pr).
 
 ## Waiting for mergeability with `--settle`
 
