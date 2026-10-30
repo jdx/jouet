@@ -95,6 +95,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
 /// them out. `jouet agent-help COMMAND` still lists them.
 const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
 
+/// Subcommands for a person's decision, not an agent's, which the overview
+/// leaves out as it leaves out `jouet setup`: trusting a repository's rules.
+/// `jouet agent-help COMMAND` still lists them.
+const PEOPLE: &[(&str, &str)] = &[("rule", "trust"), ("rule", "untrust")];
+
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
 const COMPANIONS: &[(&str, &str)] = &[
@@ -159,7 +164,10 @@ pub(crate) fn overview() -> String {
         let listed: Vec<_> = meta
             .subcommands
             .iter()
-            .filter(|s| !s.hide && !PROMPTED.contains(&(name, s.cmd.name)))
+            .filter(|s| {
+                let at = (name, s.cmd.name);
+                !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
+            })
             .collect();
         // A bare `jouet pr` above its subcommands says nothing.
         if listed.is_empty() || usage != format!("jouet {name}") {
