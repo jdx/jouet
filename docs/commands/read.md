@@ -11,12 +11,12 @@ jouet read --map [PATH] [--budget TOKENS] [--focus FILE|NAME]...
 ```
 
 ```output
-$ jouet read --map --focus src/main.rs --budget 200
+$ jouet read --map --budget 40
 src/lib.rs
   1: pub struct Client {
-  6:     pub fn download(&self, path: &str) -> String {
   12: fn join_url(base: &str, path: &str) -> String {
-... 4 more definitions in 2 more files (raise --budget, or --focus a file or name)
+  16: fn fetch(url: &str) -> String {
+... 2 more definitions in 1 more file (raise --budget, or --focus a file or name)
 ```
 
 Every flag is listed in the [CLI reference](/cli/read).
@@ -49,21 +49,44 @@ The budget is 1,024 tokens with `--focus` and 8,192 without, when the map is the
 
 ## Speed
 
-{{MAP_BENCH}}
+On mise's repository (1,061 Rust and other source files) on a 32-core Linux machine, a map with nothing cached took 0.39 s, and with every file's tags cached 0.11 s, the mean of 10 and 20 runs. The cache for that repository is 5.4 MB.
 
 Built without the `grammars` feature, jouet has no tree-sitter and `jouet read --map` exits 2 and says so. The release builds have it.
 
 ## JSON
 
+`jouet read --map --budget 40 --json`, with nothing cached yet (`cached` counts the files whose tags came from the cache):
+
 ```json
 {
   "files": [
-    { "path": "src/lib.rs", "defs": [{ "line": 1, "kind": "class", "name": "Client", "text": "pub struct Client {" }] }
+    {
+      "path": "src/lib.rs",
+      "defs": [
+        {
+          "line": 1,
+          "kind": "class",
+          "name": "Client",
+          "text": "pub struct Client {"
+        },
+        {
+          "line": 12,
+          "kind": "function",
+          "name": "join_url",
+          "text": "fn join_url(base: &str, path: &str) -> String {"
+        },
+        {
+          "line": 16,
+          "kind": "function",
+          "name": "fetch",
+          "text": "fn fetch(url: &str) -> String {"
+        }
+      ]
+    }
   ],
-  "tokens": 61,
-  "files_scanned": 3,
-  "cached": 3,
-  "more_defs": 4,
-  "more_files": 2
+  "tokens": 32,
+  "files_scanned": 2,
+  "more_defs": 2,
+  "more_files": 1
 }
 ```

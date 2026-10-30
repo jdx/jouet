@@ -122,7 +122,7 @@ src/main.rs (1)"
 
 	run --separate-stderr jouet read --map --budget 10
 	assert_success
-	assert_line --regexp '^\.\.\. [0-9]+ more definitions in [0-9]+ more files \(raise --budget, or --focus a file or name\)$'
+	assert_line --regexp '^\.\.\. [0-9]+ more definitions in [0-9]+ more files? \(raise --budget, or --focus a file or name\)$'
 
 	run --separate-stderr jouet read --map --focus src/main.rs --json
 	assert_success

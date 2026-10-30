@@ -589,11 +589,25 @@ pub fn render(map: &RepoMap) -> String {
             map.files_scanned
         );
     }
-    if map.more_defs > 0 || map.more_files > 0 {
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let more = match (map.more_defs, map.more_files) {
+        (0, 0) => None,
+        (defs, 0) => Some(format!(
+            "{} in the files above",
+            plural(defs, "more definition", "more definitions")
+        )),
+        (0, files) => Some(plural(files, "more file", "more files")),
+        (defs, files) => Some(format!(
+            "{} in {}",
+            plural(defs, "more definition", "more definitions"),
+            plural(files, "more file", "more files")
+        )),
+    };
+    if let Some(more) = more {
         let _ = writeln!(
             text,
-            "... {} more definitions in {} more files (raise --budget, or --focus a file or name)",
-            map.more_defs, map.more_files
+            "... {more} (raise --budget, or --focus a file or name)"
         );
     }
     text

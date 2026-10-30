@@ -315,7 +315,7 @@ fn the_map_fits_the_budget_and_says_what_it_left_out() {
     assert_eq!(full.files_scanned, 11);
     let small = map::build(&map_options(60));
     assert!(small.tokens <= 60, "{}", small.tokens);
-    assert!(small.more_defs > 0);
+    assert!(small.more_defs > 1 && small.more_files > 1);
     let text = map::render(&small);
     assert!(
         text.ends_with(&format!(
@@ -323,6 +323,30 @@ fn the_map_fits_the_budget_and_says_what_it_left_out() {
             small.more_defs, small.more_files
         )),
         "{text}"
+    );
+}
+
+#[test]
+fn definitions_left_out_of_files_already_shown_are_counted_there() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        repo.path().join("a.rs"),
+        "fn alpha() { beta(); }\nfn beta() { gamma(); }\nfn gamma() {}\n",
+    )
+    .unwrap();
+    let map = map::build(&MapOptions {
+        root: repo.path().to_path_buf(),
+        budget: 10,
+        ..MapOptions::default()
+    });
+    assert_eq!((map.files.len(), map.more_files), (1, 0));
+    assert!(
+        map::render(&map).ends_with(&format!(
+            "... {} more definitions in the files above (raise --budget, or --focus a file or name)\n",
+            map.more_defs
+        )),
+        "{}",
+        map::render(&map)
     );
 }
 

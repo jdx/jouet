@@ -66,6 +66,8 @@ jouet's hooks see Claude Code's built-in Read and Grep tools as well as shell co
 
 ## JSON
 
+`jouet search --json --budget 100 --file-budget 100 -F url`:
+
 ```json
 {
   "files": [
@@ -73,20 +75,33 @@ jouet's hooks see Claude Code's built-in Read and Grep tools as well as shell co
       "path": "src/lib.rs",
       "matches": 5,
       "shown": [
-        { "line": 7, "text": "let url = join_url(&self.base, path);", "symbol": { "kind": "method", "name": "download", "start": 6, "end": 9 } }
+        {
+          "line": 7,
+          "text": "let url = join_url(&self.base, path);",
+          "symbol": {
+            "kind": "method",
+            "name": "download",
+            "start": 6,
+            "end": 9
+          }
+        }
       ],
       "more": 4
-    },
-    { "path": "src/main.rs", "matches": 2, "already_shown": 2 }
+    }
   ],
-  "matches": 9,
-  "files_matched": 3,
-  "files_searched": 41,
-  "omitted": [{ "path": "tests/x.rs", "matches": 2 }]
+  "matches": 6,
+  "files_matched": 2,
+  "files_searched": 3,
+  "omitted": [
+    {
+      "path": "src/notes.rs",
+      "matches": 1
+    }
+  ]
 }
 ```
 
-- `matches` counts every match, shown or not; `more` counts a file's matches left out by a budget, and `already_shown` those this session saw before.
+- `matches` counts every match, shown or not; `more` counts a file's matches left out by a budget, and `already_shown` (absent here) those this session saw before.
 - `omitted` lists the files the total budget never reached.
 - As everywhere in jouet, fields that are empty or zero are left out.
 
@@ -96,7 +111,15 @@ jouet's hooks see Claude Code's built-in Read and Grep tools as well as shell co
 
 ## Speed
 
-{{SEARCH_BENCH}}
+Search itself is ripgrep's, and runs as fast. On mise's repository (5,048 files searched), with ripgrep 15.2.0 on a 32-core Linux machine, output piped, the mean of 30 [hyperfine](https://github.com/sharkdp/hyperfine) runs:
+
+| Search | `rg -n` | `jouet search` |
+|---|---|---|
+| `-F 'fn install_version'`: 40 matches in 35 files | 11.0 ms | 10.8 ms |
+| `Settings`: 2,299 matches in 346 files | 10.8 ms | 11.3 ms, printing 6 KB of rg's 198 KB |
+| `Settings`, `--budget 0 --file-budget 0` | | 12.4 ms |
+
+Those runs read definitions from the cache. The first search to show those 35 files parses them all, and took 188 ms.
 
 ## Compared with other tools
 
