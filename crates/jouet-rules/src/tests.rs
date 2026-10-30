@@ -472,3 +472,39 @@ fn rules_of_yours_add_decisions_and_never_weaken_the_builtin_ones() {
     assert_eq!(outcome.warnings[0].rule, "deny-all");
     assert_eq!(engine.evaluate(&bash("ls")).deny.unwrap().rule, "deny-all");
 }
+
+#[test]
+fn a_rules_metamethods_never_run_outside_its_budget() {
+    let spin = "setmetatable({}, { __index = function() while true do end end })";
+    let engine = engine_with(
+        vec![
+            // The rule table itself: its fields are read raw, so `check` is
+            // simply missing.
+            user("meta-rule", &format!("return {spin}")),
+            // The decision: `action` and `message` are read raw too.
+            user(
+                "meta-decision",
+                &format!("return {{ check = function() return {spin} end }}"),
+            ),
+            user(
+                "deny",
+                "return { check = function() return jouet.deny('still runs') end }",
+            ),
+        ],
+        Budget {
+            time: Duration::from_millis(20),
+            ..Budget::default()
+        },
+        Vec::new(),
+    );
+    let start = Instant::now();
+    assert!(matches!(&engine.rules()[0].state, State::Broken(e) if e.contains("check")));
+    let outcome = engine.evaluate(&bash("ls"));
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(
+        outcome.errors[0].contains("unknown action"),
+        "{:?}",
+        outcome.errors
+    );
+    assert_eq!(outcome.deny.unwrap().rule, "deny");
+}

@@ -618,10 +618,21 @@ impl Engine {
                 _ => "the rule is not loaded".into(),
             });
         };
-        let check: mlua::Function = table.get("check").map_err(|e| e.to_string())?;
+        // Raw reads throughout: a rule's tables can carry metamethods, which
+        // must never run outside the budget.
+        let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
         let call_table = call_table(&self.lua, call).map_err(|e| e.to_string())?;
         self.shared.records.borrow_mut().clear();
-        let value: Value = self.guarded(|| check.call(call_table))?;
+        let returned = self.guarded(|| {
+            Ok(match check.call::<Value>(call_table)? {
+                Value::Nil => None,
+                Value::Table(t) => Some(Ok((
+                    t.raw_get::<Option<String>>("action")?.unwrap_or_default(),
+                    t.raw_get::<Option<String>>("message")?,
+                ))),
+                other => Some(Err(other.type_name())),
+            })
+        })?;
         let records = self
             .shared
             .records
@@ -634,10 +645,9 @@ impl Engine {
                 exit_code,
             })
             .collect();
-        let decision = match value {
-            Value::Nil => None,
-            Value::Table(t) => {
-                let action: String = t.get("action").unwrap_or_default();
+        let decision = match returned {
+            None => None,
+            Some(Ok((action, message))) => {
                 let action = match action.as_str() {
                     // A warn-mode rule only warns, and the floor: a rule of
                     // yours or a repository's cannot lock you out of jouet.
@@ -652,17 +662,15 @@ impl Engine {
                     "allow" => Action::Allow,
                     other => return Err(format!("check returned an unknown action `{other}`")),
                 };
-                let message: Option<String> = t.get("message").ok().flatten();
                 Some(Decision {
                     rule: rule.name.clone(),
                     action,
                     message,
                 })
             }
-            other => {
+            Some(Err(type_name)) => {
                 return Err(format!(
-                    "check must return jouet.deny(...), jouet.warn(...), jouet.allow() or nil, not {}",
-                    other.type_name()
+                    "check must return jouet.deny(...), jouet.warn(...), jouet.allow() or nil, not {type_name}"
                 ));
             }
         };
@@ -677,23 +685,24 @@ impl Engine {
                 _ => "the rule is not loaded".into(),
             });
         };
-        let examples: Option<Table> = table.get("examples").map_err(|e| e.to_string())?;
+        let examples: Option<Table> = table.raw_get("examples").map_err(|e| e.to_string())?;
         let Some(examples) = examples else {
             return Ok(Vec::new());
         };
         let mut out = Vec::new();
         for expect in ["deny", "warn", "allow", "record"] {
-            let list: Option<Table> = examples.get(expect).map_err(|e| e.to_string())?;
+            let list: Option<Table> = examples.raw_get(expect).map_err(|e| e.to_string())?;
             for case in list.iter().flat_map(|l| l.sequence_values::<Value>()) {
                 let case = case.map_err(|e| e.to_string())?;
                 let (command, exit_code, kind) = match case {
                     Value::String(s) => (s.to_string_lossy(), 0, None),
                     Value::Table(t) => (
-                        t.get::<String>("command").map_err(|e| e.to_string())?,
-                        t.get::<Option<i32>>("exit_code")
+                        t.raw_get::<String>("command").map_err(|e| e.to_string())?,
+                        t.raw_get::<Option<i32>>("exit_code")
                             .map_err(|e| e.to_string())?
                             .unwrap_or(0),
-                        t.get::<Option<String>>("kind").map_err(|e| e.to_string())?,
+                        t.raw_get::<Option<String>>("kind")
+                            .map_err(|e| e.to_string())?,
                     ),
                     other => {
                         return Err(format!(
@@ -802,23 +811,30 @@ fn only_jouet(call: &Call) -> bool {
     !commands.is_empty() && commands.iter().all(|c| c.program() == Some("jouet"))
 }
 
+/// Reads the rule table's fields with raw access, so no metamethod of the
+/// rule's runs outside its budget.
 fn read_fields(rule: &mut Rule, table: &Table) -> Result<(), String> {
-    let check: Value = table.get("check").map_err(|e| e.to_string())?;
+    let check: Value = table.raw_get("check").map_err(|e| e.to_string())?;
     if !check.is_function() {
         return Err("the rule table needs a `check` function".into());
     }
     if let Some(on) = table
-        .get::<Option<String>>("on")
+        .raw_get::<Option<String>>("on")
         .map_err(|e| format!("`on`: {e}"))?
     {
         rule.event = Event::parse(&on).ok_or_else(|| {
             format!("`on` must be \"pre-tool-use\" or \"post-tool-use\", not `{on}`")
         })?;
     }
-    rule.needs = table
-        .get::<Option<Vec<String>>>("needs")
+    if let Some(needs) = table
+        .raw_get::<Option<Table>>("needs")
         .map_err(|e| format!("`needs`: {e}"))?
-        .unwrap_or_default();
+    {
+        rule.needs = needs
+            .sequence_values::<String>()
+            .collect::<mlua::Result<_>>()
+            .map_err(|e| format!("`needs`: {e}"))?;
+    }
     Ok(())
 }
 
@@ -853,8 +869,8 @@ fn install_module(
                 ))
             })?;
             // A command whose exit status is unknown says nothing.
-            if let Some(status) = command.get::<Option<i32>>("status")? {
-                let text: String = command.get("text")?;
+            if let Some(status) = command.raw_get::<Option<i32>>("status")? {
+                let text: String = command.raw_get("text")?;
                 records.records.borrow_mut().push((kind, text, status));
             }
             Ok(())
