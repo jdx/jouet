@@ -223,3 +223,53 @@ fn a_codex_patch_is_accepted_as_is() {
         "new\n"
     );
 }
+
+#[test]
+fn relative_and_absolute_paths_to_one_file_compose() {
+    let dir = fixture(&[("a.rs", "one two\n")]);
+    let abs = dir.path().join("a.rs");
+    let spec = format!(
+        "=== a.rs\n<<<<<<< SEARCH\none two\n=======\n1 two\n>>>>>>> REPLACE\n=== {}\n<<<<<<< SEARCH\n1 two\n=======\n1 2\n>>>>>>> REPLACE\n",
+        abs.display()
+    );
+    let out = jouet(dir.path(), &["edit"], &spec);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert_eq!(fs::read_to_string(abs).unwrap(), "1 2\n");
+}
+
+#[test]
+fn a_check_that_cannot_start_still_reverts() {
+    let dir = fixture(&[("a.rs", "one\n"), ("not-a-dir", "")]);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jouet"))
+        .args(["edit", "--json", "--check", "true", "--revert-on-fail"])
+        .current_dir(dir.path())
+        // A regular file where the log directory should be, so the check
+        // cannot write its log and never runs.
+        .env("JOUET_LOG_DIR", dir.path().join("not-a-dir"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"=== a.rs\n<<<<<<< SEARCH\none\n=======\n1\n>>>>>>> REPLACE\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    let doc = json(&out);
+    assert_eq!(doc["error"]["code"], "failed");
+    assert!(
+        doc["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("restored"),
+        "{doc}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("a.rs")).unwrap(),
+        "one\n"
+    );
+}
