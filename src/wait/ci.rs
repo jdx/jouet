@@ -42,6 +42,7 @@ pub struct CiWait {
     /// When checks started being awaited on the current commit.
     sha_since: Instant,
     last: Snapshot,
+    conflict: watch::ConflictCheck,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,6 +101,7 @@ impl CiWait {
             sha: None,
             sha_since: Instant::now(),
             last: Snapshot::default(),
+            conflict: watch::ConflictCheck::default(),
         }
     }
 
@@ -236,18 +238,22 @@ impl Watch for CiWait {
         }
         let selected = self.selected(&snap);
         let pr = snap.pr.clone();
+        let polled_at = snap.polled_at_ms;
         self.last = snap;
-        if let Some(pr) = pr.filter(|p| p.conflicted()) {
-            if !pr.conflict_settled(crate::time::now()) {
-                return Ok(Poll::Pending(
-                    "GitHub reports a conflict just after an update; checking again".into(),
-                ));
-            }
+        // Measured between real polls, so a snapshot another wait fetched a
+        // moment ago does not count as a second report.
+        let conflicted = pr.as_ref().filter(|p| p.conflicted());
+        if self.conflict.confirmed(conflicted.is_some(), polled_at)
+            && let Some(pr) = conflicted
+        {
             let message = format!(
                 "{}#{} conflicts with {}; pull_request workflows will not run until it is rebased",
                 self.repo, self.number, pr.base_ref
             );
             return Ok(Poll::Done(self.doc("conflict", selected, Some(message))));
+        }
+        if conflicted.is_some() {
+            return Ok(Poll::Pending(watch::CONFIRMING.into()));
         }
         if selected.is_empty() {
             if self.sha_since.elapsed() >= self.options.appear_timeout {

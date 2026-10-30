@@ -28,10 +28,6 @@ use std::path::{Path, PathBuf};
 const MAX_EVENTS: usize = 1000;
 /// Pages of check runs or files read at most (100 each).
 const MAX_PAGES: u32 = 30;
-/// How long after a push GitHub's report of a conflict is not trusted.
-/// For a few seconds after a push it still reports the old head's
-/// mergeability, so a conflict that a rebase just fixed looks unfixed.
-pub const CONFLICT_SETTLE_SECS: i64 = 30;
 
 /// The PR fields a wait needs, from `GET /repos/{o}/{r}/pulls/{n}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,8 +40,6 @@ pub struct Pr {
     /// `None` while GitHub is still computing it.
     pub mergeable: Option<bool>,
     pub mergeable_state: String,
-    /// When the PR last changed, in Unix seconds; a push updates it.
-    pub updated_at: Option<i64>,
 }
 
 impl Pr {
@@ -62,20 +56,12 @@ impl Pr {
             base_ref: v["base"]["ref"].as_str()?.to_string(),
             mergeable: v["mergeable"].as_bool(),
             mergeable_state: v["mergeable_state"].as_str().unwrap_or("unknown").into(),
-            updated_at: v["updated_at"].as_str().and_then(crate::time::parse_utc),
         })
     }
 
     /// GitHub has finished computing mergeability and found a conflict.
     pub fn conflicted(&self) -> bool {
         self.mergeable == Some(false) && self.mergeable_state == "dirty"
-    }
-
-    /// Whether the PR has gone [`CONFLICT_SETTLE_SECS`] without an update,
-    /// so a conflict GitHub reports is about the current head.
-    pub fn conflict_settled(&self, now: i64) -> bool {
-        self.updated_at
-            .is_none_or(|t| now - t >= CONFLICT_SETTLE_SECS)
     }
 }
 
@@ -144,6 +130,35 @@ pub enum PollError {
 impl From<Failure> for PollError {
     fn from(f: Failure) -> Self {
         Self::Remote(f)
+    }
+}
+
+/// How far apart two reports of a conflict must be before a wait believes
+/// it. For a second or so after a push, GitHub's API still answers for the
+/// old head, mergeability included, so a conflict that a rebase just fixed
+/// can look unfixed; asking again later tells the two apart.
+const CONFLICT_CONFIRM_MS: u64 = 10_000;
+
+/// The message while a conflict waits to be confirmed.
+pub const CONFIRMING: &str = "GitHub reports a conflict; asking again to rule out a stale answer";
+
+/// Confirms a conflict by seeing it again [`CONFLICT_CONFIRM_MS`] later.
+#[derive(Debug, Default)]
+pub struct ConflictCheck {
+    first_seen_ms: Option<u64>,
+}
+
+impl ConflictCheck {
+    /// Records whether GitHub reported a conflict when it was asked at
+    /// `asked_ms` (Unix milliseconds), and says whether the conflict is now
+    /// confirmed.
+    pub fn confirmed(&mut self, conflicted: bool, asked_ms: u64) -> bool {
+        if !conflicted {
+            self.first_seen_ms = None;
+            return false;
+        }
+        let first = *self.first_seen_ms.get_or_insert(asked_ms);
+        asked_ms.saturating_sub(first) >= CONFLICT_CONFIRM_MS
     }
 }
 
@@ -263,7 +278,7 @@ fn keep_pr(v: Value) -> Value {
         "number": v["number"], "state": v["state"], "merged": v["merged"],
         "merged_at": v["merged_at"], "head": { "sha": v["head"]["sha"] },
         "base": { "ref": v["base"]["ref"] }, "mergeable": v["mergeable"],
-        "mergeable_state": v["mergeable_state"], "updated_at": v["updated_at"],
+        "mergeable_state": v["mergeable_state"],
     })
 }
 
@@ -577,6 +592,18 @@ pub fn get_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conflict_counts_once_seen_again_ten_seconds_later() {
+        let mut check = ConflictCheck::default();
+        assert!(!check.confirmed(true, 1_000));
+        assert!(!check.confirmed(true, 6_000));
+        assert!(check.confirmed(true, 11_000));
+        // A clean answer in between starts over.
+        assert!(!check.confirmed(false, 12_000));
+        assert!(!check.confirmed(true, 13_000));
+        assert!(check.confirmed(true, 23_000));
+    }
 
     #[test]
     fn branch_names_keep_their_slashes() {

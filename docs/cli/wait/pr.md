@@ -5,7 +5,7 @@
 
 Wait for a PR to become mergeable, merged, approved, ready, ...
 
---until is one of: mergeable (keeps waiting while GitHub reports UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged), closed, approved (exit 1 when changes are requested), checks-registered (any check on the head), ready (no `pr status` attention codes and no pending checks; exit 1 on conflict, checks_failing, changes_requested or unresolved_threads), or any-change (the next push, check result, review, thread or state change, printed as one event). A conflict reported within 30s of a push keeps the wait going, since GitHub may still be reporting the old head.
+--until is one of: mergeable (keeps waiting while GitHub reports UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged), closed, approved (exit 1 when changes are requested), checks-registered (any check on the head), ready (no `pr status` attention codes and no pending checks; exit 1 on conflict, checks_failing, changes_requested or unresolved_threads), or any-change (the next push, check result, review, thread or state change, printed as one event). A conflict counts once GitHub reports it again 10s later, since right after a push it can still answer for the old head.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
