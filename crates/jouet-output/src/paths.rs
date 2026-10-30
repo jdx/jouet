@@ -1,36 +1,56 @@
 //! Where jouet keeps files that outlive a command, such as full logs.
+//!
+//! Only logs fall back to the system temp directory when there is no home
+//! directory. Config, cache and state hold rules, compiled bytecode and trust
+//! decisions, which another user could plant in a shared temp directory, so
+//! without a home they are simply absent.
 
 use std::path::PathBuf;
 
-/// `$JOUET_LOG_DIR`, else `$XDG_STATE_HOME/jouet/logs`, else
-/// `~/.local/state/jouet/logs`, else a directory under the system temp dir.
+/// `$JOUET_LOG_DIR`, else `<state dir>/logs`, else a directory under the
+/// system temp dir.
 pub fn log_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("JOUET_LOG_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(dir);
+    if let Some(dir) = env_dir("JOUET_LOG_DIR") {
+        return dir;
     }
-    state_dir().join("logs")
+    state_dir()
+        .unwrap_or_else(|| std::env::temp_dir().join("jouet"))
+        .join("logs")
+}
+
+/// `$XDG_STATE_HOME/jouet`, else `~/.local/state/jouet`.
+pub fn state_dir() -> Option<PathBuf> {
+    xdg("XDG_STATE_HOME", &[".local", "state"])
+}
+
+/// `$XDG_CACHE_HOME/jouet`, else `~/.cache/jouet`.
+pub fn cache_dir() -> Option<PathBuf> {
+    xdg("XDG_CACHE_HOME", &[".cache"])
+}
+
+/// `$XDG_CONFIG_HOME/jouet`, else `~/.config/jouet`: `config.toml` and the
+/// user's `rules/`.
+pub fn config_dir() -> Option<PathBuf> {
+    xdg("XDG_CONFIG_HOME", &[".config"])
+}
+
+fn xdg(var: &str, fallback: &[&str]) -> Option<PathBuf> {
+    let base = env_dir(var).filter(|d| d.is_absolute()).or_else(|| {
+        std::env::home_dir().map(|home| fallback.iter().fold(home, |p, part| p.join(part)))
+    })?;
+    Some(base.join("jouet"))
 }
 
 /// Where `wait` keeps the shared state of the PRs being watched:
-/// `$XDG_STATE_HOME/jouet/watch`, else `~/.local/state/jouet/watch`.
+/// `<state dir>/watch`, else a directory under the system temp dir.
 pub fn watch_dir() -> PathBuf {
-    state_dir().join("watch")
+    state_dir()
+        .unwrap_or_else(|| std::env::temp_dir().join("jouet"))
+        .join("watch")
 }
 
-/// Where `jouet setup`'s hooks keep each agent session's state, such as its
-/// last test and lint runs: `$XDG_STATE_HOME/jouet/sessions`, else
-/// `~/.local/state/jouet/sessions`.
-pub fn sessions_dir() -> PathBuf {
-    state_dir().join("sessions")
-}
-
-fn state_dir() -> PathBuf {
-    let state = std::env::var_os("XDG_STATE_HOME")
+pub fn env_dir(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|h| h.join(".local").join("state")));
-    match state {
-        Some(state) => state.join("jouet"),
-        None => std::env::temp_dir().join("jouet"),
-    }
 }

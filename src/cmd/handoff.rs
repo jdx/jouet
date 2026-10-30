@@ -27,7 +27,9 @@ pub(crate) fn run_handoff(args: &HandoffArgs, out: &Output) -> Exit {
     let git = Git::here();
     let session = args.session.clone().or_else(session::id_from_env);
     let opts = Options {
-        session: session.map(|id| (jouet_output::paths::sessions_dir(), id)),
+        session: session
+            .zip(crate::verify::sessions_dir())
+            .map(|(id, dir)| (dir, id)),
         processes: true,
     };
     let mut h = match handoff::collect(&git, &opts) {

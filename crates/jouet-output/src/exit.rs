@@ -21,7 +21,18 @@ pub enum Exit {
 }
 
 impl Exit {
-    pub(crate) const fn code(self) -> u8 {
+    /// Every code, in the order `jouet agent-help` lists them.
+    pub const ALL: [Self; 7] = [
+        Self::Ok,
+        Self::Failed,
+        Self::Usage,
+        Self::NotFound,
+        Self::Precondition,
+        Self::Remote,
+        Self::Timeout,
+    ];
+
+    pub const fn code(self) -> u8 {
         match self {
             Self::Ok => 0,
             Self::Failed => 1,
@@ -43,6 +54,19 @@ impl Exit {
             Self::Precondition => "precondition",
             Self::Remote => "remote",
             Self::Timeout => "timeout",
+        }
+    }
+
+    /// What the code tells an agent to do next.
+    pub const fn meaning(self) -> &'static str {
+        match self {
+            Self::Ok => "done",
+            Self::Failed => "the answer is no: fix the code",
+            Self::Usage => "bad arguments",
+            Self::NotFound => "no such file, PR or thread",
+            Self::Precondition => "refused before doing anything: fix the request",
+            Self::Remote => "GitHub could not be reached or refused: check auth, then retry",
+            Self::Timeout => "still pending: run the same command again to keep waiting",
         }
     }
 }

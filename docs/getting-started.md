@@ -50,6 +50,8 @@ Each [GitHub release](https://github.com/jdx/jouet/releases) has an archive per 
 | Windows x64 | `jouet-x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `jouet-aarch64-pc-windows-msvc.zip` |
 
+The glibc archives need glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40). On older distributions, use the musl archive for your architecture: it is static and runs anywhere. mise picks it for you on those hosts.
+
 Unpack the archive and put `jouet` (`jouet.exe` on Windows) on your `PATH`.
 
 ## Check it works
@@ -108,13 +110,12 @@ jouet edit replace src/main.rs --old 'let x = 2;' --new 'let x = 3;'
 
 ## Tell your agent
 
-Agents use what their instructions mention. Add a line like this to `AGENTS.md`, `CLAUDE.md` or a skill:
+Agents use what their instructions mention. For Claude Code or Codex, let jouet install a skill and hooks that steer the agent toward its commands:
 
-```md
-Edit files with `jouet edit` (search/replace blocks or a Codex-style patch on stdin)
-instead of Python heredocs, and wait with `jouet wait` instead of sleep loops.
-Run `jouet edit --help` and `jouet wait --help` for details. Exit code 4 means
-jouet refused and changed nothing; 124 means a wait timed out.
+```sh
+jouet setup claude   # or: jouet setup codex
 ```
+
+See [agent setup and hooks](/setup) for what that changes and how to turn each part off. For another harness, add the snippet `jouet skill --format agents-md` prints to its `AGENTS.md`; it points the agent at `jouet agent-help`, which always describes the installed version.
 
 jouet notices when an agent runs it and switches to compact output by itself. See [display modes](/conventions#display-modes).
