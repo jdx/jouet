@@ -52,6 +52,8 @@ enum Cmd {
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
+    /// Run a recipe: a Luau script that sequences jouet's commands
+    Run(RunArgs),
     /// Notice costly patterns in the hook ledger and draft rules for them
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
@@ -578,6 +580,34 @@ pub enum RuleCmd {
     Gap(RuleGapArgs),
 }
 
+/// Run a recipe: a Luau script that sequences jouet's commands
+///
+/// Recipes are built in (land, ship-check, sweep), in ~/.config/jouet/recipes,
+/// and in a repository's .jouet/recipes once it is trusted with --trust. They
+/// run only jouet's own commands, through `jouet.cmd`, and a command that
+/// merges or posts needs `yes=true`. Words after the recipe are its
+/// arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123
+/// yes=true`.
+#[derive(Args)]
+pub(crate) struct RunArgs {
+    /// The recipe to run
+    recipe: Option<String>,
+    /// The recipe's arguments: KEY=VALUE, or plain words in order
+    args: Vec<String>,
+    /// List every recipe, where it comes from and what it takes
+    #[usage(long)]
+    list: bool,
+    /// Print each step the recipe would run, running none
+    #[usage(long)]
+    dry_run: bool,
+    /// Trust this repository's .jouet/recipes as they are now
+    #[usage(long, conflicts = "--untrust")]
+    trust: bool,
+    /// Stop trusting this repository's .jouet/recipes
+    #[usage(long)]
+    untrust: bool,
+}
+
 /// List every rule, where it comes from and whether it runs
 #[derive(Args)]
 pub struct RuleListArgs {}
@@ -964,6 +994,7 @@ fn main() -> ExitCode {
         Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
+        Cmd::Run(args) => cmd::run::run(&args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::Share(args) => cmd::share::run(&args, &out),

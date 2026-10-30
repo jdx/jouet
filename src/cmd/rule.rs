@@ -593,13 +593,17 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, String), (Exit, String)
         let Some(origin @ Origin::Repo(_)) = untrusted else {
             return Ok((loaded.engine, rule.to_string()));
         };
-        return single(origin);
+        return single(origin, cwd);
     }
-    single(Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())))
+    single(
+        Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())),
+        cwd,
+    )
 }
 
-/// An engine holding just the rule at `origin`'s path, as that origin.
-fn single(origin: Origin) -> Result<(Engine, String), (Exit, String)> {
+/// An engine holding just the rule at `origin`'s path, as that origin, with
+/// the probes a hook in `cwd` would have.
+fn single(origin: Origin, cwd: &Path) -> Result<(Engine, String), (Exit, String)> {
     let (Origin::User(path) | Origin::Repo(path)) = &origin else {
         return Err((Exit::Failed, "a built-in rule has no file".into()));
     };
@@ -631,6 +635,8 @@ fn single(origin: Origin) -> Result<(Engine, String), (Exit, String)> {
         },
     )
     .map_err(|e| (Exit::Failed, e.to_string()))?;
+    let network = crate::settings::Settings::load().rules.network;
+    engine.set_probes(rules::probes(cwd, network));
     Ok((engine, name))
 }
 
