@@ -160,6 +160,40 @@ fn filters_by_project_and_time() {
 }
 
 #[test]
+fn scanning_into_a_populated_analyzer_counts_what_it_held_once() {
+    let held = || {
+        let mut a = Analyzer::default();
+        a.add(
+            "claude",
+            &jouet_audit::transcripts(&[jouet_audit::CommandRecord {
+                session: "earlier".into(),
+                command: "git status".into(),
+                ..Default::default()
+            }])[0],
+        );
+        a
+    };
+    let requests = |a: &Analyzer| -> u64 {
+        a.report(1)
+            .harnesses
+            .iter()
+            .map(|h| h.totals.requests)
+            .sum()
+    };
+    // No readers at all, so the scan reads nothing.
+    let empty = scan(&[], &Filter::default(), held(), 4);
+    assert_eq!(requests(&empty.analyzer), 1);
+    // The fixtures on four threads: 8 Claude and 9 Codex requests, plus the one held.
+    let (claude, codex) = readers();
+    let readers: [&dyn Reader; 2] = [&claude, &codex];
+    let full = scan(&readers, &Filter::default(), held(), 4);
+    assert_eq!(requests(&full.analyzer), 8 + 9 + 1);
+    let claude = full.analyzer.report(1);
+    let claude = harness(&claude, "claude");
+    assert_eq!(claude.totals.sessions, 2);
+}
+
+#[test]
 fn a_file_that_vanished_is_reported_not_fatal() {
     struct Gone;
     impl Reader for Gone {

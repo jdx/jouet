@@ -138,7 +138,8 @@ pub struct Unreadable {
     pub partial: bool,
 }
 
-/// Reads every matching transcript of every reader into `analyzer`, on
+/// Reads every matching transcript of every reader into `analyzer`, adding
+/// to whatever it already holds, on
 /// `threads` threads (at least one). Larger files are started first, so one
 /// large file does not finish last on its own.
 pub fn scan(readers: &[&dyn Reader], filter: &Filter, analyzer: Analyzer, threads: usize) -> Scan {
@@ -174,7 +175,9 @@ pub fn scan(readers: &[&dyn Reader], filter: &Filter, analyzer: Analyzer, thread
     std::thread::scope(|s| {
         for _ in 0..threads.max(1).min(work.len().max(1)) {
             s.spawn(|| {
-                let mut local = analyzer.clone();
+                // Settings only: what `analyzer` already holds is counted
+                // once, in the merge below.
+                let mut local = analyzer.empty_like();
                 let mut local_stats = ScanStats::default();
                 loop {
                     let n = next.fetch_add(1, Ordering::Relaxed);

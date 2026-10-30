@@ -9,7 +9,7 @@
 use crate::category::{Category, categorize};
 use crate::event::{Tool, Transcript};
 use crate::pattern::{Pattern, detect_call};
-use crate::redact::example;
+use crate::redact::{example, redact};
 use crate::shape::shape;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -130,6 +130,11 @@ impl Analyzer {
             examples,
             home,
         }
+    }
+
+    /// An analyzer with the same settings and nothing counted.
+    pub(crate) fn empty_like(&self) -> Self {
+        Self::new(self.examples, self.home.clone())
     }
 
     /// Adds a transcript. Calls count only through the requests that issued
@@ -441,7 +446,9 @@ fn top(shapes: &HashMap<String, ShapeAcc>, n: usize) -> Vec<ShapeCount> {
         .into_iter()
         .take(n)
         .map(|(shape, s)| ShapeCount {
-            shape: shape.clone(),
+            // Shapes hold no values, but a program's own name could still
+            // look like a key.
+            shape: redact(shape),
             calls: s.calls,
             input_tokens: s.tokens.round() as u64,
             duration_ms: s.duration_ms,

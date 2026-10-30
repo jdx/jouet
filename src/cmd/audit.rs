@@ -474,6 +474,44 @@ mod tests {
     }
 
     #[test]
+    fn secret_option_values_stay_out_of_both_formats() {
+        let mut analyzer = Analyzer::new(true, None);
+        let records = [jouet_audit::CommandRecord {
+            session: "s".into(),
+            command:
+                r#"gh api user --token "correct horse" --password   'battery staple' -pS3cret"#
+                    .into(),
+            ..Default::default()
+        }];
+        for t in jouet_audit::transcripts(&records) {
+            analyzer.add("claude", &t);
+        }
+        let report = analyzer.report(JSON_SHAPES);
+        let stats = ScanStats::default();
+        let doc = Doc {
+            since: None,
+            project: None,
+            scan: ScanDoc::from(&stats, 1),
+            harnesses: &report.harnesses,
+        };
+        let json = serde_json::to_string(&doc).unwrap();
+        let text = text(&report, &stats, &doc, DEFAULT_TOP);
+        assert!(
+            text.contains("e.g. gh api user --token <redacted>"),
+            "{text}"
+        );
+        for out in [&json, &text] {
+            for word in ["correct", "horse", "battery", "staple"] {
+                assert!(!out.contains(word), "{word} in {out}");
+            }
+        }
+        // An attached value is not a known secret, so an example keeps it,
+        // but no shape does.
+        let shape = &report.harnesses[0].categories[0].top_shapes[0].shape;
+        assert_eq!(shape, "gh api <path> --token <s> --password <s> -p<v>");
+    }
+
+    #[test]
     fn numbers_read_at_a_glance() {
         assert_eq!(count(12_345), "12,345");
         assert_eq!(count(999), "999");

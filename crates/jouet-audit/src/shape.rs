@@ -823,26 +823,49 @@ fn rest_args(items: &[&Tok], mut i: usize, parts: &mut Vec<String>) {
     }
 }
 
-/// A flag with its value replaced: `--repo=jdx/mise` is `--repo=<v>`,
-/// `-n5` is `-n<n>` and `-50` is `-<n>`.
+/// A flag with any value attached to it replaced: `--repo=jdx/mise` is
+/// `--repo=<v>`, `-n5` is `-n<n>`, `-pSECRET` is `-p<v>` and `-50` is
+/// `-<n>`. Only the form of a flag name is kept as written: a long name of
+/// lowercase letters, digits and dashes, or a cluster of at most three
+/// letters, since a longer short option may be one letter and its value.
 fn flag(text: &str) -> String {
-    if let Some((name, _)) = text.split_once('=') {
-        return format!("{name}=<v>");
-    }
-    let body = text.trim_start_matches('-');
-    let dashes = &text[..text.len() - body.len()];
-    let letters = body.trim_end_matches(|c: char| c.is_ascii_digit());
-    if letters.len() == body.len() {
-        if body
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            text.to_string()
+    let (head, attached) = match text.split_once('=') {
+        Some((head, _)) => (head, true),
+        None => (text, false),
+    };
+    if let Some(long) = head.strip_prefix("--") {
+        let named = (1..=32).contains(&long.len())
+            && long.starts_with(|c: char| c.is_ascii_lowercase())
+            && long
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        let name = if named { head } else { "--<v>" };
+        return if attached {
+            format!("{name}=<v>")
         } else {
-            format!("{dashes}<v>")
+            name.to_string()
+        };
+    }
+    let body = head.strip_prefix('-').unwrap_or(head);
+    if body.is_empty() && !attached {
+        return "-".into();
+    }
+    if !attached && body.bytes().all(|c| c.is_ascii_digit()) {
+        return "-<n>".into();
+    }
+    if !attached && body.len() <= 3 && body.bytes().all(|c| c.is_ascii_alphabetic()) {
+        return text.to_string();
+    }
+    match body.chars().next() {
+        Some(first) if first.is_ascii_alphabetic() => {
+            let rest = &body[1..];
+            if !attached && !rest.is_empty() && rest.bytes().all(|c| c.is_ascii_digit()) {
+                format!("-{first}<n>")
+            } else {
+                format!("-{first}<v>")
+            }
         }
-    } else {
-        format!("{dashes}{letters}<n>")
+        _ => "-<v>".into(),
     }
 }
 
@@ -939,6 +962,32 @@ mod tests {
         assert_eq!(shape("head -n5 x.txt"), "head -n<n> <path>");
         assert_eq!(shape("tail -50 log"), "tail -<n> <v>");
         assert_eq!(shape("rg --type=rust 'fn main'"), "rg --type=<v> <s>");
+        assert_eq!(shape("grep -rn -A5 x ."), "grep -rn -A<n> <v> <path>");
+    }
+
+    #[test]
+    fn values_attached_to_options_are_replaced() {
+        assert_eq!(shape("mysql -pS3cretPass -u root"), "mysql -p<v> -u <v>");
+        assert_eq!(shape("git commit -mfixed"), "git commit -m<v>");
+        assert_eq!(
+            shape("tool --token=abc123 --Token-ABC"),
+            "tool --token=<v> --<v>"
+        );
+        assert_eq!(
+            shape("java -Dpassword=hunter2 -jar app.jar"),
+            "java -D<v> -jar <path>"
+        );
+        assert_eq!(shape("tar -xvzf a.tgz"), "tar -x<v> <path>");
+        for secret in ["S3cretPass", "fixed", "abc123", "hunter2", "ABC"] {
+            for cmd in [
+                "mysql -pS3cretPass",
+                "git commit -mfixed",
+                "tool --token=abc123 --Token-ABC",
+                "java -Dpassword=hunter2",
+            ] {
+                assert!(!shape(cmd).contains(secret), "{cmd}: {}", shape(cmd));
+            }
+        }
         assert_eq!(shape("echo $(date) \"$HOME\""), "echo <s>…");
     }
 

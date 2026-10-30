@@ -20,11 +20,14 @@ static TOKENS: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Values that follow a name saying they are secret: `TOKEN=...`,
 /// `--password ...`, `Authorization: Bearer ...`, `https://user:pass@`.
+/// A value is the whole shell word: quoted parts, escapes and all, so
+/// `--password "a b"c` loses all of `"a b"c`.
 static NAMED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(?i)(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]*=)",
-        r#"("[^"]*"|'[^']*'|[^\s;&|]+)"#,
-        r"|(--(?:token|password|secret|api-key)[= ])(\S+)",
+        r#"((?:"(?:[^"\\]|\\.)*"?|'[^']*'?|\\.|[^\s;&|"'\\])+)"#,
+        r"|(--(?:token|password|passwd|secret|api-?key|auth-token|private-key|client-secret)(?:=|\s+))",
+        r#"((?:"(?:[^"\\]|\\.)*"?|'[^']*'?|\\.|[^\s;&|"'\\])+)"#,
         r"|((?:authorization|x-api-key|private-token):\s*(?:bearer\s+|token\s+|basic\s+)?)([^\s'\x22]+)",
         r"|(://)([^/\s:@]+:[^/\s@]+)(@)",
     ))
@@ -36,6 +39,11 @@ static NAMED: LazyLock<Regex> = LazyLock::new(|| {
 /// characters (which also catches long hashes, deliberately).
 pub fn redact(text: &str) -> String {
     let named = NAMED.replace_all(text, |c: &regex::Captures<'_>| {
+        // A shape's placeholder is not a secret: `--token <s>` stays.
+        let value = c.get(2).or_else(|| c.get(4)).map_or("", |m| m.as_str());
+        if value.starts_with('<') && value.trim_end_matches('…').ends_with('>') {
+            return c[0].to_string();
+        }
         if let Some(name) = c.get(1) {
             format!("{}<redacted>", name.as_str())
         } else if let Some(flag) = c.get(3) {
@@ -140,6 +148,24 @@ mod tests {
         assert_eq!(
             redact("mytool --password hunter2"),
             "mytool --password <redacted>"
+        );
+        assert_eq!(
+            redact(r#"mytool --password "correct horse" --next"#),
+            "mytool --password <redacted> --next"
+        );
+        assert_eq!(
+            redact("mytool --token   'a b c' x"),
+            "mytool --token   <redacted> x"
+        );
+        assert_eq!(
+            redact(r"mytool --api-key=a\ b\ c x"),
+            "mytool --api-key=<redacted> x"
+        );
+        assert_eq!(redact(r#"API_KEY="a b"c rest"#), "API_KEY=<redacted> rest");
+        assert_eq!(redact(r#"--secret "never closed"#), "--secret <redacted>");
+        assert_eq!(
+            redact("tool --token <s> TOKEN=<v>"),
+            "tool --token <s> TOKEN=<v>"
         );
         assert_eq!(
             redact("curl -H 'Authorization: Bearer abc.def' https://u:p@host/x"),
