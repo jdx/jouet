@@ -272,11 +272,17 @@ fn apply(file: &FileChange) -> std::io::Result<()> {
     let path = Path::new(&file.path);
     match (file.action, &file.contents) {
         (Action::Create | Action::Update, Some(contents)) => {
-            let dir = path.parent().unwrap_or(Path::new("."));
+            // Through a symlink (dotfile managers link these files) to the
+            // file it names, keeping that file's permissions.
+            let target = resolve_links(path)?;
+            let dir = target.parent().unwrap_or(Path::new("."));
             std::fs::create_dir_all(dir)?;
             let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
             std::io::Write::write_all(&mut tmp, contents.as_bytes())?;
-            tmp.persist(path).map_err(|e| e.error)?;
+            if let Ok(meta) = std::fs::metadata(&target) {
+                tmp.as_file().set_permissions(meta.permissions())?;
+            }
+            tmp.persist(&target).map_err(|e| e.error)?;
         }
         (Action::Remove, _) => {
             std::fs::remove_file(path)?;
@@ -290,6 +296,27 @@ fn apply(file: &FileChange) -> std::io::Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// The file `path` names after following symlinks, even a dangling one.
+fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    for _ in 0..16 {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let link = std::fs::read_link(&current)?;
+                current = match current.parent() {
+                    Some(dir) if link.is_relative() => dir.join(link),
+                    _ => link,
+                };
+            }
+            _ => return Ok(current),
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "{} is a chain of more than 16 symlinks",
+        path.display()
+    )))
 }
 
 fn text(report: &Report) -> String {

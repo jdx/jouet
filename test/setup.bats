@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# `jouet setup`, `jouet skill` and `jouet agent-help` as a person runs them:
-# HOME is a scratch directory, so every file lands under the test's tmpdir.
+# `jouet setup` as a person runs it: HOME is a scratch directory, so every
+# file lands under the test's tmpdir.
 
 setup() {
 	load "test_helper/common_setup"
@@ -118,30 +118,18 @@ setup() {
 	assert_failure 2
 }
 
-@test "skill prints a thin SKILL.md, or an AGENTS.md snippet" {
-	run --separate-stderr jouet skill
-	assert_success
-	assert_line 'name: jouet'
-	assert_output --partial 'jouet agent-help'
+@test "setup writes through a symlinked settings file and keeps its mode" {
+	mkdir -p "$HOME/dotfiles" "$HOME/.claude"
+	printf '%s\n' '{"model":"opus"}' >"$HOME/dotfiles/settings.json"
+	chmod 644 "$HOME/dotfiles/settings.json"
+	ln -s ../dotfiles/settings.json "$HOME/.claude/settings.json"
 
-	run --separate-stderr jouet skill --format agents-md
-	assert_success
-	assert_line --index 0 '## jouet'
-}
-
-@test "agent-help covers the tool in under 60 lines and mentions installed companions" {
-	printf '#!/bin/sh\n' >"$BATS_TEST_TMPDIR/bin/bd"
-	chmod +x "$BATS_TEST_TMPDIR/bin/bd"
-
-	run --separate-stderr jouet agent-help
+	run --separate-stderr jouet setup claude
 
 	assert_success
-	assert [ "${#lines[@]}" -le 60 ]
-	assert_output --partial 'jouet edit replace <PATH> --old TEXT --new TEXT'
-	assert_output --partial 'Also installed: bd (beads)'
-}
-
-@test "agent-help for an unknown command exits not found" {
-	run --separate-stderr jouet agent-help frobnicate
-	assert_failure 3
+	assert [ -L "$HOME/.claude/settings.json" ]
+	run jq -r '.model, .hooks.Stop[0].hooks[0].command' "$HOME/dotfiles/settings.json"
+	assert_output $'opus\njouet hook claude stop'
+	run sh -c 'stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"' _ "$HOME/dotfiles/settings.json"
+	assert_output 644
 }
