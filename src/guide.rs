@@ -60,6 +60,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "run",
+        Some(
+            "a routine you would otherwise type out step by step: `jouet run land` (pr next, wait ci, then pr land; yes=true merges), `jouet run sweep` (unresolved threads as a work list) or `jouet run ship-check` (the test task, then pr status); `jouet run --list` shows them all, `--dry-run` the steps",
+        ),
+    ),
+    (
         "wind",
         Some(
             "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
@@ -338,7 +344,7 @@ mod tests {
     #[test]
     fn the_overview_stays_short() {
         let text = overview();
-        // A budget to defend, not a ceiling to fill.
+        // The cap is a budget to defend, not a ceiling to fill.
         assert!(text.lines().count() <= 80, "{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),

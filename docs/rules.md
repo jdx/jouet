@@ -99,7 +99,7 @@ The header is a few `--- key: value` lines at the top of the file, which `jouet 
 - **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --`, and `program` is the basename of what runs.
 
 The `jouet` module has helpers for the common cases:
-- `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`.
+- `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`. (`jouet.git` is also where the `jouet.git.state()` probe lives.)
 - `jouet.gh(command)` returns gh's arguments.
 - `jouet.options(args)` returns the arguments before `--`.
 - `jouet.short_flag(arg, "f", "o")` reads short-option clusters such as `-fu`.
@@ -156,11 +156,47 @@ jouet rule types > jouet.d.luau
 luau-lsp analyze --definitions=jouet.d.luau ~/.config/jouet/rules/*.luau
 ```
 
+## Probes
+
+A rule can also ask about jouet's state. The probes only read, and each returns its value, or `nil` and the reason it has none:
+
+| Probe | Returns |
+|---|---|
+| `jouet.pr.status(pr?)` | What [`jouet pr status`](/commands/pr-status) reports for the PR, or for this branch's PR |
+| `jouet.pr.next(pr?)` | What [`jouet pr next`](/commands/pr-next) says the PR needs next |
+| `jouet.ci.last_run(kind?)` | The newest `test`, `lint` or `build` run the hooks recorded in their ledger: its `kind`, `ok`, `exit_code`, command `shape` and time. `nil` when there is no ledger yet |
+| `jouet.git.state()` | The branch, its upstream, `ahead` and `behind`, and whether the work tree is `dirty`, from plain `git` |
+| `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |
+| `jouet.env(name)` | An environment variable on a short allowlist, such as `CI` or `JOUET_*`. A name with `TOKEN`, `SECRET`, `PASSWORD` or `KEY` in it is never on it. |
+
+```lua
+check = function(call)
+	local state = jouet.git.state()
+	if state and state.behind and state.behind > 0 then
+		return jouet.warn(`{state.branch} is {state.behind} commits behind {state.upstream}`)
+	end
+	return nil
+end,
+```
+
+Every probe is cached for the rest of the hook call, so asking twice costs nothing, and runs inside the rule's budget. A probe gets whatever time the rule has left, and one that cannot answer in time fails open like the rule. `git` probes run without taking git's optional locks, so they never get in the way of the agent's own git.
+
+**The GitHub probes are off in hooks.** A hook runs before every tool call, and a round trip to GitHub would slow every one of them, so `jouet.pr.status` and `jouet.pr.next` return `nil` and say so. To turn them on, set this in `~/.config/jouet/config.toml`, or set `JOUET_RULES_NETWORK=true`:
+
+```toml
+[rules]
+network = true
+```
+
+A probe still has to answer within the rule's 50 ms. [Recipes](/commands/run) always have the GitHub probes, with a budget of their own.
+
+The hooks record which work tree each run was in, by a hash of its root rather than its path, so `jouet.ci.last_run` passes over runs from other repositories.
+
 ## The sandbox and its limits
 
 Each rule runs in a sandboxed Luau VM:
 
-- **What a rule can reach.** The standard library, without `require`, plus the `jouet` module. Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
+- **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). `jouet.cmd`, which runs commands, is only for [recipes](/commands/run). Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
 - **Budgets.** Every call to a rule's `check`, and every loading of its file, has a 50 ms time budget and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
 - **Failing open.** A rule that does not compile, throws, runs out of budget or returns something unexpected says nothing. jouet reports it and carries on with the other rules.
 - **Compiled-rule cache.** Compiled rules are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.

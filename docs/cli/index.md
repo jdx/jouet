@@ -49,6 +49,7 @@
 - [`jouet rule promote [--reason <TEXT>] <NAME>`](/cli/rule/promote.md)
 - [`jouet rule log [NAME]`](/cli/rule/log.md)
 - [`jouet rule gap [--rule <NAME>] <TEXT>`](/cli/rule/gap.md)
+- [`jouet run [FLAGS] [RECIPE] [ARGS]…`](/cli/run.md)
 - [`jouet wind [SUBCOMMAND]`](/cli/wind.md)
 - [`jouet wind show <ID>`](/cli/wind/show.md)
 - [`jouet wind dismiss <ID>`](/cli/wind/dismiss.md)

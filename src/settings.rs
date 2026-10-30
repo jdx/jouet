@@ -4,6 +4,7 @@
 //! ```toml
 //! [rules]
 //! disable = ["git-stash", "no-verify"]
+//! network = true
 //!
 //! [hooks]
 //! verify = false
@@ -67,6 +68,10 @@ pub(crate) struct RuleSettings {
     /// Rules to turn off, by name; "all" turns every rule off
     #[usage(env = "JOUET_RULES_DISABLE", merge = "union", parse = "list_by_comma")]
     pub disable: Option<Vec<String>>,
+    /// Let rules in hooks use the GitHub probes (`jouet.pr.*`); off so a
+    /// hook never waits on the network. Recipes always have them
+    #[usage(env = "JOUET_RULES_NETWORK", default = false)]
+    pub network: bool,
 }
 
 impl Settings {
@@ -106,6 +111,17 @@ mod tests {
     fn nothing_is_disabled_by_default() {
         let s = Settings::load_from(&env(&[]), None);
         assert_eq!(s.rules.disable, None);
+        assert!(!s.rules.network);
+    }
+
+    #[test]
+    fn the_network_probes_are_turned_on_by_the_file_or_the_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[rules]\nnetwork = true\n").unwrap();
+        assert!(Settings::load_from(&env(&[]), Some(path)).rules.network);
+        let on = Settings::load_from(&env(&[("JOUET_RULES_NETWORK", "true")]), None);
+        assert!(on.rules.network);
     }
 
     #[test]

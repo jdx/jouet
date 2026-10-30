@@ -122,7 +122,7 @@ mod tests {
         );
         assert!(skill.contains("`jouet agent-help`"), "{skill}");
         assert!(skill.contains("- `jouet edit`: "), "{skill}");
-        // A budget to defend, not a ceiling to fill.
+        // The cap is a budget to defend, not a ceiling to fill.
         assert!(skill.lines().count() <= 30, "{skill}");
         // Flags belong to agent-help.
         assert!(!skill.contains("--expect-hash"), "{skill}");
