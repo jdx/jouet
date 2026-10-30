@@ -1253,7 +1253,7 @@ Print help
 .SH "JOUET SETUP"
 Install jouet's hooks and skill into Claude Code or Codex
 
-Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; \-\-uninstall removes only what jouet added.
+Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 .PP
 \fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
 .PP
@@ -1264,7 +1264,10 @@ Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping eve
 Install for every project, under your home directory (the default)
 .TP
 \fB\-\-project\fR
-Install into this repository's .claude/, or .codex/ and .agents/
+Install into this repository for you alone: Claude Code's untracked .claude/settings.local.json
+.TP
+\fB\-\-shared\fR
+Install into the repository's tracked .claude/settings.json, or .codex/hooks.json, for everyone who clones it (implies \-\-project)
 .TP
 \fB\-\-dry\-run\fR
 Show what would change without writing anything

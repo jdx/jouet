@@ -5,14 +5,15 @@
 
 Install jouet's hooks and skill into Claude Code or Codex
 
-Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; --uninstall removes only what jouet added.
+Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; --uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 
 ## Arguments
 - **`<HARNESS>`** — claude or codex
 
 ## Flags
 - **`--global`** — Install for every project, under your home directory (the default)
-- **`--project`** — Install into this repository's .claude/, or .codex/ and .agents/
+- **`--project`** — Install into this repository for you alone: Claude Code's untracked .claude/settings.local.json
+- **`--shared`** — Install into the repository's tracked .claude/settings.json, or .codex/hooks.json, for everyone who clones it (implies --project)
 - **`--dry-run`** — Show what would change without writing anything
 - **`--uninstall`** — Remove jouet's hooks and skill
 - **`-h --help`** — Print help
