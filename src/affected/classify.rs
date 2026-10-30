@@ -153,16 +153,17 @@ fn manifests(dir: &Path) -> Vec<Ecosystem> {
     if has("pyproject.toml") || has("setup.py") || has("setup.cfg") {
         out.push(Ecosystem::Python);
     }
-    for (name, eco) in [
-        ("Cargo.toml", Ecosystem::Other),
-        ("go.mod", Ecosystem::Other),
-        ("Gemfile", Ecosystem::Other),
-        ("pom.xml", Ecosystem::Other),
-        ("build.gradle", Ecosystem::Other),
-        ("build.gradle.kts", Ecosystem::Other),
-        ("Package.swift", Ecosystem::Other),
+    for (names, eco) in [
+        (&["Cargo.toml"][..], Ecosystem::Rust),
+        (&["go.mod"], Ecosystem::Go),
+        (&["Gemfile"], Ecosystem::Ruby),
+        (
+            &["pom.xml", "build.gradle", "build.gradle.kts"],
+            Ecosystem::Jvm,
+        ),
+        (&["Package.swift"], Ecosystem::Swift),
     ] {
-        if has(name) && !out.contains(&eco) {
+        if names.iter().any(|n| has(n)) {
             out.push(eco);
         }
     }
@@ -274,7 +275,7 @@ mod tests {
         );
         assert_eq!(
             packages.nearest("tools/x/y.rs"),
-            Some((String::new(), vec![Ecosystem::Other]))
+            Some((String::new(), vec![Ecosystem::Rust]))
         );
         std::fs::remove_file(root.join("Cargo.toml")).unwrap();
         let mut packages = Packages::new(root);

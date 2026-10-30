@@ -453,8 +453,8 @@ impl Adapter for Pytest {
         }
     }
 
-    fn ecosystem(&self) -> Ecosystem {
-        Ecosystem::Python
+    fn covers(&self, ecosystem: Ecosystem) -> bool {
+        ecosystem == Ecosystem::Python
     }
 
     fn traces(&self, path: &str) -> bool {

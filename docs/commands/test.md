@@ -99,6 +99,7 @@ jouet looks for adapters in the current directory, then each directory above it 
 
 These slot into the same adapter trait and are follow-ups:
 
+- **A code-graph fallback:** one adapter built on jouet's own cross-language import graph (in progress), for languages without a strong native tool: Ruby, Go, Java, C and C++ among them. It runs only where no native adapter in the same directory covers the language, picks the test files that import a changed file, directly or not, with the chain for the explanation, and runs the whole suite for a changed file the graph cannot speak for.
 - **go:** `go list -deps` gives the package graph, on top of Go's own test cache.
 - **cargo:** narrowing what is built (`-p`) rather than which tests run, with `determinator`. In Rust, compiling dominates, so selecting tests saves little.
 - **Ruby:** best-effort, from coverage maps in the style of crystalball, or file naming conventions.
@@ -167,10 +168,10 @@ With several adapters, every suite runs, and the exit is `1` if any failed.
 
 An adapter is a type implementing the `Adapter` trait in `src/affected/mod.rs`:
 
-- `name`, `precision` and `ecosystem` (which packages it can see into);
+- `name` and `precision`, and `covers(ecosystem)`: which packages it can see into (a native adapter covers one language, a graph-based fallback several);
 - `traces(path)`: the files it can follow to tests, and `traces_deletions()`;
 - `trigger(path)`: the files whose change means its whole suite, such as its configuration;
 - `full(...)` and `select(...)`: the command for the whole suite, and the tests the changed files affect with the command that runs them, delegating to the runner's own selection where it has one;
 - optionally `env()` and `exit(code)`, to map the runner's exit codes onto jouet's.
 
-Detection is a function of the directory's files only, so the hooks' `jouet.test.adapters()` probe can ask too. Add the name to `NAMES`, `detect` and `load`, a fixture project in `test/fixtures/affected/`, selection tests in `src/affected/tests.rs`, and a bats test that runs the real tool.
+Then add an entry to `ADAPTERS`: its name, a detection function of the directory's files only (so the hooks' `jouet.test.adapters()` probe can ask too), and how to load it. Native adapters come first; a fallback goes last. Add a fixture project in `test/fixtures/affected/`, selection tests in `src/affected/tests.rs`, and a bats test that runs the real tool.

@@ -212,8 +212,8 @@ impl Adapter for Js {
         format!("{}'s module graph", self.runner.name())
     }
 
-    fn ecosystem(&self) -> Ecosystem {
-        Ecosystem::Js
+    fn covers(&self, ecosystem: Ecosystem) -> bool {
+        ecosystem == Ecosystem::Js
     }
 
     fn traces(&self, path: &str) -> bool {

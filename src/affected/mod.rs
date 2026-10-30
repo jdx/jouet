@@ -29,13 +29,24 @@ use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// Which packages a suite's adapter can see into.
+/// The language a package is written in, by its manifest: which packages a
+/// suite's adapter can see into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ecosystem {
+    /// `package.json`.
     Js,
+    /// `pyproject.toml`, `setup.py` or `setup.cfg`.
     Python,
-    /// Any other: Rust, Go, Ruby, the JVM, Swift.
-    Other,
+    /// `Cargo.toml`.
+    Rust,
+    /// `go.mod`.
+    Go,
+    /// `Gemfile`.
+    Ruby,
+    /// `pom.xml` or `build.gradle(.kts)`.
+    Jvm,
+    /// `Package.swift`.
+    Swift,
 }
 
 /// Why `jouet test` stopped before running anything: the exit code to leave
@@ -126,16 +137,18 @@ pub(crate) struct Selection {
 }
 
 /// One test runner in one directory: how it finds the tests a change
-/// affects, and how it runs them. Adding an ecosystem means adding one of
-/// these and a line in [`NAMES`] and [`load`].
+/// affects, and how it runs them. Adding one means implementing this and
+/// adding a line to [`ADAPTERS`].
 pub(crate) trait Adapter {
     /// Its name, as `--adapter` takes it.
     fn name(&self) -> &'static str;
     /// How it selects, in a few words, such as "vitest's module graph".
     fn precision(&self) -> String;
-    /// Whose packages it can see into: a change in a package of another
-    /// ecosystem cannot affect its tests.
-    fn ecosystem(&self) -> Ecosystem;
+    /// Whether it can see into packages of this ecosystem: a change in a
+    /// package of an ecosystem it does not cover cannot affect its tests.
+    /// A native adapter covers one; a fallback built on a cross-language
+    /// import graph covers several.
+    fn covers(&self, ecosystem: Ecosystem) -> bool;
     /// Whether it can trace a change to this file to the tests that depend
     /// on it.
     fn traces(&self, path: &str) -> bool;
@@ -166,23 +179,55 @@ pub(crate) trait Adapter {
     }
 }
 
-/// Every adapter, in the order they are tried.
-pub(crate) const NAMES: &[&str] = &["vitest", "jest", "pytest"];
+/// An adapter jouet knows: its name, as `--adapter` takes it, how its
+/// projects are recognised from their files alone (so the hooks can ask
+/// too), and how it is made ready to select.
+pub(crate) struct Known {
+    pub name: &'static str,
+    detect: fn(&Path) -> bool,
+    load: fn(&Project) -> Box<dyn Adapter>,
+}
 
-/// The adapters whose projects are in `dir`, by name: only files are
-/// looked at, so the hooks can ask too.
+/// Every adapter, in the order they are tried. Native adapters, which hand
+/// the selection to the runner's own tool, come first. A fallback serving
+/// several languages from one import graph (a jouet-graph adapter, planned)
+/// goes last, covers only the ecosystems no native adapter found in the
+/// same directory covers, and reports a changed file it cannot speak for
+/// through `traces`, so the whole suite runs.
+pub(crate) const ADAPTERS: &[Known] = &[
+    Known {
+        name: "vitest",
+        detect: js::detect_vitest,
+        load: |p| Box::new(js::Js::vitest(p)),
+    },
+    Known {
+        name: "jest",
+        detect: js::detect_jest,
+        load: |p| Box::new(js::Js::jest(p)),
+    },
+    Known {
+        name: "pytest",
+        detect: python::detect,
+        load: |p| Box::new(python::Pytest::load(p)),
+    },
+];
+
+/// Every adapter's name, for messages.
+pub(crate) fn names() -> String {
+    ADAPTERS
+        .iter()
+        .map(|k| k.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The adapters whose projects are in `dir`, by name.
 pub(crate) fn detect(dir: &Path) -> Vec<&'static str> {
-    let mut found = Vec::new();
-    if js::detect_vitest(dir) {
-        found.push("vitest");
-    }
-    if js::detect_jest(dir) {
-        found.push("jest");
-    }
-    if python::detect(dir) {
-        found.push("pytest");
-    }
-    found
+    ADAPTERS
+        .iter()
+        .filter(|k| (k.detect)(dir))
+        .map(|k| k.name)
+        .collect()
 }
 
 /// The nearest directory from `cwd` up to `root` with an adapter's project
@@ -212,12 +257,11 @@ pub(crate) fn near(dir: &Path) -> Vec<&'static str> {
 }
 
 /// An adapter, ready to select: its runner found, its configuration read.
-fn load(name: &str, project: &Project) -> Box<dyn Adapter> {
-    match name {
-        "vitest" => Box::new(js::Js::vitest(project)),
-        "jest" => Box::new(js::Js::jest(project)),
-        _ => Box::new(python::Pytest::load(project)),
-    }
+fn load(name: &str, project: &Project) -> Option<Box<dyn Adapter>> {
+    ADAPTERS
+        .iter()
+        .find(|k| k.name == name)
+        .map(|k| (k.load)(project))
 }
 
 /// What a suite will do.
@@ -265,11 +309,11 @@ pub(crate) fn locate(
     only: Option<&str>,
 ) -> Result<(PathBuf, Project, Vec<&'static str>), Error> {
     if let Some(name) = only
-        && !NAMES.contains(&name)
+        && !ADAPTERS.iter().any(|k| k.name == name)
     {
         return Err(Error::new(
             Exit::Usage,
-            format!("no adapter `{name}`: there are {}", NAMES.join(", ")),
+            format!("no adapter `{name}`: there are {}", names()),
         ));
     }
     let root = changes::git(cwd, &["rev-parse", "--show-toplevel"])
@@ -286,7 +330,7 @@ pub(crate) fn locate(
             format!(
                 "no test runner jouet can select for, from here up to {}: it knows {}",
                 root.display(),
-                NAMES.join(", ")
+                names()
             ),
         )
         .hint("run `jouet test` for the full suite, or run from a package's directory"));
@@ -326,7 +370,7 @@ pub(crate) fn plan(
     let (root, project, names) = locate(cwd, only)?;
     let base = changes::base(&root, since)?;
     let changes = changes::changed(&root, &base.merge_base)?;
-    let adapters: Vec<Box<dyn Adapter>> = names.iter().map(|n| load(n, &project)).collect();
+    let adapters: Vec<Box<dyn Adapter>> = names.iter().filter_map(|n| load(n, &project)).collect();
     let mut packages = Packages::new(&root);
     let effects: Vec<Vec<FileEffect>> = (0..adapters.len())
         .map(|i| {
@@ -360,7 +404,12 @@ pub(crate) fn plan(
 
 /// `name`'s whole suite in `project`, for `jouet test` without a test task.
 pub(crate) fn full_suite(name: &str, project: &Project, extra: &[String]) -> Result<Suite, Error> {
-    let adapter = load(name, project);
+    let adapter = load(name, project).ok_or_else(|| {
+        Error::new(
+            Exit::Usage,
+            format!("no adapter `{name}`: there are {}", names()),
+        )
+    })?;
     let command = adapter.full(project, extra)?;
     Ok(Suite {
         adapter,
@@ -417,7 +466,7 @@ fn effect(
         ));
     }
     match packages.nearest(path) {
-        Some((dir, ecosystems)) if ecosystems.contains(&adapter.ecosystem()) => {
+        Some((dir, ecosystems)) if ecosystems.iter().any(|e| adapter.covers(*e)) => {
             let inside = if dir.is_empty() {
                 path
             } else {

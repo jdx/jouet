@@ -201,7 +201,7 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             format!(
                 "no test task in {}, and no test runner jouet knows: looked for a mise `test` task, a package.json `test` script, Cargo.toml, a justfile or Makefile `test` target, go.mod, and {} projects",
                 root.display(),
-                affected::NAMES.join(", ")
+                affected::names()
             ),
         )
         .hint(e.message)
