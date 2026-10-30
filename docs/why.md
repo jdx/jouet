@@ -28,7 +28,7 @@ Each of these is a few lines of shell that looks right and usually works, which 
 | [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` handling |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
 
-`jouet edit` has landed. The other three are being built.
+`jouet edit`, `jouet pr status` and `jouet pr threads` have landed. `jouet wait` is being built.
 
 Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is truncated without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
 

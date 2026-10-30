@@ -7,7 +7,7 @@ description: Install jouet with mise, cargo or a release binary, and make your f
 jouet is one static binary with no runtime dependencies. It runs on Linux, macOS (Apple Silicon) and Windows.
 
 ::: warning Early development
-jouet is in early development, and only [`jouet edit`](/commands/edit) and [`jouet pr status`](/commands/pr-status) are available so far. Their flags, exit codes and JSON output are not finalized and may change incompatibly between releases.
+jouet is in early development, and only [`jouet edit`](/commands/edit), [`jouet pr status`](/commands/pr-status) and [`jouet pr threads`](/commands/pr-threads) are available so far. Their flags, exit codes and JSON output are not finalized and may change incompatibly between releases.
 :::
 
 ## Install

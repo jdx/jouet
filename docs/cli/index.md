@@ -18,3 +18,8 @@
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
+- [`jouet pr threads [FLAGS] [PR] [SUBCOMMAND]`](/cli/pr/threads.md)
+- [`jouet pr threads reply [FLAGS] <ID> [PR]`](/cli/pr/threads/reply.md)
+- [`jouet pr threads resolve [FLAGS] [ARGS]…`](/cli/pr/threads/resolve.md)
+- [`jouet pr threads unresolve [--dry-run] [ARGS]…`](/cli/pr/threads/unresolve.md)
+- [`jouet pr threads apply [FLAGS] [ARGS]…`](/cli/pr/threads/apply.md)

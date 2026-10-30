@@ -11,3 +11,4 @@ Inspect pull requests
 ## Subcommands
 
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
+- [`jouet pr threads [FLAGS] [PR] [SUBCOMMAND]`](/cli/pr/threads.md)
