@@ -132,7 +132,7 @@ jouet wait ci
 |---|---|
 | [`jouet edit`](/commands/edit) | Heredoc edits with a hand-written `assert s.count(old) == 1`; all or nothing, never partly written |
 | [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; waiting on `gh pr checks` and `gh run view` is coming soon |
-| [`jouet pr status`](/commands/pr-status) <Badge type="warning" text="soon" /> | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
+| [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) <Badge type="warning" text="soon" /> | Raw `reviewThreads` queries, replies and resolves |
 
 Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is cut without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".

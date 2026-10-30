@@ -27,10 +27,10 @@ features:
     details: Blocks until a file, log line, port, URL, process or command is ready, then prints one summary. Waiting on CI, with the failed step's log, is coming soon.
     link: /commands/wait
     linkText: Read the guide
-  - title: 'jouet pr <span class="jouet-status is-soon">coming soon</span>'
-    details: <code>pr status</code> gives one line per PR with what needs attention. <code>pr threads</code> lists, replies to and resolves review threads without hand-written GraphQL.
+  - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'
+    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code>, which lists, replies to and resolves review threads without hand-written GraphQL, is coming soon.
     link: /commands/pr-status
-    linkText: What it will do
+    linkText: Read the guide
   - title: 'Agent steering <span class="jouet-status is-later">later</span>'
     details: Hooks that catch an agent's costly patterns and point it to the command that replaces them, and rules you write yourself.
     link: /why#what-comes-next

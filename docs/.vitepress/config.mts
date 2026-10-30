@@ -29,6 +29,7 @@ export default defineConfig({
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
     "cli/wait.md": "cli/wait/index.md",
+    "cli/pr.md": "cli/pr/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -95,6 +96,12 @@ export default defineConfig({
                   { text: "pid", link: "/cli/wait/pid" },
                   { text: "cmd", link: "/cli/wait/cmd" },
                 ],
+              },
+              {
+                text: "pr",
+                link: "/cli/pr/",
+                collapsed: true,
+                items: [{ text: "status", link: "/cli/pr/status" }],
               },
             ],
           },

@@ -23,3 +23,5 @@
 - [`jouet wait http [--status <CODE>] [--contains <REGEX>] <URL>`](/cli/wait/http.md)
 - [`jouet wait pid <PID>`](/cli/wait/pid.md)
 - [`jouet wait cmd [--expect-exit <N>] [-- CMD]…`](/cli/wait/cmd.md)
+- [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
+- [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
