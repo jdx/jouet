@@ -8,9 +8,10 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output};
 
-const BATCH: &str = include_str!("../src/pr/fixtures/batch.json");
-const FAILING_CHECKS: &str = include_str!("../src/pr/fixtures/failing_checks.json");
-const SEARCH: &str = include_str!("../src/pr/fixtures/search.json");
+const BATCH: &str = include_str!("../crates/jouet-github/src/pr/fixtures/batch.json");
+const FAILING_CHECKS: &str =
+    include_str!("../crates/jouet-github/src/pr/fixtures/failing_checks.json");
+const SEARCH: &str = include_str!("../crates/jouet-github/src/pr/fixtures/search.json");
 
 /// Runs jouet with only the given tokens and a PATH holding `path_dir`, so
 /// `gh` is found only when a test puts one there.

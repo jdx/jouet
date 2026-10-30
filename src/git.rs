@@ -10,18 +10,18 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 /// The full SHA of HEAD.
-pub fn head() -> Option<String> {
+pub(crate) fn head() -> Option<String> {
     git(&["rev-parse", "--verify", "--quiet", "HEAD"])
 }
 
 /// The abbreviated SHA of HEAD, as git would print it.
-pub fn short_head() -> Option<String> {
+pub(crate) fn short_head() -> Option<String> {
     git(&["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
 }
 
 /// Whether `ancestor` is `commit` or one of its ancestors; `None` when git
 /// cannot tell, such as when either commit is not in this clone.
-pub fn is_ancestor(ancestor: &str, commit: &str) -> Option<bool> {
+pub(crate) fn is_ancestor(ancestor: &str, commit: &str) -> Option<bool> {
     let status = Command::new("git")
         .args(["merge-base", "--is-ancestor", ancestor, commit])
         .output()
@@ -35,12 +35,12 @@ pub fn is_ancestor(ancestor: &str, commit: &str) -> Option<bool> {
 }
 
 /// The top of the working tree.
-pub fn toplevel() -> Option<PathBuf> {
+pub(crate) fn toplevel() -> Option<PathBuf> {
     git(&["rev-parse", "--show-toplevel"]).map(PathBuf::from)
 }
 
 /// Whether `path` (relative to the top of the tree) matches HEAD.
-pub fn unchanged(top: &Path, path: &str) -> bool {
+pub(crate) fn unchanged(top: &Path, path: &str) -> bool {
     Command::new("git")
         .arg("-C")
         .arg(top)

@@ -3,15 +3,16 @@
 
 use super::Output;
 use crate::config::Config;
-use crate::exit::Exit;
-use crate::github::Client;
-use crate::pr::target::{self, Arg, Repo, Target};
-use crate::pr::threads::condense::{self, condense};
-use crate::pr::threads::write::{self, Entry, Options, Outcome};
-use crate::pr::threads::{
+use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git};
+use jouet_github::Client;
+use jouet_github::pr::target::{self, Arg, Repo, Target};
+use jouet_github::pr::threads::condense::{self, condense};
+use jouet_github::pr::threads::write::{self, Entry, Options, Outcome};
+use jouet_github::pr::threads::{
     self, Context, Counts, Filter, Kind, Lookup, PrThreads, Side, Status, Thread,
 };
-use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git, time};
+use jouet_output::exit::Exit;
+use jouet_output::time;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -29,7 +30,7 @@ impl Stop {
     }
 }
 
-pub fn run(args: ThreadsArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: ThreadsArgs, out: &Output) -> Exit {
     let result = match &args.cmd {
         None => list(&args, out),
         Some(ThreadsCmd::Reply(a)) => reply(&args, a, out),

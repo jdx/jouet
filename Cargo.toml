@@ -1,43 +1,79 @@
-[package]
-name = "jouet"
-version = "0.0.1"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# `cargo test`, `clippy` and `check` at the root cover every crate.
+default-members = [".", "crates/*"]
+
+[workspace.package]
+# `version` is deliberately absent: each crate carries its own, and
+# release-plz.toml says how they move.
 edition = "2024"
 # usage-rs 7's own floor. CI checks it in the msrv job.
 rust-version = "1.91"
-description = "A toolkit CLI for coding agents"
-keywords = ["cli", "agents", "github", "ci"]
-categories = ["command-line-utilities", "development-tools"]
-readme = "README.md"
 license = "MIT"
 repository = "https://github.com/jdx/jouet"
-# Published crates carry the source and its licence, not the machinery used to
-# develop and ship it. A list of what to ship, so files added to the repository
-# (or left untracked in a checkout) are never published by accident.
-include = ["/src/**", "/LICENSE", "/README.md"]
+# Every crate ships the workspace README, so a crates.io page describes the
+# whole tool rather than repeating a paragraph per crate.
+readme = "README.md"
 
-[dependencies]
+[workspace.dependencies]
+jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
+jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
+jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
+jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
+libc = "0.2"
 mise-agent-env = "2026"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 regex = "1"
-sha2 = "0.11"
-similar = "3"
-tempfile = "3"
 # TLS trusts the system's root certificates, with ring for crypto. ureq's
 # default bundles webpki-roots, and its platform verifier pulls in
 # webpki-root-certs; the org's dependency policy does not allow their licence
 # (CDLA-Permissive-2.0).
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-native-certs = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+similar = "3"
+tempfile = "3"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
 usage-rs = "7"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+
+# The library crates opt in, so everything they export is something the binary
+# or a sibling crate uses, and the rest is `pub(crate)`.
+[workspace.lints.rust]
+unreachable_pub = "deny"
+
+[package]
+name = "jouet"
+version = "0.0.1"
+description = "A toolkit CLI for coding agents"
+keywords = ["cli", "agents", "github", "ci"]
+categories = ["command-line-utilities", "development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# Published crates carry the source and its licence, not the machinery used to
+# develop and ship it. A list of what to ship, so files added to the repository
+# (or left untracked in a checkout) are never published by accident.
+include = ["/src/**", "/LICENSE", "/README.md"]
+
+[lints]
+workspace = true
+
+[dependencies]
+jouet-edit.workspace = true
+jouet-github.workspace = true
+jouet-output.workspace = true
+jouet-wait.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+usage-rs.workspace = true
 
 [profile.release]
 lto = true
@@ -48,5 +84,5 @@ strip = true
 debug = 1
 
 [dev-dependencies]
-serde_json = "1"
-tempfile = "3"
+serde_json.workspace = true
+tempfile.workspace = true

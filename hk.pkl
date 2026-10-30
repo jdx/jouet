@@ -6,9 +6,12 @@ local linters = new Mapping<String, Step> {
     ["cargo-fmt"] = Builtins.cargo_fmt
     // Same invocation as `mise run lint:clippy` and CI.
     ["cargo-clippy"] = (Builtins.cargo_clippy) {
-        check = "cargo clippy --all-targets --all-features -- -D warnings"
+        // One run over the whole workspace, rather than one per crate's
+        // Cargo.toml that the builtin would otherwise start.
+        workspace_indicator = null
+        check = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
         // Same as `mise run lint-fix`, so fixes cover the targets check does.
-        fix = "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
+        fix = "cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
     }
     // The bats tests and their helper. `mise x` for the same reason as
     // jactionlint below.

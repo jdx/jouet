@@ -1,12 +1,12 @@
 //! `jouet pr status`.
 
 use super::Output;
-use crate::exit::Exit;
-use crate::github::Client;
-use crate::pr::status::{self, Fetched, Incomplete, Lookup, Mergeability, PrStatus, State};
-use crate::pr::target::{self, Arg, Repo, Target};
-use crate::time;
 use crate::{PrArgs, PrCmd, StatusArgs};
+use jouet_github::Client;
+use jouet_github::pr::status::{self, Fetched, Incomplete, Lookup, Mergeability, PrStatus, State};
+use jouet_github::pr::target::{self, Arg, Repo, Target};
+use jouet_output::exit::Exit;
+use jouet_output::time;
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
@@ -15,7 +15,7 @@ const DEFAULT_SETTLE: Duration = Duration::from_secs(20);
 /// Titles longer than this are cut at a word boundary in text output.
 const TITLE_WIDTH: usize = 40;
 
-pub fn run(args: PrArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: PrArgs, out: &Output) -> Exit {
     match args.cmd {
         PrCmd::Status(args) => run_status(&args, out),
         PrCmd::Threads(args) => super::threads::run(args, out),

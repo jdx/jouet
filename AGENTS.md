@@ -26,10 +26,10 @@ Go through mise rather than calling cargo directly, so that a laptop and a CI ru
 same commands. mise wraps `cargo` with mbx; see CONTRIBUTING.md.
 
 ```sh
-mise run build        # cargo build --all-targets
-mise run test         # cargo test --all-targets, then the bats tests in test/
+mise run build        # cargo build --workspace --all-targets
+mise run test         # cargo test --workspace --all-targets, then the bats tests in test/
 mise run test:bats    # only the bats tests
-mise run lint         # cargo fmt --check + clippy --all-targets --all-features -D warnings
+mise run lint         # cargo fmt --all --check + clippy --workspace --all-targets --all-features -D warnings
 mise run lint-fix     # auto-fix what can be auto-fixed
 mise run ci           # build + test + lint
 ```
@@ -45,6 +45,25 @@ mise x hk -- hk install --mise  # pre-commit hook
 
 CI also runs `cargo deny check` (`deny.toml`), the same tests on macOS, and `cargo check` on the
 MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester tests in `e2e-win/`.
+
+## Crates
+
+The repository is a Cargo workspace. The `jouet` package at the root is the binary: the usage-rs
+CLI declaration in `src/main.rs`, the command glue in `src/cmd/`, the config file and the git
+helpers. The rest lives in library crates under `crates/`:
+
+- `jouet-output`: the shared conventions: exit codes, display modes, `Output` (results and the
+  error document), time parsing and formatting, and the log and state directories.
+- `jouet-github`: the GitHub client (token lookup, retries, GraphQL and REST, ETags,
+  `JOUET_GITHUB_API_URL`), TLS, and the `pr` model shared by `pr status`, `pr threads` and `wait`.
+- `jouet-edit`: the edit engine behind `jouet edit`.
+- `jouet-wait`: the conditions and polling behind `jouet wait`.
+
+The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
+workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,
+dependency requirements in `[workspace.dependencies]`, and each crate inherits both. Every crate
+shares one version (see `release-plz.toml`). The subprocess tests in `tests/` and the bats and
+Pester tests stay at the root, since they run the binary.
 
 ## Code rules
 
@@ -111,8 +130,8 @@ the daily auto-merge of the release PR.
   release is at least two days old and a `fix:` or `feat:` has landed since.
 - Renaming `.github/workflows/release-plz.yml` breaks crates.io publishing until the trusted
   publisher is updated, because the OIDC claim names the workflow file.
-- Published crates carry source and licence only. Repository tooling files are listed in
-  `Cargo.toml`'s `exclude`; add new ones there.
+- Published crates carry source and licence only. Each crate's `Cargo.toml` lists what it ships
+  in `include`, so nothing else in a checkout is packaged; a new file that must ship goes there.
 
 ## PR titles and descriptions are release-note inputs
 

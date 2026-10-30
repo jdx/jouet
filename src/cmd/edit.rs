@@ -1,14 +1,14 @@
 //! `jouet edit`, `jouet edit replace` and `jouet edit hash`.
 
 use super::Output;
-use crate::edit::spec::{self, Count, Edit, FileOp, Format, Spec};
-use crate::edit::{self, EditStatus, FileStatus, Options, Report};
-use crate::exit::Exit;
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
+use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
+use jouet_edit::{self as edit, EditStatus, FileStatus, Options, Report};
+use jouet_output::exit::Exit;
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
 
-pub fn run(args: EditArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
         Some(EditCmd::Replace(replace)) => replace_spec(replace),
@@ -68,7 +68,7 @@ pub fn run(args: EditArgs, out: &Output) -> Exit {
     };
     let mut exit = Exit::Ok;
     if let Some(command) = &args.check {
-        let mut check = match edit::run_check(command, &crate::paths::log_dir()) {
+        let mut check = match edit::run_check(command, &jouet_output::paths::log_dir()) {
             Ok(check) => check,
             Err(e) => {
                 // The files are already written, so a check that cannot run
