@@ -1,0 +1,87 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "mise.toml"
+      - "mise.lock"
+      - ".github/workflows/docs.yml"
+  # Pull requests run the same build as a dry run; only main uploads and
+  # deploys.
+  pull_request:
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "mise.toml"
+      - "mise.lock"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MBX_DISABLE: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Read-only: this job also runs pull request code. configure-pages only
+    # reads the site's settings; publishing needs write access, which only the
+    # deploy job below has, and it runs only on main.
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # lastUpdated reads each page's git history.
+          fetch-depth: 0
+          persist-credentials: false
+      # docs:check builds jouet to regenerate the CLI reference from its usage
+      # spec. Rust comes from the runner.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+        if: github.ref == 'refs/heads/main'
+      - name: Build with VitePress
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mise run docs:check
+          mise run docs:build
+          touch docs/.vitepress/dist/.nojekyll
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
