@@ -4,8 +4,9 @@
 //! Claude Code reads hooks from `settings.json` and Codex from `hooks.json`,
 //! in the same shape: `{"hooks": {EVENT: [{"matcher": ..., "hooks":
 //! [HANDLER, ...]}]}}`. jouet adds one matcher group per event, holding one
-//! handler whose command is `jouet hook HARNESS EVENT`. That command is how
-//! jouet recognises its own entries: everything else is left as it is,
+//! handler whose command runs `jouet hook HARNESS EVENT`, behind a guard that
+//! exits 0 when jouet is not on `PATH`. That command is how jouet recognises
+//! its own entries, guarded or bare: everything else is left as it is,
 //! re-running is a no-op, and uninstalling removes only those.
 
 use serde_json::{Map, Value, json};
@@ -19,8 +20,13 @@ pub(crate) enum Harness {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Scope {
+    /// Every project, under the home directory.
     Global,
-    Project,
+    /// This repository, in files only you have: Claude Code's
+    /// `settings.local.json`.
+    Local,
+    /// This repository, in the files everyone who clones it gets.
+    Shared,
 }
 
 /// Seconds a harness waits for a hook. jouet's take milliseconds; this is the
@@ -70,11 +76,16 @@ impl Harness {
             (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
                 .join("settings.json"),
-            (Self::Claude, Scope::Project) => project.join(".claude").join("settings.json"),
+            (Self::Claude, Scope::Local) => project.join(".claude").join("settings.local.json"),
+            (Self::Claude, Scope::Shared) => project.join(".claude").join("settings.json"),
             (Self::Codex, Scope::Global) => jouet_output::paths::env_dir("CODEX_HOME")
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("hooks.json"),
-            (Self::Codex, Scope::Project) => project.join(".codex").join("hooks.json"),
+            // Codex has no project hooks file of your own; `cmd::setup`
+            // refuses `--project` without `--shared` for it.
+            (Self::Codex, Scope::Local | Scope::Shared) => {
+                project.join(".codex").join("hooks.json")
+            }
         }
     }
 
@@ -84,26 +95,52 @@ impl Harness {
             (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
                 .join("skills"),
-            (Self::Claude, Scope::Project) => project.join(".claude").join("skills"),
+            (Self::Claude, Scope::Local | Scope::Shared) => project.join(".claude").join("skills"),
             (Self::Codex, Scope::Global) => home.join(".agents").join("skills"),
-            (Self::Codex, Scope::Project) => project.join(".agents").join("skills"),
+            (Self::Codex, Scope::Local | Scope::Shared) => project.join(".agents").join("skills"),
         };
         dir.join("jouet").join("SKILL.md")
     }
 
+    /// The hook's command. The guard makes a missing `jouet` (a contributor
+    /// without it, or an app started with a shorter `PATH`) a silent no-op
+    /// rather than an error on every tool call. It is `sh -c` because Codex
+    /// runs hooks with the login shell, which may not be a POSIX one. Claude
+    /// Code runs hooks with Git Bash on Windows, where `sh` is too.
     fn command(self, event: &str) -> String {
-        format!("jouet hook {} {event}", self.name())
+        format!(
+            "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {} {event}'",
+            self.name()
+        )
+    }
+
+    /// The command Codex runs instead on Windows, where its hook shell is
+    /// PowerShell. Claude Code has no such field.
+    fn windows_command(self, event: &str) -> Option<String> {
+        (self == Self::Codex).then(|| {
+            format!(
+                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {} {event} }}",
+                self.name()
+            )
+        })
     }
 }
 
-/// Whether a handler is one jouet installed: its command runs `jouet hook`.
+/// Whether a handler is one jouet installed: its command runs `jouet hook`,
+/// directly (as older versions installed it) or inside `sh -c`.
 fn is_jouet(handler: &Value) -> bool {
-    let Some(command) = handler.get("command").and_then(Value::as_str) else {
-        return false;
-    };
-    let mut words = command.split_whitespace();
-    let program = words.next().map(jouet_rules::shell::basename);
-    program == Some("jouet") && words.next() == Some("hook")
+    handler
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| runs_jouet_hook(&jouet_rules::shell::parse(command)))
+}
+
+fn runs_jouet_hook(script: &jouet_rules::shell::Script) -> bool {
+    let direct = script.all().into_iter().any(|c| {
+        let argv = c.argv();
+        c.program() == Some("jouet") && argv.get(1).is_some_and(|a| a == "hook")
+    });
+    direct || script.inner_scripts().iter().any(runs_jouet_hook)
 }
 
 /// The matcher groups holding a jouet handler, with their events, in order.
@@ -121,6 +158,11 @@ fn jouet_groups(doc: &Value) -> Vec<(&str, &Value)> {
                 .map(move |g| (event.as_str(), g))
         })
         .collect()
+}
+
+/// Whether the document holds any of jouet's hooks, from any version.
+pub(crate) fn has_jouet(doc: &Value) -> bool {
+    !jouet_groups(doc).is_empty()
 }
 
 fn handlers(group: &Value) -> &[Value] {
@@ -166,10 +208,14 @@ pub(crate) fn install(doc: &mut Value, harness: Harness) {
         if let Some(matcher) = matcher {
             group.insert("matcher".into(), json!(matcher));
         }
-        group.insert(
-            "hooks".into(),
-            json!([{"type": "command", "command": harness.command(jouet_event), "timeout": TIMEOUT}]),
-        );
+        let mut handler = Map::new();
+        handler.insert("type".into(), json!("command"));
+        handler.insert("command".into(), json!(harness.command(jouet_event)));
+        if let Some(command) = harness.windows_command(jouet_event) {
+            handler.insert("commandWindows".into(), json!(command));
+        }
+        handler.insert("timeout".into(), json!(TIMEOUT));
+        group.insert("hooks".into(), json!([handler]));
         hooks
             .entry(*event)
             .or_insert_with(|| Value::Array(Vec::new()))
@@ -244,7 +290,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook codex session-start",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex session-start'",
+            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex session-start }",
             "timeout": 10
           }
         ]
@@ -256,7 +303,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook codex pre-tool-use",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex pre-tool-use'",
+            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }",
             "timeout": 10
           }
         ]
@@ -267,7 +315,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook codex stop",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex stop'",
+            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex stop }",
             "timeout": 10
           }
         ]
@@ -323,7 +372,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook claude stop",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
             "timeout": 10
           }
         ]
@@ -344,7 +393,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook claude pre-tool-use",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
             "timeout": 10
           }
         ]
@@ -365,7 +414,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook claude session-start",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
             "timeout": 10
           }
         ]
@@ -377,7 +426,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook claude post-tool-use",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
             "timeout": 10
           }
         ]
@@ -389,7 +438,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "jouet hook claude post-tool-use-failure",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
             "timeout": 10
           }
         ]
@@ -429,8 +478,112 @@ mod tests {
         assert_eq!(pre.as_array().unwrap().len(), 1);
         assert_eq!(
             pre[0]["hooks"][0]["command"],
-            "jouet hook claude pre-tool-use"
+            "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"
         );
+    }
+
+    /// What versions before the guard installed: bare `jouet hook` commands,
+    /// after another tool's hook.
+    fn bare() -> Value {
+        let mut hooks = Map::new();
+        hooks.insert(
+            "Stop".into(),
+            json!([{"hooks": [{"type": "command", "command": "entire hooks claude-code stop"}]}]),
+        );
+        for (event, matcher, jouet_event) in Harness::Claude.hooks() {
+            let handler = json!({"type": "command", "command": format!("jouet hook claude {jouet_event}"), "timeout": 10});
+            let group = match matcher {
+                Some(m) => json!({"matcher": m, "hooks": [handler]}),
+                None => json!({"hooks": [handler]}),
+            };
+            hooks
+                .entry(*event)
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .unwrap()
+                .push(group);
+        }
+        json!({"hooks": hooks})
+    }
+
+    #[test]
+    fn bare_entries_are_upgraded_to_the_guarded_form_in_place() {
+        let doc = installed(bare(), Harness::Claude);
+        assert_eq!(
+            pretty(&doc),
+            r#"{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks claude-code stop"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}"#
+        );
+        // And the upgraded file is then left alone.
+        assert_eq!(installed(doc.clone(), Harness::Claude), doc);
     }
 
     #[test]
@@ -473,7 +626,16 @@ mod tests {
             &json!({"command": "/usr/local/bin/jouet hook codex stop"})
         ));
         assert!(!is_jouet(&json!({"command": "jouet edit"})));
+        assert!(is_jouet(
+            &json!({"command": Harness::Claude.command("stop")})
+        ));
+        assert!(is_jouet(
+            &json!({"command": Harness::Codex.command("stop")})
+        ));
         assert!(!is_jouet(&json!({"command": "echo jouet hook"})));
+        assert!(!is_jouet(
+            &json!({"command": "sh -c 'echo jouet hook; command -v jouet'"})
+        ));
         assert!(!is_jouet(&json!({"type": "prompt"})));
     }
 }
