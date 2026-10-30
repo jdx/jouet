@@ -8,7 +8,7 @@ Describe 'jouet setup hooks on Windows' {
     BeforeAll {
         $script:OriginalDir = Get-Location
         $script:Saved = @{}
-        foreach ($name in 'USERPROFILE', 'HOME', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'JOUET_LOG_DIR', 'XDG_STATE_HOME', 'PATH') {
+        foreach ($name in 'USERPROFILE', 'HOME', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'JOUET_DISPLAY', 'JOUET_LOG_DIR', 'XDG_STATE_HOME', 'PATH') {
             $script:Saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
         }
         $script:HookInput = '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git add -A"},"cwd":"C:\\"}'
@@ -41,7 +41,7 @@ Describe 'jouet setup hooks on Windows' {
         $env:HOME = $script:TestRoot
         $env:JOUET_LOG_DIR = Join-Path $script:TestRoot 'logs'
         $env:XDG_STATE_HOME = Join-Path $script:TestRoot 'state'
-        Remove-Item Env:CODEX_HOME, Env:CLAUDE_CONFIG_DIR -ErrorAction Ignore
+        Remove-Item Env:CODEX_HOME, Env:CLAUDE_CONFIG_DIR, Env:JOUET_DISPLAY -ErrorAction Ignore
         $env:PATH = $script:Saved['PATH']
     }
 

@@ -152,19 +152,20 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 @test "setup --project writes your own settings.local.json at the repository root, and says when git would commit it" {
 	init_repo
+	work=$(pwd -P) # macOS reports /private/tmp for /tmp
 	mkdir sub
 	cd sub
 
 	run --separate-stderr jouet setup claude --project
 
 	assert_success
-	assert_line "created $BATS_TEST_TMPDIR/work/.claude/settings.local.json"
-	assert_line "created $BATS_TEST_TMPDIR/work/.claude/skills/jouet/SKILL.md"
+	assert_line "created $work/.claude/settings.local.json"
+	assert_line "created $work/.claude/skills/jouet/SKILL.md"
 	assert_line "note: git does not ignore .claude/settings.local.json or .claude/skills/jouet/SKILL.md, so \`git add\` could commit them: list them in .gitignore, or in .git/info/exclude for this clone alone"
-	assert_golden "$BATS_TEST_TMPDIR/work/.claude/settings.local.json" claude-hooks.json
-	assert [ ! -e "$BATS_TEST_TMPDIR/work/.claude/settings.json" ]
+	assert_golden "$work/.claude/settings.local.json" claude-hooks.json
+	assert [ ! -e "$work/.claude/settings.json" ]
 
-	printf '.claude/settings.local.json\n.claude/skills/jouet/\n' >>"$BATS_TEST_TMPDIR/work/.git/info/exclude"
+	printf '.claude/settings.local.json\n.claude/skills/jouet/\n' >>"$work/.git/info/exclude"
 	run --separate-stderr jouet setup claude --project
 	assert_success
 	refute_line --partial "git does not ignore"
@@ -184,6 +185,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 @test "setup --project from a linked worktree writes the main checkout's settings.local.json" {
 	init_repo
+	work=$(pwd -P) # macOS reports /private/tmp for /tmp
 	commit_file README.md hi init
 	git worktree add -q .claude/worktrees/w1 -b w1
 	cd .claude/worktrees/w1
@@ -191,12 +193,13 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup claude --project
 
 	assert_success
-	assert_line "created $BATS_TEST_TMPDIR/work/.claude/settings.local.json"
+	assert_line "created $work/.claude/settings.local.json"
 	assert [ ! -e .claude/settings.local.json ]
 }
 
 @test "setup refuses --project for Codex, which has no hooks file of your own" {
 	init_repo
+	work=$(pwd -P) # macOS reports /private/tmp for /tmp
 
 	run --separate-stderr jouet setup codex --project
 
@@ -208,7 +211,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	jouet setup codex --shared >/dev/null
 	run --separate-stderr jouet setup codex --project --uninstall
 	assert_success
-	assert_line "updated $BATS_TEST_TMPDIR/work/.codex/hooks.json"
+	assert_line "updated $work/.codex/hooks.json"
 	assert_content .codex/hooks.json $'{}\n'
 }
 
@@ -227,17 +230,18 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 @test "setup --uninstall removes jouet's hooks from either project file" {
 	init_repo
+	work=$(pwd -P) # macOS reports /private/tmp for /tmp
 	jouet setup claude --shared >/dev/null
 	run --separate-stderr jouet setup claude --project --uninstall
 	assert_success
-	assert_line "updated $BATS_TEST_TMPDIR/work/.claude/settings.json"
-	assert_line "removed $BATS_TEST_TMPDIR/work/.claude/skills/jouet/SKILL.md"
+	assert_line "updated $work/.claude/settings.json"
+	assert_line "removed $work/.claude/skills/jouet/SKILL.md"
 	assert_content .claude/settings.json $'{}\n'
 
 	jouet setup claude --project >/dev/null
 	run --separate-stderr jouet setup claude --shared --uninstall
 	assert_success
-	assert_line "updated $BATS_TEST_TMPDIR/work/.claude/settings.local.json"
+	assert_line "updated $work/.claude/settings.local.json"
 	assert_content .claude/settings.local.json $'{}\n'
 }
 
