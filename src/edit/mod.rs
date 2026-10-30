@@ -155,16 +155,7 @@ pub fn run_check(command: &str, log_dir: &Path) -> io::Result<CheckReport> {
         .map_or(0, |d| d.as_millis());
     let log_path = log_dir.join(format!("edit-check-{stamp}-{}.log", std::process::id()));
     let log = fs::File::create(&log_path)?;
-    let mut shell = if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", command]);
-        c
-    } else {
-        let mut c = std::process::Command::new("sh");
-        c.args(["-c", command]);
-        c
-    };
-    let status = shell
+    let status = shell(command)
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
@@ -181,6 +172,25 @@ pub fn run_check(command: &str, log_dir: &Path) -> io::Result<CheckReport> {
         log_path: log_path.display().to_string(),
         reverted: false,
     })
+}
+
+/// `sh -c COMMAND`.
+#[cfg(not(windows))]
+fn shell(command: &str) -> std::process::Command {
+    let mut c = std::process::Command::new("sh");
+    c.args(["-c", command]);
+    c
+}
+
+/// `cmd /S /C "COMMAND"`, with COMMAND exactly as given. An argument passed
+/// with `arg` is escaped for the MSVC runtime, and cmd.exe does not undo that
+/// escaping: `findstr /C:"a b" f` would fail with `Cannot open b"`.
+#[cfg(windows)]
+fn shell(command: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut c = std::process::Command::new("cmd");
+    c.raw_arg(format!("/S /C \"{command}\""));
+    c
 }
 
 impl Report {
