@@ -11,5 +11,5 @@ Counts what the hook ledger recorded (jouet command runs, rule decisions and wha
 - **`--since <TIME>`** — Only ledger entries since TIME: a duration ago such as 7d or 12h, a date such as 2026-10-01, or RFC 3339
 - **`--harness <HARNESS>`** — Which harness: claude, codex or all (default all)
 - **`--session <ID>`** — Only one session's ledger entries
-- **`--summary`** — Print one line about what jouet saved, or nothing, for a stop hook. The `stats_summary` config key or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
+- **`--summary`** — Print one line about what jouet saved, or nothing, for a stop hook. `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
 - **`-h --help`** — Print help

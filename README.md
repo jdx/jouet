@@ -43,7 +43,8 @@ cargo install jouet --locked
 
 Release archives for Linux, macOS (Apple Silicon) and Windows are on the
 [releases page](https://github.com/jdx/jouet/releases), each with a signed
-[packslip](https://packslip.dev).
+[packslip](https://packslip.dev). The glibc Linux archives need glibc 2.39 or newer; on older
+distributions use the static musl archive, which mise picks automatically.
 [All installation options →](https://jouet.jdx.dev/getting-started)
 
 ## Before and after
@@ -113,9 +114,11 @@ Every command follows the same
 output that adapts to whoever is reading, `--json` that prints exactly one
 document, and one table of exit codes.
 
-After the commands, jouet will help agents reach for them: hooks that catch a
-costly pattern and point to the command that replaces it, and rules you write
-yourself. See [what comes next](https://jouet.jdx.dev/why#what-comes-next).
+`jouet setup claude` (or `codex`) installs a thin skill and hooks that steer an
+agent toward these commands, deny habits such as `git add -A` and a bare
+`git stash`, and stop it finishing while its last test run failed. The rules
+behind the hooks are [Luau scripts](https://jouet.jdx.dev/rules) you can add
+to. See [agent setup and hooks](https://jouet.jdx.dev/setup).
 
 ## Development
 

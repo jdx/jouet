@@ -11,7 +11,6 @@ pub(crate) struct Config {
     reply_footer: Option<String>,
     #[serde(default)]
     bots: Vec<String>,
-    stats_summary: Option<String>,
 }
 
 impl Config {
@@ -49,22 +48,6 @@ impl Config {
             .filter(|b| !b.is_empty())
             .map(str::to_ascii_lowercase)
             .collect()
-    }
-}
-
-impl Config {
-    /// How `jouet stats --summary` tells its line: `JOUET_STATS_SUMMARY` when
-    /// it is set, else `stats_summary`, else quips. `off` prints no line.
-    pub(crate) fn stats_summary(&self) -> Result<jouet_audit::stats::SummaryStyle, String> {
-        let (name, source) = match std::env::var("JOUET_STATS_SUMMARY") {
-            Ok(name) => (name, "JOUET_STATS_SUMMARY"),
-            Err(_) => match &self.stats_summary {
-                Some(name) => (name.clone(), "stats_summary"),
-                None => return Ok(jouet_audit::stats::SummaryStyle::default()),
-            },
-        };
-        jouet_audit::stats::SummaryStyle::parse(&name)
-            .ok_or_else(|| format!("{source} must be quips, plain or off, not `{name}`"))
     }
 }
 

@@ -64,7 +64,7 @@ setup() {
 	[[ "${#lines[@]}" == 1 ]]
 
 	mkdir -p "$XDG_CONFIG_HOME/jouet"
-	printf 'stats_summary = "plain"\n' >"$XDG_CONFIG_HOME/jouet/config.toml"
+	printf '[stats]\nsummary = "plain"\n' >"$XDG_CONFIG_HOME/jouet/config.toml"
 	run --separate-stderr jouet stats --summary
 	assert_success
 	assert_output --regexp "^jouet\[savings\]: (rules steered 1 command to jouet|1 failing CI log returned as the failing step's excerpt|blocked finishing after a failed check once)$"
@@ -73,9 +73,11 @@ setup() {
 	assert_success
 	assert_output ''
 
+	# A value jouet cannot read counts as the default, so a typo never
+	# breaks the stop hook.
 	run --separate-stderr env JOUET_STATS_SUMMARY=loud jouet stats --summary
-	assert_failure 2
-	assert_equal "$stderr" "jouet: JOUET_STATS_SUMMARY must be quips, plain or off, not \`loud\`"
+	assert_success
+	assert_output --regexp '^jouet\[savings\]: '
 }
 
 @test "without a ledger it says so and prices one run of each command" {

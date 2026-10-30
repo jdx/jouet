@@ -3,7 +3,7 @@
 use super::Output;
 use super::audit::parse_since;
 use crate::StatsArgs;
-use crate::config::Config;
+use crate::settings::Settings;
 use jouet_audit::stats::{self, Baseline, Estimate, Ledger, Measured, StatsFilter};
 use jouet_audit::{Analyzer, ClaudeCode, Codex, Filter, Reader};
 use jouet_output::exit::Exit;
@@ -34,22 +34,24 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         harness: harness.clone(),
         session: args.session.clone(),
     };
-    let dir = paths::ledger_dir();
-    let ledger = match Ledger::read(&dir) {
-        Ok(ledger) => ledger,
-        Err(e) => return out.error(Exit::Failed, &format!("reading {}: {e}", dir.display())),
+    let dir = crate::ledger::dir();
+    let ledger = match dir.as_deref().map(Ledger::read).transpose() {
+        Ok(ledger) => ledger.flatten(),
+        Err(e) => {
+            let dir = dir.unwrap_or_default();
+            return out.error(Exit::Failed, &format!("reading {}: {e}", dir.display()));
+        }
     };
     let measured = ledger.as_ref().map(|l| stats::measure(&l.entries, &filter));
-    let cache = paths::stats_dir().join("baselines.json");
+    let cache = paths::state_dir().map(|d| d.join("stats").join("baselines.json"));
 
     if args.summary {
-        let style = match Config::load().and_then(|c| c.stats_summary()) {
-            Ok(style) => style,
-            Err(e) => return out.error(Exit::Usage, &e),
-        };
+        // Settings::load falls back to the default for a value it cannot
+        // read, so a typo never breaks the stop hook.
+        let style = stats::SummaryStyle::parse(&Settings::load().stats.summary).unwrap_or_default();
         // The stop hook runs this, so it reads the baselines the last full
         // `jouet stats` saved instead of reading the history again.
-        let baselines = read_cache(&cache);
+        let baselines = cache.as_deref().map(read_cache).unwrap_or_default();
         let line = measured
             .as_ref()
             .and_then(|m| stats::summary(m, &stats::estimate(m, &baselines), style));
@@ -92,8 +94,8 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         let report = scan.analyzer.report(0);
         baselines.extend(report.harnesses.iter().map(|h| stats::baseline(h, until)));
     }
-    if harness.is_none() {
-        write_cache(&cache, &baselines);
+    if let (None, Some(cache)) = (&harness, &cache) {
+        write_cache(cache, &baselines);
     }
     let estimates = match &measured {
         Some(m) => stats::estimate(m, &baselines),
@@ -106,7 +108,7 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     };
     let doc = Doc {
         ledger: LedgerDoc {
-            dir: dir.display().to_string(),
+            dir: dir.map(|d| d.display().to_string()),
             present: ledger.is_some(),
             files: ledger.as_ref().map_or(0, |l| l.files),
             bad_lines: ledger.as_ref().map_or(0, |l| l.bad_lines),
@@ -173,7 +175,9 @@ struct Doc<'a> {
 
 #[derive(Serialize)]
 struct LedgerDoc {
-    dir: String,
+    /// Absent without a home directory, where there is no ledger.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     present: bool,
     #[serde(skip_serializing_if = "is_zero")]
@@ -197,10 +201,14 @@ fn text(doc: &Doc<'_>) -> String {
     let mut s = String::new();
     match doc.measured {
         None => {
+            let at = doc
+                .ledger
+                .dir
+                .as_deref()
+                .map_or(String::new(), |d| format!(" at {d}"));
             let _ = writeln!(
                 s,
-                "jouet stats: no ledger at {}, so nothing is measured yet. `jouet setup` starts one.",
-                doc.ledger.dir
+                "jouet stats: no ledger{at}, so nothing is measured yet. `jouet setup` starts one."
             );
         }
         Some(m) => {

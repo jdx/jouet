@@ -13,7 +13,7 @@ description: See what jouet saved, measured from its hook ledger and estimated a
 jouet stats [--since TIME] [--harness claude|codex|all] [--session ID] [--summary] [--json]
 ```
 
-The flags are listed in the [CLI reference](/cli/stats). `--since` limits the ledger entries counted; the history before setup is the same whatever it says.
+The flags are listed in the [CLI reference](/cli/stats). `--since` limits the ledger entries counted; the history before setup is the same whatever it says. The ledger keeps 30 days of [rotated files](/setup#the-ledger), so measured figures reach back about that far.
 
 ## How the estimates work
 
@@ -74,7 +74,7 @@ Without a ledger, `jouet stats` says so and shows what one run of each command w
 jouet[savings]: 3 waits, zero 'is it done yet?'. about 2.4M tokens left unread (estimated).
 ```
 
-The `stats_summary` key in `~/.config/jouet/config.toml`, or `JOUET_STATS_SUMMARY`, sets the style: `quips` (the default), `plain` for the same fact stated plainly, or `off` for no line. The summary reads the baseline the last full `jouet stats` saved under `$XDG_STATE_HOME/jouet/stats`, so it stays fast; until then it leaves estimates out.
+`[stats] summary` in `~/.config/jouet/config.toml`, or `JOUET_STATS_SUMMARY`, sets the style: `quips` (the default), `plain` for the same fact stated plainly, or `off` for no line. A value jouet cannot read counts as the default, as with every [setting](/setup#settings), so a typo never breaks a stop hook. The summary reads the baseline the last full `jouet stats` saved under `$XDG_STATE_HOME/jouet/stats`, so it stays fast; until then it leaves estimates out.
 
 ## JSON
 
@@ -82,4 +82,4 @@ The `stats_summary` key in `~/.config/jouet/config.toml`, or `JOUET_STATS_SUMMAR
 
 ## Exit codes
 
-`0` with a report, including without a ledger; `2` for a usage error or a bad `stats_summary`; `1` when the ledger cannot be read.
+`0` with a report, including without a ledger; `2` for a usage error; `1` when the ledger cannot be read.
