@@ -29,6 +29,16 @@ const WHEN: &[(&str, Option<&str>)] = &[
             "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: `jouet rule test` runs one before it is enabled",
         ),
     ),
+    (
+        "wind",
+        Some(
+            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+        ),
+    ),
+    (
+        "unwind",
+        Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
+    ),
     ("agent-help", None),
     ("skill", None),
     ("setup", None),

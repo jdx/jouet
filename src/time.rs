@@ -1,6 +1,29 @@
-//! Durations: parsing `90s`, `10m` or `1h30m`, and printing elapsed time.
+//! Durations: parsing `90s`, `10m` or `1h30m`, and printing elapsed time;
+//! and the calendar dates the ledger and the rule log are kept by.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Seconds since the Unix epoch.
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// The UTC date of a Unix time, as `2026-10-30`.
+pub fn date(secs: u64) -> String {
+    // Howard Hinnant's days-to-civil algorithm.
+    let days = (secs / 86_400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
 
 /// Parses a duration such as `90s`, `10m`, `1h30m` or `0`.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -54,6 +77,14 @@ pub fn elapsed(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dates() {
+        assert_eq!(date(0), "1970-01-01");
+        assert_eq!(date(951_782_400), "2000-02-29");
+        assert_eq!(date(1_793_318_400), "2026-10-30");
+        assert_eq!(date(1_793_404_799), "2026-10-30");
+    }
 
     #[test]
     fn durations() {

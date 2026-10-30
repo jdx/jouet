@@ -133,6 +133,20 @@ jouet rule test checks --command 'cargo test' --exit-code 101
 jouet rule test no-rm-rf --payload hook-input.json
 ```
 
+`--replay` runs it over every call in the hook ledger instead. It lists the calls the rule fires on and the near misses it stays quiet on (calls running the same programs), and fails if it fires on nothing:
+
+```console
+$ jouet rule test no-tags --replay
+no-tags: fired on 8 of 28 calls in the ledger
+fires on:
+     6x  warn         git tag <arg>
+     2x  warn         git tag -l
+stays quiet on (near misses):
+     2x  allow        git status
+```
+
+`jouet rule new NAME --why "..."` writes a rule of yours from a template, in warn mode, and `jouet rule promote NAME` switches it to deny. [Self-winding](/winding) drafts rules like this from the ledger on its own.
+
 ### Type checking
 
 Rules can be type-checked with [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) against the definitions jouet prints:

@@ -17,6 +17,7 @@ mod time;
 mod tls;
 mod verify;
 mod wait;
+mod wind;
 
 use display::Mode;
 use exit::Exit;
@@ -50,6 +51,10 @@ enum Cmd {
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
+    /// Notice costly patterns in the hook ledger and draft rules for them
+    Wind(WindArgs),
+    /// Propose retiring rules that are noisy or always overridden
+    Unwind(UnwindArgs),
     /// Print a short usage guide written for agents
     AgentHelp(AgentHelpArgs),
     /// Print jouet's agent skill
@@ -275,6 +280,12 @@ pub enum RuleCmd {
     Trust(RuleTrustArgs),
     /// Stop trusting this repository's .jouet/rules
     Untrust(RuleTrustArgs),
+    /// Write a new rule of yours, in warn mode, from a template or a winding note
+    New(RuleNewArgs),
+    /// Switch a rule of yours from warn to deny
+    Promote(RulePromoteArgs),
+    /// Show every change made to your rules, and why
+    Log(RuleLogArgs),
 }
 
 /// List every rule, where it comes from and whether it runs
@@ -285,7 +296,8 @@ pub struct RuleListArgs {}
 ///
 /// With neither --command nor --payload, runs the rule's `examples` and
 /// fails if any does not do what it expects, so a rule can be checked
-/// before it is enabled.
+/// before it is enabled. --replay runs it over every call in the hook
+/// ledger instead, and fails if it fires on none of them.
 #[derive(Args)]
 pub struct RuleTestArgs {
     /// A rule's name, or the path to a .luau file
@@ -299,6 +311,9 @@ pub struct RuleTestArgs {
     /// The command's exit code, for a post-tool-use rule (default 0)
     #[usage(long, value_name = "N")]
     exit_code: Option<i32>,
+    /// Run the rule over the hook ledger's calls: what it fires on, and the near misses
+    #[usage(long)]
+    replay: bool,
 }
 
 /// Print the Luau type definitions of the jouet module
@@ -308,6 +323,90 @@ pub struct RuleTypesArgs {}
 /// Trust or stop trusting this repository's .jouet/rules
 #[derive(Args)]
 pub struct RuleTrustArgs {}
+
+/// Write a new rule of yours, in warn mode, from a template or a winding note
+///
+/// Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists,
+/// who wrote it and when. It starts in warn mode: `jouet rule promote` makes
+/// its denials real. With --from-note, the rule is the one `jouet wind`
+/// drafted.
+#[derive(Args)]
+pub struct RuleNewArgs {
+    /// The rule's name: lowercase words joined by dashes
+    name: String,
+    /// Start from the rule a winding note drafted, such as n3
+    #[usage(long, value_name = "ID")]
+    from_note: Option<String>,
+    /// What the rule is for, in one line (the template's `why`)
+    #[usage(long, value_name = "TEXT")]
+    why: Option<String>,
+    /// Who is writing it: your session's id (default: $JOUET_SESSION_ID, or the harness's)
+    #[usage(long, value_name = "WHO")]
+    author: Option<String>,
+}
+
+/// Switch a rule of yours from warn to deny
+///
+/// Only rules in ~/.config/jouet/rules: built-in rules are part of jouet,
+/// and a repository's change through a reviewed PR. Logged in `jouet rule
+/// log`.
+#[derive(Args)]
+pub struct RulePromoteArgs {
+    /// The rule's name
+    name: String,
+    /// Why, for the log
+    #[usage(long, value_name = "TEXT")]
+    reason: Option<String>,
+}
+
+/// Show every change made to your rules, and why
+#[derive(Args)]
+pub struct RuleLogArgs {
+    /// Only this rule's changes
+    name: Option<String>,
+}
+
+/// Notice costly patterns in the hook ledger and draft rules for them
+///
+/// Reads the ledger jouet's hooks keep from where it last stopped. When a
+/// command keeps failing across sessions, or agents keep sleeping instead of
+/// waiting, it drafts a rule in warn mode and keeps a note of it, which the
+/// next session start shows (two at most). The hooks run it on their own;
+/// running it by hand reads the ledger now. Off with JOUET_WIND=0.
+#[derive(Args)]
+pub struct WindArgs {
+    #[usage(subcommand)]
+    cmd: Option<WindCmd>,
+}
+
+#[derive(Subcommands)]
+pub enum WindCmd {
+    /// Show a note: what was noticed, and the rule drafted for it
+    Show(WindNoteArgs),
+    /// Drop a note, so it is never shown again
+    Dismiss(WindNoteArgs),
+}
+
+/// Show or drop a winding note
+#[derive(Args)]
+pub struct WindNoteArgs {
+    /// The note's id, such as n3
+    id: String,
+}
+
+/// Propose retiring rules that are noisy or always overridden
+///
+/// Lists your rules and a trusted repository's that the hook ledger shows
+/// are nearly always overridden, fire on a large share of calls, or no
+/// longer load. Built-in rules are never proposed. --apply moves your own
+/// rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules
+/// change through a PR.
+#[derive(Args)]
+pub struct UnwindArgs {
+    /// Retire the proposed rules of yours
+    #[usage(long)]
+    apply: bool,
+}
 
 /// Print a short usage guide written for agents
 ///
@@ -377,6 +476,8 @@ fn main() -> ExitCode {
         Cmd::Edit(args) => cmd::edit::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
+        Cmd::Wind(args) => cmd::wind::run(&args, &out),
+        Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),
         Cmd::Skill(args) => cmd::skill::run(&args, &out),
         Cmd::Setup(args) => cmd::setup::run(&args, &out),

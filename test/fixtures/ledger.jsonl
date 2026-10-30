@@ -1,0 +1,60 @@
+{"ts":1793318400,"harness":"claude","session":"s1","event":"session-start"}
+{"ts":1793318407,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"mytool sync --all"}
+{"ts":1793318410,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"mytool sync --all","exit_code":127,"duration_ms":20}
+{"ts":1793318417,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"mytool pull"}
+{"ts":1793318420,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"mytool pull","exit_code":0,"duration_ms":900}
+{"ts":1793318427,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git status"}
+{"ts":1793318430,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"git status","exit_code":0,"duration_ms":40}
+{"ts":1793318437,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793318440,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":60000}
+{"ts":1793318447,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg> && git status"}
+{"ts":1793318450,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"sleep <arg> && git status","exit_code":0,"duration_ms":45000}
+{"ts":1793318457,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"cargo test"}
+{"ts":1793318460,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"cargo test","exit_code":101,"duration_ms":30000}
+{"ts":1793318467,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"mytool sync --all"}
+{"ts":1793318470,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"mytool sync --all","exit_code":127,"duration_ms":15}
+{"ts":1793318477,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793318480,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":2000}
+{"ts":1793318487,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793318490,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":30000}
+{"ts":1793318495,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793318496,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793318501,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793318502,"harness":"claude","session":"s1","event":"override","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"override"}]}
+{"ts":1793318502,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793318507,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793318508,"harness":"claude","session":"s1","event":"override","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"override"}]}
+{"ts":1793318508,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793318513,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git tag -l"}
+{"ts":1793318513,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git log --oneline -n <arg>"}
+{"ts":1793318514,"harness":"claude","session":"s1","event":"stop"}
+{"ts":1793319113,"harness":"claude","session":"s2","event":"session-start"}
+{"ts":1793319120,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"mytool sync --all"}
+{"ts":1793319123,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"mytool sync --all","exit_code":127,"duration_ms":20}
+{"ts":1793319130,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"mytool pull"}
+{"ts":1793319133,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"mytool pull","exit_code":0,"duration_ms":900}
+{"ts":1793319140,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git status"}
+{"ts":1793319143,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"git status","exit_code":0,"duration_ms":40}
+{"ts":1793319150,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793319153,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":60000}
+{"ts":1793319160,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg> && git status"}
+{"ts":1793319163,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"sleep <arg> && git status","exit_code":0,"duration_ms":45000}
+{"ts":1793319170,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"cargo test"}
+{"ts":1793319173,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"cargo test","exit_code":101,"duration_ms":30000}
+{"ts":1793319180,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"mytool sync --all"}
+{"ts":1793319183,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"mytool sync --all","exit_code":127,"duration_ms":15}
+{"ts":1793319190,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793319193,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":2000}
+{"ts":1793319200,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"sleep <arg>"}
+{"ts":1793319203,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"sleep <arg>","exit_code":0,"duration_ms":30000}
+{"ts":1793319208,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793319209,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793319214,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793319215,"harness":"claude","session":"s2","event":"override","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"override"}]}
+{"ts":1793319215,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793319220,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"warn"}]}
+{"ts":1793319221,"harness":"claude","session":"s2","event":"override","tool":"Bash","shape":"git tag <arg>","decisions":[{"rule":"no-tags","action":"override"}]}
+{"ts":1793319221,"harness":"claude","session":"s2","event":"post-tool-use","tool":"Bash","shape":"git tag <arg>","exit_code":0,"duration_ms":30}
+{"ts":1793319226,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git tag -l"}
+{"ts":1793319226,"harness":"claude","session":"s2","event":"pre-tool-use","tool":"Bash","shape":"git log --oneline -n <arg>"}
+{"ts":1793319227,"harness":"claude","session":"s2","event":"stop"}
