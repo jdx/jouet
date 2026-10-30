@@ -9,6 +9,7 @@
 
 use jouet_rules::shell::{self, Op};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -35,6 +36,10 @@ pub struct Entry {
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// The work tree the session runs in, as [`repo_key`]: a hash, never the
+    /// path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop` or `override`.
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +66,17 @@ impl Entry {
             ..Self::default()
         }
     }
+}
+
+/// The work tree containing `cwd`, as the first 16 hex characters of the
+/// SHA-256 of its root: the nearest directory with a `.git`, with symlinks
+/// resolved, which is what `git rev-parse --show-toplevel` prints. Read from
+/// the filesystem, because a hook cannot afford to start git.
+pub fn repo_key(cwd: &Path) -> Option<String> {
+    let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
+    let root = root.canonicalize().ok()?;
+    let digest = Sha256::digest(root.to_string_lossy().as_bytes());
+    Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
 }
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
@@ -735,6 +751,26 @@ mod tests {
         ] {
             assert_eq!(shape(script), expected, "{script}");
         }
+    }
+
+    #[test]
+    fn the_repo_key_hashes_the_work_tree_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        let key = repo_key(&root.join("src/deep")).unwrap();
+        assert_eq!(key.len(), 16);
+        assert_eq!(repo_key(&root), Some(key.clone()));
+        let expected = Sha256::digest(root.canonicalize().unwrap().to_string_lossy().as_bytes());
+        assert!(
+            expected
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+                .starts_with(&key)
+        );
+        assert_eq!(repo_key(dir.path()), None);
     }
 
     #[test]

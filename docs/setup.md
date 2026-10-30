@@ -91,7 +91,7 @@ Known false positives and misses:
 
 ### The ledger
 
-Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). jouet will use the ledger to measure how useful each rule is, and later to let agents learn new rules from it.
+Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, a 16-character hash identifying the work tree (never its path), the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). jouet will use the ledger to measure how useful each rule is, and later to let agents learn new rules from it.
 
 ```json
 {"ts":1793380000,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git stash","decisions":[{"rule":"git-stash","action":"deny"}]}

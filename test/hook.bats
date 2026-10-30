@@ -153,4 +153,13 @@ LUAU
 	run --separate-stderr env JOUET_HOOKS_LEDGER=false jouet hook claude pre-tool-use <<<"$(bash_payload 'ls')"
 	run wc -l <"$ledger"
 	assert_output --regexp '^ *4$'
+
+	# In a work tree, entries carry a hash of its root, never the path.
+	mkdir -p repo/.git repo/src
+	jq -cn --arg cwd "$PWD/repo/src" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: "ls"}}' |
+		jouet hook claude pre-tool-use
+	run jq -r '.repo' <<<"$(tail -1 "$ledger")"
+	assert_output --regexp '^[0-9a-f]{16}$'
+	run grep -c "$PWD/repo" "$ledger"
+	assert_output 0
 }
