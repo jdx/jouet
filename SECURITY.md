@@ -4,10 +4,7 @@
 
 Please do not open a public issue or discussion for a suspected vulnerability.
 
-Use the repository's **Security** tab on GitHub and choose **Report a vulnerability** to send a
-private report to the maintainers. If that option is not available, open an issue that says only
-that you have a security report and asks for a private way to send it. Leave the details out of
-the issue.
+Use [GitHub's private vulnerability reporting][report] instead.
 
 Include the jouet version (`jouet --version`), your operating system, and the steps to
 reproduce. Remove GitHub tokens and private repository names from logs and attachments.
@@ -24,3 +21,5 @@ jouet's commands are designed to read a GitHub token (from `JOUET_GITHUB_TOKEN`,
 Reports are especially valuable for token disclosure (in output, logs or error messages), edits
 that write outside the files they name or leave a file partially written, and parsing bugs in
 data received from GitHub.
+
+[report]: https://github.com/jdx/jouet/security/advisories/new
