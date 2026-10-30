@@ -1,12 +1,12 @@
 ---
 layout: home
-title: A toolkit CLI for coding agents
-description: One command for each chore coding agents keep rebuilding by hand, with output written for whoever is reading it.
+title: Wind-up tools for coding agents
+description: jouet turns the shell chores coding agents keep scripting by hand into single commands that never prompt and exit with a code an agent can act on.
 
 hero:
-  name: "jouet"
-  text: "A toolkit CLI for coding agents"
-  tagline: "Agents rebuild the same few chores in shell, and get them subtly wrong. jouet turns each one into a single command that never prompts, never truncates silently, and exits with a code an agent can act on."
+  name: 'jouet <span class="jouet-gloss">pronounced “zhweh” · French for “toy”</span>'
+  text: "Wind-up tools for coding agents"
+  tagline: "Agents keep rebuilding the same shell chores by hand, and get them subtly wrong. jouet turns each one into a single command that never prompts, never cuts output silently, and exits with a code an agent can act on."
   image:
     src: /logo.svg
     alt: The jouet logo, a coral wind-up tin robot with a brass key on top
@@ -19,20 +19,20 @@ hero:
       link: /why
 
 features:
-  - title: jouet edit
-    details: Exact, all-or-nothing edits across files from search/replace blocks, a Codex-style patch or JSON. A failed edit writes nothing and shows the closest match.
+  - title: 'jouet edit <span class="jouet-status is-ready">available</span>'
+    details: Exact, all-or-nothing edits across files, from search/replace blocks, a Codex-style patch or JSON. A failed edit writes nothing and shows the closest match.
     link: /commands/edit
-    linkText: Available now
-  - title: jouet wait
-    details: Wait for CI or another condition without sleep-polling, and hear straight away when a conflicted PR will never get CI.
+    linkText: Read the guide
+  - title: 'jouet wait <span class="jouet-status is-ready">available</span>'
+    details: Blocks until a file, log line, port, URL, process or command is ready, then prints one summary. Waiting on CI, with the failed step's log, is coming soon.
     link: /commands/wait
-    linkText: Coming soon
-  - title: jouet pr status
-    details: One line per PR with the reasons it needs attention, in place of a for loop over gh pr view.
+    linkText: Read the guide
+  - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'
+    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code>, which lists, replies to and resolves review threads without hand-written GraphQL, is coming soon.
     link: /commands/pr-status
-    linkText: Available now
-  - title: jouet pr threads
-    details: List, reply to and resolve review threads without hand-written reviewThreads GraphQL.
-    link: /commands/pr-threads
-    linkText: Coming soon
+    linkText: Read the guide
+  - title: 'Agent steering <span class="jouet-status is-later">later</span>'
+    details: Hooks that catch an agent's costly patterns and point it to the command that replaces them, and rules you write yourself.
+    link: /why#what-comes-next
+    linkText: The plan
 ---
