@@ -1,0 +1,37 @@
+description = "Address a PR's open review threads: two code changes, one question; reply to each, resolve the fixed ones, commit"
+chore = "review-threads"
+rules = ["review-threads", "checks", "git-add-all"]
+branch = "invoice-average"
+timeout_s = 900
+prompt = """
+Address the open review threads on PR #12 (branch invoice-average, checked out here). Make the
+requested code changes, run the tests, and commit (don't push). Then reply on each open thread
+saying what you did, and resolve the threads you fixed. A thread that only asks a question gets an
+answer but stays open.
+"""
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "12", "--json"]
+stdout_contains = "subtotal"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "55501", "12", "--body", "Renamed to `subtotal` in {sha}.", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "view", "12", "--comments"]
+
+[[probe]]
+tool = "gh"
+args = ["api", "repos/jdx/demo/pulls/12/comments"]
+stdout_contains = "subtotal"
+
+[[probe]]
+tool = "gh"
+args = [
+  "api", "graphql", "-F", "n=12", "-f",
+  "query=query($n: Int!) { repository(owner: \"jdx\", name: \"demo\") { pullRequest(number: $n) { reviewThreads(first: 50) { nodes { id isResolved path line comments(first: 20) { nodes { databaseId author { login } body } } } } } } }",
+]
+stdout_contains = "PRRT_kwDOdemo1"

@@ -1,0 +1,99 @@
+name: bench agents
+
+# Runs coding agents against the real model APIs, which costs money, so it
+# never starts on its own: someone dispatches it, and it is a dry run (the plan
+# and budget, no agents) unless they untick `dry_run`. See docs/benchmarks.md.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the plan and budget only; run no agents
+        type: boolean
+        default: true
+      smoke:
+        description: Run only the smoke task, once per arm (ignores tasks and rounds)
+        type: boolean
+        default: true
+      harness:
+        description: Harnesses, comma-separated (claude, codex)
+        type: string
+        default: claude,codex
+      tasks:
+        description: Tasks, comma-separated; empty runs every task
+        type: string
+        default: ""
+      rounds:
+        description: Runs per task, harness and arm
+        type: string
+        default: "3"
+      claude_model:
+        type: string
+        default: claude-sonnet-5-5
+      codex_model:
+        type: string
+        default: gpt-6-sol
+
+permissions: {}
+
+concurrency:
+  group: bench-agents
+  cancel-in-progress: false
+
+env:
+  MBX_DISABLE: "1"
+  CARGO_TERM_COLOR: always
+  # Loads mise.bench.toml: the claude and codex versions mise.bench.lock pins.
+  MISE_ENV: bench
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+      # The harness CLIs, at the versions mise.bench.lock pins. Rust comes from
+      # the runner.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: claude codex
+      - run: mise run build
+      - name: Run the benchmark
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.BENCH_ANTHROPIC_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.BENCH_OPENAI_API_KEY }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SMOKE: ${{ inputs.smoke }}
+          HARNESS: ${{ inputs.harness }}
+          TASKS: ${{ inputs.tasks }}
+          ROUNDS: ${{ inputs.rounds }}
+          CLAUDE_MODEL: ${{ inputs.claude_model }}
+          CODEX_MODEL: ${{ inputs.codex_model }}
+        run: |
+          args=(run --out bench/results/ci --harness "$HARNESS" --rounds "$ROUNDS"
+            --claude-model "$CLAUDE_MODEL" --codex-model "$CODEX_MODEL")
+          if [ "$SMOKE" = true ]; then args+=(--smoke); fi
+          if [ -n "$TASKS" ]; then args+=(--tasks "$TASKS"); fi
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          python3 bench/agents.py "${args[@]}"
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f bench/results/ci/summary.md ]; then
+            cat bench/results/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No summary: a dry run, or the run stopped before writing one." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && !inputs.dry_run
+        with:
+          name: bench-agents-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bench/results/ci
+          if-no-files-found: ignore
+          retention-days: 30
