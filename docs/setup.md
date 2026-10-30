@@ -120,7 +120,7 @@ Explicit `allow` decisions are not recorded: under the [floor](/rules#where-rule
 
 ## Settings
 
-Every hook, and every rule, can be turned off in `~/.config/jouet/config.toml` (`$XDG_CONFIG_HOME/jouet/config.toml`) or with an environment variable:
+Every hook, every rule and the [`jouet stats`](/commands/stats) summary line can be turned off in `~/.config/jouet/config.toml` (`$XDG_CONFIG_HOME/jouet/config.toml`) or with an environment variable:
 
 ```toml
 [hooks]
@@ -132,6 +132,9 @@ ledger = true  # JOUET_HOOKS_LEDGER: the ledger
 
 [rules]
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule
+
+[stats]
+summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 
 [wind]
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger

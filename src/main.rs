@@ -40,8 +40,12 @@ struct Jouet {
 
 #[derive(Subcommands)]
 enum Cmd {
+    /// Report where coding-agent sessions spend tokens and time
+    Audit(AuditArgs),
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Show what jouet saved: measured from its ledger, estimated from your history
+    Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
     /// Block until a condition holds, then print one summary
@@ -65,6 +69,66 @@ enum Cmd {
     /// Answer a Claude Code or Codex hook
     #[usage(hide)]
     Hook(HookArgs),
+}
+
+/// Report where coding-agent sessions spend tokens and time
+///
+/// Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts
+/// (~/.codex/sessions and archived_sessions) on this machine, and ranks what
+/// their requests spent input tokens on: CI polling, process polling, PR
+/// threads, PR status, edits, builds and tests, reads and searches, git and
+/// more. For each costly category it names the jouet command or rule that
+/// addresses it, with an estimate of the saving, and it counts recurring
+/// patterns such as sleep loops. Nothing leaves the machine. Commands are
+/// shown only as shapes, with every value replaced, unless --examples asks
+/// for redacted examples.
+#[derive(Args)]
+pub struct AuditArgs {
+    /// Only requests made since TIME: a duration ago such as 7d or 12h, a
+    /// date such as 2026-10-01, or RFC 3339
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which transcripts to read: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+    /// Only sessions that ran in PATH or a directory below it
+    #[usage(long, value_name = "PATH")]
+    project: Option<String>,
+    /// Categories to list per harness in text (default 10; 0 lists all).
+    /// --json lists every category
+    #[usage(long, value_name = "N")]
+    top: Option<usize>,
+    /// Show one redacted example command per shape and pattern
+    #[usage(long)]
+    examples: bool,
+}
+
+/// Show what jouet saved: measured from its ledger, estimated from your history
+///
+/// Counts what the hook ledger recorded (jouet command runs, rule decisions
+/// and what the agent did after a denial, checks, and failing CI logs
+/// returned as excerpts), then estimates the input tokens those runs saved
+/// against your own Claude Code and Codex history from before `jouet setup`.
+/// Every estimate shows its basis, and a kind of work with fewer than 20 runs
+/// before setup is not estimated. Without a ledger, it shows what one run of
+/// each command would save.
+#[derive(Args)]
+pub struct StatsArgs {
+    /// Only ledger entries since TIME: a duration ago such as 7d or 12h, a
+    /// date such as 2026-10-01, or RFC 3339
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which harness: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+    /// Only one session's ledger entries
+    #[usage(long, value_name = "ID")]
+    session: Option<String>,
+    /// Print one line about what jouet saved, or nothing, for a stop hook.
+    /// `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its
+    /// style: quips (default), plain or off
+    #[usage(long)]
+    summary: bool,
 }
 
 /// Make exact, all-or-nothing edits across files
@@ -936,7 +1000,9 @@ fn main() -> ExitCode {
     }
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
+        Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),

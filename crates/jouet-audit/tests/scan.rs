@@ -1,0 +1,305 @@
+//! Scans the fixture transcripts in `tests/fixtures/home`: a Claude Code
+//! session with a subagent and a cut-off last line, a Codex session with
+//! bare-key JavaScript cells, a zstd-compressed archived rollout, and one
+//! whose second zstd frame is cut off.
+
+use jouet_audit::{
+    Analyzer, Category, ClaudeCode, Codex, Filter, HarnessReport, Pattern, Reader, Report, Source,
+    scan,
+};
+use std::path::{Path, PathBuf};
+
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/home")
+}
+
+fn readers() -> (ClaudeCode, Codex) {
+    (
+        ClaudeCode {
+            root: fixtures().join("claude"),
+        },
+        Codex {
+            root: fixtures().join("codex"),
+        },
+    )
+}
+
+fn run(filter: &Filter, examples: bool) -> (Report, jouet_audit::ScanStats) {
+    let (claude, codex) = readers();
+    let readers: [&dyn Reader; 2] = [&claude, &codex];
+    let s = scan(&readers, filter, Analyzer::new(examples, None), 4);
+    (s.analyzer.report(5), s.stats)
+}
+
+fn harness<'a>(report: &'a Report, name: &str) -> &'a HarnessReport {
+    report
+        .harnesses
+        .iter()
+        .find(|h| h.harness == name)
+        .unwrap_or_else(|| panic!("no {name} in the report"))
+}
+
+fn tokens(h: &HarnessReport, category: Category) -> u64 {
+    h.categories
+        .iter()
+        .find(|c| c.category == category)
+        .map_or(0, |c| c.input_tokens)
+}
+
+#[test]
+fn reads_both_harnesses_and_reports_what_it_could_not_read() {
+    let (report, stats) = run(&Filter::default(), false);
+    // Two Claude transcripts (the workflow journal is not one) and three
+    // Codex rollouts.
+    assert_eq!(stats.files, 5);
+    assert_eq!(stats.bad_lines, 1);
+    assert_eq!(stats.unreadable.len(), 1);
+    assert!(stats.unreadable[0].partial);
+    assert!(
+        stats.unreadable[0].path.ends_with(
+            "rollout-2026-10-28T09-00-00-01a00000-0000-7000-8000-000000000003.jsonl.zst"
+        )
+    );
+
+    let claude = harness(&report, "claude");
+    assert_eq!(claude.totals.sessions, 1);
+    assert_eq!(claude.totals.transcripts, 2);
+    // Seven requests in the session (m1 is two lines) and one in the subagent.
+    assert_eq!(claude.totals.requests, 8);
+    assert_eq!(
+        claude.totals.input_tokens,
+        20_000 + 21_000 + 22_000 + 23_000 + 24_000 + 25_000 + 26_000 + 8_000
+    );
+    assert_eq!(tokens(claude, Category::CiPolling), 41_000);
+    assert_eq!(tokens(claude, Category::Reply), 26_000);
+    let ci = claude
+        .suggestions
+        .iter()
+        .find(|s| s.category == Category::CiPolling)
+        .expect("a CI suggestion");
+    assert_eq!(ci.saving.as_ref().map(|s| s.input_tokens), Some(21_000));
+
+    let codex = harness(&report, "codex");
+    // The live session, the archived one, and the one cut off after its
+    // first request.
+    assert_eq!(codex.totals.sessions, 3);
+    // The repeated token count is counted once.
+    assert_eq!(codex.totals.requests, 9);
+    assert_eq!(codex.categories[0].category, Category::ProcessPolling);
+    assert_eq!(
+        tokens(codex, Category::ProcessPolling),
+        31_000 + 32_000 + 40_000 + 41_000
+    );
+    assert_eq!(tokens(codex, Category::CiPolling), 30_000);
+    assert_eq!(tokens(codex, Category::Edits), 34_000);
+    // The cell with two commands splits its request between git and cargo.
+    assert_eq!(tokens(codex, Category::Git), 16_500);
+    // The cut-off rollout's first request: the rest of it was never read.
+    assert_eq!(tokens(codex, Category::ReadSearch), 5_000);
+    assert_eq!(codex.totals.failed_calls, 1);
+}
+
+#[test]
+fn finds_the_patterns() {
+    let (report, _) = run(&Filter::default(), false);
+    let claude = harness(&report, "claude");
+    let found: Vec<Pattern> = claude.patterns.iter().map(|p| p.pattern).collect();
+    for p in [
+        Pattern::SleepPoll,
+        Pattern::HeadOnTestOutput,
+        Pattern::StaleTokenPrefix,
+        Pattern::HeredocEdit,
+        Pattern::RateLimited,
+    ] {
+        assert!(found.contains(&p), "{p:?} not in {found:?}");
+    }
+}
+
+#[test]
+fn shows_shapes_and_only_redacted_examples() {
+    let (report, _) = run(&Filter::default(), false);
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(json.contains("gh pr checks <n> --repo <path>"), "{json}");
+    for private in ["acme/app", "src/lib.rs", "a - b", "secret", "FAKE"] {
+        assert!(!json.contains(private), "{private} leaked: {json}");
+    }
+
+    let (report, _) = run(&Filter::default(), true);
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(json.contains("gh pr checks 12 --repo acme/app"), "{json}");
+    assert!(json.contains("Bearer <redacted>"), "{json}");
+    assert!(json.contains("<heredoc: 3 lines>"), "{json}");
+    for private in ["FAKE", "a - b", "write_text"] {
+        assert!(!json.contains(private), "{private} leaked: {json}");
+    }
+}
+
+#[test]
+fn filters_by_project_and_time() {
+    let (report, stats) = run(
+        &Filter {
+            project: Some(PathBuf::from("/work/app")),
+            ..Default::default()
+        },
+        false,
+    );
+    assert_eq!(stats.other_projects, 2);
+    assert_eq!(harness(&report, "codex").totals.sessions, 1);
+    assert_eq!(harness(&report, "claude").totals.sessions, 1);
+
+    // 10:01:42 leaves the Claude session's last two requests and its subagent.
+    let since = jouet_audit::parse_timestamp("2026-10-30T10:01:42Z");
+    let (report, _) = run(
+        &Filter {
+            since_ms: since,
+            ..Default::default()
+        },
+        false,
+    );
+    assert_eq!(harness(&report, "claude").totals.requests, 3);
+}
+
+#[test]
+fn scanning_into_a_populated_analyzer_counts_what_it_held_once() {
+    let held = || {
+        let mut a = Analyzer::default();
+        a.add(
+            "claude",
+            &jouet_audit::transcripts(&[jouet_audit::CommandRecord {
+                session: "earlier".into(),
+                command: "git status".into(),
+                ..Default::default()
+            }])[0],
+        );
+        a
+    };
+    let requests = |a: &Analyzer| -> u64 {
+        a.report(1)
+            .harnesses
+            .iter()
+            .map(|h| h.totals.requests)
+            .sum()
+    };
+    // No readers at all, so the scan reads nothing.
+    let empty = scan(&[], &Filter::default(), held(), 4);
+    assert_eq!(requests(&empty.analyzer), 1);
+    // The fixtures on four threads: 8 Claude and 9 Codex requests, plus the one held.
+    let (claude, codex) = readers();
+    let readers: [&dyn Reader; 2] = [&claude, &codex];
+    let full = scan(&readers, &Filter::default(), held(), 4);
+    assert_eq!(requests(&full.analyzer), 8 + 9 + 1);
+    let claude = full.analyzer.report(1);
+    let claude = harness(&claude, "claude");
+    assert_eq!(claude.totals.sessions, 2);
+}
+
+#[test]
+fn a_file_that_vanished_is_reported_not_fatal() {
+    struct Gone;
+    impl Reader for Gone {
+        fn harness(&self) -> &'static str {
+            "gone"
+        }
+        fn discover(&self, _: &Filter) -> std::io::Result<Vec<Source>> {
+            Ok(vec![Source {
+                path: fixtures().join("missing.jsonl"),
+                bytes: 0,
+                modified_ms: None,
+            }])
+        }
+        fn read(
+            &self,
+            _: &Source,
+            _: &mut dyn std::io::BufRead,
+            _: &Filter,
+        ) -> std::io::Result<Option<jouet_audit::Transcript>> {
+            unreachable!("the file cannot be opened")
+        }
+    }
+    let s = scan(&[&Gone], &Filter::default(), Analyzer::default(), 2);
+    assert_eq!(s.stats.files, 0);
+    assert_eq!(s.stats.unreadable.len(), 1);
+    assert!(!s.stats.unreadable[0].partial);
+    assert!(s.analyzer.report(1).harnesses.is_empty());
+}
+
+#[test]
+fn missing_harness_directories_have_no_transcripts() {
+    let none = ClaudeCode {
+        root: fixtures().join("nowhere"),
+    };
+    assert_eq!(none.discover(&Filter::default()).unwrap(), vec![]);
+    let none = Codex {
+        root: fixtures().join("nowhere"),
+    };
+    assert_eq!(none.discover(&Filter::default()).unwrap(), vec![]);
+}
+
+/// One Claude Code line: an assistant request with input tokens and a call.
+fn request(session: &str, id: &str, at: &str, command: &str) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{at}","sessionId":"{session}","cwd":"/work/app","message":{{"id":"{id}","role":"assistant","usage":{{"input_tokens":1000,"output_tokens":5}},"content":[{{"type":"tool_use","id":"t-{id}","name":"Bash","input":{{"command":"{command}"}}}}]}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn a_forked_sessions_copies_of_its_parents_requests_count_once() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects/-work-app");
+    std::fs::create_dir_all(&dir).unwrap();
+    let parent = "aaaaaaaa-0000-4000-8000-000000000001";
+    let fork = "aaaaaaaa-0000-4000-8000-000000000002";
+    let first = request(parent, "msg_1", "2026-10-30T10:00:00Z", "gh pr checks 1");
+    let second = request(parent, "msg_2", "2026-10-30T10:00:10Z", "gh pr checks 1");
+    std::fs::write(
+        dir.join(format!("{parent}.jsonl")),
+        [&*first, &*second].concat(),
+    )
+    .unwrap();
+    // The fork repeats both, IDs and all, then makes a request of its own.
+    let own = request(fork, "msg_3", "2026-10-30T10:01:00Z", "cargo test");
+    std::fs::write(
+        dir.join(format!("{fork}.jsonl")),
+        [
+            first.replace(parent, fork),
+            second.replace(parent, fork),
+            own,
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let claude = ClaudeCode {
+        root: home.path().to_path_buf(),
+    };
+    for threads in [1, 4] {
+        let s = scan(&[&claude], &Filter::default(), Analyzer::default(), threads);
+        let report = s.analyzer.report(5);
+        let totals = &harness(&report, "claude").totals;
+        assert_eq!((s.stats.files, s.stats.copied_requests), (2, 2));
+        assert_eq!((totals.requests, totals.input_tokens), (3, 3000));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_directory_hides_only_what_is_inside_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects/-work-app");
+    let session = "aaaaaaaa-0000-4000-8000-000000000001";
+    let locked = dir.join(session).join("subagents");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(
+        dir.join(format!("{session}.jsonl")),
+        request(session, "msg_1", "2026-10-30T10:00:00Z", "cargo test"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let found = ClaudeCode {
+        root: home.path().to_path_buf(),
+    }
+    .discover(&Filter::default());
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let found = found.expect("the readable transcripts are still listed");
+    assert_eq!(found.len(), 1);
+}
