@@ -1,0 +1,108 @@
+//! A local fake GitHub for the subprocess tests, so nothing they run talks
+//! to the real API.
+
+use serde_json::Value;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::process::Output;
+use std::sync::{Arc, Mutex};
+
+/// A request the fake server received: its method, path, token and body
+/// (`null` for a GET).
+#[derive(Debug, Clone)]
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub token: String,
+    pub body: Value,
+}
+
+pub struct Fake {
+    pub url: String,
+    requests: Arc<Mutex<Vec<Request>>>,
+}
+
+impl Fake {
+    pub fn requests(&self) -> Vec<Request> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+/// A status for `respond` to return: a 200 whose body is cut short.
+pub const CUT_SHORT: u16 = 0;
+
+/// Serves `respond(request, index)` for each request, one per connection.
+pub fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&requests);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut start = String::new();
+            reader.read_line(&mut start).unwrap_or(0);
+            let mut words = start.split_whitespace();
+            let method = words.next().unwrap_or_default().to_string();
+            let path = words.next().unwrap_or_default().to_string();
+            let (mut token, mut length) = (String::new(), 0);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.split_once(':').unwrap_or_default();
+                let value = value.trim();
+                match name.to_ascii_lowercase().as_str() {
+                    "authorization" => token = value.trim_start_matches("bearer ").into(),
+                    "content-length" => length = value.parse().unwrap(),
+                    _ => {}
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let request = Request {
+                method,
+                path,
+                token,
+                body: serde_json::from_slice(&body).unwrap_or(Value::Null),
+            };
+            let index = {
+                let mut seen = seen.lock().unwrap();
+                seen.push(request.clone());
+                seen.len() - 1
+            };
+            let (status, text) = respond(&request, index);
+            // `CUT_SHORT` promises a longer body than it sends, then hangs up.
+            let (status, length) = if status == CUT_SHORT {
+                (200, text.len() + 100)
+            } else {
+                (status, text.len())
+            };
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                 Content-Length: {length}\r\nConnection: close\r\n\r\n{text}"
+            );
+        }
+    });
+    Fake { url, requests }
+}
+
+/// A GraphQL request's query text, or `""` for a REST request.
+pub fn query(request: &Request) -> &str {
+    request.body["query"].as_str().unwrap_or_default()
+}
+
+pub fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+pub fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+pub fn json(out: &Output) -> Value {
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", stdout(out)))
+}

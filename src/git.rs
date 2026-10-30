@@ -1,0 +1,50 @@
+//! The few facts jouet reads from the git checkout it runs in.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn git(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !text.is_empty()).then_some(text)
+}
+
+/// The full SHA of HEAD.
+pub fn head() -> Option<String> {
+    git(&["rev-parse", "--verify", "--quiet", "HEAD"])
+}
+
+/// The abbreviated SHA of HEAD, as git would print it.
+pub fn short_head() -> Option<String> {
+    git(&["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
+}
+
+/// Whether `ancestor` is `commit` or one of its ancestors; `None` when git
+/// cannot tell, such as when either commit is not in this clone.
+pub fn is_ancestor(ancestor: &str, commit: &str) -> Option<bool> {
+    let status = Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, commit])
+        .output()
+        .ok()?
+        .status;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
+/// The top of the working tree.
+pub fn toplevel() -> Option<PathBuf> {
+    git(&["rev-parse", "--show-toplevel"]).map(PathBuf::from)
+}
+
+/// Whether `path` (relative to the top of the tree) matches HEAD.
+pub fn unchanged(top: &Path, path: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(top)
+        .args(["status", "--porcelain", "--", path])
+        .output()
+        .is_ok_and(|o| o.status.success() && o.stdout.is_empty())
+}

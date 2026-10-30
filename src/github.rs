@@ -1,5 +1,5 @@
 //! A small blocking GitHub client: finding a token that works, GraphQL, and
-//! REST GETs with ETags.
+//! the few REST reads GraphQL has no equivalent for.
 //!
 //! Tokens are tried in order: `JOUET_GITHUB_TOKEN`, `GH_TOKEN`,
 //! `GITHUB_TOKEN`, then `gh auth token`. There is no separate probe: the
@@ -8,8 +8,8 @@
 //! failed command. `JOUET_GITHUB_API_URL` points the client at another API
 //! root, such as a GitHub Enterprise server or a test's fake server.
 //!
-//! REST GETs send `If-None-Match` when given an ETag, so an unchanged poll
-//! comes back as a 304 that costs nothing against the rate limit.
+//! [`Client::get`] sends `If-None-Match` when given an ETag, so an unchanged
+//! poll comes back as a 304 that costs nothing against the rate limit.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -25,9 +25,7 @@ const MAX_RETRY_AFTER: u64 = 60;
 
 pub struct Client {
     agent: ureq::Agent,
-    /// The API root, without a trailing slash.
-    api: String,
-    graphql_url: String,
+    api_url: String,
     /// Token sources not yet tried, in order.
     sources: Vec<&'static str>,
     tried: Vec<String>,
@@ -40,8 +38,8 @@ struct Token {
     value: String,
 }
 
-/// A REST response. `status` is 304, with an empty body, when the ETag
-/// given still matches.
+/// A REST response from [`Client::get`]. `status` is 304, with an empty
+/// body, when the ETag given still matches.
 #[derive(Debug)]
 pub struct Rest {
     pub status: u16,
@@ -71,12 +69,13 @@ impl Failure {
     }
 }
 
-/// What a request sends.
-enum Request<'a> {
-    Graphql(&'a str),
-    Get { url: &'a str, etag: Option<&'a str> },
+impl From<Failure> for String {
+    fn from(f: Failure) -> Self {
+        f.message()
+    }
 }
 
+/// A response: its status, ETag and body.
 struct Sent {
     status: u16,
     etag: Option<String>,
@@ -103,7 +102,6 @@ impl Client {
             .ok()
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| "https://api.github.com".into());
-        let api = api.trim_end_matches('/').to_string();
         let agent = ureq::Agent::config_builder()
             .tls_config(crate::tls::config())
             .http_status_as_error(false)
@@ -113,8 +111,7 @@ impl Client {
             .into();
         Self {
             agent,
-            graphql_url: format!("{api}/graphql"),
-            api,
+            api_url: api.trim_end_matches('/').to_string(),
             sources: ENV_SOURCES.into_iter().chain([GH_SOURCE]).collect(),
             tried: Vec::new(),
             token: None,
@@ -126,10 +123,24 @@ impl Client {
     /// `NOT_FOUND` come back as `null` in the data; every other error fails
     /// the call.
     pub fn graphql(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
+        self.graphql_with(query, variables, true)
+    }
+
+    /// Runs a GraphQL mutation. Unlike a query it is not retried after a 5xx
+    /// or a dropped connection, which can follow a write that succeeded.
+    pub fn mutate(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
+        self.graphql_with(query, variables, false)
+    }
+
+    fn graphql_with(
+        &mut self,
+        query: &str,
+        variables: &Value,
+        idempotent: bool,
+    ) -> Result<Value, String> {
         let body = serde_json::json!({ "query": query, "variables": variables }).to_string();
-        let Sent { status, text, .. } = self
-            .authorized(&Request::Graphql(&body))
-            .map_err(|f| f.message())?;
+        let url = format!("{}/graphql", self.api_url);
+        let Sent { status, text, .. } = self.send(&url, Some(&body), None, idempotent)?;
         if status != 200 {
             return Err(format!("GitHub returned {status}: {}", message(&text)));
         }
@@ -149,16 +160,31 @@ impl Client {
             .ok_or_else(|| "GitHub returned no data".to_string())
     }
 
+    /// GETs a REST path such as `/repos/OWNER/NAME/activity`. A 404 comes
+    /// back as `None`.
+    pub fn rest_get(&mut self, path: &str) -> Result<Option<Value>, String> {
+        let url = format!("{}{path}", self.api_url);
+        let Sent { status, text, .. } = self.send(&url, None, None, true)?;
+        match status {
+            200 => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|e| format!("GitHub sent a response jouet could not read: {e}")),
+            404 => Ok(None),
+            _ => Err(format!("GitHub returned {status}: {}", message(&text))),
+        }
+    }
+
     /// GETs a REST path such as `/repos/o/r/pulls/1`, or a full URL,
     /// sending `If-None-Match` when `etag` is given. Statuses other than 401
-    /// are the caller's to read; a 401 moves on to the next token.
+    /// are the caller's to read, and an exhausted rate limit says when it
+    /// resets, so a caller can wait it out.
     pub fn get(&mut self, path: &str, etag: Option<&str>) -> Result<Rest, Failure> {
         let url = if path.starts_with('/') {
-            format!("{}{path}", self.api)
+            format!("{}{path}", self.api_url)
         } else {
             path.to_string()
         };
-        let sent = self.authorized(&Request::Get { url: &url, etag })?;
+        let sent = self.send(&url, None, etag, true)?;
         Ok(Rest {
             status: sent.status,
             etag: sent.etag,
@@ -166,15 +192,21 @@ impl Client {
         })
     }
 
-    /// Sends with the first token that is not rejected (401), and says which
-    /// sources were rejected once one works.
-    fn authorized(&mut self, request: &Request<'_>) -> Result<Sent, Failure> {
+    /// Sends a request with the first token GitHub accepts: a POST of `body`
+    /// when there is one, else a GET (conditional when `etag` is given).
+    fn send(
+        &mut self,
+        url: &str,
+        body: Option<&str>,
+        etag: Option<&str>,
+        idempotent: bool,
+    ) -> Result<Sent, Failure> {
         loop {
             let token = match self.token.take() {
                 Some(token) => token,
                 None => self.next_token().map_err(Failure::Other)?,
             };
-            let sent = match self.send(&token.value, request) {
+            let sent = match self.request(&token.value, url, body, etag, idempotent) {
                 Ok(sent) => sent,
                 // The token was not rejected, so it is kept for the next
                 // request (such as the one after a rate limit resets).
@@ -233,33 +265,36 @@ impl Client {
         })
     }
 
-    /// Sends one request, retrying 5xx responses, connections dropped
-    /// before or during the response, and secondary rate limits with
-    /// jittered backoff.
-    fn send(&self, token: &str, request: &Request<'_>) -> Result<Sent, Failure> {
-        let target = match request {
-            Request::Graphql(_) => self.graphql_url.as_str(),
-            Request::Get { url, .. } => url,
-        };
+    /// Sends one request, retrying secondary rate limits with jittered
+    /// backoff, and when it is `idempotent` 5xx responses and connections
+    /// dropped before or during the response too.
+    fn request(
+        &self,
+        token: &str,
+        url: &str,
+        body: Option<&str>,
+        etag: Option<&str>,
+        idempotent: bool,
+    ) -> Result<Sent, Failure> {
         let mut attempt = 0;
         loop {
             let auth = format!("bearer {token}");
-            let sent = match request {
-                Request::Graphql(body) => self
+            let sent = match body {
+                Some(body) => self
                     .agent
-                    .post(&self.graphql_url)
-                    .header("Authorization", &auth)
+                    .post(url)
+                    .header("Authorization", auth)
                     .content_type("application/json")
-                    .send(*body),
-                Request::Get { url, etag } => {
+                    .send(body),
+                None => {
                     let mut req = self
                         .agent
-                        .get(*url)
-                        .header("Authorization", &auth)
+                        .get(url)
+                        .header("Authorization", auth)
                         .header("Accept", "application/vnd.github+json")
                         .header("X-GitHub-Api-Version", "2022-11-28");
                     if let Some(etag) = etag {
-                        req = req.header("If-None-Match", *etag);
+                        req = req.header("If-None-Match", etag);
                     }
                     req.call()
                 }
@@ -274,13 +309,13 @@ impl Client {
             });
             let (resp, text) = match sent {
                 Ok(sent) => sent,
-                Err(e) if attempt < RETRIES => {
+                Err(e) if idempotent && attempt < RETRIES => {
                     eprintln!("jouet: request to GitHub failed ({e}); retrying");
                     attempt += 1;
                     std::thread::sleep(backoff(attempt));
                     continue;
                 }
-                Err(e) => return Err(Failure::Other(format!("could not reach {target}: {e}"))),
+                Err(e) => return Err(Failure::Other(format!("could not reach {url}: {e}"))),
             };
             let status = resp.status().as_u16();
             let header = |name: &str| {
@@ -320,7 +355,7 @@ impl Client {
                     )));
                 }
             }
-            if status >= 500 && attempt < RETRIES {
+            if status >= 500 && idempotent && attempt < RETRIES {
                 eprintln!("jouet: GitHub returned {status}; retrying");
                 attempt += 1;
                 std::thread::sleep(backoff(attempt));
