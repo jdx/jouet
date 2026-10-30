@@ -384,7 +384,7 @@ pub struct WaitCmdArgs {
 /// Lists unresolved threads by default, outdated ones included and marked.
 /// Each thread is addressed by its first comment's ID, the number in the web
 /// UI's #discussion_r links. Bodies are condensed: HTML comments and badges
-/// are removed, <details> collapse to their summary and each comment is cut
+/// are removed, `<details>` collapse to their summary and each comment is cut
 /// at 30 lines with a marker; suggestion blocks are always kept whole.
 #[derive(Args)]
 pub struct ThreadsArgs {
