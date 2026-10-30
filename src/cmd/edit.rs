@@ -68,31 +68,45 @@ pub fn run(args: EditArgs, out: &Output) -> Exit {
     };
     let mut exit = Exit::Ok;
     if let Some(command) = &args.check {
-        match edit::run_check(command, &crate::paths::log_dir()) {
-            Ok(mut check) => {
-                if !check.passed {
-                    exit = Exit::Failed;
-                    if args.revert_on_fail {
-                        if let Err(e) = edit::revert(&journal) {
-                            return out.error(
-                                Exit::Failed,
-                                &format!(
-                                    "the check failed and restoring the files failed too: {e}"
-                                ),
-                            );
-                        }
-                        check.reverted = true;
-                        plan.report.applied = false;
-                        plan.report.files_written = 0;
-                        for f in &mut plan.report.files {
-                            f.status = FileStatus::Reverted;
-                        }
-                    }
+        let mut check = match edit::run_check(command, &crate::paths::log_dir()) {
+            Ok(check) => check,
+            Err(e) => {
+                // The files are already written, so a check that cannot run
+                // must still honour --revert-on-fail.
+                let message = format!("running --check: {e}");
+                if !args.revert_on_fail {
+                    return out.error(Exit::Failed, &format!("{message}; the edits were kept"));
                 }
-                plan.report.check = Some(check);
+                return match edit::revert(&journal) {
+                    Ok(()) => out.error(
+                        Exit::Failed,
+                        &format!("{message}; every edited file was restored"),
+                    ),
+                    Err(r) => out.error(
+                        Exit::Failed,
+                        &format!("{message}, and restoring the files failed too: {r}"),
+                    ),
+                };
             }
-            Err(e) => return out.error(Exit::Failed, &format!("running --check: {e}")),
+        };
+        if !check.passed {
+            exit = Exit::Failed;
+            if args.revert_on_fail {
+                if let Err(e) = edit::revert(&journal) {
+                    return out.error(
+                        Exit::Failed,
+                        &format!("the check failed and restoring the files failed too: {e}"),
+                    );
+                }
+                check.reverted = true;
+                plan.report.applied = false;
+                plan.report.files_written = 0;
+                for f in &mut plan.report.files {
+                    f.status = FileStatus::Reverted;
+                }
+            }
         }
+        plan.report.check = Some(check);
     }
     print_report(out, &plan.report);
     exit

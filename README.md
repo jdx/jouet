@@ -1,6 +1,6 @@
 # jouet
 
-A toolkit CLI for coding agents.
+A toolkit CLI for coding agents. Documentation: **[jouet.jdx.dev](https://jouet.jdx.dev)**.
 
 > [!CAUTION]
 > **jouet is in early development.** Only `jouet edit` and `jouet pr status` are available so far. Their flags, exit
@@ -21,6 +21,17 @@ first four commands turn each of those into one command (`edit` and `pr status` 
 Each command is designed to work without a TTY and never prompt. Output adapts to who is
 reading (an agent, a human at a terminal, or a pipe), `--json` prints exactly one token-lean
 document, lists are never truncated silently, and every command shares one exit-code table.
+
+## Install
+
+```sh
+mise use --global github:jdx/jouet
+# or
+cargo install jouet
+```
+
+Release archives for Linux, macOS and Windows are on the [releases page](https://github.com/jdx/jouet/releases).
+See [Getting started](https://jouet.jdx.dev/getting-started) for more.
 
 ## Building
 
