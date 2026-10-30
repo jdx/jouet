@@ -342,7 +342,7 @@ Every probe is cached for the rest of the hook call, so asking twice costs nothi
 network = true
 ```
 
-A probe still has to answer within the rule's 50 ms. [Recipes](/commands/run) always have the GitHub probes, with a budget of their own.
+A probe still has to answer within the rule's 50 ms. [Routines](/routines) reach GitHub through their own primitives instead.
 
 The hooks record which work tree each run was in, by a hash of its root rather than its path, so `jouet.ci.last_run` passes over runs from other repositories.
 
@@ -350,7 +350,7 @@ The hooks record which work tree each run was in, by a hash of its root rather t
 
 Each script runs in a sandboxed Luau VM:
 
-- **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). `jouet.cmd`, which runs commands, is only for [recipes](/commands/run). Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
+- **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). Running jouet's commands and writing are for [routines](/routines), not rules. Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
 - **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
 - **Failing open.** A rule that does not load, or a script that does not compile, throws, runs out of budget or returns something unexpected, says nothing. jouet reports it and carries on with the other rules.
 - **Compiled-script cache.** Compiled scripts are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.

@@ -1,0 +1,171 @@
+{
+ "github": [
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "match": "\"n0\":19",
+   "body": {
+    "data": {
+     "l0": {
+      "pullRequest": {
+       "autoMergeRequest": null,
+       "baseRefName": "main",
+       "commits": {
+        "nodes": [
+         {
+          "commit": {
+           "committedDate": "2026-10-30T17:36:23Z",
+           "statusCheckRollup": {
+            "contexts": {
+             "checkRunCountsByState": [
+              {
+               "state": "SUCCESS",
+               "count": 12
+              }
+             ],
+             "statusContextCountsByState": []
+            },
+            "id": "SCR_kwDOVdIDQdoAKDg0MDlkNGQxMjBkYTk4YTdhMGM0ZWE3YWQ0MjMxZGFhMjI5ZDRmNjM"
+           }
+          }
+         }
+        ]
+       },
+       "headRefName": "refactor/crates",
+       "headRefOid": "8409d4d120da98a7a0c4ea7ad4231daa229d4f63",
+       "id": "PR_kwDOVdIDQc8AAAABL00LTQ",
+       "isDraft": false,
+       "mergeStateStatus": "CLEAN",
+       "mergeable": "MERGEABLE",
+       "number": 19,
+       "repository": {
+        "nameWithOwner": "jdx/jouet"
+       },
+       "reviewDecision": null,
+       "reviewThreads": {
+        "nodes": [],
+        "pageInfo": {
+         "endCursor": null,
+         "hasNextPage": false
+        }
+       },
+       "state": "OPEN",
+       "timelineItems": {
+        "nodes": []
+       },
+       "title": "refactor: split jouet into workspace crates",
+       "url": "https://github.com/jdx/jouet/pull/19"
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "match": "\"n0\":15",
+   "body": {
+    "data": {
+     "l0": {
+      "pullRequest": {
+       "autoMergeRequest": null,
+       "baseRefName": "feat/rules",
+       "commits": {
+        "nodes": [
+         {
+          "commit": {
+           "committedDate": "2026-10-30T17:52:32Z",
+           "statusCheckRollup": {
+            "contexts": {
+             "checkRunCountsByState": [
+              {
+               "state": "SUCCESS",
+               "count": 12
+              }
+             ],
+             "statusContextCountsByState": []
+            },
+            "id": "SCR_kwDOVdIDQdoAKDU1NTJjNTgwNjc3MThiZDEyMzFmOGRjYjNhODQ5NDkxMGVjYmQ4MjU"
+           }
+          }
+         }
+        ]
+       },
+       "headRefName": "feat/setup",
+       "headRefOid": "5552c58067718bd1231f8dcb3a8494910ecbd825",
+       "id": "PR_kwDOVdIDQc8AAAABLz8OVw",
+       "isDraft": false,
+       "mergeStateStatus": "CLEAN",
+       "mergeable": "MERGEABLE",
+       "number": 15,
+       "repository": {
+        "nameWithOwner": "jdx/jouet"
+       },
+       "reviewDecision": null,
+       "reviewThreads": {
+        "nodes": [
+         {
+          "isResolved": true
+         },
+         {
+          "isResolved": true
+         },
+         {
+          "isResolved": false
+         }
+        ],
+        "pageInfo": {
+         "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxNzo1MToxNFrOshRURg==",
+         "hasNextPage": false
+        }
+       },
+       "state": "OPEN",
+       "timelineItems": {
+        "nodes": [
+         {
+          "createdAt": "2026-10-30T17:10:26Z"
+         }
+        ]
+       },
+       "title": "feat(setup): add agent-help, skill and harness hooks that run jouet's rules",
+       "url": "https://github.com/jdx/jouet/pull/15"
+      }
+     }
+    }
+   }
+  }
+ ],
+ "jouet": [
+  {
+   "command": "pr land jdx/jouet#19 --dry-run",
+   "exit_code": 0,
+   "json": {
+    "repo": "jdx/jouet",
+    "pr": 19,
+    "url": "https://github.com/jdx/jouet/pull/19",
+    "result": "dry_run",
+    "method": "squash",
+    "head_sha": "8409d4d120da",
+    "plan": [
+     "merge with squash at 8409d4d120da"
+    ]
+   }
+  },
+  {
+   "command": "pr land jdx/jouet#19 --yes",
+   "exit_code": 0,
+   "json": {
+    "repo": "jdx/jouet",
+    "pr": 19,
+    "url": "https://github.com/jdx/jouet/pull/19",
+    "result": "merged",
+    "method": "squash",
+    "head_sha": "8409d4d120da",
+    "plan": [
+     "merge with squash at 8409d4d120da"
+    ],
+    "merge_commit": "0123abc"
+   }
+  }
+ ]
+}

@@ -1,0 +1,225 @@
+{
+ "github": [
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "match": "\"n0\":19",
+   "body": {
+    "data": {
+     "l0": {
+      "pullRequest": {
+       "autoMergeRequest": null,
+       "baseRefName": "main",
+       "commits": {
+        "nodes": [
+         {
+          "commit": {
+           "committedDate": "2026-10-30T17:36:23Z",
+           "statusCheckRollup": {
+            "contexts": {
+             "checkRunCountsByState": [
+              {
+               "count": 0,
+               "state": "ACTION_REQUIRED"
+              },
+              {
+               "count": 0,
+               "state": "CANCELLED"
+              },
+              {
+               "count": 0,
+               "state": "COMPLETED"
+              },
+              {
+               "count": 0,
+               "state": "FAILURE"
+              },
+              {
+               "count": 3,
+               "state": "IN_PROGRESS"
+              },
+              {
+               "count": 1,
+               "state": "NEUTRAL"
+              },
+              {
+               "count": 0,
+               "state": "PENDING"
+              },
+              {
+               "count": 2,
+               "state": "QUEUED"
+              },
+              {
+               "count": 3,
+               "state": "SKIPPED"
+              },
+              {
+               "count": 0,
+               "state": "STALE"
+              },
+              {
+               "count": 0,
+               "state": "STARTUP_FAILURE"
+              },
+              {
+               "count": 6,
+               "state": "SUCCESS"
+              },
+              {
+               "count": 0,
+               "state": "TIMED_OUT"
+              },
+              {
+               "count": 0,
+               "state": "WAITING"
+              }
+             ],
+             "statusContextCountsByState": [
+              {
+               "count": 0,
+               "state": "EXPECTED"
+              },
+              {
+               "count": 0,
+               "state": "ERROR"
+              },
+              {
+               "count": 0,
+               "state": "FAILURE"
+              },
+              {
+               "count": 0,
+               "state": "PENDING"
+              },
+              {
+               "count": 0,
+               "state": "SUCCESS"
+              }
+             ]
+            },
+            "id": "SCR_kwDOVdIDQdoAKDg0MDlkNGQxMjBkYTk4YTdhMGM0ZWE3YWQ0MjMxZGFhMjI5ZDRmNjM"
+           }
+          }
+         }
+        ]
+       },
+       "headRefName": "refactor/crates",
+       "headRefOid": "8409d4d120da98a7a0c4ea7ad4231daa229d4f63",
+       "id": "PR_kwDOVdIDQc8AAAABL00LTQ",
+       "isDraft": false,
+       "mergeStateStatus": "BLOCKED",
+       "mergeable": "MERGEABLE",
+       "number": 19,
+       "repository": {
+        "nameWithOwner": "jdx/jouet"
+       },
+       "reviewDecision": null,
+       "reviewThreads": {
+        "nodes": [],
+        "pageInfo": {
+         "endCursor": null,
+         "hasNextPage": false
+        }
+       },
+       "state": "OPEN",
+       "timelineItems": {
+        "nodes": []
+       },
+       "title": "refactor: split jouet into workspace crates",
+       "url": "https://github.com/jdx/jouet/pull/19"
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "match": "\"n0\":19",
+   "body": {
+    "data": {
+     "l0": {
+      "pullRequest": {
+       "autoMergeRequest": null,
+       "baseRefName": "main",
+       "commits": {
+        "nodes": [
+         {
+          "commit": {
+           "committedDate": "2026-10-30T17:36:23Z",
+           "statusCheckRollup": {
+            "contexts": {
+             "checkRunCountsByState": [
+              {
+               "state": "SUCCESS",
+               "count": 12
+              }
+             ],
+             "statusContextCountsByState": []
+            },
+            "id": "SCR_kwDOVdIDQdoAKDg0MDlkNGQxMjBkYTk4YTdhMGM0ZWE3YWQ0MjMxZGFhMjI5ZDRmNjM"
+           }
+          }
+         }
+        ]
+       },
+       "headRefName": "refactor/crates",
+       "headRefOid": "8409d4d120da98a7a0c4ea7ad4231daa229d4f63",
+       "id": "PR_kwDOVdIDQc8AAAABL00LTQ",
+       "isDraft": false,
+       "mergeStateStatus": "CLEAN",
+       "mergeable": "MERGEABLE",
+       "number": 19,
+       "repository": {
+        "nameWithOwner": "jdx/jouet"
+       },
+       "reviewDecision": null,
+       "reviewThreads": {
+        "nodes": [],
+        "pageInfo": {
+         "endCursor": null,
+         "hasNextPage": false
+        }
+       },
+       "state": "OPEN",
+       "timelineItems": {
+        "nodes": []
+       },
+       "title": "refactor: split jouet into workspace crates",
+       "url": "https://github.com/jdx/jouet/pull/19"
+      }
+     }
+    }
+   }
+  }
+ ],
+ "jouet": [
+  {
+   "command": "wait ci jdx/jouet#19",
+   "exit_code": 0,
+   "json": {
+    "result": "passed",
+    "checks": {
+     "pass": 15
+    }
+   }
+  },
+  {
+   "command": "pr land jdx/jouet#19 --yes",
+   "exit_code": 0,
+   "json": {
+    "repo": "jdx/jouet",
+    "pr": 19,
+    "url": "https://github.com/jdx/jouet/pull/19",
+    "result": "merged",
+    "method": "squash",
+    "head_sha": "8409d4d120da",
+    "plan": [
+     "merge with squash at 8409d4d120da"
+    ],
+    "merge_commit": "0123abc"
+   }
+  }
+ ]
+}

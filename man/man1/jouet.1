@@ -145,22 +145,40 @@ Show every change made to your rules, and why
 Record something a rule could not express, for `jouet share \-\-idea`
 .TP
 \fBrun\fR
-Run a recipe: a Luau script that sequences jouet's commands
+Run a routine: a Luau program on jouet's primitives (also `joue`)
+.TP
+\fBrun test\fR
+Run routines' examples against their recorded responses
+.TP
+\fBrun types\fR
+Print the Luau type definitions of the primitives
 .TP
 \fBwind\fR
-Notice costly patterns in the hook ledger and draft rules for them
+Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 .TP
 \fBwind show\fR
-Show a note: what was noticed, and the rule drafted for it
+Show a note or a proposal: what was noticed, and what was drafted
 .TP
 \fBwind dismiss\fR
-Drop a note, so it is never shown again
+Drop a note, a proposal or a suggested review, so it is never shown again
+.TP
+\fBwind adopt\fR
+Mark a review's proposal as applied
+.TP
+\fBwind digest\fR
+Digest whole sessions: corrections, failures, waits, re\-reads
+.TP
+\fBwind review\fR
+Digest whole sessions: corrections, failures, waits, re\-reads
+.TP
+\fBwind propose\fR
+Record what a review proposed, to show at the next session start
 .TP
 \fBunwind\fR
 Propose retiring rules that are noisy or always overridden
 .TP
 \fBshare\fR
-Propose a proven rule, or a missing primitive, to jouet's maintainers
+Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
 .TP
 \fBagent\-help\fR
 Print a short usage guide written for agents
@@ -1206,41 +1224,59 @@ Print help
 \fB<TEXT>\fR
 What you wanted a rule to do, and what was missing
 .SH "JOUET RUN"
-Run a recipe: a Luau script that sequences jouet's commands
+Run a routine: a Luau program on jouet's primitives (also `joue`)
 
-Recipes are built in (land, ship\-check, sweep), in ~/.config/jouet/recipes, and in a repository's .jouet/recipes once it is trusted with \-\-trust. They run only jouet's own commands, through `jouet.cmd`, and a command that merges or posts needs `yes=true`. Words after the recipe are its arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123 yes=true`.
+Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
 .PP
-\fBUsage:\fR jouet run [OPTIONS] [<RECIPE>] [<ARGS>] ...
+\fBUsage:\fR jouet run [OPTIONS] [COMMAND]
 .PP
 \fBOptions:\fR
 .PP
 .TP
 \fB\-\-list\fR
-List every recipe, where it comes from and what it takes
-.TP
-\fB\-\-dry\-run\fR
-Print each step the recipe would run, running none
+List every routine, where it comes from and what it reaches
 .TP
 \fB\-\-trust\fR
-Trust this repository's .jouet/recipes as they are now
+Trust this repository's .jouet/routines as they are now
 .TP
 \fB\-\-untrust\fR
-Stop trusting this repository's .jouet/recipes
+Stop trusting this repository's .jouet/routines
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RUN TEST"
+Run routines' examples against their recorded responses
+
+Each example runs the routine with its arguments against a fixture: a local fake GitHub serves its recorded responses, and jouet's commands, git, mise and the ledger answer from it too. Nothing real is reached, and file edits are only previewed. Fails (exit 1) when an example's exit code, output, JSON, previewed writes or requests differ from what it expects, or when a routine has no examples.
+.PP
+\fBUsage:\fR jouet run test [OPTIONS] [<ROUTINE>]
+.PP
+\fBOptions:\fR
+.PP
 .TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
 .PP
 .TP
-\fB<RECIPE>\fR
-The recipe to run
+\fB<ROUTINE>\fR
+The routine (default: every one)
+.SH "JOUET RUN TYPES"
+Print the Luau type definitions of the primitives
+.PP
+\fBUsage:\fR jouet run types [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
 .TP
-\fB<ARGS>\fR
-The recipe's arguments: KEY=VALUE, or plain words in order
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET WIND"
-Notice costly patterns in the hook ledger and draft rules for them
+Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 
 Reads the ledger jouet's hooks keep from where it last stopped. When a command keeps failing across sessions, or agents keep sleeping instead of waiting, it drafts a rule in warn mode and keeps a note of it, which the next session start shows (two at most). The hooks run it on their own; running it by hand reads the ledger now. Off with JOUET_WIND=0.
+
+The ledger holds only command shapes. `jouet wind digest` and `jouet wind review` read whole sessions: the user's corrections, abandoned approaches, waits and repeated exploration. A review's proposals (mise tasks, rules, routines, AGENTS.md or memory notes) are recorded with `jouet wind propose` and shown like the ledger's notes.
 .PP
 \fBUsage:\fR jouet wind [OPTIONS] [COMMAND]
 .PP
@@ -1250,7 +1286,7 @@ Reads the ledger jouet's hooks keep from where it last stopped. When a command k
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET WIND SHOW"
-Show a note: what was noticed, and the rule drafted for it
+Show a note or a proposal: what was noticed, and what was drafted
 .PP
 \fBUsage:\fR jouet wind show [OPTIONS] <ID>
 .PP
@@ -1263,9 +1299,9 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The note's id, such as n3
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
 .SH "JOUET WIND DISMISS"
-Drop a note, so it is never shown again
+Drop a note, a proposal or a suggested review, so it is never shown again
 .PP
 \fBUsage:\fR jouet wind dismiss [OPTIONS] <ID>
 .PP
@@ -1278,7 +1314,103 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The note's id, such as n3
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
+.SH "JOUET WIND ADOPT"
+Mark a review's proposal as applied
+.PP
+\fBUsage:\fR jouet wind adopt [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
+.SH "JOUET WIND DIGEST"
+Digest whole sessions: corrections, failures, waits, re\-reads
+
+Reads a Claude Code or Codex transcript and reduces it to a few thousand tokens: the user's corrections and interruptions, failures and their retries, long calls, where tokens and time went (as `jouet audit` counts them), files read repeatedly, commands typed out again, and a timeline with a phase per prompt. Every item names its lines in the transcript. Secrets are redacted (with gitleaks' rules too, when a config is found) and the home directory is written as ~. Nothing leaves the machine. `jouet wind review` prints the same with a prompt for a reviewing agent.
+.PP
+\fBUsage:\fR jouet wind digest [OPTIONS] [<SESSION>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-last\fR
+The most recently written session (inside a session, that session)
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Every session written since TIME (7d, 12h, a date or RFC 3339), the 8 most recent
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-budget\fR \fI<N>\fR
+Tokens per session's digest, about (default 4000)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SESSION>\fR
+A session ID, a prefix of one, or a transcript's path
+.SH "JOUET WIND REVIEW"
+Digest whole sessions: corrections, failures, waits, re\-reads
+
+Reads a Claude Code or Codex transcript and reduces it to a few thousand tokens: the user's corrections and interruptions, failures and their retries, long calls, where tokens and time went (as `jouet audit` counts them), files read repeatedly, commands typed out again, and a timeline with a phase per prompt. Every item names its lines in the transcript. Secrets are redacted (with gitleaks' rules too, when a config is found) and the home directory is written as ~. Nothing leaves the machine. `jouet wind review` prints the same with a prompt for a reviewing agent.
+.PP
+\fBUsage:\fR jouet wind review [OPTIONS] [<SESSION>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-last\fR
+The most recently written session (inside a session, that session)
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Every session written since TIME (7d, 12h, a date or RFC 3339), the 8 most recent
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-budget\fR \fI<N>\fR
+Tokens per session's digest, about (default 4000)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SESSION>\fR
+A session ID, a prefix of one, or a transcript's path
+.SH "JOUET WIND PROPOSE"
+Record what a review proposed, to show at the next session start
+
+Reads a review's JSON reply on stdin (or from FILE): `{"session": "...", "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`, as `jouet wind review` asks for. Each proposal is checked and recorded as pending: three per review and three a day at most, never one that looks like it holds a secret, never one already proposed. Recording applies nothing: the next session starts show each proposal in one line, and the agent there asks the user before applying it.
+.PP
+\fBUsage:\fR jouet wind propose [OPTIONS] [<FILE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<FILE>\fR
+Read the reply from FILE instead of stdin
 .SH "JOUET UNWIND"
 Propose retiring rules that are noisy or always overridden
 
@@ -1295,9 +1427,9 @@ Retire the proposed rules of yours
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET SHARE"
-Propose a proven rule, or a missing primitive, to jouet's maintainers
+Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
 
-Builds a proposal and prints the exact text, with paths, repository names, hostnames and emails replaced, and a diff of what that changed. Nothing is posted without \-\-yes, which a person must approve: it posts a Discussion in the "Rules & ideas" category of jdx/jouet with your GitHub login. A rule is shared only once it passes its tests, has denied for a week and fired often with few overrides. At most three posts a week.
+Builds a proposal and prints the exact text, with paths, repository names, hostnames and emails replaced, and a diff of what that changed. Nothing is posted without \-\-yes, which a person must approve: it posts with your GitHub login, a bug as an Issue on jdx/jouet and anything else as a Discussion in its "Rules & ideas" category. A rule is shared only once it passes its tests, has denied for a week and fired often with few overrides. \-\-idea also covers what sessions show about jouet itself: crashes, exit codes outside its table, malformed JSON, usage errors, output agents abandon, built\-in rules overridden again and again, slow hooks, and scripts written in many sessions. At most three posts a week.
 .PP
 \fBUsage:\fR jouet share [OPTIONS] [<NAME>]
 .PP
@@ -1305,7 +1437,10 @@ Builds a proposal and prints the exact text, with paths, repository names, hostn
 .PP
 .TP
 \fB\-\-idea\fR
-Share an idea from recorded gaps instead of a rule
+Share an idea: a missing primitive, or something sessions show about jouet itself
+.TP
+\fB\-\-list\fR
+List the ideas ready to share, with their keys
 .TP
 \fB\-\-yes\fR
 Post it; without this, only show what would be posted
@@ -1396,6 +1531,9 @@ The script asks this binary for each completion, so it needs nothing else instal
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-joue\fR
+Complete `joue` instead, the name routines run under
 .TP
 \fB\-h, \-\-help\fR
 Print help

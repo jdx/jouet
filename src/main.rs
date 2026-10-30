@@ -20,6 +20,8 @@ mod wind;
 use std::process::ExitCode;
 use usage_rs::{Args, Cli, Subcommands};
 
+// `joue` is a view of `jouet run`: argv[0] `joue` parses as `jouet run`,
+// with --json and --display carried over, so `joue NAME` runs a routine.
 #[derive(Cli)]
 #[usage(
     name = "jouet",
@@ -27,7 +29,8 @@ use usage_rs::{Args, Cli, Subcommands};
     version,
     about = "A toolkit CLI for coding agents",
     unknown_flags = "error",
-    completion = true
+    completion = true,
+    view("joue", root = "run", globals)
 )]
 struct Jouet {
     /// Print one JSON document instead of text
@@ -66,13 +69,13 @@ enum Cmd {
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
-    /// Run a recipe: a Luau script that sequences jouet's commands
+    /// Run a routine: a Luau program on jouet's primitives (also `joue`)
     Run(RunArgs),
-    /// Notice costly patterns in the hook ledger and draft rules for them
+    /// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
     Unwind(UnwindArgs),
-    /// Propose a proven rule, or a missing primitive, to jouet's maintainers
+    /// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
     Share(ShareArgs),
     /// Print a short usage guide written for agents
     AgentHelp(AgentHelpArgs),
@@ -805,33 +808,58 @@ pub enum RuleCmd {
     Gap(RuleGapArgs),
 }
 
-/// Run a recipe: a Luau script that sequences jouet's commands
+/// Run a routine: a Luau program on jouet's primitives (also `joue`)
 ///
-/// Recipes are built in (land, ship-check, sweep), in ~/.config/jouet/recipes,
-/// and in a repository's .jouet/recipes once it is trusted with --trust. They
-/// run only jouet's own commands, through `jouet.cmd`, and a command that
-/// merges or posts needs `yes=true`. Words after the recipe are its
-/// arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123
-/// yes=true`.
+/// Routines are Luau programs, where rules are TOML configuration.
+/// `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are
+/// built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines,
+/// and in a repository's .jouet/routines once it is trusted with --trust.
+/// Each declares its arguments, so `joue NAME --help` says what it takes,
+/// and the capabilities it reaches; anything else is refused (exit 4). A
+/// routine that writes acts only with --yes: without it every write is
+/// previewed, and joue exits 4 (0 with --dry-run).
 #[derive(Args)]
 pub(crate) struct RunArgs {
-    /// The recipe to run
-    recipe: Option<String>,
-    /// The recipe's arguments: KEY=VALUE, or plain words in order
-    args: Vec<String>,
-    /// List every recipe, where it comes from and what it takes
+    /// List every routine, where it comes from and what it reaches
     #[usage(long)]
     list: bool,
-    /// Print each step the recipe would run, running none
-    #[usage(long)]
-    dry_run: bool,
-    /// Trust this repository's .jouet/recipes as they are now
+    /// Trust this repository's .jouet/routines as they are now
     #[usage(long, conflicts = "--untrust")]
     trust: bool,
-    /// Stop trusting this repository's .jouet/recipes
+    /// Stop trusting this repository's .jouet/routines
     #[usage(long)]
     untrust: bool,
+    #[usage(subcommand)]
+    cmd: Option<RunCmd>,
 }
+
+#[derive(Subcommands)]
+pub(crate) enum RunCmd {
+    /// Run routines' examples against their recorded responses
+    Test(RunTestArgs),
+    /// Print the Luau type definitions of the primitives
+    Types(RunTypesArgs),
+    #[usage(external_subcommand)]
+    External(Vec<std::ffi::OsString>),
+}
+
+/// Run routines' examples against their recorded responses
+///
+/// Each example runs the routine with its arguments against a fixture: a
+/// local fake GitHub serves its recorded responses, and jouet's commands,
+/// git, mise and the ledger answer from it too. Nothing real is reached,
+/// and file edits are only previewed. Fails (exit 1) when an example's exit
+/// code, output, JSON, previewed writes or requests differ from what it
+/// expects, or when a routine has no examples.
+#[derive(Args)]
+pub(crate) struct RunTestArgs {
+    /// The routine (default: every one)
+    routine: Option<String>,
+}
+
+/// Print the Luau type definitions of the primitives
+#[derive(Args)]
+pub(crate) struct RunTypesArgs {}
 
 /// List every rule, where it comes from and whether it runs
 #[derive(Args)]
@@ -942,21 +970,28 @@ pub struct RuleGapArgs {
     rule: Option<String>,
 }
 
-/// Propose a proven rule, or a missing primitive, to jouet's maintainers
+/// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
 ///
 /// Builds a proposal and prints the exact text, with paths, repository
 /// names, hostnames and emails replaced, and a diff of what that changed.
-/// Nothing is posted without --yes, which a person must approve: it posts a
-/// Discussion in the "Rules & ideas" category of jdx/jouet with your GitHub
-/// login. A rule is shared only once it passes its tests, has denied for a
-/// week and fired often with few overrides. At most three posts a week.
+/// Nothing is posted without --yes, which a person must approve: it posts
+/// with your GitHub login, a bug as an Issue on jdx/jouet and anything else
+/// as a Discussion in its "Rules & ideas" category. A rule is shared only
+/// once it passes its tests, has denied for a week and fired often with few
+/// overrides. --idea also covers what sessions show about jouet itself:
+/// crashes, exit codes outside its table, malformed JSON, usage errors,
+/// output agents abandon, built-in rules overridden again and again, slow
+/// hooks, and scripts written in many sessions. At most three posts a week.
 #[derive(Args)]
 pub struct ShareArgs {
     /// The rule to share; with --idea, the idea's key (default: the most recorded)
     name: Option<String>,
-    /// Share an idea from recorded gaps instead of a rule
+    /// Share an idea: a missing primitive, or something sessions show about jouet itself
     #[usage(long)]
     idea: bool,
+    /// List the ideas ready to share, with their keys
+    #[usage(long)]
+    list: bool,
     /// Post it; without this, only show what would be posted
     #[usage(long)]
     yes: bool,
@@ -965,13 +1000,19 @@ pub struct ShareArgs {
     redact: Vec<String>,
 }
 
-/// Notice costly patterns in the hook ledger and draft rules for them
+/// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 ///
 /// Reads the ledger jouet's hooks keep from where it last stopped. When a
 /// command keeps failing across sessions, or agents keep sleeping instead of
 /// waiting, it drafts a rule in warn mode and keeps a note of it, which the
 /// next session start shows (two at most). The hooks run it on their own;
 /// running it by hand reads the ledger now. Off with JOUET_WIND=0.
+///
+/// The ledger holds only command shapes. `jouet wind digest` and `jouet wind
+/// review` read whole sessions: the user's corrections, abandoned
+/// approaches, waits and repeated exploration. A review's proposals (mise
+/// tasks, rules, routines, AGENTS.md or memory notes) are recorded with
+/// `jouet wind propose` and shown like the ledger's notes.
 #[derive(Args)]
 pub struct WindArgs {
     #[usage(subcommand)]
@@ -980,17 +1021,72 @@ pub struct WindArgs {
 
 #[derive(Subcommands)]
 pub enum WindCmd {
-    /// Show a note: what was noticed, and the rule drafted for it
+    /// Show a note or a proposal: what was noticed, and what was drafted
     Show(WindNoteArgs),
-    /// Drop a note, so it is never shown again
+    /// Drop a note, a proposal or a suggested review, so it is never shown again
     Dismiss(WindNoteArgs),
+    /// Mark a review's proposal as applied
+    Adopt(WindNoteArgs),
+    /// Digest whole sessions: corrections, failures, waits, re-reads
+    Digest(WindDigestArgs),
+    /// Print a prompt and session digests for an agent to review
+    Review(WindDigestArgs),
+    /// Record what a review proposed, to show at the next session start
+    Propose(WindProposeArgs),
 }
 
 /// Show or drop a winding note
 #[derive(Args)]
 pub struct WindNoteArgs {
-    /// The note's id, such as n3
+    /// The id of a note (n3), a proposal (p2) or a suggested review (r1)
     id: String,
+}
+
+/// Digest whole sessions: corrections, failures, waits, re-reads
+///
+/// Reads a Claude Code or Codex transcript and reduces it to a few thousand
+/// tokens: the user's corrections and interruptions, failures and their
+/// retries, long calls, where tokens and time went (as `jouet audit` counts
+/// them), files read repeatedly, commands typed out again, and a timeline
+/// with a phase per prompt. Every item names its lines in the transcript.
+/// Secrets are redacted (with gitleaks' rules too, when a config is found)
+/// and the home directory is written as ~. Nothing leaves the machine.
+/// `jouet wind review` prints the same with a prompt for a reviewing agent.
+#[derive(Args)]
+pub struct WindDigestArgs {
+    /// A session ID, a prefix of one, or a transcript's path
+    session: Option<String>,
+    /// The most recently written session (inside a session, that session)
+    #[usage(long)]
+    last: bool,
+    /// Every session written since TIME (7d, 12h, a date or RFC 3339), the
+    /// 8 most recent
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which transcripts to read: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+    /// Only sessions that ran in PATH or a directory below it
+    #[usage(long, value_name = "PATH")]
+    project: Option<String>,
+    /// Tokens per session's digest, about (default 4000)
+    #[usage(long, value_name = "N")]
+    budget: Option<usize>,
+}
+
+/// Record what a review proposed, to show at the next session start
+///
+/// Reads a review's JSON reply on stdin (or from FILE): `{"session": "...",
+/// "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`,
+/// as `jouet wind review` asks for. Each proposal is checked and recorded
+/// as pending: three per review and three a day at most, never one that
+/// looks like it holds a secret, never one already proposed. Recording
+/// applies nothing: the next session starts show each proposal in one line,
+/// and the agent there asks the user before applying it.
+#[derive(Args)]
+pub struct WindProposeArgs {
+    /// Read the reply from FILE instead of stdin
+    file: Option<String>,
 }
 
 /// Propose retiring rules that are noisy or always overridden
@@ -1073,6 +1169,9 @@ pub struct CompletionArgs {
         choices("bash", "zsh", "fish", "powershell", "pwsh", "elvish", "nu", "nushell")
     )]
     shell: String,
+    /// Complete `joue` instead, the name routines run under
+    #[usage(long)]
+    joue: bool,
 }
 
 /// Answer a Claude Code or Codex hook
@@ -1243,6 +1342,9 @@ pub struct ApplyArgs {
 }
 
 fn main() -> ExitCode {
+    if let Some(exit) = routine_typo() {
+        return exit;
+    }
     let cli = Jouet::parse();
     // Before the output mode is chosen: a bad JOUET_DISPLAY must not make a
     // hook exit 2, which a harness reads as "block".
@@ -1258,12 +1360,12 @@ fn main() -> ExitCode {
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
-        Cmd::Pr(args) => cmd::pr::run(args, &out),
+        Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
-        Cmd::Run(args) => cmd::run::run(&args, &out),
+        Cmd::Run(args) => return cmd::run::run(args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::Share(args) => cmd::share::run(&args, &out),
@@ -1274,4 +1376,42 @@ fn main() -> ExitCode {
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     exit.into()
+}
+
+/// `jouet triage`, when `triage` is a routine and not a command: says to
+/// run `joue triage` instead of failing as an unknown command.
+fn routine_typo() -> Option<ExitCode> {
+    let argv: Vec<String> = std::env::args().collect();
+    let program = argv.first()?;
+    let base = std::path::Path::new(program)
+        .file_stem()?
+        .to_string_lossy()
+        .into_owned();
+    if base == "joue" {
+        return None;
+    }
+    let mut words = argv[1..].iter();
+    let word = loop {
+        let word = words.next()?;
+        match word.as_str() {
+            "--json" => continue,
+            "--display" => {
+                words.next();
+                continue;
+            }
+            w if w.starts_with("--display=") => continue,
+            w if w.starts_with('-') || w.starts_with("__") => return None,
+            w => break w,
+        }
+    };
+    if spec::has_command(&[word]) || !cmd::run::is_routine(word) {
+        return None;
+    }
+    let out = cmd::Output::new(argv.iter().any(|w| w == "--json"), None);
+    out.error_with_hint(
+        jouet_output::exit::Exit::Usage,
+        &format!("no command `{word}`"),
+        Some(&format!("`{word}` is a routine: run it with `joue {word}`")),
+    );
+    Some(ExitCode::from(jouet_output::exit::Exit::Usage.code()))
 }

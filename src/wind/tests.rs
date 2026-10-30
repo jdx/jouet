@@ -27,6 +27,10 @@ fn settings() -> WindSettings {
         enabled: true,
         auto_promote: false,
         promote_after: 3,
+        review: false,
+        review_every: 5,
+        review_corrections: 2,
+        gitleaks: None,
     }
 }
 

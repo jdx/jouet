@@ -28,6 +28,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const TREE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
+    let started = std::time::Instant::now();
     let result = std::panic::catch_unwind(|| {
         let harness = args.harness.as_deref().and_then(Harness::parse)?;
         let event = args.event.as_deref()?;
@@ -37,7 +38,10 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         if event == "session-start" {
             verify::prune_sessions();
         }
-        handle(harness, event, &payload, &Settings::load())
+        let settings = Settings::load();
+        let output = handle(harness, event, &payload, &settings);
+        record_slow(harness, event, &payload, &settings, started.elapsed());
+        output
     });
     match result {
         Ok(Some(output)) => println!("{output}"),
@@ -49,6 +53,30 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         _ => {}
     }
     jouet_output::exit::Exit::Ok
+}
+
+/// Records a hook that ran over its budget, for `jouet share --idea`:
+/// every tool call waits for it.
+fn record_slow(
+    harness: Harness,
+    event: &str,
+    payload: &Value,
+    settings: &Settings,
+    took: Duration,
+) {
+    let hooks = &settings.hooks;
+    let budget = crate::share::signals::hook_budget(event, hooks.budget_ms);
+    let ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    if !hooks.enabled || !hooks.ledger || ms <= budget {
+        return;
+    }
+    let Some(dir) = ledger::dir() else { return };
+    let session = payload.get("session_id").and_then(Value::as_str);
+    let mut entry = Entry::new(harness.name(), session, "slow-hook");
+    entry.tool = Some(event.to_string());
+    entry.duration_ms = Some(ms);
+    entry.budget_ms = Some(budget);
+    ledger::append(&dir, &entry);
 }
 
 /// The hook's stdout for one event, or `None` to print nothing.
@@ -71,7 +99,8 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             log.append(log.entry("session-start"));
             let engine = load(payload).filter(|_| hooks.prime)?;
             let primer = session_start(&engine, hooks.steer, hooks.verify);
-            Some(with_notes(primer, &wind_notes(settings, log.session)))
+            let notes = wind_notes(settings, log.session, log.repo.as_deref());
+            Some(with_notes(primer, &notes))
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
@@ -115,6 +144,9 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
                 && let Some(paths) = wind::Paths::locate()
             {
                 wind::run(&paths, &settings.wind, crate::wind::now(), false);
+                if settings.wind.review {
+                    review_on_stop(&paths, settings, harness, payload, log.repo.clone());
+                }
             }
             output
         }
@@ -144,20 +176,72 @@ fn remember(call: &Call, session: Option<&str>) {
 }
 
 /// Winds, then picks the notes to show a starting session: at most
-/// [`wind::MAX_PER_START`], one line each.
-fn wind_notes(settings: &Settings, session: Option<&str>) -> Vec<String> {
+/// [`wind::MAX_PER_START`], one line each. The ledger's notes come first,
+/// then sessions worth a review and what reviews proposed.
+fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) -> Vec<String> {
     if !settings.wind.enabled {
         return Vec::new();
     }
     let Some(paths) = wind::Paths::locate() else {
         return Vec::new();
     };
-    wind::run(&paths, &settings.wind, crate::wind::now(), false);
+    let now = crate::wind::now();
+    wind::run(&paths, &settings.wind, now, false);
     let session = session.unwrap_or_default();
-    wind::notes_for_session(&paths, session)
+    let mut lines: Vec<String> = wind::notes_for_session(&paths, session)
         .iter()
         .map(|note| wind::note_line(note, session))
-        .collect()
+        .collect();
+    let room = wind::MAX_PER_START.saturating_sub(lines.len());
+    lines.extend(wind::review::lines_for_session(
+        &paths, session, repo, room, now,
+    ));
+    if settings.share.contribute
+        && lines.len() < wind::MAX_PER_START
+        && let Some(gaps) = crate::share::gaps_path()
+    {
+        let _ = crate::share::refresh_signals(&gaps, &paths);
+        lines.extend(crate::share::line_for_session(&gaps, session));
+    }
+    lines
+}
+
+/// At a stop, digests the session (at most every ten minutes) and queues
+/// it for review when it crosses a threshold. Reading the transcript is
+/// the cost, so only with `[wind] review` on.
+fn review_on_stop(
+    paths: &wind::Paths,
+    settings: &Settings,
+    harness: Harness,
+    payload: &Value,
+    repo: Option<String>,
+) {
+    let Some(session) = payload.get("session_id").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(transcript) = payload.get("transcript_path").and_then(Value::as_str) else {
+        return;
+    };
+    let now = crate::wind::now();
+    if !wind::review::due(paths, session, now) {
+        return;
+    }
+    let redactor = wind::session::Redactor::new(settings.wind.gitleaks.as_deref());
+    let Some(digest) = wind::session::digest_path(harness.name(), transcript.as_ref(), &redactor)
+    else {
+        return;
+    };
+    crate::share::record_digest(&digest);
+    let signals = wind::review::Signals::of(&digest);
+    wind::review::consider(
+        paths,
+        &settings.wind,
+        harness.name(),
+        session,
+        repo,
+        signals,
+        now,
+    );
 }
 
 /// The primer with winding notes after it.

@@ -22,6 +22,7 @@ jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
 jouet-git = { path = "crates/jouet-git", version = "0.0.1" }
 jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
 jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
+jouet-routines = { path = "crates/jouet-routines", version = "0.0.1" }
 jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
 jouet-search = { path = "crates/jouet-search", version = "0.0.1" }
 jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
@@ -66,6 +67,9 @@ zstd = "0.14"
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
 usage-config = { version = "7", features = ["toml"] }
 usage-rs = "7"
+# Routines' usage specs are KDL read at run time. Its help templates are left
+# out: jouet-routines renders a routine's help itself, for 1.5 MB less binary.
+usage-lib = { version = "7", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 # The library crates opt in, so everything they export is something the binary
@@ -88,6 +92,8 @@ readme.workspace = true
 # develop and ship it. A list of what to ship, so files added to the repository
 # (or left untracked in a checkout) are never published by accident.
 include = ["/src/**", "/LICENSE", "/README.md"]
+# src/bin/joue.rs is the `joue` launcher; `cargo run` means jouet.
+default-run = "jouet"
 
 [lints]
 workspace = true
@@ -98,6 +104,7 @@ jouet-edit.workspace = true
 jouet-git.workspace = true
 jouet-github.workspace = true
 jouet-output.workspace = true
+jouet-routines.workspace = true
 jouet-rules.workspace = true
 jouet-search.workspace = true
 jouet-wait.workspace = true
