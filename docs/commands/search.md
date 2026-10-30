@@ -29,7 +29,7 @@ src/lib.rs
 
 jouet embeds ripgrep's own libraries (`ignore`, `grep-searcher` and `grep-regex`), so it walks a tree the same way: `.gitignore` and `.ignore` are respected, hidden and binary files are skipped, and files are searched in parallel. On top of that:
 
-- **Matches are grouped by file, then by the definition they are in.** The heading names the function, method, class or module and its lines, so a match reads in context without opening the file, and reading just that definition takes its line range. Definitions come from tree-sitter for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. Other files list their matches under the file alone.
+- **Matches are grouped by file, then by the definition they are in.** The heading names the function, method, class or module and its lines, so a match reads in context without opening the file, and [`jouet read FILE --symbol NAME`](/commands/read) or `--range 6:9` prints just that definition. Definitions come from tree-sitter for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. Other files list their matches under the file alone.
 - **Output stops at a budget, and says so.** By default jouet prints at most 6,000 bytes (about 1,500 tokens) in all, and 1,500 bytes from any one file. A file cut short ends with `... 4 more in src/x.rs`. Files the budget never reached are named on one closing line, with their match counts:
 
   ```output

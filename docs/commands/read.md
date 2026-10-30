@@ -1,14 +1,70 @@
 ---
-description: A map of a repository's most important definitions, sized to a token budget, so an agent can find its way around without reading whole files.
+description: Read a file by its outline, one definition or a range of lines instead of whole, and a map of a repository's most important definitions, sized to a token budget.
 ---
 
 # jouet read
 
-`jouet read --map` prints a map of a repository: for the files that matter most, the line of each of their most important definitions, sized to fit a token budget. An agent starting on unfamiliar code reads the map instead of listing directories and opening whole files to see what is in them.
+Reading a whole file to find one thing is the most common way agents fill their context. `jouet read` reads in steps instead: a file's outline, then the one definition needed, or a range of lines. `jouet read --map` does the same for a whole repository.
 
 ```text
+jouet read FILE [--outline | --symbol NAME | --range A:B] [--max-lines N] [--again]
 jouet read --map [PATH] [--budget TOKENS] [--focus FILE|NAME]...
 ```
+
+Every flag is listed in the [CLI reference](/cli/read).
+
+## Reading a file
+
+```output
+$ jouet read src/lib.rs --outline
+src/lib.rs: 18 lines, 4 definitions
+  1-3    class Client
+  6-9    method Client::download
+  12-14  function join_url
+  16-18  function fetch
+$ jouet read src/lib.rs --symbol Client::download
+src/lib.rs: method Client::download (6-9)
+6	    pub fn download(&self, path: &str) -> String {
+7	        let url = join_url(&self.base, path);
+8	        fetch(&url)
+9	    }
+```
+
+- **`--outline`** lists every definition with its line range, each named with its scope: the class, module or namespace it is in, a Rust `impl` block's type, or a Go method's receiver.
+- **`--symbol NAME`** prints the definitions `NAME` matches. `NAME` is a name (`download`), a kind and a name (`fn download`, `class Cart`, `trait Backend`), or a name with its scope (`Client::download`, `Shop.Cart`). The same selectors pick definitions for [`jouet edit`'s symbol targets](/commands/edit#symbol-targets).
+- **`--range A:B`** prints lines `A` to `B`; `A:` runs to the end and `:B` starts at the beginning.
+- **With none of them,** a file of up to 300 lines is printed whole, and a longer one as its outline, with a line saying so.
+
+Code is printed with line numbers, at most `--max-lines` lines (400 by default; `0` is no limit), and an outline at most that many definitions. A cut ends with a marker, such as `... 16 more lines (--range 3:18, or raise --max-lines)`.
+
+Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line, as in [`jouet search`](/commands/search#sessions); `--again` prints them. The hooks remember what Claude Code's Read tool showed too.
+
+Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file or symbol exits 3, and a missing symbol's error lists what the file defines.
+
+With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:
+
+```json
+{
+  "path": "src/lib.rs",
+  "lines": 18,
+  "sections": [
+    {
+      "symbol": "function fetch (16-18)",
+      "start": 16,
+      "end": 18,
+      "text": "fn fetch(url: &str) -> String {\n    url.to_string()\n}"
+    }
+  ]
+}
+```
+
+An outline is an `outline` list of `kind`, `name`, `start` and `end`, with `more_definitions` when it was cut. A section has `more` for lines a cut left out, and `already_shown` instead of `text` for lines the session already has.
+
+The built-in `large-read` [rule](/rules) warns when the agent reads 400 lines or more of a file at once, with Claude Code's Read and no `offset` or `limit`, or with `cat` or `nl`, and suggests the outline.
+
+## The repository map
+
+`jouet read --map` prints a map of a repository: for the files that matter most, the line of each of their most important definitions, sized to fit a token budget. An agent starting on unfamiliar code reads the map instead of listing directories and opening whole files to see what is in them.
 
 ```output
 $ jouet read --map --budget 40
@@ -19,9 +75,7 @@ src/lib.rs
 ... 2 more definitions in 1 more file (raise --budget, or --focus a file or name)
 ```
 
-Every flag is listed in the [CLI reference](/cli/read).
-
-## How the map is built
+### How the map is built
 
 The map is [Aider's repo map](https://aider.chat/docs/repomap.html), rebuilt in Rust. Aider's design and its weights are used under the Apache-2.0 licence.
 
@@ -38,7 +92,7 @@ jouet departs from Aider in three places:
 
 Names are matched by text, as in Aider: tree-sitter does not know which `download` a call means. A language server does, which is where [Serena](https://github.com/oraios/serena) is more precise; the map needs no server.
 
-## Focus
+### Focus
 
 `--focus` takes a file you are working on, or an identifier you care about, and can be repeated. A value naming an existing file is a file; anything else is an identifier.
 
@@ -47,13 +101,13 @@ Names are matched by text, as in Aider: tree-sitter does not know which `downloa
 
 The budget is 1,024 tokens with `--focus` and 8,192 without, when the map is the agent's whole view of the repository. These are Aider's defaults.
 
-## Speed
+### Speed
 
 On mise's repository (1,061 Rust and other source files) on a 32-core Linux machine, a map with nothing cached took 0.39 s, and with every file's tags cached 0.11 s, the mean of 10 and 20 runs. The cache for that repository is 5.4 MB.
 
 Built without the `grammars` feature, jouet has no tree-sitter and `jouet read --map` exits 2 and says so. The release builds have it.
 
-## JSON
+### JSON
 
 `jouet read --map --budget 40 --json`, with nothing cached yet (`cached` counts the files whose tags came from the cache):
 

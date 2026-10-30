@@ -69,6 +69,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("checks", include_str!("../rules/checks.toml")),
     ("reread", include_str!("../rules/reread.toml")),
+    ("large-read", include_str!("../rules/large-read.toml")),
     (
         "unbudgeted-search",
         include_str!("../rules/unbudgeted-search.toml"),
@@ -298,6 +299,8 @@ pub struct Call {
     /// Whether the session was already shown everything the call reads,
     /// unchanged; worked out by the caller, which knows the session.
     pub seen: Option<bool>,
+    /// How many lines of files the call reads; worked out by the caller.
+    pub read_lines: Option<u32>,
 }
 
 impl Call {
@@ -337,6 +340,7 @@ impl Call {
             exit_code,
             input: payload.get("tool_input").cloned(),
             seen: None,
+            read_lines: None,
         }
     }
 }

@@ -101,8 +101,8 @@ pub(crate) struct RuleDecl {
 
 /// Which calls a rule matches. Every key given must hold; a list in a key
 /// matches if any of its items does (`text` excepted: every pattern must
-/// match). Every key but `tool`, `paths`, `input`, `unless_input` and
-/// `seen` is about a command, and needs `command`.
+/// match). Every key but `tool`, `paths`, `input`, `unless_input`, `seen`
+/// and `min_read_lines` is about a command, and needs `command`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Matcher {
@@ -188,6 +188,11 @@ pub(crate) struct Matcher {
     /// files with `cat`, `head`, `tail`, `sed -n` or `nl`; any other call is
     /// unseen. In an example, set it with `seen = true`.
     pub seen: Option<bool>,
+    /// The call puts at least this many lines of files in the context:
+    /// Claude Code's Read (up to 2,000 lines without a `limit`), or a shell
+    /// read with `cat`, `head`, `tail`, `sed -n` or `nl`. jouet's hook counts
+    /// them; set it in an example with `read_lines`.
+    pub min_read_lines: Option<u32>,
 }
 
 impl Matcher {
@@ -199,6 +204,7 @@ impl Matcher {
             input: _,
             unless_input: _,
             seen: _,
+            min_read_lines: _,
             command,
             via,
             flags,
@@ -233,10 +239,11 @@ impl Matcher {
             || !self.input.is_empty()
             || !self.unless_input.is_empty()
             || self.seen.is_some()
+            || self.min_read_lines.is_some()
             || self.with.is_some()
             || self.unless_with.is_some();
         if nested && not_command {
-            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `input`, `unless_input`, `seen`, `with` or `unless_with`".into());
+            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `with` or `unless_with`".into());
         }
         if self.command.is_empty() && self.about_a_command() {
             return Some("it says how a command looks, but not which: add `command`".into());
@@ -303,6 +310,9 @@ pub(crate) struct CaseTable {
     /// Whether the session was already shown everything the call reads,
     /// as jouet's hook would work it out; `false` if omitted.
     pub seen: Option<bool>,
+    /// How many lines of files the call reads, as jouet's hook would count
+    /// them.
+    pub read_lines: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -318,7 +328,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input` or `seen`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen` or `read_lines`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

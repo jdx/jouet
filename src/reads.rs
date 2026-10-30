@@ -274,6 +274,16 @@ pub(crate) fn seen(memory: &Memory, reads: &[Read]) -> bool {
         })
 }
 
+/// How many lines of files the reads put in the context, or `None` when a
+/// file is missing or too large to count.
+pub(crate) fn line_count(reads: &[Read]) -> Option<u32> {
+    reads.iter().try_fold(0u32, |total, read| {
+        let (_, lines) = measure(&read.path)?;
+        let span = span(read, lines).map_or(0, |(start, end)| end - start + 1);
+        Some(total.saturating_add(span))
+    })
+}
+
 /// Remembers that the session was shown what the reads cover.
 pub(crate) fn record(memory: &mut Memory, reads: &[Read]) {
     for read in reads {
@@ -384,6 +394,11 @@ mod tests {
         assert!(seen(&memory, &[tail]));
         // A Read past the end covers only the lines that exist.
         assert!(seen(&memory, &[read(1, Some(2000))]));
+        assert_eq!(line_count(&[read(2, None)]), Some(4));
+        assert_eq!(
+            line_count(&[read(1, Some(2000)), read(4, Some(4))]),
+            Some(6)
+        );
         std::fs::write(&file, "1\n2\n3\n4\n5\n6\n").unwrap();
         assert!(!seen(&memory, &[read(1, Some(2))]));
     }

@@ -20,13 +20,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "finding your way around a repository: `jouet read --map` prints the most important definitions to fit a token budget, instead of listing and reading whole files",
+            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing; `jouet read --map` prints a repository's most important definitions to fit a token budget",
         ),
     ),
     (
         "edit",
         Some(
-            "changing files: exact replacements that all land or none do, instead of python/sed rewrites or a string of separate edits",
+            "changing files: exact replacements, or whole definitions by name (`=== PATH#SYMBOL`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
         ),
     ),
     (

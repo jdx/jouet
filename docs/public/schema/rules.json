@@ -138,7 +138,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `input`, `unless_input` and\n`seen` is about a command, and needs `command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `input`, `unless_input`, `seen`\nand `min_read_lines` is about a command, and needs `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -223,6 +223,12 @@
         "seen": {
           "description": "Whether this agent session was already shown everything the call\nreads, every line, in files unchanged since. jouet's hook works it\nout for Claude Code's Read tool and for shell calls that only read\nfiles with `cat`, `head`, `tail`, `sed -n` or `nl`; any other call is\nunseen. In an example, set it with `seen = true`.",
           "type": "boolean"
+        },
+        "min_read_lines": {
+          "description": "The call puts at least this many lines of files in the context:\nClaude Code's Read (up to 2,000 lines without a `limit`), or a shell\nread with `cat`, `head`, `tail`, `sed -n` or `nl`. jouet's hook counts\nthem; set it in an example with `read_lines`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -332,6 +338,12 @@
         "seen": {
           "description": "Whether the session was already shown everything the call reads,\nas jouet's hook would work it out; `false` if omitted.",
           "type": "boolean"
+        },
+        "read_lines": {
+          "description": "How many lines of files the call reads, as jouet's hook would count\nthem.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "additionalProperties": false

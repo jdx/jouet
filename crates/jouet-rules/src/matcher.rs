@@ -32,6 +32,11 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
     {
         return false;
     }
+    if m.min_read_lines
+        .is_some_and(|min| call.read_lines.is_none_or(|n| n < min))
+    {
+        return false;
+    }
     if m.command.is_empty() {
         return true;
     }
