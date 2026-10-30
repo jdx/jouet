@@ -213,7 +213,11 @@ pub struct Options {
 #[derive(Debug)]
 struct Entry {
     original: Option<Vec<u8>>,
+    /// The mode on disk before the edit, which a revert restores.
     permissions: Option<fs::Permissions>,
+    /// The mode the written file gets. Usually the same as `permissions`, but
+    /// a file moved here takes its source's mode.
+    write_permissions: Option<fs::Permissions>,
     current: State,
 }
 
@@ -235,6 +239,7 @@ impl Entry {
                 };
                 Ok(Self {
                     original: Some(bytes),
+                    write_permissions: permissions.clone(),
                     permissions,
                     current,
                 })
@@ -242,6 +247,7 @@ impl Entry {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self {
                 original: None,
                 permissions: None,
+                write_permissions: None,
                 current: State::Absent,
             }),
             Err(e) => Err(e),
@@ -276,7 +282,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
     let mut entries: BTreeMap<PathBuf, Entry> = BTreeMap::new();
     let mut files = Vec::new();
-    let mut hash_failures: BTreeMap<String, FileError> = BTreeMap::new();
+    let mut hash_failures: BTreeMap<PathBuf, (String, FileError)> = BTreeMap::new();
     for (path, want) in &options.expect_hashes {
         let entry = load(&mut entries, path)?;
         let have = entry.original.as_deref().map(sha256_hex);
@@ -288,17 +294,20 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
                 None => format!("expected sha256 {want}, but the file does not exist"),
             };
             hash_failures.insert(
-                path.clone(),
-                FileError {
-                    code: FileErrorCode::HashMismatch,
-                    message,
-                },
+                identity(Path::new(path)),
+                (
+                    path.clone(),
+                    FileError {
+                        code: FileErrorCode::HashMismatch,
+                        message,
+                    },
+                ),
             );
         }
     }
     for op in &spec.ops {
         let mut report = apply_op(&mut entries, op)?;
-        if let Some(error) = hash_failures.remove(op.path())
+        if let Some((_, error)) = hash_failures.remove(&identity(Path::new(op.path())))
             && report.error.is_none()
         {
             report.status = FileStatus::Failed;
@@ -306,7 +315,7 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
         }
         files.push(report);
     }
-    for (path, error) in hash_failures {
+    for (path, error) in hash_failures.into_values() {
         files.push(failed(&path, error));
     }
     let ok = files.iter().all(|f| f.status != FileStatus::Failed);
@@ -330,8 +339,31 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
     })
 }
 
+/// One key per file however a spec spells its path: `a.rs`, `./a.rs` and
+/// its absolute path must share one in-memory entry, or edits made through
+/// each spelling would be planned separately and one would overwrite the
+/// other on write. Symlinks resolve to their target too, so writing replaces
+/// the target rather than the link.
+fn identity(path: &Path) -> PathBuf {
+    if let Ok(real) = fs::canonicalize(path) {
+        return real;
+    }
+    // A file that does not exist yet: resolve its directory instead.
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        if let Ok(real) = fs::canonicalize(parent) {
+            return real.join(name);
+        }
+    }
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn load<'a>(entries: &'a mut BTreeMap<PathBuf, Entry>, path: &str) -> io::Result<&'a mut Entry> {
-    let key = PathBuf::from(path);
+    let key = identity(Path::new(path));
     if !entries.contains_key(&key) {
         let entry = Entry::load(&key)?;
         entries.insert(key.clone(), entry);
@@ -445,6 +477,7 @@ fn apply_op(entries: &mut BTreeMap<PathBuf, Entry>, op: &FileOp) -> io::Result<F
                 None => entry.current = State::Text(text),
                 Some(to) => {
                     entry.current = State::Absent;
+                    let mode = entry.write_permissions.clone();
                     let target = load(entries, to)?;
                     if target.current != State::Absent {
                         report.status = FileStatus::Failed;
@@ -455,6 +488,7 @@ fn apply_op(entries: &mut BTreeMap<PathBuf, Entry>, op: &FileOp) -> io::Result<F
                         return Ok(report);
                     }
                     target.current = State::Text(text);
+                    target.write_permissions = mode;
                     report.status = FileStatus::Moved;
                     report.moved_to = Some(to.clone());
                 }
@@ -493,7 +527,7 @@ fn line_counts(before: &str, after: &str) -> (usize, usize) {
 
 fn file_diff(entries: &BTreeMap<PathBuf, Entry>, f: &FileReport) -> Option<String> {
     let text_of = |path: &str, current: bool| -> String {
-        let Some(entry) = entries.get(Path::new(path)) else {
+        let Some(entry) = entries.get(&identity(Path::new(path))) else {
             return String::new();
         };
         if current {
@@ -802,7 +836,7 @@ pub fn write(plan: &mut Plan) -> io::Result<Journal> {
             continue;
         }
         let result = match &entry.current {
-            State::Text(s) => put(path, s.as_bytes(), entry.permissions.as_ref()),
+            State::Text(s) => put(path, s.as_bytes(), entry.write_permissions.as_ref()),
             State::Absent => fs::remove_file(path),
             State::Binary => Ok(()),
         };

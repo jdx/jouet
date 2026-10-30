@@ -3,6 +3,8 @@
 min_version = "2026.9.16"
 
 [tools]
+# aube installs the documentation site's dependencies from docs/aube-lock.yaml.
+aube = { version = "latest", lazy = true, lazy_bins = ["aube"], minimum_release_age = "0s" }
 # hk.pkl amends a pinned hk package; the tool itself floats and is resolved by mise.lock.
 hk = { version = "latest", minimum_release_age = "0s" }
 jactionlint = "latest"
@@ -11,6 +13,9 @@ mr-boxington = { version = "latest", minimum_release_age = "0s" }
 # so release-plz.yml's MISE_LOCKED install cannot pick up an unreviewed build.
 # Bump with `mise lock`, deliberately.
 communique = { version = "latest", minimum_release_age = "0s" }
+node = "24"
+# Renders docs/cli from the usage spec the binary serves.
+usage = { version = "latest", minimum_release_age = "0s" }
 # Rust is deliberately absent: it comes from the runner image in CI and from
 # rustup locally, so a new stable is caught by CI rather than by a user.
 
@@ -50,3 +55,30 @@ run = [
 [tasks.ci]
 description = "Everything CI runs"
 depends = ["build", "test", "lint"]
+
+[tasks.docs]
+description = "Start the documentation development server"
+depends = ["render"]
+dir = "docs"
+run = "aube install && exec aube run docs:dev"
+
+[tasks."docs:build"]
+description = "Build the documentation website"
+depends = ["render"]
+dir = "docs"
+run = "aube install && exec aube run docs:build"
+
+[tasks."docs:check"]
+description = "Check that the generated CLI reference is current"
+depends = ["render"]
+run = "git diff --exit-code -- docs/cli && test -z \"$(git status --porcelain --untracked-files=all -- docs/cli)\""
+
+[tasks.render]
+description = "Generate the CLI reference in docs/cli from the usage spec"
+depends = ["build"]
+run = [
+    "rm -rf docs/cli",
+    # The version is left out of the spec so a release, which bumps it, does not
+    # make docs/cli stale; the site's nav reads it from Cargo.toml instead.
+    "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate markdown --file - --multi --replace-pre-with-code-fences --url-prefix /cli --out-dir docs/cli",
+]

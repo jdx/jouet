@@ -341,3 +341,36 @@ fn json_omits_empty_and_false_fields() {
     assert!(!json.contains("dry_run"), "{json}");
     assert!(json.contains(r#""expected":1"#), "{json}");
 }
+
+#[test]
+fn two_spellings_of_one_path_edit_the_same_file() {
+    let f = Fixture::new(&[("a.rs", "one two\n")]);
+    // `dir/./a.rs` would not do: Path comparison already ignores a `.`.
+    fs::create_dir(f.dir.path().join("sub")).unwrap();
+    let alias = f.dir.path().join("sub").join("..").join("a.rs");
+    let spec = format!(
+        "=== {}\n<<<<<<< SEARCH\none two\n=======\n1 two\n>>>>>>> REPLACE\n=== {}\n<<<<<<< SEARCH\n1 two\n=======\n1 2\n>>>>>>> REPLACE\n",
+        f.path("a.rs"),
+        alias.display()
+    );
+    let (report, _) = f.run(&spec, Format::Blocks);
+    assert!(report.applied, "{report:?}");
+    assert_eq!(report.files_written, 1);
+    assert_eq!(f.read("a.rs"), "1 2\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_moved_file_keeps_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new(&[("a.rs", "#!/bin/sh\necho hi\n")]);
+    fs::set_permissions(f.dir.path().join("a.rs"), fs::Permissions::from_mode(0o755)).unwrap();
+    let spec = "*** Begin Patch\n*** Update File: {a.rs}\n*** Move to: {moved.rs}\n #!/bin/sh\n-echo hi\n+echo bye\n*** End Patch\n";
+    let (report, _) = f.run(spec, Format::Patch);
+    assert!(report.applied, "{report:?}");
+    let mode = fs::metadata(f.dir.path().join("moved.rs"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o755);
+}
