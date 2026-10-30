@@ -99,7 +99,7 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             if settings.wind.enabled
                 && let Some(paths) = wind::Paths::locate()
             {
-                wind::run(&paths, &settings.wind, crate::time::now(), false);
+                wind::run(&paths, &settings.wind, crate::wind::now(), false);
             }
             output
         }
@@ -116,7 +116,7 @@ fn wind_notes(settings: &Settings, session: Option<&str>) -> Vec<String> {
     let Some(paths) = wind::Paths::locate() else {
         return Vec::new();
     };
-    wind::run(&paths, &settings.wind, crate::time::now(), false);
+    wind::run(&paths, &settings.wind, crate::wind::now(), false);
     let session = session.unwrap_or_default();
     wind::notes_for_session(&paths, session)
         .iter()

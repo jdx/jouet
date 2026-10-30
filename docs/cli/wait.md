@@ -18,9 +18,12 @@ Replaces `sleep N; check; repeat` loops. The first check is immediate; later one
 
 ## Subcommands
 
+- [`jouet wait ci [FLAGS] [PR]`](/cli/wait/ci.md)
 - [`jouet wait cmd [--expect-exit <N>] [-- CMD]…`](/cli/wait/cmd.md)
 - [`jouet wait file [--contains <REGEX>] [--gone] <PATH>`](/cli/wait/file.md)
 - [`jouet wait http [--status <CODE>] [--contains <REGEX>] <URL>`](/cli/wait/http.md)
 - [`jouet wait log <--match <REGEX>> [--from-start] <PATH>`](/cli/wait/log.md)
 - [`jouet wait pid <PID>`](/cli/wait/pid.md)
 - [`jouet wait port [--closed] <ADDR>`](/cli/wait/port.md)
+- [`jouet wait pr [--repo <OWNER/NAME>] <--until <CONDITION>> [PR]`](/cli/wait/pr.md)
+- [`jouet wait run [FLAGS] <RUN>`](/cli/wait/run.md)

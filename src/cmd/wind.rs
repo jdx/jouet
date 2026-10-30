@@ -64,7 +64,7 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
             "winding is off; turn it on with `[wind] enabled = true` in ~/.config/jouet/config.toml, or unset JOUET_WIND",
         );
     }
-    let report = wind::run(paths, &settings.wind, crate::time::now(), true);
+    let report = wind::run(paths, &settings.wind, crate::wind::now(), true);
     let state = wind::State::load(&paths.state);
     let pending: Vec<Pending> = state
         .notes
@@ -143,7 +143,7 @@ pub fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
     let stats = stats::compute(&wind::reader::read_all(&paths.ledger));
     let proposals = retire::proposals(&loaded.engine, &stats);
     let (retired, errors) = if args.apply {
-        retire::apply(&paths, &proposals, "user", crate::time::now())
+        retire::apply(&paths, &proposals, "user", crate::wind::now())
     } else {
         (Vec::new(), Vec::new())
     };

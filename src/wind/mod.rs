@@ -38,6 +38,11 @@ pub const MAX_NEW_PER_DAY: usize = 2;
 /// end of every turn.
 const MIN_INTERVAL: u64 = 60;
 
+/// Seconds since the Unix epoch, as the ledger and the rule log keep time.
+pub fn now() -> u64 {
+    u64::try_from(crate::time::now()).unwrap_or(0)
+}
+
 /// Where winding reads and writes; one place, so tests can point it at a
 /// scratch directory.
 #[derive(Debug, Clone)]

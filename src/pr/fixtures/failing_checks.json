@@ -1,0 +1,218 @@
+{
+  "data": {
+    "l0": {
+      "contexts": {
+        "nodes": [
+          {
+            "conclusion": "SKIPPED",
+            "name": "draft-limit / draft-limit"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "trusted"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "trusted"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "merge"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "title"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "title"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "draft-limit / draft-limit"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "complete"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "gate"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "status"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "status"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "build-tarball-${{ matrix.name }}"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "build-tarball-${{ matrix.name }}"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "build-windows"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "sign-windows"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "finish-draft-resolve"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / check-changes"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "untrusted / build"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "e2e-linux-${{ matrix.tranche }}"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "untrusted / list-changed-tools"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "rpm"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "untrusted / validate-new-tools"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "deb"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "untrusted / test-tool-${{ matrix.tranche }}"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "finish-draft-attest"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "release"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / registry-ci"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / classify-changes"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "finish-draft-packslip"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "registry-ci"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / build-ubuntu"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "attest-release"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / build-windows"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "finish-draft-publish"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / unit-macos"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "packslip"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / windows-unit"
+          },
+          {
+            "conclusion": "SKIPPED",
+            "name": "publish-release"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / windows-lint"
+          },
+          {
+            "conclusion": "FAILURE",
+            "name": "untrusted / lint"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / e2e"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / bootstrap-linux-host"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "untrusted / windows-e2e"
+          },
+          {
+            "conclusion": "FAILURE",
+            "name": "untrusted / test-ci"
+          },
+          {
+            "conclusion": "FAILURE",
+            "name": "test-ci"
+          },
+          {
+            "conclusion": "NEUTRAL",
+            "name": "Entire Gates"
+          },
+          {
+            "context": "CodeRabbit",
+            "state": "SUCCESS"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "Greptile Review"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "Socket Security: Project Report"
+          },
+          {
+            "conclusion": "SUCCESS",
+            "name": "Socket Security: Pull Request Alerts"
+          },
+          {
+            "context": "release-window",
+            "state": "SUCCESS"
+          }
+        ],
+        "pageInfo": {
+          "endCursor": "NTE",
+          "hasNextPage": false
+        }
+      }
+    }
+  }
+}

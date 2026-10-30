@@ -1,0 +1,550 @@
+{
+  "data": {
+    "l0": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-25T13:25:21Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 3,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 22,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 23,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 2,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKGEwM2IzZWY2NTU2OThjY2RiYTVkY2I4ZjhlNTA4ZGFlMDFjMmZiYjE"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "fix/hook-env-error-hook-order",
+        "headRefOid": "a03b3ef655698ccdba5dcb8f8e508dae01c2fbb1",
+        "id": "PR_kwDOIvux3s8AAAABKlTqmA",
+        "isDraft": true,
+        "mergeStateStatus": "DIRTY",
+        "mergeable": "CONFLICTING",
+        "number": 14955,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [],
+          "pageInfo": {
+            "endCursor": null,
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "fix(hook-env): install the error reporter before the fast path",
+        "url": "https://github.com/jdx/mise/pull/14955"
+      }
+    },
+    "l1": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-29T10:26:02Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 21,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 27,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKDg5MGJiZTA0N2NjMTM3NDcwMjdkNGZhNDNjMTQ5ZGQ1ZmY5ZjIwNzk"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "fix/pipx-lock-selected-python",
+        "headRefOid": "890bbe047cc13747027d4fa43c149dd5ff9f2079",
+        "id": "PR_kwDOIvux3s8AAAABLeaPDA",
+        "isDraft": true,
+        "mergeStateStatus": "DIRTY",
+        "mergeable": "CONFLICTING",
+        "number": 15147,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0yOVQxMDoxMjo1NFrOsYD3Cw==",
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "fix(backend): lock pipx dependency graphs with the selected Python",
+        "url": "https://github.com/jdx/mise/pull/15147"
+      }
+    },
+    "l2": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T03:40:39Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 21,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 25,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOIvux3toAKGUxZDkzMDU4ODQzZDVkYmEzNDA0MDAxNTA1MzU0Yjk0MWUyMTkyMDM"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "claude/github-issue-discussion-e01ea6",
+        "headRefOid": "e1d93058843d5dba3404001505354b941e219203",
+        "id": "PR_kwDOIvux3s8AAAABLrPLuA",
+        "isDraft": false,
+        "mergeStateStatus": "UNKNOWN",
+        "mergeable": "UNKNOWN",
+        "number": 15187,
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQwMzoyODoyMVrOsdX6Eg==",
+            "hasNextPage": false
+          }
+        },
+        "state": "MERGED",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "fix(dotfiles): keep saving a directory tracked in place of narrower paths",
+        "url": "https://github.com/jdx/mise/pull/15187"
+      }
+    },
+    "l3": {
+      "pullRequest": null
+    },
+    "l4": {
+      "pullRequest": {
+        "autoMergeRequest": null,
+        "baseRefName": "main",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-30T14:59:29Z",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "ACTION_REQUIRED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "CANCELLED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "COMPLETED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "IN_PROGRESS"
+                      },
+                      {
+                        "count": 1,
+                        "state": "NEUTRAL"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "QUEUED"
+                      },
+                      {
+                        "count": 1,
+                        "state": "SKIPPED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STALE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "STARTUP_FAILURE"
+                      },
+                      {
+                        "count": 9,
+                        "state": "SUCCESS"
+                      },
+                      {
+                        "count": 0,
+                        "state": "TIMED_OUT"
+                      },
+                      {
+                        "count": 0,
+                        "state": "WAITING"
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "count": 0,
+                        "state": "EXPECTED"
+                      },
+                      {
+                        "count": 0,
+                        "state": "ERROR"
+                      },
+                      {
+                        "count": 0,
+                        "state": "FAILURE"
+                      },
+                      {
+                        "count": 0,
+                        "state": "PENDING"
+                      },
+                      {
+                        "count": 0,
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  },
+                  "id": "SCR_kwDOVdIDQdoAKDYzMTg0ZDI5NTAzNjYxMWVmZDExYzE5MDgxZGUzNDJiZDlkYzg3YWQ"
+                }
+              }
+            }
+          ]
+        },
+        "headRefName": "feat/edit",
+        "headRefOid": "63184d295036611efd11c19081de342bd9dc87ad",
+        "id": "PR_kwDOVdIDQc8AAAABLym_fQ",
+        "isDraft": false,
+        "mergeStateStatus": "DIRTY",
+        "mergeable": "CONFLICTING",
+        "number": 3,
+        "repository": {
+          "nameWithOwner": "jdx/jouet"
+        },
+        "reviewDecision": null,
+        "reviewThreads": {
+          "nodes": [],
+          "pageInfo": {
+            "endCursor": null,
+            "hasNextPage": false
+          }
+        },
+        "state": "OPEN",
+        "timelineItems": {
+          "nodes": []
+        },
+        "title": "feat(edit): add jouet edit for exact, all-or-nothing edits",
+        "url": "https://github.com/jdx/jouet/pull/3"
+      }
+    },
+    "l5": {
+      "newest": {
+        "nodes": []
+      },
+      "open": {
+        "nodes": []
+      }
+    }
+  },
+  "errors": [
+    {
+      "locations": [
+        {
+          "column": 43,
+          "line": 5
+        }
+      ],
+      "message": "Could not resolve to a PullRequest with the number of 99999999.",
+      "path": [
+        "l3",
+        "pullRequest"
+      ],
+      "type": "NOT_FOUND"
+    }
+  ]
+}

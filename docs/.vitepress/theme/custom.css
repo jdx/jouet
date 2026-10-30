@@ -1,4 +1,6 @@
-/* Shared palette for the docs and the landing page. */
+/* jouet's palette comes from the wind-up robot: a coral head, teal ears, a
+   brass key and a cream face, drawn in ink. Light and dark share the same
+   accents; only the paper changes. */
 @font-face {
   font-family: "Space Grotesk";
   font-style: normal;
@@ -9,36 +11,111 @@
 
 :root {
   --jouet-display: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  /* The logo's colours, exactly. */
   --jouet-coral-rgb: 239 106 85;
   --jouet-coral: rgb(var(--jouet-coral-rgb));
-  --jouet-coral-bright: #ff8f7c;
-  --jouet-coral-deep: #d4513d;
-  --jouet-teal-light: #8fd3c9;
+  --jouet-teal-rgb: 42 157 143;
+  --jouet-teal: rgb(var(--jouet-teal-rgb));
+  --jouet-brass-rgb: 242 184 75;
+  --jouet-brass: rgb(var(--jouet-brass-rgb));
+  --jouet-brass-shade: #d9962b;
+  --jouet-cream: #fbf3e6;
   --jouet-ink: #1d0f0c;
+  /* The tin stripe: the robot's three accents side by side. */
+  --jouet-stripe: linear-gradient(
+    90deg,
+    var(--jouet-coral) 0 33.4%,
+    var(--jouet-brass) 33.4% 66.7%,
+    var(--jouet-teal) 66.7%
+  );
+  --jouet-radius: 14px;
+
   --vp-font-family-mono:
-    "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --vp-sidebar-width: 280px;
   --vp-home-hero-name-color: var(--vp-c-brand-1);
   --vp-home-hero-name-background: none;
   --vp-home-hero-image-background-image: none;
   --vp-home-hero-image-filter: none;
+
+  /* Light: cream paper and ink, with the accents darkened until body text
+     on them passes WCAG AA. */
+  --vp-c-bg: #fffaf2;
+  --vp-c-bg-alt: #f8f0e3;
+  --vp-c-bg-elv: #fffdf9;
+  --vp-c-bg-soft: #f5ebdc;
+  --vp-c-divider: #eadfce;
+  --vp-c-border: #dccdb8;
+  --vp-c-gutter: #efe4d4;
+  --vp-c-text-1: #241713;
+  --vp-c-text-2: #5f4b42;
+  --vp-c-text-3: #7a665c;
+  --vp-c-default-1: #7a665c;
+  --vp-c-default-2: #e7d9c6;
+  --vp-c-default-3: #dccdb8;
+  --vp-c-default-soft: rgb(122 102 92 / 0.12);
+  --vp-c-brand-1: #b8432f;
+  --vp-c-brand-2: #9c3624;
+  --vp-c-brand-3: var(--jouet-coral);
+  --vp-c-brand-soft: rgb(var(--jouet-coral-rgb) / 0.14);
+  --vp-c-tip-1: #1d7468;
+  --vp-c-tip-2: #165e55;
+  --vp-c-tip-3: var(--jouet-teal);
+  --vp-c-tip-soft: rgb(var(--jouet-teal-rgb) / 0.12);
+  --vp-c-warning-1: #8a5d0b;
+  --vp-c-warning-2: #73500c;
+  --vp-c-warning-3: var(--jouet-brass-shade);
+  --vp-c-warning-soft: rgb(var(--jouet-brass-rgb) / 0.2);
+  --vp-code-block-bg: #f5ebdc;
+  --vp-code-copy-code-bg: #efe4d4;
+  --vp-button-brand-bg: var(--jouet-coral);
+  --vp-button-brand-border: var(--jouet-coral);
+  --vp-button-brand-text: var(--jouet-ink);
+  --vp-button-brand-hover-bg: #f27c69;
+  --vp-button-brand-hover-border: #f27c69;
+  --vp-button-brand-hover-text: var(--jouet-ink);
+  --vp-button-brand-active-bg: #e85a43;
+  --vp-button-brand-active-border: #e85a43;
+  --vp-button-brand-active-text: var(--jouet-ink);
+  --jouet-shadow: 0 18px 40px -28px rgb(36 23 19 / 0.45);
+  --jouet-panel: #fffdf9;
 }
 
+/* Dark: the same accents on a neutral charcoal, so coral, teal and brass all
+   stay distinct. */
 .dark {
-  --vp-c-brand-1: var(--jouet-coral);
-  --vp-c-brand-2: var(--jouet-coral-bright);
-  --vp-c-brand-3: var(--jouet-coral-deep);
-  --vp-c-brand-soft: rgb(var(--jouet-coral-rgb) / 0.12);
   --vp-c-bg: #16171c;
   --vp-c-bg-alt: #121317;
   --vp-c-bg-elv: #1f2027;
   --vp-c-bg-soft: #1c1d23;
   --vp-c-divider: #33343c;
+  --vp-c-border: #44454e;
   --vp-c-gutter: #0e0f12;
-  --vp-code-block-bg: #121317;
   --vp-c-text-1: #efeae4;
   --vp-c-text-2: #bdb6ae;
   --vp-c-text-3: #9d968e;
+  --vp-c-default-1: #9d968e;
+  --vp-c-default-2: #3a3b44;
+  --vp-c-default-3: #4a4b55;
+  --vp-c-default-soft: rgb(157 150 142 / 0.14);
+  --vp-c-brand-1: var(--jouet-coral);
+  --vp-c-brand-2: #ff8f7c;
+  --vp-c-brand-3: var(--jouet-coral);
+  --vp-c-brand-soft: rgb(var(--jouet-coral-rgb) / 0.14);
+  --vp-c-tip-1: #6fcfc1;
+  --vp-c-tip-2: #8fdcd1;
+  --vp-c-tip-3: var(--jouet-teal);
+  --vp-c-tip-soft: rgb(var(--jouet-teal-rgb) / 0.16);
+  --vp-c-warning-1: var(--jouet-brass);
+  --vp-c-warning-2: #f6c96f;
+  --vp-c-warning-3: var(--jouet-brass-shade);
+  --vp-c-warning-soft: rgb(var(--jouet-brass-rgb) / 0.14);
+  --vp-code-block-bg: #121317;
+  --vp-code-copy-code-bg: #1f2027;
+  --vp-button-brand-hover-bg: #ff8f7c;
+  --vp-button-brand-hover-border: #ff8f7c;
+  --jouet-shadow: 0 24px 50px -30px rgb(0 0 0 / 0.7);
+  --jouet-panel: #1a1b21;
 }
 
 ::selection {
@@ -46,13 +123,26 @@
 }
 a:focus-visible,
 button:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--jouet-teal-light);
+summary:focus-visible,
+[role="tab"]:focus-visible {
+  outline: 2px solid var(--vp-c-tip-1);
   outline-offset: 4px;
+}
+
+/* The tin stripe runs along the top of every page. */
+.VPNav::before {
+  background: var(--jouet-stripe);
+  content: "";
+  height: 3px;
+  inset: 0 0 auto;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
 }
 
 .VPNavBarTitle .title {
   font-family: var(--jouet-display);
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.03em;
 }
@@ -63,56 +153,114 @@ summary:focus-visible {
   font-size: 13px !important;
 }
 
-/* Landing: generous type, restrained surfaces, and one primary action. */
+/* Status pills: what is available now, what is coming, what is later. */
+.jouet-status {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  display: inline-block;
+  font-family: var(--vp-font-family-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 18px;
+  margin-left: 6px;
+  padding: 0 7px;
+  text-transform: uppercase;
+  vertical-align: 3px;
+  white-space: nowrap;
+}
+.jouet-status.is-ready {
+  background: var(--vp-c-tip-soft);
+  color: var(--vp-c-tip-1);
+}
+.jouet-status.is-soon {
+  background: var(--vp-c-warning-soft);
+  color: var(--vp-c-warning-1);
+}
+.jouet-status.is-later {
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+.VPSidebarItem .jouet-status {
+  font-size: 9px;
+  line-height: 16px;
+  padding: 0 6px;
+  vertical-align: 1px;
+}
+
+/* Landing: the robot, one headline, and one primary action. */
 .VPHome {
-  background: radial-gradient(
-    ellipse 44rem 32rem at 90% 4%,
-    rgb(var(--jouet-coral-rgb) / 0.07),
-    transparent 75%
-  );
+  background:
+    radial-gradient(
+      ellipse 46rem 34rem at 88% 2%,
+      rgb(var(--jouet-coral-rgb) / 0.09),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 36rem 28rem at 4% 40%,
+      rgb(var(--jouet-teal-rgb) / 0.05),
+      transparent 70%
+    );
   margin-bottom: 0 !important;
 }
 .VPHero {
-  padding-bottom: 24px !important;
+  padding-bottom: 32px !important;
 }
 .VPHero .name {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
   font-family: var(--jouet-display);
-  font-size: 19px;
+  font-size: 20px;
+  font-weight: 700;
+  gap: 4px 12px;
   letter-spacing: -0.02em;
   line-height: 1.6;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+}
+.VPHero .name .jouet-gloss {
+  color: var(--vp-c-text-2);
+  -webkit-text-fill-color: var(--vp-c-text-2);
+  font-family: var(--vp-font-family-base);
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 .VPHero .text {
   font-family: var(--jouet-display);
-  font-size: clamp(38px, 5.2vw, 66px);
+  font-size: clamp(40px, 5.4vw, 68px);
   font-weight: 600;
   letter-spacing: -0.055em;
-  line-height: 1.08;
-  max-width: 650px;
-}
-.VPHero .text code {
-  color: var(--vp-c-brand-1);
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: inherit;
+  line-height: 1.04;
+  max-width: 640px;
 }
 .VPHero .tagline {
   color: var(--vp-c-text-2);
   font-size: 18px;
-  line-height: 1.8;
-  max-width: 540px;
+  line-height: 1.75;
+  max-width: 560px;
   padding-top: 24px;
 }
-.VPHero .image-src {
-  filter: drop-shadow(0 24px 30px #0005);
-  max-height: 300px;
-  max-width: 300px;
+.VPHero .tagline code {
+  background: var(--vp-c-default-soft);
+  border-radius: 5px;
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.85em;
+  padding: 2px 6px;
 }
 .VPHero .image-bg {
-  border: 1px dashed rgb(var(--jouet-coral-rgb) / 0.22);
+  background: radial-gradient(
+    circle at 50% 55%,
+    rgb(var(--jouet-brass-rgb) / 0.16),
+    rgb(var(--jouet-coral-rgb) / 0.08) 45%,
+    transparent 70%
+  );
+  border: 1px dashed rgb(var(--jouet-coral-rgb) / 0.3);
   border-radius: 50%;
-  height: 350px;
-  width: 350px;
+  height: 360px;
+  width: 360px;
 }
 .VPHero .actions {
   gap: 12px;
@@ -122,27 +270,118 @@ summary:focus-visible {
   padding: 0;
 }
 .VPButton {
-  border-radius: 7px !important;
+  border-radius: 10px !important;
 }
-.VPHome .VPButton.brand {
-  background: var(--jouet-coral);
-  border-color: var(--jouet-coral);
-  color: var(--jouet-ink);
+.VPButton.brand {
   font-weight: 700;
-}
-.VPHome .VPButton.brand:hover {
-  background: var(--jouet-coral-bright);
-  border-color: var(--jouet-coral-bright);
-  color: var(--jouet-ink);
 }
 .VPHome .VPButton.alt {
   background: transparent;
-  border-color: var(--vp-c-divider);
+  border-color: var(--vp-c-border);
 }
 .VPHome .VPButton.alt:hover {
   background: var(--vp-c-bg-soft);
   border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-text-1);
 }
+
+/* Home sections line up with VitePress's hero and feature grid. */
+.jouet-section {
+  padding: 80px 24px 0;
+}
+.jouet-container {
+  margin: 0 auto;
+  max-width: 1152px;
+}
+@media (min-width: 640px) {
+  .jouet-section {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+}
+@media (min-width: 960px) {
+  .jouet-section {
+    padding-left: 64px;
+    padding-right: 64px;
+  }
+}
+.jouet-eyebrow {
+  color: var(--vp-c-brand-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.7;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+}
+.jouet-section h2 {
+  color: var(--vp-c-text-1);
+  font-family: var(--jouet-display);
+  font-size: clamp(28px, 3.4vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.15;
+  margin: 0;
+}
+.jouet-section .jouet-lede {
+  color: var(--vp-c-text-2);
+  font-size: 16px;
+  line-height: 1.75;
+  margin: 14px 0 0;
+  max-width: 640px;
+}
+
+/* Feature cards, one per command. */
+.VPHome .VPFeatures {
+  padding-top: 28px !important;
+}
+.VPFeature {
+  background: var(--jouet-panel) !important;
+  border: 1px solid var(--vp-c-divider) !important;
+  border-radius: var(--jouet-radius) !important;
+  box-shadow: var(--jouet-shadow);
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.VPFeature.link:hover {
+  border-color: var(--vp-c-brand-1) !important;
+}
+.VPFeature .box {
+  padding: 22px 22px 20px !important;
+}
+.VPFeature .title {
+  font-family: var(--jouet-display);
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em;
+  line-height: 1.5 !important;
+}
+.VPFeature .title code {
+  font-family: inherit;
+}
+.VPFeature .details {
+  color: var(--vp-c-text-2) !important;
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+}
+.VPFeature .details code {
+  background: var(--vp-c-default-soft);
+  border-radius: 4px;
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.86em;
+  padding: 1px 5px;
+}
+.VPFeature .link-text {
+  padding-top: 14px !important;
+}
+.VPFeature .link-text-value {
+  color: var(--vp-c-brand-1) !important;
+  font-size: 13px !important;
+}
+
 /* Long-form docs: readable body copy, calm headings, and usable references. */
 .vp-doc {
   font-size: 16px;
@@ -159,28 +398,28 @@ summary:focus-visible {
   font-family: var(--jouet-display);
 }
 .vp-doc h1 {
-  font-size: 36px;
+  font-size: 38px;
   font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1.2;
+  letter-spacing: -0.045em;
+  line-height: 1.15;
   margin-bottom: 24px;
 }
 .vp-doc h1 + p {
   color: var(--vp-c-text-2);
   font-size: 18px;
-  line-height: 1.8;
+  line-height: 1.75;
 }
 .vp-doc h2 {
   border-top: 1px solid var(--vp-c-divider);
   font-size: 26px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: -0.035em;
   margin: 48px 0 20px;
   padding-top: 24px;
 }
 .vp-doc h3 {
-  font-size: 21px;
-  font-weight: 500;
+  font-size: 20px;
+  font-weight: 600;
   letter-spacing: -0.025em;
   margin-top: 32px;
 }
@@ -193,10 +432,11 @@ summary:focus-visible {
 }
 .vp-doc div[class*="language-"] {
   border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 .vp-doc [class*="language-"] > span.lang {
-  color: var(--vp-c-text-2);
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
 }
 .vp-doc [class*="language-"] code {
   font-size: 13px;
@@ -223,14 +463,18 @@ summary:focus-visible {
   background: transparent;
 }
 .vp-doc .custom-block {
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
 }
 .vp-doc .custom-block.tip {
-  border-left: 3px solid var(--vp-c-tip-1);
+  border-left: 3px solid var(--vp-c-tip-3);
+}
+.vp-doc .custom-block.info {
+  border-left: 3px solid var(--vp-c-warning-3);
+  background: var(--vp-c-warning-soft);
 }
 .vp-doc .custom-block.warning {
-  border-left: 3px solid var(--vp-c-warning-1);
+  border-left: 3px solid var(--vp-c-warning-3);
 }
 .vp-doc .custom-block.danger {
   border-left: 3px solid var(--vp-c-danger-1);
@@ -238,10 +482,37 @@ summary:focus-visible {
 .vp-doc img {
   border-radius: 8px;
 }
+/* Before and after pairs on the docs pages. */
+.vp-doc .jouet-label {
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin: 24px 0 -8px;
+  text-transform: uppercase;
+}
+.vp-doc .jouet-label.is-before::before,
+.vp-doc .jouet-label.is-after::before {
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  width: 8px;
+}
+.vp-doc .jouet-label.is-before::before {
+  background: var(--jouet-coral);
+}
+.vp-doc .jouet-label.is-after::before {
+  background: var(--jouet-teal);
+}
 .VPSidebarItem.level-0 > .item > .text {
   color: var(--vp-c-text-1);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+  font-family: var(--jouet-display);
+  font-size: 13px;
+  letter-spacing: 0.01em;
 }
 .VPSidebarItem.is-active > .item > .link > .text {
   color: var(--vp-c-brand-1);
@@ -255,16 +526,15 @@ summary:focus-visible {
     margin-top: 0;
     padding-top: 40px !important;
   }
+  .VPHero .name {
+    justify-content: center;
+  }
   .VPHero .image {
-    margin: 0 0 24px;
+    margin: 0 0 16px;
   }
   .VPHero .image-container {
     height: 280px;
     max-width: 100%;
-  }
-  .VPHero .image-src {
-    max-height: 220px;
-    max-width: 220px;
   }
   .VPHero .image-bg {
     height: 260px;
@@ -278,15 +548,8 @@ summary:focus-visible {
   .VPHome .VPHero {
     padding-top: 24px !important;
   }
-  .VPHero .image {
-    margin: 0 0 20px;
-  }
   .VPHero .image-container {
-    height: 200px;
-  }
-  .VPHero .image-src {
-    max-height: 175px;
-    max-width: 175px;
+    height: 210px;
   }
   .VPHero .image-bg {
     height: 200px;
@@ -295,8 +558,11 @@ summary:focus-visible {
   .VPHero .tagline {
     font-size: 16px;
   }
+  .jouet-section {
+    padding-top: 56px;
+  }
   .vp-doc h1 {
-    font-size: 30px;
+    font-size: 31px;
   }
   .vp-doc div[class*="language-"] {
     border-radius: 0;
@@ -324,6 +590,14 @@ summary:focus-visible {
   position: relative;
   padding-bottom: 12px !important;
   margin-bottom: -12px !important;
+}
+
+/* The negative margin above keeps the star count out of flow so it does not
+   grow the nav bar. VitePress's overflow menu sets `overflow-y: auto`, which
+   clips anything hanging past its padding box, so put the padding back in
+   flow there and let the menu grow instead. */
+.VPNavBarExtra .VPSocialLinks a[href*="github.com/jdx/jouet"] {
+  margin-bottom: 0 !important;
 }
 
 .VPSocialLinks a[href*="github.com/jdx/jouet"] svg {
@@ -358,7 +632,7 @@ summary:focus-visible {
 
 .jdx-banner {
   align-items: center;
-  background: var(--vp-c-brand-1);
+  background: var(--jouet-coral);
   color: var(--jouet-ink);
   display: flex;
   font-size: 0.9rem;

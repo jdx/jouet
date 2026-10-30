@@ -7,9 +7,16 @@
 //! change of state resets it. A sleep never runs past the deadline, and one
 //! last check happens at it, so `--timeout 0` checks exactly once.
 
+pub mod checks;
+pub mod ci;
+mod joblog;
 pub mod local;
 mod os;
+pub mod pr;
+pub mod remote;
 mod report;
+pub mod run;
+mod watch;
 
 pub use report::Reporter;
 
@@ -38,6 +45,17 @@ impl Observation {
             detail: Detail::default(),
         }
     }
+}
+
+/// Something a GitHub wait saw happen, such as a check finishing.
+#[derive(Debug, Clone)]
+pub struct Event {
+    /// The `event` name under `--jsonl`, such as `check_completed`.
+    pub name: &'static str,
+    /// The rest of the `--jsonl` line.
+    pub fields: serde_json::Value,
+    /// The progress line in text modes.
+    pub text: String,
 }
 
 /// An error that ends the wait without an answer, such as a command that

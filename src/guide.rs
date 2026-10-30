@@ -20,7 +20,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wait",
         Some(
-            "waiting for a file, a log line, a port, a URL, a process or a command to succeed, instead of a sleep loop",
+            "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process or command, instead of a sleep loop",
+        ),
+    ),
+    (
+        "pr",
+        Some(
+            "checking many PRs at once (`pr status`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
         ),
     ),
     (

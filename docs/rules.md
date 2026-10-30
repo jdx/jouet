@@ -14,14 +14,14 @@ The rule API is new and may change between releases. `jouet rule types` always d
 
 ```console
 $ jouet rule list
-sleep-poll      needs jouet wait ci     deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
-review-threads  needs jouet pr threads  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
-python-edit     enabled                 deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
-git-add-all     enabled                 deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
-git-stash       enabled                 deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
-no-verify       enabled                 deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
-force-push      enabled                 deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
-checks          enabled                 record  builtin  builtin  2026-10-30  Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
+sleep-poll      enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+review-threads  enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
+python-edit     enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
+git-add-all     enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
+git-stash       enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
+no-verify       enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
+force-push      enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+checks          enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
 ```
 
 The columns are: name, state, mode, scope, author, created, and why.
@@ -113,7 +113,7 @@ A rule with `on = "post-tool-use"` runs after a command finished. Each top-level
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects:
+`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
 
 ```console
 $ jouet rule test ./no-rm-rf.luau
