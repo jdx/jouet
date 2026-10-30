@@ -67,7 +67,7 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 | `head` | HEAD has new commits, moved back, or was rewritten |
 | `operation` | a merge, rebase or other operation started or finished |
 | `upstream`, `behind` | the upstream changed, or moved |
-| `uncommitted` | uncommitted files changed state, or their changes differ |
+| `uncommitted` | uncommitted files changed state, or their staged or unstaged changes differ |
 | `untracked` | untracked files appeared or went away |
 | `process_exited` | a recorded process is no longer running |
 

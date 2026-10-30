@@ -189,6 +189,54 @@ fn pickup_reports_each_kind_of_drift() {
     assert!(d[0].message.contains("was feat/x, now other"), "{d:?}");
 }
 
+/// Stages `staged` for `path`, then puts `worktree` back in the working
+/// tree, so only the index differs from what was there before.
+fn restage(repo: &Repo, path: &str, staged: &str, worktree: &str) {
+    repo.write(path, staged);
+    repo.git(&["add", "--", path]);
+    repo.write(path, worktree);
+}
+
+#[test]
+fn pickup_notices_staged_changes_when_the_working_tree_is_unchanged() {
+    let repo = Repo::new();
+    let git = repo.git_handle();
+    repo.commit(&[("a.txt", "one\n")], "init");
+    restage(&repo, "a.txt", "staged\n", "worktree\n");
+    let h = collect(&git, &opts()).unwrap();
+    assert_eq!(h.changes[0].status, "MM");
+
+    // Another session stages different contents; the working tree, and so
+    // `git diff HEAD`, and the status letters are what they were.
+    restage(&repo, "a.txt", "restaged\n", "worktree\n");
+    let now = collect(&git, &opts()).unwrap();
+    assert_eq!(now.changes, h.changes);
+
+    let d = drift(&git, &h).unwrap();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].code, "uncommitted");
+    assert!(
+        d[0].message.contains("staged or unstaged changes differ"),
+        "{d:?}"
+    );
+}
+
+#[test]
+fn pickup_notices_staged_changes_on_an_unborn_branch() {
+    let repo = Repo::new();
+    let git = repo.git_handle();
+    restage(&repo, "a.txt", "staged\n", "worktree\n");
+    let h = collect(&git, &opts()).unwrap();
+    assert_eq!(h.head, None);
+    assert!(h.diff_sha256.is_some());
+    assert_eq!(drift(&git, &h).unwrap(), []);
+
+    restage(&repo, "a.txt", "restaged\n", "worktree\n");
+    let d = drift(&git, &h).unwrap();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].code, "uncommitted");
+}
+
 #[test]
 fn pickup_notices_a_rewritten_head_and_an_operation() {
     let repo = Repo::new();

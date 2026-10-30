@@ -52,8 +52,8 @@ pub struct Handoff {
     pub changes: Vec<Change>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub untracked: Vec<String>,
-    /// SHA-256 of `git diff HEAD`, so `pickup` notices edits to files that
-    /// were already changed.
+    /// SHA-256 of the staged and the unstaged changes, so `pickup` notices
+    /// edits to files that were already changed, staged or not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,11 +186,30 @@ fn git_facts(git: &Git, top: &Path) -> Result<Handoff, Error> {
     }
     if h.head.is_some() {
         h.head_subject = git.line(&["log", "-1", "--format=%s", "HEAD"]);
-        let diff = git.text(&["diff", "--binary", "--no-ext-diff", "--no-color", "HEAD"])?;
-        h.diff_sha256 = (!diff.is_empty()).then(|| hex(&Sha256::digest(diff.as_bytes())));
     }
+    h.diff_sha256 = fingerprint(git)?;
     h.operation = operation(&git.git_dir()?);
     Ok(h)
+}
+
+/// SHA-256 of the staged changes (the index against HEAD, or against
+/// nothing on an unborn branch) and, separately, the unstaged ones (the
+/// working tree against the index); `None` when there are neither. Hashing
+/// the two apart means restaging a file changes the fingerprint even when
+/// its working-tree contents and its status letters stay the same.
+fn fingerprint(git: &Git) -> Result<Option<String>, Error> {
+    let diff = ["diff", "--binary", "--no-ext-diff", "--no-color"];
+    let staged = git.text(&[&diff[..], &["--cached"]].concat())?;
+    let unstaged = git.text(&diff)?;
+    if staged.is_empty() && unstaged.is_empty() {
+        return Ok(None);
+    }
+    let mut hash = Sha256::new();
+    for (name, text) in [("staged", &staged), ("unstaged", &unstaged)] {
+        hash.update(format!("{name} {}\n", text.len()));
+        hash.update(text.as_bytes());
+    }
+    Ok(Some(hex(&hash.finalize())))
 }
 
 /// One `git status --porcelain=v2` entry: XY, then `fields` more fields
@@ -444,7 +463,8 @@ pub fn drift(git: &Git, then: &Handoff) -> Result<Vec<Drift>, Error> {
     } else if now.diff_sha256 != then.diff_sha256 {
         add(
             "uncommitted",
-            "the uncommitted files are the same, but their changes differ".into(),
+            "the uncommitted files are the same, but their staged or unstaged changes differ"
+                .into(),
         );
     }
     let (before, after): (BTreeSet<_>, BTreeSet<_>) = (
