@@ -30,6 +30,30 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "commit",
+        Some(
+            "committing: only the paths you name, with the configured trailers and hooks run, instead of `git add -A && git commit`",
+        ),
+    ),
+    (
+        "review-package",
+        Some(
+            "handing a range of commits to a reviewer: one file with the commits, a diffstat and the full diff, refusing a range that would show the wrong diff",
+        ),
+    ),
+    (
+        "handoff",
+        Some(
+            "ending a session with work in progress: records the branch, uncommitted files, the PR, the last test runs and background processes for the next session",
+        ),
+    ),
+    (
+        "pickup",
+        Some(
+            "starting a session that continues earlier work: prints the last handoff and checks that it still holds",
+        ),
+    ),
+    (
         "rule",
         Some(
             "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",

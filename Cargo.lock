@@ -274,6 +274,7 @@ version = "0.0.1"
 dependencies = [
  "jouet-audit",
  "jouet-edit",
+ "jouet-git",
  "jouet-github",
  "jouet-output",
  "jouet-rules",
@@ -310,6 +311,19 @@ dependencies = [
  "serde_json",
  "sha2",
  "similar",
+ "tempfile",
+]
+
+[[package]]
+name = "jouet-git"
+version = "0.0.1"
+dependencies = [
+ "jouet-output",
+ "mise-agent-env",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
  "tempfile",
 ]
 
