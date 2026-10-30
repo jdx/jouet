@@ -21,6 +21,9 @@ Print help
 Print version
 .SH COMMANDS
 .TP
+\fBaudit\fR
+Report where coding\-agent sessions spend tokens and time
+.TP
 \fBedit\fR
 Make exact, all\-or\-nothing edits across files
 .TP
@@ -29,6 +32,9 @@ Replace text in one file, given on the command line
 .TP
 \fBedit hash\fR
 Print the SHA\-256 hash of files, for \-\-expect\-hash
+.TP
+\fBstats\fR
+Show what jouet saved: measured from its ledger, estimated from your history
 .TP
 \fBpr\fR
 Inspect pull requests
@@ -146,6 +152,33 @@ Install jouet's hooks and skill into Claude Code or Codex
 .TP
 \fBcompletion\fR
 Print a shell completion script
+.SH "JOUET AUDIT"
+Report where coding\-agent sessions spend tokens and time
+
+Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless \-\-examples asks for redacted examples.
+.PP
+\fBUsage:\fR jouet audit [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Only requests made since TIME: a duration ago such as 7d or 12h, a date such as 2026\-10\-01, or RFC 3339
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-top\fR \fI<N>\fR
+Categories to list per harness in text (default 10; 0 lists all). \-\-json lists every category
+.TP
+\fB\-\-examples\fR
+Show one redacted example command per shape and pattern
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET EDIT"
 Make exact, all\-or\-nothing edits across files
 
@@ -223,6 +256,30 @@ Print help
 .TP
 \fB<PATHS>\fR
 Files to hash
+.SH "JOUET STATS"
+Show what jouet saved: measured from its ledger, estimated from your history
+
+Counts what the hook ledger recorded (jouet command runs, rule decisions and what the agent did after a denial, checks, and failing CI logs returned as excerpts), then estimates the input tokens those runs saved against your own Claude Code and Codex history from before `jouet setup`. Every estimate shows its basis, and a kind of work with fewer than 20 runs before setup is not estimated. Without a ledger, it shows what one run of each command would save.
+.PP
+\fBUsage:\fR jouet stats [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Only ledger entries since TIME: a duration ago such as 7d or 12h, a date such as 2026\-10\-01, or RFC 3339
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which harness: claude, codex or all (default all)
+.TP
+\fB\-\-session\fR \fI<ID>\fR
+Only one session's ledger entries
+.TP
+\fB\-\-summary\fR
+Print one line about what jouet saved, or nothing, for a stop hook. `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET PR"
 Inspect pull requests
 .PP

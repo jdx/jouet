@@ -1,0 +1,9 @@
+{"ts":1793405130,"harness":"claude","session":"s1","event":"stop","decisions":[{"rule":"verify","action":"block"}]}
+{"ts":1793405140,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"python3 - <arg>","decisions":[{"rule":"python-edit","action":"deny"}]}
+{"ts":1793405150,"harness":"claude","session":"s1","event":"override","tool":"Bash","shape":"python3 - <arg>","decisions":[{"rule":"python-edit","action":"override"}]}
+{"ts":1793405150,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"python3 - <arg>"}
+{"ts":1793405160,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"jouet pr status --mine","exit_code":0,"duration_ms":1200}
+{"ts":1793405200,"harness":"codex","session":"c1","event":"pre-tool-use","tool":"Bash","shape":"gh api graphql -f <arg>","decisions":[{"rule":"review-threads","action":"warn"}]}
+{"ts":1793405210,"harness":"codex","session":"c1","event":"post-tool-use","tool":"Bash","shape":"jouet pr threads <arg>","exit_code":0,"duration_ms":900}
+{"ts":1793405220,"harness":"codex","session":"c1","event":"post-tool-use","tool":"Bash","shape":"cd <arg> && jouet edit","exit_code":0,"duration_ms":50}
+{"ts":"not a number"}

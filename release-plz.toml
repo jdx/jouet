@@ -19,14 +19,14 @@ semver_check = false
 # libraries exist to build the `jouet` binary and promise nothing on their own,
 # so a separate number per crate would say nothing. release-plz publishes them
 # in dependency order: jouet-output, then jouet-github, then jouet-edit,
-# jouet-rules and jouet-wait, then jouet.
+# jouet-rules, jouet-wait and jouet-audit, then jouet.
 [[package]]
 name = "jouet"
 publish = true
 version_group = "jouet"
 # One changelog for the whole tool: a fix that only touches a library crate is
 # still a change to the jouet people install.
-changelog_include = ["jouet-output", "jouet-github", "jouet-edit", "jouet-rules", "jouet-wait"]
+changelog_include = ["jouet-output", "jouet-github", "jouet-edit", "jouet-rules", "jouet-wait", "jouet-audit"]
 # The tag people reference, and the one release.yml's archives hang off.
 git_tag_name = "v{{ version }}"
 
@@ -68,6 +68,14 @@ git_release_enable = false
 
 [[package]]
 name = "jouet-wait"
+publish = true
+version_group = "jouet"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+
+[[package]]
+name = "jouet-audit"
 publish = true
 version_group = "jouet"
 changelog_update = false
