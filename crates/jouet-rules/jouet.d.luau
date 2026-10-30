@@ -23,8 +23,9 @@
 -- `jouet.cmd` to run jouet's own commands.
 --
 -- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
--- `jouet.cargo`, `jouet.repo`, `jouet.env`) only read. Each is cached for the rest of the hook call, or of
--- the recipe step, and runs inside the caller's budget. Most return
+-- `jouet.cargo`, `jouet.test`, `jouet.repo`, `jouet.env`) only read. Each is
+-- cached for the rest of the hook call, or of the recipe step, and runs
+-- inside the caller's budget. Most return
 -- `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)` when there is
 -- nothing to report. The GitHub probes (`jouet.pr`) are off in hooks unless
 -- the `rules.network` setting is on; recipes always have them.
@@ -381,6 +382,12 @@ declare jouet: {
 		-- The Cargo workspace around `dir` (relative to the call's directory;
 		-- the call's directory when nil). nil outside a Cargo project.
 		workspace: (dir: string?) -> (JouetCargoWorkspace?, string?),
+	},
+	test: {
+		-- The test runners `jouet test --affected` can select for, in the
+		-- nearest directory from the call's up to the work tree's root that
+		-- has any, such as { "vitest" }; empty when there are none.
+		adapters: () -> ({ string }?, string?),
 	},
 	-- The work tree's root and its GitHub repository.
 	repo: () -> (JouetRepo?, string?),

@@ -31,6 +31,7 @@
 - [`jouet pr threads unresolve [--dry-run] [ARGS]…`](/cli/pr/threads/unresolve.md)
 - [`jouet pr threads apply [FLAGS] [ARGS]…`](/cli/pr/threads/apply.md)
 - [`jouet review-package [-o --output <FILE>] [--context <N>] <BASE> [HEAD]`](/cli/review-package.md)
+- [`jouet test [FLAGS] [EXTRA]…`](/cli/test.md)
 - [`jouet wait [FLAGS] <SUBCOMMAND>`](/cli/wait.md)
 - [`jouet wait ci [FLAGS] [PR]`](/cli/wait/ci.md)
 - [`jouet wait run [FLAGS] <RUN>`](/cli/wait/run.md)

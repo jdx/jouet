@@ -2,8 +2,9 @@
 //! for. `jouet.pr.status()` and `jouet.pr.next()` (GitHub),
 //! `jouet.ci.last_run()` (the hooks' ledger), `jouet.git.state()`,
 //! `jouet.git.tree()` and `jouet.repo()` (plain `git`),
-//! `jouet.cargo.workspace()` (`Cargo.toml` files), and `jouet.env()` (an
-//! allowlist).
+//! `jouet.cargo.workspace()` (`Cargo.toml` files), `jouet.test.adapters()`
+//! (the test runners `jouet test --affected` can select for, as the binary
+//! detects them), and `jouet.env()` (an allowlist).
 //!
 //! Every probe:
 //! - only reads;
@@ -64,6 +65,9 @@ pub(crate) struct PrView {
 
 type PrFetch = dyn Fn(Option<&str>) -> Result<Option<PrView>, String> + Send + Sync;
 
+/// The names of the test adapters for a directory.
+type Adapters = dyn Fn(&std::path::Path) -> Vec<String> + Send + Sync;
+
 /// Where the probes look, and whether they may use the network.
 #[derive(Clone)]
 pub struct Probes {
@@ -73,6 +77,7 @@ pub struct Probes {
     /// The key the ledger names this work tree by, if it has one.
     repo_key: Option<String>,
     github: Arc<PrFetch>,
+    adapters: Option<Arc<Adapters>>,
 }
 
 impl Probes {
@@ -87,7 +92,19 @@ impl Probes {
             ledger,
             repo_key: None,
             github: Arc::new(github::fetch),
+            adapters: None,
         }
+    }
+
+    /// The same probes, with how to find the test adapters for a
+    /// directory, for `jouet.test.adapters()`. Without it, that probe
+    /// answers nil and a reason.
+    pub fn with_test_adapters(
+        mut self,
+        find: impl Fn(&std::path::Path) -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.adapters = Some(Arc::new(find));
+        self
     }
 
     /// The same probes, with the key the ledger's writer gives this work
@@ -277,6 +294,27 @@ pub(crate) fn install(
         })?,
     )?;
     jouet.set("cargo", cargo_table)?;
+
+    let test_table = lua.create_table()?;
+    let s = shared.clone();
+    test_table.set(
+        "adapters",
+        lua.create_function(move |lua, ()| {
+            let found = cached(&s, "test:adapters", |p, _| {
+                let find = p
+                    .adapters
+                    .clone()
+                    .ok_or("test adapters cannot be detected here")?;
+                let dir = match &p.dir {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_dir().map_err(|e| e.to_string())?,
+                };
+                Ok(Some(serde_json::json!(find(&dir))))
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("test", test_table)?;
 
     let s = shared.clone();
     jouet.set(

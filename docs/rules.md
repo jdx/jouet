@@ -22,6 +22,7 @@ git-stash       enabled  deny    builtin  builtin  2026-10-30  Every worktree of
 no-verify       enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
 force-push      enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
 push-untested   enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
+affected-tests  enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
 checks          enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 ```
 
@@ -212,9 +213,10 @@ ok    git-stash       25 examples passed
 ok    no-verify       14 examples passed
 ok    force-push      12 examples passed
 ok    push-untested   13 examples passed
-ok    checks          41 examples passed
+ok    affected-tests  22 examples passed
+ok    checks          50 examples passed
 FAIL  no-rm-rf        it has no `quiet` examples: near misses it must leave alone
-9 of 10 rules passed their examples
+10 of 11 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -241,7 +243,7 @@ stays quiet on (near misses):
 
 ## Scripts
 
-Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Two built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree.
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Three built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
 
 ```toml
 [[rule]]

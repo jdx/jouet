@@ -18,6 +18,7 @@ pub(crate) mod setup;
 pub(crate) mod share;
 pub(crate) mod skill;
 pub(crate) mod stats;
+pub(crate) mod test;
 pub(crate) mod threads;
 pub(crate) mod wait;
 pub(crate) mod wind;

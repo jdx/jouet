@@ -54,6 +54,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "test",
+        Some(
+            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push",
+        ),
+    ),
+    (
         "rule",
         Some(
             "writing or checking a jouet rule, the TOML matchers behind jouet's hooks (`jouet rule schema`): write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
@@ -144,8 +150,13 @@ pub(crate) fn overview() -> String {
         let name = meta.cmd.name;
         let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
-        let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
-        for sub in meta.subcommands.iter().filter(|s| !s.hide) {
+        let subs: Vec<_> = meta.subcommands.iter().filter(|s| !s.hide).collect();
+        let usage = synopsis(&format!("jouet {name}"), meta);
+        // A bare `jouet pr` above its subcommands says nothing.
+        if subs.is_empty() || usage != format!("jouet {name}") {
+            let _ = writeln!(out, "  {usage}");
+        }
+        for sub in subs {
             let path = format!("jouet {name} {}", sub.cmd.name);
             let _ = writeln!(
                 out,

@@ -406,3 +406,23 @@ fn push_untested_warns_until_the_full_suite_passed_at_this_tree() {
     let why = warning(&[run("full", 0, &tree)]).unwrap();
     assert!(why.contains("the tree has changed"), "{why}");
 }
+
+#[test]
+fn test_adapters_come_from_the_detector_the_binary_gives() {
+    let expr = r#"(function()
+        local found, err = jouet.test.adapters()
+        if not found then return `nil {err}` end
+        return table.concat(found, ",")
+    end)()"#;
+    let e = engine(expr, Budget::default());
+    let work = tempfile::tempdir().unwrap();
+    let probes = Probes::new(Some(work.path().into()), None, false);
+    e.set_probes(probes.clone());
+    assert_eq!(said(&e), "nil test adapters cannot be detected here");
+    let dir = work.path().to_path_buf();
+    e.set_probes(probes.with_test_adapters(move |asked| {
+        assert_eq!(asked, dir);
+        vec!["vitest".into(), "pytest".into()]
+    }));
+    assert_eq!(said(&e), "vitest,pytest");
+}

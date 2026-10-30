@@ -3,6 +3,7 @@
 
 use super::Output;
 use crate::RunArgs;
+use crate::affected::{self, task};
 use crate::rules;
 use jouet_output::exit::Exit;
 use jouet_rules::Trust;
@@ -245,11 +246,15 @@ impl Host for Jouet {
     fn describe(&self, step: &Step) -> String {
         match step.argv() {
             Some(argv) => {
-                let words: Vec<String> = argv[1..].iter().map(|w| quote(w)).collect();
+                let words: Vec<String> = argv[1..].iter().map(|w| affected::quote(w)).collect();
                 format!("jouet {}", words.join(" "))
             }
-            None => match test_task(&self.root) {
-                Some(task) => task.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" "),
+            None => match task::test_task(&self.root) {
+                Some(task) => task
+                    .iter()
+                    .map(|w| affected::quote(w))
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 None => "the test task (none found)".into(),
             },
         }
@@ -277,7 +282,7 @@ impl Jouet {
     /// Runs the test task with its output in a log, and reports how it
     /// ended with the end of the log.
     fn test(&self) -> Result<StepOutput, String> {
-        let task = test_task(&self.root).ok_or_else(|| {
+        let task = task::test_task(&self.root).ok_or_else(|| {
             format!(
                 "no test task found in {}: looked for a mise `test` task, a package.json `test` script, Cargo.toml, a justfile or Makefile `test` target, and go.mod",
                 self.root.display()
@@ -331,128 +336,14 @@ fn tail(path: &Path, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// The repository's test task, by the first of these it has: a mise
-/// `test` task, a package.json `test` script (run by the package manager
-/// its lockfile names), Cargo.toml, a justfile or Makefile `test` target,
-/// go.mod.
-fn test_task(root: &Path) -> Option<Vec<String>> {
-    let has = |name: &str| root.join(name).is_file();
-    let read = |name: &str| std::fs::read_to_string(root.join(name)).ok();
-    let words = |w: &[&str]| Some(w.iter().map(|s| (*s).to_string()).collect());
-    let mise_files = [
-        "mise.toml",
-        ".mise.toml",
-        "mise/config.toml",
-        ".config/mise.toml",
-        ".mise/config.toml",
-    ];
-    let mise_task = mise_files.iter().filter_map(|f| read(f)).any(|text| {
-        toml::from_str::<toml::Table>(&text)
-            .ok()
-            .and_then(|t| t.get("tasks")?.as_table()?.get("test").cloned())
-            .is_some()
-    }) || [
-        "mise-tasks/test",
-        ".mise-tasks/test",
-        ".mise/tasks/test",
-        "mise/tasks/test",
-    ]
-    .iter()
-    .any(|f| has(f));
-    if mise_task {
-        return words(&["mise", "run", "test"]);
-    }
-    let script = read("package.json")
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .is_some_and(|pkg| pkg["scripts"]["test"].is_string());
-    if script {
-        return if has("pnpm-lock.yaml") {
-            words(&["pnpm", "test"])
-        } else if has("yarn.lock") {
-            words(&["yarn", "test"])
-        } else if has("bun.lock") || has("bun.lockb") {
-            words(&["bun", "run", "test"])
-        } else {
-            words(&["npm", "test"])
-        };
-    }
-    if has("Cargo.toml") {
-        return words(&["cargo", "test"]);
-    }
-    let target = |names: &[&str]| {
-        names.iter().filter_map(|f| read(f)).any(|text| {
-            text.lines()
-                .any(|l| l.starts_with("test:") || l.starts_with("test "))
-        })
-    };
-    if target(&["justfile", "Justfile", ".justfile"]) {
-        return words(&["just", "test"]);
-    }
-    if target(&["Makefile", "makefile", "GNUmakefile"]) {
-        return words(&["make", "test"]);
-    }
-    if has("go.mod") {
-        return words(&["go", "test", "./..."]);
-    }
-    None
-}
-
-/// A word as a shell would need it, for showing a command line.
-fn quote(word: &str) -> String {
-    let plain = !word.is_empty()
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_=./:@#,+%".contains(c));
-    if plain {
-        word.to_string()
-    } else {
-        format!("'{}'", word.replace('\'', r"'\''"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_test_task_is_found_by_what_the_repository_has() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        assert_eq!(test_task(root), None);
-        std::fs::write(root.join("go.mod"), "module x\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["go", "test", "./..."]);
-        std::fs::write(
-            root.join("Makefile"),
-            "build:\n\ttrue\ntest: build\n\ttrue\n",
-        )
-        .unwrap();
-        assert_eq!(test_task(root).unwrap(), ["make", "test"]);
-        std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
-        std::fs::write(
-            root.join("package.json"),
-            r#"{"scripts":{"test":"vitest"}}"#,
-        )
-        .unwrap();
-        std::fs::write(root.join("pnpm-lock.yaml"), "").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["pnpm", "test"]);
-        std::fs::write(root.join("mise.toml"), "[tasks.lint]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["pnpm", "test"]);
-        std::fs::write(root.join("mise.toml"), "[tasks.test]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
-    }
 
     #[test]
     fn every_command_a_recipe_can_run_is_in_this_jouet() {
         for command in recipe::COMMANDS.iter().filter(|c| !c.path.is_empty()) {
             assert!(crate::spec::has_command(command.path), "{}", command.name);
         }
-    }
-
-    #[test]
-    fn command_lines_are_quoted_for_a_shell() {
-        assert_eq!(quote("--body=done"), "--body=done");
-        assert_eq!(quote("it's done"), r"'it'\''s done'");
-        assert_eq!(quote(""), "''");
     }
 }

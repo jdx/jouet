@@ -81,6 +81,7 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
+          { text: "jouet test", link: "/commands/test" },
           { text: "jouet run", link: "/commands/run" },
           { text: "jouet audit", link: "/commands/audit" },
           { text: "jouet stats", link: "/commands/stats" },
@@ -131,6 +132,7 @@ export default defineConfig({
                 ],
               },
               { text: "review-package", link: "/cli/review-package" },
+              { text: "test", link: "/cli/test" },
               {
                 text: "wait",
                 link: "/cli/wait/",

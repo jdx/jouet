@@ -255,6 +255,55 @@ local function runner_scope(args: { string }, from: number): Scope
 	return if #picks == 0 then FULL else partial(table.concat(picks, " "))
 end
 
+-- `jouet test`: the full suite, unless `--affected` or words after `--`
+-- narrow it; the selector names them. A dry run, help, a usage error (2)
+-- and no runner found (4) ran no tests.
+local function jouet_test(command: JouetCommand, args: { string }): (Kind?, Scope)
+	local unknown = partial(nil)
+	if command.status == 2 or command.status == 4 then
+		return nil, unknown
+	end
+	local picks: { string } = {}
+	local affected = false
+	local sub = false
+	local i = 1
+	while i <= #args do
+		local arg = args[i]
+		i += 1
+		if arg == "--" then
+			if sub and i <= #args then
+				table.insert(picks, "-- " .. table.concat(args, " ", i))
+			end
+			break
+		elseif arg == "--display" then
+			i += 1
+		elseif arg == "--json" or string.sub(arg, 1, 10) == "--display=" then
+			-- Output options, before or after the subcommand.
+		elseif not sub then
+			if arg ~= "test" then
+				return nil, unknown
+			end
+			sub = true
+		elseif arg == "--dry-run" or arg == "--help" or arg == "-h" then
+			return nil, unknown
+		elseif arg == "--affected" then
+			affected = true
+		elseif arg == "--since" or arg == "--adapter" then
+			table.insert(picks, `{arg} {args[i] or ""}`)
+			i += 1
+		elseif string.match(arg, "^%-%-since=") or string.match(arg, "^%-%-adapter=") then
+			table.insert(picks, arg)
+		end
+	end
+	if not sub then
+		return nil, unknown
+	end
+	if affected then
+		table.insert(picks, 1, "--affected")
+	end
+	return "test", if #picks == 0 then FULL else partial(table.concat(picks, " "))
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -297,6 +346,8 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
+	elseif program == "jouet" then
+		return jouet_test(command, args)
 	elseif program == "bats" then
 		return "test", unknown
 	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "pytest" then

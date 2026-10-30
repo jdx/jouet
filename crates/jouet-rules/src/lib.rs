@@ -67,6 +67,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ("no-verify", include_str!("../rules/no-verify.toml")),
     ("force-push", include_str!("../rules/force-push.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
+    (
+        "affected-tests",
+        include_str!("../rules/affected-tests.toml"),
+    ),
     ("checks", include_str!("../rules/checks.toml")),
 ];
 
@@ -75,6 +79,10 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
         "push-untested.luau",
         include_str!("../rules/push-untested.luau"),
+    ),
+    (
+        "affected-tests.luau",
+        include_str!("../rules/affected-tests.luau"),
     ),
     ("checks.luau", include_str!("../rules/checks.luau")),
 ];
