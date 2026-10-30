@@ -63,7 +63,9 @@ MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester t
   updates its page under `docs/commands/` in the same PR.
 - **Rules:** the hooks' steering rules are Luau scripts in `crates/jouet-rules/rules/`, written
   against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`, printed by `jouet rule
-  types`). A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
+  types`), each starting with a `--- why:` header (plus `mode`, `scope`, `author`, `created`). User
+  and repository rules may only add decisions; keep that floor (no replacing built-in rules, no
+  locking out `jouet`) when changing the engine. A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
   matching and near-miss commands with each change. A rule whose advice names a jouet command
   declares it in `needs`. Keep `jouet.d.luau` in step with `install_module` and `prelude.luau`.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub

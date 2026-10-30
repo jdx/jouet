@@ -1,5 +1,10 @@
 --!strict
--- Skipping git hooks hides what they would have caught.
+--- name: no-verify
+--- why: Skipping git hooks with `--no-verify` hides what they would have caught.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local MESSAGE = "Do not skip git hooks with --no-verify: fix what the hook reports, or ask the user."
 
@@ -42,7 +47,6 @@ local function commit_short_n(opts: { string }): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny `--no-verify` and `git commit -n`",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local sub, args = jouet.git(command)

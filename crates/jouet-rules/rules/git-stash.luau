@@ -1,7 +1,10 @@
 --!strict
--- Every worktree of a repository shares one stash, so a stash without a
--- message, or a pop, apply or drop without a stash named, can take another
--- session's work.
+--- name: git-stash
+--- why: Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local MESSAGE =
 	"Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work: commit a WIP instead, or `git stash push -m <unique-tag>` and restore with `git stash apply <sha>`."
@@ -43,6 +46,15 @@ local function risky(args: { string }): boolean
 	elseif sub == "pop" or sub == "apply" or sub == "drop" then
 		-- Without a stash named, these act on whichever entry is on top.
 		return not has_positional(rest)
+	elseif sub == "branch" then
+		-- `git stash branch <name>` applies and drops the top entry.
+		local positional = 0
+		for _, arg in rest do
+			if string.sub(arg, 1, 1) ~= "-" then
+				positional += 1
+			end
+		end
+		return positional < 2
 	elseif sub == "clear" then
 		return true
 	end
@@ -50,7 +62,6 @@ local function risky(args: { string }): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny a bare `git stash`, `pop`, `drop` or `clear`; the stash is shared across worktrees",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local sub, args = jouet.git(command)
@@ -71,6 +82,7 @@ local rule: JouetRule = {
 			"git stash drop",
 			"git stash clear",
 			"git stash save",
+			"git stash branch rescue",
 		},
 		allow = {
 			"git stash push -m wip-ab12",
@@ -82,6 +94,7 @@ local rule: JouetRule = {
 			"git stash show -p stash@{1}",
 			"git stash apply 3f2a9c1",
 			"git stash drop stash@{2}",
+			"git stash branch rescue stash@{1}",
 			"echo 'git stash'",
 			"git commit -m 'avoid git stash'",
 		},

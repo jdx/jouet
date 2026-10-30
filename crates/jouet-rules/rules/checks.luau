@@ -1,8 +1,9 @@
 --!strict
--- Records test, lint and build runs, so jouet can refuse to let an agent
--- finish while the last one failed. The exit status a command gets is
--- worked out by jouet: a failure belongs only to the last pipeline, so
--- `cargo test; echo done` failing records nothing.
+--- name: checks
+--- why: Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 type Kind = "test" | "lint" | "build"
 
@@ -79,7 +80,6 @@ local function classify(command: JouetCommand): Kind?
 end
 
 local rule: JouetRule = {
-	description = "Record test, lint and build runs for the check before stopping",
 	on = "post-tool-use",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do

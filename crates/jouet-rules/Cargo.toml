@@ -9,9 +9,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-# The source, the built-in rules and the type definitions they are embedded
-# from, and nothing a checkout happens to hold.
-include = ["/src/**", "/rules/**", "/jouet.d.luau"]
+# The source, the built-in rules, the type definitions they are embedded
+# from and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/rules/**", "/jouet.d.luau", "/LICENSE"]
 
 [dependencies]
 mlua = { version = "0.12", features = ["luau"] }

@@ -17,7 +17,16 @@ fn engine_with(sources: Vec<Source>, budget: Budget, disabled: Vec<String>) -> E
     .unwrap()
 }
 
+/// A user rule whose header makes it deny, as most tests need.
 fn user(name: &str, code: &str) -> Source {
+    user_raw(
+        name,
+        &format!("--- why: a test rule\n--- mode: deny\n{code}"),
+    )
+}
+
+/// A user rule exactly as written, header and all.
+fn user_raw(name: &str, code: &str) -> Source {
     Source {
         name: name.into(),
         origin: Origin::User(PathBuf::from(format!("{name}.luau"))),
@@ -41,7 +50,11 @@ fn every_builtin_rule_loads_and_passes_its_examples() {
     let engine = engine(builtin());
     for rule in engine.rules() {
         assert_eq!(rule.state, State::Enabled, "{}", rule.name);
-        assert!(!rule.description.is_empty(), "{}", rule.name);
+        assert!(!rule.why.is_empty(), "{}", rule.name);
+        assert_eq!(
+            (rule.scope, rule.author.as_str()),
+            (Scope::Builtin, "builtin")
+        );
         let examples = engine.examples(rule).unwrap();
         assert!(examples.len() >= 4, "{} has too few examples", rule.name);
         for example in examples {
@@ -274,25 +287,15 @@ fn discovery_layers_user_and_trusted_repository_rules() {
     let repo_dir = dir.path().join("repo");
     std::fs::create_dir_all(&user_dir).unwrap();
     std::fs::create_dir_all(&repo_dir).unwrap();
-    std::fs::write(
-        user_dir.join("git-stash.luau"),
-        "return { check = function() end }",
-    )
-    .unwrap();
-    std::fs::write(
-        repo_dir.join("team.luau"),
-        "return { check = function() end }",
-    )
-    .unwrap();
-    let mut trust = TrustStore::load(dir.path().join("trust.json"));
+    let rule = "--- why: test\nreturn { check = function() end }";
+    std::fs::write(user_dir.join("mine.luau"), rule).unwrap();
+    std::fs::write(repo_dir.join("team.luau"), rule).unwrap();
+    let mut trust = TrustStore::load(Some(dir.path().join("trust.json")));
 
     let (sources, errors) = discover(Some(&user_dir), Some(&repo_dir), &trust);
     assert!(errors.is_empty());
-    let stash = sources.iter().find(|s| s.name == "git-stash").unwrap();
-    assert!(
-        matches!(stash.origin, Origin::User(_)),
-        "the user's rule replaces the builtin"
-    );
+    let mine = sources.iter().find(|s| s.name == "mine").unwrap();
+    assert!(matches!(mine.origin, Origin::User(_)) && mine.trusted);
     let team = sources.iter().find(|s| s.name == "team").unwrap();
     assert!(!team.trusted);
 
@@ -323,10 +326,36 @@ fn an_untrusted_repository_rule_never_replaces_or_runs() {
 fn compiled_rules_are_cached() {
     let dir = tempfile::tempdir().unwrap();
     let code = "return { check = function() return jouet.deny('x') end }";
-    let first = cache::compile(code, Some(dir.path())).unwrap();
+    let (first, cached) = cache::compile(code, Some(dir.path())).unwrap();
+    assert!(!cached);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
-    assert_eq!(cache::compile(code, Some(dir.path())).unwrap(), first);
+    assert_eq!(
+        cache::compile(code, Some(dir.path())).unwrap(),
+        (first, true)
+    );
     assert!(cache::compile("return {", Some(dir.path())).is_err());
+}
+
+#[test]
+fn a_damaged_cache_entry_is_recompiled() {
+    let dir = tempfile::tempdir().unwrap();
+    let code = "return { check = function() return jouet.deny('x') end }";
+    cache::compile(code, Some(dir.path())).unwrap();
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        std::fs::write(entry.unwrap().path(), b"not bytecode").unwrap();
+    }
+    let engine = Engine::new(
+        vec![user("cached", code)],
+        Options {
+            has_command: Box::new(|_| true),
+            disabled: Vec::new(),
+            budget: Budget::default(),
+            cache_dir: Some(dir.path().to_path_buf()),
+        },
+    )
+    .unwrap();
+    assert_eq!(engine.rules()[0].state, State::Enabled);
+    assert!(engine.evaluate(&bash("ls")).deny.is_some());
 }
 
 #[test]
@@ -351,4 +380,95 @@ fn calls_are_read_from_hook_payloads() {
         "codex",
     );
     assert_eq!((call.event, call.exit_code), (None, Some(7)));
+}
+
+#[test]
+fn a_users_rule_warns_unless_its_header_says_deny() {
+    let code = "return { check = function() return jouet.deny('no') end }";
+    let engine = engine(vec![
+        user_raw("soft", &format!("--- why: x\n{code}")),
+        user_raw("hard", &format!("--- why: x\n--- mode: deny\n{code}")),
+    ]);
+    assert_eq!(engine.rule("soft").unwrap().mode, Mode::Warn);
+    let outcome = engine.evaluate(&bash("ls"));
+    assert_eq!(outcome.warnings[0].rule, "soft");
+    assert_eq!(outcome.deny.unwrap().rule, "hard");
+
+    let mut repo = user_raw("team", &format!("--- why: x\n{code}"));
+    repo.origin = Origin::Repo(PathBuf::from("team.luau"));
+    let engine = engine_with(vec![repo], Budget::default(), Vec::new());
+    assert_eq!(engine.rule("team").unwrap().mode, Mode::Deny);
+}
+
+#[test]
+fn headers_are_checked_against_the_file() {
+    let check = "return { check = function() end }";
+    let engine = engine(vec![
+        user_raw("no-why", check),
+        user_raw("misnamed", &format!("--- name: other\n--- why: x\n{check}")),
+        user_raw(
+            "claims-builtin",
+            &format!("--- why: x\n--- scope: builtin\n{check}"),
+        ),
+        user_raw("bad-mode", &format!("--- why: x\n--- mode: loud\n{check}")),
+        user_raw(
+            "good",
+            &format!(
+                "--- name: good\n--- why: x\n--- scope: user\n--- author: session-1\n--- created: 2026-10-30\n{check}"
+            ),
+        ),
+    ]);
+    for rule in &engine.rules()[..4] {
+        assert!(
+            matches!(rule.state, State::Broken(_)),
+            "{}: {:?}",
+            rule.name,
+            rule.state
+        );
+    }
+    let good = engine.rule("good").unwrap();
+    assert_eq!(good.state, State::Enabled);
+    assert_eq!(
+        (good.author.as_str(), good.created.as_str()),
+        ("session-1", "2026-10-30")
+    );
+}
+
+#[test]
+fn rules_of_yours_add_decisions_and_never_weaken_the_builtin_ones() {
+    let mut sources = builtin();
+    // Same name as a built-in: refused, and the built-in still runs.
+    sources.push(user(
+        "git-add-all",
+        "return { check = function() return jouet.allow() end }",
+    ));
+    // An explicit allow decides nothing for the other rules.
+    sources.push(user(
+        "allow-all",
+        "return { check = function() return jouet.allow() end }",
+    ));
+    // A rule that would deny everything, jouet included.
+    sources.push(user(
+        "deny-all",
+        "return { check = function() return jouet.deny('no') end }",
+    ));
+    let engine = engine(sources);
+
+    let replaced = engine
+        .rules()
+        .iter()
+        .filter(|r| r.name == "git-add-all")
+        .map(|r| (r.scope, matches!(r.state, State::Broken(_))))
+        .collect::<Vec<_>>();
+    assert_eq!(replaced, [(Scope::Builtin, false), (Scope::User, true)]);
+    assert_eq!(
+        engine.evaluate(&bash("git add -A")).deny.unwrap().rule,
+        "git-add-all"
+    );
+
+    // It cannot lock you out of jouet: its denial of jouet itself only warns.
+    let outcome = engine.evaluate(&bash("jouet rule list && jouet setup claude --uninstall"));
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.warnings[0].rule, "deny-all");
+    assert_eq!(engine.evaluate(&bash("ls")).deny.unwrap().rule, "deny-all");
 }

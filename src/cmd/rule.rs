@@ -32,10 +32,15 @@ pub fn run(args: &RuleArgs, out: &Output) -> Exit {
 struct ListedRule<'a> {
     name: &'a str,
     state: &'a State,
+    mode: jouet_rules::Mode,
+    scope: jouet_rules::Scope,
+    author: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    created: &'a str,
     source: String,
     event: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
-    description: &'a str,
+    why: &'a str,
 }
 
 #[derive(Serialize)]
@@ -71,9 +76,13 @@ fn list(cwd: &Path, out: &Output) -> Exit {
         .map(|rule| ListedRule {
             name: &rule.name,
             state: &rule.state,
+            mode: rule.mode,
+            scope: rule.scope,
+            author: &rule.author,
+            created: &rule.created,
             source: rule.origin.describe(),
             event: rule.event.name(),
-            description: &rule.description,
+            why: &rule.why,
         })
         .collect();
     let report = List {
@@ -95,23 +104,37 @@ fn state_text(state: &State) -> String {
 }
 
 fn list_text(report: &List) -> String {
-    let rows: Vec<[String; 4]> = report
+    let rows: Vec<[String; 7]> = report
         .rules
         .iter()
         .map(|r| {
+            // A post-tool-use rule records runs; its mode never applies.
+            let mode = match (r.event, r.mode) {
+                ("post-tool-use", _) => "record",
+                (_, jouet_rules::Mode::Warn) => "warn",
+                (_, jouet_rules::Mode::Deny) => "deny",
+            };
             [
                 r.name.to_string(),
                 state_text(r.state),
-                r.source.clone(),
-                r.description.to_string(),
+                mode.to_string(),
+                r.scope.name().to_string(),
+                r.author.to_string(),
+                r.created.to_string(),
+                r.why.to_string(),
             ]
         })
         .collect();
-    let width = |i: usize| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0);
-    let (w0, w1, w2) = (width(0), width(1), width(2));
+    let widths: Vec<usize> = (0..6)
+        .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0))
+        .collect();
     let mut out = String::new();
-    for [name, state, source, description] in &rows {
-        let line = format!("{name:w0$}  {state:w1$}  {source:w2$}  {description}");
+    for row in &rows {
+        let mut line = String::new();
+        for (cell, width) in row.iter().zip(&widths) {
+            let _ = write!(line, "{cell:width$}  ");
+        }
+        line.push_str(&row[6]);
         let _ = writeln!(out, "{}", line.trim_end());
     }
     for note in &report.notes {

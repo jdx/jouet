@@ -11,9 +11,9 @@ pub struct Loaded {
     pub repo: Option<(PathBuf, Trust)>,
 }
 
-/// `~/.config/jouet/rules`.
-pub fn user_dir() -> PathBuf {
-    crate::paths::config_dir().join("rules")
+/// `~/.config/jouet/rules`, when there is a home directory.
+pub fn user_dir() -> Option<PathBuf> {
+    crate::paths::config_dir().map(|d| d.join("rules"))
 }
 
 /// `<repository root>/.jouet/rules`, when there is one above `cwd`.
@@ -24,14 +24,14 @@ pub fn repo_dir(cwd: &Path) -> Option<PathBuf> {
 }
 
 pub fn trust_store() -> TrustStore {
-    TrustStore::load(crate::paths::state_dir().join("trusted-rules.json"))
+    TrustStore::load(crate::paths::state_dir().map(|d| d.join("trusted-rules.json")))
 }
 
 /// Loads every rule. Fails only when the Luau VM itself cannot start.
 pub fn load(cwd: &Path) -> Result<Loaded, String> {
     let trust = trust_store();
     let repo = repo_dir(cwd);
-    let (sources, errors) = jouet_rules::discover(Some(&user_dir()), repo.as_deref(), &trust);
+    let (sources, errors) = jouet_rules::discover(user_dir().as_deref(), repo.as_deref(), &trust);
     let settings = crate::settings::Settings::load();
     let engine = Engine::new(
         sources,
@@ -39,7 +39,7 @@ pub fn load(cwd: &Path) -> Result<Loaded, String> {
             has_command: Box::new(crate::spec::has_command),
             disabled: settings.rules.disable.unwrap_or_default(),
             budget: Budget::default(),
-            cache_dir: Some(crate::paths::cache_dir().join("luau")),
+            cache_dir: crate::paths::cache_dir().map(|d| d.join("luau")),
         },
     )
     .map_err(|e| e.to_string())?;
