@@ -17,12 +17,14 @@ repository = "https://github.com/jdx/jouet"
 readme = "README.md"
 
 [workspace.dependencies]
+jouet-audit = { path = "crates/jouet-audit", version = "0.0.1" }
 jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
 jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
 jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
 jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
 jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
 libc = "0.2"
+memchr = "2"
 mise-agent-env = "2026"
 mlua = { version = "0.12", features = ["luau"] }
 regex = "1"
@@ -38,6 +40,7 @@ sha2 = "0.11"
 similar = "3"
 tempfile = "3"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+zstd = "0.14"
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
 usage-config = { version = "7", features = ["toml"] }
 usage-rs = "7"
@@ -68,6 +71,7 @@ include = ["/src/**", "/LICENSE", "/README.md"]
 workspace = true
 
 [dependencies]
+jouet-audit.workspace = true
 jouet-edit.workspace = true
 jouet-github.workspace = true
 jouet-output.workspace = true
