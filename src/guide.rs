@@ -338,6 +338,7 @@ mod tests {
     #[test]
     fn the_overview_stays_short() {
         let text = overview();
+        // A budget to defend, not a ceiling to fill.
         assert!(text.lines().count() <= 80, "{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),

@@ -14,6 +14,7 @@ setup() {
 	run --separate-stderr jouet agent-help
 
 	assert_success
+	# A budget to defend, not a ceiling to fill.
 	assert [ "${#lines[@]}" -le 80 ]
 	assert_output --partial 'jouet edit replace <PATH> --old TEXT --new TEXT'
 	assert_output --partial 'Also installed: bd (beads)'
