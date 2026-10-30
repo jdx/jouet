@@ -1,0 +1,23 @@
+[package]
+name = "jouet-edit"
+version = "0.0.1"
+description = "The exact, all-or-nothing edit engine behind jouet edit"
+keywords = ["agents", "edit", "patch"]
+categories = ["development-tools", "text-processing"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/LICENSE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+similar.workspace = true
+tempfile.workspace = true

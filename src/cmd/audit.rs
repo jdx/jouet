@@ -2,11 +2,11 @@
 
 use super::Output;
 use crate::AuditArgs;
-use crate::exit::Exit;
-use crate::time;
 use jouet_audit::{
     Analyzer, CategoryReport, ClaudeCode, Codex, Filter, HarnessReport, Reader, Report, ScanStats,
 };
+use jouet_output::exit::Exit;
+use jouet_output::time;
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ const DEFAULT_TOP: usize = 10;
 const JSON_SHAPES: usize = 5;
 const TEXT_SHAPES: usize = 3;
 
-pub fn run(args: &AuditArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
     let now = time::now();
     let since_ms = match args.since.as_deref().map(|s| parse_since(s, now)) {
         None => None,

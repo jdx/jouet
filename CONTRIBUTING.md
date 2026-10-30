@@ -32,7 +32,7 @@ CurrentUser -Force -SkipPublisherCheck"`.
 
 mise provides the repository's tools. Rust is not among them: the toolchain is
 whichever one rustup makes current, and any stable release from 1.91, the
-crate's `rust-version`, builds it.
+workspace's `rust-version`, builds it.
 
 ## mbx build cache
 

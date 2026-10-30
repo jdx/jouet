@@ -12,10 +12,8 @@ readme.workspace = true
 # The source and the licence, and nothing a checkout happens to hold.
 include = ["/src/**", "/LICENSE"]
 
-# Everything exported is something the binary uses, or `jouet wind` will;
-# the rest is `pub(crate)`.
-[lints.rust]
-unreachable_pub = "deny"
+[lints]
+workspace = true
 
 [dependencies]
 memchr.workspace = true

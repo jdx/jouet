@@ -4,19 +4,8 @@
 
 mod cmd;
 mod config;
-mod display;
-mod edit;
-mod exit;
 mod git;
-mod github;
-mod paths;
-mod pr;
-mod time;
-mod tls;
-mod wait;
 
-use display::Mode;
-use exit::Exit;
 use std::process::ExitCode;
 use usage_rs::{Args, Cli, Subcommands};
 
@@ -583,20 +572,4 @@ fn main() -> ExitCode {
         Cmd::Wait(args) => cmd::wait::run(args, &out),
     };
     exit.into()
-}
-
-impl cmd::Output {
-    fn new(json: bool, display: Option<&str>) -> Self {
-        match Mode::detect(display) {
-            Ok(mode) => Self { json, mode },
-            Err(message) => {
-                let out = Self {
-                    json,
-                    mode: Mode::Plain,
-                };
-                out.error(Exit::Usage, &message);
-                std::process::exit(Exit::Usage.code().into());
-            }
-        }
-    }
 }

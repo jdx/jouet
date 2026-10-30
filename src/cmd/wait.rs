@@ -1,21 +1,21 @@
 //! `jouet wait` and its subjects.
 
 use super::Output;
-use crate::exit::Exit;
-use crate::github::Client;
-use crate::pr::target::{self, Arg, Repo, Target};
-use crate::time::parse_duration;
-use crate::wait::checks::Selection;
-use crate::wait::ci::{self, CiWait};
-use crate::wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
-use crate::wait::pr::{PrWait, Until};
-use crate::wait::remote::{self, Halt, Watch};
-use crate::wait::run::{self as run_wait, RunWait};
-use crate::wait::{self, Reporter, Stop, Subject, Timing};
 use crate::{
     WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitFileArgs, WaitHttpArgs, WaitLogArgs,
     WaitPidArgs, WaitPrArgs, WaitRunArgs,
 };
+use jouet_github::Client;
+use jouet_github::pr::target::{self, Arg, Repo, Target};
+use jouet_output::exit::Exit;
+use jouet_output::time::parse_duration;
+use jouet_wait::checks::Selection;
+use jouet_wait::ci::{self, CiWait};
+use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
+use jouet_wait::pr::{PrWait, Until};
+use jouet_wait::remote::{self, Halt, Watch};
+use jouet_wait::run::{self as run_wait, RunWait};
+use jouet_wait::{self as wait, Reporter, Stop, Subject, Timing};
 use regex::Regex;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,7 +25,7 @@ const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 const DEFAULT_APPEAR_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const DEFAULT_LOG_LINES: usize = 60;
 
-pub fn run(args: WaitArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     if out.json && args.jsonl {
         return out.error(Exit::Usage, "give --json or --jsonl, not both");
     }
@@ -116,7 +116,7 @@ fn watch<W: Watch>(
 }
 
 fn github_failure(reset: i64) -> String {
-    crate::github::Failure::RateLimited { reset }.message()
+    jouet_github::Failure::RateLimited { reset }.message()
 }
 
 /// The PR an argument names, in `--repo` or this checkout's repository,
@@ -270,5 +270,5 @@ fn cmd_log_path() -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-    crate::paths::log_dir().join(format!("wait-cmd-{stamp}-{}.log", std::process::id()))
+    jouet_output::paths::log_dir().join(format!("wait-cmd-{stamp}-{}.log", std::process::id()))
 }

@@ -1,0 +1,24 @@
+[package]
+name = "jouet-github"
+version = "0.0.1"
+description = "jouet's GitHub client and the pull request model behind its pr and wait commands"
+keywords = ["agents", "github"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/LICENSE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+jouet-output.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true

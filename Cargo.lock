@@ -233,20 +233,16 @@ name = "jouet"
 version = "0.0.1"
 dependencies = [
  "jouet-audit",
- "libc",
- "mise-agent-env",
+ "jouet-edit",
+ "jouet-github",
+ "jouet-output",
+ "jouet-wait",
  "regex",
- "rustls",
- "rustls-native-certs",
  "serde",
  "serde_json",
- "sha2",
- "similar",
  "tempfile",
  "toml",
- "ureq",
  "usage-rs",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -259,6 +255,53 @@ dependencies = [
  "serde_json",
  "tempfile",
  "zstd",
+]
+
+[[package]]
+name = "jouet-edit"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "tempfile",
+]
+
+[[package]]
+name = "jouet-github"
+version = "0.0.1"
+dependencies = [
+ "jouet-output",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "jouet-output"
+version = "0.0.1"
+dependencies = [
+ "mise-agent-env",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "jouet-wait"
+version = "0.0.1"
+dependencies = [
+ "jouet-github",
+ "jouet-output",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
