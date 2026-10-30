@@ -139,13 +139,25 @@ Record something a rule could not express, for `jouet share \-\-idea`
 Run a recipe: a Luau script that sequences jouet's commands
 .TP
 \fBwind\fR
-Notice costly patterns in the hook ledger and draft rules for them
+Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 .TP
 \fBwind show\fR
-Show a note: what was noticed, and the rule drafted for it
+Show a note or a proposal: what was noticed, and what was drafted
 .TP
 \fBwind dismiss\fR
-Drop a note, so it is never shown again
+Drop a note, a proposal or a suggested review, so it is never shown again
+.TP
+\fBwind adopt\fR
+Mark a review's proposal as applied
+.TP
+\fBwind digest\fR
+Digest whole sessions: corrections, failures, waits, re\-reads
+.TP
+\fBwind review\fR
+Digest whole sessions: corrections, failures, waits, re\-reads
+.TP
+\fBwind propose\fR
+Record what a review proposed, to show at the next session start
 .TP
 \fBunwind\fR
 Propose retiring rules that are noisy or always overridden
@@ -1115,9 +1127,11 @@ The recipe to run
 \fB<ARGS>\fR
 The recipe's arguments: KEY=VALUE, or plain words in order
 .SH "JOUET WIND"
-Notice costly patterns in the hook ledger and draft rules for them
+Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 
 Reads the ledger jouet's hooks keep from where it last stopped. When a command keeps failing across sessions, or agents keep sleeping instead of waiting, it drafts a rule in warn mode and keeps a note of it, which the next session start shows (two at most). The hooks run it on their own; running it by hand reads the ledger now. Off with JOUET_WIND=0.
+
+The ledger holds only command shapes. `jouet wind digest` and `jouet wind review` read whole sessions: the user's corrections, abandoned approaches, waits and repeated exploration. A review's proposals (mise tasks, rules, routines, AGENTS.md or memory notes) are recorded with `jouet wind propose` and shown like the ledger's notes.
 .PP
 \fBUsage:\fR jouet wind [OPTIONS] [COMMAND]
 .PP
@@ -1127,7 +1141,7 @@ Reads the ledger jouet's hooks keep from where it last stopped. When a command k
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET WIND SHOW"
-Show a note: what was noticed, and the rule drafted for it
+Show a note or a proposal: what was noticed, and what was drafted
 .PP
 \fBUsage:\fR jouet wind show [OPTIONS] <ID>
 .PP
@@ -1140,9 +1154,9 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The note's id, such as n3
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
 .SH "JOUET WIND DISMISS"
-Drop a note, so it is never shown again
+Drop a note, a proposal or a suggested review, so it is never shown again
 .PP
 \fBUsage:\fR jouet wind dismiss [OPTIONS] <ID>
 .PP
@@ -1155,7 +1169,103 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The note's id, such as n3
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
+.SH "JOUET WIND ADOPT"
+Mark a review's proposal as applied
+.PP
+\fBUsage:\fR jouet wind adopt [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The id of a note (n3), a proposal (p2) or a suggested review (r1)
+.SH "JOUET WIND DIGEST"
+Digest whole sessions: corrections, failures, waits, re\-reads
+
+Reads a Claude Code or Codex transcript and reduces it to a few thousand tokens: the user's corrections and interruptions, failures and their retries, long calls, where tokens and time went (as `jouet audit` counts them), files read repeatedly, commands typed out again, and a timeline with a phase per prompt. Every item names its lines in the transcript. Secrets are redacted (with gitleaks' rules too, when a config is found) and the home directory is written as ~. Nothing leaves the machine. `jouet wind review` prints the same with a prompt for a reviewing agent.
+.PP
+\fBUsage:\fR jouet wind digest [OPTIONS] [<SESSION>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-last\fR
+The most recently written session (inside a session, that session)
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Every session written since TIME (7d, 12h, a date or RFC 3339), the 8 most recent
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-budget\fR \fI<N>\fR
+Tokens per session's digest, about (default 4000)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SESSION>\fR
+A session ID, a prefix of one, or a transcript's path
+.SH "JOUET WIND REVIEW"
+Digest whole sessions: corrections, failures, waits, re\-reads
+
+Reads a Claude Code or Codex transcript and reduces it to a few thousand tokens: the user's corrections and interruptions, failures and their retries, long calls, where tokens and time went (as `jouet audit` counts them), files read repeatedly, commands typed out again, and a timeline with a phase per prompt. Every item names its lines in the transcript. Secrets are redacted (with gitleaks' rules too, when a config is found) and the home directory is written as ~. Nothing leaves the machine. `jouet wind review` prints the same with a prompt for a reviewing agent.
+.PP
+\fBUsage:\fR jouet wind review [OPTIONS] [<SESSION>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-last\fR
+The most recently written session (inside a session, that session)
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Every session written since TIME (7d, 12h, a date or RFC 3339), the 8 most recent
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-\-project\fR \fI<PATH>\fR
+Only sessions that ran in PATH or a directory below it
+.TP
+\fB\-\-budget\fR \fI<N>\fR
+Tokens per session's digest, about (default 4000)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SESSION>\fR
+A session ID, a prefix of one, or a transcript's path
+.SH "JOUET WIND PROPOSE"
+Record what a review proposed, to show at the next session start
+
+Reads a review's JSON reply on stdin (or from FILE): `{"session": "...", "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`, as `jouet wind review` asks for. Each proposal is checked and recorded as pending: three per review and three a day at most, never one that looks like it holds a secret, never one already proposed. Recording applies nothing: the next session starts show each proposal in one line, and the agent there asks the user before applying it.
+.PP
+\fBUsage:\fR jouet wind propose [OPTIONS] [<FILE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<FILE>\fR
+Read the reply from FILE instead of stdin
 .SH "JOUET UNWIND"
 Propose retiring rules that are noisy or always overridden
 
