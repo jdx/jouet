@@ -1,0 +1,43 @@
+amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Builtins.pkl"
+
+// Mirrors `mise run lint` (and so CI): rustfmt, then Clippy with warnings denied.
+local linters = new Mapping<String, Step> {
+    ["cargo-fmt"] = Builtins.cargo_fmt
+    // Same invocation as `mise run lint:clippy` and CI.
+    ["cargo-clippy"] = (Builtins.cargo_clippy) {
+        check = "cargo clippy --all-targets --all-features -- -D warnings"
+        // Same as `mise run lint-fix`, so fixes cover the targets check does.
+        fix = "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
+    }
+    // lints GitHub Actions workflows, composite actions and Dependabot config (jdx/jactionlint)
+    ["jactionlint"] {
+        glob = List(".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/actions/**/action.yml", ".github/actions/**/action.yaml", ".github/dependabot.yml", ".github/dependabot.yaml")
+        batch = true
+        check = new CommandSpec {
+            // `mise x` installs it on demand: the CI test jobs run mise-action with
+            // `install: false`, so tools in mise.toml are not on PATH otherwise.
+            command = "mise x jactionlint -- jactionlint {{ files }}"
+            effect = "read"
+        }
+        fix = new CommandSpec {
+            command = "mise x jactionlint -- jactionlint --fix {{ files }}"
+            effect = "write"
+        }
+    }
+}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        stash = "git"
+        steps = linters
+    }
+    ["fix"] {
+        fix = true
+        steps = linters
+    }
+    ["check"] {
+        steps = linters
+    }
+}
