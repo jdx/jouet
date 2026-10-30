@@ -317,6 +317,9 @@ fn command(fake: &Fake, dir: &Path, args: &[&str]) -> Command {
         .env("JOUET_GITHUB_TOKEN", "test-token")
         .env("XDG_STATE_HOME", dir.join("state"))
         .env("JOUET_LOG_DIR", dir.join("logs"))
+        // No `gh` to fall back to, as on CI runners, so a lost token fails
+        // instead of quietly reading the developer's own.
+        .env("PATH", dir.join("empty"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

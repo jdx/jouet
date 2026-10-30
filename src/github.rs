@@ -174,7 +174,15 @@ impl Client {
                 Some(token) => token,
                 None => self.next_token().map_err(Failure::Other)?,
             };
-            let sent = self.send(&token.value, request)?;
+            let sent = match self.send(&token.value, request) {
+                Ok(sent) => sent,
+                // The token was not rejected, so it is kept for the next
+                // request (such as the one after a rate limit resets).
+                Err(failure) => {
+                    self.token = Some(token);
+                    return Err(failure);
+                }
+            };
             if sent.status == 401 {
                 self.rejected.push(token.source);
                 continue;
