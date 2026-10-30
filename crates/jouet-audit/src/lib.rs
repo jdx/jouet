@@ -21,8 +21,8 @@
 //! are redacted.
 //!
 //! An incremental audit over another source of calls, such as jouet's own
-//! hook ledger, builds [`Transcript`]s itself (one [`Request`] per call when
-//! it has no token counts) and feeds them to an [`Analyzer`].
+//! hook ledger, passes [`CommandRecord`]s to [`findings`] for the patterns
+//! alone, or to [`transcripts`] and then an [`Analyzer`] for the full report.
 //! [`categorize`] and [`detect`] also accept a command that is already a
 //! shape, so a ledger that stores only shapes loses only the patterns that
 //! look inside a script's body.
@@ -32,6 +32,7 @@ mod category;
 mod event;
 mod pattern;
 mod read;
+mod record;
 mod redact;
 mod shape;
 mod time;
@@ -46,6 +47,7 @@ pub use pattern::{Pattern, Patterns, detect};
 pub use read::{
     ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, open, scan,
 };
+pub use record::{CommandRecord, findings, transcripts};
 pub use redact::{example, redact};
 pub use shape::shape;
 pub use time::parse_timestamp;

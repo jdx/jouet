@@ -23,15 +23,23 @@ pub enum Pattern {
     HeredocEdit,
     /// Output that reported a GitHub rate limit.
     RateLimited,
+    /// `gh` run once per item of a shell loop, such as `for n in ...; do gh
+    /// pr view $n; done`.
+    GhLoop,
+    /// A command that failed, run again with the same shape right after.
+    /// Found by the analyzer, which sees calls in order, not by [`detect`].
+    RepeatedFailure,
 }
 
 impl Pattern {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::SleepPoll,
         Self::HeadOnTestOutput,
         Self::StaleTokenPrefix,
         Self::HeredocEdit,
         Self::RateLimited,
+        Self::GhLoop,
+        Self::RepeatedFailure,
     ];
 
     pub fn name(self) -> &'static str {
@@ -41,6 +49,8 @@ impl Pattern {
             Self::StaleTokenPrefix => "stale_token_prefix",
             Self::HeredocEdit => "heredoc_edit",
             Self::RateLimited => "rate_limited",
+            Self::GhLoop => "gh_loop",
+            Self::RepeatedFailure => "repeated_failure",
         }
     }
 
@@ -51,6 +61,8 @@ impl Pattern {
             Self::StaleTokenPrefix => "stale-token prefix",
             Self::HeredocEdit => "heredoc or script edit",
             Self::RateLimited => "GitHub rate limit hit",
+            Self::GhLoop => "gh in a shell loop",
+            Self::RepeatedFailure => "failed command run again",
         }
     }
 
@@ -72,10 +84,15 @@ impl Pattern {
             Self::RateLimited => {
                 "`jouet pr status` reads many PRs in one query, and `jouet wait` shares one poll between sessions"
             }
+            Self::GhLoop => "`jouet pr status` reads every PR in one batched query",
+            Self::RepeatedFailure => {
+                "read why it failed before running it again; `jouet wait cmd` for a deliberate retry"
+            }
         }
     }
 
     fn bit(self) -> u8 {
+        const { assert!(Self::ALL.len() <= 8, "Patterns is a u8") };
         1 << self as u8
     }
 }
@@ -136,8 +153,19 @@ static CAT_HEREDOC: LazyLock<Regex> = LazyLock::new(|| {
         .expect("the cat-heredoc pattern compiles")
 });
 
+static GH_LOOP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?s)\b(?:for\s+\S+\s+in|while\s+read)\b.*?\bgh\s+(?:pr|api|run|issue)\b",
+        r"|\bxargs\b[^|;&\n]*\bgh\s+(?:pr|api|run|issue)\b",
+    ))
+    .expect("the gh-loop pattern compiles")
+});
+
 /// The patterns a command shows. Works on shapes too, except
 /// [`Pattern::HeredocEdit`], which needs the script's body.
+/// [`Pattern::RateLimited`] comes from a call's output and
+/// [`Pattern::RepeatedFailure`] from the calls before it, so neither is found
+/// here.
 pub fn detect(command: &str) -> Patterns {
     let mut found = Patterns::default();
     if SLEEP.is_match(command) {
@@ -151,6 +179,9 @@ pub fn detect(command: &str) -> Patterns {
     }
     if (SCRIPT.is_match(command) && WRITES.is_match(command)) || CAT_HEREDOC.is_match(command) {
         found.insert(Pattern::HeredocEdit);
+    }
+    if GH_LOOP.is_match(command) {
+        found.insert(Pattern::GhLoop);
     }
     found
 }
@@ -219,6 +250,23 @@ mod tests {
             "GH_TOKEN=$(cat f) gh api user",
             Pattern::StaleTokenPrefix
         ));
+    }
+
+    #[test]
+    fn finds_gh_in_loops() {
+        assert!(has(
+            "for n in 1 2 3; do gh pr view $n --json state; done",
+            Pattern::GhLoop
+        ));
+        assert!(has(
+            "gh pr list -q .[].number | xargs -n1 gh pr checks",
+            Pattern::GhLoop
+        ));
+        assert!(has(
+            "for <v> in <n>…; do gh pr view <s>; done",
+            Pattern::GhLoop
+        ));
+        assert!(!has("for f in *.rs; do wc -l $f; done", Pattern::GhLoop));
     }
 
     #[test]

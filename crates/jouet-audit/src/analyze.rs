@@ -72,7 +72,9 @@ struct PatAcc {
     calls: u64,
     sessions: HashSet<String>,
     tokens: f64,
+    duration_ms: u64,
     example: Option<String>,
+    shapes: HashMap<String, ShapeAcc>,
 }
 
 impl Analyzer {
@@ -100,6 +102,8 @@ impl Analyzer {
         }
         acc.transcripts += 1;
         let mut previous = 0u32;
+        // The shape of the last command, when it failed.
+        let mut last_failure: Option<String> = None;
         for request in &transcript.requests {
             acc.requests += 1;
             let tokens = request.input_tokens.unwrap_or(0);
@@ -150,8 +154,9 @@ impl Analyzer {
                 if previous & bit(category) != 0 {
                     c.repeat_tokens += tokens;
                 }
-                if let Some(command) = &call.command {
-                    let s = c.shapes.entry(shape(command)).or_default();
+                let call_shape = call.command.as_deref().map(shape);
+                if let (Some(command), Some(call_shape)) = (&call.command, &call_shape) {
+                    let s = c.shapes.entry(call_shape.clone()).or_default();
                     s.calls += 1;
                     s.tokens += tokens;
                     s.duration_ms += duration;
@@ -159,7 +164,18 @@ impl Analyzer {
                         keep_shortest(&mut s.example, command, home.as_deref());
                     }
                 }
-                for pattern in detect_call(call).iter() {
+                let mut patterns = detect_call(call);
+                if call_shape.is_some() {
+                    if call.failed && call_shape == last_failure {
+                        patterns.insert(Pattern::RepeatedFailure);
+                    }
+                    last_failure = if call.failed {
+                        call_shape.clone()
+                    } else {
+                        None
+                    };
+                }
+                for pattern in patterns.iter() {
                     // Rate-limit messages count only in GitHub output, not in
                     // a file that happens to mention one.
                     if pattern == Pattern::RateLimited && !is_github(category) {
@@ -168,6 +184,13 @@ impl Analyzer {
                     let p = &mut acc.patterns[pattern as usize];
                     p.calls += 1;
                     p.tokens += tokens;
+                    p.duration_ms += duration;
+                    if let Some(call_shape) = &call_shape {
+                        let s = p.shapes.entry(call_shape.clone()).or_default();
+                        s.calls += 1;
+                        s.tokens += tokens;
+                        s.duration_ms += duration;
+                    }
                     if !p.sessions.contains(&transcript.session) {
                         p.sessions.insert(transcript.session.clone());
                     }
@@ -205,17 +228,13 @@ impl Analyzer {
                 o.failed += t.failed;
                 o.repeat_tokens += t.repeat_tokens;
                 o.failed_tokens += t.failed_tokens;
-                for (shape, ts) in t.shapes {
-                    let os = o.shapes.entry(shape).or_default();
-                    os.calls += ts.calls;
-                    os.tokens += ts.tokens;
-                    os.duration_ms += ts.duration_ms;
-                    merge_example(&mut os.example, ts.example);
-                }
+                merge_shapes(&mut o.shapes, t.shapes);
             }
             for (o, t) in ours.patterns.iter_mut().zip(theirs.patterns) {
                 o.calls += t.calls;
                 o.tokens += t.tokens;
+                o.duration_ms += t.duration_ms;
+                merge_shapes(&mut o.shapes, t.shapes);
                 o.sessions.extend(t.sessions);
                 merge_example(&mut o.example, t.example);
             }
@@ -234,6 +253,16 @@ impl Analyzer {
                 .map(|name| harness_report(name, &self.harnesses[name], top_shapes))
                 .collect(),
         }
+    }
+}
+
+fn merge_shapes(ours: &mut HashMap<String, ShapeAcc>, theirs: HashMap<String, ShapeAcc>) {
+    for (shape, ts) in theirs {
+        let os = ours.entry(shape).or_default();
+        os.calls += ts.calls;
+        os.tokens += ts.tokens;
+        os.duration_ms += ts.duration_ms;
+        merge_example(&mut os.example, ts.example);
     }
 }
 
@@ -297,7 +326,7 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
                 output_bytes: c.output_bytes,
                 failed: c.failed,
                 shape_count: c.shapes.len() as u64,
-                top_shapes: top(c, top_shapes),
+                top_shapes: top(&c.shapes, top_shapes),
             })
         })
         .collect();
@@ -320,7 +349,9 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
                 calls: p.calls,
                 sessions: p.sessions.len() as u64,
                 input_tokens: p.tokens.round() as u64,
+                duration_ms: p.duration_ms,
                 advice: pattern.advice(),
+                top_shapes: top(&p.shapes, top_shapes),
                 example: p.example.clone(),
             })
         })
@@ -361,8 +392,8 @@ fn ratio(part: f64, whole: f64) -> f64 {
     }
 }
 
-fn top(c: &CatAcc, n: usize) -> Vec<ShapeCount> {
-    let mut shapes: Vec<(&String, &ShapeAcc)> = c.shapes.iter().collect();
+fn top(shapes: &HashMap<String, ShapeAcc>, n: usize) -> Vec<ShapeCount> {
+    let mut shapes: Vec<(&String, &ShapeAcc)> = shapes.iter().collect();
     shapes.sort_by(|a, b| {
         b.1.calls
             .cmp(&a.1.calls)
@@ -577,9 +608,15 @@ pub struct PatternReport {
     /// Input tokens of the requests that issued these calls.
     #[serde(skip_serializing_if = "is_zero")]
     pub input_tokens: u64,
+    /// Time these calls ran.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub duration_ms: u64,
     pub advice: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
+    /// The most frequent shapes showing the pattern.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub top_shapes: Vec<ShapeCount>,
 }
 
 fn is_zero(n: &u64) -> bool {

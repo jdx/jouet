@@ -34,7 +34,7 @@ The savings are estimates and are labelled as such:
 - **Edits:** requests whose edit failed and had to be redone.
 - **Builds and tests** cost time more than tokens; jouet has no command for them, and the report points to mbx.
 
-The patterns are `sleep` before a check, test output cut with `| head` or `| tail`, a `GH_TOKEN=` prefix that works around a stale token, scripts or heredocs that rewrite files, and GitHub rate-limit messages.
+The patterns are `sleep` before a check, test output cut with `| head` or `| tail`, a `GH_TOKEN=` prefix that works around a stale token, scripts or heredocs that rewrite files, GitHub rate-limit messages, `gh` run once per item of a shell loop, and a failed command run again with the same shape right after.
 
 ## Privacy
 
