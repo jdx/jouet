@@ -65,6 +65,7 @@ export default defineConfig({
           { text: "jouet wait", link: "/commands/wait" },
           { text: `jouet pr status ${soon}`, link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
+          { text: "jouet audit", link: "/commands/audit" },
         ],
       },
       {
@@ -75,6 +76,7 @@ export default defineConfig({
             link: "/cli/",
             collapsed: true,
             items: [
+              { text: "audit", link: "/cli/audit" },
               {
                 text: "edit",
                 link: "/cli/edit/",

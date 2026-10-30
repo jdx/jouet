@@ -13,6 +13,7 @@
 
 ## Subcommands
 
+- [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet edit [FLAGS] [SUBCOMMAND]`](/cli/edit.md)
 - [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)

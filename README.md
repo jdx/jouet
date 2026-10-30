@@ -105,6 +105,7 @@ match shows what moved.
 | [`jouet wait`](https://jouet.jdx.dev/commands/wait) | Available | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
 | [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | Available | `for` loops over `gh pr view` |
 | [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | Available | hand-written `reviewThreads` GraphQL |
+| [`jouet audit`](https://jouet.jdx.dev/commands/audit) | Available | reading your own transcripts to see where tokens and time go |
 
 Every command follows the same
 [conventions](https://jouet.jdx.dev/conventions): no prompts and no TTY,

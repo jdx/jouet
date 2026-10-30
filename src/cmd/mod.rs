@@ -1,5 +1,6 @@
 //! Command implementations, and the output conventions they share.
 
+pub mod audit;
 pub mod edit;
 pub mod pr;
 pub mod threads;

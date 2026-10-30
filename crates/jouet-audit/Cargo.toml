@@ -1,0 +1,28 @@
+[package]
+name = "jouet-audit"
+version = "0.0.1"
+description = "Reads coding-agent transcripts and reports where their tokens and time go, behind jouet audit"
+keywords = ["agents", "claude", "codex", "audit"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/LICENSE"]
+
+# Everything exported is something the binary uses, or `jouet wind` will;
+# the rest is `pub(crate)`.
+[lints.rust]
+unreachable_pub = "deny"
+
+[dependencies]
+memchr.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
