@@ -3,7 +3,7 @@
 
 use super::Output;
 use crate::TestArgs;
-use crate::affected::{self, Decision, Plan, Suite, task};
+use crate::affected::{self, Decision, Plan, Suite};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -160,7 +160,11 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
         .find(|d| d.join(".git").exists())
         .unwrap_or(cwd)
         .to_path_buf();
-    if let Some(mut argv) = task::test_task(&root) {
+    if let Some(mut argv) = jouet_routines::prims::test_task(&root) {
+        // Every package, not only the one at a workspace's root.
+        if argv == ["cargo", "test"] {
+            argv.push("--workspace".into());
+        }
         // npm only passes on what follows `--`.
         if argv[0] == "npm" && !args.extra.is_empty() {
             argv.push("--".into());

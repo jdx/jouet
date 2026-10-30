@@ -3,10 +3,10 @@
 
 - **Usage:** `jouet wind dismiss <ID>`
 
-Drop a note, so it is never shown again
+Drop a note, a proposal or a suggested review, so it is never shown again
 
 ## Arguments
-- **`<ID>`** — The note's id, such as n3
+- **`<ID>`** — The id of a note (n3), a proposal (p2) or a suggested review (r1)
 
 ## Flags
 - **`-h --help`** — Print help

@@ -1,0 +1,54 @@
+# Session d1d1d1d1-0000-4000-8000-000000000001 (claude) in /work/app
+2026-10-30 10:00 UTC, 7m20s wall, 4 prompts, 13 requests, 13 calls (3 failed), 260k input tokens, 520 output, 5m31s in tools
+Transcript: <fixtures>/claude/projects/-work-app/d1d1d1d1-0000-4000-8000-000000000001.jsonl (L = its line numbers)
+
+## User corrections (4)
+- L8-10 interrupt — after `cargo test 2>&1 | tail -<n>`
+- L8-11 negation (after an interrupt): "no, use mise run test instead of cargo test, and don't pipe it through tail" — after `cargo test 2>&1 | tail -<n>`
+- L20-21 refusal: "never force-push; open a PR instead" — after `git push <v>… --force`
+- L20-24 repeat: "I said open a PR. GH_TOKEN=<redacted> is already in the env" — after `git push <v>… --force`
+
+## Failures (2)
+- L4-8 `cargo test 2>&1 | tail -<n>` failed 2 of 2, never worked: error[E0425]: cannot find value `x` in this scope
+- L20 `git push <v>… --force` failed 1 of 1, never worked
+
+## Long calls (6, 5m19s in all)
+- L12 `mise run test` 1m35s
+- L27 `sleep <n>; gh pr checks <n> --repo <path>` 47s
+- L29 `sleep <n>; gh pr checks <n> --repo <path>` 47s
+- L31 `sleep <n>; gh pr checks <n> --repo <path>` 47s
+- L8 `cargo test 2>&1 | tail -<n>` 43s
+- L4 `cargo test 2>&1 | tail -<n>` 40s
+
+## Where tokens and time went
+- read_search 31%: 80k tokens, 4 calls, 4s
+- build_test_lint 23%: 60k tokens, 3 calls, 2m58s (most: `cargo test 2>&1 | tail -<n>`)
+- ci_polling 23%: 60k tokens, 3 calls, 2m21s (most: `sleep <n>; gh pr checks <n> --repo <path>`)
+- github 8%: 20k tokens, 1 calls, 5s (most: `gh pr create --fill --base <v> --head <path>`)
+- git 8%: 20k tokens, 1 calls, 2s (most: `git push <v>… --force`)
+- edits 8%: 20k tokens, 1 calls, 1s
+
+## Files read repeatedly (1)
+- src/lib.rs 4 reads, 2 with no edit since the last — L2-18
+
+## Commands typed out again (1)
+- 3× `sleep 45; gh pr checks 12 --repo acme/app` — L27-31
+
+## Patterns jouet audit knows
+- sleep_poll (3 calls): `jouet wait` blocks until the condition holds, in one call (built-in rule `sleep-poll`)
+- head_on_test_output (2 calls): run tests once with the full log saved, and read the failures from it; mbx's agent display prints only failures
+- repeated_failure (1 calls): read why it failed before running it again; `jouet wait cmd` for a deliberate retry
+
+## Timeline (4 phases)
+1. L1-8 +0ms for 1m38s, 4 requests, 80k tokens, 4 calls: "fix the failing test in src/lib.rs"
+   `cargo test` ×2 (2 failed): cargo test 2>&1 | tail -20
+   `read` ×1: src/lib.rs
+   `edit` ×1: src/lib.rs
+2. L11-20 +1m50s for 2m12s, 5 requests, 100k tokens, 5 calls: "no, use mise run test instead of cargo test, and don't pipe it through tail"
+   `read` ×3: src/lib.rs
+   `mise run test` ×1: mise run test
+   `git push` ×1 (1 failed): git push origin HEAD --force
+3. L24-31 +4m20s for 2m52s, 4 requests, 80k tokens, 4 calls: "I said open a PR. GH_TOKEN=<redacted> is already in the env"
+   `sleep + gh pr checks` ×3: sleep 45; gh pr checks 12 --repo acme/app
+   `gh pr create` ×1: gh pr create --fill --base main --head fix/test-x
+4. L33 +7m20s, 0 requests, 0 tokens, 0 calls: "thanks, that's all"

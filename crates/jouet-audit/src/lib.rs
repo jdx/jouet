@@ -32,13 +32,16 @@
 
 mod analyze;
 mod category;
+pub mod digest;
 mod event;
+mod gitleaks;
 mod pattern;
 mod read;
 mod record;
 mod redact;
 mod shape;
 pub mod stats;
+mod structure;
 mod time;
 
 pub use analyze::{
@@ -46,7 +49,8 @@ pub use analyze::{
     Totals,
 };
 pub use category::{Category, categorize};
-pub use event::{Call, Request, Tool, Transcript};
+pub use event::{Call, Message, MessageKind, Request, Tool, Transcript};
+pub use gitleaks::Gitleaks;
 pub use pattern::{Pattern, Patterns, detect};
 pub use read::{
     ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, home, open, scan,
@@ -54,4 +58,5 @@ pub use read::{
 pub use record::{CommandRecord, findings, transcripts};
 pub use redact::{example, redact};
 pub use shape::shape;
+pub use structure::{Part, structure};
 pub use time::parse_timestamp;

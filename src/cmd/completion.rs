@@ -12,7 +12,13 @@ pub(crate) fn run(args: &CompletionArgs, out: &Output) -> Exit {
     let Some(shell) = Shell::from_name(&args.shell) else {
         return out.error(Exit::Usage, &format!("unsupported shell `{}`", args.shell));
     };
-    let script = Jouet::completion_script(shell);
+    // `joue` is a view of `jouet run`, and jouet answers for a command line
+    // that starts with it, so its script still asks jouet.
+    let script = if args.joue {
+        Jouet::completion_script_for_alias("joue", shell)
+    } else {
+        Jouet::completion_script(shell)
+    };
     out.result(
         &serde_json::json!({ "shell": shell.as_str(), "script": script }),
         || script.clone(),

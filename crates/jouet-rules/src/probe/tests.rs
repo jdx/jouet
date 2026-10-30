@@ -119,7 +119,7 @@ fn git_state_reads_the_branch_its_upstream_and_the_work_tree() {
 
 #[test]
 fn status_lines_are_counted_by_kind() {
-    let state = git::parse_status(
+    let state = jouet_git::status::parse(
         "# branch.oid (initial)\n# branch.head (detached)\n1 .M N... 100644 100644 100644 a a f\n2 R. N... 100644 100644 100644 a a R100 g\tf\nu UU N... 1 2 3 4 a b c h\n? n\n",
     );
     assert_eq!(

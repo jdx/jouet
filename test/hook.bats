@@ -227,3 +227,17 @@ stop_reason() {
 	run grep -c "$PWD/repo" "$ledger"
 	assert_output 0
 }
+
+@test "the ledger keeps a compound command's structure and drops its values" {
+	jq -cn '{session_id: "s1", tool_name: "Bash", tool_input: {command: "cd /repo && for pr in 101 102; do gh pr checks $pr --repo acme/app; done"}}' |
+		jouet hook claude pre-tool-use
+	jq -cn '{session_id: "s1", tool_name: "Bash", tool_input: {command: "case \"$e\" in\n  deploy-prod) make ship;;\nesac"}}' |
+		jouet hook claude pre-tool-use
+
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	run jq -r '.shape' "$ledger"
+	assert_line --index 0 'cd <arg> && for <arg> in <arg>…; do gh pr checks <arg> --repo <arg>; done'
+	assert_line --index 1 'case <arg> in <arg>) make <arg>;; esac'
+	run grep -cE 'acme|deploy-prod|101' "$ledger"
+	assert_output 0
+}

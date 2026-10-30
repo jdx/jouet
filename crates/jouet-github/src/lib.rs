@@ -8,8 +8,9 @@
 //! failed command. `JOUET_GITHUB_API_URL` points the client at another API
 //! root, such as a GitHub Enterprise server or a test's fake server.
 //!
-//! [`Client::put`] is the one REST write, for the merge and update-branch
-//! endpoints GraphQL has no safe equivalent of.
+//! [`Client::put`] is the REST write for the merge and update-branch
+//! endpoints GraphQL has no safe equivalent of; [`Client::write`] sends any
+//! other method, for routines.
 //!
 //! [`Client::get`] sends `If-None-Match` when given an ETag, so an unchanged
 //! poll comes back as a 304 that costs nothing against the rate limit.
@@ -50,6 +51,8 @@ struct Token {
 pub struct Rest {
     pub status: u16,
     pub etag: Option<String>,
+    /// The `Link` header, which names the next page of a list.
+    pub link: Option<String>,
     pub body: String,
 }
 
@@ -81,18 +84,40 @@ impl From<Failure> for String {
     }
 }
 
-/// What a request sends: a GraphQL POST, a REST PUT, or (with neither) a
-/// GET.
+/// What a request sends: a GraphQL POST, a REST write with its method, or
+/// (with neither) a GET.
 #[derive(Clone, Copy)]
 enum Body<'a> {
     Post(&'a str),
-    Put(&'a str),
+    Rest(Method, &'a str),
 }
 
-/// A response: its status, ETag and body.
+/// The REST methods that write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl Method {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.to_ascii_uppercase().as_str() {
+            "POST" => Some(Self::Post),
+            "PUT" => Some(Self::Put),
+            "PATCH" => Some(Self::Patch),
+            "DELETE" => Some(Self::Delete),
+            _ => None,
+        }
+    }
+}
+
+/// A response: its status, ETag, `Link` header and body.
 struct Sent {
     status: u16,
     etag: Option<String>,
+    link: Option<String>,
     text: String,
 }
 
@@ -131,6 +156,25 @@ impl Client {
             token: None,
             rejected: Vec::new(),
         }
+    }
+
+    /// The same client, sending to another API root, such as a test's
+    /// fake server.
+    pub fn with_api_url(mut self, url: &str) -> Self {
+        self.api_url = url.trim_end_matches('/').to_string();
+        self
+    }
+
+    /// The same client, using only `token`: no environment variable and no
+    /// `gh`. For a test's fake server.
+    pub fn with_token(mut self, token: &str) -> Self {
+        self.sources = Vec::new();
+        self.tried = Vec::new();
+        self.token = Some(Token {
+            source: "the given token",
+            value: token.to_string(),
+        });
+        self
     }
 
     /// Runs a GraphQL query and returns its `data`. Paths GitHub reports as
@@ -200,11 +244,7 @@ impl Client {
             path.to_string()
         };
         let sent = self.send(&url, None, etag, true)?;
-        Ok(Rest {
-            status: sent.status,
-            etag: sent.etag,
-            body: sent.text,
-        })
+        Ok(sent.into())
     }
 
     /// PUTs a JSON body to a REST path such as `/repos/o/r/pulls/1/merge`.
@@ -212,14 +252,17 @@ impl Client {
     /// follow one that succeeded. Statuses other than 401 are the caller's to
     /// read.
     pub fn put(&mut self, path: &str, body: &Value) -> Result<Rest, Failure> {
+        self.write(Method::Put, path, body)
+    }
+
+    /// Sends a JSON body to a REST path with a method that writes. Like
+    /// [`Client::put`], it is not retried after a 5xx or a dropped
+    /// connection, and statuses other than 401 are the caller's to read.
+    pub fn write(&mut self, method: Method, path: &str, body: &Value) -> Result<Rest, Failure> {
         let url = format!("{}{path}", self.api_url);
         let body = body.to_string();
-        let sent = self.send(&url, Some(Body::Put(&body)), None, false)?;
-        Ok(Rest {
-            status: sent.status,
-            etag: sent.etag,
-            body: sent.text,
-        })
+        let sent = self.send(&url, Some(Body::Rest(method, &body)), None, false)?;
+        Ok(sent.into())
     }
 
     /// Sends a request with the first token GitHub accepts: `body` when
@@ -316,14 +359,19 @@ impl Client {
                     .header("Authorization", auth)
                     .content_type("application/json")
                     .send(body),
-                Some(Body::Put(body)) => self
-                    .agent
-                    .put(url)
-                    .header("Authorization", auth)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
-                    .content_type("application/json")
-                    .send(body),
+                Some(Body::Rest(method, body)) => {
+                    let req = match method {
+                        Method::Post => self.agent.post(url),
+                        Method::Put => self.agent.put(url),
+                        Method::Patch => self.agent.patch(url),
+                        Method::Delete => self.agent.delete(url).force_send_body(),
+                    };
+                    req.header("Authorization", auth)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("X-GitHub-Api-Version", "2022-11-28")
+                        .content_type("application/json")
+                        .send(body)
+                }
                 None => {
                     let mut req = self
                         .agent
@@ -366,6 +414,7 @@ impl Client {
             let remaining = header("x-ratelimit-remaining");
             let reset = header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok());
             let etag = header("etag");
+            let link = header("link");
             if status == 403 || status == 429 {
                 if remaining.as_deref() == Some("0") {
                     let reset = reset.unwrap_or_else(|| jouet_output::time::now() + 60);
@@ -399,9 +448,41 @@ impl Client {
                 std::thread::sleep(backoff(attempt));
                 continue;
             }
-            return Ok(Sent { status, etag, text });
+            return Ok(Sent {
+                status,
+                etag,
+                link,
+                text,
+            });
         }
     }
+}
+
+impl From<Sent> for Rest {
+    fn from(sent: Sent) -> Self {
+        Self {
+            status: sent.status,
+            etag: sent.etag,
+            link: sent.link,
+            body: sent.text,
+        }
+    }
+}
+
+/// The URL of the next page in a `Link` header, if it names one.
+pub fn next_page(link: &str) -> Option<String> {
+    link.split(',').find_map(|part| {
+        let (url, params) = part.split_once(';')?;
+        params
+            .split(';')
+            .any(|p| p.trim() == r#"rel="next""#)
+            .then(|| {
+                url.trim()
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .to_string()
+            })
+    })
 }
 
 /// Reads a token from `gh`, with `GH_TOKEN` and `GITHUB_TOKEN` removed so
@@ -453,6 +534,19 @@ mod tests {
         assert_eq!(
             join_and(&["GH_TOKEN", "GITHUB_TOKEN", "gh auth token"]),
             "GH_TOKEN, GITHUB_TOKEN and gh auth token"
+        );
+    }
+
+    #[test]
+    fn the_next_page_comes_from_the_link_header() {
+        let link = r#"<https://api.github.com/x?page=1>; rel="prev", <https://api.github.com/x?page=3>; rel="next""#;
+        assert_eq!(
+            next_page(link).as_deref(),
+            Some("https://api.github.com/x?page=3")
+        );
+        assert_eq!(
+            next_page(r#"<https://api.github.com/x?page=1>; rel="prev""#),
+            None
         );
     }
 

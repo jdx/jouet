@@ -96,7 +96,11 @@ jobs:
       # matrix on every pull request.
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1
         with:
-          bin: jouet
+          # `joue` is a small launcher for the `jouet` beside it, so both
+          # ship as real files and no package manager has to make a symlink.
+          # Two binaries need the archive named, which keeps it jouet's.
+          bin: jouet,joue
+          archive: jouet-$target
           target: ${{ matrix.target }}
           build-tool: ${{ contains(matrix.target, '-linux-') && 'cross' || 'cargo' }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -237,7 +241,8 @@ jobs:
 
       # SHA256SUMS says the files did not change in transit; the packslip
       # says who built them. It is one signed document holding every
-      # archive's digest, the executable inside it, the shared objects it
+      # archive's digest, the executables inside it (jouet, and joue, which
+      # runs routines), the shared objects it
       # needs from the host, and the build provenance of each file, signed
       # keylessly with this job's identity. See https://packslip.dev.
       #
@@ -252,7 +257,7 @@ jobs:
           commit: ${{ needs.source.outputs.commit }}
           artifacts: release-assets/jouet-*.tar.gz release-assets/jouet-*.zip
           manifest: .github/packslip/release.toml
-          bin: jouet
+          bin: jouet joue
           resources: |
             cli-spec/usage=asset:jouet.usage.kdl
             completion/bash=asset:jouet.bash

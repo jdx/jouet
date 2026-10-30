@@ -4,9 +4,9 @@
 Usage: check-glibc-min.py MANIFEST ARCHIVE...
 
 MANIFEST is the packslip release.toml. For every `*-linux-gnu*` archive, the
-`jouet` executable inside is read with `readelf -V`, which works for any ELF
-architecture, and the highest `GLIBC_x.y` symbol version it needs is compared
-with the archive's `requires.glibc_min`. An archive the manifest gives no
+`jouet` and `joue` executables inside are read with `readelf -V`, which works
+for any ELF architecture, and the highest `GLIBC_x.y` symbol version either
+needs is compared with the archive's `requires.glibc_min`. An archive the manifest gives no
 `glibc_min`, or one whose binary needs more, fails, so the declared floor and
 the real one cannot drift apart.
 """
@@ -18,6 +18,10 @@ import tarfile
 import tempfile
 import tomllib
 from pathlib import Path
+
+
+# Every executable a release archive holds.
+BINARIES = ("jouet", "joue")
 
 
 def version(text: str) -> tuple[int, ...]:
@@ -62,7 +66,7 @@ def main() -> int:
             print(f"::error::{archive.name} has no requires.glibc_min in {sys.argv[1]}")
             status = 1
             continue
-        need = needed(archive)
+        need = max(needed(archive, binary) for binary in BINARIES)
         shown = ".".join(map(str, need)) or "none"
         if need > version(floor):
             print(f"::error::{archive.name} needs glibc {shown}, but {sys.argv[1]} declares {floor}")

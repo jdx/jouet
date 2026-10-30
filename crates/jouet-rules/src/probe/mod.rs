@@ -1,24 +1,22 @@
-//! Probes: read-only views of jouet's state that rules and recipes can ask
-//! for. `jouet.pr.status()` and `jouet.pr.next()` (GitHub),
-//! `jouet.ci.last_run()` (the hooks' ledger), `jouet.git.state()`,
-//! `jouet.git.tree()` and `jouet.repo()` (plain `git`),
-//! `jouet.cargo.workspace()` (`Cargo.toml` files), `jouet.test.adapters()`
-//! (the test runners `jouet test --affected` can select for, as the binary
-//! detects them), and `jouet.env()` (an allowlist).
+//! Probes: read-only views of jouet's state that rules can ask for.
+//! `jouet.pr.status()` and `jouet.pr.next()` (GitHub), `jouet.ci.last_run()`
+//! (the hooks' ledger), `jouet.git.state()`, `jouet.git.tree()` and
+//! `jouet.repo()` (plain `git`), `jouet.cargo.workspace()` (`Cargo.toml`
+//! files), `jouet.test.adapters()` (the test runners `jouet test --affected`
+//! can select for, as the binary detects them), and `jouet.env()` (an
+//! allowlist).
 //!
 //! Every probe:
 //! - only reads;
-//! - is cached for the rest of the hook call, or of the recipe step, that
-//!   first asked for it;
-//! - runs inside the caller's budget: it gets whatever time the rule (or
-//!   step) has left, and a probe that cannot answer in that time returns
-//!   nil with the reason, as does any other failure;
+//! - is cached for the rest of the hook call that first asked for it;
+//! - runs inside the caller's budget: it gets whatever time the rule has
+//!   left, and a probe that cannot answer in that time returns nil with the
+//!   reason, as does any other failure;
 //! - returns `(value, nil)`, `(nil, reason)` or `(nil, nil)` when there is
 //!   simply nothing to report, such as no ledger yet.
 //!
 //! The GitHub probes are off in hooks unless the `rules.network` setting
-//! turns them on, so a hook never waits on the network by default; recipes
-//! always have them.
+//! turns them on, so a hook never waits on the network by default.
 
 mod cargo;
 pub(crate) mod git;

@@ -105,7 +105,7 @@ These slot into the same adapter trait and are follow-ups:
 
 ## The full suite
 
-`jouet test` without `--affected` runs the repository's test task, found at the repository root as `jouet run`'s recipes find it: a mise `test` task (`mise run test`), a package.json `test` script (with the package manager its lockfile names), `Cargo.toml` (`cargo test --workspace`), a justfile or Makefile `test` target, or `go.mod` (`go test ./...`). Without one, it runs the whole suite of each adapter found. Words after `--` are passed on (after a `--` of its own for `npm test`).
+`jouet test` without `--affected` runs the repository's test task, found at the repository root: a mise `test` task (`mise run test`), a package.json `test` script (with the package manager its lockfile names), `Cargo.toml` (`cargo test --workspace`), a justfile or Makefile `test` target, or `go.mod` (`go test ./...`). Without one, it runs the whole suite of each adapter found. Words after `--` are passed on (after a `--` of its own for `npm test`).
 
 ### mise tasks
 

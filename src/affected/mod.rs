@@ -21,7 +21,6 @@ mod graph;
 mod js;
 mod pyimports;
 mod python;
-pub(crate) mod task;
 
 pub(crate) use changes::{Base, Change, Status};
 pub(crate) use classify::Effect;

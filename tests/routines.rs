@@ -1,6 +1,7 @@
-//! The GitHub probes end to end, against a local fake GitHub replaying a
-//! recorded PR: from a recipe, which always has them, and from a rule under
-//! `jouet rule test`, which has them only with `rules.network`.
+//! Routines and the GitHub probes end to end, against a local fake GitHub
+//! replaying a recorded PR: `joue` run by its launcher, by a link named
+//! `joue` and as `jouet run`, and a rule under `jouet rule test`, which has
+//! the probes only with `rules.network`.
 
 mod common;
 
@@ -49,35 +50,59 @@ fn write(home: &Path, dir: &str, name: &str, code: &str) {
     std::fs::write(dir.join(name), code).unwrap();
 }
 
+/// `joue` as the launcher runs it, as a symlink named `joue` does, and as
+/// `jouet run`: the same routine, the same document.
+fn joue_three_ways(fake: &Fake, home: &Path, args: &[&str]) -> Vec<Output> {
+    let link = home.join(format!("joue{}", std::env::consts::EXE_SUFFIX));
+    if !link.exists() {
+        link_binary(Path::new(env!("CARGO_BIN_EXE_jouet")), &link);
+    }
+    let mut outputs = Vec::new();
+    for program in [Path::new(env!("CARGO_BIN_EXE_joue")), &link] {
+        let mut cmd = Command::new(program);
+        cmd.args(args)
+            .current_dir(home)
+            .env("HOME", home)
+            .env("XDG_STATE_HOME", home.join("state"))
+            .env("JOUET_GITHUB_API_URL", &fake.url)
+            .env("JOUET_GITHUB_TOKEN", "t")
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
+            .env_remove("JOUET_DISPLAY");
+        outputs.push(cmd.output().expect("joue should start"));
+    }
+    let mut run = vec!["run"];
+    run.extend(args);
+    outputs.push(jouet(fake, home, &[], &run));
+    outputs
+}
+
+#[cfg(unix)]
+fn link_binary(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(windows)]
+fn link_binary(target: &Path, link: &Path) {
+    std::fs::copy(target, link).unwrap();
+}
+
 #[test]
-fn a_recipe_reads_a_pr_through_the_probes() {
+fn the_pr_next_routine_says_what_pr_next_says() {
     let fake = fake();
     let home = tempfile::tempdir().unwrap();
-    write(
+    let rust = jouet(
+        &fake,
         home.path(),
-        "recipes",
-        "look.luau",
-        r#"--- why: read a PR
-return { run = function()
-    local s = jouet.pr.status("jdx/mise#15172")
-    local n = jouet.pr.next("jdx/mise#15172")
-    return { number = s.number, state = s.state, repo = n.repo, action = n.action, kind = n.kind }
-end }
-"#,
+        &[],
+        &["--json", "pr", "next", "jdx/mise#15172"],
     );
-    let out = jouet(&fake, home.path(), &[], &["--json", "run", "look"]);
-    let report = json(&out);
-    assert_eq!(report["exit_code"], 0, "{}{}", stdout(&out), stderr(&out));
-    let result = &report["result"];
-    assert_eq!(result["number"], 15172);
-    assert_eq!(result["state"], "draft");
-    assert_eq!(result["repo"], "jdx/mise");
-    assert!(result["action"].is_string() && result["kind"].is_string());
-    // Status and next come from one fetch, cached for the step, made the
-    // way `jouet pr status` makes it.
-    let requests = fake.requests();
-    assert_eq!(requests.len(), 1);
-    let request = &requests[0];
+    assert_eq!(rust.status.code(), Some(10), "{}", stderr(&rust));
+    for out in joue_three_ways(&fake, home.path(), &["--json", "pr-next", "jdx/mise#15172"]) {
+        assert_eq!(out.status.code(), Some(10), "{}", stderr(&out));
+        assert_eq!(stdout(&out), stdout(&rust));
+    }
+    let request = &fake.requests()[0];
     assert_eq!(
         (
             request.method.as_str(),
@@ -90,6 +115,47 @@ end }
         query(request).contains("pullRequest(number:"),
         "{}",
         query(request)
+    );
+}
+
+#[test]
+fn a_users_routine_composes_primitives() {
+    let fake = fake();
+    let home = tempfile::tempdir().unwrap();
+    write(
+        home.path(),
+        "routines",
+        "draft-check.luau",
+        r#"--- about: Say whether a PR is still a draft
+--- capabilities: github.read
+--- usage: arg "<pr>" help="The PR"
+return {
+    run = function(args)
+        local found = github.prs({ prs = { args.pr }, settle = 0 })
+        local pr = found.prs[1]
+        print(`{pr.repo}#{pr.number} is {pr.state}`)
+        return { draft = pr.state == "draft" }, if pr.state == "draft" then joue.exit.act else 0
+    end,
+}
+"#,
+    );
+    let outs = joue_three_ways(&fake, home.path(), &["draft-check", "jdx/mise#15172"]);
+    for out in &outs {
+        assert_eq!(out.status.code(), Some(10), "{}", stderr(out));
+        assert_eq!(stdout(out), "jdx/mise#15172 is draft\n");
+    }
+    let out = jouet(
+        &fake,
+        home.path(),
+        &[],
+        &["run", "draft-check", "jdx/mise#15172", "--json"],
+    );
+    assert_eq!(json(&out), serde_json::json!({ "draft": true }));
+    let out = jouet(&fake, home.path(), &[], &["run", "draft-check", "--help"]);
+    assert!(
+        stdout(&out).contains("Usage: joue draft-check [FLAGS] <pr>"),
+        "{}",
+        stdout(&out)
     );
 }
 
@@ -125,8 +191,8 @@ return {
     // arrives within the rule's 50 ms depends on the machine, so either
     // outcome is right: the PR's state, or the rule failing open over its
     // budget. What must not happen is the probe being refused. The fetch
-    // itself is checked, without a deadline that matters, by the recipe test
-    // above.
+    // itself is the one `pr status` makes, which the routine tests above
+    // check without a deadline that matters.
     let out = jouet(
         &fake,
         home.path(),

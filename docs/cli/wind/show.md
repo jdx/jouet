@@ -3,10 +3,10 @@
 
 - **Usage:** `jouet wind show <ID>`
 
-Show a note: what was noticed, and the rule drafted for it
+Show a note or a proposal: what was noticed, and what was drafted
 
 ## Arguments
-- **`<ID>`** — The note's id, such as n3
+- **`<ID>`** — The id of a note (n3), a proposal (p2) or a suggested review (r1)
 
 ## Flags
 - **`-h --help`** — Print help

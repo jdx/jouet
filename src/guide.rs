@@ -68,13 +68,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "run",
         Some(
-            "a routine you would otherwise type out step by step: `jouet run land` (pr next, wait ci, then pr land; yes=true merges), `jouet run sweep` (unresolved threads as a work list) or `jouet run ship-check` (the test task, then pr status); `jouet run --list` shows them all, `--dry-run` the steps",
+            "a job you would otherwise do step by step, written as a routine (code, where rules are TOML configuration): `joue land [PR]` (pr-next, wait for CI, then pr land), `joue sweep` (unresolved threads as a work list), `joue ship-check` (the tests, then the PR); `joue --list` lists them, `joue NAME --help` gives the args, and a routine that writes needs --yes (without it: a preview and exit 4)",
         ),
     ),
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent",
         ),
     ),
     (
@@ -89,6 +89,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("stats", None),
     ("completion", None),
 ];
+
+/// Subcommands an agent is told about where it needs them, in a line jouet
+/// prints (a proposal's note, the review prompt), so the overview leaves
+/// them out. `jouet agent-help COMMAND` still lists them.
+const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -150,13 +155,17 @@ pub(crate) fn overview() -> String {
         let name = meta.cmd.name;
         let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
-        let subs: Vec<_> = meta.subcommands.iter().filter(|s| !s.hide).collect();
         let usage = synopsis(&format!("jouet {name}"), meta);
+        let listed: Vec<_> = meta
+            .subcommands
+            .iter()
+            .filter(|s| !s.hide && !PROMPTED.contains(&(name, s.cmd.name)))
+            .collect();
         // A bare `jouet pr` above its subcommands says nothing.
-        if subs.is_empty() || usage != format!("jouet {name}") {
+        if listed.is_empty() || usage != format!("jouet {name}") {
             let _ = writeln!(out, "  {usage}");
         }
-        for sub in subs {
+        for sub in listed {
             let path = format!("jouet {name} {}", sub.cmd.name);
             let _ = writeln!(
                 out,
@@ -352,6 +361,16 @@ mod tests {
                 crate::spec::has_command(&[name]),
                 "WHEN names `{name}`, which jouet does not have"
             );
+        }
+    }
+
+    #[test]
+    fn subcommands_left_out_of_the_overview_exist() {
+        for (name, sub) in PROMPTED {
+            assert!(crate::spec::has_command(&[name, sub]), "{name} {sub}");
+            let guide = command(&[name]).unwrap();
+            assert!(guide.contains(&format!("jouet {name} {sub}")), "{guide}");
+            assert!(!overview().contains(&format!("jouet {name} {sub}")));
         }
     }
 
