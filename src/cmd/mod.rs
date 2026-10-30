@@ -1,7 +1,9 @@
 //! Command implementations, and the output conventions they share.
 
 pub mod edit;
+pub mod pr;
 pub mod rule;
+pub mod threads;
 pub mod wait;
 
 use crate::display::Mode;
@@ -26,11 +28,22 @@ impl Output {
     /// with --json, so `jouet ... --json | jq` always gets one document, and
     /// as text on stderr otherwise.
     pub fn error(&self, exit: Exit, message: &str) -> Exit {
+        self.error_with_hint(exit, message, None)
+    }
+
+    /// Like [`Output::error`], with a hint on what to change.
+    pub fn error_with_hint(&self, exit: Exit, message: &str, hint: Option<&str>) -> Exit {
         if self.json {
-            let doc = serde_json::json!({ "error": { "code": exit.name(), "message": message } });
-            println!("{}", self.mode.json(&doc));
+            let mut error = serde_json::json!({ "code": exit.name(), "message": message });
+            if let Some(hint) = hint {
+                error["hint"] = hint.into();
+            }
+            println!("{}", self.mode.json(&serde_json::json!({ "error": error })));
         } else {
             eprintln!("jouet: {message}");
+            if let Some(hint) = hint {
+                eprintln!("hint: {hint}");
+            }
         }
         exit
     }

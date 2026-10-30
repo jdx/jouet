@@ -47,6 +47,7 @@ tempfile = "3"
 # (CDLA-Permissive-2.0).
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-native-certs = "0.8"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
 usage-config = { version = "7", features = ["toml"] }
 usage-rs = { version = "7", features = ["config"] }

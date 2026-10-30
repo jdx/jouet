@@ -1,0 +1,518 @@
+{
+  "data": {
+    "l0": {
+      "issueCount": 4,
+      "nodes": [
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "feat/edit",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T15:26:22Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 3,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 1,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 3,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 3,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKGZlMWUzY2U2ODFlOGU5YjMwZjhkOWMyYTA1OWQ2MWNiMjk4ZjU2NDQ"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "feat/wait-local",
+          "headRefOid": "fe1e3ce681e8e9b30f8d9c2a059d61cb298f5644",
+          "id": "PR_kwDOVdIDQc8AAAABLzI-MA",
+          "isDraft": false,
+          "mergeStateStatus": "UNSTABLE",
+          "mergeable": "MERGEABLE",
+          "number": 7,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [],
+            "pageInfo": {
+              "endCursor": null,
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "feat(wait): add jouet wait for files, logs, ports, URLs and processes",
+          "url": "https://github.com/jdx/jouet/pull/7"
+        },
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "feat/edit",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T15:24:23Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 3,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 10,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKDcwM2Y5ZDQ4NmRmNjcyNWFmZTM2MGY3ODc0ZGIwYTg3ZWQ3Y2M2Zjc"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "docs/site",
+          "headRefOid": "703f9d486df6725afe360f7874db0a87ed7cc6f7",
+          "id": "PR_kwDOVdIDQc8AAAABLzF2CA",
+          "isDraft": false,
+          "mergeStateStatus": "CLEAN",
+          "mergeable": "MERGEABLE",
+          "number": 6,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [],
+            "pageInfo": {
+              "endCursor": null,
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "docs: add the documentation site at jouet.jdx.dev",
+          "url": "https://github.com/jdx/jouet/pull/6"
+        },
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "feat/edit",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T15:17:38Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 2,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 9,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKDg1NDQyM2JhYWI1YmZjYTJhNDNlZjRmMzU0N2M5ZjkzZTRmOWVmY2E"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "feat/pr-status",
+          "headRefOid": "854423baab5bfca2a43ef4f3547c9f93e4f9efca",
+          "id": "PR_kwDOVdIDQc8AAAABLy73Tw",
+          "isDraft": false,
+          "mergeStateStatus": "CLEAN",
+          "mergeable": "MERGEABLE",
+          "number": 5,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [
+              {
+                "isResolved": false
+              },
+              {
+                "isResolved": false
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxNToyNDo0NlrOsgapKw==",
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "feat(status): add jouet pr status",
+          "url": "https://github.com/jdx/jouet/pull/5"
+        },
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "main",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T15:16:54Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 1,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 1,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 9,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKDYyMjM2OGFjMmViZTJhZjE2ZjJjMTI3ZDM1ZGYyNTE1OGQ4Yjg0Nzk"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "feat/edit",
+          "headRefOid": "622368ac2ebe2af16f2c127d35df25158d8b8479",
+          "id": "PR_kwDOVdIDQc8AAAABLym_fQ",
+          "isDraft": false,
+          "mergeStateStatus": "CLEAN",
+          "mergeable": "MERGEABLE",
+          "number": 3,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [
+              {
+                "isResolved": false
+              },
+              {
+                "isResolved": false
+              },
+              {
+                "isResolved": false
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxNToyNDoxNFrOsgacRQ==",
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "feat(edit): add jouet edit for exact, all-or-nothing edits",
+          "url": "https://github.com/jdx/jouet/pull/3"
+        }
+      ],
+      "pageInfo": {
+        "endCursor": "Y3Vyc29yOjQ=",
+        "hasNextPage": false
+      }
+    }
+  }
+}

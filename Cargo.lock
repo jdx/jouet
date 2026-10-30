@@ -277,6 +277,7 @@ dependencies = [
  "sha2",
  "similar",
  "tempfile",
+ "toml",
  "ureq",
  "usage-config",
  "usage-rs",
