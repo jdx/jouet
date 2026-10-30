@@ -1,0 +1,142 @@
+name: ci implementation
+
+on:
+  workflow_call:
+    inputs:
+      trusted:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MBX_DISABLE: "1"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Actions are pinned to full commit SHAs. A mutable tag like @v2 or @stable can
+# be retargeted at any time, which would swap out executable CI code without
+# review.
+jobs:
+  test:
+    runs-on: ${{ !inputs.trusted && 'ubuntu-latest' || 'namespace-profile-endev-linux-amd64;overrides.cache-tag=cache' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The tasks live in mise.toml so that a laptop and this runner invoke the
+      # same commands. Tools install on demand; Rust comes from the runner.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install: false
+          cache: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ inputs.trusted && github.ref == 'refs/heads/main' }}
+      - name: Install Rust lint components
+        run: rustup component add rustfmt clippy
+
+      # hk.pkl runs exactly what `mise run lint` does (cargo fmt --check and
+      # clippy -D warnings) plus jactionlint, so it replaces that task here.
+      # Online checks (known-vulnerable actions, impostor commits, stale refs) run
+      # in CI only; locally: JACTIONLINT_ONLINE=1 hk check --all
+      - run: mise x hk -- hk check --all
+        env:
+          JACTIONLINT_ONLINE: 1
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: mise run test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Check dependencies
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  test-macos:
+    runs-on: ${{ !inputs.trusted && 'macos-latest' || 'namespace-profile-endev-macos-arm64;overrides.cache-tag=cache' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install: false
+          cache: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ inputs.trusted && github.ref == 'refs/heads/main' }}
+      # mise installs the task's tools lazily here, and without a token it hits
+      # the 60/hr per-IP GitHub API limit that macOS runners share, failing the
+      # job before cargo starts.
+      - run: mise run test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # Plain cargo, without mise: the Linux job compiles out `#[cfg(windows)]`
+  # code, so Windows-only lints and test failures surface only here.
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ inputs.trusted && github.ref == 'refs/heads/main' }}
+      - name: Install Rust lint components
+        run: rustup component add clippy
+      - run: cargo test --locked --all-targets
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  # Cargo.toml's rust-version is a promise to anyone building from crates.io.
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: "1.91"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the minimum supported Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ inputs.trusted && github.ref == 'refs/heads/main' }}
+      - name: Check MSRV
+        run: cargo check --locked --all-targets
+
+  # Single fan-in gate, so branch protection requires one check instead of an
+  # enumerated list that goes stale every time a job is added or renamed. It
+  # also catches *skipped* jobs, which a required check would otherwise treat
+  # as passing.
+  final:
+    permissions: {}
+    needs:
+      - test
+      - test-macos
+      - test-windows
+      - msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    # Run on success or upstream failure but skip when the workflow is cancelled
+    # — `always()` would override `cancel-in-progress` and waste a runner.
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Check job results
+        if: |
+          needs.test.result != 'success' ||
+          needs.test-macos.result != 'success' ||
+          needs.test-windows.result != 'success' ||
+          needs.msrv.result != 'success'
+        run: exit 1
+      - run: echo "All CI jobs completed successfully"

@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+# A distinct group from ci-impl.yml's, which would otherwise cancel its own caller.
+concurrency:
+  group: ci-caller-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # jdx's own pushes and same-repository pull requests run on Namespace runners;
+  # everything else runs on GitHub-hosted runners without cache writes.
+  trusted:
+    if: ${{ github.actor == 'jdx' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'jdx')) }}
+    permissions:
+      contents: read
+    uses: $/.github/workflows/ci-impl.yml
+    with:
+      trusted: true
+
+  untrusted:
+    if: ${{ github.actor != 'jdx' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login != 'jdx')) }}
+    permissions:
+      contents: read
+    uses: $/.github/workflows/ci-impl.yml
+    with:
+      trusted: false
+
+  final:
+    name: final
+    if: ${{ always() && !cancelled() && needs.trusted.result != 'cancelled' && needs.untrusted.result != 'cancelled' }}
+    permissions: {}
+    needs: [trusted, untrusted]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Check selected workflow result
+        env:
+          TRUSTED_RESULT: ${{ needs.trusted.result }}
+          UNTRUSTED_RESULT: ${{ needs.untrusted.result }}
+        run: |
+          if { [[ "$TRUSTED_RESULT" == success && "$UNTRUSTED_RESULT" == skipped ]] ||
+             [[ "$TRUSTED_RESULT" == skipped && "$UNTRUSTED_RESULT" == success ]]; }; then
+            exit 0
+          fi
+          echo "trusted=$TRUSTED_RESULT untrusted=$UNTRUSTED_RESULT"
+          exit 1

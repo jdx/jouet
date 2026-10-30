@@ -1,0 +1,22 @@
+[workspace]
+# Label the release PR so it is easy to find and filter.
+pr_labels = ["release"]
+# Releases happen by merging a release PR (auto-merge-release.yml does that on
+# a cadence), not by any push that happens to carry a version bump.
+release_always = false
+git_tag_enable = true
+git_release_enable = true
+# Drafted so release.yml can attach binaries before anyone sees it — a release
+# that appears without its assets is worse than one that appears a minute
+# later. release-plz.yml undrafts it once the upload succeeds.
+git_release_draft = true
+# A CLI: its promise is its commands, flags, exit codes and JSON output, not a
+# Rust API, so cargo-semver-checks has nothing meaningful to read. A real CLI
+# break is declared with `!` and a `BREAKING CHANGE:` footer.
+semver_check = false
+
+[[package]]
+name = "jouet"
+publish = true
+# The tag people reference, and the one release.yml's archives hang off.
+git_tag_name = "v{{ version }}"
