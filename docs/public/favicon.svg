@@ -1,7 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="jouet-logo-title">
-  <title id="jouet-logo-title">jouet</title>
-  <rect x="28.5" y="3" width="7" height="14" rx="3.5" fill="#f3ece2"/>
-  <path fill="#ef6a55" d="M32 13c14.5 0 26 6.2 26 13.6 0 4-5.3 9.5-13.6 17.8L34.6 56.6c-1.4 1.8-3.8 1.8-5.2 0L19.6 44.4C11.3 36.1 6 30.6 6 26.6 6 19.2 17.5 13 32 13z"/>
-  <path fill="none" stroke="#f3ece2" stroke-linecap="round" stroke-width="4" d="M8.5 31c6.5 5 40.5 5 47 0"/>
-  <path fill="none" stroke="#ffb3a5" stroke-linecap="round" stroke-width="3" opacity=".8" d="M17 20.5c4.5-2 9-2.8 13-3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="jouet-favicon-title" aria-describedby="jouet-favicon-desc">
+  <title id="jouet-favicon-title">jouet</title>
+  <desc id="jouet-favicon-desc">The jouet wind-up robot simplified for small sizes: a coral head, a cream face with two eyes and a smile, and a brass winding key on top</desc>
+  <path fill="#f2b84b" fill-rule="evenodd" d="M14 2C12.5 1 11.5 0 10 0A4 4 0 0 0 10 8C11.5 8 12.5 7 14 6V8H18V6C19.5 7 20.5 8 22 8A4 4 0 0 0 22 0C20.5 0 19.5 1 18 2zM8.5 4a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0zM20.5 4a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0z"/>
+  <rect x="12" y="8" width="8" height="3" rx="1" fill="#d9962b"/>
+  <rect x="2" y="10" width="28" height="20" rx="6" fill="#ef6a55"/>
+  <rect x="6" y="14" width="20" height="12" rx="3" fill="#fbf3e6"/>
+  <circle cx="12" cy="18" r="2.25" fill="#1d0f0c"/>
+  <circle cx="20" cy="18" r="2.25" fill="#1d0f0c"/>
+  <path d="M13 22q3 2.5 6 0" fill="none" stroke="#1d0f0c" stroke-width="2" stroke-linecap="round"/>
 </svg>
