@@ -118,6 +118,10 @@ pub struct PrArgs {
 pub enum PrCmd {
     /// Show where PRs stand and why any need attention
     Status(StatusArgs),
+    /// Say the one thing each PR needs next, and the command for it
+    Next(NextArgs),
+    /// Merge a PR that is ready, honouring branch protection
+    Land(LandArgs),
     /// List, reply to and resolve review threads
     Threads(ThreadsArgs),
 }
@@ -150,6 +154,83 @@ pub struct StatusArgs {
     /// Exit 1 when any PR needs attention
     #[usage(long)]
     fail_on_attention: bool,
+}
+
+/// Say the one thing each PR needs next, and the command for it
+///
+/// Works through a fixed order and stops at the first state that applies:
+/// merged, closed, draft, conflict, mergeable_unknown, behind_base,
+/// checks_failing, checks_pending, changes_requested, unresolved_threads,
+/// awaiting_approval, blocked, auto_merge, ready_to_merge. The states come
+/// from the same data and attention codes as `pr status`. Exits 0 when
+/// nothing is left to do, 10 when the agent must act and 20 when waiting on
+/// someone or something else; with several PRs, 10 wins over 20. These two
+/// codes are outside the shared table on purpose.
+#[derive(Args)]
+pub struct NextArgs {
+    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
+    /// current branch's PR
+    prs: Vec<String>,
+    /// Add the open PRs authored by the token's user
+    #[usage(long)]
+    mine: bool,
+    /// Add the PRs matching a GitHub search query
+    #[usage(long, value_name = "QUERY")]
+    search: Option<String>,
+    /// The repository for bare numbers, branches, --mine and --search.
+    /// Repeatable. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Vec<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
+}
+
+/// Merge a PR that is ready, honouring branch protection
+///
+/// Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is
+/// missing. With --update, a branch behind its base is first updated on
+/// GitHub by merging the base in (never a force-push), and its new checks
+/// are waited for. The merge goes through the API with the head SHA as a
+/// guard, the way the merge button does, so branch protection applies and
+/// is never bypassed. Then the PR is confirmed merged and the merge commit
+/// printed. It asks first only when a person is at a terminal (stdin and
+/// stderr are terminals and no coding agent is detected); anyone else must
+/// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
+#[derive(Args)]
+pub struct LandArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// How to merge: squash, merge or rebase (default squash)
+    #[usage(long, value_name = "METHOD")]
+    method: Option<String>,
+    /// Update a branch that is behind its base by merging the base in on
+    /// GitHub, then wait for its checks
+    #[usage(long)]
+    update: bool,
+    /// Merge without asking
+    #[usage(long)]
+    yes: bool,
+    /// Print the plan and change nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// How long to wait for checks after --update (default 30m)
+    #[usage(long, value_name = "DUR")]
+    timeout: Option<String>,
+    /// Time between the first checks of that wait; backs off to 60s
+    /// (default 10s)
+    #[usage(long, value_name = "DUR")]
+    interval: Option<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
 }
 
 /// Block until a condition holds, then print one summary

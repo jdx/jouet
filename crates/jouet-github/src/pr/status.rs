@@ -15,6 +15,7 @@ use jouet_output::time;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::fmt::Write as _;
+use std::time::{Duration, Instant};
 
 /// Lookups per query.
 const BATCH: usize = 50;
@@ -445,6 +446,42 @@ pub fn fetch(client: &mut Client, lookups: Vec<Lookup>) -> Result<FetchResult, S
     }
 }
 
+/// Re-queries open PRs whose mergeable state is still unknown until GitHub
+/// settles it or `settle` runs out.
+pub fn settle(client: &mut Client, prs: &mut [Fetched], settle: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + settle;
+    let mut wait = Duration::from_secs(1);
+    let mut announced = false;
+    loop {
+        let unknown: Vec<Target> = prs
+            .iter()
+            .filter(|p| p.is_open() && p.mergeable_unknown())
+            .filter_map(Fetched::target)
+            .collect();
+        let left = deadline.saturating_duration_since(Instant::now());
+        if unknown.is_empty() || left.is_zero() {
+            return Ok(());
+        }
+        if !announced {
+            let names: Vec<String> = unknown.iter().map(Target::to_string).collect();
+            eprintln!(
+                "jouet: waiting up to {}s for GitHub to compute mergeability of {}",
+                left.as_secs(),
+                names.join(", ")
+            );
+            announced = true;
+        }
+        std::thread::sleep(wait.min(left));
+        wait = (wait + Duration::from_secs(1)).min(Duration::from_secs(5));
+        let again = fetch(client, unknown.into_iter().map(Lookup::Pr).collect())?;
+        for fresh in again.prs {
+            if let Some(pr) = prs.iter_mut().find(|p| p.key() == fresh.key()) {
+                *pr = fresh;
+            }
+        }
+    }
+}
+
 /// Reads the PRs a batch of PR and search lookups returned, and returns
 /// the lookups for the next page of each search that has one.
 fn read_prs(
@@ -517,7 +554,7 @@ fn parse<T: serde::de::DeserializeOwned>(value: &Value, what: &str) -> Result<T,
     T::deserialize(value).map_err(|e| format!("GitHub sent {what} jouet could not read: {e}"))
 }
 
-fn read_pr(value: &Value) -> Result<Fetched, String> {
+pub(crate) fn read_pr(value: &Value) -> Result<Fetched, String> {
     let raw: RawPr = parse(value, "a PR")?;
     let state = match (raw.state.as_str(), raw.is_draft) {
         ("MERGED", _) => State::Merged,
@@ -556,6 +593,7 @@ fn read_pr(value: &Value) -> Result<Fetched, String> {
             base: raw.base_ref_name,
             head: raw.head_ref_name,
             head_sha: raw.head_ref_oid.chars().take(10).collect(),
+            head_oid: raw.head_ref_oid,
             pushed_at,
             mergeable,
             merge_state: raw.merge_state_status.to_ascii_lowercase(),
@@ -655,6 +693,10 @@ pub struct PrStatus {
     pub base: String,
     pub head: String,
     pub head_sha: String,
+    /// The whole head SHA, which the merge and update-branch endpoints
+    /// take as a guard against a push in between.
+    #[serde(skip)]
+    pub head_oid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pushed_at: Option<String>,
     pub mergeable: Mergeability,

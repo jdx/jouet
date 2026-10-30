@@ -13,6 +13,8 @@ jouet pr status [PR...] [--mine] [--search QUERY] [--repo OWNER/NAME]...
 
 The flags are listed in the [CLI reference](/cli/pr/status).
 
+For the single next action on each pull request, with the command that does it, use [`jouet pr next`](/commands/pr-next).
+
 ```text
 $ jouet pr status --repo jdx/mise 14955 15147 15187 99999999
 #14955 draft  fix(hook-env): install the error...        CONFLICT  ci 25/51 fail: untrusted / lint, untrusted / test-ci, test-ci  threads 0  review -

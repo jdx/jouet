@@ -18,6 +18,13 @@ pub enum Exit {
     /// Still pending when `--timeout` expired; running the same command
     /// again keeps waiting.
     Timeout,
+    /// `pr next` only: the agent has something to do. Outside the shared
+    /// table on purpose, as in Kent C. Dodds' `ship-pr`, so a script can
+    /// tell "act" and "wait" apart from every error.
+    Act,
+    /// `pr next` only: waiting on someone or something else, such as CI
+    /// or a reviewer.
+    Waiting,
 }
 
 impl Exit {
@@ -30,6 +37,8 @@ impl Exit {
             Self::Precondition => 4,
             Self::Remote => 5,
             Self::Timeout => 124,
+            Self::Act => 10,
+            Self::Waiting => 20,
         }
     }
 
@@ -43,6 +52,8 @@ impl Exit {
             Self::Precondition => "precondition",
             Self::Remote => "remote",
             Self::Timeout => "timeout",
+            Self::Act => "act",
+            Self::Waiting => "waiting",
         }
     }
 }
