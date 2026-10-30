@@ -26,6 +26,26 @@ common: --timeout DUR (default 30m)  --interval DUR (default 10s, backs off to 6
 
 The flags are listed in the [CLI reference](/cli/wait/). `PR` is a number, a URL, `owner/repo#123` or a branch, and defaults to the current branch's PR; `--repo` names the repository for a bare number or branch. `RUN` is a run ID or an Actions URL.
 
+## Before and after
+
+An agent restarts a server and waits for it, but `app.log` still holds the lines from the last run:
+
+```sh
+until grep -q 'Listening on' app.log; do
+  sleep 2
+done
+```
+
+The old "Listening on" line matches straight away, so the loop exits before this server is up. And if the server never gets there, the loop never ends. `jouet wait log` reads only what is appended after it starts, and gives up at `--timeout`:
+
+```console
+$ jouet wait log app.log --match 'Listening on' --timeout 2m
+[0s] log app.log: following
+[10s] log app.log: matched
+MET log app.log: matched (10s)
+  12:06:31 Listening on http://localhost:3000
+```
+
 ## `wait ci`
 
 ```console
