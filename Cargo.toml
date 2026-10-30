@@ -1,6 +1,6 @@
 [package]
 name = "jouet"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2024"
 # usage-rs 7's own floor. CI checks it in the msrv job.
 rust-version = "1.91"
