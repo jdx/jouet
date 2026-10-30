@@ -78,7 +78,7 @@ The rules read the command the way a shell does: quoted strings, here-document b
 The stop hook keeps an agent from declaring success while the last test, lint or build run it made failed, in the spirit of "verification before completion". It is conservative by design:
 
 - **What counts as a check.** Whatever the post-tool-use rules record. The built-in `checks` rule records `cargo test`, `build`, `check`, `clippy` and `fmt --check` (also through `mbx`), `mise run` tasks named `test*`, `lint*`, `check*`, `build*` or `ci`, `npm`/`pnpm`/`yarn`/`bun` test and scripts with those names, `make`/`just` targets, `go test`/`vet`/`build`, `pytest`, `vitest`, `jest`, `bats`, `hk check` and a few common linters; replace it with a `checks.luau` of your own to change that.
-- **When a failure counts.** Only when the check is the command's last pipeline, so its exit status is the command's: `cd crate && cargo test` counts, `cargo test; echo done` does not. Each kind keeps only its latest run, so a later passing `cargo test` clears an earlier failure.
+- **When a run counts.** Only when the check's own exit status is known: `cd crate && cargo test` counts, while `cargo test; echo done`, `cargo build && cargo test` failing, and `cargo test | tail` without `pipefail` do not. Each kind keeps only its latest run, so a later passing `cargo test` clears an earlier failure.
 - **Blocking once.** The hook blocks with a one-line reason, and if the agent stops again straight away (the harness reports `stop_hook_active`), its answer stands. A check that cannot pass never traps the agent.
 - **Where runs are recorded.** Claude Code reports each command's exit code to the post-tool-use hooks, which keep the latest run of each kind in `$XDG_STATE_HOME/jouet/sessions/<session>.json`. Updates take a lock, so commands finishing at once cannot drop each other's runs, and files untouched for a week are removed. Codex sends hooks no exit code, so its stop hook reads the commands in the last 8 MiB of the session transcript instead, and runs them through the same rules. That format is Codex's own: if it changes, the hook stops blocking rather than blocking wrongly.
 
@@ -86,7 +86,7 @@ Known false positives and misses:
 
 - A check you expected to fail, such as a test written to fail first or a failure that is already on the main branch, still blocks once. Say so in the reply and stop again.
 - A narrower passing run clears a broader failure: `cargo test -p a` passing after `cargo test` failed counts as passing.
-- A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
+- A check piped through `head` or `tail` counts as no run at all, unless `set -o pipefail` is on: its exit status is `tail`'s. A failure recorded earlier therefore stays, and blocks once, until the check passes without the pipe or with `pipefail`.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
 
 ### With rtk
