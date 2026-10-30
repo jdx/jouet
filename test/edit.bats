@@ -157,8 +157,8 @@ EOF
 	assert_content a.rs $'fn a() {\n    2\n}\n'
 	assert_content src/new.rs $'new\n'
 	assert_content added.rs $'fresh\n'
-	[[ ! -e old.rs ]]
-	[[ ! -e gone.rs ]]
+	[[ ! -e old.rs ]] || false
+	[[ ! -e gone.rs ]] || false
 }
 
 @test "a Codex patch without its End Patch line is refused as cut short" {
@@ -250,12 +250,12 @@ EOF
 	assert_line "0 of 3 files written"
 	assert_content a.txt $'one\n'
 	assert_content b.txt $'two\n'
-	[[ ! -e c.txt ]]
+	[[ ! -e c.txt ]] || false
 
 	# The full log is kept where the report says.
 	local log
 	log="$(sed -n 's/^  full log: //p' <<<"$output")"
-	[[ "$log" == "$JOUET_LOG_DIR"/* ]]
+	[[ "$log" == "$JOUET_LOG_DIR"/* ]] || false
 	assert_content "$log" $'tests failed\n'
 }
 
@@ -318,12 +318,12 @@ EOF
 	run --separate-stderr jouet edit --bogus </dev/null
 	assert_failure 2
 	assert_output ""
-	[[ "$stderr" == *"unexpected argument '--bogus'"* ]]
+	[[ "$stderr" == *"unexpected argument '--bogus'"* ]] || false
 
 	run --separate-stderr jouet edit <<<"just some text"
 	assert_failure 2
 	assert_output ""
-	[[ "$stderr" == "jouet: could not tell the spec's format from its first line"* ]]
+	[[ "$stderr" == "jouet: could not tell the spec's format from its first line"* ]] || false
 
 	run --separate-stderr jouet edit --format yaml <<<"=== a.txt"
 	assert_failure 2

@@ -24,6 +24,12 @@ mise run build
 The submodules are [bats](https://github.com/bats-core/bats-core) and its
 helpers, pinned so that `mise run test` uses the same test runner as CI.
 
+On Windows, `mise run test` runs the [Pester](https://pester.dev) tests in
+`e2e-win/` instead of bats. They need PowerShell 7 (`winget install
+Microsoft.PowerShell`) and Pester 5, which Windows does not ship (it has
+Pester 3): `pwsh -Command "Install-Module Pester -MinimumVersion 5.0 -Scope
+CurrentUser -Force -SkipPublisherCheck"`.
+
 mise provides the repository's tools. Rust is not among them: the toolchain is
 whichever one rustup makes current, and any stable release from 1.91, the
 crate's `rust-version`, builds it.
