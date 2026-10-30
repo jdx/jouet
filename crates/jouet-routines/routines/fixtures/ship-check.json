@@ -1,0 +1,166 @@
+{
+ "mise": {
+  "test": {
+   "ok": true,
+   "command": [
+    "cargo",
+    "test"
+   ],
+   "exit_code": 0,
+   "duration_ms": 1200,
+   "log": "/tmp/test.log",
+   "tail": [
+    "test result: ok. 12 passed"
+   ]
+  }
+ },
+ "github": [
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "match": "\"n0\":15",
+   "body": {
+    "data": {
+     "l0": {
+      "pullRequest": {
+       "autoMergeRequest": null,
+       "baseRefName": "feat/rules",
+       "commits": {
+        "nodes": [
+         {
+          "commit": {
+           "committedDate": "2026-10-30T17:52:32Z",
+           "statusCheckRollup": {
+            "contexts": {
+             "checkRunCountsByState": [
+              {
+               "count": 0,
+               "state": "ACTION_REQUIRED"
+              },
+              {
+               "count": 0,
+               "state": "CANCELLED"
+              },
+              {
+               "count": 0,
+               "state": "COMPLETED"
+              },
+              {
+               "count": 0,
+               "state": "FAILURE"
+              },
+              {
+               "count": 1,
+               "state": "IN_PROGRESS"
+              },
+              {
+               "count": 1,
+               "state": "NEUTRAL"
+              },
+              {
+               "count": 0,
+               "state": "PENDING"
+              },
+              {
+               "count": 13,
+               "state": "QUEUED"
+              },
+              {
+               "count": 0,
+               "state": "SKIPPED"
+              },
+              {
+               "count": 0,
+               "state": "STALE"
+              },
+              {
+               "count": 0,
+               "state": "STARTUP_FAILURE"
+              },
+              {
+               "count": 2,
+               "state": "SUCCESS"
+              },
+              {
+               "count": 0,
+               "state": "TIMED_OUT"
+              },
+              {
+               "count": 0,
+               "state": "WAITING"
+              }
+             ],
+             "statusContextCountsByState": [
+              {
+               "count": 0,
+               "state": "EXPECTED"
+              },
+              {
+               "count": 0,
+               "state": "ERROR"
+              },
+              {
+               "count": 0,
+               "state": "FAILURE"
+              },
+              {
+               "count": 0,
+               "state": "PENDING"
+              },
+              {
+               "count": 0,
+               "state": "SUCCESS"
+              }
+             ]
+            },
+            "id": "SCR_kwDOVdIDQdoAKDU1NTJjNTgwNjc3MThiZDEyMzFmOGRjYjNhODQ5NDkxMGVjYmQ4MjU"
+           }
+          }
+         }
+        ]
+       },
+       "headRefName": "feat/setup",
+       "headRefOid": "5552c58067718bd1231f8dcb3a8494910ecbd825",
+       "id": "PR_kwDOVdIDQc8AAAABLz8OVw",
+       "isDraft": false,
+       "mergeStateStatus": "BLOCKED",
+       "mergeable": "MERGEABLE",
+       "number": 15,
+       "repository": {
+        "nameWithOwner": "jdx/jouet"
+       },
+       "reviewDecision": null,
+       "reviewThreads": {
+        "nodes": [
+         {
+          "isResolved": true
+         },
+         {
+          "isResolved": true
+         },
+         {
+          "isResolved": false
+         }
+        ],
+        "pageInfo": {
+         "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0zMFQxNzo1MToxNFrOshRURg==",
+         "hasNextPage": false
+        }
+       },
+       "state": "OPEN",
+       "timelineItems": {
+        "nodes": [
+         {
+          "createdAt": "2026-10-30T17:10:26Z"
+         }
+        ]
+       },
+       "title": "feat(setup): add agent-help, skill and harness hooks that run jouet's rules",
+       "url": "https://github.com/jdx/jouet/pull/15"
+      }
+     }
+    }
+   }
+  }
+ ]
+}

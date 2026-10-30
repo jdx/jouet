@@ -11,15 +11,15 @@
 //! its time or instruction budget or returns something unexpected is reported
 //! in [`Outcome::errors`] and treated as having said nothing.
 //!
-//! Rules (and recipes) can also ask about jouet's state through read-only
-//! probes ([`probe`]), and recipes ([`recipe`]) sequence jouet's commands.
+//! Rules can also ask about jouet's state through read-only probes
+//! ([`probe`]). Routines, which compose jouet's primitives, are
+//! jouet-routines'.
 
 mod cache;
 mod examples;
 mod header;
 mod json;
 pub mod probe;
-pub mod recipe;
 pub mod shell;
 mod trust;
 
@@ -322,10 +322,8 @@ pub(crate) struct Shared {
     budget: Budget,
     /// What the probes read; None until a caller sets them up.
     probes: RefCell<Option<Probes>>,
-    /// Probe answers for the current hook call or recipe step.
+    /// Probe answers for the current hook call.
     cache: RefCell<HashMap<String, Result<Option<serde_json::Value>, String>>>,
-    /// The recipe being run, while one is.
-    recipe: RefCell<Option<recipe::RunState>>,
 }
 
 impl Shared {
@@ -363,7 +361,6 @@ impl Vm {
             budget,
             probes: RefCell::new(None),
             cache: RefCell::new(HashMap::new()),
-            recipe: RefCell::new(None),
         });
         install_module(&lua, &shared, &has_command)?;
         let guard = shared.clone();
@@ -435,8 +432,7 @@ impl Vm {
         result.map_err(|e| first_line(&e.to_string()))
     }
 
-    /// Forgets the probes' answers: a new hook call or recipe step asks
-    /// again.
+    /// Forgets the probes' answers: a new hook call asks again.
     fn new_call(&self) {
         self.shared.cache.borrow_mut().clear();
     }
@@ -887,7 +883,7 @@ fn read_fields(rule: &mut Rule, table: &Table) -> Result<(), String> {
     Ok(())
 }
 
-/// The `jouet` module: the Rust functions, the probes and `cmd`, then the
+/// The `jouet` module: the Rust functions and the probes, then the
 /// prelude's.
 fn install_module(
     lua: &Lua,
@@ -900,7 +896,6 @@ fn install_module(
     let git = lua.create_table()?;
     jouet.set("git", &git)?;
     probe::install(lua, &jouet, &git, shared)?;
-    recipe::install(lua, &jouet, shared, has_command)?;
     jouet.set(
         "parse",
         lua.create_function(|lua, (script, exit_code): (String, Option<i32>)| {

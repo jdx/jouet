@@ -67,6 +67,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Rules", link: "/rules" },
+          { text: "Routines and joue", link: "/routines" },
           { text: "Self-winding", link: "/winding" },
           { text: "Agent setup and hooks", link: "/setup" },
         ],
@@ -80,7 +81,6 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
-          { text: "jouet run", link: "/commands/run" },
           { text: "jouet audit", link: "/commands/audit" },
           { text: "jouet stats", link: "/commands/stats" },
           { text: "jouet commit", link: "/commands/commit" },
@@ -162,7 +162,15 @@ export default defineConfig({
                   { text: "gap", link: "/cli/rule/gap" },
                 ],
               },
-              { text: "run", link: "/cli/run" },
+              {
+                text: "run",
+                link: "/cli/run",
+                collapsed: true,
+                items: [
+                  { text: "test", link: "/cli/run/test" },
+                  { text: "types", link: "/cli/run/types" },
+                ],
+              },
               {
                 text: "wind",
                 link: "/cli/wind/",
