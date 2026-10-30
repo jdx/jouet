@@ -3,13 +3,13 @@
 A toolkit CLI for coding agents.
 
 > [!CAUTION]
-> **jouet is in early development.** Only `jouet edit` and `jouet pr status` are available so far. Their flags, exit
-> codes and JSON output are not finalized and may change incompatibly between releases.
+> **jouet is in early development.** Only `jouet edit`, `jouet pr status` and `jouet pr threads` are available so far.
+> Their flags, exit codes and JSON output are not finalized and may change incompatibly between releases.
 
 Coding agents spend a large share of their shell calls rebuilding the same few chores by hand,
 and they get them subtly wrong: sleep-polling CI, hand-rolled GraphQL for PR review threads,
 `for` loops over `gh pr view`, and Python heredocs that patch files with `str.replace`. jouet's
-first four commands turn each of those into one command (`edit` and `pr status` have landed; the others are being built):
+first four commands turn each of those into one command (`edit`, `pr status` and `pr threads` have landed; `wait` is being built):
 
 | Command | Replaces |
 |---|---|
