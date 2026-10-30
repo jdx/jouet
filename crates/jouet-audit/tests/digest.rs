@@ -201,3 +201,47 @@ fn what_sessions_share_is_listed_across_them() {
     assert!(text.contains("# Session d1d1d1d1"));
     assert!(text.contains("(codex)"));
 }
+
+#[test]
+fn jouet_itself_is_checked_in_its_own_sessions() {
+    let reader = ClaudeCode {
+        root: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jouet/claude"),
+    };
+    let d = read(&reader);
+    let found: Vec<(&str, &str, &str)> = d
+        .jouet
+        .iter()
+        .map(|j| {
+            (
+                j.found.kind.name(),
+                j.found.subject.as_str(),
+                j.found.detail.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                "crash",
+                "jouet pr threads",
+                "panicked at src/cmd/threads.rs:41:9"
+            ),
+            (
+                "bad_json",
+                "jouet pr status",
+                "`--json` output did not start a JSON document"
+            ),
+            (
+                "usage",
+                "jouet wait ci",
+                "exit 2, then retried with other flags"
+            ),
+            ("abandoned", "jouet pr status", "then `gh pr view`"),
+        ]
+    );
+    let text = digest::render(&d, 4000);
+    assert!(text.contains("## jouet itself (4)"), "{text}");
+    // The panic's message, which holds a value, is never shown.
+    assert!(!text.contains("index out of bounds"), "{text}");
+}

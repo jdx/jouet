@@ -184,6 +184,19 @@ fn render_with(d: &Digest, l: Limits) -> String {
         });
         out.push('\n');
     }
+    if !d.jouet.is_empty() {
+        let _ = writeln!(out, "## jouet itself ({})", d.jouet.len());
+        list(&mut out, &d.jouet, l.items, |j| {
+            format!(
+                "- {} `{}` {}: {}",
+                span(j.span),
+                j.found.subject,
+                j.found.kind.name(),
+                j.found.detail
+            )
+        });
+        out.push('\n');
+    }
     if !d.waits.is_empty() {
         let total: u64 = d.waits.iter().map(|w| w.duration_ms).sum();
         let _ = writeln!(

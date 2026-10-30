@@ -79,6 +79,7 @@ Session review reads the whole transcript instead, through a digest, and only no
 
 The digest lists, most telling first:
 
+- **jouet itself:** where jouet crashed, exited outside its exit-code table, printed `--json` that is not JSON, met usage errors, or was dropped for raw `gh` or `git` right after it answered. See [what sessions show about jouet](#what-sessions-show-about-jouet).
 - **User corrections:** interruptions, refused tool calls (with the reason the user gave), and prompts that correct the agent, each with the call the agent made just before. A prompt is a correction when it opens with "no", "stop", "wait", "don't", "actually" or "instead", or contains a phrase such as "I said", "that's not what", "why did you", "still failing" or "rather than", outside code spans. Whatever follows an interruption is counted as a redirect. Text the harness writes in the user's place (slash-command expansions, task notifications, resumed-session summaries, AGENTS.md and environment blocks) is not a prompt.
 - **Failures:** commands and calls that failed, how often, whether a later attempt of the same shape worked, and the output line that says what went wrong. A search that found nothing once is left out.
 - **Long calls:** any call of 30 seconds or more.
@@ -128,6 +129,7 @@ The prompt asks the reviewer for causes, not symptoms, and for at most three pro
 - **`rule`:** a rule that steers the agent's own tool calls, such as pointing a long command at the task that replaces it. Always warn mode, in user scope, like a rule the ledger drafts.
 - **`agents_md`:** a line or two for the project's AGENTS.md: knowledge every agent in the repository needs. Always asked first.
 - **`memory`:** a note for the harness's memory: this user's preference, across projects.
+- **`jouet`:** a change to jouet itself, for its maintainers. Offered only with `[share] contribute` on. It is not a pending proposal: `jouet wind propose` records it as an idea for [`jouet share`](#what-sessions-show-about-jouet), which drafts it and posts only with the user's yes.
 - **`nothing`:** most sessions need nothing, and the prompt says so.
 
 ### Suggesting a review
@@ -172,6 +174,9 @@ review = false          # JOUET_WIND_REVIEW: digest sessions at stop, suggest re
 review_every = 5        # JOUET_WIND_REVIEW_EVERY: sessions, at least, between two suggestions
 review_corrections = 2  # JOUET_WIND_REVIEW_CORRECTIONS: corrections that make a session worth it
 gitleaks = "~/src/gitleaks/config/gitleaks.toml"  # JOUET_WIND_GITLEAKS: also redact with these rules
+
+[share]
+contribute = false      # JOUET_SHARE_CONTRIBUTE: suggest sharing what sessions show about jouet
 ```
 
 `JOUET_WIND=0` turns winding off, reviews included. The ledger itself has its own switch, `[hooks] ledger = false`.
@@ -181,8 +186,34 @@ gitleaks = "~/src/gitleaks/config/gitleaks.toml"  # JOUET_WIND_GITLEAKS: also re
 Contributing is opt-in, and a person approves every post. A rule that has proven itself here may help everyone, and a rule jouet's API could not express shows what jouet should build next.
 
 - **`jouet share RULE`** turns a rule of yours into a proposal. It refuses until the rule passes `jouet rule test`, fires on the ledger under `--replay`, has denied for 7 days since `jouet rule promote`, and has fired at least 10 times with at most 10% overridden. It says which of these is missing.
-- **`jouet share --idea [KEY]`** turns recorded gaps into an idea: "I kept trying to catch X; there is no primitive for Y". jouet records a gap when a rule reads a `jouet` primitive that does not exist, and `jouet rule gap "TEXT"` records one in your words.
+- **`jouet share --idea [KEY]`** turns recorded gaps into an idea: "I kept trying to catch X; there is no primitive for Y". jouet records a gap when a rule reads a `jouet` primitive that does not exist, and `jouet rule gap "TEXT"` records one in your words. It also covers [what sessions show about jouet itself](#what-sessions-show-about-jouet), and the changes to jouet a session review proposed.
+- **`jouet share --list`** lists the ideas ready to share, with their keys and where each would go.
 - **What it posts.** Without `--yes`, nothing: it prints the exact title and text, and a diff of what anonymizing changed. Paths, repository names, hostnames, emails, your login and this machine's name are replaced; `--redact WORD` replaces more, such as an internal tool's name. It refuses text that still looks like a secret.
-- **Where.** With `--yes`, it posts a Discussion in the "Rules & ideas" category of [jdx/jouet](https://github.com/jdx/jouet/discussions) with your GitHub login, ending with an AI disclosure line (your `reply_footer`, if you set one). It first looks for a proposal with the same title, and posts at most three a week. If the category does not exist yet, it says so and posts nothing.
+- **Where.** With `--yes`, it posts with your GitHub login, ending with an AI disclosure line (your `reply_footer`, if you set one): a bug as an Issue on [jdx/jouet](https://github.com/jdx/jouet/issues), anything else as a Discussion in its "Rules & ideas" category. It first looks for an Issue or Discussion with the same title, and posts at most three a week in all. If the Discussions category does not exist yet, it says so and posts nothing.
 
 `jouet skill --contribute` prints an optional skill that tells an agent when a contribution is worth making, and that it posts only after the user approves the exact text.
+
+### What sessions show about jouet
+
+jouet watches itself in the same ledger and digests. What it notices becomes an idea for `jouet share --idea`, kept beside the missing primitives in `$XDG_STATE_HOME/jouet/gaps.json`, as shapes and counts only:
+
+| Signal | Seen in | Ready to share | Goes to |
+| --- | --- | --- | --- |
+| jouet crashed: exit 101, or `panicked at` in its output (the location only, never the message) | ledger, digest | at once | an Issue, with the commands' shapes as steps to reproduce |
+| An exit code outside the shared table (126 and up belong to the shell) | ledger, digest | at once | an Issue |
+| `--json` output that does not start a JSON document, when nothing else printed to it | digest | at once | an Issue |
+| A usage error (exit 2), and whether the agent retried with other flags | ledger, digest | 3 times in 2 sessions | a Discussion: a confusing flag, or a gap in `agent-help` |
+| An answer dropped: the raw command a jouet command replaces (`gh pr view` after `jouet pr status`, `git commit` after `jouet commit`) run right after it succeeded | ledger, digest | 3 times in 2 sessions | a Discussion: the output may be missing something |
+| A built-in rule overridden at least 3 times and 30% of its 10 or more firings | ledger | at once | a Discussion with the overridden shapes; an Issue from 50% |
+| A hook over its time budget (`[hooks] budget_ms`, 500 ms for the tool hooks and ten times that for session start and stop), which the hook records itself as a `slow-hook` ledger entry | ledger | 3 times | an Issue, with the budget and the slowest run |
+| The same script (a loop, a conditional, or three commands or more chained) in 5 sessions | ledger | at once | a Discussion: a candidate built-in |
+
+The ledger's signals are counted afresh each time `jouet share` reads them; a digest's are added once per session and line, so digesting a session again counts nothing twice. A key names each signal, such as `crash-pr-threads` or `usage-wind-digest`. A shared one is not proposed again, and a second user seeing the same problem finds the first post by its title.
+
+With `[share] contribute = true` (off by default), a session start may add one line, within the same two-line budget as the winding notes, suggesting the most pressing idea (bugs first) to the agent, at most three times per idea:
+
+```text
+jouet noticed something for its maintainers: `jouet pr threads` crashed 2 times (panicked at src/cmd/threads.rs:41:9). `jouet share --idea crash-pr-threads` drafts an Issue on jdx/jouet; show the draft to the user, and post it with `--yes` only if they agree.
+```
+
+The session review prompt then also offers the [`jouet` kind](#what-a-proposal-can-be).

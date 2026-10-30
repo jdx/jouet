@@ -97,6 +97,9 @@ pub struct Call {
     pub target: Option<String>,
     /// The start of a failed call's output, raw.
     pub error: Option<String>,
+    /// The start of the output of a command that runs jouet, raw, so a
+    /// digest can check jouet's own `--json`.
+    pub output: Option<String>,
 }
 
 impl Call {
@@ -114,6 +117,7 @@ impl Call {
             name: None,
             target: None,
             error: None,
+            output: None,
         }
     }
 

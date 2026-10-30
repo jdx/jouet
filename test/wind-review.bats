@@ -181,3 +181,50 @@ JSON
 	run primer third-session
 	refute_output --partial 'review it in a subagent'
 }
+
+@test "a digest records what it finds about jouet itself, for jouet share" {
+	cp -r "$PROJECT_ROOT/crates/jouet-audit/tests/fixtures/jouet/claude/projects/-work-app/." "$HOME/.claude/projects/-work-app/"
+	run --separate-stderr jouet wind digest e2e2
+	assert_success
+	assert_line '## jouet itself (4)'
+	assert_line --regexp '^- L2 .jouet pr threads. crash: panicked at src/cmd/threads.rs:41:9$'
+	refute_output --partial 'index out of bounds'
+
+	# Digesting the same session again counts nothing twice.
+	run --separate-stderr jouet wind digest e2e2
+	run --separate-stderr jouet share --list --json
+	assert_success
+	run jq -c '.ideas | map([.key, .destination])' <<<"$output"
+	assert_output '[["bad-json-pr-status","issue"],["crash-pr-threads","issue"]]'
+
+	# Off by default: no session-start line.
+	run primer next-session
+	refute_output --partial 'jouet noticed something for its maintainers'
+
+	export JOUET_SHARE_CONTRIBUTE=1
+	run primer next-session
+	assert_line --regexp 'jouet noticed something for its maintainers: .jouet pr threads. crashed 1 times'
+	assert_line --regexp '.jouet share --idea crash-pr-threads. drafts an Issue on jdx/jouet'
+
+	run --separate-stderr jouet share --idea crash-pr-threads
+	assert_success
+	assert_line --regexp '^title: Bug: .jouet pr threads. panicked$'
+	refute_output --partial 'secret-app'
+	assert_line --partial 'Nothing was posted.'
+}
+
+@test "with contribute on, a review may propose a change to jouet, recorded as an idea" {
+	run --separate-stderr jouet wind review d1d1
+	refute_output --partial '"jouet": a change to jouet itself'
+	run --separate-stderr env JOUET_SHARE_CONTRIBUTE=1 jouet wind review d1d1
+	assert_line --partial '- "jouet": a change to jouet itself, for its maintainers'
+
+	run --separate-stderr jouet wind propose <<<'{"proposals": [{"kind": "jouet", "title": "Say which flag was unknown", "why": "The agent guessed three spellings (L5-7).", "evidence": ["L5-7"], "draft": "Name the closest flag in the usage error."}]}'
+	assert_success
+	assert_line --regexp "^recorded idea note-say-which-flag-was-unknown for jouet's maintainers; .jouet share --idea note-say-which-flag-was-unknown. drafts it, and posts only with --yes$"
+	run --separate-stderr jouet share --idea note-say-which-flag-was-unknown
+	assert_success
+	assert_line 'title: Idea: Say which flag was unknown'
+	assert_line 'A review of one of my agent sessions suggests this change to jouet:'
+	assert_line 'Name the closest flag in the usage error.'
+}

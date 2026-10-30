@@ -262,6 +262,8 @@ impl State {
                     script_failed && last_shell == Some(i) || exit.is_some_and(|c| c != 0);
                 if self.detail && call.failed {
                     call.error = Some(out.head.clone());
+                } else if self.detail && super::claude::runs_jouet(call) {
+                    call.output = Some(out.head.clone());
                 }
                 // One exit code in the output belongs to the cell's only command.
                 if shells == 1 {

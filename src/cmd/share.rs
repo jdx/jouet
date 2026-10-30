@@ -29,6 +29,15 @@ pub(crate) fn run(args: &ShareArgs, out: &Output) -> Exit {
     words.extend(args.redact.iter().cloned());
     let footer = share::footer();
     let now = wind::now();
+    if (args.idea || args.list)
+        && let Some(path) = share::gaps_path()
+        && let Err(e) = share::refresh_signals(&path, &paths)
+    {
+        eprintln!("jouet: reading the ledger for signals: {e}");
+    }
+    if args.list {
+        return list(out);
+    }
     let built = if args.idea {
         idea(&paths, args.name.as_deref(), &words, &footer)
     } else {
@@ -86,7 +95,9 @@ pub(crate) fn run(args: &ShareArgs, out: &Output) -> Exit {
     let mut client = jouet_github::Client::from_env();
     let (login, url) = match share::post(&mut client, &proposal) {
         Ok(posted) => posted,
-        Err(Refusal::NoCategory) => {
+        Err(Refusal::NoCategory)
+            if proposal.destination == share::signals::Destination::Discussion =>
+        {
             return out.error(
                 Exit::Precondition,
                 &format!(
@@ -104,6 +115,9 @@ pub(crate) fn run(args: &ShareArgs, out: &Output) -> Exit {
             );
         }
         Err(Refusal::Remote(message)) => return out.error(Exit::Remote, &message),
+        Err(Refusal::NoCategory) => {
+            return out.error(Exit::Remote, "no Discussions category for an Issue");
+        }
     };
     let record = Posted {
         ts: now,
@@ -160,7 +174,7 @@ fn idea(
         .unwrap_or_default();
     let ideas = share::ideas(&gaps);
     if ideas.is_empty() {
-        return Err("no gaps are recorded: jouet records one when a rule reaches for a primitive the API lacks, and `jouet rule gap TEXT` records one in your words".into());
+        return Err("no ideas are recorded: jouet records one when a rule reaches for a primitive the API lacks, or when sessions show jouet crashing, misbehaving or falling short; `jouet rule gap TEXT` records one in your words".into());
     }
     let (key, entries) = match key {
         Some(key) => ideas.iter().find(|(k, _)| k == key).ok_or_else(|| {
@@ -169,6 +183,12 @@ fn idea(
         })?,
         None => &ideas[0],
     };
+    if let Some(signal) = entries.iter().find_map(|g| g.signal.as_ref()) {
+        return Ok((
+            share::signal_proposal(signal, words, footer),
+            vec![key.clone()],
+        ));
+    }
     // What the rules that reached for it were trying to do.
     let engine = wind::user_engine(&paths.rules);
     let why: Vec<String> = entries
@@ -181,6 +201,63 @@ fn idea(
         share::idea_proposal(key, entries, &why, words, footer),
         vec![key.clone()],
     ))
+}
+
+#[derive(Serialize)]
+struct Idea {
+    key: String,
+    destination: share::signals::Destination,
+    summary: String,
+}
+
+/// `jouet share --list`: the ideas ready to share.
+fn list(out: &Output) -> Exit {
+    let gaps = share::gaps_path()
+        .map(|p| share::read_gaps(&p))
+        .unwrap_or_default();
+    let ideas: Vec<Idea> = share::ideas(&gaps)
+        .into_iter()
+        .map(|(key, entries)| {
+            let signal = entries.iter().find_map(|g| g.signal.as_ref());
+            Idea {
+                destination: signal
+                    .map_or(share::signals::Destination::Discussion, |s| s.destination()),
+                summary: match signal {
+                    Some(s) => s.summary(),
+                    None => {
+                        let count: u64 = entries.iter().map(|g| g.count).sum();
+                        let what = entries
+                            .iter()
+                            .find_map(|g| {
+                                g.primitive
+                                    .clone()
+                                    .map(|p| format!("`jouet.{p}`, which the rule API lacks"))
+                            })
+                            .or_else(|| entries.iter().find_map(|g| g.note.clone()))
+                            .unwrap_or_default();
+                        format!("{what} ({count} times)")
+                    }
+                },
+                key,
+            }
+        })
+        .collect();
+    out.result(&serde_json::json!({ "ideas": ideas }), || {
+        if ideas.is_empty() {
+            return "no ideas are ready to share\n".into();
+        }
+        let mut text = String::new();
+        for idea in &ideas {
+            let place = match idea.destination {
+                share::signals::Destination::Issue => "issue     ",
+                share::signals::Destination::Discussion => "discussion",
+            };
+            let _ = writeln!(text, "{}  {place}  {}", idea.key, idea.summary);
+        }
+        text.push_str("`jouet share --idea KEY` drafts one; nothing is posted without --yes\n");
+        text
+    });
+    Exit::Ok
 }
 
 fn preview(proposal: &Proposal, args: &ShareArgs) -> String {
@@ -200,10 +277,13 @@ fn preview(proposal: &Proposal, args: &ShareArgs) -> String {
     for word in &args.redact {
         let _ = write!(again, " --redact {word}");
     }
+    let place = match proposal.destination {
+        share::signals::Destination::Issue => "as an Issue".to_string(),
+        share::signals::Destination::Discussion => format!("to \"{}\"", share::CATEGORY),
+    };
     let _ = writeln!(
         text,
-        "\nNothing was posted. Show this to the user; run `{again} --yes` only once they agree, to post it to \"{}\" on {}/{} with their GitHub login. `--redact WORD` hides more.",
-        share::CATEGORY,
+        "\nNothing was posted. Show this to the user; run `{again} --yes` only once they agree, to post it {place} on {}/{} with their GitHub login. `--redact WORD` hides more.",
         share::OWNER,
         share::REPO
     );

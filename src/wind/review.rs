@@ -43,6 +43,9 @@ pub(crate) enum Kind {
     Rule,
     AgentsMd,
     Memory,
+    /// A change to jouet itself, for its maintainers: recorded as an idea
+    /// for `jouet share`, never as a pending proposal.
+    Jouet,
     Nothing,
 }
 
@@ -54,6 +57,7 @@ impl Kind {
             Self::Rule => "rule",
             Self::AgentsMd => "agents_md",
             Self::Memory => "memory",
+            Self::Jouet => "jouet",
             Self::Nothing => "nothing",
         }
     }
@@ -65,6 +69,7 @@ impl Kind {
             Self::Rule => "a rule",
             Self::AgentsMd => "an AGENTS.md note",
             Self::Memory => "a memory note",
+            Self::Jouet => "a change to jouet",
             Self::Nothing => "nothing",
         }
     }
@@ -83,7 +88,7 @@ impl Kind {
             }
             Self::AgentsMd => "ask the user before adding it to the project's AGENTS.md",
             Self::Memory => "save it to your memory if the user agrees",
-            Self::Nothing => "",
+            Self::Jouet | Self::Nothing => "",
         }
     }
 
@@ -93,6 +98,7 @@ impl Kind {
             Self::Task => &["local", "project", "global"],
             Self::Routine | Self::Rule | Self::Memory => &["user", "project"],
             Self::AgentsMd => &["project"],
+            Self::Jouet => &["maintainers"],
             Self::Nothing => &[""],
         }
     }
@@ -431,6 +437,10 @@ pub(crate) struct Recorded {
     /// The review found nothing worth changing.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub nothing: bool,
+    /// Changes to jouet itself, recorded as ideas for `jouet share --idea`
+    /// by these keys.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ideas: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -471,12 +481,20 @@ fn problem(d: &Draft) -> Option<String> {
     None
 }
 
-/// Records a review's proposals as pending, within the limits.
+/// Records a review's proposals as pending, within the limits, and its
+/// changes to jouet itself as ideas for `jouet share`.
 pub(crate) fn record(paths: &Paths, reply: Reply, now: u64) -> std::io::Result<Recorded> {
-    super::update(&paths.state, |state| record_in(state, reply, now))
+    let (mut out, ideas) = super::update(&paths.state, |state| record_in(state, reply, now))?;
+    if let Some(gaps) = crate::share::gaps_path() {
+        for (title, body) in ideas {
+            out.ideas
+                .push(crate::share::record_review(&gaps, &title, &body, now)?);
+        }
+    }
+    Ok(out)
 }
 
-fn record_in(state: &mut State, reply: Reply, now: u64) -> Recorded {
+fn record_in(state: &mut State, reply: Reply, now: u64) -> (Recorded, Vec<(String, String)>) {
     let r = &mut state.reviews;
     let today = jouet_output::time::date(now);
     let mut budget = MAX_PROPOSALS_PER_DAY.saturating_sub(
@@ -486,6 +504,7 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> Recorded {
             .count(),
     );
     let mut out = Recorded::default();
+    let mut ideas = Vec::new();
     let mut this_review = 0;
     for d in reply.proposals {
         if d.kind == Kind::Nothing {
@@ -498,6 +517,11 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> Recorded {
         };
         if let Some(reason) = problem(&d) {
             out.skipped.push(skip(reason));
+            continue;
+        }
+        if d.kind == Kind::Jouet {
+            let body = format!("{}\n\n{}", d.why.trim(), d.draft.trim());
+            ideas.push((d.title.trim().to_string(), body));
             continue;
         }
         let duplicate = r
@@ -548,11 +572,22 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> Recorded {
             }
         }
     }
-    out
+    (out, ideas)
 }
 
-/// The prompt `jouet wind review` prints before the digests.
-pub(crate) const PROMPT: &str = r#"You are reviewing a coding-agent session to find changes to its environment that would have made it go better: fewer corrections from the user, fewer failed retries, less waiting, less exploring the same ground. You are not reviewing the code it wrote.
+/// The prompt `jouet wind review` prints before the digests; with
+/// `contribute`, it may also propose changes to jouet itself.
+pub(crate) fn prompt(contribute: bool) -> String {
+    if !contribute {
+        return PROMPT.to_string();
+    }
+    PROMPT.replace(
+        "\n- \"nothing\":",
+        "\n- \"jouet\": a change to jouet itself, for its maintainers: it crashed, exited with an odd code, printed malformed JSON, its flags confused the agent, or its output was abandoned for raw `gh` or `git` (see \"jouet itself\" in the digest). The draft is the report, with no private values. It is recorded as an idea for `jouet share`, which posts only after the user agrees.\n- \"nothing\":",
+    )
+}
+
+const PROMPT: &str = r#"You are reviewing a coding-agent session to find changes to its environment that would have made it go better: fewer corrections from the user, fewer failed retries, less waiting, less exploring the same ground. You are not reviewing the code it wrote.
 
 Below is a digest of the session from `jouet wind digest`: the user's corrections, failures, long calls, where tokens went, files read repeatedly, commands typed out again, and a timeline of phases, one per prompt. Each item has a span (L120-188) into the transcript named in its header, a JSONL file; when an item is unclear, read those lines (`sed -n '120,188p' FILE | cut -c1-600`), and only those.
 

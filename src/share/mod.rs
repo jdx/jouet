@@ -1,13 +1,17 @@
-//! Sharing proven rules and missing primitives with jouet's maintainers.
+//! Sharing proven rules, missing primitives, and what sessions show about
+//! jouet itself with jouet's maintainers.
 //!
 //! Contributing is opt-in and always goes through a person: `jouet share`
 //! builds a proposal, prints the exact text and a diff of what anonymizing
-//! changed, and posts nothing. Only `--yes` posts it, as a Discussion in the
-//! "Rules & ideas" category of `jdx/jouet`, with the user's own GitHub login.
-//! Before posting it looks for an existing proposal, refuses anything that
-//! still looks like a secret, and posts at most [`MAX_POSTS`] a week.
+//! changed, and posts nothing. Only `--yes` posts it with the user's own
+//! GitHub login: a bug ([`signals`] such as a crash) as an Issue on
+//! `jdx/jouet`, anything else as a Discussion in its "Rules & ideas"
+//! category. Before posting it looks for an existing proposal, refuses
+//! anything that still looks like a secret, and posts at most [`MAX_POSTS`]
+//! a week.
 
 pub(crate) mod anonymize;
+pub(crate) mod signals;
 
 use crate::wind::{self, Paths, replay, rulefile, stats};
 use jouet_rules::{Engine, Gap, Mode, Scope, State};
@@ -37,20 +41,34 @@ pub(crate) struct GapEntry {
     /// The rule that reached for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
-    /// What an agent could not express, in its own words.
+    /// What an agent could not express, in its own words; for a change a
+    /// session review proposed, its why and draft.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// A change to jouet a session review proposed: its title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub count: u64,
     pub first: u64,
     pub last: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shared: bool,
+    /// What a session showed about jouet itself, instead of a primitive or
+    /// a note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<signals::Signal>,
+    /// Sessions a start-of-session line suggested sharing it to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown: Vec<String>,
 }
 
 impl GapEntry {
     /// What `jouet share --idea KEY` names it by.
     pub(crate) fn key(&self) -> String {
-        match (&self.primitive, &self.note) {
+        if let Some(signal) = &self.signal {
+            return signal.key();
+        }
+        match (&self.primitive, self.title.as_ref().or(self.note.as_ref())) {
             (Some(p), _) => p.clone(),
             (None, Some(note)) => {
                 let words: Vec<&str> = note.split_whitespace().take(5).collect();
@@ -117,11 +135,12 @@ pub(crate) fn read_gaps(path: &Path) -> Gaps {
 }
 
 fn add_gap(gaps: &mut Gaps, entry: GapEntry, now: u64) {
-    if let Some(existing) = gaps
-        .gaps
-        .iter_mut()
-        .find(|g| g.primitive == entry.primitive && g.rule == entry.rule && g.note == entry.note)
-    {
+    if let Some(existing) = gaps.gaps.iter_mut().find(|g| {
+        g.signal.is_none()
+            && g.primitive == entry.primitive
+            && g.rule == entry.rule
+            && g.note == entry.note
+    }) {
         existing.count += 1;
         existing.last = now;
         return;
@@ -132,6 +151,67 @@ fn add_gap(gaps: &mut Gaps, entry: GapEntry, now: u64) {
         last: now,
         ..entry
     });
+}
+
+/// Counts the ledger's signals about jouet afresh into the gap file.
+pub(crate) fn refresh_signals(gaps_path: &Path, paths: &Paths) -> std::io::Result<()> {
+    let entries = wind::reader::read_all(&paths.ledger);
+    let engine = wind::user_engine(&paths.rules);
+    let fresh = signals::from_ledger(&entries, engine.as_ref());
+    update_gaps(gaps_path, |gaps| signals::replace_ledger(gaps, fresh))
+}
+
+/// Records what a digest shows about jouet itself. Best effort; a session
+/// digested again adds nothing.
+pub(crate) fn record_digest(digest: &jouet_audit::digest::Digest) {
+    if digest.jouet.is_empty() {
+        return;
+    }
+    let Some(path) = gaps_path() else { return };
+    let found: Vec<_> = digest
+        .jouet
+        .iter()
+        .map(|j| (j.found.clone(), j.command.clone(), j.span.from))
+        .collect();
+    let _ = update_gaps(&path, |gaps| {
+        signals::add_digest(gaps, &digest.session, &found);
+    });
+}
+
+/// The line a starting session shows about an idea worth sharing, when
+/// the user opted in with `[share] contribute`: the most recorded one not
+/// yet shared, shown to at most three sessions. Bugs come first.
+pub(crate) fn line_for_session(gaps_path: &Path, session: &str) -> Option<String> {
+    update_gaps(gaps_path, |gaps| {
+        let mut ready: Vec<&mut GapEntry> = gaps
+            .gaps
+            .iter_mut()
+            .filter(|g| !g.shared && g.shown.len() < wind::MAX_SHOWINGS)
+            .filter(|g| !g.shown.iter().any(|s| s == session))
+            .filter(|g| g.signal.as_ref().is_some_and(signals::Signal::ready))
+            .collect();
+        ready.sort_by_key(|g| {
+            let s = g.signal.as_ref().expect("filtered to signals");
+            (
+                s.destination() != signals::Destination::Issue,
+                std::cmp::Reverse(s.count),
+            )
+        });
+        let entry = ready.into_iter().next()?;
+        entry.shown.push(session.to_string());
+        let signal = entry.signal.as_ref().expect("filtered to signals");
+        let place = match signal.destination() {
+            signals::Destination::Issue => "an Issue",
+            signals::Destination::Discussion => "a Discussion",
+        };
+        Some(format!(
+            "jouet noticed something for its maintainers: {}. `jouet share --idea {}` drafts {place} on jdx/jouet; show the draft to the user, and post it with `--yes` only if they agree.",
+            signal.summary(),
+            entry.key()
+        ))
+    })
+    .ok()
+    .flatten()
 }
 
 /// Records the primitives an engine's rules reached for. Best effort.
@@ -173,6 +253,27 @@ pub(crate) fn record_note(
         };
         add_gap(gaps, entry, now);
     })
+}
+
+/// Records a change to jouet a session review proposed.
+pub(crate) fn record_review(
+    path: &Path,
+    title: &str,
+    body: &str,
+    now: u64,
+) -> std::io::Result<String> {
+    let entry = GapEntry {
+        title: Some(title.trim().to_string()),
+        note: Some(body.trim().to_string()),
+        ..GapEntry::default()
+    };
+    let key = entry.key();
+    update_gaps(path, |gaps| {
+        if !gaps.gaps.iter().any(|g| g.title == entry.title) {
+            add_gap(gaps, entry, now);
+        }
+    })?;
+    Ok(key)
 }
 
 /// What a rule has done, gathered for a proposal.
@@ -287,6 +388,8 @@ pub(crate) fn check_rule(
 #[derive(Debug, Serialize)]
 pub(crate) struct Proposal {
     pub kind: &'static str,
+    /// An Issue for a bug, else a Discussion in "Rules & ideas".
+    pub destination: signals::Destination,
     pub title: String,
     /// The text that would be posted.
     pub body: String,
@@ -317,6 +420,7 @@ pub(crate) fn footer() -> String {
 
 fn finish(
     kind: &'static str,
+    destination: signals::Destination,
     title: String,
     original: String,
     words: &[String],
@@ -336,6 +440,7 @@ fn finish(
     };
     Proposal {
         kind,
+        destination,
         title,
         body,
         diff,
@@ -385,7 +490,14 @@ pub(crate) fn rule_proposal(
         body.push_str("\n### Near misses it allows\n\n");
         shapes(&mut body, &e.near_misses);
     }
-    finish("rule", format!("Rule: {name}"), body, words, footer)
+    finish(
+        "rule",
+        signals::Destination::Discussion,
+        format!("Rule: {name}"),
+        body,
+        words,
+        footer,
+    )
 }
 
 pub(crate) fn idea_proposal(
@@ -422,6 +534,18 @@ pub(crate) fn idea_proposal(
             );
             format!("Idea: a `jouet.{p}` primitive")
         }
+        None if entries.iter().any(|g| g.title.is_some()) => {
+            let entry = entries.iter().find(|g| g.title.is_some()).expect("found");
+            let title = entry.title.as_deref().unwrap_or(key);
+            let _ = writeln!(
+                body,
+                "A review of one of my agent sessions suggests this change to jouet:\n"
+            );
+            for line in entry.note.as_deref().unwrap_or_default().lines() {
+                let _ = writeln!(body, "{line}");
+            }
+            format!("Idea: {title}")
+        }
         None => {
             let note = entries
                 .first()
@@ -431,18 +555,128 @@ pub(crate) fn idea_proposal(
                 body,
                 "A rule I wanted could not be expressed with jouet's rule API ({count} times):\n"
             );
-            let _ = writeln!(body, "> {note}");
-            let short: String = note.chars().take(60).collect();
+            for line in note.lines() {
+                let _ = writeln!(body, "> {line}");
+            }
+            let first = note.lines().next().unwrap_or(note);
+            let short: String = first.chars().take(60).collect();
             format!("Idea: {short}")
         }
     };
-    finish("idea", title, body, words, footer)
+    finish(
+        "idea",
+        signals::Destination::Discussion,
+        title,
+        body,
+        words,
+        footer,
+    )
+}
+
+/// A proposal from what sessions showed about jouet itself: a bug report
+/// with the steps that show it, or an idea for a Discussion.
+pub(crate) fn signal_proposal(
+    signal: &signals::Signal,
+    words: &[String],
+    footer: &str,
+) -> Proposal {
+    use signals::Kind;
+    let subject = &signal.subject;
+    let sessions = signal.sessions.len();
+    let mut body = String::new();
+    let title = match signal.kind() {
+        Kind::Crash => format!("Bug: `{subject}` panicked"),
+        Kind::ExitCode => format!("Bug: `{subject}` exited outside the exit-code table"),
+        Kind::BadJson => format!("Bug: `{subject} --json` printed something that is not JSON"),
+        Kind::SlowHook => format!("Bug: the {subject} hook runs over its time budget"),
+        Kind::Overridden if signal.destination() == signals::Destination::Issue => {
+            format!("Bug: built-in rule `{subject}` is overridden most of the time")
+        }
+        Kind::Overridden => format!("Idea: built-in rule `{subject}` may fire where it should not"),
+        Kind::Usage => format!("Idea: agents keep hitting usage errors with `{subject}`"),
+        Kind::Abandoned => format!("Idea: agents drop `{subject}` for raw commands"),
+        Kind::Routine => format!(
+            "Idea: a built-in for a script agents keep writing ({})",
+            &signal.key()["routine-".len()..]
+        ),
+    };
+    let _ = writeln!(body, "{}.\n", capitalize(&signal.summary()));
+    let what = match signal.kind() {
+        Kind::Crash | Kind::ExitCode | Kind::BadJson => {
+            "jouet's own sessions on my machine show it; the commands below are shapes, with every value replaced, so they show the flags but not the arguments."
+        }
+        Kind::Usage => {
+            "Agents ran it, got exit 2 (a usage error), and often retried with other flags: the CLI or `jouet agent-help` may be missing what they needed."
+        }
+        Kind::Abandoned => {
+            "Right after it answered, the agent ran the raw command it replaces: its output may be missing something the agent needed."
+        }
+        Kind::Overridden => {
+            "Agents ran a command of the same shape again within ten minutes of the rule denying or warning about it. Each override is a call the rule may have stopped wrongly."
+        }
+        Kind::SlowHook => {
+            "jouet records a hook that runs over its budget: every tool call waits for it."
+        }
+        Kind::Routine => {
+            "The same script, with values replaced, ran in each of these sessions: it may want to be a jouet command or a built-in routine."
+        }
+    };
+    let _ = writeln!(body, "{what}\n");
+    if !signal.details.is_empty() {
+        body.push_str("### What was seen\n\n");
+        for (detail, n) in &signal.details {
+            let _ = writeln!(body, "- {detail} ({n}x)");
+        }
+        body.push('\n');
+    }
+    let examples: Vec<&String> = if signal.kind() == Kind::Routine {
+        vec![&signal.subject]
+    } else {
+        signal.examples.iter().collect()
+    };
+    if !examples.is_empty() {
+        body.push_str(match signal.destination() {
+            signals::Destination::Issue => "### To reproduce\n\n",
+            signals::Destination::Discussion => "### The commands (shapes)\n\n",
+        });
+        for e in examples {
+            let _ = writeln!(body, "- `{e}`");
+        }
+        body.push('\n');
+    }
+    if let (Kind::SlowHook, [budget, slowest, ..]) = (signal.kind(), &signal.numbers[..]) {
+        let _ = writeln!(body, "Budget {budget} ms; slowest {slowest} ms.\n");
+    }
+    let _ = writeln!(
+        body,
+        "Seen in {sessions} sessions. jouet {} on {}.",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
+    let kind = match signal.destination() {
+        signals::Destination::Issue => "bug",
+        signals::Destination::Discussion => "idea",
+    };
+    finish(kind, signal.destination(), title, body, words, footer)
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// Every candidate idea, by key, most recorded first.
 pub(crate) fn ideas(gaps: &Gaps) -> Vec<(String, Vec<&GapEntry>)> {
     let mut by_key: Vec<(String, Vec<&GapEntry>)> = Vec::new();
-    for gap in gaps.gaps.iter().filter(|g| !g.shared) {
+    for gap in gaps
+        .gaps
+        .iter()
+        .filter(|g| !g.shared)
+        .filter(|g| g.signal.as_ref().is_none_or(signals::Signal::ready))
+    {
         let key = gap.key();
         match by_key.iter_mut().find(|(k, _)| *k == key) {
             Some((_, list)) => list.push(gap),
@@ -500,19 +734,26 @@ pub(crate) enum Refusal {
     Remote(String),
 }
 
-/// Looks up the repository and its category, refuses a duplicate, and
-/// creates the Discussion. Returns the poster's login and the URL.
+/// Looks up the repository (and, for a Discussion, its category), refuses
+/// a duplicate, and creates the Issue or Discussion. Returns the poster's
+/// login and the URL.
 pub(crate) fn post(
     client: &mut jouet_github::Client,
     proposal: &Proposal,
 ) -> Result<(String, String), Refusal> {
+    let issue = proposal.destination == signals::Destination::Issue;
     let data = client
         .graphql(
-            "query($owner:String!,$name:String!,$q:String!){viewer{login} repository(owner:$owner,name:$name){id discussionCategories(first:50){nodes{id name}}} search(query:$q,type:DISCUSSION,first:10){nodes{... on Discussion{title url}}}}",
+            "query($owner:String!,$name:String!,$q:String!,$type:SearchType!){viewer{login} repository(owner:$owner,name:$name){id discussionCategories(first:50){nodes{id name}}} search(query:$q,type:$type,first:10){nodes{... on Discussion{title url} ... on Issue{title url}}}}",
             &json!({
                 "owner": OWNER,
                 "name": REPO,
-                "q": format!("repo:{OWNER}/{REPO} in:title \"{}\"", proposal.title.replace('"', "")),
+                "q": format!(
+                    "repo:{OWNER}/{REPO} {}in:title \"{}\"",
+                    if issue { "is:issue " } else { "" },
+                    proposal.title.replace('"', "")
+                ),
+                "type": if issue { "ISSUE" } else { "DISCUSSION" },
             }),
         )
         .map_err(Refusal::Remote)?;
@@ -523,18 +764,6 @@ pub(crate) fn post(
     let repo = &data["repository"];
     let Some(repo_id) = repo["id"].as_str() else {
         return Err(Refusal::Remote(format!("{OWNER}/{REPO} was not found")));
-    };
-    let category = repo["discussionCategories"]["nodes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|c| {
-            c["name"]
-                .as_str()
-                .is_some_and(|n| n.eq_ignore_ascii_case(CATEGORY))
-        });
-    let Some(category_id) = category.and_then(|c| c["id"].as_str()) else {
-        return Err(Refusal::NoCategory);
     };
     let duplicate = data["search"]["nodes"]
         .as_array()
@@ -550,6 +779,31 @@ pub(crate) fn post(
             d["url"].as_str().unwrap_or_default().to_string(),
         ));
     }
+    if issue {
+        let created = client
+            .mutate(
+                "mutation($repo:ID!,$title:String!,$body:String!){createIssue(input:{repositoryId:$repo,title:$title,body:$body}){issue{url}}}",
+                &json!({ "repo": repo_id, "title": proposal.title, "body": proposal.body }),
+            )
+            .map_err(Refusal::Remote)?;
+        let url = created["createIssue"]["issue"]["url"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        return Ok((login, url));
+    }
+    let category = repo["discussionCategories"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| {
+            c["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(CATEGORY))
+        });
+    let Some(category_id) = category.and_then(|c| c["id"].as_str()) else {
+        return Err(Refusal::NoCategory);
+    };
     let created = client
         .mutate(
             "mutation($repo:ID!,$cat:ID!,$title:String!,$body:String!){createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){discussion{url}}}",
