@@ -20,6 +20,7 @@ mod json;
 pub mod probe;
 pub mod recipe;
 pub mod shell;
+pub mod tree;
 mod trust;
 
 pub use header::{Mode, Scope};
@@ -51,6 +52,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("git-stash", include_str!("../rules/git-stash.luau")),
     ("no-verify", include_str!("../rules/no-verify.luau")),
     ("force-push", include_str!("../rules/force-push.luau")),
+    ("push-untested", include_str!("../rules/push-untested.luau")),
     ("checks", include_str!("../rules/checks.luau")),
 ];
 
@@ -237,14 +239,32 @@ impl Kind {
     }
 }
 
-/// A check a post-tool-use rule recorded: a test, lint or build run and how
-/// it ended.
+/// A check a post-tool-use rule recorded: a test, lint or build run, how
+/// much of the project it covered, and how it ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Record {
     pub rule: String,
     pub kind: Kind,
     pub command: String,
     pub exit_code: i32,
+    /// Whether the run covered the whole project. A rule that does not say
+    /// records a partial run.
+    pub full: bool,
+    /// What a partial run selected, such as `-p jouet-edit` or a test name,
+    /// when the rule said.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+}
+
+impl Record {
+    /// `full`, or `partial` and what the run selected.
+    pub fn scope(&self) -> String {
+        match (&self.selector, self.full) {
+            (_, true) => "full".into(),
+            (Some(selector), false) => format!("partial {selector}"),
+            (None, false) => "partial".into(),
+        }
+    }
 }
 
 /// What the enabled rules made of one call.
@@ -305,7 +325,8 @@ struct Loader<'a> {
 
 /// State the VM's callbacks share with the engine.
 pub(crate) struct Shared {
-    records: RefCell<Vec<(Kind, String, i32)>>,
+    /// What the running rule recorded; the engine names the rule.
+    records: RefCell<Vec<Record>>,
     /// The rule running now, and the missing `jouet` fields rules have read.
     current: RefCell<String>,
     gaps: RefCell<Vec<Gap>>,
@@ -735,11 +756,9 @@ impl Engine {
             .records
             .borrow_mut()
             .drain(..)
-            .map(|(kind, command, exit_code)| Record {
+            .map(|record| Record {
                 rule: rule.name.clone(),
-                kind,
-                command,
-                exit_code,
+                ..record
             })
             .collect();
         let decision = match returned {
@@ -787,19 +806,30 @@ impl Engine {
         let Some(examples) = examples else {
             return Ok(Vec::new());
         };
+        // Examples are tests, so they give the same answer anywhere: every
+        // probe returns nil and a reason, whatever the machine holds.
+        let probes = self.vm.shared.probes.borrow_mut().take();
+        let out = self.run_examples(rule, &examples);
+        *self.vm.shared.probes.borrow_mut() = probes;
+        out
+    }
+
+    fn run_examples(&self, rule: &Rule, examples: &Table) -> Result<Vec<Example>, String> {
         let mut out = Vec::new();
         for expect in ["deny", "warn", "allow", "record"] {
             let list: Option<Table> = examples.raw_get(expect).map_err(|e| e.to_string())?;
             for case in list.iter().flat_map(|l| l.sequence_values::<Value>()) {
                 let case = case.map_err(|e| e.to_string())?;
-                let (command, exit_code, kind) = match case {
-                    Value::String(s) => (s.to_string_lossy(), 0, None),
+                let (command, exit_code, kind, scope) = match case {
+                    Value::String(s) => (s.to_string_lossy(), 0, None, None),
                     Value::Table(t) => (
                         t.raw_get::<String>("command").map_err(|e| e.to_string())?,
                         t.raw_get::<Option<i32>>("exit_code")
                             .map_err(|e| e.to_string())?
                             .unwrap_or(0),
                         t.raw_get::<Option<String>>("kind")
+                            .map_err(|e| e.to_string())?,
+                        t.raw_get::<Option<String>>("scope")
                             .map_err(|e| e.to_string())?,
                     ),
                     other => {
@@ -817,12 +847,17 @@ impl Engine {
                     cwd: None,
                     exit_code: (rule.event == Event::PostToolUse).then_some(exit_code),
                 };
-                let expected = match (expect, kind) {
-                    ("record", Some(kind)) => format!("record {kind}"),
-                    (e, _) => e.to_string(),
+                let expected = match (expect, kind, &scope) {
+                    ("record", Some(kind), Some(scope)) => format!("record {kind} {scope}"),
+                    ("record", Some(kind), None) => format!("record {kind}"),
+                    (e, _, _) => e.to_string(),
                 };
                 self.vm.new_call();
                 let actual = match self.run_check(rule, &call, false) {
+                    // An example that names a scope checks it too.
+                    Ok((_, records)) if scope.is_some() && !records.is_empty() => {
+                        format!("record {} {}", records[0].kind.name(), records[0].scope())
+                    }
                     Ok((decision, records)) => summarize(decision.as_ref(), &records),
                     Err(e) => format!("error: {e}"),
                 };
@@ -976,19 +1011,44 @@ fn install_module(
     let records = shared.clone();
     jouet.set(
         "record",
-        lua.create_function(move |_, (kind, command): (String, Table)| {
-            let kind = Kind::parse(&kind).ok_or_else(|| {
-                mlua::Error::runtime(format!(
-                    "jouet.record: kind must be \"test\", \"lint\" or \"build\", not `{kind}`"
-                ))
-            })?;
-            // A command whose exit status is unknown says nothing.
-            if let Some(status) = command.raw_get::<Option<i32>>("status")? {
-                let text: String = command.raw_get("text")?;
-                records.records.borrow_mut().push((kind, text, status));
-            }
-            Ok(())
-        })?,
+        lua.create_function(
+            move |_,
+                  (kind, command, scope, selector): (
+                String,
+                Table,
+                Option<String>,
+                Option<String>,
+            )| {
+                let kind = Kind::parse(&kind).ok_or_else(|| {
+                    mlua::Error::runtime(format!(
+                        "jouet.record: kind must be \"test\", \"lint\" or \"build\", not `{kind}`"
+                    ))
+                })?;
+                // Unknown means partial: only a rule that knows the run
+                // covered everything says so.
+                let full = match scope.as_deref() {
+                    None | Some("partial") => false,
+                    Some("full") => true,
+                    Some(other) => {
+                        return Err(mlua::Error::runtime(format!(
+                            "jouet.record: scope must be \"full\" or \"partial\", not `{other}`"
+                        )));
+                    }
+                };
+                // A command whose exit status is unknown says nothing.
+                if let Some(status) = command.raw_get::<Option<i32>>("status")? {
+                    records.records.borrow_mut().push(Record {
+                        rule: String::new(),
+                        kind,
+                        command: command.raw_get("text")?,
+                        exit_code: status,
+                        full,
+                        selector: selector.filter(|s| !full && !s.is_empty()),
+                    });
+                }
+                Ok(())
+            },
+        )?,
     )?;
     lua.load(PRELUDE)
         .set_name("=jouet")

@@ -23,8 +23,8 @@
 -- that returns a `JouetRecipe`. It runs in the same sandbox, and also has
 -- `jouet.cmd` to run jouet's own commands.
 --
--- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.repo`,
--- `jouet.env`) only read. Each is cached for the rest of the hook call, or of
+-- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
+-- `jouet.cargo`, `jouet.repo`, `jouet.env`) only read. Each is cached for the rest of the hook call, or of
 -- the recipe step, and runs inside the caller's budget. Most return
 -- `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)` when there is
 -- nothing to report. The GitHub probes (`jouet.pr`) are off in hooks unless
@@ -84,6 +84,9 @@ export type JouetExample = string | {
 	-- For `record` examples: the kind the rule must record, "test", "lint"
 	-- or "build".
 	kind: string?,
+	-- For `record` examples with a `kind`: the scope it must record, "full",
+	-- or "partial" and what the run selected, such as "partial -p jouet".
+	scope: string?,
 }
 
 export type JouetRule = {
@@ -96,7 +99,8 @@ export type JouetRule = {
 	check: (call: JouetCall) -> JouetDecision?,
 	-- Commands and what the rule must make of each, run by `jouet rule test`.
 	-- They check what `check` returns, before the mode turns a deny into a
-	-- warning.
+	-- warning. They run without probes, so they give the same answer
+	-- anywhere: every probe returns nil and a reason.
 	examples: {
 		deny: { JouetExample }?,
 		warn: { JouetExample }?,
@@ -145,6 +149,12 @@ export type JouetLastRun = {
 	-- The rule that recorded it.
 	rule: string,
 	ok: boolean,
+	-- Whether the run covered the whole project. Runs recorded before jouet
+	-- kept a scope read as "partial".
+	scope: "full" | "partial",
+	-- The work tree the run saw, as `jouet.git.tree()` hashes it; absent
+	-- when it could not be read, and for older runs.
+	tree: string?,
 	exit_code: number?,
 	-- The command's shape, with values replaced by placeholders.
 	shape: string?,
@@ -168,6 +178,21 @@ export type JouetGitState = {
 	changed: number,
 	untracked: number,
 	conflicted: number,
+}
+
+-- The Cargo workspace a directory is in.
+export type JouetCargoWorkspace = {
+	-- The workspace's root directory.
+	root: string,
+	-- The package whose manifest is nearest the directory: what a cargo
+	-- command there builds without `-p` or `--workspace`. Absent at a
+	-- virtual manifest.
+	package: string?,
+	-- Every member's package name, sorted; absent when a `members` pattern
+	-- is more than a `*` or `?` in its last part.
+	members: { string }?,
+	-- Whether the workspace sets `default-members`.
+	default_members: boolean,
 }
 
 export type JouetRepo = {
@@ -273,6 +298,10 @@ export type JouetGit = typeof(setmetatable(
 		-- The current branch, its upstream and how far apart they are, and
 		-- whether the work tree is clean, from `git status`.
 		state: () -> (JouetGitState?, string?),
+		-- A hash of the content of every tracked file in the work tree,
+		-- staged or not; untracked and ignored files are left out. A commit
+		-- with the same content hashes the same. The `tree` of a recorded run.
+		tree: () -> (string?, string?),
 	},
 	{} :: {
 		-- A git command's subcommand and its arguments, past global options
@@ -291,8 +320,10 @@ declare jouet: {
 	allow: () -> JouetDecision,
 	-- Record a run of kind "test", "lint" or "build" with the command's
 	-- `status`, for the check before the agent stops. Ignored when `status`
-	-- is nil; any other kind is an error.
-	record: (kind: string, command: JouetCommand) -> (),
+	-- is nil; any other kind is an error. `scope` is "full" when the run
+	-- covered the whole project and "partial" otherwise (nil is partial), and
+	-- `selector` says what a partial run selected, such as "-p jouet".
+	record: (kind: string, command: JouetCommand, scope: string?, selector: string?) -> (),
 	-- Parse a script the way `call.commands` is built; with an exit code,
 	-- top-level commands get a `status`.
 	parse: (script: string, exit_code: number?) -> { JouetCommand },
@@ -324,9 +355,15 @@ declare jouet: {
 	},
 	ci: {
 		-- The newest recorded run of a kind ("test", "lint" or "build"; any
-		-- when nil) from the hooks' ledger, passing over runs another
-		-- repository recorded. nil when there is no ledger or no such run.
-		last_run: (kind: string?) -> (JouetLastRun?, string?),
+		-- when nil) and scope ("full" or "partial"; any when nil) from the
+		-- hooks' ledger, passing over runs another repository recorded. nil
+		-- when there is no ledger or no such run.
+		last_run: (kind: string?, scope: string?) -> (JouetLastRun?, string?),
+	},
+	cargo: {
+		-- The Cargo workspace around `dir` (relative to the call's directory;
+		-- the call's directory when nil). nil outside a Cargo project.
+		workspace: (dir: string?) -> (JouetCargoWorkspace?, string?),
 	},
 	-- The work tree's root and its GitHub repository.
 	repo: () -> (JouetRepo?, string?),

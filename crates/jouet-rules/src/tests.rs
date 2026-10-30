@@ -87,6 +87,8 @@ fn post_tool_use_rules_record_checks() {
             kind: Kind::Test,
             command: "cargo test -p jouet".into(),
             exit_code: 101,
+            full: false,
+            selector: Some("-p jouet".into()),
         }]
     );
 }
@@ -570,4 +572,46 @@ fn a_missing_primitive_is_recorded_as_a_gap() {
     );
     fine.evaluate(&bash("ls"));
     assert!(fine.take_gaps().is_empty());
+}
+
+#[test]
+fn a_plain_cargo_run_is_full_only_when_it_covers_every_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    let write = |path: &str, text: &str| {
+        let path = tmp.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write("solo/Cargo.toml", "[package]\nname = \"solo\"\n");
+    write(
+        "ws/Cargo.toml",
+        "[package]\nname = \"app\"\n[workspace]\nmembers = [\"crates/*\"]\n",
+    );
+    write("ws/crates/lib/Cargo.toml", "[package]\nname = \"lib\"\n");
+    write("virt/Cargo.toml", "[workspace]\nmembers = [\"a\", \"b\"]\n");
+    write("virt/a/Cargo.toml", "[package]\nname = \"a\"\n");
+    write("virt/b/Cargo.toml", "[package]\nname = \"b\"\n");
+    let engine = engine(builtin());
+    let scope = |dir: &str, command: &str| {
+        engine.set_probes(Probes::new(Some(tmp.path().join(dir)), None, false));
+        let call = Call {
+            event: Some(Event::PostToolUse),
+            exit_code: Some(0),
+            ..bash(command)
+        };
+        let records = engine.evaluate(&call).records;
+        assert_eq!(records.len(), 1, "{command}");
+        records[0].scope()
+    };
+    assert_eq!(scope("solo", "cargo test"), "full");
+    assert_eq!(scope("virt", "cargo test"), "full");
+    assert_eq!(scope("virt", "cd a && cargo test"), "partial -p a");
+    assert_eq!(scope("ws", "cargo test"), "partial -p app");
+    assert_eq!(scope("ws", "cargo test -p app -p lib"), "full");
+    assert_eq!(scope("ws", "cargo clippy -p lib"), "partial -p lib");
+    assert_eq!(
+        scope("ws", "cd crates/lib && cargo test --workspace"),
+        "full"
+    );
+    assert_eq!(scope(".", "cargo test"), "partial");
 }
