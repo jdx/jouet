@@ -16,8 +16,10 @@ use std::time::{Duration, Instant};
 
 /// How much of the last `wait cmd` run's output is printed.
 const OUTPUT_TAIL: usize = 20;
-/// How long a TCP connection attempt may take.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a TCP connection attempt may take. Windows reports a refused
+/// connection only after about two seconds of retries, so this leaves room
+/// for that to be seen as a refusal rather than a timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long one HTTP request may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The most of an HTTP body `--contains` searches.
@@ -139,7 +141,12 @@ impl LogWait {
         self.offset += read as u64;
         let complete = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
         let mut rest = buf.split_off(complete);
-        for line in buf.split(|&b| b == b'\n') {
+        // `buf` is empty or ends with a newline. Splitting it as it is would
+        // also yield an empty "line" after that newline (or for an empty
+        // read), which a pattern such as `^$` would match; a blank line that
+        // was really written is kept.
+        let lines = buf.strip_suffix(b"\n").map(|b| b.split(|&c| c == b'\n'));
+        for line in lines.into_iter().flatten() {
             let line = String::from_utf8_lossy(line);
             let line = line.trim_end_matches('\r');
             if self.pattern.is_match(line) {
@@ -220,11 +227,40 @@ impl PortWait {
             _ => Err(bad()),
         }
     }
+}
 
-    fn open(addrs: &[SocketAddr]) -> bool {
-        addrs
-            .iter()
-            .any(|a| TcpStream::connect_timeout(a, CONNECT_TIMEOUT).is_ok())
+/// What connecting to a port found.
+#[derive(Debug, PartialEq, Eq)]
+enum Probe {
+    Open,
+    /// Every address refused the connection.
+    Refused,
+    /// No address accepted, and at least one failed some other way (a
+    /// timeout, an unreachable network, a permission error), so whether the
+    /// port is closed is not known.
+    Unknown(String),
+}
+
+impl Probe {
+    /// Combines the attempts on each resolved address, stopping at the
+    /// first that connects.
+    fn of(attempts: impl IntoIterator<Item = io::Result<()>>) -> Self {
+        let (mut any, mut unknown) = (false, None);
+        for attempt in attempts {
+            any = true;
+            match attempt {
+                Ok(()) => return Self::Open,
+                Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {}
+                Err(e) => {
+                    unknown.get_or_insert_with(|| e.to_string());
+                }
+            }
+        }
+        match unknown {
+            Some(e) => Self::Unknown(e),
+            None if any => Self::Refused,
+            None => Self::Unknown("the address resolved to nothing".into()),
+        }
     }
 }
 
@@ -242,10 +278,19 @@ impl Subject for PortWait {
             Ok(addrs) => addrs.collect(),
             Err(e) => return Ok(Observation::pending(format!("unresolved: {e}"))),
         };
-        let open = Self::open(&addrs);
+        let probe = Probe::of(
+            addrs
+                .iter()
+                .map(|a| TcpStream::connect_timeout(a, CONNECT_TIMEOUT).map(drop)),
+        );
+        let (met, state) = match probe {
+            Probe::Open => (!self.closed, "open".to_string()),
+            Probe::Refused => (self.closed, "closed".to_string()),
+            Probe::Unknown(e) => (false, format!("unreachable: {e}")),
+        };
         Ok(Observation {
-            met: open != self.closed,
-            ..Observation::pending(if open { "open" } else { "closed" })
+            met,
+            ..Observation::pending(state)
         })
     }
 }
@@ -539,6 +584,38 @@ mod tests {
         let obs = log.check(far).ok().unwrap();
         assert!(obs.met);
         assert_eq!(obs.detail.line.as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn only_lines_that_were_written_are_matched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.log");
+        std::fs::write(&path, "").unwrap();
+        let mut log = LogWait::new(path.clone(), Regex::new("^$").unwrap(), true);
+        let far = Instant::now() + Duration::from_secs(60);
+        // An empty read, then a single non-blank line.
+        assert!(!log.check(far).ok().unwrap().met);
+        std::fs::write(&path, "hello\n").unwrap();
+        assert!(!log.check(far).ok().unwrap().met);
+        // A blank line that was really written does match.
+        std::fs::write(&path, "hello\n\nworld\n").unwrap();
+        let obs = log.check(far).ok().unwrap();
+        assert!(obs.met);
+        assert_eq!(obs.detail.line.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn only_refusal_on_every_address_counts_as_closed() {
+        let refused = || Err(io::Error::from(io::ErrorKind::ConnectionRefused));
+        let timeout = || Err(io::Error::from(io::ErrorKind::TimedOut));
+        assert_eq!(Probe::of([refused(), refused()]), Probe::Refused);
+        assert_eq!(Probe::of([refused(), Ok(())]), Probe::Open);
+        assert!(matches!(
+            Probe::of([refused(), timeout()]),
+            Probe::Unknown(_)
+        ));
+        assert!(matches!(Probe::of([timeout()]), Probe::Unknown(_)));
+        assert!(matches!(Probe::of([]), Probe::Unknown(_)));
     }
 
     #[test]
