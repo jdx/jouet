@@ -18,7 +18,7 @@ jouet edit hash PATH...
 ## How an edit runs
 
 - **All or nothing.** Every edit in every file is applied in memory first. If any edit fails, no file is written and the output says so: `0 of 2 files written`. Each file is written to a temporary file beside it and renamed into place, keeping its permissions, and if a write fails part way, the files already written are restored.
-- **In order.** Edits to one file apply in the order given, and each one sees the result of the one before.
+- **In order.** Edits to one file apply in the order given, and each one sees the result of the one before. Two spellings of the same file, such as `a.rs` and `sub/../a.rs` or its absolute path, are the same file.
 - **Exact.** Search text matches exactly, whitespace included. In a file with CRLF line endings, line breaks in the search and replacement text are treated as CRLF.
 - **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When it matches too often, it lists the line of every match, so you can add context or set a count.
 - **Every problem at once.** A failed edit does not stop the others from being checked, so one run reports everything wrong with a spec.
@@ -86,7 +86,7 @@ The format used by OpenAI Codex's `apply_patch`, accepted as is:
 *** End Patch
 ```
 
-- `*** Add File:` creates a file from the `+` lines that follow. `*** Delete File:` removes one. `*** Update File:` changes one, and an optional `*** Move to:` straight after it renames it.
+- `*** Add File:` creates a file from the `+` lines that follow. `*** Delete File:` removes one. `*** Update File:` changes one, and an optional `*** Move to:` straight after it renames it, keeping its mode.
 - Each hunk is a run of context lines (starting with a space), removed lines (`-`) and added lines (`+`).
 - `@@ TEXT` is an anchor: the hunk is searched for after the first line equal to `TEXT` (ignoring surrounding whitespace if no line is exactly equal). Several `@@` lines narrow the search one after another.
 - Hunks are searched for in order, each after the one before, and must match exactly once in what remains.
@@ -153,6 +153,13 @@ check failed (exit 1): grep -q "y = 2" src/main.rs
   full log: /home/me/.local/state/jouet/logs/edit-check-1793373365910-3807454.log
   every edited file was restored
 0 of 1 file written
+```
+
+If the check cannot start at all, for example because the log directory cannot be written or there is no shell, that also counts as a failure: the exit code is `1`, the error says whether the edits were kept, and with `--revert-on-fail` every edited file is restored the same way:
+
+```text
+$ jouet edit replace c.txt --old 'a = 1' --new 'a = 2' --check true --revert-on-fail
+jouet: running --check: No such file or directory (os error 2); every edited file was restored
 ```
 
 This is what mutation testing needs: an edit that does not apply, or does not compile, can never be mistaken for a surviving mutation.
@@ -232,7 +239,7 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | Code | When |
 |---|---|
 | 0 | Every edit applied, and the check passed if there was one |
-| 1 | The check failed (the files are restored with `--revert-on-fail` and kept otherwise), or reading or writing a file failed |
+| 1 | The check failed or could not start (the files are restored with `--revert-on-fail` and kept otherwise), or reading or writing a file failed |
 | 2 | A malformed spec or bad flags |
 | 3 | Every failure was a missing file to update or delete |
 | 4 | Nothing was written: a match count was wrong, an anchor was missing, a hash did not match, a file to create already exists, or a file is not UTF-8 text |
