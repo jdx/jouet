@@ -11,26 +11,9 @@ readme = "README.md"
 license = "MIT"
 repository = "https://github.com/jdx/jouet"
 # Published crates carry the source and its licence, not the machinery used to
-# develop and ship it. Add new repository tooling files here.
-exclude = [
-    ".agents/",
-    ".claude/",
-    ".codex/",
-    ".github/",
-    ".gitignore",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "CONTRIBUTING.md",
-    "Cross.toml",
-    "SECURITY.md",
-    "communique.toml",
-    "deny.toml",
-    "hk.pkl",
-    "mise.lock",
-    "mise.toml",
-    "release-plz.toml",
-    "renovate.json",
-]
+# develop and ship it. A list of what to ship, so files added to the repository
+# (or left untracked in a checkout) are never published by accident.
+include = ["/src/**", "/LICENSE", "/README.md"]
 
 [dependencies]
 usage-rs = "7"

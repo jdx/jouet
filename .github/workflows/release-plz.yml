@@ -28,8 +28,9 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Forks should never attempt to publish.
-    if: ${{ github.repository_owner == 'jdx' }}
+    # Forks should never attempt to publish, and neither should this repository
+    # while it is private: publishing to crates.io would make the source public.
+    if: ${{ github.repository_owner == 'jdx' && !github.event.repository.private }}
     permissions:
       contents: write
       # Required for crates.io trusted publishing: the OIDC token proves this
@@ -160,7 +161,8 @@ jobs:
     name: Release PR
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: ${{ github.repository_owner == 'jdx' }}
+    # Same guard as the release job: no release PRs while the repository is private.
+    if: ${{ github.repository_owner == 'jdx' && !github.event.repository.private }}
     permissions:
       contents: write
       pull-requests: write
