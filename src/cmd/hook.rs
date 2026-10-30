@@ -153,6 +153,7 @@ impl Log<'_> {
         let mut entry = self.entry("pre-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = Some(shape);
+        entry.via = ledger::via(command);
         entry.decisions = outcome
             .deny
             .iter()
@@ -173,6 +174,7 @@ impl Log<'_> {
         let mut entry = self.entry("post-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = call.command.as_deref().map(ledger::shape);
+        entry.via = call.command.as_deref().and_then(ledger::via);
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
         entry.decisions = records

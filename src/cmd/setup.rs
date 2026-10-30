@@ -110,6 +110,15 @@ pub fn run(args: &SetupArgs, out: &Output) -> Exit {
     let changed = files
         .iter()
         .any(|f| matches!(f.action, Action::Create | Action::Update | Action::Remove));
+    let config_doc = std::fs::read_to_string(&config)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    if !args.uninstall && config_doc.as_ref().is_some_and(setup::has_rtk_hook) {
+        notes.push(
+            "rtk's hook is installed too, and both stay. Both see the command as the agent wrote it; a jouet denial wins over rtk's rewrite, and jouet's rules see through `rtk <cmd>`."
+                .to_string(),
+        );
+    }
     if harness == Harness::Codex && !args.uninstall && changed {
         notes.push(
             "Codex skips new or changed hooks until they are trusted: run /hooks in Codex and trust jouet's."

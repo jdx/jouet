@@ -130,6 +130,25 @@ fn handlers(group: &Value) -> &[Value] {
         .map_or(&[], Vec::as_slice)
 }
 
+/// Whether another tool's pre-tool-use handler runs rtk: rtk's hook, which
+/// rewrites shell commands to `rtk <cmd>` so their output is compressed.
+pub fn has_rtk_hook(doc: &Value) -> bool {
+    let Some(groups) = doc
+        .get("hooks")
+        .and_then(|h| h.get("PreToolUse"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    groups.iter().flat_map(handlers).any(|h| {
+        !is_jouet(h)
+            && h.get("command").and_then(Value::as_str).is_some_and(|c| {
+                c.split_whitespace()
+                    .any(|word| jouet_rules::shell::basename(word).starts_with("rtk"))
+            })
+    })
+}
+
 /// Checks that a document has the shape a hook file must have, so a merge
 /// never replaces something it does not understand.
 pub fn validate(doc: &Value) -> Result<(), String> {
@@ -456,6 +475,30 @@ mod tests {
         let mut doc = original.clone();
         uninstall(&mut doc);
         assert_eq!(doc, original);
+    }
+
+    #[test]
+    fn rtk_s_hook_is_detected_and_kept() {
+        let rtk = json!({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]}
+        ]}});
+        assert!(has_rtk_hook(&rtk));
+        let script = json!({"hooks": {"PreToolUse": [
+            {"hooks": [{"type": "command", "command": "~/.claude/hooks/rtk-rewrite.sh"}]}
+        ]}});
+        assert!(has_rtk_hook(&script));
+        assert!(!has_rtk_hook(&installed(json!({}), Harness::Claude)));
+
+        let doc = installed(rtk, Harness::Claude);
+        let pre = doc["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre[0]["hooks"][0]["command"], "rtk hook claude");
+        assert_eq!(
+            pre[1]["hooks"][0]["command"],
+            "jouet hook claude pre-tool-use"
+        );
+        let mut removed = doc.clone();
+        uninstall(&mut removed);
+        assert!(has_rtk_hook(&removed));
     }
 
     #[test]

@@ -154,6 +154,11 @@ LUAU
 	run wc -l <"$ledger"
 	assert_output --regexp '^ *4$'
 
+	# A command rtk wrapped is shaped as the command, with via = rtk.
+	jouet hook claude pre-tool-use <<<"$(bash_payload 'rtk git status')" >/dev/null
+	run jq -c '[.shape, .via]' <<<"$(tail -1 "$ledger")"
+	assert_output '["git status","rtk"]'
+
 	# In a work tree, entries carry a hash of its root, never the path.
 	mkdir -p repo/.git repo/src
 	jq -cn --arg cwd "$PWD/repo/src" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: "ls"}}' |

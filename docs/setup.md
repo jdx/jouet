@@ -89,6 +89,15 @@ Known false positives and misses:
 - A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
 
+### With rtk
+
+[rtk](https://github.com/rtk-ai/rtk) and jouet do different jobs, so use both: rtk compresses the output of the commands an agent runs, and jouet steers which commands those are. rtk's hook rewrites a shell command to `rtk <cmd>`, such as `rtk git status`.
+
+- **Both hooks stay.** `jouet setup` keeps rtk's hook (and every other hook) and notes when it finds it. `--uninstall` leaves it in place.
+- **Order does not matter.** Claude Code gives both hooks the command as the agent wrote it, and when one denies and another allows with a rewrite, the denial wins. A command the agent writes as `rtk git add -A` is denied like `git add -A`, because the rules see through rtk (see [Rules](/rules)).
+- **Codex.** Codex runs every matching hook too, and a denial blocks the call. How it combines rtk's `updatedInput` rewrite with another hook's decision beyond that is untested.
+- **The ledger** records an rtk-wrapped command by the command's shape, with `"via":"rtk"`.
+
 ### The ledger
 
 Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, a 16-character hash identifying the work tree (never its path), the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). jouet will use the ledger to measure how useful each rule is, and later to let agents learn new rules from it.

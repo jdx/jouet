@@ -133,3 +133,20 @@ setup() {
 	run sh -c 'stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"' _ "$HOME/dotfiles/settings.json"
 	assert_output 644
 }
+
+@test "setup keeps rtk's hook beside jouet's and says so" {
+	mkdir -p "$HOME/.claude"
+	printf '%s\n' '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"rtk hook claude"}]}]}}' \
+		>"$HOME/.claude/settings.json"
+
+	run --separate-stderr jouet setup claude
+
+	assert_success
+	assert_line --partial "note: rtk's hook is installed too, and both stay."
+	run jq -c '[.hooks.PreToolUse[].hooks[].command]' "$HOME/.claude/settings.json"
+	assert_output '["rtk hook claude","jouet hook claude pre-tool-use"]'
+
+	run --separate-stderr jouet setup claude --uninstall
+	run jq -c '[.hooks.PreToolUse[].hooks[].command]' "$HOME/.claude/settings.json"
+	assert_output '["rtk hook claude"]'
+}

@@ -49,7 +49,7 @@ const COMPANIONS: &[(&str, &str)] = &[
     ),
     (
         "rtk",
-        "rtk: shrinks the output of common commands; see `rtk --help`",
+        "rtk: compresses command output, while jouet steers which commands run; use both, since jouet's rules see through `rtk <cmd>`",
     ),
     (
         "bd",
