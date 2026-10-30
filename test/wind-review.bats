@@ -20,7 +20,8 @@ setup() {
 	cp -r "$fixtures/codex" "$HOME/.codex"
 	CLAUDE_FILE="$HOME/.claude/projects/-work-app/$CLAUDE_ID.jsonl"
 	CODEX_FILE=$(echo "$HOME"/.codex/sessions/2026/10/30/rollout-*.jsonl)
-	touch -d '2 hours ago' "$CODEX_FILE"
+	# Two hours old; BSD touch takes no relative dates.
+	perl -e 'my $t = time - 7200; utime $t, $t, @ARGV' "$CODEX_FILE"
 	touch "$CLAUDE_FILE"
 }
 
