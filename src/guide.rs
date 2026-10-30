@@ -81,6 +81,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("skill", None),
     ("setup", None),
     ("stats", None),
+    ("completion", None),
 ];
 
 /// Subcommands an agent is told about where it needs them, in a line jouet
@@ -231,7 +232,7 @@ pub(crate) fn summary(rules: &[&str], verify: bool) -> String {
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while the last test, lint or build run failed.\n",
+            "They also stop you finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code.\n",
         );
     }
     out

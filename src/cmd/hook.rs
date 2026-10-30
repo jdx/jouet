@@ -18,8 +18,11 @@ use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
 use serde_json::{Value, json};
 use std::io::Read;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// How long a hook may spend hashing the work tree a check ran against.
+const TREE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
     let result = std::panic::catch_unwind(|| {
@@ -79,12 +82,12 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         }
         "post-tool-use" | "post-tool-use-failure" => {
             let call = Call::from_hook(payload, harness.name());
-            let records = if hooks.verify {
+            let (records, tree) = if hooks.verify {
                 record(payload, &call)
             } else {
-                Vec::new()
+                (Vec::new(), None)
             };
-            log.post_tool_use(payload, &call, &records);
+            log.post_tool_use(payload, &call, &records, tree);
             None
         }
         "stop" => {
@@ -98,6 +101,7 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
                 entry.decisions.push(ledger::Decision {
                     rule: "verify".into(),
                     action: "block".into(),
+                    scope: None,
                 });
             }
             log.append(entry);
@@ -231,6 +235,7 @@ impl Log<'_> {
                 entry.decisions.push(ledger::Decision {
                     rule,
                     action: "override".into(),
+                    scope: None,
                 });
                 ledger::append(dir, &entry);
             }
@@ -249,22 +254,31 @@ impl Log<'_> {
                 } else {
                     "warn".into()
                 },
+                scope: None,
             })
             .collect();
         ledger::append(dir, &entry);
     }
 
-    fn post_tool_use(&self, payload: &Value, call: &Call, records: &[Record]) {
+    fn post_tool_use(
+        &self,
+        payload: &Value,
+        call: &Call,
+        records: &[Record],
+        tree: Option<String>,
+    ) {
         let mut entry = self.entry("post-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = call.command.as_deref().map(ledger::shape);
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
+        entry.tree = tree;
         entry.decisions = records
             .iter()
             .map(|r| ledger::Decision {
                 rule: r.rule.clone(),
                 action: format!("record:{}", r.kind.name()),
+                scope: Some(if r.full { "full" } else { "partial" }.into()),
             })
             .collect();
         self.append(entry);
@@ -364,8 +378,9 @@ fn respond(outcome: &Outcome) -> Option<Value> {
 }
 
 /// Runs the post-tool-use rules on a finished Bash command and keeps what
-/// they record in the session's state file.
-fn record(payload: &Value, call: &Call) -> Vec<Record> {
+/// they record in the session's state file, with the tree the command ran
+/// against, which is also returned.
+fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<String>) {
     // A background command has not finished when this hook runs.
     let background = payload
         .get("tool_input")
@@ -373,23 +388,35 @@ fn record(payload: &Value, call: &Call) -> Vec<Record> {
         .and_then(Value::as_bool)
         == Some(true);
     if call.tool != "Bash" || call.exit_code.is_none() || background {
-        return Vec::new();
+        return (Vec::new(), None);
     }
     let Some(path) = session_state_path(payload) else {
-        return Vec::new();
+        return (Vec::new(), None);
     };
     let Some(engine) = load(payload) else {
-        return Vec::new();
+        return (Vec::new(), None);
     };
     let call = Call {
         event: Some(Event::PostToolUse),
         ..call.clone()
     };
     let records = evaluate(&engine, &call).records;
-    if !records.is_empty() {
-        let _ = verify::update(&path, |state| state.record(records.clone()));
+    if records.is_empty() {
+        return (records, None);
     }
-    records
+    // The command has finished, so the tree now is the one it ran against,
+    // unless the command itself changed tracked files.
+    let tree = work_tree(payload);
+    let _ = verify::update(&path, |state| {
+        state.record(records.clone(), tree.as_deref());
+    });
+    (records, tree)
+}
+
+/// The session's work tree, hashed; None outside a repository.
+fn work_tree(payload: &Value) -> Option<String> {
+    let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
+    jouet_rules::tree::work_tree(cwd, TREE_TIMEOUT).ok()
 }
 
 fn session_state_path(payload: &Value) -> Option<PathBuf> {
@@ -414,7 +441,7 @@ fn stop(harness: Harness, payload: &Value) -> Option<Value> {
             codex_state(&engine, commands)
         }
     };
-    let reason = state.block_reason()?;
+    let reason = state.block_reason(|| work_tree(payload))?;
     Some(json!({ "decision": "block", "reason": reason }))
 }
 
@@ -431,7 +458,8 @@ fn codex_state(engine: &Engine, commands: Vec<(String, i32)>) -> State {
             cwd: None,
             exit_code: Some(exit_code),
         };
-        state.record(evaluate(engine, &call).records);
+        // The transcript does not say what tree each command saw.
+        state.record(evaluate(engine, &call).records, None);
     }
     state
 }
@@ -506,13 +534,29 @@ mod tests {
     #[test]
     fn codex_commands_replay_through_the_post_tool_use_rules() {
         let engine = engine(Vec::new());
-        let failing = codex_state(&engine, vec![("cargo test".into(), 101), ("ls".into(), 0)]);
-        assert!(failing.block_reason().is_some());
+        let failing = codex_state(
+            &engine,
+            vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
+        );
+        assert!(failing.block_reason(|| None).is_some());
         let fixed = codex_state(
             &engine,
-            vec![("cargo test".into(), 101), ("cargo test".into(), 0)],
+            vec![
+                ("cargo test --workspace".into(), 101),
+                ("cargo test --workspace".into(), 0),
+            ],
         );
-        assert_eq!(fixed.block_reason(), None);
+        assert_eq!(fixed.block_reason(|| None), None);
+        // A partial pass leaves the full failure standing.
+        let partial = codex_state(
+            &engine,
+            vec![
+                ("cargo test --workspace".into(), 101),
+                ("cargo test -p jouet --lib".into(), 0),
+            ],
+        );
+        let why = partial.block_reason(|| None).unwrap();
+        assert!(why.contains("only a full test run clears it"), "{why}");
     }
 
     #[test]

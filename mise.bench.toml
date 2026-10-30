@@ -1,0 +1,7 @@
+# The harnesses the agent benchmark runs (docs/benchmarks.md), locked in
+# mise.bench.lock so a CI run measures known versions. Loaded only with
+# MISE_ENV=bench, so it never changes the `claude` or `codex` anyone runs day
+# to day in this repository. Bump with `MISE_ENV=bench mise lock`.
+[tools]
+claude = { version = "latest", minimum_release_age = "0s" }
+codex = { version = "latest", minimum_release_age = "0s" }

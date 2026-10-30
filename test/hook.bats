@@ -98,7 +98,7 @@ LUAU
 
 @test "stop blocks once while the last test run failed, and not after it passes" {
 	jq -cn '{session_id: "s1", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
-		tool_input: {command: "cargo test"}, error: "Exit code 101\ntest result: FAILED", is_interrupt: false}' |
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101\ntest result: FAILED", is_interrupt: false}' |
 		jouet hook claude post-tool-use-failure
 
 	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
@@ -111,8 +111,67 @@ LUAU
 	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":true}'
 	assert_output ""
 
-	bash_payload 'cargo test' | jq -c '. + {hook_event_name: "PostToolUse"}' | jouet hook claude post-tool-use
+	bash_payload 'cargo test --workspace' | jq -c '. + {hook_event_name: "PostToolUse"}' | jouet hook claude post-tool-use
 	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
+	assert_output ""
+}
+
+# A finished command in the work tree at ./repo, as Claude Code reports it.
+ran() {
+	local event=PostToolUse
+	[[ $2 == 0 ]] || event=PostToolUseFailure
+	jq -cn --arg c "$1" --arg cwd "$PWD/repo" --arg e "$event" --arg code "$2" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: $e, tool_name: "Bash", tool_input: {command: $c}}
+		+ (if $code == "0" then {} else {error: "Exit code \($code)"} end)' |
+		jouet hook claude "$([[ $2 == 0 ]] && echo post-tool-use || echo post-tool-use-failure)"
+}
+
+stop_reason() {
+	jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}' |
+		jouet hook claude stop | jq -r '.reason // empty'
+}
+
+@test "a partial pass does not clear a failed full run" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+
+	ran 'cargo test --workspace' 101
+	ran 'cargo test --workspace --test cli' 0
+	run stop_reason
+	assert_output --partial 'cargo test --workspace'
+	assert_output --partial 'exited 101'
+	assert_output --partial 'only a full test run clears it'
+
+	ran 'cargo test --workspace' 0
+	run stop_reason
+	assert_output ""
+	# The ledger keeps each run's scope and tree, never what it selected.
+	run jq -c 'select(.event == "post-tool-use") | [.decisions[0].scope, (.tree | length)]' \
+		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_line --index 0 '["full",32]'
+	assert_line --index 1 '["partial",32]'
+	run grep -c 'test cli' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_output 0
+}
+
+@test "only partial runs after the tree changed ask for the full suite once" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+
+	ran 'cargo test --workspace' 0
+	ran 'cargo test --workspace wait_github' 0
+	run stop_reason
+	assert_output ""
+
+	echo 'fn main() { todo!() }' >repo/main.rs
+	ran 'cargo test --workspace wait_github' 0
+	run stop_reason
+	assert_output --partial 'The tree has changed since the last full test run'
+	assert_output --partial 'selecting wait_github'
+	# The agent's answer stands after one nudge.
+	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":true}'
 	assert_output ""
 }
 

@@ -69,6 +69,7 @@ export default defineConfig({
           { text: "Rules", link: "/rules" },
           { text: "Self-winding", link: "/winding" },
           { text: "Agent setup and hooks", link: "/setup" },
+          { text: "Benchmarks", link: "/benchmarks" },
         ],
       },
       {
@@ -181,6 +182,7 @@ export default defineConfig({
               { text: "agent-help", link: "/cli/agent-help" },
               { text: "skill", link: "/cli/skill" },
               { text: "setup", link: "/cli/setup" },
+              { text: "completion", link: "/cli/completion" },
             ],
           },
         ],

@@ -25,7 +25,8 @@ use usage_rs::{Args, Cli, Subcommands};
     bin = "jouet",
     version,
     about = "A toolkit CLI for coding agents",
-    unknown_flags = "error"
+    unknown_flags = "error",
+    completion = true
 )]
 struct Jouet {
     /// Print one JSON document instead of text
@@ -74,6 +75,8 @@ enum Cmd {
     Skill(SkillArgs),
     /// Install jouet's hooks and skill into Claude Code or Codex
     Setup(SetupArgs),
+    /// Print a shell completion script
+    Completion(CompletionArgs),
     /// Answer a Claude Code or Codex hook
     #[usage(hide)]
     Hook(HookArgs),
@@ -397,6 +400,10 @@ pub struct NextArgs {
 /// printed. It asks first only when a person is at a terminal (stdin and
 /// stderr are terminals and no coding agent is detected); anyone else must
 /// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
+///
+/// While jouet's hooks keep a ledger, it also refuses (exit 4) unless they
+/// recorded a full test run passing at the PR head's tree; pass
+/// --skip-verify with a reason, which the ledger keeps, to land anyway.
 #[derive(Args)]
 pub struct LandArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
@@ -430,6 +437,10 @@ pub struct LandArgs {
     /// (default 20s; 0 disables)
     #[usage(long, value_name = "DUR")]
     settle: Option<String>,
+    /// Land without a full test pass recorded at the PR head's tree, and
+    /// say why; the reason is kept in the hook ledger
+    #[usage(long, value_name = "REASON")]
+    skip_verify: Option<String>,
 }
 
 /// Block until a condition holds, then print one summary
@@ -448,6 +459,10 @@ pub struct WaitArgs {
     /// Time between the first checks; backs off to 60s (default 10s)
     #[usage(long, global, value_name = "DUR")]
     interval: Option<String>,
+    /// How long a conflict GitHub reports must persist before `wait ci` and
+    /// `wait pr` believe it (default 10s). For tests
+    #[usage(long, global, hide, value_name = "DUR")]
+    confirm_conflict: Option<String>,
     /// Print one JSON event per line, then the result document
     #[usage(long, global)]
     jsonl: bool,
@@ -965,7 +980,8 @@ pub struct SkillArgs {
 ///
 /// Merges hooks into Claude Code's settings.json or Codex's hooks.json,
 /// keeping every other hook, and installs the skill. Running it again changes
-/// nothing; --uninstall removes only what jouet added.
+/// nothing; --uninstall removes only what jouet added. The hooks do nothing
+/// where jouet is not on PATH.
 #[derive(Args)]
 pub struct SetupArgs {
     /// claude or codex
@@ -973,15 +989,35 @@ pub struct SetupArgs {
     /// Install for every project, under your home directory (the default)
     #[usage(long)]
     global: bool,
-    /// Install into this repository's .claude/, or .codex/ and .agents/
+    /// Install into this repository for you alone: Claude Code's untracked
+    /// .claude/settings.local.json
     #[usage(long)]
     project: bool,
+    /// Install into the repository's tracked .claude/settings.json, or
+    /// .codex/hooks.json, for everyone who clones it (implies --project)
+    #[usage(long)]
+    shared: bool,
     /// Show what would change without writing anything
     #[usage(long)]
     dry_run: bool,
     /// Remove jouet's hooks and skill
     #[usage(long)]
     uninstall: bool,
+}
+
+/// Print a shell completion script
+///
+/// The script asks this binary for each completion, so it needs nothing else
+/// installed and follows whichever jouet is on PATH. Write it where your shell
+/// loads completions, or source it from your shell's startup file.
+#[derive(Args)]
+pub struct CompletionArgs {
+    /// The shell to complete for
+    #[usage(
+        arg,
+        choices("bash", "zsh", "fish", "powershell", "pwsh", "elvish", "nu", "nushell")
+    )]
+    shell: String,
 }
 
 /// Answer a Claude Code or Codex hook
@@ -1177,6 +1213,7 @@ fn main() -> ExitCode {
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),
         Cmd::Skill(args) => cmd::skill::run(&args, &out),
         Cmd::Setup(args) => cmd::setup::run(&args, &out),
+        Cmd::Completion(args) => cmd::completion::run(&args, &out),
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     exit.into()

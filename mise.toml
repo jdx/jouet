@@ -40,8 +40,8 @@ run = "cargo build --workspace --all-targets"
 
 [tasks.test]
 alias = "t"
-description = "Run the Rust tests and the end-to-end tests"
-depends = ["test:cargo", "test:e2e"]
+description = "Run the Rust tests, the end-to-end tests and the benchmark harness's own tests"
+depends = ["test:cargo", "test:e2e", "test:bench"]
 
 [tasks."test:cargo"]
 description = "Run the Rust unit and integration tests"
@@ -60,6 +60,28 @@ run_windows = "pwsh -NoProfile e2e-win/run.ps1"
 description = "Run the bats end-to-end tests"
 depends = ["build"]
 run = "bats test"
+
+[tasks."test:bench"]
+description = "Test the agent benchmark harness, and prove each task's check and fake GitHub, without running an agent"
+# check-tasks runs target/debug/jouet against each task's fake GitHub.
+depends = ["build"]
+run = [
+    "python3 -m unittest discover -s bench/tests -t bench",
+    "python3 bench/agents.py check-tasks",
+]
+
+# The agent benchmark (docs/benchmarks.md) runs real agents, spending model
+# tokens, so nothing else depends on it. Arguments pass through:
+# `mise run bench:agents --harness claude --rounds 5`, or `--dry-run` for the plan.
+[tasks."bench:agents"]
+description = "Run coding agents on the benchmark tasks with and without jouet, and compare (spends model tokens)"
+depends = ["build"]
+run = "python3 bench/agents.py run"
+
+[tasks."bench:agents:smoke"]
+description = "Run the benchmark's smoke task once per harness and arm, to check the harness works"
+depends = ["build"]
+run = "python3 bench/agents.py run --smoke"
 
 [tasks.lint]
 description = "Check formatting and run clippy"
@@ -97,16 +119,19 @@ dir = "docs"
 run = "aube install && exec aube run docs:build"
 
 [tasks."docs:check"]
-description = "Check that the generated CLI reference is current"
+description = "Check that the generated CLI reference and man page are current"
 depends = ["render"]
-run = "git diff --exit-code -- docs/cli && test -z \"$(git status --porcelain --untracked-files=all -- docs/cli)\""
+run = "git diff --exit-code -- docs/cli man && test -z \"$(git status --porcelain --untracked-files=all -- docs/cli man)\""
 
 [tasks.render]
-description = "Generate the CLI reference in docs/cli from the usage spec"
+description = "Generate the CLI reference in docs/cli and the man page in man/ from the usage spec"
 depends = ["build"]
 run = [
-    "rm -rf docs/cli",
+    "rm -rf docs/cli man",
     # The version is left out of the spec so a release, which bumps it, does not
-    # make docs/cli stale; the site's nav reads it from Cargo.toml instead.
+    # make docs/cli or the man page stale; the site's nav reads it from
+    # Cargo.toml instead.
     "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate markdown --file - --multi --replace-pre-with-code-fences --url-prefix /cli --out-dir docs/cli",
+    "mkdir -p man/man1",
+    "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate manpage --file - --out-file man/man1/jouet.1",
 ]

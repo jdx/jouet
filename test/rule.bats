@@ -43,7 +43,7 @@ setup() {
 	assert_success
 	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
-	assert_line '8 of 8 rules passed their examples'
+	assert_line '9 of 9 rules passed their examples'
 
 	cat >"$RULES/no-rm.luau" <<'LUAU'
 --- why: rm deletes for good
@@ -63,12 +63,12 @@ LUAU
 	assert_line '            - expected: quiet'
 	assert_line '            + actual:   deny: rm deletes for good'
 	assert_line --regexp '^FAIL  bare +it has no examples$'
-	assert_line '8 of 10 rules passed their examples'
+	assert_line '9 of 11 rules passed their examples'
 	refute_line --partial 'echo rm'
 
 	run --separate-stderr jouet rule test --all --json
 	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
-	assert_output '[8,2,[2,1]]'
+	assert_output '[9,2,[2,1]]'
 
 	run --separate-stderr jouet rule test
 	assert_failure 2

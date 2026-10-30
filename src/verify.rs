@@ -1,13 +1,23 @@
-//! The check before an agent stops: if the last test, lint or build run in
-//! this session failed, the stop hook blocks once and says which.
+//! The check before an agent stops: if a test, lint or build run in this
+//! session failed and nothing since has covered it, or only part of the
+//! test suite ran since the tree last changed, the stop hook blocks once and
+//! says which.
 //!
 //! What counts as a check is decided by post-tool-use rules (the built-in
 //! `checks` rule, or a user's replacement), which `jouet.record` the runs
-//! they recognise. Claude Code reports each command's exit code to a hook as
-//! it happens (PostToolUse on success, PostToolUseFailure with `Exit code N`),
-//! and those records are kept in a small per-session state file. Codex sends
-//! no exit code to hooks, so its commands are read from the end of the
-//! session transcript when it stops, and run through the same rules then.
+//! they recognise, each `full` (it covered the whole project) or `partial`
+//! (with what it selected, such as `-p jouet-edit`). Claude Code reports
+//! each command's exit code to a hook as it happens (PostToolUse on success,
+//! PostToolUseFailure with `Exit code N`), and those records are kept, with
+//! the tree each run saw ([`jouet_rules::tree`]), in a small per-session
+//! state file. Codex sends no exit code to hooks, so its commands are read
+//! from the end of the session transcript when it stops, and run through the
+//! same rules then; their trees are unknown.
+//!
+//! A failed run is cleared by a later full pass of its kind, or by a partial
+//! pass that selected the same thing. A partial pass never clears a full
+//! failure: `cargo test -p x` passing says nothing about the rest of
+//! `cargo test --workspace`.
 
 use jouet_rules::{Kind, Record};
 use serde::{Deserialize, Serialize};
@@ -15,48 +25,161 @@ use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+/// How many unresolved failures of a kind are kept; older ones are dropped.
+const MAX_FAILURES: usize = 16;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Run {
     pub command: String,
     pub exit_code: i32,
-}
-
-/// The latest run of each kind of check.
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct State {
+    /// Whether the run covered the whole project. State files written
+    /// before jouet kept a scope lack it, and read as partial.
     #[serde(default)]
-    pub runs: BTreeMap<Kind, Run>,
+    pub full: bool,
+    /// What a partial run selected, when its rule said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// The work tree the run saw, when it could be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<String>,
 }
 
-impl State {
-    pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>) {
-        for record in records {
-            self.runs.insert(
-                record.kind,
-                Run {
-                    command: record.command,
-                    exit_code: record.exit_code,
-                },
-            );
+impl Run {
+    fn new(record: Record, tree: Option<&str>) -> Self {
+        Self {
+            command: record.command,
+            exit_code: record.exit_code,
+            full: record.full,
+            selector: record.selector,
+            tree: tree.map(str::to_string),
         }
     }
 
-    /// Why stopping should wait, if the last run of any check failed.
-    pub(crate) fn block_reason(&self) -> Option<String> {
-        let (kind, run) = self.runs.iter().find(|(_, run)| run.exit_code != 0)?;
+    /// What a pass must have selected to clear this run's failure: its
+    /// selector, or without one its command.
+    fn selection(&self) -> &str {
+        self.selector.as_deref().unwrap_or(&self.command)
+    }
+
+    fn passed(&self) -> bool {
+        self.exit_code == 0
+    }
+}
+
+/// A session's checks.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct State {
+    /// The newest run of each kind.
+    #[serde(default)]
+    pub runs: BTreeMap<Kind, Run>,
+    /// The newest full pass of each kind.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub full_passes: BTreeMap<Kind, Run>,
+    /// Failed runs no later run has cleared, oldest first.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub failures: BTreeMap<Kind, Vec<Run>>,
+}
+
+impl State {
+    /// Adds runs that ran against `tree`.
+    pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>, tree: Option<&str>) {
+        for record in records {
+            let kind = record.kind;
+            let run = Run::new(record, tree);
+            let failures = self.failures.entry(kind).or_default();
+            if run.passed() && run.full {
+                failures.clear();
+                self.full_passes.insert(kind, run.clone());
+            } else if run.passed() {
+                failures.retain(|f| f.full || f.selection() != run.selection());
+            } else {
+                failures.retain(|f| f.full != run.full || f.selection() != run.selection());
+                failures.push(run.clone());
+                if failures.len() > MAX_FAILURES {
+                    failures.remove(0);
+                }
+            }
+            if failures.is_empty() {
+                self.failures.remove(&kind);
+            }
+            self.runs.insert(kind, run);
+        }
+    }
+
+    /// Why stopping should wait: a failure nothing has cleared, or a test
+    /// suite that has only partly run since the tree changed. `tree` gives
+    /// the work tree now; it is only asked for when a partial test pass
+    /// is the newest test run.
+    pub(crate) fn block_reason(&self, tree: impl FnOnce() -> Option<String>) -> Option<String> {
+        if let Some(reason) = self.failure_reason() {
+            return Some(reason);
+        }
+        let last = self.runs.get(&Kind::Test)?;
+        if last.full || !last.passed() {
+            return None;
+        }
+        let since = match &last.selector {
+            Some(selector) => format!("`{}`, selecting {selector}", last.command),
+            None => format!("`{}`", last.command),
+        };
+        let Some(full) = self.full_passes.get(&Kind::Test) else {
+            return Some(format!(
+                "Only part of the test suite has run in this session (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]"
+            ));
+        };
+        if full.tree.is_some() && full.tree == tree() {
+            return None;
+        }
         Some(format!(
-            "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
+            "The tree has changed since the last full test run (`{}`), and only part of the suite has run since (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]",
+            full.command
+        ))
+    }
+
+    fn failure_reason(&self) -> Option<String> {
+        let (kind, failures) = self.failures.iter().find(|(_, f)| !f.is_empty())?;
+        // A full failure first: it says the most.
+        let failed = failures.iter().rev().find(|f| f.full).or(failures.last())?;
+        let last = self.runs.get(kind);
+        if last == Some(failed) {
+            return Some(format!(
+                "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
+                kind.name(),
+                failed.command,
+                failed.exit_code
+            ));
+        }
+        let since = last.map_or(String::new(), |l| format!(" (`{}`)", l.command));
+        let clear = if failed.full {
+            format!("only a full {} run clears it", kind.name())
+        } else {
+            format!(
+                "a run of the same selection or a full {} run clears it",
+                kind.name()
+            )
+        };
+        Some(format!(
+            "A {} run failed (`{}` exited {}), and the runs since{since} do not cover it: {clear}. Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
             kind.name(),
-            run.command,
-            run.exit_code
+            failed.command,
+            failed.exit_code
         ))
     }
 
     pub(crate) fn load(path: &Path) -> Self {
-        std::fs::read(path)
+        let mut state: Self = std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // A file from before failures were kept: its newest failed runs.
+        if state.failures.is_empty() {
+            for (kind, run) in &state.runs {
+                if !run.passed() {
+                    state.failures.insert(*kind, vec![run.clone()]);
+                }
+            }
+        }
+        state
     }
 
     pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -185,23 +308,120 @@ fn codex_command(line: &str) -> Option<(String, i32)> {
 mod tests {
     use super::*;
 
-    fn record(kind: Kind, command: &str, exit_code: i32) -> Record {
+    /// A run of `kind`: full when `scope` is "full", else partial and
+    /// selecting `scope`.
+    fn record(kind: Kind, command: &str, exit_code: i32, scope: &str) -> Record {
         Record {
             rule: "checks".into(),
             kind,
             command: command.into(),
             exit_code,
+            full: scope == "full",
+            selector: (scope != "full").then(|| scope.to_string()),
         }
     }
 
+    fn test(command: &str, exit_code: i32, scope: &str) -> Record {
+        record(Kind::Test, command, exit_code, scope)
+    }
+
+    /// The reason to block with the work tree at `tree`.
+    fn reason(state: &State, tree: &str) -> Option<String> {
+        state.block_reason(|| Some(tree.to_string()))
+    }
+
     #[test]
-    fn blocks_only_while_the_last_run_failed() {
+    fn blocks_while_the_last_run_failed() {
         let mut state = State::default();
-        state.record([record(Kind::Test, "cargo test", 101)]);
-        let reason = state.block_reason().unwrap();
-        assert!(reason.contains("`cargo test` exited 101"), "{reason}");
-        state.record([record(Kind::Test, "cargo test -p jouet", 0)]);
-        assert_eq!(state.block_reason(), None);
+        state.record([test("cargo test", 101, "full")], Some("t1"));
+        let why = reason(&state, "t1").unwrap();
+        assert!(why.starts_with("The last test run failed"), "{why}");
+        assert!(why.contains("`cargo test` exited 101"), "{why}");
+        state.record([test("cargo test", 0, "full")], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn a_partial_pass_does_not_clear_a_failed_full_run() {
+        let mut state = State::default();
+        state.record([test("cargo test --workspace", 101, "full")], Some("t1"));
+        state.record(
+            [test("cargo test -p jouet-edit", 0, "-p jouet-edit")],
+            Some("t1"),
+        );
+        let why = reason(&state, "t1").unwrap();
+        assert!(why.contains("`cargo test --workspace` exited 101"), "{why}");
+        assert!(why.contains("only a full test run clears it"), "{why}");
+        state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
+        assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn a_partial_pass_clears_only_a_failure_of_the_same_selection() {
+        let mut state = State::default();
+        state.record([test("cargo test --workspace", 0, "full")], Some("t1"));
+        state.record([test("cargo test -p a", 101, "-p a")], Some("t1"));
+        state.record([test("cargo test -p b", 0, "-p b")], Some("t1"));
+        let why = reason(&state, "t1").unwrap();
+        assert!(why.contains("`cargo test -p a` exited 101"), "{why}");
+        assert!(why.contains("same selection"), "{why}");
+        // The same selection, run with other options, clears it.
+        state.record(
+            [test("cargo test -p a -- --nocapture", 0, "-p a")],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+        // A lint failure is its own.
+        state.record(
+            [record(Kind::Lint, "cargo clippy --workspace", 101, "full")],
+            Some("t1"),
+        );
+        state.record(
+            [record(Kind::Lint, "cargo clippy -p a", 0, "-p a")],
+            Some("t1"),
+        );
+        assert!(reason(&state, "t1").unwrap().contains("clippy --workspace"));
+    }
+
+    #[test]
+    fn only_partial_test_runs_since_the_tree_changed_block() {
+        let mut state = State::default();
+        state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        let why = reason(&state, "t1").unwrap();
+        assert!(why.starts_with("Only part of the test suite"), "{why}");
+        assert!(why.contains("selecting -p a"), "{why}");
+
+        state.record([test("cargo test --workspace", 0, "full")], Some("t1"));
+        state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        // The tree the full suite passed at: nothing to add.
+        assert_eq!(reason(&state, "t1"), None);
+        let why = reason(&state, "t2").unwrap();
+        assert!(why.starts_with("The tree has changed"), "{why}");
+        assert!(why.contains("`cargo test --workspace`"), "{why}");
+        // An unknown tree (a Codex session) is not the same tree.
+        assert!(state.block_reason(|| None).is_some());
+        // A partial lint or build run is not asked about.
+        let mut lint = State::default();
+        lint.record([record(Kind::Lint, "cargo clippy -p a", 0, "-p a")], None);
+        assert_eq!(lint.block_reason(|| None), None);
+    }
+
+    #[test]
+    fn a_state_file_from_an_older_jouet_keeps_its_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.json");
+        std::fs::write(
+            &path,
+            r#"{"runs":{"test":{"command":"cargo test","exit_code":101},"lint":{"command":"cargo clippy","exit_code":0}}}"#,
+        )
+        .unwrap();
+        let state = State::load(&path);
+        assert!(!state.runs[&Kind::Test].full);
+        assert!(
+            reason(&state, "t1")
+                .unwrap()
+                .contains("`cargo test` exited 101")
+        );
     }
 
     #[test]
@@ -209,7 +429,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.json");
         let mut state = State::default();
-        state.record([record(Kind::Lint, "cargo clippy", 101)]);
+        state.record(
+            [record(Kind::Lint, "cargo clippy --workspace", 101, "full")],
+            Some("t1"),
+        );
+        state.record([test("cargo test -p a", 0, "-p a")], None);
         state.save(&path).unwrap();
         assert_eq!(State::load(&path), state);
         assert_eq!(
@@ -228,8 +452,8 @@ mod tests {
                 let path = path.clone();
                 std::thread::spawn(move || {
                     for i in 0..40 {
-                        let run = record(kind, &format!("run {i}"), code);
-                        update(&path, |s| s.record([run])).unwrap();
+                        let run = record(kind, &format!("run {i}"), code, "full");
+                        update(&path, |s| s.record([run], None)).unwrap();
                     }
                 })
             })

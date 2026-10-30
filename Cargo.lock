@@ -360,6 +360,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "toml",
 ]
 
 [[package]]
@@ -941,6 +942,16 @@ dependencies = [
  "usage-argv",
  "usage-config",
  "usage-derive",
+ "usage-test",
+]
+
+[[package]]
+name = "usage-test"
+version = "7.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87d6e5859e58321ecb1a2cd7483493a214bedd69a6384920beef6d1f4fef6905"
+dependencies = [
+ "usage-argv",
 ]
 
 [[package]]
