@@ -113,7 +113,7 @@ A rule with `on = "post-tool-use"` runs after a command finished. Each top-level
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects:
+`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
 
 ```console
 $ jouet rule test ./no-rm-rf.luau

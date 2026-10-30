@@ -84,6 +84,8 @@ export type JouetRule = {
 	-- Returns a decision, or nil to say nothing. The first rule to deny wins.
 	check: (call: JouetCall) -> JouetDecision?,
 	-- Commands and what the rule must make of each, run by `jouet rule test`.
+	-- They check what `check` returns, before the mode turns a deny into a
+	-- warning.
 	examples: {
 		deny: { JouetExample }?,
 		warn: { JouetExample }?,
