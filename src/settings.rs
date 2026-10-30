@@ -43,6 +43,18 @@ pub(crate) struct WindSettings {
     /// Firings, with no overrides, before a rule is promoted automatically
     #[usage(env = "JOUET_WIND_PROMOTE_AFTER", default = 20)]
     pub promote_after: u64,
+    /// Digest each session at its stop hook, and suggest reviewing one with user corrections or a lot of waste at the next session start
+    #[usage(env = "JOUET_WIND_REVIEW", default = false)]
+    pub review: bool,
+    /// Sessions, at least, between two suggested reviews
+    #[usage(env = "JOUET_WIND_REVIEW_EVERY", default = 5)]
+    pub review_every: u64,
+    /// User corrections in a session that make it worth a review
+    #[usage(env = "JOUET_WIND_REVIEW_CORRECTIONS", default = 2)]
+    pub review_corrections: u64,
+    /// A gitleaks config whose rules also redact digests; ~/.config/jouet/gitleaks.toml when it exists
+    #[usage(env = "JOUET_WIND_GITLEAKS")]
+    pub gitleaks: Option<String>,
 }
 
 /// What the hooks `jouet setup` installs do.
@@ -183,6 +195,21 @@ mod tests {
         assert_eq!(s.wind.promote_after, 20);
         let s = Settings::load_from(&env(&[("JOUET_WIND", "0")]), None);
         assert!(!s.wind.enabled);
+    }
+
+    #[test]
+    fn session_review_is_off_until_turned_on() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(!s.wind.review);
+        assert_eq!((s.wind.review_every, s.wind.review_corrections), (5, 2));
+        assert_eq!(s.wind.gitleaks, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[wind]\nreview = true\nreview_every = 3\n").unwrap();
+        let s = Settings::load_from(&env(&[("JOUET_WIND_GITLEAKS", "/x.toml")]), Some(path));
+        assert!(s.wind.review);
+        assert_eq!(s.wind.review_every, 3);
+        assert_eq!(s.wind.gitleaks.as_deref(), Some("/x.toml"));
     }
 
     #[test]

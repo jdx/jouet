@@ -68,7 +68,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent",
         ),
     ),
     (
@@ -82,6 +82,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("setup", None),
     ("stats", None),
 ];
+
+/// Subcommands an agent is told about where it needs them, in a line jouet
+/// prints (a proposal's note, the review prompt), so the overview leaves
+/// them out. `jouet agent-help COMMAND` still lists them.
+const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -144,7 +149,11 @@ pub(crate) fn overview() -> String {
         let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
         let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
-        for sub in meta.subcommands.iter().filter(|s| !s.hide) {
+        let listed = meta
+            .subcommands
+            .iter()
+            .filter(|s| !s.hide && !PROMPTED.contains(&(name, s.cmd.name)));
+        for sub in listed {
             let path = format!("jouet {name} {}", sub.cmd.name);
             let _ = writeln!(
                 out,
@@ -340,6 +349,16 @@ mod tests {
                 crate::spec::has_command(&[name]),
                 "WHEN names `{name}`, which jouet does not have"
             );
+        }
+    }
+
+    #[test]
+    fn subcommands_left_out_of_the_overview_exist() {
+        for (name, sub) in PROMPTED {
+            assert!(crate::spec::has_command(&[name, sub]), "{name} {sub}");
+            let guide = command(&[name]).unwrap();
+            assert!(guide.contains(&format!("jouet {name} {sub}")), "{guide}");
+            assert!(!overview().contains(&format!("jouet {name} {sub}")));
         }
     }
 

@@ -19,6 +19,38 @@ pub struct Transcript {
     pub bad_lines: u64,
     /// Reading stopped early with this error; what came before it is kept.
     pub truncated: Option<String>,
+    /// What the user said, and when they interrupted or refused a call. Read
+    /// only with [`Filter::detail`](crate::Filter::detail).
+    pub messages: Vec<Message>,
+    /// Lines in the file, counting those skipped.
+    pub lines: u64,
+}
+
+/// Something the user did, as the transcript records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Message {
+    /// When, in milliseconds since the Unix epoch.
+    pub at: Option<i64>,
+    /// The transcript line it is on, from 1.
+    pub line: u64,
+    /// How many calls the transcript had issued before it, so a message
+    /// can be placed among them.
+    pub after_calls: usize,
+    pub kind: MessageKind,
+    /// What the user wrote: a prompt's text, or the reason given with a
+    /// refusal. Raw, and only its first 512 bytes, as much as the readers
+    /// keep of any output; whoever shows it redacts it first.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    /// A prompt the user typed.
+    Prompt,
+    /// The user stopped the agent mid-turn.
+    Interrupt,
+    /// The user refused a tool call the agent asked to make.
+    Refusal,
 }
 
 /// One request to the model.
@@ -56,6 +88,15 @@ pub struct Call {
     pub exit_code: Option<i32>,
     /// Its output reported a GitHub rate limit.
     pub rate_limited: bool,
+    /// The transcript line that issued it, from 1. Read only with
+    /// [`Filter::detail`](crate::Filter::detail), like the fields below.
+    pub line: u64,
+    /// The tool's own name, such as `TodoWrite` or `apply_patch`.
+    pub name: Option<String>,
+    /// The file or pattern a read, search or edit names, raw.
+    pub target: Option<String>,
+    /// The start of a failed call's output, raw.
+    pub error: Option<String>,
 }
 
 impl Call {
@@ -69,6 +110,10 @@ impl Call {
             failed: false,
             exit_code: None,
             rate_limited: false,
+            line: 0,
+            name: None,
+            target: None,
+            error: None,
         }
     }
 
