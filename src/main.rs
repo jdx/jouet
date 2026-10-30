@@ -904,7 +904,8 @@ pub struct SkillArgs {
 ///
 /// Merges hooks into Claude Code's settings.json or Codex's hooks.json,
 /// keeping every other hook, and installs the skill. Running it again changes
-/// nothing; --uninstall removes only what jouet added.
+/// nothing; --uninstall removes only what jouet added. The hooks do nothing
+/// where jouet is not on PATH.
 #[derive(Args)]
 pub struct SetupArgs {
     /// claude or codex
@@ -912,9 +913,14 @@ pub struct SetupArgs {
     /// Install for every project, under your home directory (the default)
     #[usage(long)]
     global: bool,
-    /// Install into this repository's .claude/, or .codex/ and .agents/
+    /// Install into this repository for you alone: Claude Code's untracked
+    /// .claude/settings.local.json
     #[usage(long)]
     project: bool,
+    /// Install into the repository's tracked .claude/settings.json, or
+    /// .codex/hooks.json, for everyone who clones it (implies --project)
+    #[usage(long)]
+    shared: bool,
     /// Show what would change without writing anything
     #[usage(long)]
     dry_run: bool,

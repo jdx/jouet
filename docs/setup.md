@@ -12,7 +12,8 @@ description: Install jouet's hooks and skill into Claude Code or Codex, so agent
 ```sh
 jouet setup claude              # Claude Code: ~/.claude/settings.json and ~/.claude/skills/jouet/
 jouet setup codex               # Codex: ~/.codex/hooks.json and ~/.agents/skills/jouet/
-jouet setup claude --project    # this repository's .claude/ instead
+jouet setup claude --project    # this repository, for you alone (.claude/settings.local.json)
+jouet setup claude --shared     # this repository, for everyone (.claude/settings.json)
 jouet setup codex --dry-run     # show the diff, write nothing
 jouet setup codex --uninstall   # remove what jouet added
 ```
@@ -26,17 +27,37 @@ The hooks, their rules and the settings below are new and may change between rel
 | Harness | Scope | Hooks | Skill |
 |---|---|---|---|
 | Claude Code | `--global` (default) | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR` if set) | `~/.claude/skills/jouet/SKILL.md` |
-| Claude Code | `--project` | `.claude/settings.json` | `.claude/skills/jouet/SKILL.md` |
+| Claude Code | `--project` | `.claude/settings.local.json` | `.claude/skills/jouet/SKILL.md` |
+| Claude Code | `--shared` | `.claude/settings.json` | `.claude/skills/jouet/SKILL.md` |
 | Codex | `--global` (default) | `~/.codex/hooks.json` (`$CODEX_HOME` if set) | `~/.agents/skills/jouet/SKILL.md` |
-| Codex | `--project` | `.codex/hooks.json` | `.agents/skills/jouet/SKILL.md` |
+| Codex | `--shared` | `.codex/hooks.json` | `.agents/skills/jouet/SKILL.md` |
 
-`--project` writes at the root of the enclosing git repository. A project file is shared with everyone who clones it, and a hook whose command is not installed fails on every tool call, so use `--project` only where everyone has jouet.
-
+- **`--project` is yours alone.** It writes at the root of the enclosing git repository, into Claude Code's `.claude/settings.local.json`, which Claude Code reads alongside `settings.json` but which is not meant to be committed. Claude Code ignores that file in git once it has written to it itself; until then, and for the skill, setup says when git does not ignore them, so you can list them in `.gitignore` or `.git/info/exclude`.
+- **`--shared` is for everyone who clones the repository.** It writes the tracked `.claude/settings.json` or `.codex/hooks.json`, for a team that has agreed to use jouet. Since the hooks do nothing where jouet is not installed, contributors without it are not broken, but they get no hooks either.
+- **Codex has no hooks file of your own in a project.** It reads project hooks only from the repository's `.codex/hooks.json` and `.codex/config.toml`, so `jouet setup codex --project` is refused: use `--global`, or `--shared` to install there for everyone.
 - **Merges, never clobbers.** jouet adds its own matcher group to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone.
-- **Re-running is a no-op.** jouet recognises its entries by their command, `jouet hook ...`, and only rewrites them when they differ from what this version installs.
-- **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. A settings file left empty stays, as `{}`.
+- **Re-running is a no-op.** jouet recognises its entries by their command, which runs `jouet hook ...`, and only rewrites them when they differ from what this version installs. Entries an older version installed, such as the bare `jouet hook claude stop`, are replaced in place, not duplicated.
+- **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`.
 - **The skill is jouet's only while it is unedited.** setup ends the `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps any other `skills/jouet/SKILL.md`, including one you have edited, with a note.
-- **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's.
+- **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's. Upgrading from a version that installed bare commands changes them, so they need trusting again.
+
+### When jouet is not on PATH
+
+Each hook's command checks for jouet first and exits 0 silently when it is not on `PATH`, the way the Entire CLI's hooks do:
+
+```sh
+sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'
+```
+
+So a contributor without jouet, or an app started with a shorter `PATH` than your shell's, gets no hooks rather than an error on every tool call. setup says so when jouet is not on `PATH` where you run it. The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }`.
+
+The hooks find jouet on `PATH` rather than at the path of the jouet that ran setup. That path changes on every upgrade with mise, Homebrew and other version managers, differs between machines that share a settings file, and means nothing to anyone else in a `--shared` install. A hook pointing at a path that is gone would skip just as silently, but on every machine after every upgrade.
+
+### Worktrees
+
+Claude Code reads `.claude/settings.local.json` from the main checkout's root, also in sessions that run in a linked worktree such as the desktop app's `.claude/worktrees/*`, so `--project` writes it there even when you run it from a worktree. The skill is read through from the main checkout only when the worktree has no `.claude/skills` directory of its own; a repository that tracks `.claude/skills` has one in every worktree. On Windows Claude Code reads the local file from each worktree instead, and a new worktree starts without it unless the repository's [`.worktreeinclude`](https://code.claude.com/docs/en/worktrees#copy-gitignored-files-into-worktrees) lists it.
+
+If you work across many repositories or worktrees, install with `--global` instead, and choose which hooks run with the [settings](#settings) below.
 
 ## The hooks
 
