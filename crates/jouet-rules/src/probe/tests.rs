@@ -46,14 +46,13 @@ fn repo() -> tempfile::TempDir {
 /// a probe's answer from the decision. It has examples only so that it may
 /// deny.
 fn rule(expr: &str) -> Source {
-    Source {
-        name: "probe".into(),
-        origin: Origin::User("probe.luau".into()),
-        code: format!(
+    Source::luau(
+        "probe",
+        Origin::User("probe.luau".into()),
+        format!(
             "--- why: a test rule\n--- mode: deny\nreturn {{ check = function(call)\n  return jouet.deny({expr})\nend, examples = {{ fires = {{ 'x' }}, quiet = {{ 'y' }} }} }}\n"
         ),
-        trusted: true,
-    }
+    )
 }
 
 fn engine(expr: &str, budget: Budget) -> Engine {
@@ -66,7 +65,6 @@ fn engine(expr: &str, budget: Budget) -> Engine {
             cache_dir: None,
         },
     )
-    .unwrap()
 }
 
 fn bash() -> Call {
@@ -369,8 +367,7 @@ fn push_untested_warns_until_the_full_suite_passed_at_this_tree() {
             },
             cache_dir: None,
         },
-    )
-    .unwrap();
+    );
     engine.set_probes(Probes::new(
         Some(work.clone()),
         Some(ledger.path().into()),

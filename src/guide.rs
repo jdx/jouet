@@ -56,13 +56,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "rule",
         Some(
-            "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
+            "writing or checking a jouet rule, the TOML matchers behind jouet's hooks (`jouet rule schema`): write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
         ),
     ),
     (
         "run",
         Some(
-            "a job you would otherwise do step by step, written as a routine: `joue land [PR]` (pr-next, wait for CI, then pr land), `joue sweep` (unresolved threads as a work list), `joue ship-check` (the tests, then the PR); `joue --list` lists them, `joue NAME --help` gives the args, and a routine that writes needs --yes (without it: a preview and exit 4)",
+            "a job you would otherwise do step by step, written as a routine (code, where rules are TOML configuration): `joue land [PR]` (pr-next, wait for CI, then pr land), `joue sweep` (unresolved threads as a work list), `joue ship-check` (the tests, then the PR); `joue --list` lists them, `joue NAME --help` gives the args, and a routine that writes needs --yes (without it: a preview and exit 4)",
         ),
     ),
     (

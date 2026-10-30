@@ -1,0 +1,68 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "git-stash"
+why = "Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+message = "Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work: commit a WIP instead, or `git stash push -m <unique-tag>` and restore with `git stash apply <sha>`."
+
+# `git stash` and `git stash -u`, without a message.
+[[rule.match]]
+command = "git stash"
+max_args = 0
+unless_flags = ["-m", "--message"]
+value_flags = ["-m", "--message"]
+
+[[rule.match]]
+command = "git stash push"
+unless_flags = ["-m", "--message"]
+value_flags = ["-m", "--message"]
+
+[[rule.match]]
+command = "git stash save"
+max_args = 0
+unless_flags = ["-m", "--message"]
+value_flags = ["-m", "--message"]
+
+# Without a stash named, these act on whichever entry is on top.
+[[rule.match]]
+command = ["git stash pop", "git stash apply", "git stash drop", "git stash clear"]
+max_args = 0
+
+# `git stash branch <name>` applies and drops the top entry.
+[[rule.match]]
+command = "git stash branch"
+max_args = 1
+
+[rule.examples]
+fires = [
+  "git stash",
+  "git stash -u",
+  "git stash push",
+  "git stash push -u src/",
+  "git stash pop",
+  "git stash apply",
+  "git stash drop",
+  "git stash clear",
+  "git stash save",
+  "git stash branch rescue",
+  "rtk git stash",
+  { command = "git stash pop", harness = "codex" },
+]
+quiet = [
+  "git stash push -m wip-ab12",
+  "git stash push -u -m 'wip ab12'",
+  "git stash push --message=wip",
+  "git stash -u -m wip",
+  "git stash save 'wip ab12'",
+  "git stash list",
+  "git stash show -p stash@{1}",
+  "git stash apply 3f2a9c1",
+  "git stash drop stash@{2}",
+  "git stash branch rescue stash@{1}",
+  "echo 'git stash'",
+  "echo rtk git stash",
+  "git commit -m 'avoid git stash'",
+]

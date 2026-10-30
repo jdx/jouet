@@ -1,15 +1,15 @@
 ---
-description: Luau rules that read the command an agent is about to run, or has just run, and deny it, warn about it, or record it as a check.
+description: Rules that read the command an agent is about to run, or has just run, and deny it, warn about it, or record it as a check.
 ---
 
 # Rules
 
-A jouet rule is a small [Luau](https://luau.org) script. It reads a tool call, such as the shell command an agent is about to run, and decides what to do: deny it with one line of advice, let it run with a warning, or say nothing. A rule that runs after a command can instead record it as a test, lint or build run.
+A jouet rule reads a tool call, such as the shell command an agent is about to run, and decides what to do: deny it with one line of advice, let it run with a warning, or say nothing. A rule is configuration, a `[[rule]]` table in a TOML file: which commands it matches, what it tells the agent, and examples that prove it. A rule with logic a matcher cannot express hands the decision to a small [Luau script](#scripts).
 
-jouet ships its own rules, for instance one that denies `git add -A` and one that denies a bare `git stash`. They are written against the same API as yours. You, or your agent, can write new ones, test them, and let them warn before they ever block anything.
+jouet ships its own rules, for instance one that denies `git add -A` and one that denies a bare `git stash`. They are written in the same format as yours. You, or your agent, can write new ones, test them, and let them warn before they ever block anything.
 
 ::: warning Early development
-The rule API is new and may change between releases. `jouet rule types` always describes the installed version.
+The rule format is new and may change between releases. `jouet rule schema` always describes the installed version.
 :::
 
 ```output
@@ -29,22 +29,22 @@ The columns are: name, state, mode, scope, author, created, and why.
 
 ## Where rules come from
 
-| Source | Directory | Runs | Mode unless the header says |
+| Source | Directory | Runs | Mode unless the rule says |
 |---|---|---|---|
 | Built in | embedded in the binary | always | deny |
-| Yours | `~/.config/jouet/rules/*.luau` (`$XDG_CONFIG_HOME/jouet/rules`) | always | warn |
-| A repository's | `.jouet/rules/*.luau` at the repository root | once trusted with `jouet rule trust` | deny |
+| Yours | `~/.config/jouet/rules/*.toml` (`$XDG_CONFIG_HOME/jouet/rules`) | always | warn |
+| A repository's | `.jouet/rules/*.toml` at the repository root | once trusted with `jouet rule trust` | deny |
 
-A rule's name is its file name without `.luau`.
+A file can hold any number of `[[rule]]` tables, and every rule has a `name` of its own.
 
 Rules of yours and a repository's **only add decisions**. jouet enforces this, so a rule written in a hurry, by you or an agent, cannot weaken the safety it already has:
 
 - **No replacing.** A rule with the name of a built-in rule is refused (`jouet rule list` shows it as broken), and the built-in rule keeps running.
-- **No overruling.** Rules run built-in rules first, and the first denial wins. `jouet.allow()` decides nothing for any other rule.
+- **No overruling.** Rules run built-in rules first, and the first denial wins. A script's `jouet.allow()` decides nothing for any other rule.
 - **No locking out.** A denial of a command that only runs `jouet` becomes a warning, so a bad rule never stops you running `jouet rule list` or `jouet setup --uninstall` to fix it.
-- **The sandbox.** It holds for every rule (see below).
+- **The sandbox.** It holds for every script (see below).
 
-A repository's rules can deny commands and put text in front of the agent, so they only run once you trust them. `jouet rule trust` records a hash of every rule file in `.jouet/rules`. Adding or changing a rule makes the directory untrusted again, and `jouet rule list` says so. `jouet rule untrust` withdraws trust.
+A repository's rules can deny commands and put text in front of the agent, so they only run once you trust them. `jouet rule trust` records a hash of every rule file and script in `.jouet/rules`. Adding or changing one makes the directory untrusted again, and `jouet rule list` says so. `jouet rule untrust` withdraws trust.
 
 To turn rules off without deleting them, list them in `~/.config/jouet/config.toml`, or in `JOUET_RULES_DISABLE` (comma-separated):
 
@@ -55,103 +55,133 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 
 ## Writing a rule
 
-A rule file starts with a header and returns a table with its `examples` and a `check` function. Write the examples first. They are the tool calls the rule must fire on, and the near misses it must leave alone, after [ast-grep](https://ast-grep.github.io/guide/test-rule.html)'s valid and invalid rule tests. They pin down what the rule is for more exactly than its `why`, and jouet holds every rule to them before it can block anything:
+A rule says what it is for, which calls it matches, and what the agent is told. Write its examples first. They are the tool calls the rule must fire on, and the near misses it must leave alone, after [ast-grep](https://ast-grep.github.io/guide/test-rule.html)'s valid and invalid rule tests. They pin down what the rule is for more exactly than its `why`, and jouet holds every rule to them before it can block anything:
 
-```lua
---!strict
---- why: rm -r deletes for good, and agents are quick to reach for it
---- mode: warn
---- author: jdx
---- created: 2026-10-30
-local rule: JouetRule = {
-	examples = {
-		-- Calls the rule must fire on.
-		fires = { "rm -rf target", "sudo rm -r build" },
-		-- Near misses it must leave alone.
-		quiet = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
-	},
-	check = function(call: JouetCall): JouetDecision?
-		for _, command in call.commands do
-			if command.program == "rm" and jouet.short_flag(command.argv[2] or "", "r") then
-				return jouet.deny("rm -r deletes for good; is this path right?")
-			end
-		end
-		return nil
-	end,
-}
+```toml
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "no-rm-rf"
+why = "rm -r deletes for good, and agents are quick to reach for it"
+mode = "warn"
+author = "jdx"
+created = "2026-10-30"
+message = "rm -r deletes for good; is this path right?"
 
-return rule
+[rule.match]
+command = "rm"
+flags = ["-r", "-R", "--recursive"]
+
+[rule.examples]
+# Calls the rule must fire on.
+fires = ["rm -rf target", "sudo rm -r build"]
+# Near misses it must leave alone.
+quiet = ["rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'"]
 ```
 
-`check` gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing.
+The `#:schema` line lets editors that read it ([Tombi](https://tombi-toml.github.io/tombi/), [Taplo](https://taplo.tamasfe.dev/)) complete and check the file. `jouet rule schema` prints the same JSON schema.
+
+A rule's keys:
+
+| Key | Meaning |
+|---|---|
+| `name` | Required. Lowercase words joined by dashes, unique among the rules jouet loads. |
+| `why` | Required. What the rule is for, in one line. |
+| `mode` | `warn` or `deny`. A `warn` rule's denials are shown to the agent as warnings and the command runs. A rule of yours defaults to `warn`, so a new rule can prove itself before it blocks anything. |
+| `scope` | Optional `builtin`, `user` or `repo`; must match where the file lives. |
+| `author` | Who wrote it: a person, or the agent session that did. |
+| `created` | When. |
+| `message` | What the agent is told when the rule matches. |
+| `suggest` | A command to run instead. The agent sees ``Run `SUGGEST` instead.`` before the message. |
+| `needs` | The jouet command the advice names, such as `["wait", "ci"]`. The rule stays off until the installed jouet has it. |
+| `match` | Which calls it matches: a table, or a list of `[[rule.match]]` tables of which any may match. |
+| `examples` | `fires` and `quiet`, the calls it must fire on and leave alone. |
+| `script` | A Luau file beside this one, for logic a matcher cannot express. See [Scripts](#scripts). |
+| `on` | `pre-tool-use` (the default), or `post-tool-use` for a script that records checks. |
+
+### Matching a command
+
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool` and `paths` is about a command, and needs `command`.
+
+| Key | Matches |
+|---|---|
+| `command` | The program and its subcommands, such as `"git stash pop"`. Options before the first subcommand are skipped (`git -C dir add`, `cargo +nightly test`). `*` and `?` are wildcards: `"python3.*"`. |
+| `flags` | The command has one of these options. `-f` matches inside a cluster such as `-fu`, and `--force` matches `--force=x`. |
+| `unless_flags` | It has none of these. |
+| `exact_flags` | Its options are exactly these, whatever their values. |
+| `value_flags` | Its options that take a value, so that in `git commit -m -n` the `-n` is the message, and `-mn` is `-m n`. |
+| `args` | One of its arguments (the words after its subcommands that are not options or their values) matches one of these wildcard patterns: `args = [".", ":/"]`, or `"+?*"` for a `+` refspec. |
+| `unless_args` | None of its arguments matches. |
+| `max_args` | It has at most this many arguments: `max_args = 0` for a bare `git stash pop`. |
+| `text` | Regular expressions that must each match one of its words after the program, or one of its here-documents. `\|` gives alternatives within one. |
+| `with` | Another command in the same call matches this too, as in `sleep 60 && gh pr checks`. It takes the command keys. |
+| `via` | The wrapper it ran through, such as `rtk`, `sudo` or `mise`. |
+| `tool` | The harness's tool name, such as `Edit`. Without it, a matcher with `command` matches any tool that runs a command. |
+| `paths` | For a file tool, the path it reads or writes. A pattern without a `/` matches the file name; one with a `/` matches the path from the working directory, where `*` stays within a directory and `**` crosses them. |
+
+For example, the built-in `force-push` rule:
+
+```toml
+[[rule.match]]
+command = "git push"
+flags = ["-f", "--force"]
+unless_flags = ["--force-with-lease"]
+# `-o` takes a value, so `-of` is a push option, not a force.
+value_flags = ["-o", "--push-option"]
+
+# A `+` refspec forces that one ref.
+[[rule.match]]
+command = "git push"
+args = "+?*"
+unless_flags = ["--force-with-lease"]
+```
+
+The command is read the way a shell reads it, so a rule never has to pick apart quoting itself:
+
+- **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
+- **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
+- **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` match too.**
+- **Wrappers are looked through:** `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --` are skipped, `via` records them, and the program is the basename of what runs.
+
+`setup` sends the hook shell commands only, so for now a `tool` or `paths` matcher fires under `jouet rule test`, and in a hook for whatever other tools a harness is set up to send.
 
 ### Examples
 
-Every `fires` example must make `check` deny, warn, or record a check. Every `quiet` example must make it say nothing and record nothing. Examples check what `check` decides before the mode applies, so a warn-mode rule that calls `jouet.deny` fires with `deny`.
+Every `fires` example must make the rule deny, warn, or record a check. Every `quiet` example must make it say nothing and record nothing. Examples check what the rule decides before the mode applies, so a warn-mode matcher fires with `deny`.
 
 An example is a shell command, or a table for a call that needs more than that:
 
-```lua
-fires = {
-	"git stash",
-	{ command = "git stash pop", harness = "codex" },
-	{ tool = "WebFetch", action = "warn" },
-},
+```toml
+fires = [
+  "git stash",
+  { command = "git stash pop", harness = "codex" },
+  { tool = "Edit", path = "Cargo.lock", action = "deny" },
+]
 ```
 
 | Key | Meaning |
 |---|---|
 | `command` | The shell command. Required for a `Bash` call. |
 | `tool` | The harness's tool name; `Bash` if omitted. |
+| `path` | For a file tool, the path it reads or writes. |
 | `harness` | `claude`, `codex` or another harness; `test` if omitted. |
 | `exit_code` | For a post-tool-use rule; `0` if omitted. |
 | `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
 | `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
+| `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
 
 Every rule needs at least one example of each kind:
 
 - **Built-in rules** are held to theirs by jouet's own test suite.
-- **A rule of yours or a repository's** without them still runs, but only warns, whatever its header says. `jouet rule list` notes why.
+- **A rule of yours or a repository's** without them still runs, but only warns, whatever its `mode` says. `jouet rule list` notes why.
 - **Promotion and sharing.** `jouet rule promote` and `jouet share` refuse a rule until it passes examples of both kinds.
 - **Drafted rules.** [Self-winding](/winding) writes both kinds into every rule it drafts, and drops a draft that fails its own.
-
-The header is a few `--- key: value` lines at the top of the file, which `jouet rule list` shows without running the rule:
-
-| Key | Meaning |
-|---|---|
-| `why` | Required. What the rule is for, in one line. |
-| `mode` | `warn` or `deny`. A `warn` rule's denials are shown to the agent as warnings and the command runs. A rule of yours defaults to `warn`, so a new rule can prove itself before it blocks anything. |
-| `name` | Optional; must match the file name. |
-| `scope` | Optional `builtin`, `user` or `repo`; must match where the file lives. |
-| `author` | Who wrote it: a person, or the agent session that did. |
-| `created` | When. |
-
-`call.commands` is the command parsed the way a shell parses it, so a rule never has to pick apart quoting itself:
-
-- **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
-- **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
-- **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` are included**, marked `nested`.
-- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --`, and `program` is the basename of what runs.
-
-The `jouet` module has helpers for the common cases:
-- `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`. (`jouet.git` is also where the `jouet.git.state()` probe lives.)
-- `jouet.gh(command)` returns gh's arguments.
-- `jouet.options(args)` returns the arguments before `--`.
-- `jouet.short_flag(arg, "f", "o")` reads short-option clusters such as `-fu`.
-- `jouet.has_command("wait", "ci")` asks whether the installed jouet has a command.
-
-`jouet rule types` prints the whole API as Luau type definitions.
-
-A rule that names a jouet command in its advice declares it with `needs = { "wait", "ci" }`, and stays off until the installed jouet has that command.
-
-A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Testing a rule
 
 `jouet rule test` runs a rule's examples. It fails if one does not do what it expects, showing what was expected and what the rule did, or if the rule lacks either kind. Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason. Say you add `rm -ri build` as a near miss, since `-i` asks before each file:
 
 ```output
-$ jouet rule test ./no-rm-rf.luau
+$ jouet rule test ./no-rm-rf.toml
 ok    fires         rm -rf target
 ok    fires         sudo rm -r build
 ok    quiet         rm file.txt
@@ -163,20 +193,28 @@ FAIL  quiet         rm -ri build
 no-rm-rf: 5 of 6 examples passed
 ```
 
+`unless_flags = ["-i", "--interactive"]` fixes it. A file of several rules runs them all. A file that does not load says where:
+
+```output
+$ jouet rule test ./no-rm-rf.toml
+jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `text`, `with`
+```
+
 `jouet rule test --all` runs every rule's examples: built in, yours, and this repository's, trusted or not.
 
 ```output
 $ jouet rule test --all
-ok    sleep-poll      10 examples passed
-ok    review-threads  5 examples passed
+ok    sleep-poll      12 examples passed
+ok    review-threads  7 examples passed
 ok    python-edit     7 examples passed
 ok    git-add-all     14 examples passed
 ok    git-stash       25 examples passed
-ok    no-verify       13 examples passed
-ok    force-push      11 examples passed
-ok    checks          20 examples passed
+ok    no-verify       14 examples passed
+ok    force-push      12 examples passed
+ok    push-untested   13 examples passed
+ok    checks          41 examples passed
 FAIL  no-rm-rf        it has no `quiet` examples: near misses it must leave alone
-8 of 9 rules passed their examples
+9 of 10 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -199,20 +237,72 @@ stays quiet on (near misses):
      2x  allow        git status
 ```
 
-`jouet rule new NAME --why "..."` writes a rule of yours from a template, in warn mode, with empty `fires` and `quiet` lists to fill in first. `jouet rule promote NAME` switches it to deny once it passes them. [Self-winding](/winding) drafts rules like this from the ledger on its own.
+`jouet rule new NAME --why "..."` writes `~/.config/jouet/rules/NAME.toml` from a template, in warn mode, with a matcher to fill in and empty `fires` and `quiet` lists to fill in first. `jouet rule promote NAME` switches it to deny once it passes them. [Self-winding](/winding) drafts rules like this from the ledger on its own.
+
+## Scripts
+
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Two built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree.
+
+```toml
+[[rule]]
+name = "long-sleep"
+why = "a long sleep spends the session's time doing nothing"
+needs = ["wait"]
+script = "long-sleep.luau"
+# The script only runs on calls this matches.
+match = { command = "sleep", args = "*" }
+examples = { fires = ["sleep 90"], quiet = ["sleep 1", "echo sleep 90"] }
+```
+
+```lua
+--!strict
+local rule: JouetRule = {
+	check = function(call: JouetCall): JouetDecision?
+		for _, command in call.commands do
+			local seconds = tonumber(command.argv[2])
+			if command.program == "sleep" and seconds and seconds >= 10 then
+				return jouet.warn("Wait for what you need with `jouet wait` instead of sleeping.")
+			end
+		end
+		return nil
+	end,
+}
+
+return rule
+```
+
+The script returns a table with a `check` function, which gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing. The rule's name, mode, `needs`, `on` and examples stay in its TOML, and a script rule takes no `message` or `suggest`: its `check` says what to tell the agent. `jouet rule new NAME --script` writes both files.
+
+A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
+
+`call.commands` is the command parsed the way a shell parses it, as for a matcher. Each command has its `words`, its `argv` without wrappers, its `program`, its `heredocs`, the wrappers it ran `via`, and whether it is `nested`. The `jouet` module has helpers for the common cases:
+
+- `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`. (`jouet.git` is also where the `jouet.git.state()` probe lives.)
+- `jouet.gh(command)` returns gh's arguments.
+- `jouet.options(args)` returns the arguments before `--`.
+- `jouet.short_flag(arg, "f", "o")` reads short-option clusters such as `-fu`.
+- `jouet.has_command("wait", "ci")` asks whether the installed jouet has a command.
+
+`jouet rule types` prints the whole API as Luau type definitions.
+
+A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Type checking
 
-Rules can be type-checked with [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) against the definitions jouet prints:
+Scripts can be type-checked with [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) against the definitions jouet prints:
 
 ```sh
 jouet rule types > jouet.d.luau
 luau-lsp analyze --definitions=jouet.d.luau ~/.config/jouet/rules/*.luau
 ```
 
+### Luau rule files
+
+Before rules were TOML, a rule was a whole `.luau` file with a `--- why:` header and its `on`, `needs` and `examples` in the table it returns. Those files still load, but are deprecated and stop loading in jouet 0.1.0; `jouet rule list` names each one. To convert one, write its header and examples as a `[[rule]]` table in a `.toml` file of the same name, and either express its `check` as a matcher or keep the file as the rule's `script`, without the header and the table's `on`, `needs` and `examples`.
+
 ## Probes
 
-A rule can also ask about jouet's state. The probes only read, and each returns its value, or `nil` and the reason it has none:
+A script can also ask about jouet's state. The probes only read, and each returns its value, or `nil` and the reason it has none:
 
 | Probe | Returns |
 |---|---|
@@ -250,9 +340,9 @@ The hooks record which work tree each run was in, by a hash of its root rather t
 
 ## The sandbox and its limits
 
-Each rule runs in a sandboxed Luau VM:
+Each script runs in a sandboxed Luau VM:
 
 - **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). Running jouet's commands and writing are for [routines](/routines), not rules. Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
-- **Budgets.** Every call to a rule's `check`, and every loading of its file, has a 50 ms time budget and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
-- **Failing open.** A rule that does not compile, throws, runs out of budget or returns something unexpected says nothing. jouet reports it and carries on with the other rules.
-- **Compiled-rule cache.** Compiled rules are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.
+- **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
+- **Failing open.** A rule that does not load, or a script that does not compile, throws, runs out of budget or returns something unexpected, says nothing. jouet reports it and carries on with the other rules.
+- **Compiled-script cache.** Compiled scripts are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.

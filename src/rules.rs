@@ -47,8 +47,8 @@ pub(crate) fn trust_store() -> TrustStore {
     TrustStore::load(jouet_output::paths::state_dir().map(|d| d.join("trusted-rules.json")))
 }
 
-/// Loads every rule. Fails only when the Luau VM itself cannot start.
-pub(crate) fn load(cwd: &Path) -> Result<Loaded, String> {
+/// Loads every rule. A script's Luau VM starts only when a call needs it.
+pub(crate) fn load(cwd: &Path) -> Loaded {
     let trust = trust_store();
     let repo = repo_dir(cwd);
     let (sources, errors) = jouet_rules::discover(user_dir().as_deref(), repo.as_deref(), &trust);
@@ -61,17 +61,16 @@ pub(crate) fn load(cwd: &Path) -> Result<Loaded, String> {
             budget: Budget::default(),
             cache_dir: jouet_output::paths::cache_dir().map(|d| d.join("luau")),
         },
-    )
-    .map_err(|e| e.to_string())?;
+    );
     // In a hook the GitHub probes wait for `rules.network`.
     engine.set_probes(probes(cwd, settings.rules.network));
     let repo = repo.map(|dir| {
         let state = trust.check(&dir);
         (dir, state)
     });
-    Ok(Loaded {
+    Loaded {
         engine,
         errors,
         repo,
-    })
+    }
 }

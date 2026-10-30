@@ -5,7 +5,7 @@
 
 List, test and trust the rules jouet's hooks run
 
-Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule types` prints the API they are written against.
+Rules are `[[rule]]` tables in TOML files: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
 
 ## Flags
 - **`-h --help`** — Print help
@@ -17,6 +17,7 @@ Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository'
 - [`jouet rule log [NAME]`](/cli/rule/log.md)
 - [`jouet rule new [FLAGS] <NAME>`](/cli/rule/new.md)
 - [`jouet rule promote [--reason <TEXT>] <NAME>`](/cli/rule/promote.md)
+- [`jouet rule schema`](/cli/rule/schema.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
 - [`jouet rule trust`](/cli/rule/trust.md)
 - [`jouet rule types`](/cli/rule/types.md)

@@ -1,0 +1,714 @@
+{
+  "repo": "jdx/demo",
+  "rest": {
+    "/repos/jdx/demo/pulls/12": {
+      "number": 12,
+      "id": 3012,
+      "node_id": "PR_kwDOdemo12",
+      "state": "open",
+      "draft": false,
+      "title": "Add average_line",
+      "body": "Adds the average line total for the summary page.",
+      "user": {
+        "login": "jdx"
+      },
+      "html_url": "https://github.com/jdx/demo/pull/12",
+      "url": "http://api.github.localhost/repos/jdx/demo/pulls/12",
+      "head": {
+        "ref": "invoice-average",
+        "sha": "{{head_sha}}",
+        "label": "jdx:invoice-average",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "base": {
+        "ref": "main",
+        "sha": "{{base_sha}}",
+        "label": "jdx:main",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "merged": false
+    },
+    "/repos/jdx/demo/pulls": [
+      {
+        "number": 12,
+        "id": 3012,
+        "node_id": "PR_kwDOdemo12",
+        "state": "open",
+        "draft": false,
+        "title": "Add average_line",
+        "body": "Adds the average line total for the summary page.",
+        "user": {
+          "login": "jdx"
+        },
+        "html_url": "https://github.com/jdx/demo/pull/12",
+        "url": "http://api.github.localhost/repos/jdx/demo/pulls/12",
+        "head": {
+          "ref": "invoice-average",
+          "sha": "{{head_sha}}",
+          "label": "jdx:invoice-average",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "{{base_sha}}",
+          "label": "jdx:main",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "merged": false
+      }
+    ],
+    "/repos/jdx/demo/pulls/12/reviews": [
+      {
+        "id": 4401,
+        "node_id": "PRR_1",
+        "user": {
+          "login": "octo-reviewer"
+        },
+        "body": "A few things before this lands.",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-30T09:15:00Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/12#pullrequestreview-4401"
+      }
+    ],
+    "/repos/jdx/demo/issues/12/comments": [
+      {
+        "id": 66601,
+        "node_id": "IC_kwDOdemo1",
+        "user": {
+          "login": "octo-reviewer"
+        },
+        "body": "Thanks, this is close.",
+        "created_at": "2026-10-30T09:16:00Z",
+        "html_url": "https://github.com/jdx/demo/pull/12#issuecomment-66601"
+      }
+    ],
+    "/repos/jdx/demo/activity": [],
+    "/repos/jdx/demo/commits/{{head_sha}}/check-runs": {
+      "total_count": 1,
+      "check_runs": [
+        {
+          "id": 7201,
+          "name": "test",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "{{head_sha}}",
+          "started_at": "2026-10-30T09:00:00Z",
+          "completed_at": "2026-10-30T09:01:00Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
+          "app": {
+            "slug": "github-actions"
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/status": {
+      "state": "success",
+      "statuses": [],
+      "total_count": 0,
+      "sha": "{{head_sha}}"
+    },
+    "/repos/jdx/demo/branches/main": {
+      "name": "main",
+      "commit": {
+        "sha": "{{base_sha}}"
+      },
+      "protected": false
+    }
+  },
+  "graphql": {
+    "viewer": {
+      "__typename": "User",
+      "id": "U_jdx",
+      "login": "jdx",
+      "name": "jdx"
+    },
+    "repository": {
+      "__typename": "Repository",
+      "id": "R_demo",
+      "name": "demo",
+      "nameWithOwner": "jdx/demo",
+      "url": "https://github.com/jdx/demo",
+      "owner": {
+        "__typename": "User",
+        "id": "U_jdx",
+        "login": "jdx",
+        "name": "jdx"
+      },
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "viewerPermission": "ADMIN",
+      "isPrivate": false,
+      "object": {
+        "__typename": "Commit",
+        "id": "COMMIT_head",
+        "oid": "{{head_sha}}",
+        "abbreviatedOid": "{{head_short}}",
+        "statusCheckRollup": {
+          "__typename": "StatusCheckRollup",
+          "state": "SUCCESS",
+          "contexts": {
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7201",
+                "databaseId": 7201,
+                "name": "test",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-10-30T09:00:00Z",
+                "completedAt": "2026-10-30T09:01:00Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
+                "isRequired": true,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "databaseId": 9101,
+                    "event": "pull_request",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "name": "ci"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "messageHeadline": "Add average_line",
+        "committedDate": "2026-10-30T08:00:00Z",
+        "authors": {
+          "nodes": [
+            {
+              "name": "jdx",
+              "email": "jdx@example.invalid",
+              "user": {
+                "login": "jdx"
+              }
+            }
+          ]
+        }
+      },
+      "pullRequests": {
+        "nodes": [
+          {
+            "__typename": "PullRequest",
+            "id": "PR_kwDOdemo12",
+            "number": 12,
+            "databaseId": 3012,
+            "title": "Add average_line",
+            "body": "Adds the average line total for the summary page.",
+            "state": "OPEN",
+            "isDraft": false,
+            "closed": false,
+            "merged": false,
+            "url": "https://github.com/jdx/demo/pull/12",
+            "author": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "headRefName": "invoice-average",
+            "headRefOid": "{{head_sha}}",
+            "baseRefName": "main",
+            "baseRefOid": "{{base_sha}}",
+            "headRepository": {
+              "__typename": "Repository",
+              "id": "R_demo",
+              "name": "demo",
+              "nameWithOwner": "jdx/demo"
+            },
+            "headRepositoryOwner": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "isCrossRepository": false,
+            "maintainerCanModify": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "additions": 14,
+            "deletions": 3,
+            "changedFiles": 2,
+            "createdAt": "2026-10-30T08:00:00Z",
+            "updatedAt": "2026-10-30T09:16:00Z",
+            "closedAt": null,
+            "mergedAt": null,
+            "commits": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "__typename": "PullRequestCommit",
+                  "id": "PRC_12",
+                  "commit": {
+                    "__typename": "Commit",
+                    "id": "COMMIT_head",
+                    "oid": "{{head_sha}}",
+                    "abbreviatedOid": "{{head_short}}",
+                    "statusCheckRollup": {
+                      "__typename": "StatusCheckRollup",
+                      "state": "SUCCESS",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7201",
+                            "databaseId": 7201,
+                            "name": "test",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                            "startedAt": "2026-10-30T09:00:00Z",
+                            "completedAt": "2026-10-30T09:01:00Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
+                            "isRequired": true,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "databaseId": 9101,
+                                "event": "pull_request",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "name": "ci"
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "messageHeadline": "Add average_line",
+                    "committedDate": "2026-10-30T08:00:00Z",
+                    "authors": {
+                      "nodes": [
+                        {
+                          "name": "jdx",
+                          "email": "jdx@example.invalid",
+                          "user": {
+                            "login": "jdx"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "__typename": "StatusCheckRollup",
+              "state": "SUCCESS",
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7201",
+                    "databaseId": 7201,
+                    "name": "test",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-10-30T09:00:00Z",
+                    "completedAt": "2026-10-30T09:01:00Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
+                    "isRequired": true,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "databaseId": 9101,
+                        "event": "pull_request",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "name": "ci"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo0",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "isCollapsed": true,
+                  "path": "invoice.py",
+                  "line": null,
+                  "startLine": null,
+                  "originalLine": 1,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": {
+                    "__typename": "User",
+                    "id": "U_rev",
+                    "login": "octo-reviewer",
+                    "name": "Octo Reviewer"
+                  },
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo0",
+                        "databaseId": 55500,
+                        "fullDatabaseId": "55500",
+                        "url": "https://github.com/jdx/demo/pull/12#discussion_r55500",
+                        "createdAt": "2026-10-29T09:00:00Z",
+                        "updatedAt": "2026-10-29T09:00:00Z",
+                        "body": "Nit: a module docstring would help.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "invoice.py",
+                        "line": null,
+                        "originalLine": 1,
+                        "diffHunk": "",
+                        "outdated": true,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "invoice.py",
+                  "line": 13,
+                  "startLine": null,
+                  "originalLine": 13,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo1",
+                        "databaseId": 55501,
+                        "fullDatabaseId": "55501",
+                        "url": "https://github.com/jdx/demo/pull/12#discussion_r55501",
+                        "createdAt": "2026-10-30T09:10:00Z",
+                        "updatedAt": "2026-10-30T09:10:00Z",
+                        "body": "`tmp` doesn't say what this is. Call it `subtotal`.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "invoice.py",
+                        "line": 13,
+                        "originalLine": 13,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo2",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "invoice.py",
+                  "line": 19,
+                  "startLine": null,
+                  "originalLine": 19,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo2",
+                        "databaseId": 55502,
+                        "fullDatabaseId": "55502",
+                        "url": "https://github.com/jdx/demo/pull/12#discussion_r55502",
+                        "createdAt": "2026-10-30T09:12:00Z",
+                        "updatedAt": "2026-10-30T09:12:00Z",
+                        "body": "This raises ZeroDivisionError for an invoice with no lines. Return `Decimal(\"0.00\")` when `lines` is empty.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "invoice.py",
+                        "line": 19,
+                        "originalLine": 19,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo3",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "invoice.py",
+                  "line": 14,
+                  "startLine": null,
+                  "originalLine": 14,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo3",
+                        "databaseId": 55503,
+                        "fullDatabaseId": "55503",
+                        "url": "https://github.com/jdx/demo/pull/12#discussion_r55503",
+                        "createdAt": "2026-10-30T09:14:00Z",
+                        "updatedAt": "2026-10-30T09:14:00Z",
+                        "body": "Is half-up rounding deliberate here? `Decimal` defaults to banker's rounding.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "invoice.py",
+                        "line": 14,
+                        "originalLine": 14,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "reviews": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReview",
+                  "id": "PRR_1",
+                  "databaseId": 4401,
+                  "fullDatabaseId": "4401",
+                  "state": "COMMENTED",
+                  "body": "A few things before this lands.",
+                  "author": {
+                    "__typename": "User",
+                    "id": "U_rev",
+                    "login": "octo-reviewer",
+                    "name": "Octo Reviewer"
+                  },
+                  "authorAssociation": "COLLABORATOR",
+                  "url": "https://github.com/jdx/demo/pull/12#pullrequestreview-4401",
+                  "createdAt": "2026-10-30T09:15:00Z",
+                  "submittedAt": "2026-10-30T09:15:00Z",
+                  "commit": {
+                    "oid": "{{head_sha}}"
+                  },
+                  "reactionGroups": [],
+                  "comments": {
+                    "nodes": []
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReview",
+                  "id": "PRR_1",
+                  "databaseId": 4401,
+                  "fullDatabaseId": "4401",
+                  "state": "COMMENTED",
+                  "body": "A few things before this lands.",
+                  "author": {
+                    "__typename": "User",
+                    "id": "U_rev",
+                    "login": "octo-reviewer",
+                    "name": "Octo Reviewer"
+                  },
+                  "authorAssociation": "COLLABORATOR",
+                  "url": "https://github.com/jdx/demo/pull/12#pullrequestreview-4401",
+                  "createdAt": "2026-10-30T09:15:00Z",
+                  "submittedAt": "2026-10-30T09:15:00Z",
+                  "commit": {
+                    "oid": "{{head_sha}}"
+                  },
+                  "reactionGroups": [],
+                  "comments": {
+                    "nodes": []
+                  }
+                }
+              ]
+            },
+            "comments": {
+              "nodes": [
+                {
+                  "__typename": "IssueComment",
+                  "id": "IC_kwDOdemo1",
+                  "databaseId": 66601,
+                  "fullDatabaseId": "66601",
+                  "url": "https://github.com/jdx/demo/pull/12#issuecomment-66601",
+                  "createdAt": "2026-10-30T09:16:00Z",
+                  "body": "Thanks, this is close.",
+                  "author": {
+                    "__typename": "User",
+                    "id": "U_rev",
+                    "login": "octo-reviewer",
+                    "name": "Octo Reviewer"
+                  },
+                  "authorAssociation": "COLLABORATOR",
+                  "includesCreatedEdit": false,
+                  "isMinimized": false,
+                  "minimizedReason": null,
+                  "reactionGroups": [],
+                  "viewerDidAuthor": false
+                }
+              ]
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "projectCards": {
+              "nodes": []
+            },
+            "projectItems": {
+              "nodes": []
+            },
+            "milestone": null,
+            "autoMergeRequest": null,
+            "reactionGroups": [],
+            "files": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "invoice.py",
+                  "additions": 6,
+                  "deletions": 3
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "tests/test_average.py",
+                  "additions": 11,
+                  "deletions": 0
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

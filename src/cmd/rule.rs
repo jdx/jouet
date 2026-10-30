@@ -1,4 +1,4 @@
-//! `jouet rule list|test|types|trust|untrust|new|promote|log`.
+//! `jouet rule list|test|schema|types|trust|untrust|new|promote|log`.
 
 use super::Output;
 use crate::rules;
@@ -21,6 +21,12 @@ pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
     match &args.cmd {
         RuleCmd::List(_) => list(&cwd, out),
         RuleCmd::Test(test_args) => test(test_args, &cwd, out),
+        RuleCmd::Schema(_) => {
+            let text = jouet_rules::schema();
+            let schema: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            out.result(&schema, || text.clone());
+            Exit::Ok
+        }
         RuleCmd::Types(_) => {
             let text = jouet_rules::TYPES;
             out.result(&serde_json::json!({ "text": text }), || text.to_string());
@@ -48,6 +54,11 @@ struct ListedRule<'a> {
     event: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
     why: &'a str,
+    /// `toml`, or `luau` for a deprecated Luau rule file.
+    format: jouet_rules::Format,
+    /// The Luau script a TOML rule names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script: Option<&'a str>,
     /// Why its examples fall short, so that it only warns.
     #[serde(skip_serializing_if = "Option::is_none")]
     missing_examples: Option<&'a str>,
@@ -61,10 +72,10 @@ struct List<'a> {
 }
 
 fn list(cwd: &Path, out: &Output) -> Exit {
-    let loaded = match rules::load(cwd) {
-        Ok(loaded) => loaded,
-        Err(e) => return out.error(Exit::Failed, &format!("starting the rule engine: {e}")),
-    };
+    let mut loaded = rules::load(cwd);
+    // Listing is not on a hook's path, so it compiles every script to show
+    // the broken ones.
+    loaded.engine.load_scripts();
     let mut notes = loaded.errors.clone();
     if let Some((dir, trust)) = &loaded.repo {
         match trust {
@@ -93,9 +104,18 @@ fn list(cwd: &Path, out: &Output) -> Exit {
             source: rule.origin.describe(),
             event: rule.event.name(),
             why: &rule.why,
+            format: rule.format,
+            script: rule.script.as_deref(),
             missing_examples: rule.missing_examples.as_deref(),
         })
         .collect();
+    notes.extend(
+        loaded
+            .engine
+            .rules()
+            .iter()
+            .filter_map(jouet_rules::Rule::deprecation),
+    );
     // Listing is not on a hook's path, so it can afford to run examples.
     for rule in loaded.engine.rules() {
         if rule.scope == jouet_rules::Scope::Builtin
@@ -244,7 +264,7 @@ impl Examples {
 }
 
 /// How to give a rule what it lacks.
-const ADD_EXAMPLES: &str = "give it `examples = { fires = { ... }, quiet = { ... } }`";
+const ADD_EXAMPLES: &str = "give it `[rule.examples]` with `fires = [...]` and `quiet = [...]`";
 
 fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
     let name = match (&args.rule, args.all) {
@@ -261,9 +281,29 @@ fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
         }
         (Some(name), false) => name,
     };
-    let (engine, name) = match engine_for(name, cwd) {
+    let (engine, names) = match engine_for(name, cwd) {
         Ok(found) => found,
         Err((exit, message)) => return out.error(exit, &message),
+    };
+    for rule in engine.rules() {
+        if let Some(note) = rule.deprecation()
+            && names.contains(&rule.name)
+        {
+            eprintln!("jouet: {note}");
+        }
+    }
+    let name = match names.as_slice() {
+        [name] => name.clone(),
+        _ if args.command.is_some() || args.payload.is_some() || args.replay => {
+            return out.error(
+                Exit::Usage,
+                &format!(
+                    "{name} holds the rules {}; to test one against a command, payload or the ledger, install the file and name the rule",
+                    names.join(", ")
+                ),
+            );
+        }
+        _ => return report_examples(&engine, &names, out),
     };
     let Some(rule) = engine.rule(&name) else {
         return out.error(Exit::NotFound, &format!("no rule named `{name}`"));
@@ -383,15 +423,13 @@ struct All {
 /// `rule test --all`: every rule's examples, including a repository's
 /// untrusted ones, since testing only prints.
 fn test_all(cwd: &Path, out: &Output) -> Exit {
-    let loaded = match rules::load(cwd) {
-        Ok(loaded) => loaded,
-        Err(e) => return out.error(Exit::Failed, &format!("starting the rule engine: {e}")),
-    };
+    let mut loaded = rules::load(cwd);
+    loaded.engine.load_scripts();
     let mut reports = Vec::new();
     for rule in loaded.engine.rules() {
         let report = match (&rule.state, &rule.origin) {
             (State::Untrusted, origin @ Origin::Repo(_)) => match single(origin.clone(), cwd) {
-                Ok((engine, name)) => match engine.rule(&name) {
+                Ok((engine, _)) => match engine.rule(&rule.name) {
                     Some(rule) => Examples::run(&engine, rule),
                     None => continue,
                 },
@@ -408,6 +446,22 @@ fn test_all(cwd: &Path, out: &Output) -> Exit {
         };
         reports.push(report);
     }
+    print_reports(reports, out)
+}
+
+/// The examples of the named rules in `engine`, as `rule test --all` shows
+/// them: for a rule file holding several.
+fn report_examples(engine: &Engine, names: &[String], out: &Output) -> Exit {
+    let reports = engine
+        .rules()
+        .iter()
+        .filter(|r| names.contains(&r.name))
+        .map(|rule| Examples::run(engine, rule))
+        .collect();
+    print_reports(reports, out)
+}
+
+fn print_reports(reports: Vec<Examples>, out: &Output) -> Exit {
     let failed = reports.iter().filter(|r| !r.ok()).count();
     let report = All {
         passed: reports.len() - failed,
@@ -543,6 +597,9 @@ fn author(flag: Option<&str>) -> String {
 struct Created {
     rule: String,
     path: String,
+    /// Its script, for a rule with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script: Option<String>,
     mode: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     from_note: Option<String>,
@@ -567,41 +624,40 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
     let Some(paths) = Paths::locate() else {
         return out.error(Exit::Failed, "there is no home directory to keep rules in");
     };
-    let path = paths.rules.join(format!("{name}.luau"));
-    if path.exists() {
+    let path = paths.rules.join(format!("{name}.toml"));
+    let script_path = paths.rules.join(format!("{name}.luau"));
+    if let Some(taken) = [&path, &script_path].into_iter().find(|p| p.exists()) {
         return out.error(
             Exit::Precondition,
             &format!(
                 "{} already exists; edit it, or choose another name",
-                path.display()
+                taken.display()
             ),
         );
     }
     let author = author(args.author.as_deref());
     let created = jouet_output::time::date(crate::wind::now());
-    let (code, reason) = match &args.from_note {
+    let (code, script, reason) = match &args.from_note {
         Some(id) => {
             let state = wind::State::load(&paths.state);
             let Some(note) = state.note(id) else {
                 return out.error(Exit::NotFound, &format!("no winding note `{id}`"));
             };
-            let code = rulefile::set_field(&note.code, "name", name);
-            let code = rulefile::set_field(&code, "author", &author);
-            let code = match &args.why {
-                Some(why) => rulefile::set_field(&code, "why", why),
-                None => code,
-            };
-            // A note drafted by an older jouet may not pass examples of both
-            // kinds; adopting it would only give a rule that cannot deny.
-            if let Err(problem) = wind::draft::verify(name, &code) {
-                return out.error(
-                    Exit::Precondition,
-                    &format!(
-                        "note {id}'s draft does not pass examples of both kinds ({problem}); `jouet wind dismiss {id}`, or write the rule with `jouet rule new {name} --why ...`"
-                    ),
-                );
+            match adopt(note, name, &author, args.why.as_deref()) {
+                Ok(draft) => (
+                    draft.code,
+                    draft.script,
+                    format!("from winding note {id}: {}", note.why),
+                ),
+                Err(problem) => {
+                    return out.error(
+                        Exit::Precondition,
+                        &format!(
+                            "note {id}'s draft does not pass examples of both kinds ({problem}); `jouet wind dismiss {id}`, or write the rule with `jouet rule new {name} --why ...`"
+                        ),
+                    );
+                }
             }
-            (code, format!("from winding note {id}: {}", note.why))
         }
         None => {
             let Some(why) = &args.why else {
@@ -610,25 +666,34 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
                     "pass --why with what the rule is for, or --from-note with a winding note",
                 );
             };
-            let code = rulefile::scaffold(&rulefile::Header {
+            let header = rulefile::Header {
                 name,
                 why,
                 author: &author,
                 created: &created,
-            });
-            (code, why.clone())
+            };
+            let (code, script) = rulefile::scaffold(&header, args.script);
+            (code, script, why.clone())
         }
     };
-    let written = std::fs::create_dir_all(&paths.rules).and_then(|()| {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .and_then(|mut f| std::io::Write::write_all(&mut f, code.as_bytes()))
-    });
-    if let Err(e) = written {
-        return out.error(Exit::Failed, &format!("writing {}: {e}", path.display()));
+    let write = |path: &Path, text: &str| {
+        std::fs::create_dir_all(&paths.rules).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
+        })
+    };
+    let written = match &script {
+        Some(script) => write(&script_path, script).map(|()| Some(&script_path)),
+        None => Ok(None),
     }
+    .and_then(|script| write(&path, &code).map(|()| script));
+    let script_written = match written {
+        Ok(script) => script,
+        Err(e) => return out.error(Exit::Failed, &format!("writing {}: {e}", path.display())),
+    };
     let change = rulefile::Change {
         ts: crate::wind::now(),
         rule: name.clone(),
@@ -647,23 +712,63 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
     let report = Created {
         rule: name.clone(),
         path: path.display().to_string(),
+        script: script_written.map(|p| p.display().to_string()),
         mode: "warn",
         from_note: args.from_note.clone(),
     };
     out.result(&report, || {
         let next = if args.from_note.is_some() {
             format!("check it: `jouet rule test {name}` and `jouet rule test {name} --replay`")
+        } else if report.script.is_some() {
+            format!(
+                "fill in its examples (calls it must fire on, near misses it must leave alone), its matcher and its script's check, then `jouet rule test {name}`"
+            )
         } else {
             format!(
-                "fill in its examples (calls it must fire on, near misses it must leave alone) and its check, then `jouet rule test {name}`"
+                "fill in its examples (calls it must fire on, near misses it must leave alone), its matcher and its message, then `jouet rule test {name}`"
             )
         };
+        let files = match &report.script {
+            Some(script) => format!("{} and {script}", report.path),
+            None => report.path.clone(),
+        };
         format!(
-            "wrote {} (warn mode); {next}; `jouet rule promote {name}` when it is right\n",
-            report.path
+            "wrote {files} (warn mode); {next}; `jouet rule promote {name}` when it is right\n"
         )
     });
     Exit::Ok
+}
+
+/// A winding note's draft as the rule `name`, written by `author`: its
+/// name, author, `why` and script path set, and checked to load in warn
+/// mode and pass examples of both kinds.
+fn adopt(
+    note: &wind::Note,
+    name: &str,
+    author: &str,
+    why: Option<&str>,
+) -> Result<wind::draft::Draft, String> {
+    // A jouet from before rules were TOML drafted a Luau file.
+    if note.code.trim_start().starts_with("--") {
+        return Err("it was drafted as a Luau rule file, which jouet no longer writes".into());
+    }
+    let mut code = rulefile::set_field(&note.code, &note.rule, "author", author)?;
+    if let Some(why) = why {
+        code = rulefile::set_field(&code, &note.rule, "why", why)?;
+    }
+    if note.script.is_some() {
+        code = rulefile::set_field(&code, &note.rule, "script", &format!("{name}.luau"))?;
+    }
+    let code = rulefile::set_field(&code, &note.rule, "name", name)?;
+    let draft = wind::draft::Draft {
+        name: name.to_string(),
+        why: why.unwrap_or(&note.why).to_string(),
+        message: note.message.clone(),
+        code,
+        script: note.script.clone(),
+    };
+    wind::draft::verify(&draft)?;
+    Ok(draft)
 }
 
 fn promote(args: &RulePromoteArgs, out: &Output) -> Exit {
@@ -741,40 +846,38 @@ fn gap(args: &RuleGapArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
-/// The engine to test with and the rule's name in it. A path loads that
-/// file on its own; a name finds the rule among those installed, loading an
-/// untrusted repository rule from its file, since testing only prints.
-fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, String), (Exit, String)> {
+/// The engine to test with and the names of the rules to test in it. A
+/// path loads that file on its own (a TOML file may hold several rules); a
+/// name finds the rule among those installed, loading an untrusted
+/// repository rule from its file, since testing only prints.
+fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, String)> {
     let as_path = Path::new(rule);
-    let file = if rule.ends_with(".luau") || rule.contains(std::path::MAIN_SEPARATOR) {
-        Some(as_path.to_path_buf())
-    } else {
-        None
-    };
-    if file.is_none() {
-        let loaded = rules::load(cwd).map_err(|e| (Exit::Failed, e))?;
-        let untrusted = loaded
-            .engine
-            .rules()
-            .iter()
-            .find(|r| r.name == rule && r.state == State::Untrusted)
-            .map(|r| r.origin.clone());
-        // Keep it a repository rule, so its scope and default mode are the
-        // ones it will have once trusted.
-        let Some(origin @ Origin::Repo(_)) = untrusted else {
-            return Ok((loaded.engine, rule.to_string()));
-        };
-        return single(origin, cwd);
+    let is_file = rule.ends_with(".toml")
+        || rule.ends_with(".luau")
+        || rule.contains(std::path::MAIN_SEPARATOR);
+    if is_file {
+        return single(Origin::User(as_path.to_path_buf()), cwd);
     }
-    single(
-        Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())),
-        cwd,
-    )
+    let mut loaded = rules::load(cwd);
+    loaded.engine.load_scripts();
+    let untrusted = loaded
+        .engine
+        .rules()
+        .iter()
+        .find(|r| r.name == rule && r.state == State::Untrusted)
+        .map(|r| r.origin.clone());
+    // Keep it a repository rule, so its scope and default mode are the
+    // ones it will have once trusted.
+    let Some(origin @ Origin::Repo(_)) = untrusted else {
+        return Ok((loaded.engine, vec![rule.to_string()]));
+    };
+    let (engine, _) = single(origin, cwd)?;
+    Ok((engine, vec![rule.to_string()]))
 }
 
-/// An engine holding just the rule at `origin`'s path, as that origin, with
-/// the probes a hook in `cwd` would have.
-fn single(origin: Origin, cwd: &Path) -> Result<(Engine, String), (Exit, String)> {
+/// An engine holding just the rules of the file at `origin`'s path, as
+/// that origin, with the probes a hook in `cwd` would have, and their names.
+fn single(origin: Origin, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, String)> {
     let (Origin::User(path) | Origin::Repo(path)) = &origin else {
         return Err((Exit::Failed, "a built-in rule has no file".into()));
     };
@@ -786,17 +889,16 @@ fn single(origin: Origin, cwd: &Path) -> Result<(Engine, String), (Exit, String)
         };
         (exit, format!("reading {}: {e}", path.display()))
     })?;
-    let name = path
+    let stem = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let source = Source {
-        name: name.clone(),
-        origin,
-        code,
-        trusted: true,
+    let source = if path.extension().is_some_and(|e| e == "luau") {
+        Source::luau(stem, origin.clone(), code)
+    } else {
+        Source::toml(stem, origin.clone(), code)
     };
-    let engine = Engine::new(
+    let mut engine = Engine::new(
         vec![source],
         jouet_rules::Options {
             has_command: Box::new(crate::spec::has_command),
@@ -804,11 +906,12 @@ fn single(origin: Origin, cwd: &Path) -> Result<(Engine, String), (Exit, String)
             budget: jouet_rules::Budget::default(),
             cache_dir: None,
         },
-    )
-    .map_err(|e| (Exit::Failed, e.to_string()))?;
+    );
+    engine.load_scripts();
     let network = crate::settings::Settings::load().rules.network;
     engine.set_probes(rules::probes(cwd, network));
-    Ok((engine, name))
+    let names = engine.rules().iter().map(|r| r.name.clone()).collect();
+    Ok((engine, names))
 }
 
 fn read_payload(path: &str) -> Result<serde_json::Value, String> {
@@ -854,11 +957,19 @@ fn trust(cwd: &Path, trust: bool, out: &Output) -> Exit {
             );
         }
     };
-    let count = jouet_rules::rule_files(&dir).map(|f| f.len()).ok();
+    // The rules the directory holds, scripts aside.
+    let count = trust.then(|| {
+        rules::load(cwd)
+            .engine
+            .rules()
+            .iter()
+            .filter(|r| matches!(&r.origin, Origin::Repo(path) if path.starts_with(&dir)))
+            .count()
+    });
     let report = Trusted {
         dir: dir.display().to_string(),
         trusted: trust,
-        rules: if trust { count } else { None },
+        rules: count,
     };
     out.result(&report, || match (trust, changed) {
         (true, _) => format!(

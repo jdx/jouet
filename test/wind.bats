@@ -25,20 +25,19 @@ primer() {
 }
 
 no_tags_rule() {
-	cat >"$RULES/no-tags.luau" <<'LUAU'
---- why: tags are cut by the release job
-return {
-	check = function(call)
-		for _, c in call.commands do
-			if c.argv[1] == "git" and c.argv[2] == "tag" then
-				return jouet.deny("Leave tags to the release job.")
-			end
-		end
-		return nil
-	end,
-	examples = { fires = { "git tag v1" }, quiet = { "git status", "echo git tag" } },
-}
-LUAU
+	cat >"$RULES/no-tags.toml" <<'TOML'
+[[rule]]
+name = "no-tags"
+why = "tags are cut by the release job"
+message = "Leave tags to the release job."
+
+[rule.match]
+command = "git tag"
+
+[rule.examples]
+fires = ["git tag v1"]
+quiet = ["git status", "echo git tag"]
+TOML
 }
 
 @test "wind drafts a rule for each costly pattern and reads the ledger once" {
@@ -57,11 +56,13 @@ LUAU
 
 	run --separate-stderr jouet wind show n1
 	assert_success
-	assert_line '--- mode: warn'
-	assert_line '--- scope: user'
+	assert_line 'mode = "warn"'
+	assert_line 'scope = "user"'
+	assert_line 'command = "mytool"'
+	assert_line 'exact_flags = ["--all"]'
 	# What failed fires; what worked instead, and its variants, stay quiet.
-	assert_line --partial 'fires = { "mytool ARG --all" },'
-	assert_line --partial 'quiet = { "mytool ARG", "echo mytool", "mytool" },'
+	assert_line 'fires = ["mytool ARG --all"]'
+	assert_line 'quiet = ["mytool ARG", "echo mytool", "mytool"]'
 	assert_line --regexp 'mytool <arg>. worked instead'
 
 	run --separate-stderr jouet wind show n9
@@ -132,13 +133,21 @@ LUAU
 	# An adopted note is not shown again.
 	run primer sess-8
 	refute_output --partial 'from-note n1'
+
+	# The sleep note's rule has a script: a matcher cannot compare durations.
+	run --separate-stderr jouet rule new long-sleeps --from-note n2
+	assert_success
+	run grep -c '^script = "long-sleeps.luau"$' "$RULES/long-sleeps.toml"
+	assert_output 1
+	[[ -f "$RULES/long-sleeps.luau" ]]
+	run --separate-stderr jouet rule test long-sleeps
+	assert_success
+	run --separate-stderr jouet rule test long-sleeps --command 'sleep 90'
+	assert_output --partial 'warn: Instead of sleeping'
 }
 
 @test "replay fails a rule that fires on nothing the hooks have seen" {
-	cat >"$RULES/no-rm.luau" <<'LUAU'
---- why: rm deletes for good
-return { check = function(call) return if call.commands[1].program == "rm" then jouet.deny("no") else nil end }
-LUAU
+	printf '[[rule]]\nname = "no-rm"\nwhy = "rm deletes for good"\nmessage = "no"\nmatch = { command = "rm" }\n' >"$RULES/no-rm.toml"
 	run --separate-stderr jouet rule test no-rm --replay
 	assert_failure 1
 	assert_line 'no-rm: fired on 0 of 28 calls in the ledger'
@@ -153,12 +162,16 @@ LUAU
 @test "rule new writes a template, and refuses built-in names and clobbering" {
 	run --separate-stderr env JOUET_SESSION_ID=sess-3 jouet rule new no-rm --why 'rm deletes for good'
 	assert_success
-	run head -7 "$RULES/no-rm.luau"
-	assert_line '--- name: no-rm'
-	assert_line '--- why: rm deletes for good'
-	assert_line '--- mode: warn'
-	assert_line '--- scope: user'
-	assert_line '--- author: sess-3'
+	run head -10 "$RULES/no-rm.toml"
+	assert_line '#:schema https://jouet.jdx.dev/schema/rules.json'
+	assert_line 'name = "no-rm"'
+	assert_line 'why = "rm deletes for good"'
+	assert_line 'mode = "warn"'
+	assert_line 'scope = "user"'
+	assert_line 'author = "sess-3"'
+	run --separate-stderr jouet rule list
+	assert_line --regexp '^no-rm +enabled +warn +user +sess-3'
+	assert_line --regexp '^note: no-rm only warns, and cannot be promoted, until it has examples of both kinds: it has no examples'
 
 	run --separate-stderr jouet rule new no-rm --why again
 	assert_failure 4
@@ -200,12 +213,12 @@ LUAU
 
 @test "promote needs passing examples of both kinds" {
 	no_tags_rule
-	sed -i.bak 's/quiet = { "git status", "echo git tag" }/quiet = { "git tag -l" }/' "$RULES/no-tags.luau"
+	sed -i.bak 's/^quiet = .*/quiet = ["git tag -l"]/' "$RULES/no-tags.toml"
 	run --separate-stderr jouet rule promote no-tags
 	assert_failure 4
 	[[ "$stderr" == *'cannot deny until it passes examples of both kinds (1 of its 2 examples fail)'* ]]
 
-	sed -i.bak 's/, quiet = { "git tag -l" }//' "$RULES/no-tags.luau"
+	sed -i.bak '/^quiet = /d' "$RULES/no-tags.toml"
 	run --separate-stderr jouet rule promote no-tags
 	assert_failure 4
 	[[ "$stderr" == *'quiet'*' examples: near misses it must leave alone)'* ]]
@@ -222,13 +235,13 @@ LUAU
 	assert_success
 	assert_line 'propose  no-tags  4 of its 6 firings were overridden: the command went ahead anyway'
 	refute_output --partial 'git-stash'
-	[[ -f "$RULES/no-tags.luau" ]]
+	[[ -f "$RULES/no-tags.toml" ]]
 
 	run --separate-stderr jouet unwind --apply
 	assert_success
 	assert_line --partial 'retired  no-tags'
-	[[ ! -e "$RULES/no-tags.luau" ]]
-	[[ -f "$RULES/retired/no-tags.luau" ]]
+	[[ ! -e "$RULES/no-tags.toml" ]]
+	[[ -f "$RULES/retired/no-tags.toml" ]]
 	run jq -r '[.rule, .change] | join(" ")' "$LOG"
 	assert_output 'no-tags retired'
 

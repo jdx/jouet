@@ -244,18 +244,11 @@ fn load(payload: &Value) -> Option<Engine> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())?;
-    match rules::load(&cwd) {
-        Ok(loaded) => {
-            for error in &loaded.errors {
-                eprintln!("jouet: {error}");
-            }
-            Some(loaded.engine)
-        }
-        Err(e) => {
-            eprintln!("jouet: starting the rule engine: {e}");
-            None
-        }
+    let loaded = rules::load(&cwd);
+    for error in &loaded.errors {
+        eprintln!("jouet: {error}");
     }
+    Some(loaded.engine)
 }
 
 fn evaluate(engine: &Engine, call: &Call) -> Outcome {
@@ -278,18 +271,29 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
     } else {
         Vec::new()
     };
+    let mut context = guide::summary(&rules, verify);
+    // A deprecated Luau rule file: the agent can convert it.
+    for note in engine
+        .rules()
+        .iter()
+        .filter_map(jouet_rules::Rule::deprecation)
+    {
+        context.push_str(&format!("jouet: {note}\n"));
+    }
     json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": guide::summary(&rules, verify),
+            "additionalContext": context,
         }
     })
 }
 
-/// Denies a shell command a rule denies; otherwise passes on any warnings.
-/// Also returns what the rules decided, for the ledger.
+/// Denies a call a rule denies; otherwise passes on any warnings. Also
+/// returns what the rules decided, for the ledger. `setup` sends only shell
+/// commands here, but a rule matching a file tool's `paths` runs for any
+/// tool call the harness sends.
 fn pre_tool_use(engine: &Engine, call: &Call) -> (Option<Value>, Option<Outcome>) {
-    if call.tool != "Bash" || call.command.is_none() {
+    if call.tool == "Bash" && call.command.is_none() {
         return (None, None);
     }
     let call = Call {
@@ -407,6 +411,7 @@ fn codex_state(engine: &Engine, commands: Vec<(String, i32)>) -> State {
             harness: "codex".into(),
             tool: "Bash".into(),
             command: Some(command),
+            path: None,
             cwd: None,
             exit_code: Some(exit_code),
         };
@@ -433,7 +438,6 @@ mod tests {
                 cache_dir: None,
             },
         )
-        .unwrap()
     }
 
     fn bash(command: &str) -> Call {
@@ -451,7 +455,10 @@ mod tests {
         let output = &out["hookSpecificOutput"];
         assert_eq!(output["permissionDecision"], "deny");
         let reason = output["permissionDecisionReason"].as_str().unwrap();
-        assert!(reason.starts_with("Stage explicit paths"), "{reason}");
+        assert!(
+            reason.starts_with("Run `git add path/to/file ...` instead."),
+            "{reason}"
+        );
         assert!(reason.ends_with("[jouet rule: git-add-all]"), "{reason}");
     }
 
@@ -464,13 +471,31 @@ mod tests {
     }
 
     #[test]
-    fn a_warning_becomes_context() {
-        let warn = Source {
-            name: "warn-ls".into(),
-            origin: Origin::User("warn-ls.luau".into()),
-            code: "--- why: test\nreturn { check = function(c) if c.command == 'ls' then return jouet.warn('try eza') end end }".into(),
-            trusted: true,
+    fn a_rule_can_deny_a_file_tool_by_path() {
+        let rule = Source::toml(
+            "locks",
+            Origin::User("locks.toml".into()),
+            "[[rule]]\nname = \"locks\"\nwhy = \"generated\"\nmode = \"deny\"\nmessage = \"Regenerate it.\"\nmatch = { tool = \"Edit\", paths = \"*.lock\" }\nexamples = { fires = [{ tool = \"Edit\", path = \"a.lock\" }], quiet = [{ tool = \"Edit\", path = \"a.rs\" }] }\n",
+        );
+        let engine = engine(vec![rule]);
+        let edit = |path: &str| {
+            Call::from_hook(
+                &json!({"tool_name": "Edit", "tool_input": {"file_path": path}}),
+                "claude",
+            )
         };
+        let out = pre_tool_use(&engine, &edit("/repo/Cargo.lock")).0.unwrap();
+        assert_eq!(out["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(pre_tool_use(&engine, &edit("/repo/src/main.rs")).0, None);
+    }
+
+    #[test]
+    fn a_warning_becomes_context() {
+        let warn = Source::luau(
+            "warn-ls",
+            Origin::User("warn-ls.luau".into()),
+            "--- why: test\nreturn { check = function(c) if c.command == 'ls' then return jouet.warn('try eza') end end }",
+        );
         let out = pre_tool_use(&engine(vec![warn]), &bash("ls")).0.unwrap();
         assert_eq!(
             out["hookSpecificOutput"]["additionalContext"],

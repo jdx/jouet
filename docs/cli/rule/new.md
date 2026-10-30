@@ -5,7 +5,7 @@
 
 Write a new rule of yours, in warn mode, from a template or a winding note
 
-Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists, who wrote it and when. It starts in warn mode: `jouet rule promote` makes its denials real. With --from-note, the rule is the one `jouet wind` drafted.
+Writes ~/.config/jouet/rules/NAME.toml, a rule saying why it exists, who wrote it and when, with a matcher and examples to fill in. It starts in warn mode: `jouet rule promote` makes its denials real. --script adds NAME.luau for logic a matcher cannot express. With --from-note, the rule is the one `jouet wind` drafted.
 
 ## Arguments
 - **`<NAME>`** — The rule's name: lowercase words joined by dashes
@@ -14,4 +14,5 @@ Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists, who w
 - **`--from-note <ID>`** — Start from the rule a winding note drafted, such as n3
 - **`--why <TEXT>`** — What the rule is for, in one line (the template's `why`)
 - **`--author <WHO>`** — Who is writing it: your session's id (default: $JOUET_SESSION_ID, or the harness's)
+- **`--script`** — Also write NAME.luau, a script for logic a matcher cannot express
 - **`-h --help`** — Print help

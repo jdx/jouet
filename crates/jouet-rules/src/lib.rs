@@ -1,29 +1,41 @@
-//! jouet's rule engine: small Luau scripts that read the command an agent is
-//! about to run, or has just run, and decide what to do about it.
+//! jouet's rule engine: rules that read the command an agent is about to
+//! run, or has just run, and decide what to do about it.
 //!
-//! A rule is a `.luau` file returning a table with a `check` function. It runs
-//! in a sandboxed Luau VM whose only way out is the `jouet` module: the tool
-//! call it is given, a shell-aware view of its commands, helpers for matching
-//! them, and the actions `deny`, `warn`, `allow` and `record`. The built-in
-//! rules are written against the same API as anyone else's.
+//! A rule is configuration: a `[[rule]]` table in a TOML file ([`decl`])
+//! with a matcher, a message and its examples. Matching is plain Rust over
+//! the shell tokenizer's view of the command ([`matcher`]), so a rule that
+//! only matches never starts a Luau VM. A rule with logic a matcher cannot
+//! express names a Luau `script`, which runs in a sandboxed VM whose only way
+//! out is the `jouet` module: the tool call it is given, a shell-aware view
+//! of its commands, helpers for matching them, and the actions `deny`,
+//! `warn`, `allow` and `record`. The VM starts the first time a script runs.
+//! The built-in rules are written in the same format as anyone else's.
 //!
-//! Every failure is contained: a rule that does not compile, throws, runs past
-//! its time or instruction budget or returns something unexpected is reported
-//! in [`Outcome::errors`] and treated as having said nothing.
+//! A rule written as a whole `.luau` file, with a `--- why:` header, still
+//! loads, but is deprecated ([`LUAU_RULES_REMOVED_IN`]).
+//!
+//! Every failure is contained: a rule that does not load, a script that
+//! throws, runs past its time or instruction budget or returns something
+//! unexpected is reported in [`Outcome::errors`] and treated as having said
+//! nothing.
 //!
 //! Rules can also ask about jouet's state through read-only probes
 //! ([`probe`]). Routines, which compose jouet's primitives, are
 //! jouet-routines'.
 
 mod cache;
+mod decl;
 mod examples;
+mod glob;
 mod header;
 mod json;
+mod matcher;
 pub mod probe;
 pub mod shell;
 pub mod tree;
 mod trust;
 
+pub use decl::{SCHEMA_URL, schema, valid_name};
 pub use examples::{Case, Example, Expect};
 pub use header::{Mode, Scope};
 pub use probe::Probes;
@@ -31,7 +43,7 @@ pub use trust::{Trust, TrustStore};
 
 use mlua::{Lua, Table, Value, Variadic, VmState};
 use serde::Serialize;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -42,23 +54,38 @@ pub const TYPES: &str = include_str!("../jouet.d.luau");
 
 const PRELUDE: &str = include_str!("prelude.luau");
 
-/// The built-in rules, embedded in the binary.
+/// The built-in rules, embedded in the binary, in the order they run.
 const BUILTIN: &[(&str, &str)] = &[
-    ("sleep-poll", include_str!("../rules/sleep-poll.luau")),
+    ("sleep-poll", include_str!("../rules/sleep-poll.toml")),
     (
         "review-threads",
-        include_str!("../rules/review-threads.luau"),
+        include_str!("../rules/review-threads.toml"),
     ),
-    ("python-edit", include_str!("../rules/python-edit.luau")),
-    ("git-add-all", include_str!("../rules/git-add-all.luau")),
-    ("git-stash", include_str!("../rules/git-stash.luau")),
-    ("no-verify", include_str!("../rules/no-verify.luau")),
-    ("force-push", include_str!("../rules/force-push.luau")),
-    ("push-untested", include_str!("../rules/push-untested.luau")),
-    ("checks", include_str!("../rules/checks.luau")),
+    ("python-edit", include_str!("../rules/python-edit.toml")),
+    ("git-add-all", include_str!("../rules/git-add-all.toml")),
+    ("git-stash", include_str!("../rules/git-stash.toml")),
+    ("no-verify", include_str!("../rules/no-verify.toml")),
+    ("force-push", include_str!("../rules/force-push.toml")),
+    ("push-untested", include_str!("../rules/push-untested.toml")),
+    ("checks", include_str!("../rules/checks.toml")),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// The scripts built-in rules name.
+const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
+    (
+        "push-untested.luau",
+        include_str!("../rules/push-untested.luau"),
+    ),
+    ("checks.luau", include_str!("../rules/checks.luau")),
+];
+
+/// The jouet version that stops loading whole-file `.luau` rules. A test
+/// fails once jouet reaches it, as a reminder to remove them.
+pub const LUAU_RULES_REMOVED_IN: &str = "0.1.0";
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Event {
     /// Before a tool runs: a rule may deny it.
@@ -110,15 +137,66 @@ impl Origin {
     }
 }
 
-/// A rule's source code, before it is loaded.
+/// How a rule file is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Format {
+    /// `[[rule]]` tables, any number to a file.
+    Toml,
+    /// One rule as a whole Luau file with a `--- why:` header: deprecated.
+    Luau,
+}
+
+/// A rule file's source, before it is loaded.
 #[derive(Debug, Clone)]
 pub struct Source {
+    /// The file's name without its extension: a Luau rule's name.
     pub name: String,
     pub origin: Origin,
     pub code: String,
     /// False for a repository rule whose directory is not trusted: it is
     /// listed, never run.
     pub trusted: bool,
+    pub format: Format,
+    /// Scripts the file's rules name, by the path they give, when they are
+    /// not to be read from beside the file: the built-in rules', and a
+    /// draft's.
+    pub scripts: Vec<(String, String)>,
+}
+
+impl Source {
+    /// A TOML rule file.
+    pub fn toml(name: impl Into<String>, origin: Origin, code: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            origin,
+            code: code.into(),
+            trusted: true,
+            format: Format::Toml,
+            scripts: Vec::new(),
+        }
+    }
+
+    /// A whole-file Luau rule.
+    pub fn luau(name: impl Into<String>, origin: Origin, code: impl Into<String>) -> Self {
+        Self {
+            format: Format::Luau,
+            ..Self::toml(name, origin, code)
+        }
+    }
+
+    /// With a script its rules name, held in memory rather than read from
+    /// beside the file.
+    pub fn with_script(mut self, path: impl Into<String>, code: impl Into<String>) -> Self {
+        self.scripts.push((path.into(), code.into()));
+        self
+    }
+
+    /// Marked untrusted: listed, never run.
+    pub fn untrusted(mut self) -> Self {
+        self.trusted = false;
+        self
+    }
 }
 
 /// Whether a rule runs, and if not, why.
@@ -154,7 +232,48 @@ pub struct Rule {
     /// as `it has no examples`. A rule of yours or a repository's with a
     /// reason here only warns, and cannot be promoted or shared.
     pub missing_examples: Option<String>,
-    table: Option<Table>,
+    pub format: Format,
+    /// The line its `[[rule]]` table starts on, in a TOML file.
+    pub line: usize,
+    /// The script a TOML rule names, as it names it.
+    pub script: Option<String>,
+    body: Body,
+}
+
+/// What decides a rule's verdict.
+enum Body {
+    /// Nothing runs: the rule is broken or untrusted.
+    None,
+    /// A matcher: the rule fires with its message on a call it matches.
+    Match {
+        matchers: Vec<decl::Matcher>,
+        message: String,
+        suggest: Option<String>,
+    },
+    /// A TOML rule's script, compiled the first time it runs, behind its
+    /// matchers when it has any.
+    Script {
+        matchers: Vec<decl::Matcher>,
+        code: String,
+        table: OnceCell<Result<Table, String>>,
+    },
+    /// A whole-file Luau rule's table.
+    Luau(Table),
+}
+
+impl Rule {
+    /// Why this rule's file format is deprecated and how to move off it,
+    /// for a rule of yours or a repository's written as a whole `.luau` file.
+    pub fn deprecation(&self) -> Option<String> {
+        if self.format != Format::Luau || self.scope == Scope::Builtin {
+            return None;
+        }
+        let file = self.origin.describe();
+        Some(format!(
+            "{file} is a Luau rule file, which jouet stops loading in {LUAU_RULES_REMOVED_IN}: write the rule as a `[[rule]]` table in {name}.toml (`jouet rule schema` describes it), with `script = \"{name}.luau\"` only if a matcher cannot express it",
+            name = self.name
+        ))
+    }
 }
 
 /// A tool call, as a rule sees it.
@@ -164,6 +283,8 @@ pub struct Call {
     pub harness: String,
     pub tool: String,
     pub command: Option<String>,
+    /// The file a file tool reads or writes.
+    pub path: Option<String>,
     pub cwd: Option<String>,
     /// The command's exit code, for post-tool-use.
     pub exit_code: Option<i32>,
@@ -171,7 +292,8 @@ pub struct Call {
 
 impl Call {
     /// The call in a Claude Code or Codex hook payload: `hook_event_name`,
-    /// `tool_name`, `tool_input.command` and `cwd`. A `PostToolUseFailure`'s
+    /// `tool_name`, `tool_input.command` (or the path in its `file_path`,
+    /// `notebook_path` or `path`) and `cwd`. A `PostToolUseFailure`'s
     /// `error` starts `Exit code N`; a plain `PostToolUse` succeeded. An
     /// `exit_code` field, as in a test payload, wins over both.
     pub fn from_hook(payload: &serde_json::Value, harness: &str) -> Self {
@@ -198,6 +320,9 @@ impl Call {
             harness: harness.into(),
             tool: text(payload.get("tool_name")).unwrap_or_default(),
             command: text(payload.get("tool_input").and_then(|i| i.get("command"))),
+            path: ["file_path", "notebook_path", "path"]
+                .iter()
+                .find_map(|key| text(payload.get("tool_input").and_then(|i| i.get(*key)))),
             cwd: text(payload.get("cwd")),
             exit_code,
         }
@@ -216,11 +341,26 @@ pub enum Action {
 pub struct Decision {
     pub rule: String,
     pub action: Action,
+    /// What the agent is told, the suggested command included.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The command a matcher rule suggests running instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggest: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Test,
@@ -322,13 +462,6 @@ pub struct Options {
     pub budget: Budget,
     /// Where compiled rules are cached, if anywhere.
     pub cache_dir: Option<PathBuf>,
-}
-
-/// What loading a rule needs besides its source.
-struct Loader<'a> {
-    disabled: &'a [String],
-    cache_dir: Option<&'a Path>,
-    has_command: &'a HasCommand,
 }
 
 /// State the VM's callbacks share with the engine.
@@ -460,7 +593,13 @@ impl Vm {
 }
 
 pub struct Engine {
-    vm: Vm,
+    /// Started the first time a script runs, or a Luau rule file loads.
+    vm: OnceCell<Result<Vm, String>>,
+    budget: Budget,
+    has_command: Rc<HasCommand>,
+    cache_dir: Option<PathBuf>,
+    /// What the probes read, kept for a VM that has not started yet.
+    probes: RefCell<Option<Probes>>,
     rules: Vec<Rule>,
 }
 
@@ -468,28 +607,39 @@ pub struct Engine {
 pub fn builtin() -> Vec<Source> {
     BUILTIN
         .iter()
-        .map(|(name, code)| Source {
-            name: (*name).into(),
-            origin: Origin::Builtin,
-            code: (*code).into(),
-            trusted: true,
+        .map(|(name, code)| {
+            BUILTIN_SCRIPTS.iter().fold(
+                Source::toml(*name, Origin::Builtin, *code),
+                |source, (path, script)| source.with_script(*path, *script),
+            )
         })
         .collect()
 }
 
-/// The `*.luau` files in a directory, sorted by name.
+/// The rule files in a directory, `*.toml` and `*.luau`, sorted by name.
+/// Some of the `.luau` files may be scripts a TOML rule names rather than
+/// rules; the engine tells them apart.
 pub fn rule_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
         Ok(entries) => entries
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "luau") && p.is_file())
+            .filter(|p| format_of(p).is_some() && p.is_file())
             .collect(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(e),
     };
     files.sort();
     Ok(files)
+}
+
+/// A rule file's format, from its extension.
+fn format_of(path: &Path) -> Option<Format> {
+    match path.extension()?.to_str()? {
+        "toml" => Some(Format::Toml),
+        "luau" => Some(Format::Luau),
+        _ => None,
+    }
 }
 
 /// Every rule source: built-in, then the user's, then a repository's
@@ -503,7 +653,7 @@ pub fn discover(
     discover_after(builtin(), user_dir, repo_dir, trust)
 }
 
-/// `sources`, then the `*.luau` files of the user's directory, then a
+/// `sources`, then the rule files of the user's directory, then a
 /// repository's (untrusted unless its directory is trusted).
 fn discover_after(
     mut sources: Vec<Source>,
@@ -521,6 +671,7 @@ fn discover_after(
             }
         };
         for path in files {
+            let format = format_of(&path).unwrap_or(Format::Toml);
             let code = match std::fs::read_to_string(&path) {
                 Ok(code) => code,
                 Err(e) => {
@@ -538,10 +689,9 @@ fn discover_after(
                 Origin::User(path)
             };
             let source = Source {
-                name,
-                origin,
-                code,
                 trusted,
+                format,
+                ..Source::toml(name, origin, code)
             };
             sources.push(source);
         }
@@ -557,30 +707,58 @@ fn discover_after(
 }
 
 impl Engine {
-    /// Starts a sandboxed VM and loads every rule. A rule that fails to load
-    /// is kept, as [`State::Broken`], so it can be listed.
-    pub fn new(sources: Vec<Source>, options: Options) -> mlua::Result<Self> {
+    /// Loads every rule. TOML rules load without a VM; a Luau rule file
+    /// starts one. A rule that fails to load is kept, as [`State::Broken`],
+    /// so it can be listed. A `.luau` file a TOML rule beside it names as
+    /// its `script`, or one beside a TOML file of the same name, is a
+    /// script, not a rule of its own.
+    pub fn new(sources: Vec<Source>, options: Options) -> Self {
         let Options {
             has_command,
             disabled,
             budget,
             cache_dir,
         } = options;
-        let has_command: Rc<HasCommand> = Rc::from(has_command);
         let mut engine = Self {
-            vm: Vm::new(budget, has_command.clone())?,
+            vm: OnceCell::new(),
+            budget,
+            has_command: Rc::from(has_command),
+            cache_dir,
+            probes: RefCell::new(None),
             rules: Vec::new(),
         };
-        let loader = Loader {
-            disabled: &disabled,
-            cache_dir: cache_dir.as_deref(),
-            has_command: &*has_command,
-        };
-        for source in sources {
-            let mut rule = engine.load(source, &loader);
+        let (toml, luau): (Vec<_>, Vec<_>) = sources
+            .into_iter()
+            .enumerate()
+            .partition(|(_, s)| s.format == Format::Toml);
+        // Even a TOML file that does not load claims its namesake script.
+        let mut scripts: Vec<PathBuf> = toml
+            .iter()
+            .filter_map(|(_, s)| match &s.origin {
+                Origin::User(path) | Origin::Repo(path) => Some(path.with_extension("luau")),
+                Origin::Builtin => None,
+            })
+            .collect();
+        let mut loaded = Vec::new();
+        for (order, source) in toml {
+            let rules = engine.load_toml(source, &disabled, &mut scripts);
+            loaded.extend(rules.into_iter().map(|rule| (order, rule)));
+        }
+        for (order, source) in luau {
+            let is_script = match &source.origin {
+                Origin::User(path) | Origin::Repo(path) => scripts.contains(path),
+                Origin::Builtin => false,
+            };
+            if !is_script {
+                loaded.push((order, engine.load_luau(source, &disabled)));
+            }
+        }
+        // Rules run in the order their sources came, whatever their format.
+        loaded.sort_by_key(|(order, _)| *order);
+        for (_, mut rule) in loaded {
             // The floor: a rule of yours or a repository's adds decisions,
             // and never takes the place of a built-in one.
-            if rule.state != State::Untrusted
+            if !matches!(rule.state, State::Untrusted | State::Broken(_))
                 && let Some(other) = engine
                     .rules
                     .iter()
@@ -588,7 +766,7 @@ impl Engine {
             {
                 rule.state = State::Broken(match other.scope {
                     Scope::Builtin => format!(
-                        "`{}` is a built-in rule, which cannot be replaced; rename this file",
+                        "`{}` is a built-in rule, which cannot be replaced; rename it",
                         rule.name
                     ),
                     _ => format!(
@@ -597,14 +775,191 @@ impl Engine {
                         rule.name
                     ),
                 });
-                rule.table = None;
+                rule.body = Body::None;
             }
             engine.rules.push(rule);
         }
-        Ok(engine)
+        engine
     }
 
-    fn load(&self, source: Source, loader: &Loader<'_>) -> Rule {
+    /// The VM, started on first use with the probes set so far.
+    fn vm(&self) -> Result<&Vm, String> {
+        self.vm
+            .get_or_init(|| {
+                let vm = Vm::new(self.budget, self.has_command.clone())
+                    .map_err(|e| format!("starting the Luau VM: {e}"))?;
+                if let Some(probes) = self.probes.borrow().clone() {
+                    *vm.shared.probes.borrow_mut() = Some(probes);
+                }
+                Ok(vm)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    /// The rules in a TOML file. Adds the paths of the scripts they name to
+    /// `scripts`.
+    fn load_toml(
+        &self,
+        source: Source,
+        disabled: &[String],
+        scripts: &mut Vec<PathBuf>,
+    ) -> Vec<Rule> {
+        let scope = source.origin.scope();
+        let file = source.origin.describe();
+        let placeholder = |state: State| Rule {
+            name: source.name.clone(),
+            origin: source.origin.clone(),
+            why: String::new(),
+            mode: scope.default_mode(),
+            scope,
+            author: String::new(),
+            created: String::new(),
+            event: Event::PreToolUse,
+            needs: Vec::new(),
+            state,
+            examples: Vec::new(),
+            missing_examples: None,
+            format: Format::Toml,
+            line: 1,
+            script: None,
+            body: Body::None,
+        };
+        let decls = match decl::parse(&source.code) {
+            Ok(decls) => decls,
+            Err((line, e)) => {
+                return vec![placeholder(State::Broken(format!("{file}:{line}: {e}")))];
+            }
+        };
+        if decls.is_empty() {
+            return vec![placeholder(State::Broken(format!(
+                "{file}: it has no `[[rule]]` tables"
+            )))];
+        }
+        let dir = match &source.origin {
+            Origin::User(path) | Origin::Repo(path) => path.parent().map(Path::to_path_buf),
+            Origin::Builtin => None,
+        };
+        decls
+            .into_iter()
+            .map(|(line, d)| {
+                if let (Some(dir), Some(script)) = (&dir, &d.script) {
+                    scripts.push(dir.join(&script.0));
+                }
+                let mut rule = self.toml_rule(&source, line, d, dir.as_deref(), disabled);
+                if let State::Broken(e) = &mut rule.state {
+                    *e = format!("{file}:{line}: {e}");
+                }
+                rule
+            })
+            .collect()
+    }
+
+    fn toml_rule(
+        &self,
+        source: &Source,
+        line: usize,
+        d: decl::RuleDecl,
+        dir: Option<&Path>,
+        disabled: &[String],
+    ) -> Rule {
+        let scope = source.origin.scope();
+        let examples = examples::from_decl(d.examples.as_ref());
+        let event = d.on.unwrap_or(Event::PreToolUse);
+        let problem = if d.scope.is_some_and(|s| s != scope) {
+            Some(format!(
+                "it says scope `{}`, but this is a {} rule",
+                d.scope.map_or("", Scope::name),
+                scope.name()
+            ))
+        } else if d.why.trim().is_empty() {
+            Some("`why` says what the rule is for, in one line".into())
+        } else {
+            rule_problem(&d, event)
+        };
+        let mut rule = Rule {
+            name: d.name.0,
+            origin: source.origin.clone(),
+            why: d.why,
+            mode: d.mode.unwrap_or(scope.default_mode()),
+            scope,
+            author: d.author.unwrap_or_else(|| match scope {
+                Scope::Builtin => "builtin".into(),
+                _ => "unknown".into(),
+            }),
+            created: d.created.unwrap_or_default(),
+            event,
+            needs: d.needs,
+            state: State::Enabled,
+            examples: Vec::new(),
+            missing_examples: None,
+            format: Format::Toml,
+            line,
+            script: d.script.as_ref().map(|s| s.0.clone()),
+            body: Body::None,
+        };
+        let problem = problem.or_else(|| examples.as_ref().err().cloned());
+        if let Some(problem) = problem {
+            rule.state = State::Broken(problem);
+            return rule;
+        }
+        if !source.trusted {
+            rule.state = State::Untrusted;
+            return rule;
+        }
+        (rule.examples, rule.missing_examples) = examples.unwrap_or_default();
+        rule.body = match (d.script, d.message) {
+            (Some(script), _) => {
+                let code = match source.scripts.iter().find(|(path, _)| *path == script.0) {
+                    Some((_, code)) => Ok(code.clone()),
+                    None => match dir {
+                        Some(dir) => std::fs::read_to_string(dir.join(&script.0))
+                            .map_err(|e| format!("reading its script {}: {e}", script.0)),
+                        None => Err(format!("its script {} is not built in", script.0)),
+                    },
+                };
+                match code {
+                    Ok(code) => Body::Script {
+                        matchers: d.matchers,
+                        code,
+                        table: OnceCell::new(),
+                    },
+                    Err(e) => {
+                        rule.state = State::Broken(e);
+                        return rule;
+                    }
+                }
+            }
+            (None, message) => Body::Match {
+                matchers: d.matchers,
+                message: compose(message.as_deref().unwrap_or_default(), d.suggest.as_deref()),
+                suggest: d.suggest,
+            },
+        };
+        self.settle(&mut rule, disabled);
+        rule
+    }
+
+    /// The last steps of loading a rule that runs: the warn-only gate for
+    /// a rule without examples of both kinds, then whether it is disabled or
+    /// needs a command jouet lacks.
+    fn settle(&self, rule: &mut Rule, disabled: &[String]) {
+        // A rule of yours or a repository's proves itself on examples of
+        // both kinds before it may deny anything.
+        if rule.scope != Scope::Builtin && rule.missing_examples.is_some() {
+            rule.mode = Mode::Warn;
+        }
+        let needs: Vec<&str> = rule.needs.iter().map(String::as_str).collect();
+        if disabled.iter().any(|d| d == &rule.name || d == "all") {
+            rule.state = State::Disabled;
+        } else if !needs.is_empty() && !(self.has_command)(&needs) {
+            rule.state = State::Needs(format!("jouet {}", needs.join(" ")));
+        }
+    }
+
+    /// A whole-file Luau rule: its header, then its table, which starts the
+    /// VM.
+    fn load_luau(&self, source: Source, disabled: &[String]) -> Rule {
         let scope = source.origin.scope();
         let header = header::parse(&source.code);
         let mut rule = Rule {
@@ -623,7 +978,10 @@ impl Engine {
             state: State::Enabled,
             examples: Vec::new(),
             missing_examples: None,
-            table: None,
+            format: Format::Luau,
+            line: 1,
+            script: None,
+            body: Body::None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {
             rule.state = State::Broken(e);
@@ -634,8 +992,8 @@ impl Engine {
             return rule;
         }
         let table = match self
-            .vm
-            .load_table(&rule.name, &source.code, loader.cache_dir)
+            .vm()
+            .and_then(|vm| vm.load_table(&rule.name, &source.code, self.cache_dir.as_deref()))
         {
             Ok(table) => table,
             Err(e) => {
@@ -648,36 +1006,88 @@ impl Engine {
             return rule;
         }
         (rule.examples, rule.missing_examples) = examples::read(&table);
-        // A rule of yours or a repository's proves itself on examples of
-        // both kinds before it may deny anything.
-        if rule.scope != Scope::Builtin && rule.missing_examples.is_some() {
-            rule.mode = Mode::Warn;
-        }
-        rule.table = Some(table);
-        let needs: Vec<&str> = rule.needs.iter().map(String::as_str).collect();
-        if loader
-            .disabled
-            .iter()
-            .any(|d| d == &rule.name || d == "all")
-        {
-            rule.state = State::Disabled;
-        } else if !needs.is_empty() && !(loader.has_command)(&needs) {
-            rule.state = State::Needs(format!("jouet {}", needs.join(" ")));
-        }
+        rule.body = Body::Luau(table);
+        self.settle(&mut rule, disabled);
         rule
+    }
+
+    /// Compiles every script that has not run yet, so a script that does not
+    /// compile shows as broken. Listing and testing do this; a hook leaves a
+    /// script until a call needs it.
+    pub fn load_scripts(&mut self) {
+        let mut broken = Vec::new();
+        for (i, rule) in self.rules.iter().enumerate() {
+            if let Body::Script { code, table, .. } = &rule.body
+                && rule.state != State::Untrusted
+                && let Err(e) = self.script(&rule.name, code, table)
+            {
+                broken.push((i, e));
+            }
+        }
+        for (i, e) in broken {
+            let rule = &mut self.rules[i];
+            rule.state = State::Broken(format!(
+                "{}:{}: {}: {e}",
+                rule.origin.describe(),
+                rule.line,
+                rule.script.as_deref().unwrap_or("")
+            ));
+            rule.body = Body::None;
+        }
+    }
+
+    /// A script's table, compiling and running the file the first time.
+    fn script<'a>(
+        &self,
+        name: &str,
+        code: &str,
+        table: &'a OnceCell<Result<Table, String>>,
+    ) -> Result<&'a Table, String> {
+        table
+            .get_or_init(|| {
+                let vm = self.vm()?;
+                let table = vm.load_table(name, code, self.cache_dir.as_deref())?;
+                let check: Value = table.raw_get("check").map_err(|e| e.to_string())?;
+                if !check.is_function() {
+                    return Err("the script must return a table with a `check` function".into());
+                }
+                for key in ["examples", "on", "needs"] {
+                    let value: Value = table.raw_get(key).map_err(|e| e.to_string())?;
+                    if !value.is_nil() {
+                        return Err(format!(
+                            "the script sets `{key}`, which belongs in the rule's TOML"
+                        ));
+                    }
+                }
+                Ok(table)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// Lets the rules' probes run, reading what `probes` points at. Without
     /// this every probe returns nil and says why.
     pub fn set_probes(&self, probes: Probes) {
-        *self.vm.shared.probes.borrow_mut() = Some(probes);
-        self.vm.new_call();
+        if let Some(Ok(vm)) = self.vm.get() {
+            *vm.shared.probes.borrow_mut() = Some(probes.clone());
+            vm.new_call();
+        }
+        *self.probes.borrow_mut() = Some(probes);
+    }
+
+    /// Whether a Luau VM has started: only scripts and Luau rule files start
+    /// one.
+    pub fn vm_started(&self) -> bool {
+        self.vm.get().is_some()
     }
 
     /// The primitives rules reached for that the `jouet` module does not
     /// have, since the last call: what the API could not express.
     pub fn take_gaps(&self) -> Vec<Gap> {
-        let mut gaps = self.vm.shared.gaps.take();
+        let Some(Ok(vm)) = self.vm.get() else {
+            return Vec::new();
+        };
+        let mut gaps = vm.shared.gaps.take();
         gaps.sort();
         gaps.dedup();
         gaps
@@ -691,17 +1101,26 @@ impl Engine {
         self.rules.iter().find(|r| r.name == name)
     }
 
+    /// Forgets the probes' answers, when a VM has started: a new hook call
+    /// asks again.
+    fn new_call(&self) {
+        if let Some(Ok(vm)) = self.vm.get() {
+            vm.new_call();
+        }
+    }
+
     /// Runs every enabled rule for the call's event, in order, stopping at
     /// the first denial.
     pub fn evaluate(&self, call: &Call) -> Outcome {
-        self.vm.new_call();
+        self.new_call();
+        let commands = call_commands(call);
         let mut outcome = Outcome::default();
         let event = call.event.unwrap_or(Event::PreToolUse);
         for rule in &self.rules {
             if rule.state != State::Enabled || rule.event != event {
                 continue;
             }
-            match self.run_check(rule, call, true) {
+            match self.run_check(rule, call, &commands, true) {
                 Ok((decision, records)) => {
                     outcome.records.extend(records);
                     match decision {
@@ -719,16 +1138,16 @@ impl Engine {
         outcome
     }
 
-    /// Runs one rule's `check`, whatever its state, and returns its decision,
-    /// as enforced (a warn-mode rule's denial is a warning), and anything it
+    /// Runs one rule, whatever its state, and returns its decision, as
+    /// enforced (a warn-mode rule's denial is a warning), and anything it
     /// recorded. A call of its own: probes are asked afresh.
     pub fn check(
         &self,
         rule: &Rule,
         call: &Call,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
-        self.vm.new_call();
-        self.run_check(rule, call, true)
+        self.new_call();
+        self.run_check(rule, call, &call_commands(call), true)
     }
 
     /// `check`, with `enforce` deciding whether the rule's mode and the floor
@@ -738,41 +1157,43 @@ impl Engine {
         &self,
         rule: &Rule,
         call: &Call,
+        commands: &[shell::Command],
         enforce: bool,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
-        self.vm.shared.current.replace(rule.name.clone());
-        let Some(table) = &rule.table else {
-            return Err(match &rule.state {
-                State::Broken(e) => e.clone(),
-                _ => "the rule is not loaded".into(),
-            });
+        let not_loaded = || match &rule.state {
+            State::Broken(e) => e.clone(),
+            _ => "the rule is not loaded".into(),
         };
-        // Raw reads throughout: a rule's tables can carry metamethods, which
-        // must never run outside the budget.
-        let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
-        let call_table = call_table(&self.vm.lua, call).map_err(|e| e.to_string())?;
-        self.vm.shared.records.borrow_mut().clear();
-        let returned = self.vm.guarded(|| {
-            Ok(match check.call::<Value>(call_table)? {
-                Value::Nil => None,
-                Value::Table(t) => Some(Ok((
-                    t.raw_get::<Option<String>>("action")?.unwrap_or_default(),
-                    t.raw_get::<Option<String>>("message")?,
-                ))),
-                other => Some(Err(other.type_name())),
-            })
-        })?;
-        let records = self
-            .vm
-            .shared
-            .records
-            .borrow_mut()
-            .drain(..)
-            .map(|record| Record {
-                rule: rule.name.clone(),
-                ..record
-            })
-            .collect();
+        let mut suggest = None;
+        let (returned, records) = match &rule.body {
+            Body::None => return Err(not_loaded()),
+            Body::Match {
+                matchers,
+                message,
+                suggest: suggested,
+            } => {
+                if !matcher::any(matchers, call, commands) {
+                    return Ok((None, Vec::new()));
+                }
+                suggest.clone_from(suggested);
+                (
+                    Some(Ok(("deny".to_string(), Some(message.clone())))),
+                    Vec::new(),
+                )
+            }
+            Body::Script {
+                matchers,
+                code,
+                table,
+            } => {
+                if !matchers.is_empty() && !matcher::any(matchers, call, commands) {
+                    return Ok((None, Vec::new()));
+                }
+                let table = self.script(&rule.name, code, table)?;
+                self.run_luau(rule, table, call)?
+            }
+            Body::Luau(table) => self.run_luau(rule, table, call)?,
+        };
         let decision = match returned {
             None => None,
             Some(Ok((action, message))) => {
@@ -795,6 +1216,7 @@ impl Engine {
                     rule: rule.name.clone(),
                     action,
                     message,
+                    suggest,
                 })
             }
             Some(Err(type_name)) => {
@@ -805,6 +1227,120 @@ impl Engine {
         };
         Ok((decision, records))
     }
+
+    /// Runs a Luau rule's `check` under its budget: the action and message
+    /// it returned (or the type of what it returned instead), and what it
+    /// recorded.
+    fn run_luau(
+        &self,
+        rule: &Rule,
+        table: &Table,
+        call: &Call,
+    ) -> Result<(LuauVerdict, Vec<Record>), String> {
+        let vm = self.vm()?;
+        vm.shared.current.replace(rule.name.clone());
+        // Raw reads throughout: a rule's tables can carry metamethods, which
+        // must never run outside the budget.
+        let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
+        let call_table = call_table(&vm.lua, call).map_err(|e| e.to_string())?;
+        vm.shared.records.borrow_mut().clear();
+        let returned = vm.guarded(|| {
+            Ok(match check.call::<Value>(call_table)? {
+                Value::Nil => None,
+                Value::Table(t) => Some(Ok((
+                    t.raw_get::<Option<String>>("action")?.unwrap_or_default(),
+                    t.raw_get::<Option<String>>("message")?,
+                ))),
+                other => Some(Err(other.type_name())),
+            })
+        })?;
+        let records = vm
+            .shared
+            .records
+            .borrow_mut()
+            .drain(..)
+            .map(|record| Record {
+                rule: rule.name.clone(),
+                ..record
+            })
+            .collect();
+        Ok((returned, records))
+    }
+}
+
+/// What a Luau `check` returned: nothing, an action and message, or the
+/// type of something else.
+type LuauVerdict = Option<Result<(String, Option<String>), &'static str>>;
+
+/// A matcher rule's message, with the command it suggests in front.
+fn compose(message: &str, suggest: Option<&str>) -> String {
+    match suggest {
+        Some(command) => format!("Run `{command}` instead. {message}"),
+        None => message.to_string(),
+    }
+}
+
+/// What is wrong with a TOML rule's keys taken together, beyond what each
+/// key's type checks.
+fn rule_problem(d: &decl::RuleDecl, event: Event) -> Option<String> {
+    let matchers = &d.matchers;
+    let message = d.message.as_deref();
+    for (i, m) in matchers.iter().enumerate() {
+        if let Some(problem) = m.problem(false) {
+            let at = if matchers.len() == 1 {
+                "`match`".to_string()
+            } else {
+                format!("`match` {}", i + 1)
+            };
+            return Some(format!("{at}: {problem}"));
+        }
+    }
+    match &d.script {
+        Some(_) if message.is_some() || d.suggest.is_some() => Some(
+            "a script's `check` returns its own message: leave out `message` and `suggest`".into(),
+        ),
+        Some(_) => None,
+        None if matchers.is_empty() => {
+            Some("give it a `match`, or a `script` for logic a matcher cannot express".into())
+        }
+        None if message.is_none_or(|m| m.trim().is_empty()) => {
+            Some("give it a `message`: what the agent is told when it matches".into())
+        }
+        None if event == Event::PostToolUse => Some(
+            "a matcher denies or warns before a tool runs; a `post-tool-use` rule needs a `script`"
+                .into(),
+        ),
+        None => None,
+    }
+}
+
+/// Every command in a call's shell command, nested ones included.
+fn call_commands(call: &Call) -> Vec<shell::Command> {
+    match &call.command {
+        Some(script) => {
+            let (top, nested) = commands(script);
+            top.into_iter().chain(nested).collect()
+        }
+        None => Vec::new(),
+    }
+}
+
+/// A script's top-level commands, and every command it runs besides: those
+/// inside `$(...)`, then those in scripts passed to `sh -c` and the like.
+fn commands(script: &str) -> (Vec<shell::Command>, Vec<shell::Command>) {
+    let parsed = shell::parse(script);
+    let mut nested = parsed.nested.clone();
+    let mut queue = parsed.inner_scripts();
+    let mut seen = 0;
+    while let Some(inner) = queue.pop() {
+        seen += 1;
+        if seen > 16 {
+            break;
+        }
+        nested.extend(inner.all().into_iter().cloned());
+        queue.extend(inner.inner_scripts());
+    }
+    (parsed.commands, nested)
 }
 
 /// A rule reading a field of the `jouet` module that does not exist, such
@@ -1007,6 +1543,7 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
     t.set("harness", call.harness.as_str())?;
     t.set("tool", call.tool.as_str())?;
     t.set("command", call.command.as_deref())?;
+    t.set("path", call.path.as_deref())?;
     t.set("cwd", call.cwd.as_deref())?;
     t.set("exit_code", call.exit_code)?;
     let commands = match &call.command {
@@ -1021,29 +1558,17 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
 /// exit status when it is known, then those inside `$(...)`, then those in
 /// scripts passed to `sh -c` and the like.
 fn commands_table(lua: &Lua, script: &str, exit_code: Option<i32>) -> mlua::Result<Table> {
-    let parsed = shell::parse(script);
+    let (top, nested) = commands(script);
     let statuses = match exit_code {
-        Some(code) => shell::statuses(&parsed.commands, code),
-        None => vec![None; parsed.commands.len()],
+        Some(code) => shell::statuses(&top, code),
+        None => vec![None; top.len()],
     };
     let list = lua.create_table()?;
-    for (command, status) in parsed.commands.iter().zip(statuses) {
+    for (command, status) in top.iter().zip(statuses) {
         list.push(command_table(lua, command, false, status)?)?;
     }
-    for command in &parsed.nested {
+    for command in &nested {
         list.push(command_table(lua, command, true, None)?)?;
-    }
-    let mut queue = parsed.inner_scripts();
-    let mut seen = 0;
-    while let Some(inner) = queue.pop() {
-        seen += 1;
-        if seen > 16 {
-            break;
-        }
-        for command in inner.all() {
-            list.push(command_table(lua, command, true, None)?)?;
-        }
-        queue.extend(inner.inner_scripts());
     }
     Ok(list)
 }
@@ -1060,6 +1585,7 @@ fn command_table(
     t.set("argv", argv.to_vec())?;
     t.set("program", command.program())?;
     t.set("heredocs", command.heredocs.clone())?;
+    t.set("via", command.via())?;
     t.set(
         "op",
         command.op.map(|op| match op {

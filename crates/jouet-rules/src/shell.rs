@@ -143,11 +143,25 @@ impl Command {
     /// The words with wrappers such as `env FOO=1`, `sudo`, `timeout 60`,
     /// `rtk` and `mise x tool --` removed, so `[0]` is the program that runs.
     pub fn argv(&self) -> &[String] {
+        self.unwrap().1
+    }
+
+    /// The wrappers [`argv`](Self::argv) looked through, outermost first,
+    /// by basename: `rtk git status` ran via `["rtk"]`, and `mise x node --
+    /// npm test` via `["mise"]`.
+    pub fn via(&self) -> Vec<&str> {
+        self.unwrap().0
+    }
+
+    fn unwrap(&self) -> (Vec<&str>, &[String]) {
+        let mut via = Vec::new();
         let mut w = &self.words[..];
         loop {
-            let Some(first) = w.first() else { return w };
+            let Some(first) = w.first() else {
+                return (via, w);
+            };
             let rest = &w[1..];
-            w = match basename(first) {
+            let next = match basename(first) {
                 "env" => skip_options(rest, &["-u", "-C", "-S", "--unset", "--chdir"], true),
                 "sudo" => skip_options(rest, &["-u", "-g", "-C", "-h", "-p"], false),
                 "nice" => skip_options(rest, &["-n"], false),
@@ -159,11 +173,13 @@ impl Command {
                 "mise" if matches!(rest.first().map(String::as_str), Some("x" | "exec")) => {
                     match rest.iter().position(|a| a == "--") {
                         Some(i) => &rest[i + 1..],
-                        None => return w,
+                        None => return (via, w),
                     }
                 }
-                _ => return w,
+                _ => return (via, w),
             };
+            via.push(basename(first));
+            w = next;
         }
     }
 
@@ -609,8 +625,11 @@ mod tests {
     fn wrappers_are_skipped_to_find_the_program() {
         let c = &parse("env -u GH_TOKEN FOO=1 timeout 60 rtk git status").commands[0];
         assert_eq!(c.argv(), ["git", "status"]);
+        assert_eq!(c.via(), ["env", "timeout", "rtk"]);
         let c = &parse("mise x node@24 -- npm test").commands[0];
         assert_eq!(c.program(), Some("npm"));
+        assert_eq!(c.via(), ["mise"]);
+        assert!(parse("git status").commands[0].via().is_empty());
         let c = &parse("/usr/bin/git.exe add").commands[0];
         assert_eq!(c.program(), Some("git"));
     }

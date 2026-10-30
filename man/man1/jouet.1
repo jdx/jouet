@@ -114,8 +114,11 @@ List every rule, where it comes from and whether it runs
 \fBrule test\fR
 Run a rule against a command or hook payload, or against its examples
 .TP
+\fBrule schema\fR
+Print the JSON schema of rule files
+.TP
 \fBrule types\fR
-Print the Luau type definitions of the jouet module
+Print the Luau type definitions of the jouet module, for rule scripts
 .TP
 \fBrule trust\fR
 Trust this repository's .jouet/rules as they are now
@@ -926,7 +929,7 @@ The command and its arguments, after `\-\-`
 .SH "JOUET RULE"
 List, test and trust the rules jouet's hooks run
 
-Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule types` prints the API they are written against.
+Rules are `[[rule]]` tables in TOML files: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
 .PP
 \fBUsage:\fR jouet rule [OPTIONS] <COMMAND>
 .PP
@@ -976,9 +979,21 @@ Print help
 .PP
 .TP
 \fB<RULE>\fR
-A rule's name, or the path to a .luau file
+A rule's name, or the path to a .toml (or .luau) rule file
+.SH "JOUET RULE SCHEMA"
+Print the JSON schema of rule files
+
+Every key a `[[rule]]` table takes, with what it means. The rule files jouet writes start with a `#:schema` line, so editors that read it complete and check them.
+.PP
+\fBUsage:\fR jouet rule schema [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET RULE TYPES"
-Print the Luau type definitions of the jouet module
+Print the Luau type definitions of the jouet module, for rule scripts
 .PP
 \fBUsage:\fR jouet rule types [OPTIONS]
 .PP
@@ -1010,7 +1025,7 @@ Print help
 .SH "JOUET RULE NEW"
 Write a new rule of yours, in warn mode, from a template or a winding note
 
-Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists, who wrote it and when. It starts in warn mode: `jouet rule promote` makes its denials real. With \-\-from\-note, the rule is the one `jouet wind` drafted.
+Writes ~/.config/jouet/rules/NAME.toml, a rule saying why it exists, who wrote it and when, with a matcher and examples to fill in. It starts in warn mode: `jouet rule promote` makes its denials real. \-\-script adds NAME.luau for logic a matcher cannot express. With \-\-from\-note, the rule is the one `jouet wind` drafted.
 .PP
 \fBUsage:\fR jouet rule new [OPTIONS] <NAME>
 .PP
@@ -1025,6 +1040,9 @@ What the rule is for, in one line (the template's `why`)
 .TP
 \fB\-\-author\fR \fI<WHO>\fR
 Who is writing it: your session's id (default: $JOUET_SESSION_ID, or the harness's)
+.TP
+\fB\-\-script\fR
+Also write NAME.luau, a script for logic a matcher cannot express
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -1091,7 +1109,7 @@ What you wanted a rule to do, and what was missing
 .SH "JOUET RUN"
 Run a routine: a Luau program on jouet's primitives (also `joue`)
 
-`joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
+Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
 .PP
 \fBUsage:\fR jouet run [OPTIONS] [COMMAND]
 .PP

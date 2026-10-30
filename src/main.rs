@@ -673,9 +673,11 @@ pub struct WaitCmdArgs {
 
 /// List, test and trust the rules jouet's hooks run
 ///
-/// Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a
-/// repository's .jouet/rules once it is trusted. `jouet rule types` prints
-/// the API they are written against.
+/// Rules are `[[rule]]` tables in TOML files: built in, in
+/// ~/.config/jouet/rules, and in a repository's .jouet/rules once it is
+/// trusted. `jouet rule schema` prints their JSON schema; a rule with logic
+/// a matcher cannot express names a Luau `script`, written against the API
+/// `jouet rule types` prints.
 #[derive(Args)]
 pub struct RuleArgs {
     #[usage(subcommand)]
@@ -688,7 +690,9 @@ pub enum RuleCmd {
     List(RuleListArgs),
     /// Run a rule against a command or hook payload, or against its examples
     Test(RuleTestArgs),
-    /// Print the Luau type definitions of the jouet module
+    /// Print the JSON schema of rule files
+    Schema(RuleSchemaArgs),
+    /// Print the Luau type definitions of the jouet module, for rule scripts
     Types(RuleTypesArgs),
     /// Trust this repository's .jouet/rules as they are now
     Trust(RuleTrustArgs),
@@ -706,6 +710,7 @@ pub enum RuleCmd {
 
 /// Run a routine: a Luau program on jouet's primitives (also `joue`)
 ///
+/// Routines are Luau programs, where rules are TOML configuration.
 /// `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are
 /// built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines,
 /// and in a repository's .jouet/routines once it is trusted with --trust.
@@ -770,7 +775,7 @@ pub struct RuleListArgs {}
 /// in the hook ledger instead, and fails if it fires on none of them.
 #[derive(Args)]
 pub struct RuleTestArgs {
-    /// A rule's name, or the path to a .luau file
+    /// A rule's name, or the path to a .toml (or .luau) rule file
     rule: Option<String>,
     /// Run the examples of every rule: built in, yours and this repository's
     #[usage(long)]
@@ -789,7 +794,15 @@ pub struct RuleTestArgs {
     replay: bool,
 }
 
-/// Print the Luau type definitions of the jouet module
+/// Print the JSON schema of rule files
+///
+/// Every key a `[[rule]]` table takes, with what it means. The rule files
+/// jouet writes start with a `#:schema` line, so editors that read it
+/// complete and check them.
+#[derive(Args)]
+pub struct RuleSchemaArgs {}
+
+/// Print the Luau type definitions of the jouet module, for rule scripts
 #[derive(Args)]
 pub struct RuleTypesArgs {}
 
@@ -799,10 +812,11 @@ pub struct RuleTrustArgs {}
 
 /// Write a new rule of yours, in warn mode, from a template or a winding note
 ///
-/// Writes ~/.config/jouet/rules/NAME.luau with a header saying why it exists,
-/// who wrote it and when. It starts in warn mode: `jouet rule promote` makes
-/// its denials real. With --from-note, the rule is the one `jouet wind`
-/// drafted.
+/// Writes ~/.config/jouet/rules/NAME.toml, a rule saying why it exists, who
+/// wrote it and when, with a matcher and examples to fill in. It starts in
+/// warn mode: `jouet rule promote` makes its denials real. --script adds
+/// NAME.luau for logic a matcher cannot express. With --from-note, the rule
+/// is the one `jouet wind` drafted.
 #[derive(Args)]
 pub struct RuleNewArgs {
     /// The rule's name: lowercase words joined by dashes
@@ -816,6 +830,9 @@ pub struct RuleNewArgs {
     /// Who is writing it: your session's id (default: $JOUET_SESSION_ID, or the harness's)
     #[usage(long, value_name = "WHO")]
     author: Option<String>,
+    /// Also write NAME.luau, a script for logic a matcher cannot express
+    #[usage(long)]
+    script: bool,
 }
 
 /// Switch a rule of yours from warn to deny

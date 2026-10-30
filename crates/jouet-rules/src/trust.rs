@@ -84,11 +84,12 @@ fn key(dir: &Path) -> String {
         .to_string()
 }
 
-/// A hash over the names and contents of the directory's rule files.
+/// A hash over the paths and contents of the directory's rule files and
+/// the scripts beside or below them.
 pub(crate) fn digest(dir: &Path) -> std::io::Result<String> {
     let mut hasher = Sha256::new();
-    for path in crate::rule_files(dir)? {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
+    for path in files(dir)? {
+        let name = path.strip_prefix(dir).unwrap_or(&path).to_string_lossy();
         let code = std::fs::read(&path)?;
         hasher.update(name.len().to_le_bytes());
         hasher.update(name.as_bytes());
@@ -100,6 +101,23 @@ pub(crate) fn digest(dir: &Path) -> std::io::Result<String> {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect())
+}
+
+/// Every `.toml` and `.luau` file in the directory and below it, sorted.
+fn files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut out = crate::rule_files(dir)?;
+    let mut entries: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries.filter_map(Result::ok).map(|e| e.path()).collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    entries.sort();
+    for entry in entries {
+        if entry.is_dir() {
+            out.extend(files(&entry)?);
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -121,6 +139,13 @@ mod tests {
         assert_eq!(reloaded.check(&rules), Trust::Trusted);
 
         std::fs::write(rules.join("b.luau"), "return {}").unwrap();
+        assert_eq!(store.check(&rules), Trust::Changed);
+        store.trust(&rules).unwrap();
+        std::fs::write(rules.join("c.toml"), "").unwrap();
+        assert_eq!(store.check(&rules), Trust::Changed);
+        store.trust(&rules).unwrap();
+        std::fs::create_dir(rules.join("lib")).unwrap();
+        std::fs::write(rules.join("lib").join("d.luau"), "return {}").unwrap();
         assert_eq!(store.check(&rules), Trust::Changed);
 
         assert!(store.untrust(&rules).unwrap());

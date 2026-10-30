@@ -1,35 +1,7 @@
 --!strict
---- name: push-untested
---- why: Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
---- mode: warn
---- scope: builtin
---- author: builtin
---- created: 2026-10-30
-
--- `git push` options that push nothing new: a dry run, deletions, help.
-local PUSHES_NOTHING = { "-n", "--dry-run", "-d", "--delete", "-h", "--help" }
-
-local function pushes(command: JouetCommand): boolean
-	local sub, args = jouet.git(command)
-	if sub == "push" then
-		for _, arg in jouet.options(args) do
-			if jouet.contains(PUSHES_NOTHING, arg) then
-				return false
-			end
-			-- `git push origin :branch` deletes the branch.
-			if string.sub(arg, 1, 1) == ":" then
-				return false
-			end
-		end
-		return true
-	end
-	local gh = jouet.gh(command)
-	return gh ~= nil
-		and gh[1] == "pr"
-		and gh[2] == "create"
-		and not jouet.contains(gh, "--dry-run")
-		and not jouet.contains(gh, "--help")
-end
+-- The `push-untested` rule's script (push-untested.toml). Its matcher only
+-- lets a push through, so the script asks whether the work tree is known to
+-- pass the full test suite.
 
 -- Why the work tree is not known to pass the full suite; nil when it is, or
 -- when nothing was ever recorded here to judge by (the ledger is off, or
@@ -55,39 +27,15 @@ local function untested(): string?
 end
 
 local rule: JouetRule = {
-	check = function(call: JouetCall): JouetDecision?
-		for _, command in call.commands do
-			if pushes(command) then
-				local why = untested()
-				if why then
-					return jouet.warn(
-						`Before you push, run the full test suite: {why}. Runs of one package, file or test do not count. If the full suite is not needed here, say why.`
-					)
-				end
-				return nil
-			end
+	check = function(_call: JouetCall): JouetDecision?
+		local why = untested()
+		if why then
+			return jouet.warn(
+				`Before you push, run the full test suite: {why}. Runs of one package, file or test do not count. If the full suite is not needed here, say why.`
+			)
 		end
 		return nil
 	end,
-	examples = {
-		fires = {
-			"git push",
-			"git push -u origin feat/verify",
-			"git -C ../repo push --force-with-lease",
-			"cargo test -p x && git push",
-			"gh pr create --fill",
-		},
-		quiet = {
-			"git push --dry-run",
-			"git push origin --delete old-branch",
-			"git push origin :old-branch",
-			"git pull",
-			"git status",
-			"echo 'git push'",
-			"gh pr view",
-			"gh pr create --help",
-		},
-	},
 }
 
 return rule

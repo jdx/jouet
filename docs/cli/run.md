@@ -5,7 +5,7 @@
 
 Run a routine: a Luau program on jouet's primitives (also `joue`)
 
-`joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with --trust. Each declares its arguments, so `joue NAME --help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with --yes: without it every write is previewed, and joue exits 4 (0 with --dry-run).
+Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with --trust. Each declares its arguments, so `joue NAME --help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with --yes: without it every write is previewed, and joue exits 4 (0 with --dry-run).
 
 ## Flags
 - **`--list`** — List every routine, where it comes from and what it reaches

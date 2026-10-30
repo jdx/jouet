@@ -1,0 +1,216 @@
+//! Running a TOML rule's matchers against a tool call. This is plain Rust
+//! over the shell tokenizer's commands: no Luau VM starts for a rule that
+//! only matches.
+
+use crate::decl::{Flag, Matcher};
+use crate::{Call, glob, shell};
+
+/// Whether any of the matchers matches the call, whose commands are
+/// `commands` (every command it runs, nested ones included).
+pub(crate) fn any(matchers: &[Matcher], call: &Call, commands: &[shell::Command]) -> bool {
+    matchers.iter().any(|m| matches(m, call, commands))
+}
+
+fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
+    if !m.tool.is_empty() && !m.tool.iter().any(|g| glob::matches(&g.0, &call.tool)) {
+        return false;
+    }
+    if !m.paths.is_empty() {
+        let Some(path) = call.path.as_deref() else {
+            return false;
+        };
+        let path = relative(path, call.cwd.as_deref());
+        if !m.paths.iter().any(|g| glob::matches_path(&g.0, path)) {
+            return false;
+        }
+    }
+    if m.command.is_empty() {
+        return true;
+    }
+    commands.iter().enumerate().any(|(i, c)| {
+        command(m, c)
+            && m.with.as_deref().is_none_or(|with| {
+                commands
+                    .iter()
+                    .enumerate()
+                    .any(|(j, other)| j != i && command(with, other))
+            })
+    })
+}
+
+/// The path from the working directory, when it is inside it.
+fn relative<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
+    cwd.map(|cwd| cwd.trim_end_matches(['/', '\\']))
+        .filter(|cwd| !cwd.is_empty())
+        .and_then(|cwd| path.strip_prefix(cwd))
+        .and_then(|rest| rest.strip_prefix(['/', '\\']))
+        .unwrap_or(path)
+}
+
+/// Whether one command matches the matcher's command keys.
+fn command(m: &Matcher, c: &shell::Command) -> bool {
+    let argv = c.argv();
+    let Some((first, args)) = argv.split_first() else {
+        return false;
+    };
+    let program = shell::basename(first);
+    let Some(rest) = m.command.iter().find_map(|w| after(&w.0, program, args)) else {
+        return false;
+    };
+    if !m.via.is_empty() {
+        let via = c.via();
+        if !m.via.iter().any(|v| via.contains(&v.as_str())) {
+            return false;
+        }
+    }
+    let words = Words::read(rest, &m.value_flags);
+    if !m.flags.is_empty() && !m.flags.iter().any(|f| words.has(f)) {
+        return false;
+    }
+    if m.unless_flags.iter().any(|f| words.has(f)) {
+        return false;
+    }
+    if let Some(exact) = &m.exact_flags {
+        let mut want: Vec<&str> = exact.iter().map(|f| f.0.as_str()).collect();
+        want.sort_unstable();
+        want.dedup();
+        let mut have: Vec<&str> = words.flags.iter().map(String::as_str).collect();
+        have.sort_unstable();
+        have.dedup();
+        if want != have {
+            return false;
+        }
+    }
+    let arg_matches = |globs: &[crate::decl::Glob]| {
+        words
+            .args
+            .iter()
+            .any(|a| globs.iter().any(|g| glob::matches(&g.0, a)))
+    };
+    if !m.args.is_empty() && !arg_matches(&m.args) {
+        return false;
+    }
+    if arg_matches(&m.unless_args) {
+        return false;
+    }
+    if m.max_args.is_some_and(|max| words.args.len() > max) {
+        return false;
+    }
+    m.text.iter().all(|pattern| {
+        args.iter()
+            .chain(&c.heredocs)
+            .any(|text| pattern.0.is_match(text))
+    })
+}
+
+/// The words after the program and subcommands `words` names, when the
+/// command is that program and those subcommands.
+fn after<'a>(words: &[String], program: &str, args: &'a [String]) -> Option<&'a [String]> {
+    let (name, subcommands) = words.split_first()?;
+    if !glob::matches(name, program) {
+        return None;
+    }
+    let mut rest = args;
+    if !subcommands.is_empty() {
+        rest = skip_global_options(program, rest);
+    }
+    for word in subcommands {
+        let (first, tail) = rest.split_first()?;
+        if !glob::matches(word, first) {
+            return None;
+        }
+        rest = tail;
+    }
+    Some(rest)
+}
+
+/// Skips the options before a program's first subcommand, and their
+/// values where jouet knows them: `git -C dir add`, `cargo +nightly test`.
+fn skip_global_options<'a>(program: &str, args: &'a [String]) -> &'a [String] {
+    let takes_value: &[&str] = match program {
+        "git" => &[
+            "-C",
+            "-c",
+            "--git-dir",
+            "--work-tree",
+            "--namespace",
+            "--exec-path",
+        ],
+        _ => &[],
+    };
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let toolchain = program == "cargo" && i == 0 && arg.starts_with('+');
+        if !toolchain && (arg == "--" || arg == "-" || !arg.starts_with('-')) {
+            break;
+        }
+        i += if takes_value.contains(&arg.as_str()) {
+            2
+        } else {
+            1
+        };
+    }
+    args.get(i..).unwrap_or_default()
+}
+
+/// A command's words after its subcommands, read as options and
+/// arguments.
+struct Words<'a> {
+    /// Each option given, as `-x` or `--long`, without its value.
+    flags: Vec<String>,
+    /// The words that are neither options nor their values.
+    args: Vec<&'a str>,
+}
+
+impl<'a> Words<'a> {
+    fn read(words: &'a [String], value_flags: &[Flag]) -> Self {
+        let takes_value = |flag: &str| value_flags.iter().any(|f| f.0 == flag);
+        let mut out = Self {
+            flags: Vec::new(),
+            args: Vec::new(),
+        };
+        let mut i = 0;
+        let mut options_done = false;
+        while let Some(word) = words.get(i) {
+            i += 1;
+            if options_done || word == "-" || !word.starts_with('-') {
+                out.args.push(word);
+            } else if word == "--" {
+                options_done = true;
+            } else if let Some(long) = word.strip_prefix("--") {
+                let (name, value) = match long.split_once('=') {
+                    Some((name, _)) => (name, true),
+                    None => (long, false),
+                };
+                let flag = format!("--{name}");
+                if !value && takes_value(&flag) {
+                    i += 1;
+                }
+                out.flags.push(flag);
+            } else {
+                // A cluster such as `-fu`; an option that takes a value
+                // takes the rest of the word, or the next word.
+                let cluster = &word[1..];
+                for (at, c) in cluster.char_indices() {
+                    let flag = format!("-{c}");
+                    let value = takes_value(&flag);
+                    out.flags.push(flag);
+                    if value {
+                        if at + c.len_utf8() == cluster.len() {
+                            i += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn has(&self, flag: &Flag) -> bool {
+        self.flags.contains(&flag.0)
+    }
+}
+
+#[cfg(test)]
+mod tests;

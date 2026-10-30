@@ -101,24 +101,32 @@ Pester tests stay at the root, since they run the binary.
   `src/guide.rs` (a test fails until it does). If it replaces a pattern agents hand-roll, add a
   built-in rule with `needs` naming the command. Hooks must fail open: `jouet hook` always exits
   0, never 2.
-- **Rules:** the hooks' steering rules are Luau scripts in `crates/jouet-rules/rules/`, written
-  against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`, printed by `jouet rule
-  types`), each starting with a `--- why:` header (plus `mode`, `scope`, `author`, `created`). User
-  and repository rules may only add decisions; keep that floor (no replacing built-in rules, no
-  locking out `jouet`) when changing the engine. A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
-  matching and near-miss commands with each change. A rule whose advice names a jouet command
-  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module`, `prelude.luau` and
-  the probes, and check it with `luau-lsp analyze --definitions=jouet.d.luau rules/*.luau`.
+- **Rules:** the hooks' steering rules are `[[rule]]` tables in TOML, one file per built-in rule
+  in `crates/jouet-rules/rules/`: a matcher (`match`), a `message` and `suggest`, and `why`,
+  `mode`, `scope`, `author`, `created`. The types in `crates/jouet-rules/src/decl.rs` are both the
+  parser and the JSON schema (`jouet rule schema`, published as `docs/public/schema/rules.json`;
+  regenerate it with `jouet rule schema >docs/public/schema/rules.json`, or a bats test fails).
+  Matching is plain Rust (`matcher.rs`), so a rule without a script never starts a Luau VM; keep
+  the matcher small, and give a rule with real logic a `script` instead (only `checks` has one).
+  Scripts are written against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`,
+  printed by `jouet rule types`). User and repository rules may only add decisions; keep that
+  floor (no replacing built-in rules, no locking out `jouet`) when changing the engine. A rule's
+  `examples` are its tests: `cargo test` runs every built-in rule's, so add matching and near-miss
+  commands with each change. A rule whose advice names a jouet command declares it in `needs`.
+  Keep `jouet.d.luau` in step with `install_module`, `prelude.luau` and the probes, and check it
+  with `luau-lsp analyze --definitions=jouet.d.luau rules/*.luau`. Whole-file `.luau` rules still
+  load but are deprecated (`LUAU_RULES_REMOVED_IN`); a test fails once jouet reaches that version.
 - **Probes:** probes only read, are cached per hook call, and run within the rule's remaining
   budget; the GitHub ones stay off in hooks unless `rules.network` is set.
-- **Routines:** a routine reaches the world only through the primitives in
-  `crates/jouet-routines/src/prims/`, each refused without its capability. A primitive that writes
-  goes through `Ctx::write`, so it is previewed without `--yes`; never add one that runs a shell
-  command or trusts a repository. Keep `routines.d.luau` in step with the primitives and the `joue`
-  module. Every built-in routine carries examples with fixtures in `routines/fixtures/` (listed in
-  `testing::FIXTURES`), which `cargo test` runs, and the `pr-next` routine must agree with
-  `jouet_github::pr::next`, which `pr land` and the probes still use (`parity.rs`). `joue` is a
-  usage view of `jouet run`; `src/bin/joue.rs` is the launcher that ships it as a file of its own.
+- **Routines:** routines stay Luau programs, unlike rules. A routine reaches the world only through
+  the primitives in `crates/jouet-routines/src/prims/`, each refused without its capability. A
+  primitive that writes goes through `Ctx::write`, so it is previewed without `--yes`; never add
+  one that runs a shell command or trusts a repository. Keep `routines.d.luau` in step with the
+  primitives and the `joue` module. Every built-in routine carries examples with fixtures in
+  `routines/fixtures/` (listed in `testing::FIXTURES`), which `cargo test` runs, and the `pr-next`
+  routine must agree with `jouet_github::pr::next`, which `pr land` and the probes still use
+  (`parity.rs`). `joue` is a usage view of `jouet run`; `src/bin/joue.rs` is the launcher that
+  ships it as a file of its own.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub
   responses are to be recorded as fixtures and replayed, never fetched live in tests.
 - **End-to-end tests** run a command the way an agent does, from a shell: one bats file per

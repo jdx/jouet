@@ -6,6 +6,8 @@ description: Routines are small Luau programs on jouet's primitives (GitHub, git
 
 A routine is a small [Luau](https://luau.org) program written on jouet's primitives: the authenticated GitHub client, git, the wait engine, all-or-nothing edits, the hooks' ledger and mise. You or your agent write one when a job keeps being done step by step, such as "find my PRs that need me, most urgent first", and run it with `joue`.
 
+Routines are code and [rules](/rules) are configuration: a rule is a TOML matcher that steers the agent's tool calls, with a Luau script only as an escape hatch, while a routine is a Luau program from the start, because composing primitives with conditions and loops is what it is for.
+
 `joue` (French for "play!") is a second name for the jouet binary, so routines have a namespace of their own and `jouet` stays the core:
 
 ```text
@@ -197,6 +199,6 @@ A fixture holds the answers:
 
 - **A mise task** for fixed commands with no decisions, specific to one project and useful to people too. It is the default: start with one.
 - **A routine** once conditionals or parsing creep in: logic over structured state, built on jouet's primitives, with structured output, often reusable across projects.
-- **A [rule](/rules)** to steer the agent's own tool calls, typically toward a task or a routine: "use `joue triage` instead of that `gh` loop".
+- **A [rule](/rules)** to steer the agent's own tool calls, typically toward a task or a routine: a TOML matcher and a message, such as "use `joue triage` instead of that `gh` loop". A rule runs on every tool call, so it stays configuration; a routine runs when asked, so it can be a program.
 
 [Self-winding](/winding) can propose any of the three; the agent picks the kind that fits.

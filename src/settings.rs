@@ -88,7 +88,7 @@ pub(crate) struct RuleSettings {
     #[usage(env = "JOUET_RULES_DISABLE", merge = "union", parse = "list_by_comma")]
     pub disable: Option<Vec<String>>,
     /// Let rules in hooks use the GitHub probes (`jouet.pr.*`); off so a
-    /// hook never waits on the network. Recipes always have them
+    /// hook never waits on the network
     #[usage(env = "JOUET_RULES_NETWORK", default = false)]
     pub network: bool,
 }
