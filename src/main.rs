@@ -8,6 +8,7 @@ mod edit;
 mod exit;
 mod paths;
 mod time;
+mod tls;
 mod wait;
 
 use display::Mode;

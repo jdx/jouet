@@ -267,6 +267,7 @@ impl HttpWait {
             10
         };
         let agent = ureq::Agent::config_builder()
+            .tls_config(crate::tls::config())
             .http_status_as_error(false)
             .max_redirects(redirects)
             .user_agent(concat!("jouet/", env!("CARGO_PKG_VERSION")))
