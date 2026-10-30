@@ -13,9 +13,11 @@ mod guide;
 mod ledger;
 mod paths;
 mod pr;
+mod redact;
 mod rules;
 mod settings;
 mod setup;
+mod share;
 mod spec;
 mod time;
 mod tls;
@@ -61,6 +63,8 @@ enum Cmd {
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
     Unwind(UnwindArgs),
+    /// Propose a proven rule, or a missing primitive, to jouet's maintainers
+    Share(ShareArgs),
     /// Print a short usage guide written for agents
     AgentHelp(AgentHelpArgs),
     /// Print jouet's agent skill
@@ -436,6 +440,8 @@ pub enum RuleCmd {
     Promote(RulePromoteArgs),
     /// Show every change made to your rules, and why
     Log(RuleLogArgs),
+    /// Record something a rule could not express, for `jouet share --idea`
+    Gap(RuleGapArgs),
 }
 
 /// List every rule, where it comes from and whether it runs
@@ -516,6 +522,43 @@ pub struct RuleLogArgs {
     name: Option<String>,
 }
 
+/// Record something a rule could not express, for `jouet share --idea`
+///
+/// jouet records on its own when a rule reads a `jouet` primitive that does
+/// not exist. This records a wish in your words: "I kept doing X; there is
+/// no primitive for Y".
+#[derive(Args)]
+pub struct RuleGapArgs {
+    /// What you wanted a rule to do, and what was missing
+    text: String,
+    /// The rule you were writing, if any
+    #[usage(long, value_name = "NAME")]
+    rule: Option<String>,
+}
+
+/// Propose a proven rule, or a missing primitive, to jouet's maintainers
+///
+/// Builds a proposal and prints the exact text, with paths, repository
+/// names, hostnames and emails replaced, and a diff of what that changed.
+/// Nothing is posted without --yes, which a person must approve: it posts a
+/// Discussion in the "Rules & ideas" category of jdx/jouet with your GitHub
+/// login. A rule is shared only once it passes its tests, has denied for a
+/// week and fired often with few overrides. At most three posts a week.
+#[derive(Args)]
+pub struct ShareArgs {
+    /// The rule to share; with --idea, the idea's key (default: the most recorded)
+    name: Option<String>,
+    /// Share an idea from recorded gaps instead of a rule
+    #[usage(long)]
+    idea: bool,
+    /// Post it; without this, only show what would be posted
+    #[usage(long)]
+    yes: bool,
+    /// Hide WORD as well, such as an internal tool's name. Repeatable
+    #[usage(long, value_name = "WORD")]
+    redact: Vec<String>,
+}
+
 /// Notice costly patterns in the hook ledger and draft rules for them
 ///
 /// Reads the ledger jouet's hooks keep from where it last stopped. When a
@@ -577,6 +620,9 @@ pub struct SkillArgs {
     /// claude or codex (a SKILL.md), or agents-md (a snippet for AGENTS.md)
     #[usage(long, value_name = "FORMAT")]
     format: Option<String>,
+    /// Print the optional skill for proposing rules and ideas to jouet instead
+    #[usage(long)]
+    contribute: bool,
 }
 
 /// Install jouet's hooks and skill into Claude Code or Codex
@@ -784,6 +830,7 @@ fn main() -> ExitCode {
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
+        Cmd::Share(args) => cmd::share::run(&args, &out),
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),
         Cmd::Skill(args) => cmd::skill::run(&args, &out),
         Cmd::Setup(args) => cmd::setup::run(&args, &out),
