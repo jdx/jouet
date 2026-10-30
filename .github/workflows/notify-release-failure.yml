@@ -64,8 +64,10 @@ jobs:
             }')
           # This mail is the only signal that a release half-shipped, so a
           # transient Resend failure must not swallow it. The idempotency key
-          # makes a retry of a lost response deliver once.
-          curl --fail-with-body -sS \
+          # makes a retry of a lost response deliver once. --max-time bounds each
+          # attempt: --retry-max-time does not interrupt a stalled request, which
+          # would otherwise run into the job timeout with no retry left.
+          curl --fail-with-body -sS --max-time 20 \
             --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60 \
             -X POST 'https://api.resend.com/emails' \
             -H "Authorization: Bearer ${RESEND_API_KEY}" \
