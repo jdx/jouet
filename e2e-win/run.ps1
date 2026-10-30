@@ -15,7 +15,14 @@ if ($TestName) {
     $config.Filter.FullName = $TestName
 }
 
-$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { "$PSScriptRoot\..\target" }
-$env:PATH = "$targetDir\debug;$env:PATH"
+# Cargo resolves a relative CARGO_TARGET_DIR against the working directory.
+# Resolve it here, because every test changes into a directory of its own.
+$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $PSScriptRoot '..\target' }
+$targetDir = [IO.Path]::GetFullPath($targetDir, (Get-Location).ProviderPath)
+$jouet = Join-Path $targetDir 'debug\jouet.exe'
+if (-not (Test-Path -LiteralPath $jouet)) {
+    throw "jouet binary not found; run 'cargo build' first: $jouet"
+}
+$env:PATH = "$(Split-Path -Parent $jouet);$env:PATH"
 
 Invoke-Pester -Configuration $config
