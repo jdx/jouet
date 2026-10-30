@@ -180,6 +180,10 @@ export default defineConfig({
                 items: [
                   { text: "show", link: "/cli/wind/show" },
                   { text: "dismiss", link: "/cli/wind/dismiss" },
+                  { text: "adopt", link: "/cli/wind/adopt" },
+                  { text: "digest", link: "/cli/wind/digest" },
+                  { text: "review", link: "/cli/wind/review" },
+                  { text: "propose", link: "/cli/wind/propose" },
                 ],
               },
               { text: "unwind", link: "/cli/unwind" },

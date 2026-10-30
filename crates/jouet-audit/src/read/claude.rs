@@ -8,7 +8,7 @@
 
 use super::json::{Flag, Num, Obj, Output, Str};
 use super::{Filter, Reader, Source, files_under, home, lines, sources};
-use crate::event::{Call, Request, Tool, Transcript};
+use crate::event::{self, Call, MessageKind, Request, Tool, Transcript};
 use crate::time::parse_timestamp;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -92,9 +92,14 @@ impl Reader for ClaudeCode {
             session: session_of(source),
             ..Default::default()
         };
-        let mut state = State::default();
+        let mut state = State {
+            detail: filter.detail,
+            ..State::default()
+        };
         let mut other_project = false;
         t.truncated = lines(input, |line| {
+            t.lines += 1;
+            state.line_no = t.lines;
             let assistant = memchr::memmem::find(line, b"\"type\":\"assistant\"").is_some();
             if !assistant && memchr::memmem::find(line, b"\"type\":\"user\"").is_none() {
                 return true;
@@ -120,6 +125,13 @@ impl Reader for ClaudeCode {
             {
                 t.session.clone_from(id);
                 state.session_known = true;
+            }
+            if state.detail
+                && !assistant
+                && !parsed.is_meta.0
+                && memchr::memmem::find(line, b"\"tool_result\"").is_none()
+            {
+                state.prompt(&mut t, &parsed, line);
             }
             state.line(&mut t, parsed);
             true
@@ -152,6 +164,10 @@ fn session_of(source: &Source) -> String {
 
 #[derive(Default)]
 struct State {
+    /// Reading for a digest: see [`Filter::detail`].
+    detail: bool,
+    /// The line being read, from 1.
+    line_no: u64,
     /// The transcript named its session; a subagent's names its parent's.
     session_known: bool,
     /// The last request's message ID.
@@ -160,7 +176,53 @@ struct State {
     pending: HashMap<String, usize>,
 }
 
+/// What a refused call's result says, before the reason the user gave.
+const REFUSED: &str = "The user doesn't want to proceed with this tool use";
+const REASON: &str = "the user said:\n";
+/// What Claude Code writes in the user's place when they stop a turn.
+const INTERRUPTED: &str = "[Request interrupted by user";
+
 impl State {
+    /// A user line that holds no tool result: a prompt, an interruption, or
+    /// text the harness wrote in the user's place, which is left out.
+    fn prompt(&mut self, t: &mut Transcript, parsed: &Line, line: &[u8]) {
+        #[derive(Deserialize)]
+        struct PromptLine {
+            #[serde(default)]
+            message: Obj<PromptMessage>,
+        }
+        #[derive(Deserialize)]
+        struct PromptMessage {
+            #[serde(default)]
+            content: Output,
+        }
+        let Ok(PromptLine {
+            message: Obj(Some(m)),
+        }) = serde_json::from_slice(line)
+        else {
+            return;
+        };
+        let text = m.content.head.trim();
+        let kind = if text.starts_with(INTERRUPTED) {
+            MessageKind::Interrupt
+        } else if harness_text(text) {
+            return;
+        } else {
+            MessageKind::Prompt
+        };
+        t.messages.push(event::Message {
+            at: parsed.timestamp.as_deref().and_then(parse_timestamp),
+            line: self.line_no,
+            after_calls: t.calls.len(),
+            kind,
+            text: if kind == MessageKind::Prompt {
+                text.to_string()
+            } else {
+                String::new()
+            },
+        });
+    }
+
     fn line(&mut self, t: &mut Transcript, line: Line) {
         let at = line.timestamp.as_deref().and_then(parse_timestamp);
         let Some(message) = line.message.0 else {
@@ -214,8 +276,14 @@ impl State {
             let name = block.name.as_deref().unwrap_or_default();
             let mut call = Call::new(tool_kind(name));
             call.at = at;
+            let input = block.input.0;
+            if self.detail {
+                call.line = self.line_no;
+                call.name = Some(name.to_string());
+                call.target = input.as_ref().and_then(Input::target);
+            }
             if call.tool == Tool::Shell {
-                call.command = block.input.0.and_then(|i| i.command.0);
+                call.command = input.and_then(|i| i.command.0);
             }
             if let Some(id) = block.id.0 {
                 self.pending.insert(id, t.calls.len());
@@ -247,6 +315,22 @@ impl State {
             call.output_bytes = block.content.bytes;
             call.rate_limited = block.content.rate_limited;
             call.failed = block.is_error.0;
+            if !self.detail {
+                continue;
+            }
+            let head = &block.content.head;
+            if head.starts_with(REFUSED) {
+                let reason = head.find(REASON).map_or("", |i| &head[i + REASON.len()..]);
+                t.messages.push(event::Message {
+                    at,
+                    line: self.line_no,
+                    after_calls: t.calls.len(),
+                    kind: MessageKind::Refusal,
+                    text: reason.trim().to_string(),
+                });
+            } else if call.failed {
+                call.error = Some(head.clone());
+            }
         }
     }
 }
@@ -280,10 +364,34 @@ fn tool_kind(name: &str) -> Tool {
     }
 }
 
+/// Text Claude Code writes as the user's that the user did not type: a
+/// slash command's expansion, a background task's notification, a hook's or
+/// command's output, a resumed session's summary.
+fn harness_text(text: &str) -> bool {
+    text.is_empty()
+        || text.starts_with('<')
+            && [
+                "<command-",
+                "<local-command-",
+                "<task-notification",
+                "<system-reminder",
+                "<bash-",
+                "<user-prompt-submit-hook",
+                "<side-sessions-event",
+                "<ci-monitor-event",
+            ]
+            .iter()
+            .any(|tag| text.starts_with(tag))
+        || text.starts_with("Caveat: ")
+        || text.starts_with("This session is being continued from a previous conversation")
+}
+
 #[derive(Deserialize)]
 struct Line {
     #[serde(rename = "type", default)]
     kind: Str,
+    #[serde(rename = "isMeta", default)]
+    is_meta: Flag,
     #[serde(default)]
     timestamp: Str,
     #[serde(rename = "sessionId", default)]
@@ -385,6 +493,28 @@ struct Block {
 struct Input {
     #[serde(default)]
     command: Str,
+    #[serde(default)]
+    file_path: Str,
+    #[serde(default)]
+    notebook_path: Str,
+    #[serde(default)]
+    pattern: Str,
+    #[serde(default)]
+    path: Str,
+}
+
+impl Input {
+    /// The file a read or edit names, or a search's pattern and where.
+    fn target(&self) -> Option<String> {
+        if let Some(file) = self.file_path.0.as_ref().or(self.notebook_path.0.as_ref()) {
+            return Some(file.clone());
+        }
+        let pattern = self.pattern.0.as_ref()?;
+        Some(match &self.path.0 {
+            Some(path) => format!("{pattern} in {path}"),
+            None => pattern.clone(),
+        })
+    }
 }
 
 #[cfg(test)]

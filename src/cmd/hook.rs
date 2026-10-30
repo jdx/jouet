@@ -68,7 +68,8 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             log.append(log.entry("session-start"));
             let engine = load(payload).filter(|_| hooks.prime)?;
             let primer = session_start(&engine, hooks.steer, hooks.verify);
-            Some(with_notes(primer, &wind_notes(settings, log.session)))
+            let notes = wind_notes(settings, log.session, log.repo.as_deref());
+            Some(with_notes(primer, &notes))
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
@@ -108,6 +109,9 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
                 && let Some(paths) = wind::Paths::locate()
             {
                 wind::run(&paths, &settings.wind, crate::wind::now(), false);
+                if settings.wind.review {
+                    review_on_stop(&paths, settings, harness, payload, log.repo.clone());
+                }
             }
             output
         }
@@ -116,20 +120,64 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
 }
 
 /// Winds, then picks the notes to show a starting session: at most
-/// [`wind::MAX_PER_START`], one line each.
-fn wind_notes(settings: &Settings, session: Option<&str>) -> Vec<String> {
+/// [`wind::MAX_PER_START`], one line each. The ledger's notes come first,
+/// then sessions worth a review and what reviews proposed.
+fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) -> Vec<String> {
     if !settings.wind.enabled {
         return Vec::new();
     }
     let Some(paths) = wind::Paths::locate() else {
         return Vec::new();
     };
-    wind::run(&paths, &settings.wind, crate::wind::now(), false);
+    let now = crate::wind::now();
+    wind::run(&paths, &settings.wind, now, false);
     let session = session.unwrap_or_default();
-    wind::notes_for_session(&paths, session)
+    let mut lines: Vec<String> = wind::notes_for_session(&paths, session)
         .iter()
         .map(|note| wind::note_line(note, session))
-        .collect()
+        .collect();
+    let room = wind::MAX_PER_START.saturating_sub(lines.len());
+    lines.extend(wind::review::lines_for_session(
+        &paths, session, repo, room, now,
+    ));
+    lines
+}
+
+/// At a stop, digests the session (at most every ten minutes) and queues
+/// it for review when it crosses a threshold. Reading the transcript is
+/// the cost, so only with `[wind] review` on.
+fn review_on_stop(
+    paths: &wind::Paths,
+    settings: &Settings,
+    harness: Harness,
+    payload: &Value,
+    repo: Option<String>,
+) {
+    let Some(session) = payload.get("session_id").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(transcript) = payload.get("transcript_path").and_then(Value::as_str) else {
+        return;
+    };
+    let now = crate::wind::now();
+    if !wind::review::due(paths, session, now) {
+        return;
+    }
+    let redactor = wind::session::Redactor::new(settings.wind.gitleaks.as_deref());
+    let Some(digest) = wind::session::digest_path(harness.name(), transcript.as_ref(), &redactor)
+    else {
+        return;
+    };
+    let signals = wind::review::Signals::of(&digest);
+    wind::review::consider(
+        paths,
+        &settings.wind,
+        harness.name(),
+        session,
+        repo,
+        signals,
+        now,
+    );
 }
 
 /// The primer with winding notes after it.

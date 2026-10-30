@@ -10,7 +10,7 @@
 
 use super::json::{LastStr, Num, Obj, Output, Str};
 use super::{Filter, Reader, Source, files_under, home, lines, sources};
-use crate::event::{Call, Request, Tool, Transcript};
+use crate::event::{Call, Message, MessageKind, Request, Tool, Transcript};
 use crate::time::parse_timestamp;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -66,13 +66,16 @@ impl Reader for Codex {
                 .unwrap_or_default(),
             ..Default::default()
         };
-        let mut state = State::default();
+        let mut state = State {
+            detail: filter.detail,
+            ..State::default()
+        };
         let mut other_project = false;
         t.truncated = lines(input, |line| {
-            if !RELEVANT
-                .iter()
-                .any(|k| memchr::memmem::find(line, k).is_some())
-            {
+            t.lines += 1;
+            state.line = t.lines;
+            let found = |k: &&[u8]| memchr::memmem::find(line, k).is_some();
+            if !(RELEVANT.iter().any(found) || state.detail && DETAIL.iter().any(found)) {
                 return true;
             }
             let parsed: Line = match serde_json::from_slice(line) {
@@ -108,6 +111,12 @@ impl Reader for Codex {
                 }
                 (_, Some("token_count")) => state.token_count(&mut t, at, payload),
                 (_, Some("item_completed")) => state.item(&mut t, payload),
+                (Some("response_item"), Some("message")) if state.detail => {
+                    state.message(&mut t, at, payload);
+                }
+                (Some("event_msg"), Some("turn_aborted")) if state.detail => {
+                    state.push(&mut t, at, MessageKind::Interrupt, String::new());
+                }
                 _ => {}
             }
             true
@@ -141,8 +150,15 @@ const RELEVANT: [&[u8]; 6] = [
     b"\"CommandExecution\"",
 ];
 
+/// More lines a digest reads: the user's messages and aborted turns.
+const DETAIL: [&[u8]; 2] = [b"\"role\":\"user\"", b"\"turn_aborted\""];
+
 #[derive(Default)]
 struct State {
+    /// Reading for a digest: see [`Filter::detail`].
+    detail: bool,
+    /// The line being read, from 1.
+    line: u64,
     /// The first call not yet given to a request.
     request_start: usize,
     /// The last `total_token_usage`, to skip repeated token counts.
@@ -156,6 +172,32 @@ struct State {
 }
 
 impl State {
+    fn push(&self, t: &mut Transcript, at: Option<i64>, kind: MessageKind, text: String) {
+        t.messages.push(Message {
+            at,
+            line: self.line,
+            after_calls: t.calls.len(),
+            kind,
+            text,
+        });
+    }
+
+    /// A user message, unless Codex wrote it in the user's place: the
+    /// project's instructions, the environment, an app's state.
+    fn message(&self, t: &mut Transcript, at: Option<i64>, p: Payload) {
+        if p.role.as_deref() != Some("user") {
+            return;
+        }
+        let text = p.content.head.trim();
+        let injected = text.is_empty()
+            || text.starts_with('<')
+            || text.starts_with("# AGENTS.md instructions")
+            || text.starts_with("<user_instructions>");
+        if !injected {
+            self.push(t, at, MessageKind::Prompt, text.to_string());
+        }
+    }
+
     fn call(&mut self, t: &mut Transcript, at: Option<i64>, p: Payload) {
         let name = p.name.as_deref().unwrap_or_default();
         let src = p.input.0.or(p.arguments.0).unwrap_or_default();
@@ -163,6 +205,13 @@ impl State {
         let start = t.calls.len();
         for call in &mut calls {
             call.at = at;
+            if self.detail {
+                call.line = self.line;
+                call.name = Some(name.to_string());
+                if call.tool == Tool::Edit {
+                    call.target = patched_file(&src);
+                }
+            }
         }
         t.calls.extend(calls);
         self.exact.resize(t.calls.len(), false);
@@ -211,6 +260,9 @@ impl State {
                 call.duration_ms = wall.map(|w| w / shells);
                 call.failed =
                     script_failed && last_shell == Some(i) || exit.is_some_and(|c| c != 0);
+                if self.detail && call.failed {
+                    call.error = Some(out.head.clone());
+                }
                 // One exit code in the output belongs to the cell's only command.
                 if shells == 1 {
                     call.exit_code = exit.and_then(|c| i32::try_from(c).ok());
@@ -270,6 +322,16 @@ impl State {
         });
         self.request_start = t.calls.len();
     }
+}
+
+/// The first file an `apply_patch` patch changes.
+fn patched_file(patch: &str) -> Option<String> {
+    patch.lines().find_map(|line| {
+        ["*** Update File: ", "*** Add File: ", "*** Delete File: "]
+            .iter()
+            .find_map(|p| line.trim_start().strip_prefix(p))
+            .map(|f| f.trim().to_string())
+    })
 }
 
 /// The calls one Codex tool call makes.
@@ -460,6 +522,10 @@ struct Payload {
     id: Str,
     #[serde(default)]
     cwd: Str,
+    #[serde(default)]
+    role: Str,
+    #[serde(default)]
+    content: Output,
     #[serde(default)]
     name: Str,
     #[serde(default)]

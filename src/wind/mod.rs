@@ -13,7 +13,9 @@ pub(crate) mod detect;
 pub(crate) mod draft;
 pub(crate) mod reader;
 pub(crate) mod replay;
+pub(crate) mod review;
 pub(crate) mod rulefile;
+pub(crate) mod session;
 pub(crate) mod stats;
 pub(crate) mod unwind;
 
@@ -128,6 +130,10 @@ pub(crate) struct State {
     pub noted: BTreeSet<String>,
     #[serde(default)]
     pub detector: Detector,
+    /// Session reviews: the sessions queued for one, and what reviews
+    /// proposed.
+    #[serde(default)]
+    pub reviews: review::Reviews,
 }
 
 impl State {
@@ -358,11 +364,12 @@ pub(crate) fn note_line(note: &Note, session: &str) -> String {
     )
 }
 
-/// Sets a note's status; false when there is no such note.
+/// Sets the status of a note, a proposal or a queued review; false when
+/// there is no such one.
 pub(crate) fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
     update(&paths.state, |state| {
         let Some(note) = state.notes.iter_mut().find(|n| n.id == id) else {
-            return false;
+            return state.reviews.set_status(id, status);
         };
         note.status = status;
         true

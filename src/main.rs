@@ -66,7 +66,7 @@ enum Cmd {
     Rule(RuleArgs),
     /// Run a routine: a Luau program on jouet's primitives (also `joue`)
     Run(RunArgs),
-    /// Notice costly patterns in the hook ledger and draft rules for them
+    /// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
     Unwind(UnwindArgs),
@@ -893,13 +893,19 @@ pub struct ShareArgs {
     redact: Vec<String>,
 }
 
-/// Notice costly patterns in the hook ledger and draft rules for them
+/// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 ///
 /// Reads the ledger jouet's hooks keep from where it last stopped. When a
 /// command keeps failing across sessions, or agents keep sleeping instead of
 /// waiting, it drafts a rule in warn mode and keeps a note of it, which the
 /// next session start shows (two at most). The hooks run it on their own;
 /// running it by hand reads the ledger now. Off with JOUET_WIND=0.
+///
+/// The ledger holds only command shapes. `jouet wind digest` and `jouet wind
+/// review` read whole sessions: the user's corrections, abandoned
+/// approaches, waits and repeated exploration. A review's proposals (mise
+/// tasks, rules, routines, AGENTS.md or memory notes) are recorded with
+/// `jouet wind propose` and shown like the ledger's notes.
 #[derive(Args)]
 pub struct WindArgs {
     #[usage(subcommand)]
@@ -908,17 +914,72 @@ pub struct WindArgs {
 
 #[derive(Subcommands)]
 pub enum WindCmd {
-    /// Show a note: what was noticed, and the rule drafted for it
+    /// Show a note or a proposal: what was noticed, and what was drafted
     Show(WindNoteArgs),
-    /// Drop a note, so it is never shown again
+    /// Drop a note, a proposal or a suggested review, so it is never shown again
     Dismiss(WindNoteArgs),
+    /// Mark a review's proposal as applied
+    Adopt(WindNoteArgs),
+    /// Digest whole sessions: corrections, failures, waits, re-reads
+    Digest(WindDigestArgs),
+    /// Print a prompt and session digests for an agent to review
+    Review(WindDigestArgs),
+    /// Record what a review proposed, to show at the next session start
+    Propose(WindProposeArgs),
 }
 
 /// Show or drop a winding note
 #[derive(Args)]
 pub struct WindNoteArgs {
-    /// The note's id, such as n3
+    /// The id of a note (n3), a proposal (p2) or a suggested review (r1)
     id: String,
+}
+
+/// Digest whole sessions: corrections, failures, waits, re-reads
+///
+/// Reads a Claude Code or Codex transcript and reduces it to a few thousand
+/// tokens: the user's corrections and interruptions, failures and their
+/// retries, long calls, where tokens and time went (as `jouet audit` counts
+/// them), files read repeatedly, commands typed out again, and a timeline
+/// with a phase per prompt. Every item names its lines in the transcript.
+/// Secrets are redacted (with gitleaks' rules too, when a config is found)
+/// and the home directory is written as ~. Nothing leaves the machine.
+/// `jouet wind review` prints the same with a prompt for a reviewing agent.
+#[derive(Args)]
+pub struct WindDigestArgs {
+    /// A session ID, a prefix of one, or a transcript's path
+    session: Option<String>,
+    /// The most recently written session (inside a session, that session)
+    #[usage(long)]
+    last: bool,
+    /// Every session written since TIME (7d, 12h, a date or RFC 3339), the
+    /// 8 most recent
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which transcripts to read: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+    /// Only sessions that ran in PATH or a directory below it
+    #[usage(long, value_name = "PATH")]
+    project: Option<String>,
+    /// Tokens per session's digest, about (default 4000)
+    #[usage(long, value_name = "N")]
+    budget: Option<usize>,
+}
+
+/// Record what a review proposed, to show at the next session start
+///
+/// Reads a review's JSON reply on stdin (or from FILE): `{"session": "...",
+/// "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`,
+/// as `jouet wind review` asks for. Each proposal is checked and recorded
+/// as pending: three per review and three a day at most, never one that
+/// looks like it holds a secret, never one already proposed. Recording
+/// applies nothing: the next session starts show each proposal in one line,
+/// and the agent there asks the user before applying it.
+#[derive(Args)]
+pub struct WindProposeArgs {
+    /// Read the reply from FILE instead of stdin
+    file: Option<String>,
 }
 
 /// Propose retiring rules that are noisy or always overridden
