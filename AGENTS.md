@@ -58,7 +58,8 @@ helpers, and the setup, hook, ledger and agent-guide code. The rest lives in lib
 - `jouet-github`: the GitHub client (token lookup, retries, GraphQL and REST, ETags,
   `JOUET_GITHUB_API_URL`), TLS, and the `pr` model shared by `pr status`, `pr threads` and `wait`.
 - `jouet-edit`: the edit engine behind `jouet edit`.
-- `jouet-rules`: the Luau rule engine and the built-in rules behind `jouet hook` and `jouet rule`.
+- `jouet-rules`: the Luau rule engine and the built-in rules behind `jouet hook` and `jouet rule`,
+  its read-only probes (`probe/`), and the recipes `jouet run` runs (`recipe.rs`, `recipes/`).
 - `jouet-wait`: the conditions and polling behind `jouet wait`.
 
 The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
@@ -93,7 +94,14 @@ Pester tests stay at the root, since they run the binary.
   and repository rules may only add decisions; keep that floor (no replacing built-in rules, no
   locking out `jouet`) when changing the engine. A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
   matching and near-miss commands with each change. A rule whose advice names a jouet command
-  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module` and `prelude.luau`.
+  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module`, `prelude.luau`,
+  the probes and `recipe::COMMANDS`, and check it with `luau-lsp analyze
+  --definitions=jouet.d.luau rules/*.luau recipes/*.luau`.
+- **Probes and recipes:** probes only read, are cached per hook call or recipe step, and run within
+  the caller's remaining budget; the GitHub ones stay off in hooks unless `rules.network` is set.
+  A recipe reaches the world only through `jouet.cmd`, whose commands are listed in
+  `recipe::COMMANDS`: never add one that runs a shell command or trusts a repository, and mark one
+  that posts or merges `Effect::Write`, so it needs `yes = true`.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub
   responses are to be recorded as fixtures and replayed, never fetched live in tests.
 - **End-to-end tests** run a command the way an agent does, from a shell: one bats file per

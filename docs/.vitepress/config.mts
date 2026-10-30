@@ -80,6 +80,7 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
+          { text: "jouet run", link: "/commands/run" },
         ],
       },
       {
@@ -150,6 +151,7 @@ export default defineConfig({
                   { text: "gap", link: "/cli/rule/gap" },
                 ],
               },
+              { text: "run", link: "/cli/run" },
               {
                 text: "wind",
                 link: "/cli/wind/",
