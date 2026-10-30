@@ -226,12 +226,28 @@ fn shape_arg(arg: &str, state: &mut ArgState<'_>) -> String {
         state.done = true;
     }
     if let Some(long) = arg.strip_prefix("--") {
-        return match long.split_once('=') {
-            Some((name, _)) => format!("--{}=<v>", redact(name)),
-            None => {
-                state.after_flag = !long.is_empty();
-                format!("--{}", redact(long))
-            }
+        let (name, value) = match long.split_once('=') {
+            Some((name, _)) => (name, true),
+            None => (long, false),
+        };
+        // Only the form of a real flag name (`--all-targets`) is kept; a
+        // value that happens to start with `--` is a value.
+        let flag_name = name.len() <= 32
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if long.is_empty() {
+            return "--".into();
+        }
+        if !flag_name {
+            return "<arg>".into();
+        }
+        state.after_flag = !value;
+        return if value {
+            format!("--{}=<v>", redact(name))
+        } else {
+            format!("--{}", redact(name))
         };
     }
     if let Some(short) = arg.strip_prefix('-') {
@@ -690,6 +706,12 @@ mod tests {
             ),
             ("git commit -m fix", "git commit -m <arg>"),
             ("git commit -mwip", "git commit <arg>"),
+            ("echo \"--password hunter2\"", "echo <arg>"),
+            (
+                "git commit -m '--wip rotate key abc'",
+                "git commit -m <arg>",
+            ),
+            ("cargo test --Secret_Thing", "cargo test <arg>"),
             ("git push -f origin main", "git push -f <arg> <arg>"),
             // Programs without subcommands keep no positional.
             ("echo confidential", "echo <arg>"),
