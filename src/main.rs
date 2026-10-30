@@ -7,6 +7,9 @@ mod display;
 mod edit;
 mod exit;
 mod paths;
+mod rules;
+mod settings;
+mod spec;
 mod time;
 mod tls;
 mod wait;
@@ -41,6 +44,8 @@ enum Cmd {
     Edit(EditArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
+    /// List, test and trust the rules jouet's hooks run
+    Rule(RuleArgs),
 }
 
 /// Make exact, all-or-nothing edits across files
@@ -234,12 +239,70 @@ pub struct WaitCmdArgs {
     command: Vec<String>,
 }
 
+/// List, test and trust the rules jouet's hooks run
+///
+/// Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a
+/// repository's .jouet/rules once it is trusted. `jouet rule types` prints
+/// the API they are written against.
+#[derive(Args)]
+pub struct RuleArgs {
+    #[usage(subcommand)]
+    cmd: RuleCmd,
+}
+
+#[derive(Subcommands)]
+pub enum RuleCmd {
+    /// List every rule, where it comes from and whether it runs
+    List(RuleListArgs),
+    /// Run a rule against a command or hook payload, or against its examples
+    Test(RuleTestArgs),
+    /// Print the Luau type definitions of the jouet module
+    Types(RuleTypesArgs),
+    /// Trust this repository's .jouet/rules as they are now
+    Trust(RuleTrustArgs),
+    /// Stop trusting this repository's .jouet/rules
+    Untrust(RuleTrustArgs),
+}
+
+/// List every rule, where it comes from and whether it runs
+#[derive(Args)]
+pub struct RuleListArgs {}
+
+/// Run a rule against a command or hook payload, or against its examples
+///
+/// With neither --command nor --payload, runs the rule's `examples` and
+/// fails if any does not do what it expects, so a rule can be checked
+/// before it is enabled.
+#[derive(Args)]
+pub struct RuleTestArgs {
+    /// A rule's name, or the path to a .luau file
+    rule: String,
+    /// A shell command to test the rule against
+    #[usage(long, value_name = "CMD")]
+    command: Option<String>,
+    /// A Claude Code or Codex hook payload (JSON) to test against; `-` is stdin
+    #[usage(long, value_name = "FILE")]
+    payload: Option<String>,
+    /// The command's exit code, for a post-tool-use rule (default 0)
+    #[usage(long, value_name = "N")]
+    exit_code: Option<i32>,
+}
+
+/// Print the Luau type definitions of the jouet module
+#[derive(Args)]
+pub struct RuleTypesArgs {}
+
+/// Trust or stop trusting this repository's .jouet/rules
+#[derive(Args)]
+pub struct RuleTrustArgs {}
+
 fn main() -> ExitCode {
     let cli = Jouet::parse();
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Edit(args) => cmd::edit::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
+        Cmd::Rule(args) => cmd::rule::run(&args, &out),
     };
     exit.into()
 }

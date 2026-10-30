@@ -26,6 +26,7 @@ export default defineConfig({
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
     "cli/wait.md": "cli/wait/index.md",
+    "cli/rule.md": "cli/rule/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -36,7 +37,7 @@ export default defineConfig({
       {
         text: "Guide",
         link: "/getting-started",
-        activeMatch: "^/(getting-started|why|conventions)",
+        activeMatch: "^/(getting-started|why|conventions|rules)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -52,6 +53,7 @@ export default defineConfig({
           { text: "Getting started", link: "/getting-started" },
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
+          { text: "Rules", link: "/rules" },
         ],
       },
       {
@@ -91,6 +93,18 @@ export default defineConfig({
                   { text: "http", link: "/cli/wait/http" },
                   { text: "pid", link: "/cli/wait/pid" },
                   { text: "cmd", link: "/cli/wait/cmd" },
+                ],
+              },
+              {
+                text: "rule",
+                link: "/cli/rule/",
+                collapsed: true,
+                items: [
+                  { text: "list", link: "/cli/rule/list" },
+                  { text: "test", link: "/cli/rule/test" },
+                  { text: "types", link: "/cli/rule/types" },
+                  { text: "trust", link: "/cli/rule/trust" },
+                  { text: "untrust", link: "/cli/rule/untrust" },
                 ],
               },
             ],

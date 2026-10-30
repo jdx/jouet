@@ -20,3 +20,10 @@ name = "jouet"
 publish = true
 # The tag people reference, and the one release.yml's archives hang off.
 git_tag_name = "v{{ version }}"
+
+[[package]]
+name = "jouet-rules"
+publish = true
+# A library: crates.io is its distribution. A GitHub release for it would carry
+# no assets, and only the `jouet` release is undrafted by release-plz.yml.
+git_release_enable = false
