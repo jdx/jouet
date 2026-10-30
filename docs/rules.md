@@ -12,7 +12,7 @@ jouet ships its own rules, for instance one that denies `git add -A` and one tha
 The rule API is new and may change between releases. `jouet rule types` always describes the installed version.
 :::
 
-```console
+```output
 $ jouet rule list
 sleep-poll      enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
 review-threads  enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
@@ -115,7 +115,7 @@ A rule with `on = "post-tool-use"` runs after a command finished. Each top-level
 
 `jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
 
-```console
+```output
 $ jouet rule test ./no-rm-rf.luau
 ok    warn          rm -rf target
 ok    warn          sudo rm -r build

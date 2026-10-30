@@ -66,13 +66,13 @@ One table covers every command:
 | 124 | `timeout` | Still pending when the timeout expired |
 | 130 | `interrupted` | Stopped by a signal |
 
-`1` and `4` are deliberately separate. After a `1`, fix the code: jouet did what was asked, and the result is a failure. After a `4`, fix the request: jouet refused, and nothing changed. `remote` and `timeout` arrive with the GitHub commands.
+`1` and `4` are deliberately separate. After a `1`, fix the code: jouet did what was asked, and the result is a failure. After a `4`, fix the request: jouet refused, and nothing changed.
 
 ## Nothing truncated silently
 
 When jouet shortens a list or a log, it says so and says where the rest is. For example, `jouet edit --check` keeps the last 30 lines of the check's output, marks the cut, and prints the path to the full log:
 
-```text
+```output
 check failed (exit 101): cargo check -q
   ...
   error: could not compile `demo` (bin "demo") due to 1 previous error
