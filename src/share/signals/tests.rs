@@ -105,7 +105,7 @@ fn a_script_written_in_five_sessions_is_a_candidate_built_in() {
 
 #[test]
 fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
-    let engine = crate::wind::user_engine(std::path::Path::new("/nonexistent")).unwrap();
+    let engine = crate::wind::user_engine(std::path::Path::new("/nonexistent"));
     let rule = engine
         .rules()
         .iter()
