@@ -2,6 +2,7 @@
 
 pub mod edit;
 pub mod pr;
+pub mod wait;
 
 use crate::display::Mode;
 use crate::exit::Exit;

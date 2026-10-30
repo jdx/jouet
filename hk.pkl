@@ -10,6 +10,28 @@ local linters = new Mapping<String, Step> {
         // Same as `mise run lint-fix`, so fixes cover the targets check does.
         fix = "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
     }
+    // The bats tests and their helper. `mise x` for the same reason as
+    // jactionlint below.
+    ["shfmt"] {
+        glob = List("**/*.bats", "**/*.bash", "**/*.sh")
+        batch = true
+        check = new CommandSpec {
+            command = "mise x shfmt -- shfmt -d {{ files }}"
+            effect = "read"
+        }
+        fix = new CommandSpec {
+            command = "mise x shfmt -- shfmt -w {{ files }}"
+            effect = "write"
+        }
+    }
+    ["shellcheck"] {
+        glob = List("**/*.bats", "**/*.bash", "**/*.sh")
+        batch = true
+        check = new CommandSpec {
+            command = "mise x shellcheck -- shellcheck {{ files }}"
+            effect = "read"
+        }
+    }
     // lints GitHub Actions workflows, composite actions and Dependabot config (jdx/jactionlint)
     ["jactionlint"] {
         glob = List(".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/actions/**/action.yml", ".github/actions/**/action.yaml", ".github/dependabot.yml", ".github/dependabot.yaml")

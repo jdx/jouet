@@ -1,4 +1,5 @@
-//! Durations (`90s`, `10m`, `1h30m`) and the UTC timestamps GitHub returns.
+//! Durations: parsing `90s`, `10m` or `1h30m`, and printing elapsed time;
+//! and the UTC timestamps GitHub returns.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -32,6 +33,23 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
         return Err(bad());
     }
     Ok(Duration::from_secs(total))
+}
+
+/// Whole seconds in the same form `parse_duration` reads: `0s`, `45s`,
+/// `6m12s` or `1h30m`.
+pub fn elapsed(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    let mut out = String::new();
+    if h > 0 {
+        out.push_str(&format!("{h}h"));
+    }
+    if m > 0 {
+        out.push_str(&format!("{m}m"));
+    }
+    if s > 0 || out.is_empty() {
+        out.push_str(&format!("{s}s"));
+    }
+    out
 }
 
 /// Seconds since the Unix epoch for a UTC RFC 3339 timestamp such as
@@ -94,6 +112,21 @@ mod tests {
         assert_eq!(parse_duration("0s"), Ok(Duration::ZERO));
         for bad in ["", "10", "m", "1x", "1h30", "-5s", "1.5m"] {
             assert!(parse_duration(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn elapsed_round_trips() {
+        assert_eq!(elapsed(0), "0s");
+        assert_eq!(elapsed(45), "45s");
+        assert_eq!(elapsed(372), "6m12s");
+        assert_eq!(elapsed(5400), "1h30m");
+        assert_eq!(elapsed(3601), "1h1s");
+        for secs in [0, 45, 372, 5400, 3601, 86_399] {
+            assert_eq!(
+                parse_duration(&elapsed(secs)),
+                Ok(Duration::from_secs(secs))
+            );
         }
     }
 
