@@ -198,11 +198,13 @@ fn text(report: &Report, stats: &ScanStats, doc: &Doc<'_>, top: usize) -> String
         harness_text(&mut s, h, top);
     }
     if stats.bad_lines > 0 {
-        let _ = writeln!(
-            s,
-            "\nskipped {} that were not JSON",
-            plural(stats.bad_lines, "line")
-        );
+        let n = stats.bad_lines;
+        let what = if n == 1 {
+            "line that was"
+        } else {
+            "lines that were"
+        };
+        let _ = writeln!(s, "\nskipped {} {what} not JSON", count(n));
     }
     if !stats.unreadable.is_empty() {
         let n = stats.unreadable.len() as u64;
@@ -381,8 +383,8 @@ fn shapes_text(s: &mut String, row: &CategoryReport) {
     if more > 0 {
         let _ = writeln!(
             s,
-            "      … {} more (--json lists {JSON_SHAPES})",
-            plural(more, "shape")
+            "      … {} (--json lists {JSON_SHAPES})",
+            plural(more, "more shape")
         );
     }
 }
