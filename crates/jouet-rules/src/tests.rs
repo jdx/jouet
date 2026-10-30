@@ -543,24 +543,31 @@ fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
 }
 
 #[test]
-fn a_rule_sees_through_rtk_and_knows_it_was_there() {
-    let rule = engine(vec![user(
-        "via",
-        "return { check = function(call) return jouet.warn(tostring(call.via) .. ' ' .. tostring(call.commands[1].via) .. ' ' .. call.commands[1].program) end }",
+fn a_missing_primitive_is_recorded_as_a_gap() {
+    let engine = engine(vec![user(
+        "wants-ci",
+        "return { check = function(c) if jouet.ci_state and jouet.ci_state() == 'red' then return jouet.deny('red') end return jouet.pr_status(1) end }",
     )]);
-    let message = |command: &str| {
-        rule.evaluate(&bash(command)).warnings[0]
-            .message
-            .clone()
-            .unwrap()
-    };
-    assert_eq!(message("rtk git status"), "rtk rtk git");
-    assert_eq!(message("git status"), "nil nil git");
-    assert_eq!(message("rtk gain"), "nil nil rtk");
-    assert!(
-        engine(builtin())
-            .evaluate(&bash("rtk git add -A"))
-            .deny
-            .is_some()
+    let outcome = engine.evaluate(&bash("git push"));
+    // The call to a missing function fails the rule, which fails open.
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.errors.len(), 1);
+    let gaps: Vec<String> = engine
+        .take_gaps()
+        .into_iter()
+        .map(|g| format!("{}:{}", g.rule, g.primitive))
+        .collect();
+    assert_eq!(gaps, ["wants-ci:ci_state", "wants-ci:pr_status"]);
+    assert!(engine.take_gaps().is_empty());
+    // Existing primitives are not gaps.
+    let fine = engine_with(
+        vec![user(
+            "fine",
+            "return { check = function(c) local _ = jouet.git; return nil end }",
+        )],
+        Budget::default(),
+        Vec::new(),
     );
+    fine.evaluate(&bash("ls"));
+    assert!(fine.take_gaps().is_empty());
 }

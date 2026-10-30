@@ -26,7 +26,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pr",
         Some(
-            "checking many PRs at once (`pr status`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
+            "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
         ),
     ),
     (
@@ -35,6 +35,17 @@ const WHEN: &[(&str, Option<&str>)] = &[
             "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: `jouet rule test` runs one before it is enabled",
         ),
     ),
+    (
+        "wind",
+        Some(
+            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+        ),
+    ),
+    (
+        "unwind",
+        Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
+    ),
+    ("share", None),
     ("agent-help", None),
     ("audit", None),
     ("skill", None),
@@ -50,7 +61,7 @@ const COMPANIONS: &[(&str, &str)] = &[
     ),
     (
         "rtk",
-        "rtk: compresses command output, while jouet steers which commands run; use both, since jouet's rules see through `rtk <cmd>`",
+        "rtk: shrinks the output of common commands; see `rtk --help`",
     ),
     (
         "bd",

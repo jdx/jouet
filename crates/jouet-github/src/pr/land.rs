@@ -1,0 +1,175 @@
+//! The GitHub writes behind `jouet pr land`: updating a branch with its
+//! base, merging, and confirming the merge.
+//!
+//! Both writes go through the REST endpoints that take the head SHA as a
+//! guard, so a push between the check and the write makes GitHub refuse
+//! rather than merge something nobody looked at. Neither ever force-pushes:
+//! updating merges the base into the branch on GitHub. Merging asks for the
+//! same merge a person gets from the button, so branch protection applies
+//! and nothing here asks to bypass it.
+
+use super::target::Repo;
+use crate::{Client, Failure, Rest};
+use serde_json::{Value, json};
+
+/// How the merge is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Squash,
+    Merge,
+    Rebase,
+}
+
+impl Method {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "squash" => Some(Self::Squash),
+            "merge" => Some(Self::Merge),
+            "rebase" => Some(Self::Rebase),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+/// Why a write did not happen.
+#[derive(Debug)]
+pub enum Refused {
+    /// GitHub refused it: branch protection, a head that moved, a method
+    /// the repository does not allow, or missing permission. Its message.
+    Rejected(String),
+    NotFound(String),
+    /// The request failed: network, rate limit, or a 5xx.
+    Failed(Failure),
+}
+
+impl From<Failure> for Refused {
+    fn from(f: Failure) -> Self {
+        Self::Failed(f)
+    }
+}
+
+fn pulls(repo: &Repo, number: u64) -> String {
+    format!("/repos/{}/{}/pulls/{number}", repo.owner, repo.name)
+}
+
+/// Asks GitHub to merge the base into the branch, if the head is still
+/// `head_oid`. GitHub does this in the background, so the new head appears
+/// a moment after this returns.
+pub fn update_branch(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    head_oid: &str,
+) -> Result<(), Refused> {
+    let path = format!("{}/update-branch", pulls(repo, number));
+    let resp = client.put(&path, &json!({ "expected_head_sha": head_oid }))?;
+    match resp.status {
+        200..=299 => Ok(()),
+        _ => Err(refusal(repo, number, &resp)),
+    }
+}
+
+/// Merges the PR if its head is still `head_oid`, and returns the merge
+/// commit GitHub reports.
+pub fn merge(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    head_oid: &str,
+    method: Method,
+) -> Result<Option<String>, Refused> {
+    let path = format!("{}/merge", pulls(repo, number));
+    let body = json!({ "merge_method": method.as_str(), "sha": head_oid });
+    let resp = client.put(&path, &body)?;
+    match resp.status {
+        200 => Ok(read(&resp)?["sha"].as_str().map(str::to_string)),
+        _ => Err(refusal(repo, number, &resp)),
+    }
+}
+
+/// Whether GitHub reports the PR as merged, and its merge commit.
+pub fn merged(client: &mut Client, repo: &Repo, number: u64) -> Result<Merged, Refused> {
+    let resp = client.get(&pulls(repo, number), None)?;
+    if resp.status != 200 {
+        return Err(refusal(repo, number, &resp));
+    }
+    let pr = read(&resp)?;
+    Ok(Merged {
+        merged: pr["merged"].as_bool().unwrap_or(false),
+        merge_commit: pr["merge_commit_sha"].as_str().map(str::to_string),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merged {
+    pub merged: bool,
+    pub merge_commit: Option<String>,
+}
+
+fn read(resp: &Rest) -> Result<Value, Failure> {
+    serde_json::from_str(&resp.body)
+        .map_err(|e| Failure::Other(format!("GitHub sent a response jouet could not read: {e}")))
+}
+
+/// A response other than success, as GitHub explained it. A 5xx is a
+/// failure, not a refusal, since the write may still have happened.
+fn refusal(repo: &Repo, number: u64, resp: &Rest) -> Refused {
+    let message = serde_json::from_str::<Value>(&resp.body)
+        .ok()
+        .and_then(|v| v["message"].as_str().map(str::to_string))
+        .unwrap_or_else(|| resp.body.trim().to_string());
+    match resp.status {
+        404 => Refused::NotFound(format!("{repo}#{number} does not exist")),
+        403 | 405 | 409 | 422 => Refused::Rejected(message),
+        status => Refused::Failed(Failure::Other(format!(
+            "GitHub returned {status}: {message}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn methods_are_the_three_github_allows() {
+        for m in ["squash", "merge", "rebase"] {
+            assert_eq!(Method::parse(m).map(Method::as_str), Some(m));
+        }
+        assert_eq!(Method::parse("fast-forward"), None);
+    }
+
+    #[test]
+    fn rejections_carry_githubs_message() {
+        let repo = Repo::parse("jdx/demo").unwrap();
+        let resp = |status, body: &str| Rest {
+            status,
+            etag: None,
+            body: body.into(),
+        };
+        let protected = resp(
+            405,
+            r#"{"message":"At least 1 approving review is required by reviewers with write access."}"#,
+        );
+        assert!(matches!(
+            refusal(&repo, 7, &protected),
+            Refused::Rejected(m) if m.starts_with("At least 1 approving review")
+        ));
+        assert!(matches!(
+            refusal(&repo, 7, &resp(404, r#"{"message":"Not Found"}"#)),
+            Refused::NotFound(m) if m == "jdx/demo#7 does not exist"
+        ));
+        assert!(matches!(
+            refusal(&repo, 7, &resp(502, "bad gateway")),
+            Refused::Failed(Failure::Other(m)) if m == "GitHub returned 502: bad gateway"
+        ));
+    }
+}

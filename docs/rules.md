@@ -12,7 +12,7 @@ jouet ships its own rules, for instance one that denies `git add -A` and one tha
 The rule API is new and may change between releases. `jouet rule types` always describes the installed version.
 :::
 
-```console
+```output
 $ jouet rule list
 sleep-poll      enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
 review-threads  enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
@@ -72,7 +72,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = { "rm -rf target", "sudo rm -r build" },
+		warn = { "rm -rf target", "sudo rm -r build" },
 		allow = { "rm file.txt", "echo 'rm -rf /'", "git commit -m 'rm -rf old code'" },
 	},
 }
@@ -96,8 +96,7 @@ The header is a few `--- key: value` lines at the top of the file, which `jouet 
 - **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
 - **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
 - **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` are included**, marked `nested`.
-- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup` and `mise x tool --`, and `program` is the basename of what runs.
-- **rtk is looked through too.** [rtk](https://github.com/rtk-ai/rtk) compresses command output, and its hook rewrites `git status` to `rtk git status`. jouet's rules see the wrapped command, so `rtk git add -A` is denied like `git add -A`. A command it wrapped has `via = "rtk"`, and so does the call. rtk's own commands, such as `rtk gain`, are left alone.
+- **Wrappers are looked through:** `argv` skips `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --`, and `program` is the basename of what runs.
 
 The `jouet` module has helpers for the common cases:
 - `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`.
@@ -110,16 +109,16 @@ The `jouet` module has helpers for the common cases:
 
 A rule that names a jouet command in its advice declares it with `needs = { "wait", "ci" }`, and stays off until the installed jouet has that command.
 
-A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one that feeds a pipe: without `set -o pipefail`, `cargo test | tail` exiting 0 is `tail`'s success, so `cargo test` gets no status. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
+A rule with `on = "post-tool-use"` runs after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce, so this rule's denials print as `warn` there:
+`jouet rule test` runs a rule's `examples` and fails if any does not do what it expects. Examples check what `check` decides, before the mode applies, so a warn-mode rule's `deny` examples pass when it denies; the result for one `--command` is what jouet would enforce:
 
-```console
+```output
 $ jouet rule test ./no-rm-rf.luau
-ok    deny          rm -rf target
-ok    deny          sudo rm -r build
+ok    warn          rm -rf target
+ok    warn          sudo rm -r build
 ok    allow         rm file.txt
 ok    allow         echo 'rm -rf /'
 ok    allow         git commit -m 'rm -rf old code'
@@ -133,6 +132,20 @@ jouet rule test git-stash --command 'git stash pop'
 jouet rule test checks --command 'cargo test' --exit-code 101
 jouet rule test no-rm-rf --payload hook-input.json
 ```
+
+`--replay` runs it over every call in the hook ledger instead. It lists the calls the rule fires on and the near misses it stays quiet on (calls running the same programs), and fails if it fires on nothing:
+
+```console
+$ jouet rule test no-tags --replay
+no-tags: fired on 8 of 28 calls in the ledger
+fires on:
+     6x  warn         git tag <arg>
+     2x  warn         git tag -l
+stays quiet on (near misses):
+     2x  allow        git status
+```
+
+`jouet rule new NAME --why "..."` writes a rule of yours from a template, in warn mode, and `jouet rule promote NAME` switches it to deny. [Self-winding](/winding) drafts rules like this from the ledger on its own.
 
 ### Type checking
 

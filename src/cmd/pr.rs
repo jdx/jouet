@@ -1,15 +1,15 @@
-//! `jouet pr status`.
+//! `jouet pr status`, and the PR selection `pr next` shares with it.
 
 use super::Output;
 use crate::{PrArgs, PrCmd, StatusArgs};
 use jouet_github::Client;
-use jouet_github::pr::status::{self, Fetched, Incomplete, Lookup, Mergeability, PrStatus, State};
+use jouet_github::pr::status::{self, Incomplete, Lookup, Mergeability, PrStatus, State};
 use jouet_github::pr::target::{self, Arg, Repo, Target};
 use jouet_output::exit::Exit;
 use jouet_output::time;
 use serde::Serialize;
 use std::fmt::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const DEFAULT_SETTLE: Duration = Duration::from_secs(20);
 /// Titles longer than this are cut at a word boundary in text output.
@@ -18,42 +18,65 @@ const TITLE_WIDTH: usize = 40;
 pub(crate) fn run(args: PrArgs, out: &Output) -> Exit {
     match args.cmd {
         PrCmd::Status(args) => run_status(&args, out),
+        PrCmd::Next(args) => super::next::run(&args, out),
+        PrCmd::Land(args) => super::land::run(&args, out),
         PrCmd::Threads(args) => super::threads::run(args, out),
     }
 }
 
 #[derive(Debug, Serialize)]
-struct Report {
-    prs: Vec<PrStatus>,
+pub(crate) struct Report {
+    pub(crate) prs: Vec<PrStatus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    not_found: Vec<String>,
+    pub(crate) not_found: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    incomplete: Vec<Incomplete>,
+    pub(crate) incomplete: Vec<Incomplete>,
 }
 
-fn run_status(args: &StatusArgs, out: &Output) -> Exit {
-    let settle = match args.settle.as_deref().map(time::parse_duration) {
-        None => DEFAULT_SETTLE,
-        Some(Ok(d)) => d,
-        Some(Err(e)) => return out.error(Exit::Usage, &format!("--settle: {e}")),
-    };
-    let lookups = match lookups(args) {
-        Ok(lookups) => lookups,
-        Err(e) => return out.error(Exit::Usage, &e),
-    };
-    let mut client = Client::from_env();
-    let mut fetched = match status::fetch(&mut client, lookups) {
-        Ok(fetched) => fetched,
-        Err(e) => return out.error(Exit::Remote, &e),
-    };
-    if let Err(e) = settle_mergeable(&mut client, &mut fetched.prs, settle) {
-        return out.error(Exit::Remote, &e);
+/// `--settle`, or its default.
+pub(crate) fn settle_arg(settle: Option<&str>) -> Result<Duration, String> {
+    match settle.map(time::parse_duration) {
+        None => Ok(DEFAULT_SETTLE),
+        Some(Ok(d)) => Ok(d),
+        Some(Err(e)) => Err(format!("--settle: {e}")),
     }
+}
+
+/// Fetches the PRs the lookups name, waits up to `settle` for unknown
+/// mergeability, and derives their attention codes.
+pub(crate) fn fetch(
+    client: &mut Client,
+    lookups: Vec<Lookup>,
+    settle: Duration,
+) -> Result<Report, String> {
+    let mut fetched = status::fetch(client, lookups)?;
+    status::settle(client, &mut fetched.prs, settle)?;
     let now = time::now();
-    let report = Report {
+    Ok(Report {
         prs: fetched.prs.into_iter().map(|p| p.finish(now)).collect(),
         not_found: fetched.not_found,
         incomplete: fetched.incomplete,
+    })
+}
+
+fn run_status(args: &StatusArgs, out: &Output) -> Exit {
+    let settle = match settle_arg(args.settle.as_deref()) {
+        Ok(settle) => settle,
+        Err(e) => return out.error(Exit::Usage, &e),
+    };
+    let selection = Selection {
+        prs: &args.prs,
+        mine: args.mine,
+        search: args.search.as_deref(),
+        repo: &args.repo,
+    };
+    let lookups = match lookups(&selection) {
+        Ok(lookups) => lookups,
+        Err(e) => return out.error(Exit::Usage, &e),
+    };
+    let report = match fetch(&mut Client::from_env(), lookups, settle) {
+        Ok(report) => report,
+        Err(e) => return out.error(Exit::Remote, &e),
     };
     out.result(&report, || render(&report));
     if !report.not_found.is_empty() {
@@ -65,8 +88,16 @@ fn run_status(args: &StatusArgs, out: &Output) -> Exit {
     }
 }
 
+/// The PRs a command names: arguments, `--mine`, `--search` and `--repo`.
+pub(crate) struct Selection<'a> {
+    pub(crate) prs: &'a [String],
+    pub(crate) mine: bool,
+    pub(crate) search: Option<&'a str>,
+    pub(crate) repo: &'a [String],
+}
+
 /// Turns the arguments and selectors into lookups, in the order given.
-fn lookups(args: &StatusArgs) -> Result<Vec<Lookup>, String> {
+pub(crate) fn lookups(args: &Selection<'_>) -> Result<Vec<Lookup>, String> {
     let repos = args
         .repo
         .iter()
@@ -85,7 +116,7 @@ fn lookups(args: &StatusArgs) -> Result<Vec<Lookup>, String> {
         )),
     };
     let mut lookups = Vec::new();
-    for arg in &args.prs {
+    for arg in args.prs {
         let target = match Arg::parse(arg) {
             Arg::Number(n) => Target::Number(repo_for(arg)?, n),
             Arg::Branch(branch) => Target::Branch(repo_for(arg)?, branch),
@@ -103,7 +134,7 @@ fn lookups(args: &StatusArgs) -> Result<Vec<Lookup>, String> {
     if args.mine {
         lookups.push(search("is:open author:@me", &scope));
     }
-    if let Some(query) = &args.search {
+    if let Some(query) = args.search {
         let scoped = ["repo:", "org:", "user:"]
             .iter()
             .any(|q| query.split_whitespace().any(|w| w.starts_with(q)));
@@ -127,46 +158,6 @@ fn search(query: &str, repos: &[Repo]) -> Lookup {
         query,
         after: None,
         listed: 0,
-    }
-}
-
-/// Re-queries open PRs whose mergeable state is still unknown until GitHub
-/// settles it or `settle` runs out.
-fn settle_mergeable(
-    client: &mut Client,
-    prs: &mut [Fetched],
-    settle: Duration,
-) -> Result<(), String> {
-    let deadline = Instant::now() + settle;
-    let mut wait = Duration::from_secs(1);
-    let mut announced = false;
-    loop {
-        let unknown: Vec<Target> = prs
-            .iter()
-            .filter(|p| p.is_open() && p.mergeable_unknown())
-            .filter_map(Fetched::target)
-            .collect();
-        let left = deadline.saturating_duration_since(Instant::now());
-        if unknown.is_empty() || left.is_zero() {
-            return Ok(());
-        }
-        if !announced {
-            let names: Vec<String> = unknown.iter().map(Target::to_string).collect();
-            eprintln!(
-                "jouet: waiting up to {}s for GitHub to compute mergeability of {}",
-                left.as_secs(),
-                names.join(", ")
-            );
-            announced = true;
-        }
-        std::thread::sleep(wait.min(left));
-        wait = (wait + Duration::from_secs(1)).min(Duration::from_secs(5));
-        let again = status::fetch(client, unknown.into_iter().map(Lookup::Pr).collect())?;
-        for fresh in again.prs {
-            if let Some(pr) = prs.iter_mut().find(|p| p.key() == fresh.key()) {
-                *pr = fresh;
-            }
-        }
     }
 }
 

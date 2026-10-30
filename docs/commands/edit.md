@@ -31,7 +31,7 @@ The format is detected from the first non-blank line: `=== PATH` for blocks, `**
 
 The format most models already write reliably:
 
-```text
+```spec
 === src/backend/vfox.rs
 <<<<<<< SEARCH
         let resp = client.get(url).send()?;
@@ -56,7 +56,7 @@ use crate::http::HTTP_FETCH;
 - An empty search creates the file with the replacement as its content. The file must not exist yet.
 - When the text being edited contains conflict markers itself, lengthen the fence. A block opened with ten `<` must be closed with ten `>`, and its separator is ten `=`:
 
-  ```text
+  ```spec
   === src/merge.rs
   <<<<<<<<<< SEARCH
   <<<<<<< HEAD
@@ -72,7 +72,7 @@ use crate::http::HTTP_FETCH;
 
 The format used by OpenAI Codex's `apply_patch`, accepted as is:
 
-```text
+```spec
 *** Begin Patch
 *** Add File: docs/new.md
 +# A new page
@@ -124,7 +124,7 @@ The edit flags below work with `replace` too.
 
 `--dry-run` checks every edit and reports what would change, without writing anything. `--diff` adds a unified diff of each file to the report, with or without `--dry-run`:
 
-```text
+```output
 $ jouet edit replace src/main.rs --old x --new y --all --diff
 ok          src/main.rs  1 edit  +2 -2
 --- a/src/main.rs
@@ -145,7 +145,7 @@ ok          src/main.rs  1 edit  +2 -2
 
 With `--revert-on-fail`, a failing check also restores every edited file to its previous bytes and permissions, and removes the files the edit created:
 
-```text
+```output
 $ jouet edit replace src/main.rs --old 'let y = 2' --new 'let y = 5' \
     --check 'grep -q "y = 2" src/main.rs' --revert-on-fail
 reverted    src/main.rs  1 edit  +1 -1
@@ -157,7 +157,7 @@ check failed (exit 1): grep -q "y = 2" src/main.rs
 
 If the check cannot start at all, for example because the log directory cannot be written or there is no shell, that also counts as a failure: the exit code is `1`, the error says whether the edits were kept, and with `--revert-on-fail` every edited file is restored the same way:
 
-```text
+```output
 $ jouet edit replace c.txt --old 'a = 1' --new 'a = 2' --check true --revert-on-fail
 jouet: running --check: No such file or directory (os error 2); every edited file was restored
 ```
@@ -168,14 +168,14 @@ This is what mutation testing needs: an edit that does not apply, or does not co
 
 An agent that read a file a while ago may be editing a version that has since changed. `jouet edit hash` prints SHA-256 hashes to pass back later:
 
-```text
+```output
 $ jouet edit hash Cargo.toml
 5824660dfdeab9bf3325439f7f04fa368f4472e3208a0738ed4a60c0bd8c0d4f  Cargo.toml
 ```
 
 `--expect-hash PATH=SHA256` refuses the whole edit, writing nothing, when that file's contents no longer match. It can be given once per file:
 
-```text
+```output
 $ jouet edit replace Cargo.toml --old demo --new demo2 \
     --expect-hash Cargo.toml=5824660dfdeab9bf3325439f7f04fa368f4472e3208a0738ed4a60c0bd8c0d4f
 failed      Cargo.toml  1 edit  +1 -1
@@ -187,7 +187,7 @@ failed      Cargo.toml  1 edit  +1 -1
 
 Nothing is written, and the report says why. Files that were fine but not written because of another file are marked `not written`:
 
-```text
+```output
 failed      src/main.rs  1 edit
   edit 1: no match
     closest at line 2 (93% similar), - spec / + file:
@@ -199,7 +199,7 @@ not written Cargo.toml   1 edit  +1 -1
 
 Too many matches list where they are:
 
-```text
+```output
 failed      src/main.rs  1 edit
   edit 1: 2 matches, expected 1, at lines 2, 3
 0 of 1 file written
