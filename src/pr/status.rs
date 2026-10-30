@@ -51,10 +51,12 @@ const THREADS_FRAGMENT: &str = "fragment threads on PullRequestReviewThreadConne
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lookup {
     Pr(Target),
-    /// A page of a GitHub search; `after` is the cursor of the previous page.
+    /// A page of a GitHub search; `after` is the cursor of the previous page
+    /// and `listed` counts the PRs earlier pages returned.
     Search {
         query: String,
         after: Option<String>,
+        listed: u64,
     },
     /// The next page of a PR's review threads, by the PR's node ID.
     Threads {
@@ -110,7 +112,7 @@ pub fn query(lookups: &[Lookup]) -> (String, Value) {
                      newest: pullRequests(headRefName: $b{i}, {newest}) {{ nodes {{ ...pr }} }} }}"
                 );
             }
-            Lookup::Search { query, after } => {
+            Lookup::Search { query, after, .. } => {
                 pr = true;
                 params.extend([format!("$q{i}: String!"), format!("$a{i}: String")]);
                 vars.insert(format!("q{i}"), json!(query));
@@ -118,7 +120,7 @@ pub fn query(lookups: &[Lookup]) -> (String, Value) {
                 let _ = writeln!(
                     body,
                     "  l{i}: search(query: $q{i}, type: ISSUE, first: {BATCH}, after: $a{i}) {{ \
-                     pageInfo {{ hasNextPage endCursor }} nodes {{ ... on PullRequest {{ ...pr }} }} }}"
+                     issueCount pageInfo {{ hasNextPage endCursor }} nodes {{ ... on PullRequest {{ ...pr }} }} }}"
                 );
             }
             Lookup::Threads { id, after } => {
@@ -270,6 +272,7 @@ struct RawContext {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawSearch {
+    issue_count: u64,
     page_info: PageInfo,
     nodes: Vec<Value>,
 }
@@ -387,6 +390,17 @@ pub struct FetchResult {
     pub prs: Vec<Fetched>,
     /// Targets that named no PR, as `owner/repo#N` or `owner/repo:branch`.
     pub not_found: Vec<String>,
+    /// Searches that matched more PRs than GitHub would list.
+    pub incomplete: Vec<Incomplete>,
+}
+
+/// A search GitHub cut short: it lists at most 1,000 results across all
+/// pages, however many match.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Incomplete {
+    pub query: String,
+    pub matched: u64,
+    pub listed: u64,
 }
 
 /// Fetches every PR the lookups name, following search pages and finishing
@@ -460,18 +474,27 @@ fn read_prs(
                     result.prs.push(read_pr(pr)?);
                 }
             }
-            Lookup::Search { query, .. } => {
+            Lookup::Search { query, listed, .. } => {
                 let search: RawSearch = parse(entry, "search results")?;
+                let mut listed = *listed;
                 for node in search.nodes {
                     // Issues match `... on PullRequest` as an empty object.
                     if node.as_object().is_some_and(|o| !o.is_empty()) {
                         result.prs.push(read_pr(&node)?);
                     }
+                    listed += 1;
                 }
                 if let Some(after) = next_cursor(search.page_info) {
                     more.push(Lookup::Search {
                         query: query.clone(),
                         after: Some(after),
+                        listed,
+                    });
+                } else if search.issue_count > listed {
+                    result.incomplete.push(Incomplete {
+                        query: query.clone(),
+                        matched: search.issue_count,
+                        listed,
                     });
                 }
             }

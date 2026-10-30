@@ -30,6 +30,9 @@ impl Fake {
     }
 }
 
+/// A status for `respond` to return: a 200 whose body is cut short.
+const CUT_SHORT: u16 = 0;
+
 /// Serves `respond(request, index)` for each request, one per connection.
 fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -66,11 +69,16 @@ fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) ->
                 seen.len() - 1
             };
             let (status, text) = respond(&request, index);
+            // `CUT_SHORT` promises a longer body than it sends, then hangs up.
+            let (status, length) = if status == CUT_SHORT {
+                (200, text.len() + 100)
+            } else {
+                (status, text.len())
+            };
             let _ = write!(
                 stream,
                 "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
-                 Content-Length: {}\r\nConnection: close\r\n\r\n{text}",
-                text.len()
+                 Content-Length: {length}\r\nConnection: close\r\n\r\n{text}"
             );
         }
     });
@@ -252,7 +260,14 @@ fn search_results_exit_0_unless_attention_fails_the_run() {
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(
         stdout(&out).lines().last(),
-        Some("2 PRs, 1 needs attention: #3 (conflict)")
+        Some("4 PRs, 2 need attention: #5 (unresolved_threads), #3 (unresolved_threads)")
+    );
+    assert!(
+        stdout(&out).starts_with(
+            "#7 open feat(wait): add jouet wait for files,...  ok  ci 3/10 pending  threads 0  review -\n"
+        ),
+        "{}",
+        stdout(&out)
     );
     assert_eq!(
         fake.requests()[0].body["variables"]["q0"],
@@ -397,6 +412,41 @@ fn a_server_error_is_retried() {
     assert_eq!(fake.requests().len(), 2);
 }
 
+#[test]
+fn a_response_cut_short_is_retried() {
+    let fake = serve(|request, index| {
+        let (status, body) = github(request, index);
+        if index == 0 {
+            (CUT_SHORT, body)
+        } else {
+            (status, body)
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[("JOUET_GITHUB_TOKEN", GOOD)],
+        &[
+            "pr",
+            "status",
+            "--search",
+            "is:open",
+            "--repo",
+            "jdx/jouet",
+            "--settle",
+            "0",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("request to GitHub failed"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(fake.requests().len(), 2);
+}
+
 /// A search whose first PR GitHub has not computed mergeability for yet,
 /// which a re-query by number then settles.
 fn unsettled(request: &Request, _: usize) -> (u16, String) {
@@ -434,13 +484,13 @@ fn settle_requeries_an_unknown_mergeable_state() {
     );
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert!(
-        stderr(&out).contains("to compute mergeability of jdx/jouet#4"),
+        stderr(&out).contains("to compute mergeability of jdx/jouet#7"),
         "{}",
         stderr(&out)
     );
     assert_eq!(json(&out)["prs"][0]["mergeable"], "mergeable");
     let requery = &fake.requests()[1].body["variables"];
-    assert_eq!(requery["n0"], json!(4));
+    assert_eq!(requery["n0"], json!(7));
 
     let fake = serve(unsettled);
     let out = jouet(
