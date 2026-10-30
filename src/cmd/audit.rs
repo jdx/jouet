@@ -66,6 +66,7 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
     let filter = Filter {
         since_ms,
         project: project.clone(),
+        ..Filter::default()
     };
     let home = jouet_audit::home().map(|h| h.to_string_lossy().into_owned());
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
@@ -105,7 +106,7 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
 }
 
 /// `--since`: a duration ago (`7d`, `12h`, `1h30m`), a date, or RFC 3339.
-fn parse_since(s: &str, now: i64) -> Result<i64, String> {
+pub(crate) fn parse_since(s: &str, now: i64) -> Result<i64, String> {
     let bad = || format!("`{s}` is not a time; write it as 7d, 12h, 2026-10-01 or RFC 3339");
     if let Some(n) = s.strip_suffix('d').or_else(|| s.strip_suffix('w')) {
         let days: i64 = n.parse().map_err(|_| bad())?;

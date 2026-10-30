@@ -494,6 +494,7 @@ const FIRST: &[(&str, &[&str])] = &[
             "rule",
             "setup",
             "skill",
+            "stats",
             "wait",
         ],
     ),
@@ -743,6 +744,7 @@ mod tests {
             ("git checkout main", "git checkout <arg>"),
             ("jouet rule test git-stash", "jouet rule test <arg>"),
             ("jouet audit --since 7d", "jouet audit --since <arg>"),
+            ("jouet stats --session s1", "jouet stats --session <arg>"),
             (
                 "curl -H 'Authorization: token ghp_abcdefghijklmnopqrstuvwxyz0123' https://x",
                 "curl -H <arg> <arg>",

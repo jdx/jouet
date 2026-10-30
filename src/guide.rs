@@ -56,6 +56,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("audit", None),
     ("skill", None),
     ("setup", None),
+    ("stats", None),
 ];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when

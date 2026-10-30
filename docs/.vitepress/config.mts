@@ -82,6 +82,7 @@ export default defineConfig({
           { text: "jouet pr land", link: "/commands/pr-land" },
           { text: "jouet run", link: "/commands/run" },
           { text: "jouet audit", link: "/commands/audit" },
+          { text: "jouet stats", link: "/commands/stats" },
         ],
       },
       {
@@ -93,6 +94,7 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: "audit", link: "/cli/audit" },
+              { text: "stats", link: "/cli/stats" },
               {
                 text: "edit",
                 link: "/cli/edit/",

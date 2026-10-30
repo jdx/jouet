@@ -16,6 +16,9 @@
 //!   (one per thread, or one per run of an incremental audit), and produces a
 //!   [`Report`].
 //!
+//! [`stats`] builds on these to report what jouet saved: counted from the
+//! hook ledger, and estimated against the history before `jouet setup`.
+//!
 //! Nothing here touches the network, and a report never holds file contents
 //! or whole commands, only shapes, unless examples are asked for, and those
 //! are redacted.
@@ -35,6 +38,7 @@ mod read;
 mod record;
 mod redact;
 mod shape;
+pub mod stats;
 mod time;
 
 pub use analyze::{
