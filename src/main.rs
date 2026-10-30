@@ -10,6 +10,7 @@ mod github;
 mod paths;
 mod pr;
 mod time;
+mod tls;
 mod wait;
 
 use display::Mode;
