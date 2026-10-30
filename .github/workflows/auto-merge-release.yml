@@ -22,6 +22,7 @@ jobs:
   merge:
     if: github.repository == 'jdx/jouet'
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
     timeout-minutes: 10
