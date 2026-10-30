@@ -8,7 +8,7 @@ use jouet_rules::{Call, Engine, Origin, Rule, Source, State, Trust};
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn run(args: &RuleArgs, out: &Output) -> Exit {
     let cwd = match std::env::current_dir() {
@@ -297,15 +297,21 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, String), (Exit, String)
             .iter()
             .find(|r| r.name == rule && r.state == State::Untrusted)
             .map(|r| r.origin.clone());
-        let Some(Origin::Repo(path)) = untrusted else {
+        // Keep it a repository rule, so its scope and default mode are the
+        // ones it will have once trusted.
+        let Some(origin @ Origin::Repo(_)) = untrusted else {
             return Ok((loaded.engine, rule.to_string()));
         };
-        return single(&path);
+        return single(origin);
     }
-    single(file.as_deref().unwrap_or(as_path))
+    single(Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())))
 }
 
-fn single(path: &Path) -> Result<(Engine, String), (Exit, String)> {
+/// An engine holding just the rule at `origin`'s path, as that origin.
+fn single(origin: Origin) -> Result<(Engine, String), (Exit, String)> {
+    let (Origin::User(path) | Origin::Repo(path)) = &origin else {
+        return Err((Exit::Failed, "a built-in rule has no file".into()));
+    };
     let code = std::fs::read_to_string(path).map_err(|e| {
         let exit = if e.kind() == std::io::ErrorKind::NotFound {
             Exit::NotFound
@@ -320,7 +326,7 @@ fn single(path: &Path) -> Result<(Engine, String), (Exit, String)> {
         .unwrap_or_default();
     let source = Source {
         name: name.clone(),
-        origin: Origin::User(PathBuf::from(path)),
+        origin,
         code,
         trusted: true,
     };
