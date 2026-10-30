@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{CUT_SHORT, Fake, Request, json, query, serve, stderr, stdout};
+use common::{CUT_SHORT, Fake, RATE_LIMITED, Request, json, query, serve, stderr, stdout};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -30,6 +30,8 @@ struct Script {
     fail_at: Option<usize>,
     /// The index of a request whose response is cut off mid-body.
     cut_at: Option<usize>,
+    /// Answer the activity log with an exhausted rate limit.
+    activity_rate_limited: bool,
 }
 
 fn github(script: Script) -> Fake {
@@ -48,6 +50,12 @@ fn respond(script: &Script, request: &Request, index: usize) -> (u16, String) {
     }
     if request.method == "GET" {
         if request.path.contains("/activity?") {
+            if script.activity_rate_limited {
+                return (
+                    RATE_LIMITED,
+                    r#"{"message":"API rate limit exceeded"}"#.into(),
+                );
+            }
             return (200, ACTIVITY.into());
         }
         if request.path.contains("/compare/") {
@@ -69,6 +77,16 @@ fn respond(script: &Script, request: &Request, index: usize) -> (u16, String) {
         json!({ "data": { "unresolveReviewThread": { "thread": { "isResolved": false } } } })
     } else if q.contains("resolveReviewThread") {
         json!({ "data": { "resolveReviewThread": { "thread": { "isResolved": true } } } })
+    } else if q.contains("object(expression:") {
+        // Every file read for --context is 600 numbered lines.
+        let text: String = (1..=600).map(|i| format!("line {i}\n")).collect();
+        let files: serde_json::Map<String, Value> = (0..)
+            .map_while(|i| {
+                vars.get(format!("e{i}"))
+                    .map(|_| (format!("f{i}"), json!({ "text": text })))
+            })
+            .collect();
+        json!({ "data": { "repository": files } })
     } else if q.contains("commits(first: 100") {
         serde_json::from_str(COMMITS).unwrap()
     } else if vars["n"] != json!(14922) {
@@ -730,4 +748,45 @@ fn a_reply_cut_off_after_sending_is_not_sent_again() {
     assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
     assert!(json(&out)["results"][0]["failed"].is_string());
     assert_eq!(writes(&fake).len(), 1);
+}
+
+#[test]
+fn a_failed_request_keeps_the_token_for_the_next_one() {
+    // The push log is rate limited; the --context query after it must reuse
+    // the token rather than look for another, which on a runner without `gh`
+    // finds none.
+    let fake = github(Script {
+        activity_rate_limited: true,
+        ..Script::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty");
+    let args = [
+        "pr",
+        "threads",
+        "jdx/mise#14922",
+        "--since",
+        "@c42414f9",
+        "--context",
+        "1",
+        "--json",
+    ];
+    let out = jouet_with(
+        &fake,
+        dir.path(),
+        &args,
+        None,
+        &[("PATH", empty.to_str().unwrap())],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("could not read the push log"), "{err}");
+    assert!(!err.contains("token"), "{err}");
+    let doc = json(&out);
+    let t = &doc["threads"][0];
+    assert_eq!(t["id"].to_string(), OPEN_CODE);
+    assert_eq!(
+        t["context"],
+        json!({ "start": 514, "lines": ["line 514", "line 515", "line 516"] })
+    );
 }

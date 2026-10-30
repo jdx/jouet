@@ -30,6 +30,9 @@ impl Fake {
 
 /// A status for `respond` to return: a 200 whose body is cut short.
 pub const CUT_SHORT: u16 = 0;
+/// A status for `respond` to return: a 403 saying the primary rate limit is
+/// used up for the next hour.
+pub const RATE_LIMITED: u16 = 1;
 
 /// Serves `respond(request, index)` for each request, one per connection.
 pub fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
@@ -75,14 +78,23 @@ pub fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static
             };
             let (status, text) = respond(&request, index);
             // `CUT_SHORT` promises a longer body than it sends, then hangs up.
-            let (status, length) = if status == CUT_SHORT {
-                (200, text.len() + 100)
-            } else {
-                (status, text.len())
+            let (status, length, extra) = match status {
+                CUT_SHORT => (200, text.len() + 100, String::new()),
+                RATE_LIMITED => {
+                    let reset = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                        + 3600;
+                    let headers =
+                        format!("X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: {reset}\r\n");
+                    (403, text.len(), headers)
+                }
+                _ => (status, text.len(), String::new()),
             };
             let _ = write!(
                 stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}\
                  Content-Length: {length}\r\nConnection: close\r\n\r\n{text}"
             );
         }
