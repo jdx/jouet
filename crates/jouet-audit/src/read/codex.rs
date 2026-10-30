@@ -211,6 +211,10 @@ impl State {
                 call.duration_ms = wall.map(|w| w / shells);
                 call.failed =
                     script_failed && last_shell == Some(i) || exit.is_some_and(|c| c != 0);
+                // One exit code in the output belongs to the cell's only command.
+                if shells == 1 {
+                    call.exit_code = exit.and_then(|c| i32::try_from(c).ok());
+                }
             } else {
                 call.duration_ms = wall.map(|w| w / n);
             }
@@ -235,6 +239,7 @@ impl State {
         let call = &mut t.calls[i];
         if let Some(code) = item.exit_code.0 {
             call.failed = code != 0.0;
+            call.exit_code = Some(code as i32);
         }
         if let Some(d) = item.duration.0 {
             call.duration_ms =

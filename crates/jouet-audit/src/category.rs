@@ -131,8 +131,9 @@ static EDIT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static GITHUB: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bgh\s|api\.github\.com").expect("the GitHub pattern compiles"));
-static SLEEP: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bsleep\s+\d").expect("the sleep pattern compiles"));
+static SLEEP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bsleep\s+(?:\d|<n>|<arg>|<v>)").expect("the sleep pattern compiles")
+});
 
 /// Programs whose run is a build, a test or a linter.
 const BUILD: &[&str] = &[
@@ -370,6 +371,20 @@ mod tests {
             cat("GH_TOKEN= gh pr view <n> --json <v>"),
             Category::PrStatus
         );
+        // The hook ledger's shapes write values as `<arg>`.
+        assert_eq!(
+            cat("sleep <arg> && gh pr checks <arg>"),
+            Category::CiPolling
+        );
+        assert_eq!(
+            cat("sleep <arg> && tail <arg> <arg>"),
+            Category::ProcessPolling
+        );
+        assert_eq!(
+            cat("cargo test --workspace | tail <arg>"),
+            Category::BuildTestLint
+        );
+        assert_eq!(cat("git stash push"), Category::Git);
     }
 
     #[test]

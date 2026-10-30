@@ -48,6 +48,8 @@ pub struct Call {
     pub output_bytes: u64,
     /// It failed: an error result or a non-zero exit.
     pub failed: bool,
+    /// Its exit code, when the source recorded one.
+    pub exit_code: Option<i32>,
     /// Its output reported a GitHub rate limit.
     pub rate_limited: bool,
 }
@@ -61,6 +63,7 @@ impl Call {
             duration_ms: None,
             output_bytes: 0,
             failed: false,
+            exit_code: None,
             rate_limited: false,
         }
     }

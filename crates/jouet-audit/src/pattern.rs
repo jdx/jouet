@@ -120,7 +120,7 @@ impl Patterns {
 }
 
 static SLEEP: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[\s;&|(])sleep\s+(?:\d|<n>)").expect("the sleep pattern compiles")
+    Regex::new(r"(?:^|[\s;&|(])sleep\s+(?:\d|<n>|<arg>|<v>)").expect("the sleep pattern compiles")
 });
 static TEST_HEAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
@@ -208,6 +208,11 @@ mod tests {
         assert!(has("sleep 30; gh pr checks 1", Pattern::SleepPoll));
         assert!(has("while true; do sleep 5; done", Pattern::SleepPoll));
         assert!(has("sleep <n> && tail -<n> <path>", Pattern::SleepPoll));
+        assert!(has("sleep <arg> && gh pr checks <arg>", Pattern::SleepPoll));
+        assert!(has(
+            "cargo test --workspace | tail <arg>",
+            Pattern::HeadOnTestOutput
+        ));
         assert!(!has("echo sleepy 5", Pattern::SleepPoll));
     }
 

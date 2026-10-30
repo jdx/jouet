@@ -39,6 +39,7 @@ pub fn transcripts(records: &[CommandRecord]) -> Vec<Transcript> {
         call.duration_ms = record.duration_ms;
         call.output_bytes = record.output_bytes;
         call.failed = record.exit_code.is_some_and(|c| c != 0);
+        call.exit_code = record.exit_code;
         let n = t.calls.len();
         t.calls.push(call);
         t.requests.push(Request {
@@ -94,6 +95,44 @@ mod tests {
         assert_eq!(ts[0].requests.len(), 2);
         assert_eq!(ts[0].requests[1].calls, 1..2);
         assert!(ts[0].calls[1].failed);
+    }
+
+    #[test]
+    fn shapes_say_whether_they_ever_succeeded_and_how_they_last_ended() {
+        let at = |mut r: CommandRecord, ms| {
+            r.at = Some(ms);
+            r
+        };
+        let found = findings(
+            &[
+                at(record("a", "cargo test -p x | tail -5", 101), 1),
+                at(record("a", "cargo test -p x | tail -5", 101), 2),
+                at(record("b", "cargo test -p y | tail -5", 0), 3),
+                record("c", "never-works --flag", 2),
+                record("c", "never-works --flag", 2),
+            ],
+            5,
+        );
+        let cut = found
+            .iter()
+            .find(|f| f.pattern == Pattern::HeadOnTestOutput)
+            .expect("cut test output");
+        let s = &cut.top_shapes[0];
+        assert_eq!((s.calls, s.failures, s.successes), (3, 2, 1));
+        assert_eq!((s.last_failed, s.last_exit_code), (false, Some(0)));
+        let retry = found
+            .iter()
+            .find(|f| f.pattern == Pattern::RepeatedFailure)
+            .expect("a retry");
+        let shapes: Vec<_> = retry
+            .top_shapes
+            .iter()
+            .map(|s| (s.shape.as_str(), s.successes, s.last_exit_code))
+            .collect();
+        assert!(
+            shapes.contains(&("never-works --flag", 0, Some(2))),
+            "{shapes:?}"
+        );
     }
 
     #[test]

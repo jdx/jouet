@@ -64,7 +64,51 @@ struct ShapeAcc {
     calls: u64,
     tokens: f64,
     duration_ms: u64,
+    failures: u64,
+    /// The latest call: when, and how it ended (failed, exit code).
+    last: Option<Last>,
     example: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Last {
+    at: Option<i64>,
+    failed: bool,
+    exit_code: Option<i32>,
+}
+
+impl ShapeAcc {
+    fn count(&mut self, call: &crate::event::Call, tokens: f64, duration: u64) {
+        self.calls += 1;
+        self.tokens += tokens;
+        self.duration_ms += duration;
+        self.failures += u64::from(call.failed);
+        let last = Last {
+            at: call.at,
+            failed: call.failed,
+            exit_code: call.exit_code,
+        };
+        // Calls arrive in order, so a call without a time is the latest.
+        if self
+            .last
+            .is_none_or(|l| last.at.is_none() || last.at >= l.at)
+        {
+            self.last = Some(last);
+        }
+    }
+
+    fn merge(&mut self, theirs: Self) {
+        self.calls += theirs.calls;
+        self.tokens += theirs.tokens;
+        self.duration_ms += theirs.duration_ms;
+        self.failures += theirs.failures;
+        if let Some(t) = theirs.last
+            && self.last.is_none_or(|o| t.at > o.at)
+        {
+            self.last = Some(t);
+        }
+        merge_example(&mut self.example, theirs.example);
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -157,9 +201,7 @@ impl Analyzer {
                 let call_shape = call.command.as_deref().map(shape);
                 if let (Some(command), Some(call_shape)) = (&call.command, &call_shape) {
                     let s = c.shapes.entry(call_shape.clone()).or_default();
-                    s.calls += 1;
-                    s.tokens += tokens;
-                    s.duration_ms += duration;
+                    s.count(call, tokens, duration);
                     if keep_examples {
                         keep_shortest(&mut s.example, command, home.as_deref());
                     }
@@ -187,9 +229,7 @@ impl Analyzer {
                     p.duration_ms += duration;
                     if let Some(call_shape) = &call_shape {
                         let s = p.shapes.entry(call_shape.clone()).or_default();
-                        s.calls += 1;
-                        s.tokens += tokens;
-                        s.duration_ms += duration;
+                        s.count(call, tokens, duration);
                     }
                     if !p.sessions.contains(&transcript.session) {
                         p.sessions.insert(transcript.session.clone());
@@ -258,11 +298,7 @@ impl Analyzer {
 
 fn merge_shapes(ours: &mut HashMap<String, ShapeAcc>, theirs: HashMap<String, ShapeAcc>) {
     for (shape, ts) in theirs {
-        let os = ours.entry(shape).or_default();
-        os.calls += ts.calls;
-        os.tokens += ts.tokens;
-        os.duration_ms += ts.duration_ms;
-        merge_example(&mut os.example, ts.example);
+        ours.entry(shape).or_default().merge(ts);
     }
 }
 
@@ -409,6 +445,10 @@ fn top(shapes: &HashMap<String, ShapeAcc>, n: usize) -> Vec<ShapeCount> {
             calls: s.calls,
             input_tokens: s.tokens.round() as u64,
             duration_ms: s.duration_ms,
+            failures: s.failures,
+            successes: s.calls - s.failures,
+            last_failed: s.last.is_some_and(|l| l.failed),
+            last_exit_code: s.last.and_then(|l| l.exit_code),
             example: s.example.clone(),
         })
         .collect()
@@ -564,6 +604,19 @@ pub struct ShapeCount {
     pub input_tokens: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub duration_ms: u64,
+    /// Calls that failed: an error result or a non-zero exit.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub failures: u64,
+    /// Calls that did not fail.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub successes: u64,
+    /// The latest call failed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub last_failed: bool,
+    /// The latest call's exit code, when the source recorded one. Claude Code
+    /// records only whether a call failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
 }
