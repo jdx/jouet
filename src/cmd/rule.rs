@@ -4,7 +4,9 @@ use super::Output;
 use crate::exit::Exit;
 use crate::rules;
 use crate::wind::{self, Paths, Status, replay, rulefile};
-use crate::{RuleArgs, RuleCmd, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs};
+use crate::{
+    RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
+};
 use jouet_rules::{Call, Engine, Origin, Rule, Source, State, Trust};
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -29,6 +31,7 @@ pub fn run(args: &RuleArgs, out: &Output) -> Exit {
         RuleCmd::New(new_args) => new(new_args, out),
         RuleCmd::Promote(promote_args) => promote(promote_args, out),
         RuleCmd::Log(log_args) => log(log_args, out),
+        RuleCmd::Gap(gap_args) => gap(gap_args, out),
     }
 }
 
@@ -213,7 +216,9 @@ fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
         },
         ..call
     };
-    match engine.check(rule, &call) {
+    let checked = engine.check(rule, &call);
+    crate::share::record_gaps(&engine);
+    match checked {
         Ok((decision, records)) => {
             let tested = Tested {
                 rule: rule.name.clone(),
@@ -247,7 +252,9 @@ fn tested_text(t: &Tested) -> String {
 }
 
 fn examples(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
-    let examples = match engine.examples(rule) {
+    let examples = engine.examples(rule);
+    crate::share::record_gaps(engine);
+    let examples = match examples {
         Ok(examples) => examples,
         Err(e) => return out.error(Exit::Failed, &format!("rule {}: {e}", rule.name)),
     };
@@ -315,6 +322,7 @@ fn replay_ledger(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
         rule: rule.name.clone(),
         report: replay::replay(engine, rule, &entries),
     };
+    crate::share::record_gaps(engine);
     out.result(&report, || replayed_text(&report));
     if report.report.fired_total == 0 {
         Exit::Failed
@@ -541,6 +549,23 @@ fn log(args: &RuleLogArgs, out: &Output) -> Exit {
             );
         }
         text
+    });
+    Exit::Ok
+}
+
+fn gap(args: &RuleGapArgs, out: &Output) -> Exit {
+    if args.text.trim().is_empty() {
+        return out.error(Exit::Usage, "say what the rule could not express");
+    }
+    let Some(path) = crate::share::gaps_path() else {
+        return out.error(Exit::Failed, "there is no home directory to record gaps in");
+    };
+    if let Err(e) = crate::share::record_note(&path, &args.text, args.rule.as_deref(), wind::now())
+    {
+        return out.error(Exit::Failed, &format!("recording the gap: {e}"));
+    }
+    out.result(&serde_json::json!({ "recorded": args.text.trim() }), || {
+        "recorded; `jouet share --idea` turns recorded gaps into a proposal for jouet's maintainers\n".into()
     });
     Exit::Ok
 }

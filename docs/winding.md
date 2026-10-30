@@ -52,3 +52,14 @@ promote_after = 20    # JOUET_WIND_PROMOTE_AFTER: firings, with no overrides, be
 ```
 
 `JOUET_WIND=0` turns winding off. The ledger itself has its own switch, `[hooks] ledger = false`.
+
+## Sharing rules and ideas
+
+Contributing is opt-in, and a person approves every post. A rule that has proven itself here may help everyone, and a rule jouet's API could not express shows what jouet should build next.
+
+- **`jouet share RULE`** turns a rule of yours into a proposal. It refuses until the rule passes `jouet rule test`, fires on the ledger under `--replay`, has denied for 7 days since `jouet rule promote`, and has fired at least 10 times with at most 10% overridden. It says which of these is missing.
+- **`jouet share --idea [KEY]`** turns recorded gaps into an idea: "I kept trying to catch X; there is no primitive for Y". jouet records a gap when a rule reads a `jouet` primitive that does not exist, and `jouet rule gap "TEXT"` records one in your words.
+- **What it posts.** Without `--yes`, nothing: it prints the exact title and text, and a diff of what anonymizing changed. Paths, repository names, hostnames, emails, your login and this machine's name are replaced; `--redact WORD` replaces more, such as an internal tool's name. It refuses text that still looks like a secret.
+- **Where.** With `--yes`, it posts a Discussion in the "Rules & ideas" category of [jdx/jouet](https://github.com/jdx/jouet/discussions) with your GitHub login, ending with an AI disclosure line (your `reply_footer`, if you set one). It first looks for a proposal with the same title, and posts at most three a week. If the category does not exist yet, it says so and posts nothing.
+
+`jouet skill --contribute` prints an optional skill that tells an agent when a contribution is worth making, and that it posts only after the user approves the exact text.

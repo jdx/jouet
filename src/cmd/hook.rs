@@ -241,6 +241,7 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
     for error in &outcome.errors {
         eprintln!("jouet: {error}");
     }
+    crate::share::record_gaps(engine);
     outcome
 }
 

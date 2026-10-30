@@ -126,6 +126,7 @@ export default defineConfig({
                   { text: "new", link: "/cli/rule/new" },
                   { text: "promote", link: "/cli/rule/promote" },
                   { text: "log", link: "/cli/rule/log" },
+                  { text: "gap", link: "/cli/rule/gap" },
                 ],
               },
               {
@@ -138,6 +139,7 @@ export default defineConfig({
                 ],
               },
               { text: "unwind", link: "/cli/unwind" },
+              { text: "share", link: "/cli/share" },
               { text: "agent-help", link: "/cli/agent-help" },
               { text: "skill", link: "/cli/skill" },
               { text: "setup", link: "/cli/setup" },

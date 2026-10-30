@@ -45,6 +45,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
+    ("share", None),
     ("agent-help", None),
     ("skill", None),
     ("setup", None),

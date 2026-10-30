@@ -6,6 +6,7 @@ pub mod hook;
 pub mod pr;
 pub mod rule;
 pub mod setup;
+pub mod share;
 pub mod skill;
 pub mod threads;
 pub mod wait;

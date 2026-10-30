@@ -541,3 +541,33 @@ fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
             .any(|e| !e.ok && e.expected == "deny" && e.actual == "warn")
     );
 }
+
+#[test]
+fn a_missing_primitive_is_recorded_as_a_gap() {
+    let engine = engine(vec![user(
+        "wants-ci",
+        "return { check = function(c) if jouet.ci_state and jouet.ci_state() == 'red' then return jouet.deny('red') end return jouet.pr_status(1) end }",
+    )]);
+    let outcome = engine.evaluate(&bash("git push"));
+    // The call to a missing function fails the rule, which fails open.
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.errors.len(), 1);
+    let gaps: Vec<String> = engine
+        .take_gaps()
+        .into_iter()
+        .map(|g| format!("{}:{}", g.rule, g.primitive))
+        .collect();
+    assert_eq!(gaps, ["wants-ci:ci_state", "wants-ci:pr_status"]);
+    assert!(engine.take_gaps().is_empty());
+    // Existing primitives are not gaps.
+    let fine = engine_with(
+        vec![user(
+            "fine",
+            "return { check = function(c) local _ = jouet.git; return nil end }",
+        )],
+        Budget::default(),
+        Vec::new(),
+    );
+    fine.evaluate(&bash("ls"));
+    assert!(fine.take_gaps().is_empty());
+}

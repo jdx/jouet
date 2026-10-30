@@ -298,6 +298,9 @@ struct Loader<'a> {
 /// State the VM's callbacks share with the engine.
 struct Shared {
     records: RefCell<Vec<(Kind, String, i32)>>,
+    /// The rule running now, and the missing `jouet` fields rules have read.
+    current: RefCell<String>,
+    gaps: RefCell<Vec<Gap>>,
     deadline: Cell<Option<Instant>>,
     interrupts: Cell<u32>,
     budget: Budget,
@@ -405,6 +408,8 @@ impl Engine {
         lua.set_memory_limit(budget.memory)?;
         let shared = Rc::new(Shared {
             records: RefCell::new(Vec::new()),
+            current: RefCell::new(String::new()),
+            gaps: RefCell::new(Vec::new()),
             deadline: Cell::new(None),
             interrupts: Cell::new(0),
             budget,
@@ -526,6 +531,7 @@ impl Engine {
         code: &str,
         cache_dir: Option<&Path>,
     ) -> Result<Table, String> {
+        self.shared.current.replace(name.to_string());
         let (bytecode, cached) = cache::compile(code, cache_dir)?;
         let value = match self.run_chunk(name, &bytecode) {
             // A cached chunk from another Luau version, or a damaged file:
@@ -568,6 +574,15 @@ impl Engine {
         let result = f();
         self.shared.deadline.set(None);
         result.map_err(|e| first_line(&e.to_string()))
+    }
+
+    /// The primitives rules reached for that the `jouet` module does not
+    /// have, since the last call: what the API could not express.
+    pub fn take_gaps(&self) -> Vec<Gap> {
+        let mut gaps = self.shared.gaps.take();
+        gaps.sort();
+        gaps.dedup();
+        gaps
     }
 
     pub fn rules(&self) -> &[Rule] {
@@ -625,6 +640,7 @@ impl Engine {
         call: &Call,
         enforce: bool,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
+        self.shared.current.replace(rule.name.clone());
         let Some(table) = &rule.table else {
             return Err(match &rule.state {
                 State::Broken(e) => e.clone(),
@@ -752,6 +768,14 @@ impl Engine {
         }
         Ok(out)
     }
+}
+
+/// A rule reading a field of the `jouet` module that does not exist, such
+/// as `jouet.pr_status`: a primitive it wanted.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct Gap {
+    pub rule: String,
+    pub primitive: String,
 }
 
 /// One example's result.
@@ -893,6 +917,26 @@ fn install_module(
     lua.load(PRELUDE)
         .set_name("=jouet")
         .call::<()>(jouet.clone())?;
+    // Reading a field the module lacks still gives nil, and records the
+    // primitive the rule wanted.
+    let meta = lua.create_table()?;
+    let gaps = shared.clone();
+    meta.set(
+        "__index",
+        lua.create_function(move |_, (_, key): (Value, Value)| {
+            if let Value::String(key) = key {
+                let mut list = gaps.gaps.borrow_mut();
+                if list.len() < 64 {
+                    list.push(Gap {
+                        rule: gaps.current.borrow().clone(),
+                        primitive: key.to_string_lossy(),
+                    });
+                }
+            }
+            Ok(Value::Nil)
+        })?,
+    )?;
+    jouet.set_metatable(Some(meta))?;
     let globals = lua.globals();
     globals.set("jouet", jouet)?;
     // Rules read the outside world only through `jouet`.

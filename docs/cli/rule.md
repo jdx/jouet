@@ -12,6 +12,7 @@ Rules are Luau scripts: built in, in ~/.config/jouet/rules, and in a repository'
 
 ## Subcommands
 
+- [`jouet rule gap [--rule <NAME>] <TEXT>`](/cli/rule/gap.md)
 - [`jouet rule list`](/cli/rule/list.md)
 - [`jouet rule log [NAME]`](/cli/rule/log.md)
 - [`jouet rule new [FLAGS] <NAME>`](/cli/rule/new.md)
