@@ -1,22 +1,24 @@
 [package]
 name = "jouet-rules"
 version = "0.0.1"
-description = "The Luau rule engine behind jouet's agent hooks"
-keywords = ["agents", "luau", "hooks"]
+description = "The Luau rule engine behind jouet's agent hooks, and its recipes"
+keywords = ["agents", "luau", "hooks", "recipes"]
 categories = ["development-tools"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-# The source, the built-in rules, the type definitions they are embedded
-# from and the licence, and nothing a checkout happens to hold.
-include = ["/src/**", "/rules/**", "/jouet.d.luau", "/LICENSE"]
+# The source, the built-in rules and recipes, the type definitions they are
+# embedded from and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/rules/**", "/recipes/**", "/jouet.d.luau", "/LICENSE"]
 
 [lints]
 workspace = true
 
 [dependencies]
+jouet-github.workspace = true
+jouet-output.workspace = true
 mlua.workspace = true
 serde.workspace = true
 serde_json.workspace = true

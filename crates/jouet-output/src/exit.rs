@@ -54,6 +54,24 @@ impl Exit {
         }
     }
 
+    /// The exit with this code, for a code another jouet command (or a
+    /// recipe) exited with.
+    pub fn from_code(code: i32) -> Option<Self> {
+        [
+            Self::Ok,
+            Self::Failed,
+            Self::Usage,
+            Self::NotFound,
+            Self::Precondition,
+            Self::Remote,
+            Self::Timeout,
+            Self::Act,
+            Self::Waiting,
+        ]
+        .into_iter()
+        .find(|e| i32::from(e.code()) == code)
+    }
+
     /// The name used for `error.code` in JSON output.
     pub const fn name(self) -> &'static str {
         match self {
