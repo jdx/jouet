@@ -12,6 +12,16 @@ use std::time::Duration;
 /// returns its stdout, or an error once `timeout` passes. Never takes an
 /// optional lock, so a probe cannot get in the way of the agent's own git.
 pub(crate) fn git(dir: Option<&Path>, args: &[&str], timeout: Duration) -> Result<String, String> {
+    git_with_input(dir, args, None, timeout)
+}
+
+/// [`git`], with `input` on its stdin.
+pub(crate) fn git_with_input(
+    dir: Option<&Path>,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+) -> Result<String, String> {
     let mut command = Command::new("git");
     if let Some(dir) = dir {
         command.arg("-C").arg(dir);
@@ -19,11 +29,22 @@ pub(crate) fn git(dir: Option<&Path>, args: &[&str], timeout: Duration) -> Resul
     let mut child = command
         .arg("--no-optional-locks")
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("running git: {e}"))?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        // On a thread of its own, so a full stdout pipe cannot deadlock it.
+        std::thread::spawn(move || {
+            use std::io::Write as _;
+            let _ = stdin.write_all(&input);
+        });
+    }
     let mut stdout = child.stdout.take().ok_or("git has no stdout")?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {

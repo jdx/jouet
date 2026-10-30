@@ -22,6 +22,9 @@ pub struct Options {
     /// Lines of each failure log to show; `None` fetches no logs.
     pub log_lines: Option<usize>,
     pub appear_timeout: Duration,
+    /// How long a reported conflict must persist to be believed;
+    /// [`crate::CONFLICT_CONFIRM`] except in tests.
+    pub confirm_conflict: Duration,
 }
 
 pub struct CiWait {
@@ -88,6 +91,7 @@ pub fn resolve(client: &mut Client, target: Target) -> Result<(Repo, u64), Halt>
 impl CiWait {
     pub fn new(repo: Repo, number: u64, pinned: Option<String>, options: Options) -> Self {
         let state_path = watch::state_path(&repo, number, pinned.as_deref());
+        let conflict = watch::ConflictCheck::new(options.confirm_conflict);
         Self {
             repo,
             number,
@@ -101,7 +105,7 @@ impl CiWait {
             sha: None,
             sha_since: Instant::now(),
             last: Snapshot::default(),
-            conflict: watch::ConflictCheck::default(),
+            conflict,
         }
     }
 

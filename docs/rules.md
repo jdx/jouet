@@ -21,7 +21,8 @@ git-add-all     enabled  deny    builtin  builtin  2026-10-30  `git add -A` and 
 git-stash       enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
 no-verify       enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
 force-push      enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
-checks          enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
+push-untested   enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
+checks          enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 ```
 
 The columns are: name, state, mode, scope, author, created, and why.
@@ -166,6 +167,7 @@ fires = [
 | `exit_code` | For a post-tool-use rule; `0` if omitted. |
 | `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
 | `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
+| `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
 
 Every rule needs at least one example of each kind:
 
@@ -176,7 +178,7 @@ Every rule needs at least one example of each kind:
 
 ### Testing a rule
 
-`jouet rule test` runs a rule's examples. It fails if one does not do what it expects, showing what was expected and what the rule did, or if the rule lacks either kind. Say you add `rm -ri build` as a near miss, since `-i` asks before each file:
+`jouet rule test` runs a rule's examples. It fails if one does not do what it expects, showing what was expected and what the rule did, or if the rule lacks either kind. Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason. Say you add `rm -ri build` as a near miss, since `-i` asks before each file:
 
 ```output
 $ jouet rule test ./no-rm-rf.toml
@@ -209,9 +211,10 @@ ok    git-add-all     14 examples passed
 ok    git-stash       25 examples passed
 ok    no-verify       14 examples passed
 ok    force-push      12 examples passed
-ok    checks          21 examples passed
+ok    push-untested   13 examples passed
+ok    checks          41 examples passed
 FAIL  no-rm-rf        it has no `quiet` examples: near misses it must leave alone
-8 of 9 rules passed their examples
+9 of 10 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -238,7 +241,7 @@ stays quiet on (near misses):
 
 ## Scripts
 
-Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers or reading a task name, it names a Luau script beside its file. The built-in `checks` rule is one: it reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them.
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Two built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree.
 
 ```toml
 [[rule]]
@@ -282,7 +285,7 @@ A matcher in front of a script is worth having: a hook only starts a Luau VM whe
 
 `jouet rule types` prints the whole API as Luau type definitions.
 
-A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command)` records a run with that status, and the built-in `checks` rule uses it so jouet can refuse to let an agent finish while its last test, lint or build run failed.
+A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Type checking
 
@@ -305,8 +308,10 @@ A script can also ask about jouet's state. The probes only read, and each return
 |---|---|
 | `jouet.pr.status(pr?)` | What [`jouet pr status`](/commands/pr-status) reports for the PR, or for this branch's PR |
 | `jouet.pr.next(pr?)` | What [`jouet pr next`](/commands/pr-next) says the PR needs next |
-| `jouet.ci.last_run(kind?)` | The newest `test`, `lint` or `build` run the hooks recorded in their ledger: its `kind`, `ok`, `exit_code`, command `shape` and time. `nil` when there is no ledger yet |
+| `jouet.ci.last_run(kind?, scope?)` | The newest `test`, `lint` or `build` run the hooks recorded in their ledger, of any scope or only `"full"` or `"partial"` ones: its `kind`, `ok`, `scope`, the `tree` it ran against, `exit_code`, command `shape` and time. `nil` when there is no ledger yet |
 | `jouet.git.state()` | The branch, its upstream, `ahead` and `behind`, and whether the work tree is `dirty`, from plain `git` |
+| `jouet.git.tree()` | A hash of the content of every tracked file in the work tree, staged or not: the `tree` a recorded run carries. A commit with the same content hashes the same |
+| `jouet.cargo.workspace(dir?)` | The Cargo workspace around a directory: its `root`, the `package` a plain cargo command there builds, every member's name in `members`, and whether it sets `default_members` |
 | `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |
 | `jouet.env(name)` | An environment variable on a short allowlist, such as `CI` or `JOUET_*`. A name with `TOKEN`, `SECRET`, `PASSWORD` or `KEY` in it is never on it. |
 

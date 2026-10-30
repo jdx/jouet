@@ -97,16 +97,19 @@ dir = "docs"
 run = "aube install && exec aube run docs:build"
 
 [tasks."docs:check"]
-description = "Check that the generated CLI reference is current"
+description = "Check that the generated CLI reference and man page are current"
 depends = ["render"]
-run = "git diff --exit-code -- docs/cli && test -z \"$(git status --porcelain --untracked-files=all -- docs/cli)\""
+run = "git diff --exit-code -- docs/cli man && test -z \"$(git status --porcelain --untracked-files=all -- docs/cli man)\""
 
 [tasks.render]
-description = "Generate the CLI reference in docs/cli from the usage spec"
+description = "Generate the CLI reference in docs/cli and the man page in man/ from the usage spec"
 depends = ["build"]
 run = [
-    "rm -rf docs/cli",
+    "rm -rf docs/cli man",
     # The version is left out of the spec so a release, which bumps it, does not
-    # make docs/cli stale; the site's nav reads it from Cargo.toml instead.
+    # make docs/cli or the man page stale; the site's nav reads it from
+    # Cargo.toml instead.
     "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate markdown --file - --multi --replace-pre-with-code-fences --url-prefix /cli --out-dir docs/cli",
+    "mkdir -p man/man1",
+    "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate manpage --file - --out-file man/man1/jouet.1",
 ]

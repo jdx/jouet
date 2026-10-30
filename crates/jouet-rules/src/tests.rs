@@ -127,6 +127,8 @@ fn post_tool_use_rules_record_checks() {
             kind: Kind::Test,
             command: "cargo test -p jouet".into(),
             exit_code: 101,
+            full: false,
+            selector: Some("-p jouet".into()),
         }]
     );
 }
@@ -537,6 +539,7 @@ return {
                 action: Some(Action::Deny),
                 kind: None,
             },
+            scope: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
@@ -1123,5 +1126,89 @@ fn luau_rule_files_are_removed_on_time() {
         version(env!("CARGO_PKG_VERSION")) < version(LUAU_RULES_REMOVED_IN),
         "jouet {} has reached {LUAU_RULES_REMOVED_IN}: remove Luau rule files (Format::Luau, header.rs, examples::read)",
         env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
+fn a_plain_cargo_run_is_full_only_when_it_covers_every_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    let write = |path: &str, text: &str| {
+        let path = tmp.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write("solo/Cargo.toml", "[package]\nname = \"solo\"\n");
+    write(
+        "ws/Cargo.toml",
+        "[package]\nname = \"app\"\n[workspace]\nmembers = [\"crates/*\"]\n",
+    );
+    write("ws/crates/lib/Cargo.toml", "[package]\nname = \"lib\"\n");
+    write("virt/Cargo.toml", "[workspace]\nmembers = [\"a\", \"b\"]\n");
+    write("virt/a/Cargo.toml", "[package]\nname = \"a\"\n");
+    write("virt/b/Cargo.toml", "[package]\nname = \"b\"\n");
+    let engine = engine(builtin());
+    let scope = |dir: &str, command: &str| {
+        engine.set_probes(Probes::new(Some(tmp.path().join(dir)), None, false));
+        let call = Call {
+            event: Some(Event::PostToolUse),
+            exit_code: Some(0),
+            ..bash(command)
+        };
+        let records = engine.evaluate(&call).records;
+        assert_eq!(records.len(), 1, "{command}");
+        records[0].scope()
+    };
+    assert_eq!(scope("solo", "cargo test"), "full");
+    assert_eq!(scope("virt", "cargo test"), "full");
+    assert_eq!(scope("virt", "cd a && cargo test"), "partial -p a");
+    assert_eq!(scope("ws", "cargo test"), "partial -p app");
+    assert_eq!(scope("ws", "cargo test -p app -p lib"), "full");
+    assert_eq!(scope("ws", "cargo clippy -p lib"), "partial -p lib");
+    assert_eq!(
+        scope("ws", "cd crates/lib && cargo test --workspace"),
+        "full"
+    );
+    assert_eq!(scope(".", "cargo test"), "partial");
+}
+
+#[test]
+fn a_fires_example_can_pin_the_scope_it_records() {
+    let engine = engine(vec![user(
+        "scoped",
+        r#"return {
+	on = "post-tool-use",
+	check = function(call)
+		jouet.record("test", call.commands[1], "partial", "-p a")
+		return nil
+	end,
+	examples = {
+		fires = {
+			{ command = "cargo test -p a", kind = "test", scope = "partial -p a" },
+			{ command = "cargo test -p a", kind = "test", scope = "full" },
+		},
+		quiet = { { tool = "Read" } },
+	},
+}"#,
+    )]);
+    let results: Vec<(String, String, bool)> = engine
+        .examples(engine.rule("scoped").unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.expected, e.actual, e.ok))
+        .collect();
+    assert_eq!(
+        results[..2],
+        [
+            (
+                "fires record test partial -p a".into(),
+                "record test partial -p a".into(),
+                true
+            ),
+            (
+                "fires record test full".into(),
+                "record test partial -p a".into(),
+                false
+            ),
+        ]
     );
 }

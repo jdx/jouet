@@ -1,7 +1,7 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "checks"
-why = "Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed."
+why = "Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran."
 scope = "builtin"
 author = "builtin"
 created = "2026-10-30"
@@ -33,6 +33,27 @@ fires = [
   { command = "go vet ./...", exit_code = 0, kind = "lint" },
   { command = "make check", exit_code = 0, kind = "lint" },
   { command = "set -o pipefail; cargo test | tee log", exit_code = 101, kind = "test" },
+  # How much each run covered.
+  { command = "cargo test --workspace", exit_code = 101, kind = "test", scope = "full" },
+  { command = "cargo nextest run --workspace --no-fail-fast", exit_code = 0, kind = "test", scope = "full" },
+  { command = "cargo clippy --workspace --all-targets -- -D warnings", exit_code = 0, kind = "lint", scope = "full" },
+  { command = "cargo test -p jouet-rules --lib", exit_code = 0, kind = "test", scope = "partial -p jouet-rules --lib" },
+  { command = "cargo test -pjouet", exit_code = 0, kind = "test", scope = "partial -p jouet" },
+  { command = "cargo test --workspace wait_github", exit_code = 0, kind = "test", scope = "partial wait_github" },
+  { command = "cargo test --workspace -- --exact verify::tests", exit_code = 0, kind = "test", scope = "partial --exact verify::tests" },
+  { command = "cargo test --workspace --test cli", exit_code = 0, kind = "test", scope = "partial --test cli" },
+  { command = "cargo nextest run --workspace -E 'test(conflict)'", exit_code = 0, kind = "test", scope = "partial -E test(conflict)" },
+  { command = "cargo test --workspace -- --test-threads 1", exit_code = 0, kind = "test", scope = "full" },
+  { command = "cd ~/elsewhere && cargo test --workspace", exit_code = 0, kind = "test", scope = "partial" },
+  { command = "mise run test", exit_code = 0, kind = "test", scope = "full" },
+  { command = "mise run test:e2e edit", exit_code = 0, kind = "test", scope = "partial test:e2e edit" },
+  { command = "npm test", exit_code = 0, kind = "test", scope = "full" },
+  { command = "go test ./...", exit_code = 0, kind = "test", scope = "full" },
+  { command = "go test ./pkg -run TestWait", exit_code = 0, kind = "test", scope = "partial ./pkg -run TestWait" },
+  { command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
+  { command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
+  { command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
+  { command = "bats test/edit.bats", exit_code = 0, kind = "test", scope = "partial" },
 ]
 quiet = [
   { command = "cargo fmt", exit_code = 0 },
@@ -42,5 +63,6 @@ quiet = [
   { command = "cargo test; echo done", exit_code = 1 },
   { command = "cargo test || true", exit_code = 0 },
   { command = "cargo test &", exit_code = 0 },
+  # Not a program the script knows: it does not run.
   { command = "ls -la src", exit_code = 0 },
 ]

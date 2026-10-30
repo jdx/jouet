@@ -299,6 +299,10 @@
         "kind": {
           "description": "For a `fires` example of a post-tool-use rule: the kind it must\nrecord.",
           "$ref": "#/$defs/Kind"
+        },
+        "scope": {
+          "description": "For a `fires` example with a `kind`: the scope the record must have,\n`full`, or `partial` and its selector, such as `partial -p jouet`.",
+          "type": "string"
         }
       },
       "additionalProperties": false

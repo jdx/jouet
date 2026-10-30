@@ -258,6 +258,9 @@ pub(crate) struct CaseTable {
     /// For a `fires` example of a post-tool-use rule: the kind it must
     /// record.
     pub kind: Option<Kind>,
+    /// For a `fires` example with a `kind`: the scope the record must have,
+    /// `full`, or `partial` and its selector, such as `partial -p jouet`.
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -273,7 +276,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action` or `kind`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind` or `scope`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

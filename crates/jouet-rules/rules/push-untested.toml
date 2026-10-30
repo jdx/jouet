@@ -1,0 +1,41 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "push-untested"
+why = "Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+# The matcher finds a push; the script asks the ledger and git whether a
+# full test run passed at this tree, which a matcher cannot.
+script = "push-untested.luau"
+
+# `git push`, but not one that pushes nothing new: a dry run, a deletion
+# (`--delete`, or a `:branch` refspec), or help.
+[[rule.match]]
+command = "git push"
+unless_flags = ["-n", "--dry-run", "-d", "--delete", "-h", "--help"]
+unless_args = ":*"
+
+[[rule.match]]
+command = "gh pr create"
+unless_flags = ["--dry-run", "--help"]
+
+[rule.examples]
+fires = [
+  "git push",
+  "git push -u origin feat/verify",
+  "git -C ../repo push --force-with-lease",
+  "cargo test -p x && git push",
+  "gh pr create --fill",
+]
+quiet = [
+  "git push --dry-run",
+  "git push origin --delete old-branch",
+  "git push origin :old-branch",
+  "git pull",
+  "git status",
+  "echo 'git push'",
+  "gh pr view",
+  "gh pr create --help",
+]
