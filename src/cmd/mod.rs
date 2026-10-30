@@ -1,8 +1,12 @@
 //! Command implementations, and the output conventions they share.
 
+pub mod agent_help;
 pub mod edit;
+pub mod hook;
 pub mod pr;
 pub mod rule;
+pub mod setup;
+pub mod skill;
 pub mod threads;
 pub mod wait;
 
