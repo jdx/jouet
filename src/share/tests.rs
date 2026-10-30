@@ -4,7 +4,7 @@ use crate::wind::stats::tests::fired;
 
 const DAY: u64 = 1_793_318_400;
 
-const RULE: &str = "--- why: tags are cut by the release job at /home/alice/acme\n--- mode: deny\nreturn {\n\tcheck = function(call)\n\t\tfor _, c in call.commands do\n\t\t\tif c.argv[1] == \"git\" and c.argv[2] == \"tag\" then return jouet.deny(\"Leave tags to ci.acme.internal.\") end\n\t\tend\n\t\treturn nil\n\tend,\n\texamples = { deny = { \"git tag v1\" }, allow = { \"git status\" } },\n}\n";
+const RULE: &str = "--- why: tags are cut by the release job at /home/alice/acme\n--- mode: deny\nreturn {\n\tcheck = function(call)\n\t\tfor _, c in call.commands do\n\t\t\tif c.argv[1] == \"git\" and c.argv[2] == \"tag\" then return jouet.deny(\"Leave tags to ci.acme.internal.\") end\n\t\tend\n\t\treturn nil\n\tend,\n\texamples = { fires = { \"git tag v1\" }, quiet = { \"git status\" } },\n}\n";
 
 fn fixture(
     fires: u64,
@@ -76,6 +76,12 @@ fn a_proven_rule_becomes_an_anonymized_proposal() {
         p.body
     );
     assert!(p.body.contains("- `git tag <arg>` (12x)"), "{}", p.body);
+    assert!(
+        p.body
+            .contains("`jouet rule test`: 1 `fires` and 1 `quiet` examples pass"),
+        "{}",
+        p.body
+    );
     assert!(p.body.ends_with("*AI-assisted*\n"));
     for private in ["/home/alice", "ci.acme.internal", "acme"] {
         assert!(!p.body.contains(private), "{private} leaked:\n{}", p.body);
@@ -108,6 +114,21 @@ fn a_rule_that_is_not_proven_is_refused_with_every_reason() {
     let (_dir, paths) = fixture(12, 0, None);
     let problems = check_rule(&paths, "no-tags", DAY + 100).unwrap_err();
     assert!(problems[0].contains("no promotion"), "{problems:?}");
+
+    // A rule with every other credential still needs examples of both kinds,
+    // passing.
+    let (_dir, paths) = fixture(12, 0, Some(9));
+    let path = paths.rules.join("no-tags.luau");
+    let quiet = "quiet = { \"git status\" }";
+    std::fs::write(&path, RULE.replace(quiet, "")).unwrap();
+    let problems = check_rule(&paths, "no-tags", DAY + 100).unwrap_err();
+    assert!(problems[0].contains("no `quiet` examples"), "{problems:?}");
+    std::fs::write(&path, RULE.replace(quiet, "quiet = { \"git tag -l\" }")).unwrap();
+    let problems = check_rule(&paths, "no-tags", DAY + 100).unwrap_err();
+    assert!(
+        problems[0].starts_with("1 of its 2 examples fail"),
+        "{problems:?}"
+    );
 
     assert!(check_rule(&paths, "git-stash", DAY).unwrap_err()[0].contains("builtin rule"));
     assert!(check_rule(&paths, "nope", DAY).unwrap_err()[0].starts_with("no rule"));

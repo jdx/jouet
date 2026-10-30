@@ -614,14 +614,19 @@ pub struct RuleListArgs {}
 
 /// Run a rule against a command or hook payload, or against its examples
 ///
-/// With neither --command nor --payload, runs the rule's `examples` and
-/// fails if any does not do what it expects, so a rule can be checked
-/// before it is enabled. --replay runs it over every call in the hook
-/// ledger instead, and fails if it fires on none of them.
+/// With neither --command nor --payload, runs the rule's `examples`: every
+/// `fires` example must make it deny, warn or record, and every `quiet`
+/// one must leave it silent. It fails, showing what was expected and what
+/// the rule did, when one does not, or when the rule lacks either kind.
+/// --all does this for every rule. --replay runs the rule over every call
+/// in the hook ledger instead, and fails if it fires on none of them.
 #[derive(Args)]
 pub struct RuleTestArgs {
     /// A rule's name, or the path to a .luau file
-    rule: String,
+    rule: Option<String>,
+    /// Run the examples of every rule: built in, yours and this repository's
+    #[usage(long)]
+    all: bool,
     /// A shell command to test the rule against
     #[usage(long, value_name = "CMD")]
     command: Option<String>,

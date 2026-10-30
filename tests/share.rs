@@ -23,7 +23,7 @@ return {
 		end
 		return nil
 	end,
-	examples = { deny = { "git tag v1" }, allow = { "git status" } },
+	examples = { fires = { "git tag v1" }, quiet = { "git status" } },
 }
 "#;
 

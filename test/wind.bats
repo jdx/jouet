@@ -36,6 +36,7 @@ return {
 		end
 		return nil
 	end,
+	examples = { fires = { "git tag v1" }, quiet = { "git status", "echo git tag" } },
 }
 LUAU
 }
@@ -58,6 +59,9 @@ LUAU
 	assert_success
 	assert_line '--- mode: warn'
 	assert_line '--- scope: user'
+	# What failed fires; what worked instead, and its variants, stay quiet.
+	assert_line --partial 'fires = { "mytool ARG --all" },'
+	assert_line --partial 'quiet = { "mytool ARG", "echo mytool", "mytool" },'
 	assert_line --regexp 'mytool <arg>. worked instead'
 
 	run --separate-stderr jouet wind show n9
@@ -114,7 +118,9 @@ LUAU
 
 	run --separate-stderr jouet rule test wind-mytool-fails
 	assert_success
-	assert_line --regexp '^wind-mytool-fails: [0-9]+ of [0-9]+ examples passed$'
+	assert_line 'ok    fires         mytool ARG --all'
+	assert_line 'ok    quiet         mytool ARG'
+	assert_line 'wind-mytool-fails: 4 of 4 examples passed'
 
 	run --separate-stderr jouet rule test wind-mytool-fails --replay
 	assert_success
@@ -190,6 +196,24 @@ LUAU
 	assert_line --regexp '^[0-9-]+  no-tags  promoted warn -> deny  by user: it is right$'
 	run --separate-stderr jouet rule log other
 	assert_output 'no changes logged'
+}
+
+@test "promote needs passing examples of both kinds" {
+	no_tags_rule
+	sed -i.bak 's/quiet = { "git status", "echo git tag" }/quiet = { "git tag -l" }/' "$RULES/no-tags.luau"
+	run --separate-stderr jouet rule promote no-tags
+	assert_failure 4
+	[[ "$stderr" == *'cannot deny until it passes examples of both kinds (1 of its 2 examples fail)'* ]]
+
+	sed -i.bak 's/, quiet = { "git tag -l" }//' "$RULES/no-tags.luau"
+	run --separate-stderr jouet rule promote no-tags
+	assert_failure 4
+	[[ "$stderr" == *'quiet'*' examples: near misses it must leave alone)'* ]]
+	[[ ! -e "$LOG" ]]
+
+	no_tags_rule
+	run --separate-stderr jouet rule promote no-tags
+	assert_success
 }
 
 @test "unwind proposes an overridden rule of yours, never a built-in one, and retires it" {

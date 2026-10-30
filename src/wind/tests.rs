@@ -79,6 +79,36 @@ fn winding_reads_incrementally_and_drafts_within_the_daily_limit() {
 }
 
 #[test]
+fn a_draft_fires_on_what_failed_and_stays_quiet_on_near_misses_from_the_ledger() {
+    let f = fixture();
+    let mut entries = Vec::new();
+    for (i, session) in ["a", "a", "b"].iter().enumerate() {
+        let t = DAY + i as u64;
+        entries.push(fired(t, session, "baz-tool test", &[]));
+        entries.push(ran(t, session, "baz-tool test", 127));
+        // The same program, used another way: a near miss.
+        entries.push(fired(t, session, "baz-tool --version", &[]));
+        // Another program altogether: not one.
+        entries.push(fired(t, session, "ls -la", &[]));
+    }
+    write(&f.paths, &entries);
+    assert_eq!(run(&f.paths, &settings(), DAY + 100, false).drafted, ["n1"]);
+    let note = &State::load(&f.paths.state).notes[0];
+    assert!(
+        note.code.contains("fires = { \"baz-tool ARG\" }"),
+        "{}",
+        note.code
+    );
+    assert!(
+        note.code
+            .contains("quiet = { \"echo baz-tool\", \"baz-tool --version\" }"),
+        "{}",
+        note.code
+    );
+    assert_eq!(draft::verify(&note.rule, &note.code), Ok(3));
+}
+
+#[test]
 fn at_most_two_notes_per_session_start_and_each_lapses() {
     let f = fixture();
     write(&f.paths, &failures(DAY));
@@ -103,7 +133,7 @@ fn at_most_two_notes_per_session_start_and_each_lapses() {
     assert!(!set_status(&f.paths, "nope", Status::Dismissed));
 }
 
-const USER_RULE: &str = "--- why: no tags\n--- author: s1\nreturn { check = function(call)\n\tfor _, c in call.commands do\n\t\tif c.argv[1] == \"git\" and c.argv[2] == \"tag\" then return jouet.deny(\"no\") end\n\tend\n\treturn nil\nend }\n";
+const USER_RULE: &str = "--- why: no tags\n--- author: s1\nreturn { check = function(call)\n\tfor _, c in call.commands do\n\t\tif c.argv[1] == \"git\" and c.argv[2] == \"tag\" then return jouet.deny(\"no\") end\n\tend\n\treturn nil\nend, examples = { fires = { \"git tag v1\" }, quiet = { \"git status\" } } }\n";
 
 #[test]
 fn promote_switches_a_user_rule_to_deny_and_logs_it() {
@@ -118,6 +148,42 @@ fn promote_switches_a_user_rule_to_deny_and_logs_it() {
 
     let again = promote(&f.paths, "no-tags", "user", "asked", DAY).unwrap_err();
     assert!(again.contains("already in deny mode"), "{again}");
+}
+
+#[test]
+fn promote_needs_passing_examples_of_both_kinds() {
+    let f = fixture();
+    let path = f.paths.rules.join("no-tags.luau");
+    let examples = "examples = { fires = { \"git tag v1\" }, quiet = { \"git status\" } }";
+    let refused = |code: String, why: &str| {
+        std::fs::write(&path, code).unwrap();
+        let err = promote(&f.paths, "no-tags", "user", "asked", DAY).unwrap_err();
+        assert!(err.contains("cannot deny") && err.contains(why), "{err}");
+    };
+    refused(
+        USER_RULE.replace(&format!(", {examples}"), ""),
+        "it has no examples",
+    );
+    refused(
+        USER_RULE.replace("quiet = { \"git status\" }", ""),
+        "no `quiet` examples",
+    );
+    refused(
+        USER_RULE.replace("\"git status\"", "\"git tag -l\""),
+        "1 of its 2 examples fail",
+    );
+    // Its header saying deny does not make it deny without examples.
+    let deny = format!(
+        "--- mode: deny\n{}",
+        USER_RULE.replace(&format!(", {examples}"), "")
+    );
+    std::fs::write(&path, deny).unwrap();
+    let engine = user_engine(&f.paths.rules).unwrap();
+    assert_eq!(engine.rule("no-tags").unwrap().mode, Mode::Warn);
+    assert!(rulefile::read_log(&f.paths.log).is_empty());
+
+    std::fs::write(&path, USER_RULE).unwrap();
+    assert!(promote(&f.paths, "no-tags", "user", "asked", DAY).is_ok());
 }
 
 #[test]

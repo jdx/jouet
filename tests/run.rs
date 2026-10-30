@@ -103,10 +103,14 @@ fn a_rule_reaches_github_only_with_rules_network() {
         "pr-open.luau",
         r#"--- why: say what state the PR is in
 --- mode: deny
-return { check = function()
-    local s, err = jouet.pr.status("jdx/mise#15172")
-    return jouet.deny(if s then s.state else err)
-end }
+return {
+    check = function()
+        local s, err = jouet.pr.status("jdx/mise#15172")
+        return jouet.deny(if s then s.state else err)
+    end,
+    -- Only so that it may deny; this test runs it on one command.
+    examples = { fires = { "true" }, quiet = { "false" } },
+}
 "#,
     );
     let args = ["rule", "test", "pr-open", "--command", "true"];

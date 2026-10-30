@@ -258,15 +258,20 @@ fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u
         .map(|(k, e)| (k.clone(), e.clone()))
         .collect();
     let mut drafted = Vec::new();
+    // Read only when there is something to draft, for its near misses.
+    let mut ledger: Option<Vec<ledger::Entry>> = None;
     for (key, evidence) in ready {
         if budget == 0 {
             break;
         }
         let name = free_name(&draft::name_for(&evidence), state, paths, engine);
-        let d = draft::draft(&evidence, &name, &today);
+        let d = draft::draft(&evidence, &name, &today, &[]);
+        let entries = ledger.get_or_insert_with(|| reader::read_all(&paths.ledger));
+        let near = draft::near_misses(&d, &evidence, entries);
+        let d = draft::draft(&evidence, &name, &today, &near);
         // A draft that fails its own examples (it would warn about what
         // worked, say) is never offered; the pattern is not drafted again.
-        if !draft::sound(&d) {
+        if draft::verify(&d.name, &d.code).is_err() {
             state.noted.insert(key);
             continue;
         }
@@ -384,6 +389,13 @@ pub(crate) fn promote(
     }
     if rule.mode == Mode::Deny {
         return Err(format!("`{name}` is already in deny mode"));
+    }
+    // A rule denies only once it has shown, on examples of both kinds, what
+    // it fires on and what it leaves alone.
+    if let Err(problem) = engine.proven(rule) {
+        return Err(format!(
+            "`{name}` cannot deny until it passes examples of both kinds ({problem}); `jouet rule test {name}` shows them"
+        ));
     }
     let path = paths.rules.join(format!("{name}.luau"));
     let code =

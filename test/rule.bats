@@ -28,8 +28,99 @@ setup() {
 
 	# Success means every example passed.
 	assert_success
-	assert_line --partial 'ok    deny          git add -A'
+	assert_line 'ok    fires         git add -A'
+	assert_line 'ok    quiet         git add src/main.rs'
 	assert_line --regexp '^git-add-all: [0-9]+ of [0-9]+ examples passed$'
+
+	# A table example can name the harness the call comes from.
+	run --separate-stderr jouet rule test git-stash
+	assert_success
+	assert_line 'ok    fires         git stash pop (harness codex)'
+}
+
+@test "test --all runs every rule's examples and shows a failing one as a diff" {
+	run --separate-stderr jouet rule test --all
+	assert_success
+	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
+	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
+	assert_line '8 of 8 rules passed their examples'
+
+	cat >"$RULES/no-rm.luau" <<'LUAU'
+--- why: rm deletes for good
+return {
+	check = function(call)
+		return if call.commands[1].program == "rm" then jouet.deny("rm deletes for good") else nil
+	end,
+	examples = { fires = { "rm -rf target" }, quiet = { "rm notes.txt", "echo rm" } },
+}
+LUAU
+	printf -- '--- why: x\nreturn { check = function() end }\n' >"$RULES/bare.luau"
+
+	run --separate-stderr jouet rule test --all
+	assert_failure 1
+	assert_line --regexp '^FAIL  no-rm +1 of 3 examples failed$'
+	assert_line '      FAIL  quiet         rm notes.txt'
+	assert_line '            - expected: quiet'
+	assert_line '            + actual:   deny: rm deletes for good'
+	assert_line --regexp '^FAIL  bare +it has no examples$'
+	assert_line '8 of 10 rules passed their examples'
+	refute_line --partial 'echo rm'
+
+	run --separate-stderr jouet rule test --all --json
+	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
+	assert_output '[8,2,[2,1]]'
+
+	run --separate-stderr jouet rule test
+	assert_failure 2
+	run --separate-stderr jouet rule test no-rm --all
+	assert_failure 2
+	run --separate-stderr jouet rule test --all --command ls
+	assert_failure 2
+}
+
+@test "a rule of yours without examples of both kinds only warns, and says why" {
+	cat >"$RULES/no-rm.luau" <<'LUAU'
+--- why: rm deletes for good
+--- mode: deny
+return {
+	check = function(call)
+		return if call.commands[1].program == "rm" then jouet.deny("Think twice.") else nil
+	end,
+	examples = { fires = { "rm -rf target" } },
+}
+LUAU
+	cat >"$RULES/old-style.luau" <<'LUAU'
+--- why: an older rule
+--- mode: deny
+return {
+	check = function(call) return nil end,
+	examples = { deny = { "rm -rf target" }, allow = { "ls" } },
+}
+LUAU
+
+	run --separate-stderr jouet rule list
+	assert_success
+	# The header says deny, but it has not shown what it leaves alone.
+	assert_line --regexp '^no-rm +enabled +warn +user'
+	assert_line --regexp '^note: no-rm only warns, and cannot be promoted, until it has examples of both kinds: it has no .quiet. examples'
+	assert_line --regexp '^note: old-style only warns, .* listed under .(deny|allow)., which jouet no longer reads'
+	run --separate-stderr jouet rule test no-rm --command 'rm -rf target'
+	assert_output 'warn: Think twice.'
+
+	# What it has still runs, and the test fails on what it lacks.
+	run --separate-stderr jouet rule test no-rm
+	assert_failure 1
+	assert_line 'ok    fires         rm -rf target'
+	assert_line --regexp '^no-rm: it has no .quiet. examples: near misses it must leave alone; give it'
+
+	run --separate-stderr jouet rule test old-style
+	assert_failure 4
+	[[ "$stderr" == *"jouet no longer reads"* ]]
+	[[ "$stderr" == *"Or pass --command or --payload"* ]]
+
+	run --separate-stderr jouet rule list --json
+	run jq -r '.rules[] | select(.name == "no-rm") | .missing_examples' <<<"$output"
+	assert_output --regexp 'no .quiet. examples'
 }
 
 @test "test runs a rule against a command, an exit code or a hook payload" {
@@ -57,6 +148,7 @@ return {
 	check = function(call)
 		return if call.commands[1].program == "rm" then jouet.deny("Think twice.") else nil
 	end,
+	examples = { fires = { "rm -rf target" }, quiet = { "ls" } },
 }
 LUAU
 	printf -- '--- why: allow every stash\nreturn { check = function() return nil end }\n' >"$RULES/git-stash.luau"
@@ -88,9 +180,8 @@ return {
 		return nil
 	end,
 	examples = {
-		warn = { "rm -rf target" },
-		allow = { "rm file", "echo 'rm -rf /'" },
-		deny = { "rm -r src" },
+		fires = { "rm -rf target", { command = "rm -r src", action = "deny" } },
+		quiet = { "rm file", "echo 'rm -rf /'" },
 	},
 }
 LUAU
@@ -98,8 +189,16 @@ LUAU
 	run --separate-stderr jouet rule test ./draft.luau
 
 	assert_failure 1
-	assert_line 'FAIL  deny          rm -r src  (got warn)'
+	assert_line 'ok    fires         rm -rf target'
+	assert_line 'FAIL  fires deny    rm -r src'
+	assert_line '      - expected: fires deny'
+	assert_line '      + actual:   warn: rm -r deletes for good'
+	assert_line 'ok    quiet         rm file'
 	assert_line 'draft: 3 of 4 examples passed'
+
+	run --separate-stderr jouet rule test ./draft.luau --json
+	run jq -c '.examples[1] | [.command, .expected, .actual, .message, .ok]' <<<"$output"
+	assert_output '["rm -r src","fires deny","warn","rm -r deletes for good",false]'
 }
 
 @test "a broken rule is listed with its error and never runs" {
@@ -121,7 +220,7 @@ LUAU
 @test "repository rules run only once trusted, and again after every change" {
 	mkdir -p repo/.git repo/.jouet/rules
 	cd repo
-	printf -- '--- why: a team rule\nreturn { check = function() return jouet.deny("no") end }\n' >.jouet/rules/team.luau
+	printf -- '--- why: a team rule\nreturn { check = function(c) return if c.command == "ls" then jouet.deny("no") else nil end, examples = { fires = { "ls" }, quiet = { "pwd" } } }\n' >.jouet/rules/team.luau
 
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +untrusted +deny +repo +unknown +a team rule$'
@@ -131,7 +230,7 @@ LUAU
 	# repository rule, denying by default, and `scope: repo` is valid.
 	run --separate-stderr jouet rule test team --command ls
 	assert_output 'deny: no'
-	printf -- '--- why: scoped\n--- scope: repo\nreturn { check = function() return jouet.deny("scoped") end }\n' >.jouet/rules/scoped.luau
+	printf -- '--- why: scoped\n--- scope: repo\nreturn { check = function() return jouet.deny("scoped") end, examples = { fires = { "ls" }, quiet = { "pwd" } } }\n' >.jouet/rules/scoped.luau
 	run --separate-stderr jouet rule test scoped --command ls
 	assert_output 'deny: scoped'
 	rm .jouet/rules/scoped.luau

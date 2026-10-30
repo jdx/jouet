@@ -42,7 +42,7 @@ pub(crate) struct Replay {
 }
 
 /// The programs a shape runs, by basename.
-fn programs(shape: &str) -> BTreeSet<String> {
+pub(crate) fn programs(shape: &str) -> BTreeSet<String> {
     shell::parse(&reader::script(shape))
         .all()
         .into_iter()

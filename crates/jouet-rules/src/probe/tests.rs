@@ -43,13 +43,14 @@ fn repo() -> tempfile::TempDir {
 }
 
 /// A rule that denies with whatever `expr` evaluates to, so a test can read
-/// a probe's answer from the decision.
+/// a probe's answer from the decision. It has examples only so that it may
+/// deny.
 fn rule(expr: &str) -> Source {
     Source {
         name: "probe".into(),
         origin: Origin::User("probe.luau".into()),
         code: format!(
-            "--- why: a test rule\n--- mode: deny\nreturn {{ check = function(call)\n  return jouet.deny({expr})\nend }}\n"
+            "--- why: a test rule\n--- mode: deny\nreturn {{ check = function(call)\n  return jouet.deny({expr})\nend, examples = {{ fires = {{ 'x' }}, quiet = {{ 'y' }} }} }}\n"
         ),
         trusted: true,
     }

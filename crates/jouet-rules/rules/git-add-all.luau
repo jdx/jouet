@@ -31,7 +31,7 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"git add -A",
 			"git add --all",
 			"git add .",
@@ -40,7 +40,7 @@ local rule: JouetRule = {
 			"git add -- .",
 			"rtk git add .",
 		},
-		allow = {
+		quiet = {
 			"git add src/main.rs",
 			"git add ./src/main.rs",
 			"git commit -m 'git add -A'",

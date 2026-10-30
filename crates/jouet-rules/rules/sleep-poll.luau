@@ -42,14 +42,14 @@ local rule: JouetRule = {
 		return nil
 	end,
 	examples = {
-		deny = {
+		fires = {
 			"sleep 60 && gh pr checks 123",
 			"while true; do gh pr checks; sleep 30; done",
 			"until gh run view 42 --exit-status; do sleep 20; done",
 			"sleep 90; gh pr view 7 --json statusCheckRollup",
 			"bash -c 'sleep 30; gh pr checks'",
 		},
-		allow = {
+		quiet = {
 			"gh pr checks 123",
 			"sleep 5 && curl localhost:8080",
 			"echo 'sleep 30; gh pr checks'",
