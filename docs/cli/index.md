@@ -41,3 +41,4 @@
 - [`jouet rule types`](/cli/rule/types.md)
 - [`jouet rule trust`](/cli/rule/trust.md)
 - [`jouet rule untrust`](/cli/rule/untrust.md)
+- [`jouet run [FLAGS] [RECIPE] [ARGS]…`](/cli/run.md)

@@ -69,6 +69,7 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: `jouet pr next ${soon}`, link: "/commands/pr-next" },
           { text: `jouet pr land ${soon}`, link: "/commands/pr-land" },
+          { text: `jouet run ${soon}`, link: "/commands/run" },
         ],
       },
       {
@@ -125,6 +126,7 @@ export default defineConfig({
                   { text: "untrust", link: "/cli/rule/untrust" },
                 ],
               },
+              { text: "run", link: "/cli/run" },
             ],
           },
         ],

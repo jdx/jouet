@@ -94,7 +94,10 @@ pub fn repo_from_git() -> Option<Repo> {
     pick_remote(&String::from_utf8_lossy(&out.stdout))
 }
 
-fn pick_remote(config: &str) -> Option<Repo> {
+/// The GitHub repository named by `git config --get-regexp
+/// '^remote\..*\.(url|gh-resolved)$'` output, chosen as [`repo_from_git`]
+/// chooses, for a caller that ran git in another directory.
+pub fn pick_remote(config: &str) -> Option<Repo> {
     let mut remotes: Vec<(String, Repo)> = Vec::new();
     let mut default = None;
     for line in config.lines() {
