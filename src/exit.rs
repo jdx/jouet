@@ -2,8 +2,8 @@
 //!
 //! `Failed` and `Precondition` are deliberately separate: `Failed` says the
 //! work was done and the answer is no (fix the code), `Precondition` says the
-//! work was refused before it started (fix the request). `remote` (5) and
-//! `timeout` (124) join this list with the GitHub commands that return them.
+//! work was refused before it started (fix the request). `remote` (5) joins
+//! this list with the GitHub commands that return it.
 
 use std::process::ExitCode;
 
@@ -14,6 +14,9 @@ pub enum Exit {
     Usage,
     NotFound,
     Precondition,
+    /// Still pending when `--timeout` expired; running the same command
+    /// again keeps waiting.
+    Timeout,
 }
 
 impl Exit {
@@ -24,6 +27,7 @@ impl Exit {
             Self::Usage => 2,
             Self::NotFound => 3,
             Self::Precondition => 4,
+            Self::Timeout => 124,
         }
     }
 
@@ -35,6 +39,7 @@ impl Exit {
             Self::Usage => "usage",
             Self::NotFound => "not_found",
             Self::Precondition => "precondition",
+            Self::Timeout => "timeout",
         }
     }
 }

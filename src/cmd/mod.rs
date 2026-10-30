@@ -1,6 +1,7 @@
 //! Command implementations, and the output conventions they share.
 
 pub mod edit;
+pub mod wait;
 
 use crate::display::Mode;
 use crate::exit::Exit;
