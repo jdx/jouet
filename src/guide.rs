@@ -59,6 +59,17 @@ const WHEN: &[(&str, Option<&str>)] = &[
             "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: `jouet rule test` runs one before it is enabled",
         ),
     ),
+    (
+        "wind",
+        Some(
+            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+        ),
+    ),
+    (
+        "unwind",
+        Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
+    ),
+    ("share", None),
     ("agent-help", None),
     ("skill", None),
     ("setup", None),
@@ -73,7 +84,7 @@ const COMPANIONS: &[(&str, &str)] = &[
     ),
     (
         "rtk",
-        "rtk: compresses command output, while jouet steers which commands run; use both, since jouet's rules see through `rtk <cmd>`",
+        "rtk: shrinks the output of common commands; see `rtk --help`",
     ),
     (
         "bd",
@@ -114,7 +125,7 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
-/// The guide for the whole tool, kept under about 60 lines.
+/// The guide for the whole tool, kept under about 80 lines.
 pub(crate) fn overview() -> String {
     let mut out = format!(
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n",
@@ -327,7 +338,7 @@ mod tests {
     #[test]
     fn the_overview_stays_short() {
         let text = overview();
-        assert!(text.lines().count() <= 60, "{text}");
+        assert!(text.lines().count() <= 80, "{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
             "{text}"

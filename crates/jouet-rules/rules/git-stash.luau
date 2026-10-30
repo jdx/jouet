@@ -83,8 +83,6 @@ local rule: JouetRule = {
 			"git stash clear",
 			"git stash save",
 			"git stash branch rescue",
-			"rtk git stash",
-			"rtk bypass git stash pop",
 		},
 		allow = {
 			"git stash push -m wip-ab12",
@@ -99,8 +97,6 @@ local rule: JouetRule = {
 			"git stash branch rescue stash@{1}",
 			"echo 'git stash'",
 			"git commit -m 'avoid git stash'",
-			"rtk gain --history",
-			"echo rtk git stash",
 		},
 	},
 }

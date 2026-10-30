@@ -278,6 +278,7 @@ dependencies = [
  "jouet-output",
  "jouet-rules",
  "jouet-wait",
+ "mise-agent-env",
  "regex",
  "serde",
  "serde_json",

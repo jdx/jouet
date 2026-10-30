@@ -78,7 +78,7 @@ The rules read the command the way a shell does: quoted strings, here-document b
 The stop hook keeps an agent from declaring success while the last test, lint or build run it made failed, in the spirit of "verification before completion". It is conservative by design:
 
 - **What counts as a check.** Whatever the post-tool-use rules record. The built-in `checks` rule records `cargo test`, `build`, `check`, `clippy` and `fmt --check` (also through `mbx`), `mise run` tasks named `test*`, `lint*`, `check*`, `build*` or `ci`, `npm`/`pnpm`/`yarn`/`bun` test and scripts with those names, `make`/`just` targets, `go test`/`vet`/`build`, `pytest`, `vitest`, `jest`, `bats`, `hk check` and a few common linters; replace it with a `checks.luau` of your own to change that.
-- **When a run counts.** Only when the check's own exit status is known: `cd crate && cargo test` counts, while `cargo test; echo done`, `cargo build && cargo test` failing, and `cargo test | tail` without `pipefail` do not. Each kind keeps only its latest run, so a later passing `cargo test` clears an earlier failure.
+- **When a failure counts.** Only when the check is the command's last pipeline, so its exit status is the command's: `cd crate && cargo test` counts, `cargo test; echo done` does not. Each kind keeps only its latest run, so a later passing `cargo test` clears an earlier failure.
 - **Blocking once.** The hook blocks with a one-line reason, and if the agent stops again straight away (the harness reports `stop_hook_active`), its answer stands. A check that cannot pass never traps the agent.
 - **Where runs are recorded.** Claude Code reports each command's exit code to the post-tool-use hooks, which keep the latest run of each kind in `$XDG_STATE_HOME/jouet/sessions/<session>.json`. Updates take a lock, so commands finishing at once cannot drop each other's runs, and files untouched for a week are removed. Codex sends hooks no exit code, so its stop hook reads the commands in the last 8 MiB of the session transcript instead, and runs them through the same rules. That format is Codex's own: if it changes, the hook stops blocking rather than blocking wrongly.
 
@@ -86,21 +86,12 @@ Known false positives and misses:
 
 - A check you expected to fail, such as a test written to fail first or a failure that is already on the main branch, still blocks once. Say so in the reply and stop again.
 - A narrower passing run clears a broader failure: `cargo test -p a` passing after `cargo test` failed counts as passing.
-- A check piped through `head` or `tail` counts as no run at all, unless `set -o pipefail` is on: its exit status is `tail`'s. A failure recorded earlier therefore stays, and blocks once, until the check passes without the pipe or with `pipefail`.
+- A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
-
-### With rtk
-
-[rtk](https://github.com/rtk-ai/rtk) and jouet do different jobs, so use both: rtk compresses the output of the commands an agent runs, and jouet steers which commands those are. rtk's hook rewrites a shell command to `rtk <cmd>`, such as `rtk git status`.
-
-- **Both hooks stay.** `jouet setup` keeps rtk's hook (and every other hook) and notes when it finds it. `--uninstall` leaves it in place.
-- **Order does not matter.** Claude Code gives both hooks the command as the agent wrote it, and when one denies and another allows with a rewrite, the denial wins. A command the agent writes as `rtk git add -A` is denied like `git add -A`, because the rules see through rtk (see [Rules](/rules)).
-- **Codex.** Codex runs every matching hook too, and a denial blocks the call. How it combines rtk's `updatedInput` rewrite with another hook's decision beyond that is untested.
-- **The ledger** records an rtk-wrapped command by the command's shape, with `"via":"rtk"`.
 
 ### The ledger
 
-Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, a 16-character hash identifying the work tree (never its path), the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). jouet will use the ledger to measure how useful each rule is, and later to let agents learn new rules from it.
+Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, a 16-character hash identifying the work tree (never its path), the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). [Self-winding](/winding) measures each rule from it, and drafts new rules from the patterns in it.
 
 ```json
 {"ts":1793380000,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git stash","decisions":[{"rule":"git-stash","action":"deny"}]}
@@ -128,10 +119,15 @@ ledger = true  # JOUET_HOOKS_LEDGER: the ledger
 
 [rules]
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule
+
+[wind]
+enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 ```
+
+[Self-winding](/winding) is on after setup: the session-start primer shows at most two notes about rules jouet drafted from the ledger. `JOUET_WIND=0` turns it off.
 
 ## The skill and `agent-help`
 
-`jouet skill` prints the skill `jouet setup` installs, about 20 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
+`jouet skill` prints the skill `jouet setup` installs, about 25 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
 
-`jouet agent-help` prints a guide for the whole tool in under 60 lines, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk or beads (`bd`) is on `PATH`, the guide says what each is for instead of jouet duplicating it.
+`jouet agent-help` prints a guide for the whole tool in under 80 lines, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk or beads (`bd`) is on `PATH`, the guide says what each is for instead of jouet duplicating it.

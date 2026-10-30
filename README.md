@@ -100,15 +100,15 @@ match shows what moved.
 
 ## Commands
 
-| Command | Status | Replaces |
-|---|---|---|
-| [`jouet edit`](https://jouet.jdx.dev/commands/edit) | Available | heredoc edits with a hand-written `assert s.count(old) == 1` |
-| [`jouet wait`](https://jouet.jdx.dev/commands/wait) | Available | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
-| [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | Available | `for` loops over `gh pr view` |
-| [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | Available | hand-written `reviewThreads` GraphQL |
-| [`jouet commit`](https://jouet.jdx.dev/commands/commit) | Unreleased | `git add -A && git commit` in a checkout other sessions share |
-| [`jouet review-package`](https://jouet.jdx.dev/commands/review-package) | Unreleased | pointing a reviewer at a branch and the commands to run |
-| [`jouet handoff` / `pickup`](https://jouet.jdx.dev/commands/handoff) | Unreleased | hand-written notes on where the branch, PR and processes stand |
+| Command | Replaces |
+|---|---|
+| [`jouet edit`](https://jouet.jdx.dev/commands/edit) | heredoc edits with a hand-written `assert s.count(old) == 1` |
+| [`jouet wait`](https://jouet.jdx.dev/commands/wait) | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
+| [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | `for` loops over `gh pr view` |
+| [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | hand-written `reviewThreads` GraphQL, replies and resolves |
+| [`jouet commit`](https://jouet.jdx.dev/commands/commit) | `git add -A && git commit` in a checkout other sessions share |
+| [`jouet review-package`](https://jouet.jdx.dev/commands/review-package) | pointing a reviewer at a branch and the commands to run |
+| [`jouet handoff` / `pickup`](https://jouet.jdx.dev/commands/handoff) | hand-written notes on where the branch, PR and processes stand |
 
 Every command follows the same
 [conventions](https://jouet.jdx.dev/conventions): no prompts and no TTY,

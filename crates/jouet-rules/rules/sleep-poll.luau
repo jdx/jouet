@@ -48,7 +48,6 @@ local rule: JouetRule = {
 			"until gh run view 42 --exit-status; do sleep 20; done",
 			"sleep 90; gh pr view 7 --json statusCheckRollup",
 			"bash -c 'sleep 30; gh pr checks'",
-			"sleep 30 && rtk gh pr checks 12",
 		},
 		allow = {
 			"gh pr checks 123",

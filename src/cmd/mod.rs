@@ -12,8 +12,10 @@ pub(crate) mod pr;
 pub(crate) mod review;
 pub(crate) mod rule;
 pub(crate) mod setup;
+pub(crate) mod share;
 pub(crate) mod skill;
 pub(crate) mod threads;
 pub(crate) mod wait;
+pub(crate) mod wind;
 
 pub(crate) use jouet_output::Output;

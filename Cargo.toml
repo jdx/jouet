@@ -75,6 +75,7 @@ jouet-github.workspace = true
 jouet-output.workspace = true
 jouet-rules.workspace = true
 jouet-wait.workspace = true
+mise-agent-env.workspace = true
 regex.workspace = true
 serde.workspace = true
 # Keeps the key order of the harness settings files `setup` rewrites.
