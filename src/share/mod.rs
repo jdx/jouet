@@ -157,7 +157,7 @@ fn add_gap(gaps: &mut Gaps, entry: GapEntry, now: u64) {
 pub(crate) fn refresh_signals(gaps_path: &Path, paths: &Paths) -> std::io::Result<()> {
     let entries = wind::reader::read_all(&paths.ledger);
     let engine = wind::user_engine(&paths.rules);
-    let fresh = signals::from_ledger(&entries, engine.as_ref());
+    let fresh = signals::from_ledger(&entries, Some(&engine));
     update_gaps(gaps_path, |gaps| signals::replace_ledger(gaps, fresh))
 }
 
