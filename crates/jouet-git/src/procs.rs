@@ -228,6 +228,14 @@ mod tests {
             .stdout(std::fs::File::create(&log).unwrap())
             .spawn()
             .unwrap();
+        // Until the child execs, its command line is still this test
+        // binary's.
+        let cmdline = format!("/proc/{}/cmdline", child.id());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !std::fs::read(&cmdline).unwrap().starts_with(b"sleep\0") {
+            assert!(std::time::Instant::now() < deadline, "sleep never started");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let found = in_worktree(dir.path()).unwrap();
         let alive_before = alive(child.id());
         child.kill().unwrap();

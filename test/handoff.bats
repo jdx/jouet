@@ -57,6 +57,12 @@ setup() {
 	[[ "$(uname)" == Linux ]] || skip "processes are listed on Linux only"
 	sleep 30 >server.log 2>&1 &
 	local pid=$!
+	# Until the job execs, its command line is still this shell's.
+	local tries=0
+	until [[ "$(tr '\0' ' ' <"/proc/$pid/cmdline")" == "sleep 30 " ]]; do
+		((++tries < 500)) || fail "sleep never started"
+		sleep 0.01
+	done
 
 	run --separate-stderr jouet handoff --no-pr -o -
 	kill "$pid"
