@@ -25,6 +25,7 @@ export default defineConfig({
   cleanUrls: true,
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
+    "cli/wait.md": "cli/wait/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -77,6 +78,19 @@ export default defineConfig({
                 items: [
                   { text: "replace", link: "/cli/edit/replace" },
                   { text: "hash", link: "/cli/edit/hash" },
+                ],
+              },
+              {
+                text: "wait",
+                link: "/cli/wait/",
+                collapsed: true,
+                items: [
+                  { text: "file", link: "/cli/wait/file" },
+                  { text: "log", link: "/cli/wait/log" },
+                  { text: "port", link: "/cli/wait/port" },
+                  { text: "http", link: "/cli/wait/http" },
+                  { text: "pid", link: "/cli/wait/pid" },
+                  { text: "cmd", link: "/cli/wait/cmd" },
                 ],
               },
             ],
