@@ -1,6 +1,7 @@
 # The packslip manifest for release.yml's packslip step, for what the action's
 # inputs cannot say per artifact. Paths are relative to the job's workspace,
-# where the archives are collected.
+# where the archives are collected. Every archive holds both executables,
+# jouet and joue, which the action's `bin` input names for all of them.
 #
 # The GNU builds come from Cross.toml's Ubuntu 24.04 images, so they need glibc
 # 2.39. Declaring it lets a consumer such as mise take the static musl build on

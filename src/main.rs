@@ -19,6 +19,8 @@ mod wind;
 use std::process::ExitCode;
 use usage_rs::{Args, Cli, Subcommands};
 
+// `joue` is a view of `jouet run`: argv[0] `joue` parses as `jouet run`,
+// with --json and --display carried over, so `joue NAME` runs a routine.
 #[derive(Cli)]
 #[usage(
     name = "jouet",
@@ -26,7 +28,8 @@ use usage_rs::{Args, Cli, Subcommands};
     version,
     about = "A toolkit CLI for coding agents",
     unknown_flags = "error",
-    completion = true
+    completion = true,
+    view("joue", root = "run", globals)
 )]
 struct Jouet {
     /// Print one JSON document instead of text
@@ -61,7 +64,7 @@ enum Cmd {
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
-    /// Run a recipe: a Luau script that sequences jouet's commands
+    /// Run a routine: a Luau program on jouet's primitives (also `joue`)
     Run(RunArgs),
     /// Notice costly patterns in the hook ledger and draft rules for them
     Wind(WindArgs),
@@ -705,33 +708,58 @@ pub enum RuleCmd {
     Gap(RuleGapArgs),
 }
 
-/// Run a recipe: a Luau script that sequences jouet's commands
+/// Run a routine: a Luau program on jouet's primitives (also `joue`)
 ///
-/// Recipes are built in (land, ship-check, sweep), in ~/.config/jouet/recipes,
-/// and in a repository's .jouet/recipes once it is trusted with --trust. They
-/// run only jouet's own commands, through `jouet.cmd`, and a command that
-/// merges or posts needs `yes=true`. Words after the recipe are its
-/// arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123
-/// yes=true`.
+/// Routines are Luau programs, where rules are TOML configuration.
+/// `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are
+/// built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines,
+/// and in a repository's .jouet/routines once it is trusted with --trust.
+/// Each declares its arguments, so `joue NAME --help` says what it takes,
+/// and the capabilities it reaches; anything else is refused (exit 4). A
+/// routine that writes acts only with --yes: without it every write is
+/// previewed, and joue exits 4 (0 with --dry-run).
 #[derive(Args)]
 pub(crate) struct RunArgs {
-    /// The recipe to run
-    recipe: Option<String>,
-    /// The recipe's arguments: KEY=VALUE, or plain words in order
-    args: Vec<String>,
-    /// List every recipe, where it comes from and what it takes
+    /// List every routine, where it comes from and what it reaches
     #[usage(long)]
     list: bool,
-    /// Print each step the recipe would run, running none
-    #[usage(long)]
-    dry_run: bool,
-    /// Trust this repository's .jouet/recipes as they are now
+    /// Trust this repository's .jouet/routines as they are now
     #[usage(long, conflicts = "--untrust")]
     trust: bool,
-    /// Stop trusting this repository's .jouet/recipes
+    /// Stop trusting this repository's .jouet/routines
     #[usage(long)]
     untrust: bool,
+    #[usage(subcommand)]
+    cmd: Option<RunCmd>,
 }
+
+#[derive(Subcommands)]
+pub(crate) enum RunCmd {
+    /// Run routines' examples against their recorded responses
+    Test(RunTestArgs),
+    /// Print the Luau type definitions of the primitives
+    Types(RunTypesArgs),
+    #[usage(external_subcommand)]
+    External(Vec<std::ffi::OsString>),
+}
+
+/// Run routines' examples against their recorded responses
+///
+/// Each example runs the routine with its arguments against a fixture: a
+/// local fake GitHub serves its recorded responses, and jouet's commands,
+/// git, mise and the ledger answer from it too. Nothing real is reached,
+/// and file edits are only previewed. Fails (exit 1) when an example's exit
+/// code, output, JSON, previewed writes or requests differ from what it
+/// expects, or when a routine has no examples.
+#[derive(Args)]
+pub(crate) struct RunTestArgs {
+    /// The routine (default: every one)
+    routine: Option<String>,
+}
+
+/// Print the Luau type definitions of the primitives
+#[derive(Args)]
+pub(crate) struct RunTypesArgs {}
 
 /// List every rule, where it comes from and whether it runs
 #[derive(Args)]
@@ -973,6 +1001,9 @@ pub struct CompletionArgs {
         choices("bash", "zsh", "fish", "powershell", "pwsh", "elvish", "nu", "nushell")
     )]
     shell: String,
+    /// Complete `joue` instead, the name routines run under
+    #[usage(long)]
+    joue: bool,
 }
 
 /// Answer a Claude Code or Codex hook
@@ -1143,6 +1174,9 @@ pub struct ApplyArgs {
 }
 
 fn main() -> ExitCode {
+    if let Some(exit) = routine_typo() {
+        return exit;
+    }
     let cli = Jouet::parse();
     // Before the output mode is chosen: a bad JOUET_DISPLAY must not make a
     // hook exit 2, which a harness reads as "block".
@@ -1158,10 +1192,10 @@ fn main() -> ExitCode {
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
-        Cmd::Pr(args) => cmd::pr::run(args, &out),
+        Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
-        Cmd::Run(args) => cmd::run::run(&args, &out),
+        Cmd::Run(args) => return cmd::run::run(args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::Share(args) => cmd::share::run(&args, &out),
@@ -1172,4 +1206,42 @@ fn main() -> ExitCode {
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     exit.into()
+}
+
+/// `jouet triage`, when `triage` is a routine and not a command: says to
+/// run `joue triage` instead of failing as an unknown command.
+fn routine_typo() -> Option<ExitCode> {
+    let argv: Vec<String> = std::env::args().collect();
+    let program = argv.first()?;
+    let base = std::path::Path::new(program)
+        .file_stem()?
+        .to_string_lossy()
+        .into_owned();
+    if base == "joue" {
+        return None;
+    }
+    let mut words = argv[1..].iter();
+    let word = loop {
+        let word = words.next()?;
+        match word.as_str() {
+            "--json" => continue,
+            "--display" => {
+                words.next();
+                continue;
+            }
+            w if w.starts_with("--display=") => continue,
+            w if w.starts_with('-') || w.starts_with("__") => return None,
+            w => break w,
+        }
+    };
+    if spec::has_command(&[word]) || !cmd::run::is_routine(word) {
+        return None;
+    }
+    let out = cmd::Output::new(argv.iter().any(|w| w == "--json"), None);
+    out.error_with_hint(
+        jouet_output::exit::Exit::Usage,
+        &format!("no command `{word}`"),
+        Some(&format!("`{word}` is a routine: run it with `joue {word}`")),
+    );
+    Some(ExitCode::from(jouet_output::exit::Exit::Usage.code()))
 }

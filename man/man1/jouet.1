@@ -139,7 +139,13 @@ Show every change made to your rules, and why
 Record something a rule could not express, for `jouet share \-\-idea`
 .TP
 \fBrun\fR
-Run a recipe: a Luau script that sequences jouet's commands
+Run a routine: a Luau program on jouet's primitives (also `joue`)
+.TP
+\fBrun test\fR
+Run routines' examples against their recorded responses
+.TP
+\fBrun types\fR
+Print the Luau type definitions of the primitives
 .TP
 \fBwind\fR
 Notice costly patterns in the hook ledger and draft rules for them
@@ -1101,37 +1107,53 @@ Print help
 \fB<TEXT>\fR
 What you wanted a rule to do, and what was missing
 .SH "JOUET RUN"
-Run a recipe: a Luau script that sequences jouet's commands
+Run a routine: a Luau program on jouet's primitives (also `joue`)
 
-Recipes are built in (land, ship\-check, sweep), in ~/.config/jouet/recipes, and in a repository's .jouet/recipes once it is trusted with \-\-trust. They run only jouet's own commands, through `jouet.cmd`, and a command that merges or posts needs `yes=true`. Words after the recipe are its arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123 yes=true`.
+Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
 .PP
-\fBUsage:\fR jouet run [OPTIONS] [<RECIPE>] [<ARGS>] ...
+\fBUsage:\fR jouet run [OPTIONS] [COMMAND]
 .PP
 \fBOptions:\fR
 .PP
 .TP
 \fB\-\-list\fR
-List every recipe, where it comes from and what it takes
-.TP
-\fB\-\-dry\-run\fR
-Print each step the recipe would run, running none
+List every routine, where it comes from and what it reaches
 .TP
 \fB\-\-trust\fR
-Trust this repository's .jouet/recipes as they are now
+Trust this repository's .jouet/routines as they are now
 .TP
 \fB\-\-untrust\fR
-Stop trusting this repository's .jouet/recipes
+Stop trusting this repository's .jouet/routines
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RUN TEST"
+Run routines' examples against their recorded responses
+
+Each example runs the routine with its arguments against a fixture: a local fake GitHub serves its recorded responses, and jouet's commands, git, mise and the ledger answer from it too. Nothing real is reached, and file edits are only previewed. Fails (exit 1) when an example's exit code, output, JSON, previewed writes or requests differ from what it expects, or when a routine has no examples.
+.PP
+\fBUsage:\fR jouet run test [OPTIONS] [<ROUTINE>]
+.PP
+\fBOptions:\fR
+.PP
 .TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
 .PP
 .TP
-\fB<RECIPE>\fR
-The recipe to run
+\fB<ROUTINE>\fR
+The routine (default: every one)
+.SH "JOUET RUN TYPES"
+Print the Luau type definitions of the primitives
+.PP
+\fBUsage:\fR jouet run types [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
 .TP
-\fB<ARGS>\fR
-The recipe's arguments: KEY=VALUE, or plain words in order
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET WIND"
 Notice costly patterns in the hook ledger and draft rules for them
 
@@ -1291,6 +1313,9 @@ The script asks this binary for each completion, so it needs nothing else instal
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-joue\fR
+Complete `joue` instead, the name routines run under
 .TP
 \fB\-h, \-\-help\fR
 Print help

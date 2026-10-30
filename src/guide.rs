@@ -62,7 +62,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "run",
         Some(
-            "a routine you would otherwise type out step by step: `jouet run land` (pr next, wait ci, then pr land; yes=true merges), `jouet run sweep` (unresolved threads as a work list) or `jouet run ship-check` (the test task, then pr status); `jouet run --list` shows them all, `--dry-run` the steps",
+            "a job you would otherwise do step by step, written as a routine (code, where rules are TOML configuration): `joue land [PR]` (pr-next, wait for CI, then pr land), `joue sweep` (unresolved threads as a work list), `joue ship-check` (the tests, then the PR); `joue --list` lists them, `joue NAME --help` gives the args, and a routine that writes needs --yes (without it: a preview and exit 4)",
         ),
     ),
     (
