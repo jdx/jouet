@@ -2,6 +2,7 @@
 //! `jouet_output`.
 
 pub(crate) mod agent_help;
+pub(crate) mod audit;
 pub(crate) mod edit;
 pub(crate) mod hook;
 pub(crate) mod land;
@@ -12,6 +13,7 @@ pub(crate) mod run;
 pub(crate) mod setup;
 pub(crate) mod share;
 pub(crate) mod skill;
+pub(crate) mod stats;
 pub(crate) mod threads;
 pub(crate) mod wait;
 pub(crate) mod wind;
