@@ -4,7 +4,7 @@ description: Exact, checked, all-or-nothing text edits across files, from search
 
 # jouet edit
 
-`jouet edit` makes exact, checked, all-or-nothing text edits across files. It replaces Python heredoc scripts with a hand-written `assert s.count(old) == 1`, and offers the patch format OpenAI Codex uses to any agent.
+`jouet edit` makes exact, checked, all-or-nothing text edits across files. Use it where an agent would write a Python heredoc with `str.replace` and a hand-written `assert s.count(old) == 1`. It also accepts the patch format OpenAI Codex uses, from any agent.
 
 ```text
 jouet edit [--spec FILE] [--format blocks|patch|json] [--dry-run] [--diff]
@@ -13,7 +13,7 @@ jouet edit replace PATH --old TEXT --new TEXT [--count N | --all]
 jouet edit hash PATH...
 ```
 
-`jouet edit` reads a spec from `--spec FILE` or from stdin. The flags are listed in the [CLI reference](/cli/edit/).
+`jouet edit` reads a spec from `--spec FILE` or from stdin. The flags are listed in the [CLI reference](/cli/edit/), and [Why jouet](/why#editing-two-files) compares it with the heredoc it replaces.
 
 ## How an edit runs
 
