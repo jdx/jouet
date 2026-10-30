@@ -57,3 +57,16 @@ mise run ci
 plus jactionlint on the workflows: `mise x hk -- hk check --all` to verify,
 `mise x hk -- hk fix` to fix, or `mise x hk -- hk install --mise` to run them on
 commit.
+
+## Documentation
+
+The site at [jouet.jdx.dev](https://jouet.jdx.dev) is built with VitePress from
+`docs/` and deployed from `main`. `docs/cli` is generated from the usage spec
+the binary serves, so change a command's help in `src/main.rs`, never in those
+files.
+
+```sh
+mise run render       # regenerate docs/cli
+mise run docs         # local server with live reload
+mise run docs:build   # what CI builds
+```
