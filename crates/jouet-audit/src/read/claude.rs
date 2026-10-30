@@ -57,9 +57,10 @@ impl Reader for ClaudeCode {
         // each transcript's own `cwd` decides.
         let prefix = filter.project.as_ref().and_then(|p| p.to_str()).map(encode);
         let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
+        // An entry that vanished or cannot be inspected is skipped, not the
+        // whole harness.
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
             let name = entry.file_name();
@@ -68,7 +69,7 @@ impl Reader for ClaudeCode {
             {
                 continue;
             }
-            files_under(&entry.path(), &[".jsonl"], &mut paths)?;
+            let _ = files_under(&entry.path(), &[".jsonl"], &mut paths);
         }
         // Only sessions and their subagents (workflow agents included), not
         // workflow journals or other files kept beside them.
@@ -180,6 +181,7 @@ impl State {
             t.requests.push(Request {
                 at,
                 calls: start..start,
+                id: id.as_deref().map(request_id),
                 ..Default::default()
             });
             self.message = id;
@@ -247,6 +249,15 @@ impl State {
             call.failed = block.is_error.0;
         }
     }
+}
+
+/// A message ID as a request identity. The hash is fixed, so the same ID
+/// is the same identity in every transcript and every run.
+fn request_id(message: &str) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    message.hash(&mut h);
+    h.finish()
 }
 
 /// What a Claude Code tool is, by name.

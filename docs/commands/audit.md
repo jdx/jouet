@@ -11,7 +11,7 @@ jouet audit [--since TIME] [--harness claude|codex|all] [--project PATH]
             [--top N] [--examples] [--json]
 ```
 
-The flags are listed in the [CLI reference](/cli/audit). `--since` takes a duration ago (`7d`, `12h`), a date (`2026-10-01`) or RFC 3339. `--project` keeps sessions that ran in that directory or below it. `--top` sets how many categories are listed per harness (default 10; `0` lists all).
+The flags are listed in the [CLI reference](/cli/audit). `--since` takes a duration ago (`7d`, `12h`), a date (`2026-10-01`) or RFC 3339. `--project` keeps sessions that ran in that directory or below it; a relative path is taken from the current directory, with `..` resolved by name rather than by following symlinks. `--top` sets how many categories are listed per harness (default 10; `0` lists all).
 
 ## Where it reads
 
@@ -87,7 +87,7 @@ The excerpt leaves out the edits suggestion, the other patterns and the closing 
 
 ## JSON
 
-`--json` prints one document: `scan` (files and bytes read, files skipped as older than `--since` or outside `--project`, lines that were not JSON, files that could not be read, the time taken) and one entry in `harnesses` per harness, each with `totals`, every category, `suggestions` and `patterns`. A category's `share` is a fraction from 0 to 1 of the harness's input tokens, or of its tool time when `ranked_by` is `duration`. Each category lists its five most frequent shapes and `shape_count`. Fields that are zero or empty are left out.
+`--json` prints one document: `scan` (files and bytes read, files skipped as older than `--since` or outside `--project`, lines that were not JSON, requests left out as copies of ones another transcript already counted, files that could not be read, the time taken) and one entry in `harnesses` per harness, each with `totals`, every category, `suggestions` and `patterns`. A category's `share` is a fraction from 0 to 1 of the harness's input tokens, or of its tool time when `ranked_by` is `duration`. Each category lists its five most frequent shapes and `shape_count`. Fields that are zero or empty are left out.
 
 ```console
 $ jouet audit --json | jq -c '.harnesses[] | {harness, top: .categories[0].category}'
@@ -97,4 +97,4 @@ $ jouet audit --json | jq -c '.harnesses[] | {harness, top: .categories[0].categ
 
 ## Exit codes
 
-`0` with a report, `2` for a usage error, and `3` when no transcripts were found or none matched `--since` and `--project`. A file that cannot be read, or is cut off partway, does not fail the audit: the report lists it, and what came before the error still counts.
+`0` with a report, `2` for a usage error, and `3` when no transcripts were found or none matched `--since` and `--project`. A file that cannot be read, or is cut off partway, does not fail the audit: the report lists it, and what came before the error still counts. A directory that cannot be read inside a harness's directory is skipped. A forked or resumed Claude Code session repeats its parent's requests, message IDs and all, and each is counted once.

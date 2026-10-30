@@ -265,6 +265,8 @@ impl State {
             input_tokens: last.input_tokens.u64(),
             output_tokens: last.output_tokens.u64(),
             calls: self.request_start..t.calls.len(),
+            // A token count carries no ID to recognise a copy by.
+            id: None,
         });
         self.request_start = t.calls.len();
     }
