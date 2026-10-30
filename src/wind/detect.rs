@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A sleep that took at least this long counts.
-pub const LONG_SLEEP_MS: u64 = 10_000;
+pub(crate) const LONG_SLEEP_MS: u64 = 10_000;
 /// How many later calls in the session are looked at for what worked
 /// instead of a failure.
 const FIX_WINDOW: u8 = 3;
@@ -29,7 +29,7 @@ const MAX_SESSIONS: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Pattern {
+pub(crate) enum Pattern {
     NeverWorks,
     Sleep,
 }
@@ -47,13 +47,13 @@ impl Pattern {
 /// What identifies a command in a shape: its program and up to two
 /// subcommands, and the names of its flags.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Signature {
+pub(crate) struct Signature {
     pub words: Vec<String>,
     pub flags: Vec<String>,
 }
 
 impl Signature {
-    pub fn of(command: &shell::Command) -> Self {
+    pub(crate) fn of(command: &shell::Command) -> Self {
         let argv = command.argv();
         let mut words: Vec<String> = argv
             .first()
@@ -87,7 +87,7 @@ impl Signature {
         }
     }
 
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         let mut parts = self.words.clone();
         parts.extend(self.flags.iter().cloned());
         parts.join(" ")
@@ -96,7 +96,7 @@ impl Signature {
 
 /// What has been seen of one pattern.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Evidence {
+pub(crate) struct Evidence {
     pub pattern: Pattern,
     pub signature: Signature,
     pub count: u64,
@@ -117,7 +117,7 @@ pub struct Evidence {
 }
 
 impl Evidence {
-    pub fn ready(&self) -> bool {
+    pub(crate) fn ready(&self) -> bool {
         let (count, sessions) = self.pattern.threshold();
         self.count >= count && self.sessions.len() >= sessions
     }
@@ -134,7 +134,7 @@ struct Pending {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Detector {
+pub(crate) struct Detector {
     #[serde(default)]
     pub evidence: BTreeMap<String, Evidence>,
     /// Signatures that have succeeded at least once, which rules out "never
@@ -152,7 +152,7 @@ pub struct Detector {
 impl Detector {
     /// Takes in one ledger entry. `is_check` says whether a script is a
     /// test, lint or build run, whose failures are ordinary.
-    pub fn observe(&mut self, entry: &Entry, is_check: &dyn Fn(&str) -> bool) {
+    pub(crate) fn observe(&mut self, entry: &Entry, is_check: &dyn Fn(&str) -> bool) {
         if entry.tool.as_deref() != Some("Bash") {
             return;
         }
@@ -300,13 +300,13 @@ impl Detector {
 
     /// Called when a run ends: forgets what is over an hour old and still
     /// waiting for the session's next call, so the state stays small.
-    pub fn finish(&mut self, now: u64) {
+    pub(crate) fn finish(&mut self, now: u64) {
         self.pending.retain(|_, p| now.saturating_sub(p.ts) < 3600);
         self.covered.clear();
     }
 
     /// Evidence that has reached its threshold.
-    pub fn ready(&self) -> impl Iterator<Item = (&String, &Evidence)> {
+    pub(crate) fn ready(&self) -> impl Iterator<Item = (&String, &Evidence)> {
         self.evidence.iter().filter(|(_, e)| e.ready())
     }
 }
@@ -316,7 +316,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::ledger::Decision;
 
-    pub fn ran(ts: u64, session: &str, script: &str, exit_code: i32) -> Entry {
+    pub(crate) fn ran(ts: u64, session: &str, script: &str, exit_code: i32) -> Entry {
         Entry {
             ts,
             harness: "claude".into(),

@@ -3,8 +3,8 @@
 use super::Output;
 use super::skill::{self, Format};
 use crate::SetupArgs;
-use crate::exit::Exit;
 use crate::setup::{self, Harness, Scope};
+use jouet_output::exit::Exit;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -45,7 +45,7 @@ struct Report {
     notes: Vec<String>,
 }
 
-pub fn run(args: &SetupArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     let Some(harness) = Harness::parse(&args.harness) else {
         return out.error(
             Exit::Usage,

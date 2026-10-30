@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Whether a name is fit for a rule file: lowercase words joined by dashes.
-pub fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
         && name.len() <= 64
@@ -20,7 +20,7 @@ pub fn valid_name(name: &str) -> bool {
         && !name.ends_with('-')
 }
 
-pub struct Header<'a> {
+pub(crate) struct Header<'a> {
     pub name: &'a str,
     pub why: &'a str,
     pub author: &'a str,
@@ -29,7 +29,7 @@ pub struct Header<'a> {
 
 /// A rule's header: always in warn mode and user scope, since that is the
 /// only kind of rule jouet writes.
-pub fn header(h: &Header) -> String {
+pub(crate) fn header(h: &Header) -> String {
     format!(
         "--!strict\n--- name: {}\n--- why: {}\n--- mode: warn\n--- scope: user\n--- author: {}\n--- created: {}\n",
         h.name,
@@ -44,7 +44,7 @@ fn one_line(text: &str) -> String {
 }
 
 /// A new rule with a header and a `check` to fill in.
-pub fn scaffold(h: &Header) -> String {
+pub(crate) fn scaffold(h: &Header) -> String {
     format!(
         r#"{}
 -- `jouet rule types` prints the API; `jouet rule test {name} --replay` runs this
@@ -76,7 +76,7 @@ return rule
 
 /// The rule's code with its header's mode set, adding the line after `why`
 /// when there is none.
-pub fn set_mode(code: &str, mode: Mode) -> String {
+pub(crate) fn set_mode(code: &str, mode: Mode) -> String {
     let word = match mode {
         Mode::Warn => "warn",
         Mode::Deny => "deny",
@@ -86,7 +86,7 @@ pub fn set_mode(code: &str, mode: Mode) -> String {
 
 /// The rule's code with one header field set, adding it after `why` when the
 /// header has none. A file without a header is returned as it is.
-pub fn set_field(code: &str, key: &str, value: &str) -> String {
+pub(crate) fn set_field(code: &str, key: &str, value: &str) -> String {
     let line = format!("--- {key}: {}\n", one_line(value));
     // The header's lines, with each one's field name, up to the first line
     // that is not part of it.
@@ -129,12 +129,12 @@ pub fn set_field(code: &str, key: &str, value: &str) -> String {
 }
 
 /// Where retired rules go: beside the rules, where they no longer load.
-pub fn retired_dir(rules_dir: &Path) -> PathBuf {
+pub(crate) fn retired_dir(rules_dir: &Path) -> PathBuf {
     rules_dir.join("retired")
 }
 
 /// Moves a rule out of the directory rules load from. Returns where it went.
-pub fn retire(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn retire(path: &Path) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let retired = retired_dir(dir);
     std::fs::create_dir_all(&retired)?;
@@ -151,7 +151,7 @@ pub fn retire(path: &Path) -> std::io::Result<PathBuf> {
 
 /// One change to a rule, as `jouet rule log` prints it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Change {
+pub(crate) struct Change {
     pub ts: u64,
     pub rule: String,
     /// `created`, `promoted`, `retired` or `shared`.
@@ -166,11 +166,11 @@ pub struct Change {
 }
 
 /// `$XDG_STATE_HOME/jouet/rule-log.jsonl`.
-pub fn log_path() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("rule-log.jsonl"))
+pub(crate) fn log_path() -> Option<PathBuf> {
+    jouet_output::paths::state_dir().map(|d| d.join("rule-log.jsonl"))
 }
 
-pub fn log(path: &Path, change: &Change) -> std::io::Result<()> {
+pub(crate) fn log(path: &Path, change: &Change) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -184,7 +184,7 @@ pub fn log(path: &Path, change: &Change) -> std::io::Result<()> {
 }
 
 /// Every change in the log, oldest first; unreadable lines are skipped.
-pub fn read_log(path: &Path) -> Vec<Change> {
+pub(crate) fn read_log(path: &Path) -> Vec<Change> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()

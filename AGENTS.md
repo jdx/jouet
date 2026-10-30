@@ -1,8 +1,8 @@
 # jouet Development Guide
 
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
-(review threads), `jouet pr status` (many PRs at once) and `jouet edit` (exact, all-or-nothing file
-edits). It is in early development; the commands land one at a time.
+(review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
+PR needs next, and merging one that is ready) and `jouet edit` (exact, all-or-nothing file edits). It is in early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
 
@@ -26,10 +26,10 @@ Go through mise rather than calling cargo directly, so that a laptop and a CI ru
 same commands. mise wraps `cargo` with mbx; see CONTRIBUTING.md.
 
 ```sh
-mise run build        # cargo build --all-targets
-mise run test         # cargo test --all-targets, then the bats tests in test/
+mise run build        # cargo build --workspace --all-targets
+mise run test         # cargo test --workspace --all-targets, then the bats tests in test/
 mise run test:bats    # only the bats tests
-mise run lint         # cargo fmt --check + clippy --all-targets --all-features -D warnings
+mise run lint         # cargo fmt --all --check + clippy --workspace --all-targets --all-features -D warnings
 mise run lint-fix     # auto-fix what can be auto-fixed
 mise run ci           # build + test + lint
 ```
@@ -45,6 +45,28 @@ mise x hk -- hk install --mise  # pre-commit hook
 
 CI also runs `cargo deny check` (`deny.toml`), the same tests on macOS, and `cargo check` on the
 MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester tests in `e2e-win/`.
+
+## Crates
+
+The repository is a Cargo workspace. The `jouet` package at the root is the binary: the usage-rs
+CLI declaration in `src/main.rs`, the command glue in `src/cmd/`, the config file, the git
+helpers, and the setup, hook, ledger and agent-guide code. The rest lives in library crates under
+`crates/`:
+
+- `jouet-output`: the shared conventions: exit codes, display modes, `Output` (results and the
+  error document), time parsing and formatting, and the log and state directories.
+- `jouet-github`: the GitHub client (token lookup, retries, GraphQL and REST, ETags,
+  `JOUET_GITHUB_API_URL`), TLS, and the `pr` model shared by `pr status`, `pr threads` and `wait`.
+- `jouet-edit`: the edit engine behind `jouet edit`.
+- `jouet-rules`: the Luau rule engine and the built-in rules behind `jouet hook` and `jouet rule`,
+  its read-only probes (`probe/`), and the recipes `jouet run` runs (`recipe.rs`, `recipes/`).
+- `jouet-wait`: the conditions and polling behind `jouet wait`.
+
+The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
+workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,
+dependency requirements in `[workspace.dependencies]`, and each crate inherits both. Every crate
+shares one version (see `release-plz.toml`). The subprocess tests in `tests/` and the bats and
+Pester tests stay at the root, since they run the binary.
 
 ## Code rules
 
@@ -72,7 +94,14 @@ MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester t
   and repository rules may only add decisions; keep that floor (no replacing built-in rules, no
   locking out `jouet`) when changing the engine. A rule's `examples` are its tests: `cargo test` runs every built-in rule's, so add
   matching and near-miss commands with each change. A rule whose advice names a jouet command
-  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module` and `prelude.luau`.
+  declares it in `needs`. Keep `jouet.d.luau` in step with `install_module`, `prelude.luau`,
+  the probes and `recipe::COMMANDS`, and check it with `luau-lsp analyze
+  --definitions=jouet.d.luau rules/*.luau recipes/*.luau`.
+- **Probes and recipes:** probes only read, are cached per hook call or recipe step, and run within
+  the caller's remaining budget; the GitHub ones stay off in hooks unless `rules.network` is set.
+  A recipe reaches the world only through `jouet.cmd`, whose commands are listed in
+  `recipe::COMMANDS`: never add one that runs a shell command or trusts a repository, and mark one
+  that posts or merges `Effect::Write`, so it needs `yes = true`.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub
   responses are to be recorded as fixtures and replayed, never fetched live in tests.
 - **End-to-end tests** run a command the way an agent does, from a shell: one bats file per
@@ -95,9 +124,12 @@ Every command follows these, so an agent learns them once. Keep new commands con
   outside a major version.
 - **Exit codes** come from one shared table: `0` ok, `1` failed (the answer is no), `2` usage,
   `3` not found, `4` precondition (refused before doing anything), `5` remote, `124` timeout,
-  `130` interrupted. `1` and `4` are deliberately separate.
+  `130` interrupted. `1` and `4` are deliberately separate. `pr next` alone adds `10` (act) and
+  `20` (waiting), outside the table on purpose.
 - **No prompts and no TTY requirement.** Display style is chosen from an explicit flag,
-  `JOUET_DISPLAY`, agent detection (`mise-agent-env`), then whether stdout is a TTY.
+  `JOUET_DISPLAY`, agent detection (`mise-agent-env`), then whether stdout is a TTY. The one
+  prompt is `pr land`'s confirmation, shown only when `display::person_at_terminal()` (stdin and
+  stderr are terminals, no agent detected); everyone else passes `--yes` or gets exit 2.
 
 ## Conventional commits
 
@@ -123,8 +155,8 @@ the daily auto-merge of the release PR.
   release is at least two days old and a `fix:` or `feat:` has landed since.
 - Renaming `.github/workflows/release-plz.yml` breaks crates.io publishing until the trusted
   publisher is updated, because the OIDC claim names the workflow file.
-- Published crates carry source and licence only. Repository tooling files are listed in
-  `Cargo.toml`'s `exclude`; add new ones there.
+- Published crates carry source and licence only. Each crate's `Cargo.toml` lists what it ships
+  in `include`, so nothing else in a checkout is packaged; a new file that must ship goes there.
 
 ## PR titles and descriptions are release-note inputs
 

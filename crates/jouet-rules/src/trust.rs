@@ -85,7 +85,7 @@ fn key(dir: &Path) -> String {
 }
 
 /// A hash over the names and contents of the directory's rule files.
-pub fn digest(dir: &Path) -> std::io::Result<String> {
+pub(crate) fn digest(dir: &Path) -> std::io::Result<String> {
     let mut hasher = Sha256::new();
     for path in crate::rule_files(dir)? {
         let name = path.file_name().unwrap_or_default().to_string_lossy();

@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-const PR: &str = include_str!("../src/pr/threads/fixtures/pr.json");
-const COMMITS: &str = include_str!("../src/pr/threads/fixtures/commits.json");
-const ACTIVITY: &str = include_str!("../src/pr/threads/fixtures/activity.json");
+const PR: &str = include_str!("../crates/jouet-github/src/pr/threads/fixtures/pr.json");
+const COMMITS: &str = include_str!("../crates/jouet-github/src/pr/threads/fixtures/commits.json");
+const ACTIVITY: &str = include_str!("../crates/jouet-github/src/pr/threads/fixtures/activity.json");
 
 const HEAD: &str = "c42414f907109526b406d2b72bef0bfe5cf07209";
 const BASE: &str = "118797e7b63bc6579693dfc04fa7113a80d4ae02";

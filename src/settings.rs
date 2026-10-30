@@ -4,6 +4,7 @@
 //! ```toml
 //! [rules]
 //! disable = ["git-stash", "no-verify"]
+//! network = true
 //!
 //! [hooks]
 //! verify = false
@@ -15,7 +16,7 @@
 use usage_rs::config::{EnvLayer, FileLayer, FileScope, Layers, resolve};
 
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
-pub struct Settings {
+pub(crate) struct Settings {
     #[usage(flatten)]
     pub rules: RuleSettings,
     #[usage(flatten)]
@@ -27,7 +28,7 @@ pub struct Settings {
 /// Self-winding: the ledger the hooks keep, and the rules drafted from it.
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "wind")]
-pub struct WindSettings {
+pub(crate) struct WindSettings {
     /// Draft rules from costly patterns in the hook ledger, and show them at session start
     #[usage(env = "JOUET_WIND", default = true)]
     pub enabled: bool,
@@ -42,7 +43,7 @@ pub struct WindSettings {
 /// What the hooks `jouet setup` installs do.
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "hooks")]
-pub struct HookSettings {
+pub(crate) struct HookSettings {
     /// Run jouet's hooks at all
     #[usage(env = "JOUET_HOOKS", default = true)]
     pub enabled: bool,
@@ -63,18 +64,22 @@ pub struct HookSettings {
 /// Which rules run.
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "rules")]
-pub struct RuleSettings {
+pub(crate) struct RuleSettings {
     /// Rules to turn off, by name; "all" turns every rule off
     #[usage(env = "JOUET_RULES_DISABLE", merge = "union", parse = "list_by_comma")]
     pub disable: Option<Vec<String>>,
+    /// Let rules in hooks use the GitHub probes (`jouet.pr.*`); off so a
+    /// hook never waits on the network. Recipes always have them
+    #[usage(env = "JOUET_RULES_NETWORK", default = false)]
+    pub network: bool,
 }
 
 impl Settings {
     /// Reads the settings. Never fails: a broken config file or variable
     /// falls back to the defaults for what it broke, because a hook must not
     /// stop working over a typo.
-    pub fn load() -> Self {
-        let file = crate::paths::config_dir().map(|d| d.join("config.toml"));
+    pub(crate) fn load() -> Self {
+        let file = jouet_output::paths::config_dir().map(|d| d.join("config.toml"));
         Self::load_from(&EnvLayer::from_process(), file.filter(|p| p.is_file()))
     }
 
@@ -106,6 +111,17 @@ mod tests {
     fn nothing_is_disabled_by_default() {
         let s = Settings::load_from(&env(&[]), None);
         assert_eq!(s.rules.disable, None);
+        assert!(!s.rules.network);
+    }
+
+    #[test]
+    fn the_network_probes_are_turned_on_by_the_file_or_the_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[rules]\nnetwork = true\n").unwrap();
+        assert!(Settings::load_from(&env(&[]), Some(path)).rules.network);
+        let on = Settings::load_from(&env(&[("JOUET_RULES_NETWORK", "true")]), None);
+        assert!(on.rules.network);
     }
 
     #[test]

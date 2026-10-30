@@ -4,29 +4,18 @@
 
 mod cmd;
 mod config;
-mod display;
-mod edit;
-mod exit;
 mod git;
-mod github;
 mod guide;
 mod ledger;
-mod paths;
-mod pr;
 mod redact;
 mod rules;
 mod settings;
 mod setup;
 mod share;
 mod spec;
-mod time;
-mod tls;
 mod verify;
-mod wait;
 mod wind;
 
-use display::Mode;
-use exit::Exit;
 use std::process::ExitCode;
 use usage_rs::{Args, Cli, Subcommands};
 
@@ -59,6 +48,8 @@ enum Cmd {
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
+    /// Run a recipe: a Luau script that sequences jouet's commands
+    Run(RunArgs),
     /// Notice costly patterns in the hook ledger and draft rules for them
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
@@ -156,6 +147,10 @@ pub struct PrArgs {
 pub enum PrCmd {
     /// Show where PRs stand and why any need attention
     Status(StatusArgs),
+    /// Say the one thing each PR needs next, and the command for it
+    Next(NextArgs),
+    /// Merge a PR that is ready, honouring branch protection
+    Land(LandArgs),
     /// List, reply to and resolve review threads
     Threads(ThreadsArgs),
 }
@@ -188,6 +183,83 @@ pub struct StatusArgs {
     /// Exit 1 when any PR needs attention
     #[usage(long)]
     fail_on_attention: bool,
+}
+
+/// Say the one thing each PR needs next, and the command for it
+///
+/// Works through a fixed order and stops at the first state that applies:
+/// merged, closed, draft, conflict, mergeable_unknown, behind_base,
+/// checks_failing, checks_pending, changes_requested, unresolved_threads,
+/// awaiting_approval, blocked, auto_merge, ready_to_merge. The states come
+/// from the same data and attention codes as `pr status`. Exits 0 when
+/// nothing is left to do, 10 when the agent must act and 20 when waiting on
+/// someone or something else; with several PRs, 10 wins over 20. These two
+/// codes are outside the shared table on purpose.
+#[derive(Args)]
+pub struct NextArgs {
+    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
+    /// current branch's PR
+    prs: Vec<String>,
+    /// Add the open PRs authored by the token's user
+    #[usage(long)]
+    mine: bool,
+    /// Add the PRs matching a GitHub search query
+    #[usage(long, value_name = "QUERY")]
+    search: Option<String>,
+    /// The repository for bare numbers, branches, --mine and --search.
+    /// Repeatable. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Vec<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
+}
+
+/// Merge a PR that is ready, honouring branch protection
+///
+/// Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is
+/// missing. With --update, a branch behind its base is first updated on
+/// GitHub by merging the base in (never a force-push), and its new checks
+/// are waited for. The merge goes through the API with the head SHA as a
+/// guard, the way the merge button does, so branch protection applies and
+/// is never bypassed. Then the PR is confirmed merged and the merge commit
+/// printed. It asks first only when a person is at a terminal (stdin and
+/// stderr are terminals and no coding agent is detected); anyone else must
+/// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
+#[derive(Args)]
+pub struct LandArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// How to merge: squash, merge or rebase (default squash)
+    #[usage(long, value_name = "METHOD")]
+    method: Option<String>,
+    /// Update a branch that is behind its base by merging the base in on
+    /// GitHub, then wait for its checks
+    #[usage(long)]
+    update: bool,
+    /// Merge without asking
+    #[usage(long)]
+    yes: bool,
+    /// Print the plan and change nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// How long to wait for checks after --update (default 30m)
+    #[usage(long, value_name = "DUR")]
+    timeout: Option<String>,
+    /// Time between the first checks of that wait; backs off to 60s
+    /// (default 10s)
+    #[usage(long, value_name = "DUR")]
+    interval: Option<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
 }
 
 /// Block until a condition holds, then print one summary
@@ -442,6 +514,34 @@ pub enum RuleCmd {
     Log(RuleLogArgs),
     /// Record something a rule could not express, for `jouet share --idea`
     Gap(RuleGapArgs),
+}
+
+/// Run a recipe: a Luau script that sequences jouet's commands
+///
+/// Recipes are built in (land, ship-check, sweep), in ~/.config/jouet/recipes,
+/// and in a repository's .jouet/recipes once it is trusted with --trust. They
+/// run only jouet's own commands, through `jouet.cmd`, and a command that
+/// merges or posts needs `yes=true`. Words after the recipe are its
+/// arguments: KEY=VALUE, or plain words in order, as in `jouet run land 123
+/// yes=true`.
+#[derive(Args)]
+pub(crate) struct RunArgs {
+    /// The recipe to run
+    recipe: Option<String>,
+    /// The recipe's arguments: KEY=VALUE, or plain words in order
+    args: Vec<String>,
+    /// List every recipe, where it comes from and what it takes
+    #[usage(long)]
+    list: bool,
+    /// Print each step the recipe would run, running none
+    #[usage(long)]
+    dry_run: bool,
+    /// Trust this repository's .jouet/recipes as they are now
+    #[usage(long, conflicts = "--untrust")]
+    trust: bool,
+    /// Stop trusting this repository's .jouet/recipes
+    #[usage(long)]
+    untrust: bool,
 }
 
 /// List every rule, where it comes from and whether it runs
@@ -828,6 +928,7 @@ fn main() -> ExitCode {
         Cmd::Pr(args) => cmd::pr::run(args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
+        Cmd::Run(args) => cmd::run::run(&args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::Share(args) => cmd::share::run(&args, &out),
@@ -837,20 +938,4 @@ fn main() -> ExitCode {
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     exit.into()
-}
-
-impl cmd::Output {
-    fn new(json: bool, display: Option<&str>) -> Self {
-        match Mode::detect(display) {
-            Ok(mode) => Self { json, mode },
-            Err(message) => {
-                let out = Self {
-                    json,
-                    mode: Mode::Plain,
-                };
-                out.error(Exit::Usage, &message);
-                std::process::exit(Exit::Usage.code().into());
-            }
-        }
-    }
 }

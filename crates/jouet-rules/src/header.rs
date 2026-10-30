@@ -50,7 +50,7 @@ impl Scope {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Header {
+pub(crate) struct Header {
     pub name: Option<String>,
     pub why: Option<String>,
     pub mode: Option<String>,
@@ -61,7 +61,7 @@ pub struct Header {
 
 /// Reads the `--- key: value` lines at the top of a rule file, skipping blank
 /// lines and `--!` directives. The header ends at the first other line.
-pub fn parse(code: &str) -> Header {
+pub(crate) fn parse(code: &str) -> Header {
     let mut header = Header::default();
     for line in code.lines() {
         let line = line.trim();

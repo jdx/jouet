@@ -46,7 +46,7 @@ static HOSTS: LazyLock<Regex> = LazyLock::new(|| {
 /// The text with private details replaced. `words` are more to replace,
 /// such as internal tool names, the user's login and this machine's name;
 /// each becomes `<redacted>`.
-pub fn anonymize(text: &str, words: &[String]) -> String {
+pub(crate) fn anonymize(text: &str, words: &[String]) -> String {
     let mut out = text.to_string();
     for (re, with) in PATTERNS.iter() {
         out = re.replace_all(&out, *with).into_owned();
@@ -70,7 +70,7 @@ pub fn anonymize(text: &str, words: &[String]) -> String {
 
 /// Words of this machine to replace wherever they appear: the user's login,
 /// the host's name, and the current repository's owner and name.
-pub fn local_words() -> Vec<String> {
+pub(crate) fn local_words() -> Vec<String> {
     let mut words = Vec::new();
     for var in ["USER", "USERNAME", "LOGNAME"] {
         if let Ok(v) = std::env::var(var) {

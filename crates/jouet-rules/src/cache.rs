@@ -12,7 +12,7 @@ use std::path::Path;
 /// when it holds this exact source, otherwise compiled and, when there is a
 /// cache, stored there. The key does not name the Luau version, so a caller
 /// whose cached chunk fails to load calls [`recompile`].
-pub fn compile(code: &str, cache: Option<&Path>) -> Result<(Vec<u8>, bool), String> {
+pub(crate) fn compile(code: &str, cache: Option<&Path>) -> Result<(Vec<u8>, bool), String> {
     let key = key(code);
     let path = cache.map(|dir| dir.join(format!("{key}.luauc")));
     if let Some(bytes) = path.as_ref().and_then(|p| std::fs::read(p).ok())
@@ -24,7 +24,7 @@ pub fn compile(code: &str, cache: Option<&Path>) -> Result<(Vec<u8>, bool), Stri
 }
 
 /// Compiles the rule again, replacing whatever the cache held for it.
-pub fn recompile(code: &str, cache: Option<&Path>) -> Result<Vec<u8>, String> {
+pub(crate) fn recompile(code: &str, cache: Option<&Path>) -> Result<Vec<u8>, String> {
     let path = cache.map(|dir| dir.join(format!("{}.luauc", key(code))));
     fresh(code, path.as_deref())
 }

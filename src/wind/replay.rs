@@ -14,10 +14,10 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// How many fired calls and near misses a report lists.
-pub const SHOWN: usize = 10;
+pub(crate) const SHOWN: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Hit {
+pub(crate) struct Hit {
     pub command: String,
     /// How many times the ledger holds this call.
     pub count: u64,
@@ -26,7 +26,7 @@ pub struct Hit {
 }
 
 #[derive(Debug, Default, Serialize)]
-pub struct Replay {
+pub(crate) struct Replay {
     /// Calls replayed: the shell calls of the rule's event.
     pub calls: u64,
     /// Calls the rule fired on, most frequent first.
@@ -51,7 +51,7 @@ fn programs(shape: &str) -> BTreeSet<String> {
 }
 
 /// Runs the rule on every shell call of its event the entries hold.
-pub fn replay(engine: &Engine, rule: &Rule, entries: &[Entry]) -> Replay {
+pub(crate) fn replay(engine: &Engine, rule: &Rule, entries: &[Entry]) -> Replay {
     let mut report = Replay::default();
     let mut fired: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut quiet: BTreeMap<String, u64> = BTreeMap::new();
@@ -131,7 +131,7 @@ mod tests {
     use crate::wind::stats::tests::fired;
     use jouet_rules::{Budget, Options, Origin, Source};
 
-    pub fn engine(name: &str, code: &str) -> Engine {
+    pub(super) fn engine(name: &str, code: &str) -> Engine {
         Engine::new(
             vec![Source {
                 name: name.into(),

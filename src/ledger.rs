@@ -19,19 +19,19 @@ const ROTATE_AT: u64 = 4 * 1024 * 1024;
 /// Rotated files are removed once they are this old.
 const KEEP: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// How far back a retry counts as an override.
-pub const OVERRIDE_WINDOW: Duration = Duration::from_secs(10 * 60);
+pub(crate) const OVERRIDE_WINDOW: Duration = Duration::from_secs(10 * 60);
 /// How much of the current file the override check reads, from the end.
 const TAIL: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Decision {
+pub(crate) struct Decision {
     pub rule: String,
     /// `deny`, `warn`, `record:<kind>` or `block`.
     pub action: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
+pub(crate) struct Entry {
     pub ts: u64,
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,7 +55,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new(harness: &str, session: Option<&str>, event: &str) -> Self {
+    pub(crate) fn new(harness: &str, session: Option<&str>, event: &str) -> Self {
         Self {
             ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -72,7 +72,7 @@ impl Entry {
 /// SHA-256 of its root: the nearest directory with a `.git`, with symlinks
 /// resolved, which is what `git rev-parse --show-toplevel` prints. Read from
 /// the filesystem, because a hook cannot afford to start git.
-pub fn repo_key(cwd: &Path) -> Option<String> {
+pub(crate) fn repo_key(cwd: &Path) -> Option<String> {
     let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
     let root = root.canonicalize().ok()?;
     let digest = Sha256::digest(root.to_string_lossy().as_bytes());
@@ -80,13 +80,13 @@ pub fn repo_key(cwd: &Path) -> Option<String> {
 }
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
-pub fn dir() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("ledger"))
+pub(crate) fn dir() -> Option<PathBuf> {
+    jouet_output::paths::state_dir().map(|d| d.join("ledger"))
 }
 
 /// Appends an entry, rotating the file first if it has grown too large.
 /// Best effort: an error loses the entry, nothing else.
-pub fn append(dir: &Path, entry: &Entry) {
+pub(crate) fn append(dir: &Path, entry: &Entry) {
     let _ = try_append(dir, entry);
 }
 
@@ -132,7 +132,7 @@ fn prune(dir: &Path) {
 
 /// The recent entries of one session, oldest first, from the end of the
 /// current file.
-pub fn recent(dir: &Path, session: &str) -> Vec<Entry> {
+pub(crate) fn recent(dir: &Path, session: &str) -> Vec<Entry> {
     let Ok(mut file) = std::fs::File::open(dir.join("ledger.jsonl")) else {
         return Vec::new();
     };
@@ -162,7 +162,7 @@ pub fn recent(dir: &Path, session: &str) -> Vec<Entry> {
 /// A heuristic. Same shape means the same program, subcommands and flags,
 /// whatever the values, so `git add -A` retried as `git add -A` counts while
 /// `git add src/` does not. Each earlier decision is counted once.
-pub fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> {
+pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> {
     let since = now.saturating_sub(OVERRIDE_WINDOW.as_secs());
     let mut rules = Vec::new();
     for entry in recent.iter().rev() {
@@ -187,7 +187,7 @@ pub fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> {
 
 /// A command's shape: each top-level command's program, subcommand words and
 /// flag names, joined by its operators, with everything else a placeholder.
-pub fn shape(script: &str) -> String {
+pub(crate) fn shape(script: &str) -> String {
     let parsed = shell::parse(script);
     let mut out = String::new();
     for command in &parsed.commands {

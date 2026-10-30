@@ -3,7 +3,7 @@
 //! it describes the installed binary and cannot go stale.
 
 use crate::Jouet;
-use crate::exit::Exit;
+use jouet_output::exit::Exit;
 use std::fmt::Write as _;
 use usage_rs::spec::CommandMeta;
 
@@ -26,13 +26,19 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pr",
         Some(
-            "checking many PRs at once (`pr status`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
+            "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
         ),
     ),
     (
         "rule",
         Some(
             "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: `jouet rule test` runs one before it is enabled",
+        ),
+    ),
+    (
+        "run",
+        Some(
+            "a routine you would otherwise type out step by step: `jouet run land` (pr next, wait ci, then pr land; yes=true merges), `jouet run sweep` (unresolved threads as a work list) or `jouet run ship-check` (the test task, then pr status); `jouet run --list` shows them all, `--dry-run` the steps",
         ),
     ),
     (
@@ -88,7 +94,7 @@ fn lookup<S: AsRef<str>>(path: &[S]) -> Option<&'static CommandMeta<'static>> {
 }
 
 /// The commands an agent should know about, with when to use each.
-pub fn agent_commands() -> Vec<(&'static CommandMeta<'static>, &'static str)> {
+pub(crate) fn agent_commands() -> Vec<(&'static CommandMeta<'static>, &'static str)> {
     root()
         .subcommands
         .iter()
@@ -101,8 +107,8 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
-/// The guide for the whole tool, kept under about 60 lines.
-pub fn overview() -> String {
+/// The guide for the whole tool, kept under about 80 lines.
+pub(crate) fn overview() -> String {
     let mut out = format!(
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n",
         env!("CARGO_PKG_VERSION")
@@ -134,7 +140,7 @@ pub fn overview() -> String {
 }
 
 /// The guide for one command and its subcommands.
-pub fn command<S: AsRef<str>>(path: &[S]) -> Option<String> {
+pub(crate) fn command<S: AsRef<str>>(path: &[S]) -> Option<String> {
     let meta = lookup(path)?;
     let words: Vec<&str> = path.iter().map(AsRef::as_ref).collect();
     let name = format!("jouet {}", words.join(" "));
@@ -166,7 +172,7 @@ fn describe(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
 }
 
 /// The short primer printed when a session starts.
-pub fn summary(rules: &[&str], verify: bool) -> String {
+pub(crate) fn summary(rules: &[&str], verify: bool) -> String {
     let commands: Vec<String> = agent_commands()
         .iter()
         .map(|(meta, _)| {
@@ -314,7 +320,8 @@ mod tests {
     #[test]
     fn the_overview_stays_short() {
         let text = overview();
-        assert!(text.lines().count() <= 60, "{text}");
+        // The cap is a budget to defend, not a ceiling to fill.
+        assert!(text.lines().count() <= 80, "{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
             "{text}"

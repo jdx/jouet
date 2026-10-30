@@ -2,10 +2,10 @@
 
 use super::Output;
 use crate::AgentHelpArgs;
-use crate::exit::Exit;
 use crate::guide;
+use jouet_output::exit::Exit;
 
-pub fn run(args: &AgentHelpArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &AgentHelpArgs, out: &Output) -> Exit {
     let text = if args.command.is_empty() {
         guide::overview()
     } else {

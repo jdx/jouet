@@ -9,13 +9,13 @@
 //! ID`, which writes the rule under the user's rules. Nothing is enabled
 //! without that step, and every change goes to `jouet rule log`.
 
-pub mod detect;
-pub mod draft;
-pub mod reader;
-pub mod replay;
-pub mod rulefile;
-pub mod stats;
-pub mod unwind;
+pub(crate) mod detect;
+pub(crate) mod draft;
+pub(crate) mod reader;
+pub(crate) mod replay;
+pub(crate) mod rulefile;
+pub(crate) mod stats;
+pub(crate) mod unwind;
 
 use crate::ledger;
 use crate::settings::WindSettings;
@@ -29,24 +29,24 @@ use std::path::{Path, PathBuf};
 
 /// Notes shown when a session starts, at most. Not a setting: more would
 /// crowd out the session's own work.
-pub const MAX_PER_START: usize = 2;
+pub(crate) const MAX_PER_START: usize = 2;
 /// Sessions a note is shown to before it lapses.
-pub const MAX_SHOWINGS: usize = 3;
+pub(crate) const MAX_SHOWINGS: usize = 3;
 /// New notes drafted per day, at most.
-pub const MAX_NEW_PER_DAY: usize = 2;
+pub(crate) const MAX_NEW_PER_DAY: usize = 2;
 /// Runs closer together than this read nothing: the stop hook fires at the
 /// end of every turn.
 const MIN_INTERVAL: u64 = 60;
 
 /// Seconds since the Unix epoch, as the ledger and the rule log keep time.
-pub fn now() -> u64 {
-    u64::try_from(crate::time::now()).unwrap_or(0)
+pub(crate) fn now() -> u64 {
+    u64::try_from(jouet_output::time::now()).unwrap_or(0)
 }
 
 /// Where winding reads and writes; one place, so tests can point it at a
 /// scratch directory.
 #[derive(Debug, Clone)]
-pub struct Paths {
+pub(crate) struct Paths {
     pub ledger: PathBuf,
     pub state: PathBuf,
     pub rules: PathBuf,
@@ -55,8 +55,8 @@ pub struct Paths {
 
 impl Paths {
     /// The real locations, when there is a home directory.
-    pub fn locate() -> Option<Self> {
-        let state = crate::paths::state_dir()?;
+    pub(crate) fn locate() -> Option<Self> {
+        let state = jouet_output::paths::state_dir()?;
         Some(Self {
             ledger: ledger::dir()?,
             state: state.join("wind.json"),
@@ -68,7 +68,7 @@ impl Paths {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Status {
+pub(crate) enum Status {
     Pending,
     Adopted,
     Dismissed,
@@ -77,7 +77,7 @@ pub enum Status {
 }
 
 impl Status {
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Adopted => "adopted",
@@ -88,7 +88,7 @@ impl Status {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Note {
+pub(crate) struct Note {
     pub id: String,
     pub created: u64,
     pub pattern: Pattern,
@@ -109,7 +109,7 @@ pub struct Note {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct State {
+pub(crate) struct State {
     #[serde(default)]
     pub cursor: Cursor,
     #[serde(default)]
@@ -126,7 +126,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn load(path: &Path) -> Self {
+    pub(crate) fn load(path: &Path) -> Self {
         std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -142,14 +142,14 @@ impl State {
         Ok(())
     }
 
-    pub fn note(&self, id: &str) -> Option<&Note> {
+    pub(crate) fn note(&self, id: &str) -> Option<&Note> {
         self.notes.iter().find(|n| n.id == id)
     }
 }
 
 /// Loads, changes and saves the winding state under an exclusive lock, so
 /// two sessions' hooks never each save a copy without the other's changes.
-pub fn update<T>(path: &Path, change: impl FnOnce(&mut State) -> T) -> std::io::Result<T> {
+pub(crate) fn update<T>(path: &Path, change: impl FnOnce(&mut State) -> T) -> std::io::Result<T> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
     let lock = std::fs::OpenOptions::new()
@@ -167,7 +167,7 @@ pub fn update<T>(path: &Path, change: impl FnOnce(&mut State) -> T) -> std::io::
 /// The built-in and user rules, which decide what counts as a check and
 /// which rules exist. A repository's rules are left out: winding writes
 /// only user rules.
-pub fn user_engine(rules_dir: &Path) -> Option<Engine> {
+pub(crate) fn user_engine(rules_dir: &Path) -> Option<Engine> {
     let (sources, _) =
         jouet_rules::discover(Some(rules_dir), None, &jouet_rules::TrustStore::load(None));
     Engine::new(
@@ -197,7 +197,7 @@ fn is_check(engine: Option<&Engine>, script: &str) -> bool {
 }
 
 #[derive(Debug, Default, Serialize)]
-pub struct RunReport {
+pub(crate) struct RunReport {
     /// Ledger entries read this run.
     pub read: usize,
     /// Notes drafted this run.
@@ -213,7 +213,7 @@ pub struct RunReport {
 
 /// One winding pass: read the new ledger entries, draft notes for patterns
 /// that crossed their thresholds, and promote rules if the settings allow.
-pub fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool) -> RunReport {
+pub(crate) fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool) -> RunReport {
     let engine = user_engine(&paths.rules);
     let result = update(&paths.state, |state| {
         let mut report = RunReport::default();
@@ -243,12 +243,12 @@ pub fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool) -> Run
 
 /// Turns ready patterns into notes, within the daily limit.
 fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u64) -> Vec<String> {
-    let today = crate::time::date(now);
+    let today = jouet_output::time::date(now);
     let mut budget = MAX_NEW_PER_DAY.saturating_sub(
         state
             .notes
             .iter()
-            .filter(|n| crate::time::date(n.created) == today)
+            .filter(|n| jouet_output::time::date(n.created) == today)
             .count(),
     );
     let ready: Vec<(String, detect::Evidence)> = state
@@ -310,7 +310,7 @@ fn free_name(base: &str, state: &State, paths: &Paths, engine: Option<&Engine>) 
 }
 
 /// The notes to show a session that is starting, marked as shown to it.
-pub fn notes_for_session(paths: &Paths, session: &str) -> Vec<Note> {
+pub(crate) fn notes_for_session(paths: &Paths, session: &str) -> Vec<Note> {
     update(&paths.state, |state| {
         let mut shown = Vec::new();
         for note in state.notes.iter_mut() {
@@ -334,7 +334,7 @@ pub fn notes_for_session(paths: &Paths, session: &str) -> Vec<Note> {
 }
 
 /// A note as the session-start primer shows it: one line.
-pub fn note_line(note: &Note, session: &str) -> String {
+pub(crate) fn note_line(note: &Note, session: &str) -> String {
     let author = if session.is_empty() {
         String::new()
     } else {
@@ -347,7 +347,7 @@ pub fn note_line(note: &Note, session: &str) -> String {
 }
 
 /// Sets a note's status; false when there is no such note.
-pub fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
+pub(crate) fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
     update(&paths.state, |state| {
         let Some(note) = state.notes.iter_mut().find(|n| n.id == id) else {
             return false;
@@ -361,7 +361,7 @@ pub fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
 /// Switches a user rule to deny mode and logs it. Built-in and repository
 /// rules are refused: the first are part of jouet, the second change
 /// through a reviewed PR.
-pub fn promote(
+pub(crate) fn promote(
     paths: &Paths,
     name: &str,
     by: &str,

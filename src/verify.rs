@@ -16,20 +16,20 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Run {
+pub(crate) struct Run {
     pub command: String,
     pub exit_code: i32,
 }
 
 /// The latest run of each kind of check.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct State {
+pub(crate) struct State {
     #[serde(default)]
     pub runs: BTreeMap<Kind, Run>,
 }
 
 impl State {
-    pub fn record(&mut self, records: impl IntoIterator<Item = Record>) {
+    pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>) {
         for record in records {
             self.runs.insert(
                 record.kind,
@@ -42,7 +42,7 @@ impl State {
     }
 
     /// Why stopping should wait, if the last run of any check failed.
-    pub fn block_reason(&self) -> Option<String> {
+    pub(crate) fn block_reason(&self) -> Option<String> {
         let (kind, run) = self.runs.iter().find(|(_, run)| run.exit_code != 0)?;
         Some(format!(
             "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
@@ -52,14 +52,14 @@ impl State {
         ))
     }
 
-    pub fn load(path: &Path) -> Self {
+    pub(crate) fn load(path: &Path) -> Self {
         std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default()
     }
 
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
         let dir = path.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(dir)?;
         let mut file = tempfile::NamedTempFile::new_in(dir)?;
@@ -72,7 +72,7 @@ impl State {
 /// Loads, changes and saves a session's state under an exclusive lock, so
 /// two hooks finishing at once cannot each save a copy without the other's
 /// run.
-pub fn update(path: &Path, change: impl FnOnce(&mut State)) -> std::io::Result<()> {
+pub(crate) fn update(path: &Path, change: impl FnOnce(&mut State)) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
     let lock = std::fs::OpenOptions::new()
@@ -88,7 +88,7 @@ pub fn update(path: &Path, change: impl FnOnce(&mut State)) -> std::io::Result<(
 }
 
 /// The state file for a session, under `$XDG_STATE_HOME/jouet/sessions/`.
-pub fn state_path(session_id: &str) -> Option<PathBuf> {
+pub(crate) fn state_path(session_id: &str) -> Option<PathBuf> {
     let safe: String = session_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
@@ -100,12 +100,12 @@ pub fn state_path(session_id: &str) -> Option<PathBuf> {
     Some(sessions_dir()?.join(format!("{safe}.json")))
 }
 
-pub fn sessions_dir() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("sessions"))
+pub(crate) fn sessions_dir() -> Option<PathBuf> {
+    jouet_output::paths::state_dir().map(|d| d.join("sessions"))
 }
 
 /// Removes session files untouched for a week. Best effort.
-pub fn prune_sessions() {
+pub(crate) fn prune_sessions() {
     let Some(Ok(entries)) = sessions_dir().map(std::fs::read_dir) else {
         return;
     };
@@ -132,7 +132,7 @@ const TRANSCRIPT_TAIL: u64 = 8 * 1024 * 1024;
 /// The transcript format is Codex's own and undocumented; lines this does not
 /// recognise are skipped, so a format change means no blocking, not false
 /// blocking.
-pub fn codex_commands(path: &Path) -> Vec<(String, i32)> {
+pub(crate) fn codex_commands(path: &Path) -> Vec<(String, i32)> {
     let Ok(mut file) = std::fs::File::open(path) else {
         return Vec::new();
     };

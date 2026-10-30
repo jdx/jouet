@@ -16,6 +16,38 @@ repository = "https://github.com/jdx/jouet"
 # whole tool rather than repeating a paragraph per crate.
 readme = "README.md"
 
+[workspace.dependencies]
+jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
+jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
+jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
+jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
+jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
+libc = "0.2"
+mise-agent-env = "2026"
+mlua = { version = "0.12", features = ["luau"] }
+regex = "1"
+# TLS trusts the system's root certificates, with ring for crypto. ureq's
+# default bundles webpki-roots, and its platform verifier pulls in
+# webpki-root-certs; the org's dependency policy does not allow their licence
+# (CDLA-Permissive-2.0).
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustls-native-certs = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+similar = "3"
+tempfile = "3"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
+usage-config = { version = "7", features = ["toml"] }
+usage-rs = "7"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+
+# The library crates opt in, so everything they export is something the binary
+# or a sibling crate uses, and the rest is `pub(crate)`.
+[workspace.lints.rust]
+unreachable_pub = "deny"
+
 [package]
 name = "jouet"
 version = "0.0.1"
@@ -32,31 +64,26 @@ readme.workspace = true
 # (or left untracked in a checkout) are never published by accident.
 include = ["/src/**", "/LICENSE", "/README.md"]
 
+[lints]
+workspace = true
+
 [dependencies]
-jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
-mise-agent-env = "2026"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-regex = "1"
-sha2 = "0.11"
-similar = "3"
-tempfile = "3"
-# TLS trusts the system's root certificates, with ring for crypto. ureq's
-# default bundles webpki-roots, and its platform verifier pulls in
-# webpki-root-certs; the org's dependency policy does not allow their licence
-# (CDLA-Permissive-2.0).
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-rustls-native-certs = "0.8"
-toml = { version = "1", default-features = false, features = ["parse", "serde"] }
-ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
-usage-config = { version = "7", features = ["toml"] }
-usage-rs = { version = "7", features = ["config"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+jouet-edit.workspace = true
+jouet-github.workspace = true
+jouet-output.workspace = true
+jouet-rules.workspace = true
+jouet-wait.workspace = true
+mise-agent-env.workspace = true
+regex.workspace = true
+serde.workspace = true
+# Keeps the key order of the harness settings files `setup` rewrites.
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
+similar.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+usage-config.workspace = true
+usage-rs = { workspace = true, features = ["config"] }
 
 [profile.release]
 lto = true
@@ -67,5 +94,5 @@ strip = true
 debug = 1
 
 [dev-dependencies]
-serde_json = "1"
-tempfile = "3"
+serde_json.workspace = true
+tempfile.workspace = true

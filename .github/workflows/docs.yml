@@ -6,6 +6,7 @@ on:
     paths:
       - "docs/**"
       - "src/**"
+      - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "mise.toml"
@@ -17,6 +18,7 @@ on:
     paths:
       - "docs/**"
       - "src/**"
+      - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "mise.toml"

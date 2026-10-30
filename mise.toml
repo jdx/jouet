@@ -36,7 +36,7 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 [tasks.build]
 alias = "b"
 description = "Build the debug binary"
-run = "cargo build --all-targets"
+run = "cargo build --workspace --all-targets"
 
 [tasks.test]
 alias = "t"
@@ -48,7 +48,7 @@ description = "Run the Rust unit and integration tests"
 # After `build`, not beside it: the end-to-end tests run target/debug/jouet,
 # and a cargo writing that file while a test starts it fails the test.
 depends = ["build"]
-run = "cargo test --all-targets"
+run = "cargo test --workspace --all-targets"
 
 [tasks."test:e2e"]
 description = "Run the end-to-end tests: bats on Unix, Pester (e2e-win/) on Windows"
@@ -67,17 +67,17 @@ depends = ["lint:fmt", "lint:clippy"]
 
 [tasks."lint:fmt"]
 description = "Check formatting"
-run = "cargo fmt --check"
+run = "cargo fmt --all --check"
 
 [tasks."lint:clippy"]
 description = "Run clippy, warnings as errors"
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 
 [tasks.lint-fix]
 description = "Auto-fix formatting and the clippy lints that can be fixed"
 run = [
-    "cargo fmt",
-    "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings",
+    "cargo fmt --all",
+    "cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings",
 ]
 
 [tasks.ci]

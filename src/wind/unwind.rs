@@ -9,16 +9,16 @@ use jouet_rules::{Engine, Origin, Scope, State};
 use serde::Serialize;
 
 /// Firings before a rule's override rate means anything.
-pub const MIN_FIRINGS: u64 = 5;
+pub(crate) const MIN_FIRINGS: u64 = 5;
 /// An override rate at or above this proposes retirement.
-pub const OVERRIDDEN: f64 = 0.5;
+pub(crate) const OVERRIDDEN: f64 = 0.5;
 /// A rule firing on at least this share of all shell calls, at least
 /// [`NOISY_FIRINGS`] times, is noisy.
-pub const NOISY_SHARE: f64 = 0.1;
-pub const NOISY_FIRINGS: u64 = 20;
+pub(crate) const NOISY_SHARE: f64 = 0.1;
+pub(crate) const NOISY_FIRINGS: u64 = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Proposal {
+pub(crate) struct Proposal {
     pub rule: String,
     pub scope: Scope,
     pub source: String,
@@ -31,7 +31,7 @@ pub struct Proposal {
 }
 
 /// The rules worth retiring, with why.
-pub fn proposals(engine: &Engine, stats: &Stats) -> Vec<Proposal> {
+pub(crate) fn proposals(engine: &Engine, stats: &Stats) -> Vec<Proposal> {
     let mut out = Vec::new();
     for rule in engine.rules() {
         if rule.scope == Scope::Builtin || rule.state == State::Untrusted {
@@ -71,7 +71,7 @@ pub fn proposals(engine: &Engine, stats: &Stats) -> Vec<Proposal> {
 
 /// Retires the user rules among the proposals, logging each. Returns the
 /// changes made and the errors met.
-pub fn apply(
+pub(crate) fn apply(
     paths: &Paths,
     proposals: &[Proposal],
     by: &str,

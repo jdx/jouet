@@ -1,0 +1,21 @@
+[package]
+name = "jouet-output"
+version = "0.0.1"
+description = "The exit codes, display modes and output conventions jouet's commands share"
+keywords = ["agents", "cli"]
+categories = ["command-line-interface"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/LICENSE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+mise-agent-env.workspace = true
+serde.workspace = true
+serde_json.workspace = true

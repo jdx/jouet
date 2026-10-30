@@ -4,7 +4,7 @@
 use crate::Jouet;
 
 /// Whether this binary has the command at `path`, such as `["wait", "ci"]`.
-pub fn has_command(path: &[&str]) -> bool {
+pub(crate) fn has_command(path: &[&str]) -> bool {
     let mut meta = Jouet::spec().root;
     for name in path {
         let found = meta

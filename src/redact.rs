@@ -42,11 +42,11 @@ static SECRETS: LazyLock<Vec<(Regex, Keep)>> = LazyLock::new(|| {
     .collect()
 });
 
-pub const MASK: &str = "[redacted]";
+pub(crate) const MASK: &str = "[redacted]";
 
 /// The text with every secret replaced by `[redacted]`, keeping what shows
 /// the shape of the command around it.
-pub fn redact(text: &str) -> String {
+pub(crate) fn redact(text: &str) -> String {
     let mut out = text.to_string();
     for (re, keep) in SECRETS.iter() {
         out = re
@@ -64,7 +64,7 @@ pub fn redact(text: &str) -> String {
 }
 
 /// The first secret left in the text, already redacted, if any.
-pub fn find_secret(text: &str) -> Option<String> {
+pub(crate) fn find_secret(text: &str) -> Option<String> {
     SECRETS.iter().find_map(|(re, _)| {
         re.find_iter(text)
             .map(|m| m.as_str())

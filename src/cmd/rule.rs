@@ -1,19 +1,19 @@
 //! `jouet rule list|test|types|trust|untrust|new|promote|log`.
 
 use super::Output;
-use crate::exit::Exit;
 use crate::rules;
 use crate::wind::{self, Paths, Status, replay, rulefile};
 use crate::{
     RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
 };
+use jouet_output::exit::Exit;
 use jouet_rules::{Call, Engine, Origin, Rule, Source, State, Trust};
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 
-pub fn run(args: &RuleArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => return out.error(Exit::Failed, &format!("reading the current directory: {e}")),
@@ -419,7 +419,7 @@ fn new(args: &RuleNewArgs, out: &Output) -> Exit {
         );
     }
     let author = author(args.author.as_deref());
-    let created = crate::time::date(crate::wind::now());
+    let created = jouet_output::time::date(crate::wind::now());
     let (code, reason) = match &args.from_note {
         Some(id) => {
             let state = wind::State::load(&paths.state);
@@ -541,7 +541,7 @@ fn log(args: &RuleLogArgs, out: &Output) -> Exit {
             let _ = writeln!(
                 text,
                 "{}  {}  {}{arrow}  by {}: {}",
-                crate::time::date(c.ts),
+                jouet_output::time::date(c.ts),
                 c.rule,
                 c.change,
                 c.by,
@@ -593,13 +593,17 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, String), (Exit, String)
         let Some(origin @ Origin::Repo(_)) = untrusted else {
             return Ok((loaded.engine, rule.to_string()));
         };
-        return single(origin);
+        return single(origin, cwd);
     }
-    single(Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())))
+    single(
+        Origin::User(file.unwrap_or_else(|| as_path.to_path_buf())),
+        cwd,
+    )
 }
 
-/// An engine holding just the rule at `origin`'s path, as that origin.
-fn single(origin: Origin) -> Result<(Engine, String), (Exit, String)> {
+/// An engine holding just the rule at `origin`'s path, as that origin, with
+/// the probes a hook in `cwd` would have.
+fn single(origin: Origin, cwd: &Path) -> Result<(Engine, String), (Exit, String)> {
     let (Origin::User(path) | Origin::Repo(path)) = &origin else {
         return Err((Exit::Failed, "a built-in rule has no file".into()));
     };
@@ -631,6 +635,8 @@ fn single(origin: Origin) -> Result<(Engine, String), (Exit, String)> {
         },
     )
     .map_err(|e| (Exit::Failed, e.to_string()))?;
+    let network = crate::settings::Settings::load().rules.network;
+    engine.set_probes(rules::probes(cwd, network));
     Ok((engine, name))
 }
 

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Deserialize)]
-pub struct Config {
+pub(crate) struct Config {
     reply_footer: Option<String>,
     #[serde(default)]
     bots: Vec<String>,
@@ -15,7 +15,7 @@ pub struct Config {
 
 impl Config {
     /// Reads the config file; a missing file is an empty config.
-    pub fn load() -> Result<Self, String> {
+    pub(crate) fn load() -> Result<Self, String> {
         let Some(path) = path() else {
             return Ok(Self::default());
         };
@@ -28,7 +28,7 @@ impl Config {
 
     /// The text appended to every reply: `JOUET_REPLY_FOOTER` when it is set
     /// (set but empty turns the footer off), else `reply_footer`.
-    pub fn reply_footer(&self) -> Option<String> {
+    pub(crate) fn reply_footer(&self) -> Option<String> {
         let footer = match std::env::var("JOUET_REPLY_FOOTER") {
             Ok(footer) => footer,
             Err(_) => self.reply_footer.clone()?,
@@ -39,7 +39,7 @@ impl Config {
 
     /// Logins counted as bots besides those ending in `[bot]`: `bots`, plus
     /// any in `JOUET_BOTS`, separated by commas or spaces.
-    pub fn bots(&self) -> Vec<String> {
+    pub(crate) fn bots(&self) -> Vec<String> {
         let env = std::env::var("JOUET_BOTS").unwrap_or_default();
         self.bots
             .iter()

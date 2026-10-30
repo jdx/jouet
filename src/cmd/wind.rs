@@ -2,10 +2,10 @@
 //! proposing the ones to retire.
 
 use super::Output;
-use crate::exit::Exit;
 use crate::settings::Settings;
 use crate::wind::{self, Paths, Status, stats, unwind as retire};
 use crate::{UnwindArgs, WindArgs, WindCmd};
+use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;
 
@@ -18,7 +18,7 @@ fn paths(out: &Output) -> Result<Paths, Exit> {
     })
 }
 
-pub fn run(args: &WindArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &WindArgs, out: &Output) -> Exit {
     let paths = match paths(out) {
         Ok(paths) => paths,
         Err(exit) => return exit,
@@ -130,7 +130,7 @@ struct UnwindReport {
     errors: Vec<String>,
 }
 
-pub fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
+pub(crate) fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
     let paths = match paths(out) {
         Ok(paths) => paths,
         Err(exit) => return exit,

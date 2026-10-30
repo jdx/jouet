@@ -8,7 +8,7 @@ use super::rulefile::{self, Header};
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Draft {
+pub(crate) struct Draft {
     pub name: String,
     pub why: String,
     /// What the rule tells the agent.
@@ -17,7 +17,7 @@ pub struct Draft {
 }
 
 /// A Luau string literal.
-pub fn lua_str(text: &str) -> String {
+pub(crate) fn lua_str(text: &str) -> String {
     let mut out = String::from("\"");
     for c in text.chars() {
         match c {
@@ -42,7 +42,7 @@ fn list(items: &[String]) -> String {
 }
 
 /// A rule name from a pattern and the command's words: `wind-gh-pr-view`.
-pub fn name_for(evidence: &Evidence) -> String {
+pub(crate) fn name_for(evidence: &Evidence) -> String {
     let mut words: Vec<String> = Vec::new();
     for word in &evidence.signature.words {
         let slug: String = word
@@ -103,7 +103,7 @@ fn describe(e: &Evidence) -> (String, String) {
         Pattern::Sleep => (
             format!(
                 "Agents spent {} waiting in {} long sleeps across {sessions} sessions.",
-                crate::time::elapsed(e.cost / 1000),
+                jouet_output::time::elapsed(e.cost / 1000),
                 e.count
             ),
             "Instead of sleeping, wait for what you need: `jouet wait` blocks until a file, log line, port, URL, process or command is ready (`jouet agent-help wait`).".to_string(),
@@ -112,7 +112,7 @@ fn describe(e: &Evidence) -> (String, String) {
 }
 
 /// The rule for a pattern, named `name`, as `jouet wind` writes it.
-pub fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
+pub(crate) fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
     let (why, message) = describe(e);
     let header = rulefile::header(&Header {
         name,
@@ -178,7 +178,7 @@ pub fn draft(e: &Evidence, name: &str, created: &str) -> Draft {
 
 /// Whether a draft loads as a warn-mode user rule and passes every one of
 /// its examples.
-pub fn sound(draft: &Draft) -> bool {
+pub(crate) fn sound(draft: &Draft) -> bool {
     let engine = jouet_rules::Engine::new(
         vec![jouet_rules::Source {
             name: draft.name.clone(),

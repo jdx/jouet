@@ -1,56 +1,19 @@
-//! Command implementations, and the output conventions they share.
+//! Command implementations. The output conventions they share live in
+//! `jouet_output`.
 
-pub mod agent_help;
-pub mod edit;
-pub mod hook;
-pub mod pr;
-pub mod rule;
-pub mod setup;
-pub mod share;
-pub mod skill;
-pub mod threads;
-pub mod wait;
-pub mod wind;
+pub(crate) mod agent_help;
+pub(crate) mod edit;
+pub(crate) mod hook;
+pub(crate) mod land;
+pub(crate) mod next;
+pub(crate) mod pr;
+pub(crate) mod rule;
+pub(crate) mod run;
+pub(crate) mod setup;
+pub(crate) mod share;
+pub(crate) mod skill;
+pub(crate) mod threads;
+pub(crate) mod wait;
+pub(crate) mod wind;
 
-use crate::display::Mode;
-use crate::exit::Exit;
-
-pub struct Output {
-    pub json: bool,
-    pub mode: Mode,
-}
-
-impl Output {
-    /// Prints a command's result to stdout.
-    pub fn result<T: serde::Serialize>(&self, value: &T, text: impl FnOnce() -> String) {
-        if self.json {
-            println!("{}", self.mode.json(value));
-        } else {
-            print!("{}", text());
-        }
-    }
-
-    /// Reports an error that stopped a command: as a JSON document on stdout
-    /// with --json, so `jouet ... --json | jq` always gets one document, and
-    /// as text on stderr otherwise.
-    pub fn error(&self, exit: Exit, message: &str) -> Exit {
-        self.error_with_hint(exit, message, None)
-    }
-
-    /// Like [`Output::error`], with a hint on what to change.
-    pub fn error_with_hint(&self, exit: Exit, message: &str, hint: Option<&str>) -> Exit {
-        if self.json {
-            let mut error = serde_json::json!({ "code": exit.name(), "message": message });
-            if let Some(hint) = hint {
-                error["hint"] = hint.into();
-            }
-            println!("{}", self.mode.json(&serde_json::json!({ "error": error })));
-        } else {
-            eprintln!("jouet: {message}");
-            if let Some(hint) = hint {
-                eprintln!("hint: {hint}");
-            }
-        }
-        exit
-    }
-}
+pub(crate) use jouet_output::Output;

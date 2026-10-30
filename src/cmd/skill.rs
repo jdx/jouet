@@ -3,19 +3,19 @@
 
 use super::Output;
 use crate::SkillArgs;
-use crate::exit::Exit;
 use crate::guide;
+use jouet_output::exit::Exit;
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
+pub(crate) enum Format {
     Claude,
     Codex,
     AgentsMd,
 }
 
 impl Format {
-    pub fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "claude" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
@@ -25,7 +25,7 @@ impl Format {
     }
 }
 
-pub fn run(args: &SkillArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &SkillArgs, out: &Output) -> Exit {
     let name = args.format.as_deref().unwrap_or("claude");
     let Some(format) = Format::parse(name) else {
         return out.error(
@@ -45,7 +45,7 @@ pub fn run(args: &SkillArgs, out: &Output) -> Exit {
 /// The skill file. Claude Code and Codex read the same `SKILL.md` shape; the
 /// AGENTS.md snippet is the body under a heading, for harnesses without
 /// skills.
-pub fn render(format: Format) -> String {
+pub(crate) fn render(format: Format) -> String {
     let commands = guide::agent_commands();
     let mut body = String::new();
     body.push_str(
@@ -79,7 +79,7 @@ pub fn render(format: Format) -> String {
 /// The optional skill for proposing rules and ideas to jouet's maintainers.
 /// Nothing installs it; a user who wants their agent to contribute saves it
 /// beside the jouet skill.
-pub fn contribute(format: Format) -> String {
+pub(crate) fn contribute(format: Format) -> String {
     let body = "Contributing to jouet is optional, and a person approves every post. Use this skill only when the user has asked for it.\n\n\
 When a contribution is worth making:\n\n\
 - A rule of yours has proven itself: it has denied for a week, fires often and is rarely overridden, and it would help other people, not only this machine or project. `jouet share NAME` checks all of this and says what is missing.\n\
@@ -122,7 +122,8 @@ mod tests {
         );
         assert!(skill.contains("`jouet agent-help`"), "{skill}");
         assert!(skill.contains("- `jouet edit`: "), "{skill}");
-        assert!(skill.lines().count() <= 25, "{skill}");
+        // The cap is a budget to defend, not a ceiling to fill.
+        assert!(skill.lines().count() <= 30, "{skill}");
         // Flags belong to agent-help.
         assert!(!skill.contains("--expect-hash"), "{skill}");
     }

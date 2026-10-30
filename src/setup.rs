@@ -12,13 +12,13 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Harness {
+pub(crate) enum Harness {
     Claude,
     Codex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
+pub(crate) enum Scope {
     Global,
     Project,
 }
@@ -28,7 +28,7 @@ pub enum Scope {
 const TIMEOUT: u64 = 10;
 
 impl Harness {
-    pub fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "claude" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
@@ -36,7 +36,7 @@ impl Harness {
         }
     }
 
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -47,7 +47,7 @@ impl Harness {
     ///
     /// Codex sends no exit code to its hooks, so it gets no post-tool-use
     /// hooks: its stop hook reads the session transcript instead.
-    pub fn hooks(self) -> &'static [(&'static str, Option<&'static str>, &'static str)] {
+    pub(crate) fn hooks(self) -> &'static [(&'static str, Option<&'static str>, &'static str)] {
         match self {
             Self::Claude => &[
                 ("SessionStart", None, "session-start"),
@@ -65,13 +65,13 @@ impl Harness {
     }
 
     /// The file the harness reads hooks from.
-    pub fn config_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
+    pub(crate) fn config_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
         match (self, scope) {
-            (Self::Claude, Scope::Global) => crate::paths::env_dir("CLAUDE_CONFIG_DIR")
+            (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
                 .join("settings.json"),
             (Self::Claude, Scope::Project) => project.join(".claude").join("settings.json"),
-            (Self::Codex, Scope::Global) => crate::paths::env_dir("CODEX_HOME")
+            (Self::Codex, Scope::Global) => jouet_output::paths::env_dir("CODEX_HOME")
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("hooks.json"),
             (Self::Codex, Scope::Project) => project.join(".codex").join("hooks.json"),
@@ -79,9 +79,9 @@ impl Harness {
     }
 
     /// Where the harness looks for the jouet skill.
-    pub fn skill_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
+    pub(crate) fn skill_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
         let dir = match (self, scope) {
-            (Self::Claude, Scope::Global) => crate::paths::env_dir("CLAUDE_CONFIG_DIR")
+            (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
                 .join("skills"),
             (Self::Claude, Scope::Project) => project.join(".claude").join("skills"),
@@ -132,7 +132,7 @@ fn handlers(group: &Value) -> &[Value] {
 
 /// Checks that a document has the shape a hook file must have, so a merge
 /// never replaces something it does not understand.
-pub fn validate(doc: &Value) -> Result<(), String> {
+pub(crate) fn validate(doc: &Value) -> Result<(), String> {
     let Some(object) = doc.as_object() else {
         return Err("it is not a JSON object".into());
     };
@@ -152,7 +152,7 @@ pub fn validate(doc: &Value) -> Result<(), String> {
 
 /// Adds jouet's hooks for `harness`, replacing any jouet hooks already there.
 /// Leaves the document untouched when they are already exactly as wanted.
-pub fn install(doc: &mut Value, harness: Harness) {
+pub(crate) fn install(doc: &mut Value, harness: Harness) {
     let before = doc.clone();
     uninstall(doc);
     let object = doc.as_object_mut().expect("validated as an object");
@@ -191,7 +191,7 @@ pub fn install(doc: &mut Value, harness: Harness) {
 
 /// Removes every jouet handler, then any group, event or `hooks` object that
 /// removing them left empty.
-pub fn uninstall(doc: &mut Value) {
+pub(crate) fn uninstall(doc: &mut Value) {
     let Some(object) = doc.as_object_mut() else {
         return;
     };

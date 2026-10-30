@@ -66,8 +66,9 @@ local GIT_VALUE_OPTIONS = {
 }
 
 -- A git command's subcommand and its arguments, past global options such as
--- `-C dir`; nil when the command is not git.
-function jouet.git(command): (string?, { string })
+-- `-C dir`; nil when the command is not git. `jouet.git` is a table, which
+-- also holds the `state` probe, called as a function through `__call`.
+local function git_subcommand(command): (string?, { string })
 	if command.program ~= "git" then
 		return nil, {}
 	end
@@ -85,6 +86,12 @@ function jouet.git(command): (string?, { string })
 	end
 	return nil, {}
 end
+
+setmetatable(jouet.git, {
+	__call = function(_, command)
+		return git_subcommand(command)
+	end,
+})
 
 -- A gh command's arguments after `gh`; nil when the command is not gh.
 function jouet.gh(command): { string }?

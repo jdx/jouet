@@ -21,7 +21,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn run(args: &HookArgs) -> crate::exit::Exit {
+pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
     let result = std::panic::catch_unwind(|| {
         let harness = args.harness.as_deref().and_then(Harness::parse)?;
         let event = args.event.as_deref()?;
@@ -42,7 +42,7 @@ pub fn run(args: &HookArgs) -> crate::exit::Exit {
         }
         _ => {}
     }
-    crate::exit::Exit::Ok
+    jouet_output::exit::Exit::Ok
 }
 
 /// The hook's stdout for one event, or `None` to print nothing.

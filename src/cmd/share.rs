@@ -3,9 +3,9 @@
 
 use super::Output;
 use crate::ShareArgs;
-use crate::exit::Exit;
 use crate::share::{self, Posted, Proposal, Refusal, anonymize};
 use crate::wind::{self, Paths, rulefile};
+use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;
 
@@ -18,7 +18,7 @@ struct Report<'a> {
     url: Option<String>,
 }
 
-pub fn run(args: &ShareArgs, out: &Output) -> Exit {
+pub(crate) fn run(args: &ShareArgs, out: &Output) -> Exit {
     let Some(paths) = Paths::locate() else {
         return out.error(
             Exit::Failed,
@@ -83,7 +83,7 @@ pub fn run(args: &ShareArgs, out: &Output) -> Exit {
             &format!("{recent} proposals were posted in the last week, the most jouet posts; try again later"),
         );
     }
-    let mut client = crate::github::Client::from_env();
+    let mut client = jouet_github::Client::from_env();
     let (login, url) = match share::post(&mut client, &proposal) {
         Ok(posted) => posted,
         Err(Refusal::NoCategory) => {

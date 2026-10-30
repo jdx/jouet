@@ -12,7 +12,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Cursor {
+pub(crate) struct Cursor {
     /// The first line of the file the offset is in.
     #[serde(default)]
     pub head: String,
@@ -87,7 +87,7 @@ fn read_from(path: &Path, start: u64, entries: &mut Vec<Entry>) -> u64 {
 }
 
 /// Every entry after the cursor, and the cursor after the last whole line.
-pub fn read_since(dir: &Path, cursor: &Cursor) -> (Vec<Entry>, Cursor) {
+pub(crate) fn read_since(dir: &Path, cursor: &Cursor) -> (Vec<Entry>, Cursor) {
     let files = files(dir);
     let heads: Vec<String> = files.iter().map(|f| first_line(f)).collect();
     // The file the cursor is in; if none still starts with its line (the
@@ -114,7 +114,7 @@ pub fn read_since(dir: &Path, cursor: &Cursor) -> (Vec<Entry>, Cursor) {
 /// A ledger shape as a script the shell parser reads the way it read the
 /// command: its placeholders (`<arg>`, `--flag=<v>`, `<redacted>`) become
 /// plain words, where `<` would otherwise read as a redirection.
-pub fn script(shape: &str) -> String {
+pub(crate) fn script(shape: &str) -> String {
     shape
         .replace("<arg>", "ARG")
         .replace("<v>", "V")
@@ -122,7 +122,7 @@ pub fn script(shape: &str) -> String {
 }
 
 /// Every entry the ledger holds, oldest first.
-pub fn read_all(dir: &Path) -> Vec<Entry> {
+pub(crate) fn read_all(dir: &Path) -> Vec<Entry> {
     read_since(dir, &Cursor::default()).0
 }
 

@@ -7,7 +7,7 @@
 //! Before posting it looks for an existing proposal, refuses anything that
 //! still looks like a secret, and posts at most [`MAX_POSTS`] a week.
 
-pub mod anonymize;
+pub(crate) mod anonymize;
 
 use crate::wind::{self, Paths, replay, rulefile, stats};
 use jouet_rules::{Engine, Gap, Mode, Scope, State};
@@ -16,21 +16,21 @@ use serde_json::json;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-pub const OWNER: &str = "jdx";
-pub const REPO: &str = "jouet";
-pub const CATEGORY: &str = "Rules & ideas";
+pub(crate) const OWNER: &str = "jdx";
+pub(crate) const REPO: &str = "jouet";
+pub(crate) const CATEGORY: &str = "Rules & ideas";
 
 /// What a rule needs before it can be shared.
-pub const MIN_DENY_DAYS: u64 = 7;
-pub const MIN_FIRINGS: u64 = 10;
-pub const MAX_OVERRIDE_RATE: f64 = 0.1;
+pub(crate) const MIN_DENY_DAYS: u64 = 7;
+pub(crate) const MIN_FIRINGS: u64 = 10;
+pub(crate) const MAX_OVERRIDE_RATE: f64 = 0.1;
 /// Proposals posted per week, at most.
-pub const MAX_POSTS: usize = 3;
+pub(crate) const MAX_POSTS: usize = 3;
 const WEEK: u64 = 7 * 86_400;
 
 /// The primitives rules reached for, and wishes agents wrote down.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GapEntry {
+pub(crate) struct GapEntry {
     /// A missing field of the `jouet` module, such as `pr_status`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primitive: Option<String>,
@@ -49,7 +49,7 @@ pub struct GapEntry {
 
 impl GapEntry {
     /// What `jouet share --idea KEY` names it by.
-    pub fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         match (&self.primitive, &self.note) {
             (Some(p), _) => p.clone(),
             (None, Some(note)) => {
@@ -67,20 +67,20 @@ impl GapEntry {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Gaps {
+pub(crate) struct Gaps {
     #[serde(default)]
     pub gaps: Vec<GapEntry>,
 }
 
 /// `$XDG_STATE_HOME/jouet/gaps.json`.
-pub fn gaps_path() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("gaps.json"))
+pub(crate) fn gaps_path() -> Option<PathBuf> {
+    jouet_output::paths::state_dir().map(|d| d.join("gaps.json"))
 }
 
 /// `$XDG_STATE_HOME/jouet/shared.jsonl`: what was posted, for the weekly
 /// limit.
-pub fn posted_path() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("shared.jsonl"))
+pub(crate) fn posted_path() -> Option<PathBuf> {
+    jouet_output::paths::state_dir().map(|d| d.join("shared.jsonl"))
 }
 
 fn load<T: Default + for<'de> Deserialize<'de>>(path: &Path) -> T {
@@ -92,7 +92,10 @@ fn load<T: Default + for<'de> Deserialize<'de>>(path: &Path) -> T {
 
 /// Changes the gap file under a lock, as hooks of several sessions may
 /// record gaps at once.
-pub fn update_gaps<T>(path: &Path, change: impl FnOnce(&mut Gaps) -> T) -> std::io::Result<T> {
+pub(crate) fn update_gaps<T>(
+    path: &Path,
+    change: impl FnOnce(&mut Gaps) -> T,
+) -> std::io::Result<T> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
     let lock = std::fs::OpenOptions::new()
@@ -109,7 +112,7 @@ pub fn update_gaps<T>(path: &Path, change: impl FnOnce(&mut Gaps) -> T) -> std::
     Ok(out)
 }
 
-pub fn read_gaps(path: &Path) -> Gaps {
+pub(crate) fn read_gaps(path: &Path) -> Gaps {
     load(path)
 }
 
@@ -132,7 +135,7 @@ fn add_gap(gaps: &mut Gaps, entry: GapEntry, now: u64) {
 }
 
 /// Records the primitives an engine's rules reached for. Best effort.
-pub fn record_gaps(engine: &Engine) {
+pub(crate) fn record_gaps(engine: &Engine) {
     let gaps = engine.take_gaps();
     if gaps.is_empty() {
         return;
@@ -142,7 +145,7 @@ pub fn record_gaps(engine: &Engine) {
     }
 }
 
-pub fn record(path: &Path, found: &[Gap], now: u64) -> std::io::Result<()> {
+pub(crate) fn record(path: &Path, found: &[Gap], now: u64) -> std::io::Result<()> {
     update_gaps(path, |gaps| {
         for gap in found {
             let entry = GapEntry {
@@ -156,7 +159,12 @@ pub fn record(path: &Path, found: &[Gap], now: u64) -> std::io::Result<()> {
 }
 
 /// Records what an agent could not express, in its words.
-pub fn record_note(path: &Path, note: &str, rule: Option<&str>, now: u64) -> std::io::Result<()> {
+pub(crate) fn record_note(
+    path: &Path,
+    note: &str,
+    rule: Option<&str>,
+    now: u64,
+) -> std::io::Result<()> {
     update_gaps(path, |gaps| {
         let entry = GapEntry {
             note: Some(note.trim().to_string()),
@@ -169,7 +177,7 @@ pub fn record_note(path: &Path, note: &str, rule: Option<&str>, now: u64) -> std
 
 /// What a rule has done, gathered for a proposal.
 #[derive(Debug, Serialize)]
-pub struct Evidence {
+pub(crate) struct Evidence {
     pub deny_days: u64,
     pub fired: u64,
     pub overridden: u64,
@@ -185,7 +193,7 @@ pub struct Evidence {
 
 /// Checks a rule of yours against what sharing needs, returning its
 /// evidence or every reason it is not ready.
-pub fn check_rule(
+pub(crate) fn check_rule(
     paths: &Paths,
     name: &str,
     now: u64,
@@ -279,7 +287,7 @@ pub fn check_rule(
 
 /// A proposal: what would be posted, and what it was before anonymizing.
 #[derive(Debug, Serialize)]
-pub struct Proposal {
+pub(crate) struct Proposal {
     pub kind: &'static str,
     pub title: String,
     /// The text that would be posted.
@@ -291,7 +299,7 @@ pub struct Proposal {
 
 /// The AI disclosure line every post ends with: the config's
 /// `reply_footer` when there is one, else one naming the detected agent.
-pub fn footer() -> String {
+pub(crate) fn footer() -> String {
     if let Some(footer) = crate::config::Config::load()
         .ok()
         .and_then(|c| c.reply_footer())
@@ -342,7 +350,7 @@ fn shapes(out: &mut String, hits: &[replay::Hit]) {
     }
 }
 
-pub fn rule_proposal(
+pub(crate) fn rule_proposal(
     name: &str,
     why: &str,
     code: &str,
@@ -382,7 +390,7 @@ pub fn rule_proposal(
     finish("rule", format!("Rule: {name}"), body, words, footer)
 }
 
-pub fn idea_proposal(
+pub(crate) fn idea_proposal(
     key: &str,
     entries: &[&GapEntry],
     why: &[String],
@@ -434,7 +442,7 @@ pub fn idea_proposal(
 }
 
 /// Every candidate idea, by key, most recorded first.
-pub fn ideas(gaps: &Gaps) -> Vec<(String, Vec<&GapEntry>)> {
+pub(crate) fn ideas(gaps: &Gaps) -> Vec<(String, Vec<&GapEntry>)> {
     let mut by_key: Vec<(String, Vec<&GapEntry>)> = Vec::new();
     for gap in gaps.gaps.iter().filter(|g| !g.shared) {
         let key = gap.key();
@@ -453,7 +461,7 @@ pub fn ideas(gaps: &Gaps) -> Vec<(String, Vec<&GapEntry>)> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Posted {
+pub(crate) struct Posted {
     pub ts: u64,
     pub kind: String,
     pub title: String,
@@ -461,7 +469,7 @@ pub struct Posted {
 }
 
 /// How many proposals were posted in the week before `now`.
-pub fn posted_this_week(path: &Path, now: u64) -> usize {
+pub(crate) fn posted_this_week(path: &Path, now: u64) -> usize {
     std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
@@ -470,7 +478,7 @@ pub fn posted_this_week(path: &Path, now: u64) -> usize {
         .count()
 }
 
-pub fn note_posted(path: &Path, posted: &Posted) -> std::io::Result<()> {
+pub(crate) fn note_posted(path: &Path, posted: &Posted) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -487,7 +495,7 @@ pub fn note_posted(path: &Path, posted: &Posted) -> std::io::Result<()> {
 
 /// Why posting stopped before anything was written.
 #[derive(Debug)]
-pub enum Refusal {
+pub(crate) enum Refusal {
     /// The category does not exist yet.
     NoCategory,
     Duplicate(String),
@@ -496,8 +504,8 @@ pub enum Refusal {
 
 /// Looks up the repository and its category, refuses a duplicate, and
 /// creates the Discussion. Returns the poster's login and the URL.
-pub fn post(
-    client: &mut crate::github::Client,
+pub(crate) fn post(
+    client: &mut jouet_github::Client,
     proposal: &Proposal,
 ) -> Result<(String, String), Refusal> {
     let data = client

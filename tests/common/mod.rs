@@ -10,32 +10,32 @@ use std::sync::{Arc, Mutex};
 /// A request the fake server received: its method, path, token and body
 /// (`null` for a GET).
 #[derive(Debug, Clone)]
-pub struct Request {
+pub(crate) struct Request {
     pub method: String,
     pub path: String,
     pub token: String,
     pub body: Value,
 }
 
-pub struct Fake {
+pub(crate) struct Fake {
     pub url: String,
     requests: Arc<Mutex<Vec<Request>>>,
 }
 
 impl Fake {
-    pub fn requests(&self) -> Vec<Request> {
+    pub(crate) fn requests(&self) -> Vec<Request> {
         self.requests.lock().unwrap().clone()
     }
 }
 
 /// A status for `respond` to return: a 200 whose body is cut short.
-pub const CUT_SHORT: u16 = 0;
+pub(crate) const CUT_SHORT: u16 = 0;
 /// A status for `respond` to return: a 403 saying the primary rate limit is
 /// used up for the next hour.
-pub const RATE_LIMITED: u16 = 1;
+pub(crate) const RATE_LIMITED: u16 = 1;
 
 /// Serves `respond(request, index)` for each request, one per connection.
-pub fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
+pub(crate) fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static) -> Fake {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -103,18 +103,18 @@ pub fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 'static
 }
 
 /// A GraphQL request's query text, or `""` for a REST request.
-pub fn query(request: &Request) -> &str {
+pub(crate) fn query(request: &Request) -> &str {
     request.body["query"].as_str().unwrap_or_default()
 }
 
-pub fn stdout(out: &Output) -> String {
+pub(crate) fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-pub fn stderr(out: &Output) -> String {
+pub(crate) fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-pub fn json(out: &Output) -> Value {
+pub(crate) fn json(out: &Output) -> Value {
     serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", stdout(out)))
 }

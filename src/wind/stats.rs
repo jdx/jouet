@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct RuleStats {
+pub(crate) struct RuleStats {
     pub fired: u64,
     pub overridden: u64,
     pub sessions: u64,
@@ -22,7 +22,7 @@ pub struct RuleStats {
 
 impl RuleStats {
     /// Overrides as a share of firings, 0 to 1.
-    pub fn override_rate(&self) -> f64 {
+    pub(crate) fn override_rate(&self) -> f64 {
         if self.fired == 0 {
             0.0
         } else {
@@ -32,20 +32,20 @@ impl RuleStats {
 }
 
 #[derive(Debug, Default)]
-pub struct Stats {
+pub(crate) struct Stats {
     pub rules: BTreeMap<String, RuleStats>,
     /// Pre-tool-use shell calls the ledger holds, for judging noise.
     pub calls: u64,
 }
 
 impl Stats {
-    pub fn get(&self, rule: &str) -> RuleStats {
+    pub(crate) fn get(&self, rule: &str) -> RuleStats {
         self.rules.get(rule).cloned().unwrap_or_default()
     }
 }
 
 /// Every rule's stats over the entries.
-pub fn compute(entries: &[Entry]) -> Stats {
+pub(crate) fn compute(entries: &[Entry]) -> Stats {
     let mut stats = Stats::default();
     let mut sessions: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for entry in entries {
@@ -106,13 +106,13 @@ pub(crate) mod tests {
     }
 
     /// A pre-tool-use entry in which each rule warned.
-    pub fn fired(ts: u64, session: &str, script: &str, rules: &[&str]) -> Entry {
+    pub(crate) fn fired(ts: u64, session: &str, script: &str, rules: &[&str]) -> Entry {
         let warned: Vec<(&str, &str)> = rules.iter().map(|r| (*r, "warn")).collect();
         entry(ts, session, "pre-tool-use", script, &warned)
     }
 
     /// The ledger's record of a rule overridden.
-    pub fn overridden(ts: u64, session: &str, script: &str, rule: &str) -> Entry {
+    pub(crate) fn overridden(ts: u64, session: &str, script: &str, rule: &str) -> Entry {
         entry(ts, session, "override", script, &[(rule, "override")])
     }
 
