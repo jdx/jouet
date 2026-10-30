@@ -63,7 +63,7 @@ jouet edit --help
 
 Hand `jouet edit` a spec on stdin. It checks every edit before it writes any file, so this changes both files or neither:
 
-```sh
+```spec
 jouet edit <<'JOUET_EDIT'
 === src/main.rs
 <<<<<<< SEARCH
@@ -80,7 +80,7 @@ version = "0.2.0"
 JOUET_EDIT
 ```
 
-```text
+```output
 ok          src/main.rs  1 edit  +1 -1
 ok          Cargo.toml   1 edit  +1 -1
 2 of 2 files written
@@ -88,7 +88,7 @@ ok          Cargo.toml   1 edit  +1 -1
 
 If `Cargo.toml` had moved on to `0.1.1` since you read it, neither file would change, and the report would show the closest match:
 
-```text
+```output
 not written src/main.rs  1 edit  +1 -1
 failed      Cargo.toml   1 edit
   edit 1: no match
@@ -111,10 +111,22 @@ jouet edit replace src/main.rs --old 'let x = 2;' --new 'let x = 3;'
 Agents use what their instructions mention. Add a line like this to `AGENTS.md`, `CLAUDE.md` or a skill:
 
 ```md
-Edit files with `jouet edit` (search/replace blocks or a Codex-style patch on stdin)
-instead of Python heredocs, and wait with `jouet wait` instead of sleep loops.
-Run `jouet edit --help` and `jouet wait --help` for details. Exit code 4 means
-jouet refused and changed nothing; 124 means a wait timed out.
+Use jouet instead of hand-written shell scripts:
+- Edit files with `jouet edit` (search/replace blocks or a Codex-style patch on
+  stdin), not Python heredocs.
+- Wait with `jouet wait`, not sleep loops: `jouet wait ci` for a PR's checks,
+  and `jouet wait log`, `port`, `http`, `pid` or `cmd` for local things.
+- Check PRs with `jouet pr status`, and read, reply to and resolve review
+  threads with `jouet pr threads`, not loops over `gh pr view` or GraphQL.
+Run `jouet <command> --help` for details. Exit code 4 means jouet refused and
+changed nothing; 124 means a wait timed out and can be run again.
 ```
 
 jouet notices when an agent runs it and switches to compact output by itself. See [display modes](/conventions#display-modes).
+
+## Next steps
+
+- [`jouet edit`](/commands/edit): spec formats, previews, `--check` and stale-read guards.
+- [`jouet wait`](/commands/wait): CI, pull requests, logs, ports, URLs, processes and commands.
+- [`jouet pr status`](/commands/pr-status) and [`jouet pr threads`](/commands/pr-threads): pull requests and their review threads.
+- [Shared conventions](/conventions): display modes, JSON output and the exit codes every command shares.
