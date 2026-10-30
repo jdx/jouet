@@ -30,6 +30,14 @@ test("escapes title markup and gives changed content a new image URL", () => {
   assert.notEqual(first.path, socialCard("Another page").path);
 });
 
+test("the home page gets the brand card instead of a page card", () => {
+  const title = "Wind-up tools for coding agents";
+  const home = socialCard(title, { home: true });
+  assert.notEqual(home.path, socialCard(title).path);
+  assert.match(home.svg, />jouet<\/text>/);
+  assert.ok(!home.svg.includes("jouet / docs"));
+});
+
 test("renders a self-contained 1200 by 630 PNG", () => {
   const dir = mkdtempSync(join(tmpdir(), "jouet-social-"));
   try {
