@@ -38,7 +38,7 @@ sha2 = "0.11"
 similar = "3"
 tempfile = "3"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
-zstd = "0.13"
+zstd = "0.14"
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
 usage-rs = "7"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
