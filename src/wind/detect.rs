@@ -411,6 +411,7 @@ pub(crate) mod tests {
             pre.decisions = vec![Decision {
                 rule: "r".into(),
                 action: "warn".into(),
+                scope: None,
             }];
             d.observe(&pre, &never);
             d.observe(&ran(i as u64, s, "nope x", 127), &never);

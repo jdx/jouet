@@ -10,6 +10,8 @@
 use super::Output;
 use super::pr;
 use crate::LandArgs;
+use crate::ledger;
+use crate::settings::Settings;
 use jouet_github::Client;
 use jouet_github::pr::land::{self, Method, Refused};
 use jouet_github::pr::next::{self, Action, Next};
@@ -35,6 +37,8 @@ const LOG_LINES: usize = 60;
 const HEAD_MOVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How many times a merge is looked for after GitHub accepted it.
 const CONFIRM_TRIES: u32 = 5;
+/// How long hashing the PR head's tree may take.
+const TREE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The result document.
 #[derive(Debug, Serialize)]
@@ -90,6 +94,8 @@ struct Options {
     timeout: Duration,
     interval: Duration,
     settle: Duration,
+    /// Why to land without a recorded full test pass.
+    skip_verify: Option<String>,
 }
 
 pub(crate) fn run(args: &LandArgs, out: &Output) -> Exit {
@@ -147,6 +153,10 @@ fn options(args: &LandArgs) -> Result<Options, String> {
         timeout,
         interval,
         settle: pr::settle_arg(args.settle.as_deref())?,
+        skip_verify: match args.skip_verify.as_deref().map(str::trim) {
+            Some("") => return Err("--skip-verify needs a reason".into()),
+            reason => reason.map(str::to_string),
+        },
     })
 }
 
@@ -159,6 +169,7 @@ fn land(
     let (mut pr, next) = look(client, target, options.settle)?;
     let name = format!("{}#{}", pr.repo, pr.number);
     let update = gate(&pr, &next, options.update)?;
+    verify(&pr, options)?;
     let repo = Repo::parse(&pr.repo).expect("GitHub names repositories OWNER/NAME");
     let mut landed = Landed {
         repo: pr.repo.clone(),
@@ -235,6 +246,70 @@ fn land(
     Ok((landed, Exit::Ok))
 }
 
+/// Refuses a PR whose head has no full test pass in the hook ledger, unless
+/// `--skip-verify` gave a reason, which is logged there. The head is the one
+/// before any `--update`: the merge of the base that makes is checked by the
+/// PR's own CI, not here. Without a ledger (the hooks or their ledger are
+/// off, or have never run) there is nothing to check against.
+fn verify(pr: &PrStatus, options: &Options) -> Result<(), Stop> {
+    let settings = Settings::load();
+    let dir = ledger::dir().filter(|d| {
+        settings.hooks.enabled
+            && settings.hooks.verify
+            && settings.hooks.ledger
+            && d.join("ledger.jsonl").exists()
+    });
+    let Some(dir) = dir else {
+        return Ok(());
+    };
+    let name = format!("{}#{}", pr.repo, pr.number);
+    if let Some(reason) = &options.skip_verify {
+        if !options.dry_run {
+            let mut entry = ledger::Entry::new("cli", None, "skip-verify");
+            entry.repo = std::env::current_dir()
+                .ok()
+                .and_then(|cwd| ledger::repo_key(&cwd));
+            entry.shape = Some("jouet pr land --skip-verify".into());
+            entry.reason = Some(crate::redact::redact(reason));
+            ledger::append(&dir, &entry);
+        }
+        return Ok(());
+    }
+    let hint = "run the full test suite on this commit, or pass --skip-verify REASON";
+    let tree = jouet_rules::tree::commit_tree(None, &pr.head_oid, TREE_TIMEOUT).map_err(|e| {
+        Stop::new(
+            Exit::Precondition,
+            format!(
+                "{name} was not merged: its head {} cannot be read here to check its tests ({e})",
+                pr.head_sha
+            ),
+        )
+        .hint(format!(
+            "fetch it (`git fetch origin {}`) and run again, or pass --skip-verify REASON",
+            pr.head_oid
+        ))
+    })?;
+    match ledger::full_test_run(&dir, &tree) {
+        Some(true) => Ok(()),
+        Some(false) => Err(Stop::new(
+            Exit::Precondition,
+            format!(
+                "{name} was not merged: the last full test run at its head ({}) failed",
+                pr.head_sha
+            ),
+        )
+        .hint(hint)),
+        None => Err(Stop::new(
+            Exit::Precondition,
+            format!(
+                "{name} was not merged: no full test run has passed at its head ({}); partial runs do not count",
+                pr.head_sha
+            ),
+        )
+        .hint(hint)),
+    }
+}
+
 /// Fetches the PR as `pr status` does, and what `pr next` says of it.
 fn look(client: &mut Client, target: &Target, settle: Duration) -> Result<(PrStatus, Next), Stop> {
     let report = pr::fetch(client, vec![Lookup::Pr(target.clone())], settle)
@@ -283,6 +358,11 @@ fn gate(pr: &PrStatus, next: &Next, update: bool) -> Result<bool, Stop> {
 fn plan(pr: &PrStatus, update: bool, options: &Options) -> Vec<String> {
     let name = format!("{}#{}", pr.repo, pr.number);
     let mut plan = Vec::new();
+    if let Some(reason) = &options.skip_verify {
+        plan.push(format!(
+            "land without a recorded full test pass (--skip-verify: {reason})"
+        ));
+    }
     let head = if update {
         plan.push(format!(
             "merge {} into {} on GitHub (update-branch, never a force-push)",
@@ -382,6 +462,7 @@ fn wait_for_checks(
         all: false,
         log_lines: Some(LOG_LINES),
         appear_timeout: APPEAR_TIMEOUT,
+        confirm_conflict: jouet_wait::CONFLICT_CONFIRM,
     };
     let mut w = CiWait::new(repo.clone(), number, Some(head.to_string()), ci_options);
     // Progress goes to stderr; the result is part of land's own document.

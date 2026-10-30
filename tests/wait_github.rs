@@ -430,10 +430,10 @@ fn ci_passes_and_unchanged_polls_are_304s() {
         ],
     );
     let fake = serve(world);
-    let child = spawn(&fake, dir.path(), &[&CI[..], &["1s", "--json"]].concat());
+    let child = spawn(&fake, dir.path(), &[&CI[..], &["100ms", "--json"]].concat());
     // Unchanged for a few polls, then both pass.
     let w = handle(&fake);
-    after(3000, move || {
+    after(400, move || {
         let mut w = w.lock().unwrap();
         w.checks.insert(
             SHA_A,
@@ -474,7 +474,7 @@ fn ci_fails_fast_with_the_failed_steps_log_while_the_run_is_in_progress() {
     );
     world.required = vec!["unit"];
     let fake = serve(world);
-    let out = jouet(&fake, dir.path(), &[&CI[..], &["1s", "--json"]].concat());
+    let out = jouet(&fake, dir.path(), &[&CI[..], &["100ms", "--json"]].concat());
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -510,7 +510,7 @@ fn ci_fails_fast_with_the_failed_steps_log_while_the_run_is_in_progress() {
     let out = jouet(
         &fake,
         dir.path(),
-        &[&CI[..], &["1s", "--display", "agent"]].concat(),
+        &[&CI[..], &["100ms", "--display", "agent"]].concat(),
     );
     let text = stdout(&out);
     assert!(
@@ -535,9 +535,13 @@ fn ci_follows_a_moved_head() {
         .checks
         .insert(SHA_B, vec![check(2, "unit", "in_progress", None)]);
     let fake = serve(world);
-    let child = spawn(&fake, dir.path(), &[&CI[..], &["1s", "--jsonl"]].concat());
+    let child = spawn(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--jsonl"]].concat(),
+    );
     let w = handle(&fake);
-    after(1500, move || {
+    after(500, move || {
         let mut w = w.lock().unwrap();
         w.head = SHA_B;
         w.checks
@@ -581,7 +585,7 @@ fn ci_pinned_to_a_sha_ignores_the_head() {
     let out = jouet(
         &fake,
         dir.path(),
-        &[&CI[..], &["1s", "--sha", SHA_A, "--json"]].concat(),
+        &[&CI[..], &["100ms", "--sha", SHA_A, "--json"]].concat(),
     );
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     assert_eq!(json_doc(&out)["head_sha"], SHA_A);
@@ -611,7 +615,7 @@ fn required_checks_are_those_of_the_pinned_commit() {
         &[
             &CI[..],
             &[
-                "1s",
+                "100ms",
                 "--sha",
                 &SHA_A[..12],
                 "--required",
@@ -649,9 +653,9 @@ fn a_stale_conflict_right_after_a_push_is_not_believed() {
         .checks
         .insert(SHA_A, vec![check(1, "unit", "completed", Some("success"))]);
     let fake = serve(world);
-    let child = spawn(&fake, dir.path(), &[&CI[..], &["1s", "--json"]].concat());
+    let child = spawn(&fake, dir.path(), &[&CI[..], &["100ms", "--json"]].concat());
     let w = handle(&fake);
-    after(1500, move || {
+    after(500, move || {
         let mut w = w.lock().unwrap();
         w.mergeable = Some(true);
         w.mergeable_state = "clean";
@@ -669,7 +673,8 @@ fn a_stale_conflict_right_after_a_push_is_not_believed() {
     assert_eq!(json_doc(&out)["result"], "success");
 }
 
-/// A conflict that GitHub keeps reporting is believed after about 10s.
+/// A conflict that GitHub keeps reporting is believed once it has lasted
+/// the confirmation window (10s; shortened here).
 #[test]
 fn a_conflicted_pr_returns_once_confirmed() {
     let dir = tempfile::tempdir().unwrap();
@@ -678,7 +683,11 @@ fn a_conflicted_pr_returns_once_confirmed() {
         mergeable_state: "dirty",
         ..World::default()
     });
-    let out = jouet(&fake, dir.path(), &[&CI[..], &["1s", "--json"]].concat());
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--confirm-conflict", "100ms", "--json"]].concat(),
+    );
     assert_eq!(out.status.code(), Some(4), "{}", stdout(&out));
     let doc = json_doc(&out);
     assert_eq!(doc["result"], "conflict");
@@ -699,7 +708,7 @@ fn checks_that_never_appear_are_no_checks() {
         dir.path(),
         &[
             &CI[..],
-            &["1s", "--appear-timeout", "1s", "--display", "plain"],
+            &["100ms", "--appear-timeout", "200ms", "--display", "plain"],
         ]
         .concat(),
     );
@@ -728,7 +737,11 @@ fn a_rate_limit_is_slept_off_when_it_resets_in_time() {
         .checks
         .insert(SHA_A, vec![check(1, "unit", "completed", Some("success"))]);
     let fake = serve(world);
-    let out = jouet(&fake, dir.path(), &[&CI[..], &["1s", "--jsonl"]].concat());
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--jsonl"]].concat(),
+    );
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -746,7 +759,7 @@ fn a_rate_limit_is_slept_off_when_it_resets_in_time() {
     let out = jouet(
         &fake,
         dir.path(),
-        &[&CI[..], &["1s", "--timeout", "5s", "--json"]].concat(),
+        &[&CI[..], &["100ms", "--timeout", "5s", "--json"]].concat(),
     );
     assert_eq!(
         out.status.code(),
@@ -767,13 +780,17 @@ fn base_commits_touching_the_prs_files_are_reported() {
         .insert(SHA_A, vec![check(1, "unit", "in_progress", None)]);
     world.base_files = vec!["src/a.rs", "README.md"];
     let fake = serve(world);
-    let child = spawn(&fake, dir.path(), &[&CI[..], &["1s", "--jsonl"]].concat());
+    let child = spawn(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--jsonl"]].concat(),
+    );
     let w = handle(&fake);
-    after(1500, move || w.lock().unwrap().base_sha = "base111")
+    after(500, move || w.lock().unwrap().base_sha = "base111")
         .join()
         .unwrap();
     let w = handle(&fake);
-    after(1500, move || {
+    after(500, move || {
         w.lock()
             .unwrap()
             .checks
@@ -810,7 +827,7 @@ fn a_second_wait_reads_the_shared_state_and_replays_its_events() {
     let first = jouet(
         &fake,
         dir.path(),
-        &[&CI[..], &["1s", "--timeout", "0", "--json"]].concat(),
+        &[&CI[..], &["100ms", "--timeout", "0", "--json"]].concat(),
     );
     assert_eq!(first.status.code(), Some(124), "{}", stdout(&first));
     assert_eq!(json_doc(&first)["result"], "timeout");
@@ -852,7 +869,14 @@ fn check_and_ignore_select_by_name() {
         dir.path(),
         &[
             &CI[..],
-            &["1s", "--check", "unit*", "--ignore", "*windows*", "--json"],
+            &[
+                "100ms",
+                "--check",
+                "unit*",
+                "--ignore",
+                "*windows*",
+                "--json",
+            ],
         ]
         .concat(),
     );
@@ -878,12 +902,12 @@ fn a_run_finishes_and_a_missing_run_is_not_found() {
             "run",
             "https://github.com/jdx/demo/actions/runs/900",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
         ],
     );
     let w = handle(&fake);
-    after(1500, move || {
+    after(500, move || {
         let mut w = w.lock().unwrap();
         w.checks
             .insert(SHA_A, vec![check(5, "build", "completed", Some("success"))]);
@@ -929,12 +953,12 @@ fn pr_mergeable_waits_out_unknown() {
             "--until",
             "mergeable",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
         ],
     );
     let w = handle(&fake);
-    after(1500, move || {
+    after(500, move || {
         w.lock().unwrap().graphql_mergeable = "MERGEABLE"
     })
     .join()
@@ -963,6 +987,10 @@ fn pr_mergeable_waits_out_unknown() {
             "jdx/demo",
             "--until",
             "mergeable",
+            "--interval",
+            "100ms",
+            "--confirm-conflict",
+            "100ms",
             "--json",
         ],
     );
@@ -986,12 +1014,12 @@ fn pr_any_change_returns_the_first_change() {
             "--until",
             "any-change",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
         ],
     );
     let w = handle(&fake);
-    after(1500, move || w.lock().unwrap().head = SHA_B)
+    after(500, move || w.lock().unwrap().head = SHA_B)
         .join()
         .unwrap();
     let out = child.wait_with_output().unwrap();

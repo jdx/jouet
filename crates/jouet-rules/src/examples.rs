@@ -17,7 +17,15 @@ use mlua::{Table, Value};
 use serde::Serialize;
 
 /// The keys an example table may have.
-const CASE_KEYS: &[&str] = &["command", "tool", "harness", "exit_code", "action", "kind"];
+const CASE_KEYS: &[&str] = &[
+    "command",
+    "tool",
+    "harness",
+    "exit_code",
+    "action",
+    "kind",
+    "scope",
+];
 
 /// What a rule must make of an example.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +71,9 @@ pub struct Case {
     /// For a post-tool-use rule; 0 unless the example says.
     pub exit_code: Option<i32>,
     pub expect: Expect,
+    /// For a `fires` example with a `kind`: the scope the record must
+    /// have, `full` or `partial` and its selector, as [`Record::scope`].
+    pub scope: Option<String>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -190,6 +201,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         tool: "Bash".into(),
         harness: "test".into(),
         exit_code: None,
+        scope: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -258,6 +270,10 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
     if !fires && (action.is_some() || kind.is_some()) {
         return Err("a `quiet` example takes no `action` or `kind`".into());
     }
+    case.scope = text("scope")?;
+    if case.scope.is_some() && kind.is_none() {
+        return Err("`scope` needs a `kind`: it is the scope of the record".into());
+    }
     if fires {
         case.expect = Expect::Fires { action, kind };
     }
@@ -265,14 +281,18 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
 }
 
 /// Whether what the rule did is what the example expects.
-fn met(expect: Expect, action: Option<Action>, records: &[Record]) -> bool {
+fn met(case: &Case, action: Option<Action>, records: &[Record]) -> bool {
     let spoke = matches!(action, Some(Action::Deny | Action::Warn));
-    match expect {
+    match case.expect {
         Expect::Quiet => !spoke && records.is_empty(),
         Expect::Fires { action: want, kind } => {
             (spoke || !records.is_empty())
                 && want.is_none_or(|want| action == Some(want))
-                && kind.is_none_or(|kind| records.iter().any(|r| r.kind == kind))
+                && kind.is_none_or(|kind| {
+                    records.iter().any(|r| {
+                        r.kind == kind && case.scope.as_ref().is_none_or(|s| *s == r.scope())
+                    })
+                })
         }
     }
 }
@@ -289,6 +309,15 @@ impl Engine {
                 _ => "the rule is not loaded".into(),
             });
         }
+        // Examples are tests, so they give the same answer anywhere: every
+        // probe returns nil and a reason, whatever the machine holds.
+        let probes = self.vm.shared.probes.borrow_mut().take();
+        let out = self.run_examples(rule);
+        *self.vm.shared.probes.borrow_mut() = probes;
+        Ok(out)
+    }
+
+    fn run_examples(&self, rule: &Rule) -> Vec<Example> {
         let mut out = Vec::new();
         for case in &rule.examples {
             let call = Call {
@@ -309,12 +338,16 @@ impl Engine {
                     let action = decision.as_ref().map(|d| d.action);
                     let actual = match crate::summarize(decision.as_ref(), &records) {
                         word if word == "allow" => "quiet".to_string(),
+                        // An example that names a scope shows the one recorded.
+                        word if case.scope.is_some() && !records.is_empty() => {
+                            format!("{word} {}", records[0].scope())
+                        }
                         word => word,
                     };
                     let message = decision
                         .filter(|d| d.action != Action::Allow)
                         .and_then(|d| d.message);
-                    (met(case.expect, action, &records), actual, message)
+                    (met(case, action, &records), actual, message)
                 }
                 Err(e) => (false, format!("error: {e}"), None),
             };
@@ -323,14 +356,17 @@ impl Engine {
                 tool: case.tool.clone(),
                 harness: case.harness.clone(),
                 exit_code: call.exit_code,
-                expected: case.expect.text(),
+                expected: match &case.scope {
+                    Some(scope) => format!("{} {scope}", case.expect.text()),
+                    None => case.expect.text(),
+                },
                 actual,
                 message,
                 ok,
                 fires: matches!(case.expect, Expect::Fires { .. }),
             });
         }
-        Ok(out)
+        out
     }
 
     /// Whether a rule has examples of both kinds and passes every one: what

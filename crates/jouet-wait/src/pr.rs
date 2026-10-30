@@ -222,14 +222,17 @@ pub struct Doc {
 }
 
 impl PrWait {
-    pub fn new(target: Target, until: Until) -> Self {
+    /// A wait for `until` on `target`, believing a reported conflict once it
+    /// persists for `confirm_conflict` ([`crate::CONFLICT_CONFIRM`] except in
+    /// tests).
+    pub fn new(target: Target, until: Until, confirm_conflict: Duration) -> Self {
         Self {
             target,
             until,
             start: Instant::now(),
             baseline: None,
             last: None,
-            conflict: ConflictCheck::default(),
+            conflict: ConflictCheck::new(confirm_conflict),
         }
     }
 

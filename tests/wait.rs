@@ -65,7 +65,7 @@ fn json(out: &Output) -> serde_json::Value {
 
 fn later(f: impl FnOnce() + Send + 'static) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(1500));
+        thread::sleep(Duration::from_millis(500));
         f();
     })
 }
@@ -85,7 +85,7 @@ fn a_file_that_appears_is_met() {
             "file",
             &path_arg(&path),
             "--interval",
-            "1s",
+            "100ms",
             "--timeout",
             "20s",
             "--display",
@@ -120,9 +120,9 @@ fn a_timeout_exits_124_with_a_json_document() {
             "file",
             &path,
             "--timeout",
-            "1s",
+            "300ms",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
         ],
     );
@@ -148,7 +148,7 @@ fn file_contains_prints_the_matching_line_and_gone_waits_for_removal() {
             "--contains",
             "^listening on \\d+",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
         ],
     );
@@ -168,7 +168,7 @@ fn file_contains_prints_the_matching_line_and_gone_waits_for_removal() {
             &path_arg(&path),
             "--gone",
             "--interval",
-            "1s",
+            "100ms",
         ],
     );
     let p = path.clone();
@@ -191,7 +191,7 @@ fn a_log_wait_starts_at_the_end_and_follows_rotation() {
             "--match",
             "ready",
             "--interval",
-            "1s",
+            "100ms",
             "--display",
             "plain",
         ],
@@ -257,7 +257,7 @@ fn a_port_opens_and_closes() {
     let addr = format!("127.0.0.1:{port}");
     let child = spawn(
         dir.path(),
-        &["wait", "port", &addr, "--interval", "1s", "--json"],
+        &["wait", "port", &addr, "--interval", "100ms", "--json"],
     );
     let (tx, rx) = std::sync::mpsc::channel();
     let a = addr.clone();
@@ -281,7 +281,7 @@ fn a_port_opens_and_closes() {
 
     let child = spawn(
         dir.path(),
-        &["wait", "port", &addr, "--closed", "--interval", "1s"],
+        &["wait", "port", &addr, "--closed", "--interval", "100ms"],
     );
     later(move || drop(listener)).join().unwrap();
     let out = finish(child);
@@ -333,7 +333,7 @@ fn http_waits_for_the_status_and_the_body() {
             "--contains",
             "ready$",
             "--interval",
-            "1s",
+            "100ms",
             "--jsonl",
         ],
     );
@@ -379,9 +379,9 @@ fn a_pid_is_met_when_the_process_exits() {
             "file",
             &missing,
             "--timeout",
-            "2s",
+            "600ms",
             "--interval",
-            "1s",
+            "100ms",
             "--quiet",
         ])
         .spawn()
@@ -392,11 +392,11 @@ fn a_pid_is_met_when_the_process_exits() {
     let start = Instant::now();
     let out = jouet(
         dir.path(),
-        &["wait", "pid", &pid, "--interval", "1s", "--json"],
+        &["wait", "pid", &pid, "--interval", "100ms", "--json"],
     );
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     assert_eq!(json(&out)["state"], "exited");
-    assert!(start.elapsed() >= Duration::from_secs(1));
+    assert!(start.elapsed() >= Duration::from_millis(400));
     assert_eq!(reaper.join().unwrap().code(), Some(124));
 }
 
@@ -411,7 +411,7 @@ fn a_command_is_rerun_until_it_exits_as_expected() {
             "wait",
             "cmd",
             "--interval",
-            "1s",
+            "100ms",
             "--json",
             "--",
             JOUET,
