@@ -9,7 +9,7 @@ hero:
   tagline: "Agents rebuild the same few chores in shell, and get them subtly wrong. jouet turns each one into a single command that never prompts, never truncates silently, and exits with a code an agent can act on."
   image:
     src: /logo.svg
-    alt: The jouet logo, a coral spinning top
+    alt: The jouet logo, a coral wind-up tin robot with a brass key on top
   actions:
     - theme: brand
       text: Get started

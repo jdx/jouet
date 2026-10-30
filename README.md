@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/public/logo.svg" alt="The jouet logo, a coral wind-up tin robot with a brass key on top" width="160">
+</p>
+
 # jouet
 
 A toolkit CLI for coding agents. Documentation: **[jouet.jdx.dev](https://jouet.jdx.dev)**.
