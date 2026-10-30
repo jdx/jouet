@@ -912,14 +912,6 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
         Some(script) => commands_table(lua, script, call.exit_code)?,
         None => lua.create_table()?,
     };
-    // `rtk` when rtk wraps any top-level command, as its hook rewrites them.
-    let via = call.command.as_deref().and_then(|script| {
-        shell::parse(script)
-            .commands
-            .iter()
-            .find_map(shell::Command::via)
-    });
-    t.set("via", via)?;
     t.set("commands", commands)?;
     Ok(t)
 }
@@ -979,7 +971,6 @@ fn command_table(
     )?;
     t.set("nested", nested)?;
     t.set("status", status)?;
-    t.set("via", command.via())?;
     let text = argv.join(" ");
     let text = match text.char_indices().nth(80) {
         Some((i, _)) => format!("{}...", &text[..i]),

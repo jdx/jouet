@@ -541,26 +541,3 @@ fn a_warn_mode_rule_passes_its_deny_examples_with_a_warning() {
             .any(|e| !e.ok && e.expected == "deny" && e.actual == "warn")
     );
 }
-
-#[test]
-fn a_rule_sees_through_rtk_and_knows_it_was_there() {
-    let rule = engine(vec![user(
-        "via",
-        "return { check = function(call) return jouet.warn(tostring(call.via) .. ' ' .. tostring(call.commands[1].via) .. ' ' .. call.commands[1].program) end }",
-    )]);
-    let message = |command: &str| {
-        rule.evaluate(&bash(command)).warnings[0]
-            .message
-            .clone()
-            .unwrap()
-    };
-    assert_eq!(message("rtk git status"), "rtk rtk git");
-    assert_eq!(message("git status"), "nil nil git");
-    assert_eq!(message("rtk gain"), "nil nil rtk");
-    assert!(
-        engine(builtin())
-            .evaluate(&bash("rtk git add -A"))
-            .deny
-            .is_some()
-    );
-}

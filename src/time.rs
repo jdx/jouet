@@ -144,6 +144,12 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+/// The UTC date of a Unix time, as `2026-10-30`.
+pub fn date(secs: u64) -> String {
+    let (y, m, d) = civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// The proleptic Gregorian date `days` after 1970-01-01 (Howard Hinnant's
 /// `civil_from_days`).
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
@@ -161,6 +167,14 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dates() {
+        assert_eq!(date(0), "1970-01-01");
+        assert_eq!(date(951_782_400), "2000-02-29");
+        assert_eq!(date(1_793_318_400), "2026-10-30");
+        assert_eq!(date(1_793_404_799), "2026-10-30");
+    }
 
     #[test]
     fn durations() {

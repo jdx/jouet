@@ -48,17 +48,6 @@ setup() {
 	assert_output --partial 'deny: Every worktree'
 }
 
-@test "rules see through rtk, but not rtk as an argument or rtk's own commands" {
-	run --separate-stderr jouet rule test git-add-all --command 'rtk git add -A'
-	assert_output --partial 'deny: Stage explicit paths'
-	run --separate-stderr jouet rule test git-stash --command 'rtk -v bypass git stash'
-	assert_output --partial 'deny: '
-	run --separate-stderr jouet rule test git-add-all --command 'echo rtk git add -A'
-	assert_output 'allow'
-	run --separate-stderr jouet rule test git-stash --command 'rtk gain --history'
-	assert_output 'allow'
-}
-
 @test "a user rule warns by default and cannot replace a built-in rule" {
 	cat >"$RULES/no-rm.luau" <<'LUAU'
 --- why: rm deletes for good

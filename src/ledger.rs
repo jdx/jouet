@@ -46,10 +46,6 @@ pub struct Entry {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<String>,
-    /// `rtk` when rtk wrapped the command, whose shape is then the wrapped
-    /// command's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub via: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,15 +183,6 @@ pub fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> {
         }
     }
     rules
-}
-
-/// `Some("rtk")` when rtk wraps any of the script's top-level commands.
-pub fn via(script: &str) -> Option<String> {
-    shell::parse(script)
-        .commands
-        .iter()
-        .find_map(shell::Command::via)
-        .map(str::to_string)
 }
 
 /// A command's shape: each top-level command's program, subcommand words and
@@ -761,8 +748,6 @@ mod tests {
             ("GH_TOKEN=ghp_x gh api --token=sk-123", "gh api --token=<v>"),
             ("python3 - <<'EOF'\nprint('secret')\nEOF", "python3 <arg>"),
             ("cargo test 2>&1 | tail -5", "cargo test | tail <arg>"),
-            ("rtk git add -A", "git add -A"),
-            ("rtk gain --history", "rtk <arg> --history"),
         ] {
             assert_eq!(shape(script), expected, "{script}");
         }

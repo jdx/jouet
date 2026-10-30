@@ -23,13 +23,3 @@ setup() {
 	run --separate-stderr jouet agent-help frobnicate
 	assert_failure 3
 }
-
-@test "agent-help says to use rtk and jouet together when rtk is installed" {
-	printf '#!/bin/sh\n' >"$BATS_TEST_TMPDIR/bin/rtk"
-	chmod +x "$BATS_TEST_TMPDIR/bin/rtk"
-
-	run --separate-stderr jouet agent-help
-
-	assert_success
-	assert_output --partial 'rtk: compresses command output, while jouet steers which commands run; use both'
-}

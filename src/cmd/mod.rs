@@ -9,6 +9,7 @@ pub mod setup;
 pub mod skill;
 pub mod threads;
 pub mod wait;
+pub mod wind;
 
 use crate::display::Mode;
 use crate::exit::Exit;

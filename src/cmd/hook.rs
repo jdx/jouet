@@ -14,6 +14,7 @@ use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
 use crate::verify::{self, State};
+use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
 use serde_json::{Value, json};
 use std::io::Read;
@@ -63,7 +64,8 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         "session-start" => {
             log.append(log.entry("session-start"));
             let engine = load(payload).filter(|_| hooks.prime)?;
-            Some(session_start(&engine, hooks.steer, hooks.verify))
+            let primer = session_start(&engine, hooks.steer, hooks.verify);
+            Some(with_notes(primer, &wind_notes(settings, log.session)))
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
@@ -98,10 +100,45 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
                 });
             }
             log.append(entry);
+            if settings.wind.enabled
+                && let Some(paths) = wind::Paths::locate()
+            {
+                wind::run(&paths, &settings.wind, crate::wind::now(), false);
+            }
             output
         }
         _ => None,
     }
+}
+
+/// Winds, then picks the notes to show a starting session: at most
+/// [`wind::MAX_PER_START`], one line each.
+fn wind_notes(settings: &Settings, session: Option<&str>) -> Vec<String> {
+    if !settings.wind.enabled {
+        return Vec::new();
+    }
+    let Some(paths) = wind::Paths::locate() else {
+        return Vec::new();
+    };
+    wind::run(&paths, &settings.wind, crate::wind::now(), false);
+    let session = session.unwrap_or_default();
+    wind::notes_for_session(&paths, session)
+        .iter()
+        .map(|note| wind::note_line(note, session))
+        .collect()
+}
+
+/// The primer with winding notes after it.
+fn with_notes(mut primer: Value, notes: &[String]) -> Value {
+    if let Some(Value::String(context)) =
+        primer.pointer_mut("/hookSpecificOutput/additionalContext")
+    {
+        for note in notes {
+            context.push_str(note);
+            context.push('\n');
+        }
+    }
+    primer
 }
 
 /// Where this hook's ledger entries go, and whose they are.
@@ -153,7 +190,6 @@ impl Log<'_> {
         let mut entry = self.entry("pre-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = Some(shape);
-        entry.via = ledger::via(command);
         entry.decisions = outcome
             .deny
             .iter()
@@ -174,7 +210,6 @@ impl Log<'_> {
         let mut entry = self.entry("post-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = call.command.as_deref().map(ledger::shape);
-        entry.via = call.command.as_deref().and_then(ledger::via);
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
         entry.decisions = records
@@ -429,6 +464,20 @@ mod tests {
             vec![("cargo test".into(), 101), ("cargo test".into(), 0)],
         );
         assert_eq!(fixed.block_reason(), None);
+    }
+
+    #[test]
+    fn winding_notes_follow_the_primer() {
+        let primer = session_start(&engine(Vec::new()), true, true);
+        let before = primer["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let out = with_notes(primer, &["note one".into(), "note two".into()]);
+        let context = out["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert_eq!(context, format!("{before}note one\nnote two\n"));
     }
 
     #[test]
