@@ -25,9 +25,8 @@ cuts output silently, and exits with a code an agent can act on.
 
 > [!CAUTION]
 > **jouet is in early development.** `jouet edit`, `jouet pr status`,
-> `jouet pr threads` and `jouet wait`'s local subjects have shipped; waiting on
-> CI is being built. Commands, flags, exit codes and JSON output may change
-> incompatibly between releases.
+> `jouet pr threads` and `jouet wait` have shipped. Commands, flags, exit codes
+> and JSON output may change incompatibly between releases.
 
 ## Install
 
@@ -103,7 +102,7 @@ match shows what moved.
 | Command | Status | Replaces |
 |---|---|---|
 | [`jouet edit`](https://jouet.jdx.dev/commands/edit) | Available | heredoc edits with a hand-written `assert s.count(old) == 1` |
-| [`jouet wait`](https://jouet.jdx.dev/commands/wait) | Available; CI coming soon | `sleep` and `until` loops around log files, ports, URLs, processes, and `gh pr checks` |
+| [`jouet wait`](https://jouet.jdx.dev/commands/wait) | Available | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
 | [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | Available | `for` loops over `gh pr view` |
 | [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | Available | hand-written `reviewThreads` GraphQL |
 

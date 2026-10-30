@@ -28,8 +28,8 @@ export default defineConfig({
   cleanUrls: true,
   rewrites: {
     "cli/edit.md": "cli/edit/index.md",
-    "cli/wait.md": "cli/wait/index.md",
     "cli/pr.md": "cli/pr/index.md",
+    "cli/wait.md": "cli/wait/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -85,10 +85,22 @@ export default defineConfig({
                 ],
               },
               {
+                text: "pr",
+                link: "/cli/pr/",
+                collapsed: true,
+                items: [
+                  { text: "status", link: "/cli/pr/status" },
+                  { text: "threads", link: "/cli/pr/threads" },
+                ],
+              },
+              {
                 text: "wait",
                 link: "/cli/wait/",
                 collapsed: true,
                 items: [
+                  { text: "ci", link: "/cli/wait/ci" },
+                  { text: "run", link: "/cli/wait/run" },
+                  { text: "pr", link: "/cli/wait/pr" },
                   { text: "file", link: "/cli/wait/file" },
                   { text: "log", link: "/cli/wait/log" },
                   { text: "port", link: "/cli/wait/port" },
@@ -96,12 +108,6 @@ export default defineConfig({
                   { text: "pid", link: "/cli/wait/pid" },
                   { text: "cmd", link: "/cli/wait/cmd" },
                 ],
-              },
-              {
-                text: "pr",
-                link: "/cli/pr/",
-                collapsed: true,
-                items: [{ text: "status", link: "/cli/pr/status" }],
               },
             ],
           },

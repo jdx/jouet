@@ -30,7 +30,7 @@ export default {
                 title: "One command per chore",
               },
               () =>
-                "Each command replaces a script agents keep rewriting. jouet edit and jouet wait have shipped; waiting on CI and the PR commands are being built in the open.",
+                "Each command replaces a script agents keep rewriting.",
             ),
           ]),
         ]),

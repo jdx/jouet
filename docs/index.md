@@ -24,7 +24,7 @@ features:
     link: /commands/edit
     linkText: Read the guide
   - title: 'jouet wait <span class="jouet-status is-ready">available</span>'
-    details: Blocks until a file, log line, port, URL, process or command is ready, then prints one summary. Waiting on CI, with the failed step's log, is coming soon.
+    details: Blocks until CI finishes, a PR is ready, or a file, log line, port, URL, process or command is, then prints one summary. A CI failure comes with the failed step's log.
     link: /commands/wait
     linkText: Read the guide
   - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'

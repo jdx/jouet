@@ -1,6 +1,5 @@
-//! Durations: parsing `90s`, `10m` or `1h30m`, and printing elapsed time;
-//! points in time given on the command line; and the UTC timestamps GitHub
-//! returns.
+//! Durations (`90s`, `10m`, `1h30m`), printing elapsed time, points in time
+//! given on the command line, and the UTC timestamps GitHub returns.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -176,21 +175,6 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_round_trips() {
-        assert_eq!(elapsed(0), "0s");
-        assert_eq!(elapsed(45), "45s");
-        assert_eq!(elapsed(372), "6m12s");
-        assert_eq!(elapsed(5400), "1h30m");
-        assert_eq!(elapsed(3601), "1h1s");
-        for secs in [0, 45, 372, 5400, 3601, 86_399] {
-            assert_eq!(
-                parse_duration(&elapsed(secs)),
-                Ok(Duration::from_secs(secs))
-            );
-        }
-    }
-
-    #[test]
     fn ages_round_down() {
         assert_eq!(age(-5), "0s");
         assert_eq!(age(59), "59s");
@@ -228,6 +212,21 @@ mod tests {
             "2026-13-01T00:00:00Z",
         ] {
             assert_eq!(parse_utc(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn elapsed_round_trips() {
+        assert_eq!(elapsed(0), "0s");
+        assert_eq!(elapsed(45), "45s");
+        assert_eq!(elapsed(372), "6m12s");
+        assert_eq!(elapsed(5400), "1h30m");
+        assert_eq!(elapsed(3601), "1h1s");
+        for secs in [0, 45, 372, 5400, 3601, 86_399] {
+            assert_eq!(
+                parse_duration(&elapsed(secs)),
+                Ok(Duration::from_secs(secs))
+            );
         }
     }
 }

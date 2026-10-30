@@ -79,7 +79,7 @@ MET log app.log: matched (10s)
   {
     id: "wait-ci",
     tab: "jouet wait ci",
-    status: "coming soon",
+    status: null,
     before: {
       caption: "A poll loop around gh",
       code: `until gh pr checks 42; do
@@ -90,11 +90,17 @@ done`,
         "This only stops when every check passes. A failing check, or a conflicted PR that never gets CI, keeps it polling until the harness times it out.",
     },
     after: {
-      caption: "One command, being built now",
-      code: "jouet wait ci",
-      output: null,
+      caption: "Back at the first failure, with the failed step's log",
+      code: "jouet wait ci 15195 --repo jdx/mise --check release",
+      output: `FAIL jdx/mise#15195 @ 843cc16  0 pass, 1 fail, 0 skipped, 0 pending  (3s)
+
+FAIL release  step "Require auto-merge on the release PR"  required
+  https://github.com/jdx/mise/actions/runs/41083340820/job/124157989724
+  ##[error]Enable auto-merge on this pull request to build and test the release tarballs.
+  ##[error]Process completed with exit code 1.
+  full log: ~/.local/state/jouet/logs/jdx-mise-job-124157989724.log`,
       outcome:
-        "It will wait on the current branch's PR, return at the first failure with the failed step's log, and report a conflicted PR straight away.",
+        "It follows the PR head, returns at the first failure with the failed step's log, and reports a conflicted PR straight away.",
     },
   },
 ];

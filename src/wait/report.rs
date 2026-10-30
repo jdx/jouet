@@ -10,7 +10,7 @@
 //! `--quiet` drops the progress and the text result; JSON is still printed,
 //! because it was asked for.
 
-use super::{Outcome, Stop};
+use super::{Event, Outcome, Stop};
 use crate::display::Mode;
 use crate::exit::Exit;
 use crate::time::elapsed;
@@ -83,6 +83,27 @@ impl Reporter {
         }
     }
 
+    /// Something happened, such as a check finishing: an `event` line under
+    /// `--jsonl`, else a progress line, unless the event has no text (it
+    /// shows in the state line's counts instead).
+    pub fn event(&mut self, since_start: Duration, event: &Event) {
+        if self.jsonl {
+            self.line(&Tagged {
+                event: event.name,
+                body: &event.fields,
+            });
+        } else if !self.quiet && !event.text.is_empty() {
+            // Above the live line, which is redrawn at the next tick.
+            self.clear();
+            eprintln!(
+                "[{}] {}: {}",
+                elapsed(since_start.as_secs()),
+                self.label,
+                event.text
+            );
+        }
+    }
+
     /// Sleeps between checks, redrawing the live line each second.
     pub fn pause(&mut self, length: Duration, start: Instant, state: &str) {
         if !self.live {
@@ -130,18 +151,30 @@ impl Reporter {
     }
 
     pub fn finish(&mut self, outcome: &Outcome) -> Exit {
+        let text = text(outcome, self.mode);
+        self.finish_doc(outcome, &text);
+        outcome.exit()
+    }
+
+    /// Prints a result document, or its text form.
+    pub fn finish_doc<T: Serialize>(&mut self, doc: &T, text: &str) {
         self.clear();
         if self.jsonl {
             self.line(&Tagged {
                 event: "result",
-                body: outcome,
+                body: doc,
             });
         } else if self.json {
-            println!("{}", self.mode.json(outcome));
+            println!("{}", self.mode.json(doc));
         } else if !self.quiet {
-            print!("{}", text(outcome, self.mode));
+            print!("{text}");
         }
-        outcome.exit()
+    }
+
+    /// The first word of a text result, in colour for a person at a
+    /// terminal: green when `good`, else yellow.
+    pub fn word(&self, word: &str, good: bool) -> String {
+        headline(word, good, self.mode)
     }
 
     pub fn fail(&mut self, stop: &Stop) -> Exit {
@@ -163,17 +196,20 @@ impl Reporter {
     }
 }
 
+fn headline(word: &str, good: bool, mode: Mode) -> String {
+    if mode == Mode::Human && std::io::stdout().is_terminal() {
+        let colour = if good { "32" } else { "33" };
+        format!("\x1b[1;{colour}m{word}\x1b[0m")
+    } else {
+        word.to_string()
+    }
+}
+
 /// The text result: a first line that starts with `MET` or `TIMEOUT`, then
 /// whatever the subject found, indented.
 fn text(o: &Outcome, mode: Mode) -> String {
     let met = o.result == "met";
-    let word = if met { "MET" } else { "TIMEOUT" };
-    let word = if mode == Mode::Human && std::io::stdout().is_terminal() {
-        let colour = if met { "32" } else { "33" };
-        format!("\x1b[1;{colour}m{word}\x1b[0m")
-    } else {
-        word.to_string()
-    };
+    let word = headline(if met { "MET" } else { "TIMEOUT" }, met, mode);
     let took = elapsed(o.elapsed_s);
     let mut out = if met {
         format!("{word} {} {}: {} ({took})\n", o.subject, o.target, o.state)

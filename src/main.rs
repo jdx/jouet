@@ -43,10 +43,10 @@ struct Jouet {
 enum Cmd {
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
-    /// Block until a condition holds, then print one summary
-    Wait(WaitArgs),
     /// Inspect pull requests
     Pr(PrArgs),
+    /// Block until a condition holds, then print one summary
+    Wait(WaitArgs),
 }
 
 /// Make exact, all-or-nothing edits across files
@@ -118,6 +118,51 @@ pub struct HashArgs {
     paths: Vec<String>,
 }
 
+/// Inspect pull requests
+#[derive(Args)]
+pub struct PrArgs {
+    #[usage(subcommand)]
+    cmd: PrCmd,
+}
+
+#[derive(Subcommands)]
+pub enum PrCmd {
+    /// Show where PRs stand and why any need attention
+    Status(StatusArgs),
+    /// List, reply to and resolve review threads
+    Threads(ThreadsArgs),
+}
+
+/// Show where PRs stand and why any need attention
+///
+/// Prints one line per PR, then a summary. All PRs are fetched in one batched
+/// GraphQL query. Each PR lists fixed attention codes: conflict,
+/// checks_failing, checks_missing, changes_requested, unresolved_threads,
+/// behind_base, draft and mergeable_unknown.
+#[derive(Args)]
+pub struct StatusArgs {
+    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
+    /// current branch's PR
+    prs: Vec<String>,
+    /// Add the open PRs authored by the token's user
+    #[usage(long)]
+    mine: bool,
+    /// Add the PRs matching a GitHub search query
+    #[usage(long, value_name = "QUERY")]
+    search: Option<String>,
+    /// The repository for bare numbers, branches, --mine and --search.
+    /// Repeatable. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Vec<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
+    /// Exit 1 when any PR needs attention
+    #[usage(long)]
+    fail_on_attention: bool,
+}
+
 /// Block until a condition holds, then print one summary
 ///
 /// Replaces `sleep N; check; repeat` loops. The first check is immediate;
@@ -147,6 +192,12 @@ pub struct WaitArgs {
 
 #[derive(Subcommands)]
 pub enum WaitCmd {
+    /// Wait for a PR's checks, and show why any failed
+    Ci(WaitCiArgs),
+    /// Wait for a GitHub Actions run
+    Run(WaitRunArgs),
+    /// Wait for a PR to become mergeable, merged, approved, ready, ...
+    Pr(WaitPrArgs),
     /// Wait for a file to exist, contain a match, or be gone
     File(WaitFileArgs),
     /// Wait for a line matching a regex to be appended to a log
@@ -159,6 +210,99 @@ pub enum WaitCmd {
     Pid(WaitPidArgs),
     /// Re-run a command until it exits with the expected code
     Cmd(WaitCmdArgs),
+}
+
+/// Wait for a PR's checks, and show why any failed
+///
+/// Follows the PR head, switching to a new head when one is pushed, unless
+/// --sha pins a commit. Returns on the first failed check unless --all.
+/// Skipped and neutral checks count as passing. A conflicted PR returns
+/// `conflict` (exit 4), since pull_request workflows will not run, once
+/// GitHub reports it again 10s later (right after a push it can still answer
+/// for the old head); no checks within --appear-timeout returns `no_checks`
+/// (exit 1).
+/// For each
+/// failed Actions job, the failed step's log is excerpted and the full log
+/// saved. Waits on the same PR share their state, so they poll GitHub once.
+#[derive(Args)]
+pub struct WaitCiArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Wait on this commit's checks instead of following the PR head
+    #[usage(long, value_name = "SHA")]
+    sha: Option<String>,
+    /// Only checks that branch protection requires
+    #[usage(long)]
+    required: bool,
+    /// Only checks whose name matches GLOB (`*` and `?`). Repeatable
+    #[usage(long, value_name = "GLOB")]
+    check: Vec<String>,
+    /// Leave out checks whose name matches GLOB. Repeatable
+    #[usage(long, value_name = "GLOB")]
+    ignore: Vec<String>,
+    /// Wait for every check to finish, even after one fails
+    #[usage(long)]
+    all: bool,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+    /// How long checks may take to appear on a commit (default 3m)
+    #[usage(long, value_name = "DUR")]
+    appear_timeout: Option<String>,
+}
+
+/// Wait for a GitHub Actions run
+///
+/// Returns when the run completes, or on its first failed job, with the
+/// failed step's log excerpted as for `wait ci`.
+#[derive(Args)]
+pub struct WaitRunArgs {
+    /// The run ID, or its Actions URL
+    run: String,
+    /// The repository for a bare run ID. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Wait for a PR to become mergeable, merged, approved, ready, ...
+///
+/// --until is one of: mergeable (keeps waiting while GitHub reports
+/// UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged),
+/// closed, approved (exit 1 when changes are requested), checks-registered
+/// (any check on the head), ready (no `pr status` attention codes and no
+/// pending checks; exit 1 on conflict, checks_failing, changes_requested or
+/// unresolved_threads), or any-change (the next push, check result, review,
+/// thread or state change, printed as one event). A conflict counts once
+/// GitHub reports it again 10s later, since right after a push it can still
+/// answer for the old head.
+#[derive(Args)]
+pub struct WaitPrArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// The condition to wait for
+    #[usage(long, value_name = "CONDITION")]
+    until: String,
 }
 
 /// Wait for a file to exist, contain a match, or be gone
@@ -238,51 +382,6 @@ pub struct WaitCmdArgs {
     /// The command and its arguments, after `--`
     #[usage(double_dash = "required", value_name = "CMD")]
     command: Vec<String>,
-}
-
-/// Inspect pull requests
-#[derive(Args)]
-pub struct PrArgs {
-    #[usage(subcommand)]
-    cmd: PrCmd,
-}
-
-#[derive(Subcommands)]
-pub enum PrCmd {
-    /// Show where PRs stand and why any need attention
-    Status(StatusArgs),
-    /// List, reply to and resolve review threads
-    Threads(ThreadsArgs),
-}
-
-/// Show where PRs stand and why any need attention
-///
-/// Prints one line per PR, then a summary. All PRs are fetched in one batched
-/// GraphQL query. Each PR lists fixed attention codes: conflict,
-/// checks_failing, checks_missing, changes_requested, unresolved_threads,
-/// behind_base, draft and mergeable_unknown.
-#[derive(Args)]
-pub struct StatusArgs {
-    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
-    /// current branch's PR
-    prs: Vec<String>,
-    /// Add the open PRs authored by the token's user
-    #[usage(long)]
-    mine: bool,
-    /// Add the PRs matching a GitHub search query
-    #[usage(long, value_name = "QUERY")]
-    search: Option<String>,
-    /// The repository for bare numbers, branches, --mine and --search.
-    /// Repeatable. Defaults to the git remote
-    #[usage(long, value_name = "OWNER/NAME")]
-    repo: Vec<String>,
-    /// How long to wait for GitHub to compute an unknown mergeable state
-    /// (default 20s; 0 disables)
-    #[usage(long, value_name = "DUR")]
-    settle: Option<String>,
-    /// Exit 1 when any PR needs attention
-    #[usage(long)]
-    fail_on_attention: bool,
 }
 
 /// List, reply to and resolve review threads
@@ -445,8 +544,8 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Edit(args) => cmd::edit::run(args, &out),
-        Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Pr(args) => cmd::pr::run(args, &out),
+        Cmd::Wait(args) => cmd::wait::run(args, &out),
     };
     exit.into()
 }

@@ -106,7 +106,7 @@ MET log app.log: matched (10s)
 
 Only lines written after the wait starts count. If none matches, the wait stops at `--timeout` with exit code `124`.
 
-### Waiting on CI <Badge type="warning" text="coming soon" />
+### Waiting on CI
 
 <p class="jouet-label is-before">Before</p>
 
@@ -124,14 +124,14 @@ This loop stops only when every check passes. A failing check keeps it polling, 
 jouet wait ci
 ```
 
-`jouet wait ci` is being built. It is meant to wait on the current branch's pull request, return at the first failure with the failed step's log, and report a conflicted pull request straight away.
+`jouet wait ci` waits on the current branch's pull request, follows it when a new commit is pushed, and returns at the first failure with the failed step's log, even while the rest of the run is still going. A conflicted pull request is reported straight away, with exit code `4`.
 
 ## What jouet does instead
 
 | Command | Replaces |
 |---|---|
 | [`jouet edit`](/commands/edit) | Heredoc edits with a hand-written `assert s.count(old) == 1`; all or nothing, never partly written |
-| [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; waiting on `gh pr checks` and `gh run view` is coming soon |
+| [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; and around `gh pr checks` and `gh run view` |
 | [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
 

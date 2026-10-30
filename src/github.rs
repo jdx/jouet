@@ -7,6 +7,9 @@
 //! source, so a stale `GH_TOKEN` costs one rejected request rather than a
 //! failed command. `JOUET_GITHUB_API_URL` points the client at another API
 //! root, such as a GitHub Enterprise server or a test's fake server.
+//!
+//! [`Client::get`] sends `If-None-Match` when given an ETag, so an unchanged
+//! poll comes back as a 304 that costs nothing against the rate limit.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -33,6 +36,50 @@ pub struct Client {
 struct Token {
     source: &'static str,
     value: String,
+}
+
+/// A REST response from [`Client::get`]. `status` is 304, with an empty
+/// body, when the ETag given still matches.
+#[derive(Debug)]
+pub struct Rest {
+    pub status: u16,
+    pub etag: Option<String>,
+    pub body: String,
+}
+
+/// Why a request got no usable response.
+#[derive(Debug)]
+pub enum Failure {
+    /// The primary rate limit is used up until `reset`, in Unix seconds.
+    RateLimited {
+        reset: i64,
+    },
+    Other(String),
+}
+
+impl Failure {
+    pub fn message(&self) -> String {
+        match self {
+            Self::RateLimited { reset } => format!(
+                "GitHub rate limit exhausted; it resets in {}",
+                crate::time::age(reset - crate::time::now())
+            ),
+            Self::Other(message) => message.clone(),
+        }
+    }
+}
+
+impl From<Failure> for String {
+    fn from(f: Failure) -> Self {
+        f.message()
+    }
+}
+
+/// A response: its status, ETag and body.
+struct Sent {
+    status: u16,
+    etag: Option<String>,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -93,7 +140,7 @@ impl Client {
     ) -> Result<Value, String> {
         let body = serde_json::json!({ "query": query, "variables": variables }).to_string();
         let url = format!("{}/graphql", self.api_url);
-        let (status, text) = self.send(&url, Some(&body), idempotent)?;
+        let Sent { status, text, .. } = self.send(&url, Some(&body), None, idempotent)?;
         if status != 200 {
             return Err(format!("GitHub returned {status}: {}", message(&text)));
         }
@@ -117,7 +164,7 @@ impl Client {
     /// back as `None`.
     pub fn rest_get(&mut self, path: &str) -> Result<Option<Value>, String> {
         let url = format!("{}{path}", self.api_url);
-        let (status, text) = self.send(&url, None, true)?;
+        let Sent { status, text, .. } = self.send(&url, None, None, true)?;
         match status {
             200 => serde_json::from_str(&text)
                 .map(Some)
@@ -127,29 +174,48 @@ impl Client {
         }
     }
 
+    /// GETs a REST path such as `/repos/o/r/pulls/1`, or a full URL,
+    /// sending `If-None-Match` when `etag` is given. Statuses other than 401
+    /// are the caller's to read, and an exhausted rate limit says when it
+    /// resets, so a caller can wait it out.
+    pub fn get(&mut self, path: &str, etag: Option<&str>) -> Result<Rest, Failure> {
+        let url = if path.starts_with('/') {
+            format!("{}{path}", self.api_url)
+        } else {
+            path.to_string()
+        };
+        let sent = self.send(&url, None, etag, true)?;
+        Ok(Rest {
+            status: sent.status,
+            etag: sent.etag,
+            body: sent.text,
+        })
+    }
+
     /// Sends a request with the first token GitHub accepts: a POST of `body`
-    /// when there is one, else a GET.
+    /// when there is one, else a GET (conditional when `etag` is given).
     fn send(
         &mut self,
         url: &str,
         body: Option<&str>,
+        etag: Option<&str>,
         idempotent: bool,
-    ) -> Result<(u16, String), String> {
+    ) -> Result<Sent, Failure> {
         loop {
             let token = match self.token.take() {
                 Some(token) => token,
-                None => self.next_token()?,
+                None => self.next_token().map_err(Failure::Other)?,
             };
-            let (status, text) = match self.request(&token.value, url, body, idempotent) {
+            let sent = match self.request(&token.value, url, body, etag, idempotent) {
                 Ok(sent) => sent,
                 // The token was not rejected, so it is kept for the next
                 // request (such as the one after a rate limit resets).
-                Err(e) => {
+                Err(failure) => {
                     self.token = Some(token);
-                    return Err(e);
+                    return Err(failure);
                 }
             };
-            if status == 401 {
+            if sent.status == 401 {
                 self.rejected.push(token.source);
                 continue;
             }
@@ -163,7 +229,7 @@ impl Client {
                 );
             }
             self.token = Some(token);
-            return Ok((status, text));
+            return Ok(sent);
         }
     }
 
@@ -207,8 +273,9 @@ impl Client {
         token: &str,
         url: &str,
         body: Option<&str>,
+        etag: Option<&str>,
         idempotent: bool,
-    ) -> Result<(u16, String), String> {
+    ) -> Result<Sent, Failure> {
         let mut attempt = 0;
         loop {
             let auth = format!("bearer {token}");
@@ -219,12 +286,18 @@ impl Client {
                     .header("Authorization", auth)
                     .content_type("application/json")
                     .send(body),
-                None => self
-                    .agent
-                    .get(url)
-                    .header("Authorization", auth)
-                    .header("Accept", "application/vnd.github+json")
-                    .call(),
+                None => {
+                    let mut req = self
+                        .agent
+                        .get(url)
+                        .header("Authorization", auth)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("X-GitHub-Api-Version", "2022-11-28");
+                    if let Some(etag) = etag {
+                        req = req.header("If-None-Match", etag);
+                    }
+                    req.call()
+                }
             }
             .and_then(|mut resp| {
                 let text = resp
@@ -242,7 +315,7 @@ impl Client {
                     std::thread::sleep(backoff(attempt));
                     continue;
                 }
-                Err(e) => return Err(format!("could not reach {url}: {e}")),
+                Err(e) => return Err(Failure::Other(format!("could not reach {url}: {e}"))),
             };
             let status = resp.status().as_u16();
             let header = |name: &str| {
@@ -254,15 +327,11 @@ impl Client {
             let retry_after = header("retry-after").and_then(|v| v.parse::<u64>().ok());
             let remaining = header("x-ratelimit-remaining");
             let reset = header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok());
+            let etag = header("etag");
             if status == 403 || status == 429 {
                 if remaining.as_deref() == Some("0") {
-                    let when = reset.map_or(String::new(), |r| {
-                        format!(
-                            "; it resets in {}",
-                            crate::time::age(r - crate::time::now())
-                        )
-                    });
-                    return Err(format!("GitHub rate limit exhausted{when}"));
+                    let reset = reset.unwrap_or_else(|| crate::time::now() + 60);
+                    return Err(Failure::RateLimited { reset });
                 }
                 let secondary = retry_after.is_some()
                     || text.to_ascii_lowercase().contains("secondary rate limit");
@@ -280,7 +349,10 @@ impl Client {
                     continue;
                 }
                 if secondary {
-                    return Err(format!("GitHub secondary rate limit: {}", message(&text)));
+                    return Err(Failure::Other(format!(
+                        "GitHub secondary rate limit: {}",
+                        message(&text)
+                    )));
                 }
             }
             if status >= 500 && idempotent && attempt < RETRIES {
@@ -289,7 +361,7 @@ impl Client {
                 std::thread::sleep(backoff(attempt));
                 continue;
             }
-            return Ok((status, text));
+            return Ok(Sent { status, etag, text });
         }
     }
 }
