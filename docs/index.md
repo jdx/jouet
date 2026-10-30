@@ -34,5 +34,5 @@ features:
   - title: jouet pr threads
     details: List, reply to and resolve review threads without hand-written reviewThreads GraphQL.
     link: /commands/pr-threads
-    linkText: Coming soon
+    linkText: Available now
 ---

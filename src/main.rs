@@ -383,7 +383,7 @@ pub struct WaitCmdArgs {
 ///
 /// Lists unresolved threads by default, outdated ones included and marked.
 /// Each thread is addressed by its first comment's ID, the number in the web
-/// UI's #discussion_r links. Bodies are condensed: HTML comments and badges
+/// UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges
 /// are removed, `<details>` collapse to their summary and each comment is cut
 /// at 30 lines with a marker; suggestion blocks are always kept whole.
 #[derive(Args)]
@@ -409,7 +409,7 @@ pub struct ThreadsArgs {
     /// Only threads started by LOGIN. Repeatable
     #[usage(long, var, value_name = "LOGIN")]
     author: Vec<String>,
-    /// Only threads started by bots: logins ending in [bot], and the config's
+    /// Only threads started by bots: logins ending in `[bot]`, and the config's
     /// `bots`
     #[usage(long, conflicts = "--no-bots")]
     bots: bool,

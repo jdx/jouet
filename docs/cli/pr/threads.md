@@ -5,7 +5,7 @@
 
 List, reply to and resolve review threads
 
-Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's #discussion_r links. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
+Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
@@ -19,7 +19,7 @@ Lists unresolved threads by default, outdated ones included and marked. Each thr
 - **`--outdated`** — List only outdated threads
 - **`--no-outdated`** — Leave out outdated threads
 - **`--author <LOGIN>`** — Only threads started by LOGIN. Repeatable
-- **`--bots`** — Only threads started by bots: logins ending in [bot], and the config's `bots`
+- **`--bots`** — Only threads started by bots: logins ending in `[bot]`, and the config's `bots`
 - **`--no-bots`** — Leave out threads started by bots
 - **`--since <TIME>`** — Only threads with a comment posted at or after TIME: RFC 3339, a duration ago such as 2h, or @SHA for when that commit was pushed. Goes by when comments were posted, never by the commit they are on
 - **`--path <GLOB>`** — Only threads on paths matching GLOB, a directory, or (without a /) a file name. Repeatable
