@@ -554,7 +554,7 @@ pub struct ShareArgs {
     /// Post it; without this, only show what would be posted
     #[usage(long)]
     yes: bool,
-    /// Replace WORD with <redacted> as well, such as an internal tool's name. Repeatable
+    /// Hide WORD as well, such as an internal tool's name. Repeatable
     #[usage(long, value_name = "WORD")]
     redact: Vec<String>,
 }

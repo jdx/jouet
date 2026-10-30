@@ -13,5 +13,5 @@ Builds a proposal and prints the exact text, with paths, repository names, hostn
 ## Flags
 - **`--idea`** — Share an idea from recorded gaps instead of a rule
 - **`--yes`** — Post it; without this, only show what would be posted
-- **`--redact <WORD>`** — Replace WORD with <redacted> as well, such as an internal tool's name. Repeatable
+- **`--redact <WORD>`** — Hide WORD as well, such as an internal tool's name. Repeatable
 - **`-h --help`** — Print help
