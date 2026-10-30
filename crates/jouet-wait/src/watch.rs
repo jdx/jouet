@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Events kept in a state file; older ones are dropped first.
 const MAX_EVENTS: usize = 1000;
@@ -137,19 +138,28 @@ impl From<Failure> for PollError {
 /// it. For a second or so after a push, GitHub's API still answers for the
 /// old head, mergeability included, so a conflict that a rebase just fixed
 /// can look unfixed; asking again later tells the two apart.
-const CONFLICT_CONFIRM_MS: u64 = 10_000;
+pub(crate) const CONFLICT_CONFIRM: Duration = Duration::from_secs(10);
 
 /// The message while a conflict waits to be confirmed.
 pub(crate) const CONFIRMING: &str =
     "GitHub reports a conflict; asking again to rule out a stale answer";
 
-/// Confirms a conflict by seeing it again [`CONFLICT_CONFIRM_MS`] later.
-#[derive(Debug, Default)]
+/// Confirms a conflict by seeing it again `window` later
+/// ([`CONFLICT_CONFIRM`] unless a test asks for less).
+#[derive(Debug)]
 pub(crate) struct ConflictCheck {
     first_seen_ms: Option<u64>,
+    window_ms: u64,
 }
 
 impl ConflictCheck {
+    pub(crate) fn new(window: Duration) -> Self {
+        Self {
+            first_seen_ms: None,
+            window_ms: u64::try_from(window.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
     /// Records whether GitHub reported a conflict when it was asked at
     /// `asked_ms` (Unix milliseconds), and says whether the conflict is now
     /// confirmed.
@@ -159,7 +169,7 @@ impl ConflictCheck {
             return false;
         }
         let first = *self.first_seen_ms.get_or_insert(asked_ms);
-        asked_ms.saturating_sub(first) >= CONFLICT_CONFIRM_MS
+        asked_ms.saturating_sub(first) >= self.window_ms
     }
 }
 
@@ -596,7 +606,7 @@ mod tests {
 
     #[test]
     fn a_conflict_counts_once_seen_again_ten_seconds_later() {
-        let mut check = ConflictCheck::default();
+        let mut check = ConflictCheck::new(CONFLICT_CONFIRM);
         assert!(!check.confirmed(true, 1_000));
         assert!(!check.confirmed(true, 6_000));
         assert!(check.confirmed(true, 11_000));

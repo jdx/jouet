@@ -362,7 +362,7 @@ fn failing_checks_after_an_update_stop_the_landing() {
     let handle = Arc::clone(&world);
     let flip = thread::spawn(move || {
         // Once the wait has seen `unit` running, it fails.
-        thread::sleep(Duration::from_millis(2500));
+        thread::sleep(Duration::from_millis(500));
         handle.lock().unwrap().checks.insert(
             SHA_B,
             vec![
@@ -374,7 +374,7 @@ fn failing_checks_after_an_update_stop_the_landing() {
     let out = land(
         &fake,
         dir.path(),
-        &["--yes", "--update", "--interval", "1s", "--json"],
+        &["--yes", "--update", "--interval", "100ms", "--json"],
     );
     flip.join().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
@@ -413,7 +413,7 @@ fn an_update_whose_checks_pass_is_merged_at_the_new_head() {
     let out = land(
         &fake,
         dir.path(),
-        &["--yes", "--update", "--interval", "1s", "--json"],
+        &["--yes", "--update", "--interval", "100ms", "--json"],
     );
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let doc = json(&out);

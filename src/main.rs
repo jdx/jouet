@@ -278,6 +278,10 @@ pub struct WaitArgs {
     /// Time between the first checks; backs off to 60s (default 10s)
     #[usage(long, global, value_name = "DUR")]
     interval: Option<String>,
+    /// How long a conflict GitHub reports must persist before `wait ci` and
+    /// `wait pr` believe it (default 10s). For tests
+    #[usage(long, global, hide, value_name = "DUR")]
+    confirm_conflict: Option<String>,
     /// Print one JSON event per line, then the result document
     #[usage(long, global)]
     jsonl: bool,

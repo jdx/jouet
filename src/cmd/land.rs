@@ -382,6 +382,7 @@ fn wait_for_checks(
         all: false,
         log_lines: Some(LOG_LINES),
         appear_timeout: APPEAR_TIMEOUT,
+        confirm_conflict: jouet_wait::CONFLICT_CONFIRM,
     };
     let mut w = CiWait::new(repo.clone(), number, Some(head.to_string()), ci_options);
     // Progress goes to stderr; the result is part of land's own document.
