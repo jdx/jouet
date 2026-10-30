@@ -1,5 +1,10 @@
 --!strict
--- Raw `reviewThreads` GraphQL is long and easy to get subtly wrong.
+--- name: review-threads
+--- why: Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local function graphql(command: JouetCommand): boolean
 	local args = jouet.gh(command)
@@ -31,7 +36,6 @@ local function mentions_threads(command: JouetCommand): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny raw `reviewThreads` GraphQL; use `jouet pr threads`",
 	needs = { "pr", "threads" },
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do

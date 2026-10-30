@@ -1,6 +1,10 @@
 --!strict
--- A plain force push overwrites whatever is on the remote, including commits
--- pushed since you last fetched.
+--- name: force-push
+--- why: A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local MESSAGE = "Use `git push --force-with-lease`: it refuses a push that would drop commits you have not seen."
 
@@ -26,7 +30,6 @@ local function forced(args: { string }): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny force pushes without `--force-with-lease`",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			local sub, args = jouet.git(command)

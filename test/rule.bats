@@ -15,8 +15,8 @@ setup() {
 	run --separate-stderr jouet rule list
 
 	assert_success
-	assert_line --regexp '^git-stash +enabled +builtin +Deny a bare'
-	assert_line --regexp '^checks +enabled +builtin +Record test'
+	assert_line --regexp '^git-stash +enabled +deny +builtin +builtin +2026-10-30 +Every worktree'
+	assert_line --regexp '^checks +enabled +record +builtin'
 	# A rule naming a command this jouet does not have is listed as off.
 	if ! jouet wait ci --help >/dev/null 2>&1; then
 		assert_line --regexp '^sleep-poll +needs jouet wait ci'
@@ -48,15 +48,28 @@ setup() {
 	assert_output --partial 'deny: Every worktree'
 }
 
-@test "a user rule replaces the built-in rule of the same name, and settings turn rules off" {
-	cat >"$RULES/git-stash.luau" <<'LUAU'
+@test "a user rule warns by default and cannot replace a built-in rule" {
+	cat >"$RULES/no-rm.luau" <<'LUAU'
+--- why: rm deletes for good
+--- author: session-42
+--- created: 2026-10-31
 return {
-	description = "Allow every stash",
-	check = function() return nil end,
+	check = function(call)
+		return if call.commands[1].program == "rm" then jouet.deny("Think twice.") else nil
+	end,
 }
 LUAU
+	printf -- '--- why: allow every stash\nreturn { check = function() return nil end }\n' >"$RULES/git-stash.luau"
+
 	run --separate-stderr jouet rule list
-	assert_line --regexp "^git-stash +enabled +$RULES/git-stash.luau +Allow every stash"
+	assert_line --regexp '^no-rm +enabled +warn +user +session-42 +2026-10-31 +rm deletes for good$'
+	assert_line --regexp '^git-stash +broken: .* is a built-in rule, which cannot be replaced'
+	assert_line --regexp '^git-stash +enabled +deny +builtin'
+
+	run --separate-stderr jouet rule test no-rm --command 'rm -rf target'
+	assert_output 'warn: Think twice.'
+	run --separate-stderr jouet rule test git-stash --command 'git stash'
+	assert_output --partial 'deny: Every worktree'
 
 	run --separate-stderr env JOUET_RULES_DISABLE=no-verify jouet rule list
 	assert_line --regexp '^no-verify +disabled'
@@ -64,8 +77,8 @@ LUAU
 
 @test "an agent can check a new rule file before installing it" {
 	cat >draft.luau <<'LUAU'
+--- why: rm -r deletes for good
 return {
-	description = "Warn before rm -rf",
 	check = function(call)
 		for _, command in call.commands do
 			if command.program == "rm" and jouet.short_flag(command.argv[2] or "", "r") then
@@ -91,7 +104,7 @@ LUAU
 
 @test "a broken rule is listed with its error and never runs" {
 	printf 'return {\n' >"$RULES/broken.luau"
-	printf 'return { check = function() while true do end end }\n' >"$RULES/spin.luau"
+	printf -- '--- why: spins\nreturn { check = function() while true do end end }\n' >"$RULES/spin.luau"
 
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^broken +broken: '
@@ -107,10 +120,10 @@ LUAU
 @test "repository rules run only once trusted, and again after every change" {
 	mkdir -p repo/.git repo/.jouet/rules
 	cd repo
-	printf 'return { description = "Team rule", check = function() return jouet.deny("no") end }\n' >.jouet/rules/team.luau
+	printf -- '--- why: a team rule\nreturn { check = function() return jouet.deny("no") end }\n' >.jouet/rules/team.luau
 
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^team +untrusted +.*/repo/.jouet/rules/team.luau'
+	assert_line --regexp '^team +untrusted +deny +repo +unknown +a team rule$'
 	assert_line --partial 'is not trusted, so its rules do not run'
 
 	run --separate-stderr jouet rule trust
@@ -119,7 +132,7 @@ LUAU
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +enabled'
 
-	printf 'return { check = function() end }\n' >.jouet/rules/more.luau
+	printf -- '--- why: more\nreturn { check = function() end }\n' >.jouet/rules/more.luau
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +untrusted'
 	assert_line --partial 'changed since it was trusted'

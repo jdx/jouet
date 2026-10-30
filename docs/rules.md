@@ -6,7 +6,7 @@ description: Luau rules that read the command an agent is about to run, or has j
 
 A jouet rule is a small [Luau](https://luau.org) script. It reads a tool call, such as the shell command an agent is about to run, and decides what to do: deny it with one line of advice, let it run with a warning, or say nothing. A rule that runs after a command can instead record it as a test, lint or build run.
 
-jouet ships its own rules, for instance one that denies `git add -A` and one that denies a bare `git stash`. They are written against the same API as yours, and you can replace any of them. You, or your agent, can write new ones and test them before turning them on.
+jouet ships its own rules, for instance one that denies `git add -A` and one that denies a bare `git stash`. They are written against the same API as yours. You, or your agent, can write new ones, test them, and let them warn before they ever block anything.
 
 ::: warning Early development
 The rule API is new and may change between releases. `jouet rule types` always describes the installed version.
@@ -14,25 +14,34 @@ The rule API is new and may change between releases. `jouet rule types` always d
 
 ```console
 $ jouet rule list
-sleep-poll      needs jouet wait ci     builtin  Deny sleep loops around `gh pr checks` and `gh run view`; use `jouet wait ci`
-review-threads  needs jouet pr threads  builtin  Deny raw `reviewThreads` GraphQL; use `jouet pr threads`
-python-edit     enabled                 builtin  Deny Python heredoc rewrites with `.replace(`; use `jouet edit`
-git-add-all     enabled                 builtin  Deny `git add -A`, `--all` and `.`; stage explicit paths
-git-stash       enabled                 builtin  Deny a bare `git stash`, `pop`, `drop` or `clear`; the stash is shared across worktrees
-no-verify       enabled                 builtin  Deny `--no-verify` and `git commit -n`
-force-push      enabled                 builtin  Deny force pushes without `--force-with-lease`
-checks          enabled                 builtin  Record test, lint and build runs for the check before stopping
+sleep-poll      needs jouet wait ci     deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+review-threads  needs jouet pr threads  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
+python-edit     enabled                 deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
+git-add-all     enabled                 deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
+git-stash       enabled                 deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
+no-verify       enabled                 deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
+force-push      enabled                 deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+checks          enabled                 record  builtin  builtin  2026-10-30  Records test, lint and build runs, so jouet can stop an agent finishing while the last one failed.
 ```
+
+The columns are: name, state, mode, scope, author, created, and why.
 
 ## Where rules come from
 
-| Source | Directory | Runs |
-|---|---|---|
-| Built in | embedded in the binary | always |
-| Yours | `~/.config/jouet/rules/*.luau` (`$XDG_CONFIG_HOME/jouet/rules`) | always |
-| A repository's | `.jouet/rules/*.luau` at the repository root | once trusted with `jouet rule trust` |
+| Source | Directory | Runs | Mode unless the header says |
+|---|---|---|---|
+| Built in | embedded in the binary | always | deny |
+| Yours | `~/.config/jouet/rules/*.luau` (`$XDG_CONFIG_HOME/jouet/rules`) | always | warn |
+| A repository's | `.jouet/rules/*.luau` at the repository root | once trusted with `jouet rule trust` | deny |
 
-A rule's name is its file name without `.luau`. A rule of yours, or a trusted repository's, with the name of a built-in rule replaces it. That is how you change a built-in rule: copy it from the [source](https://github.com/jdx/jouet/tree/main/crates/jouet-rules/rules) and edit it.
+A rule's name is its file name without `.luau`.
+
+Rules of yours and a repository's **only add decisions**. jouet enforces this, so a rule written in a hurry, by you or an agent, cannot weaken the safety it already has:
+
+- **No replacing.** A rule with the name of a built-in rule is refused (`jouet rule list` shows it as broken), and the built-in rule keeps running.
+- **No overruling.** Rules run built-in rules first, and the first denial wins. `jouet.allow()` decides nothing for any other rule.
+- **No locking out.** A denial of a command that only runs `jouet` becomes a warning, so a bad rule never stops you running `jouet rule list` or `jouet setup --uninstall` to fix it.
+- **The sandbox.** It holds for every rule (see below).
 
 A repository's rules can deny commands and put text in front of the agent, so they only run once you trust them. `jouet rule trust` records a hash of every rule file in `.jouet/rules`. Adding or changing a rule makes the directory untrusted again, and `jouet rule list` says so. `jouet rule untrust` withdraws trust.
 
@@ -45,17 +54,19 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 
 ## Writing a rule
 
-A rule file returns a table with a `description` and a `check` function. `check` gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing:
+A rule file starts with a header and returns a table with a `check` function. `check` gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing:
 
 ```lua
 --!strict
--- ~/.config/jouet/rules/no-rm-rf.luau
+--- why: rm -r deletes for good, and agents are quick to reach for it
+--- mode: warn
+--- author: jdx
+--- created: 2026-10-30
 local rule: JouetRule = {
-	description = "Warn before rm -rf",
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do
 			if command.program == "rm" and jouet.short_flag(command.argv[2] or "", "r") then
-				return jouet.warn("rm -r deletes for good; is this path right?")
+				return jouet.deny("rm -r deletes for good; is this path right?")
 			end
 		end
 		return nil
@@ -68,6 +79,17 @@ local rule: JouetRule = {
 
 return rule
 ```
+
+The header is a few `--- key: value` lines at the top of the file, which `jouet rule list` shows without running the rule:
+
+| Key | Meaning |
+|---|---|
+| `why` | Required. What the rule is for, in one line. |
+| `mode` | `warn` or `deny`. A `warn` rule's denials are shown to the agent as warnings and the command runs. A rule of yours defaults to `warn`, so a new rule can prove itself before it blocks anything. |
+| `name` | Optional; must match the file name. |
+| `scope` | Optional `builtin`, `user` or `repo`; must match where the file lives. |
+| `author` | Who wrote it: a person, or the agent session that did. |
+| `created` | When. |
 
 `call.commands` is the command parsed the way a shell parses it, so a rule never has to pick apart quoting itself:
 

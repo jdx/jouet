@@ -55,12 +55,21 @@ impl Script {
 
 /// What a script exiting with `exit_code` says about each top-level command.
 ///
-/// A failure belongs only to the first command of the last pipeline, so
-/// `cargo test; echo done` failing says nothing about the tests. Success
-/// belongs to every command in the final `&&` chain, because all of them ran
-/// and succeeded. A command piped into `tail` gets whatever `tail` returned,
-/// which errs toward a missed failure, never an invented one. A script that
-/// ends in the background says nothing about anything.
+/// This errs toward a missed run, never an invented one:
+///
+/// - A failure belongs to the last pipeline. Without `set -o pipefail` a
+///   pipeline exits with its last command's status, so `cargo test | grep
+///   FAILED` failing is grep's failure; with `pipefail` it goes to the first
+///   command. Commands before the last pipeline get nothing (`cargo test;
+///   echo done` failing says nothing about the tests).
+/// - In a final `&&` chain, an earlier command may be the one that failed, so
+///   a failure counts only when every command before the last pipeline is a
+///   `cd` or `pushd`: `cd crate && cargo test` counts, `cargo build && cargo
+///   test` does not.
+/// - Success belongs to every command in the final `&&` chain, because all
+///   of them ran and succeeded, except a first pipeline that follows `||`,
+///   which may not have run at all.
+/// - A script that ends in the background says nothing about anything.
 pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     let mut out = vec![None; commands.len()];
     let Some(last) = commands.last() else {
@@ -73,17 +82,42 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     while start > 0 && matches!(commands[start - 1].op, Some(Op::And | Op::Pipe)) {
         start -= 1;
     }
-    if exit_code == 0 {
-        for status in &mut out[start..] {
-            *status = Some(0);
-        }
-        return out;
-    }
     let mut pipeline = commands.len() - 1;
     while pipeline > start && commands[pipeline - 1].op == Some(Op::Pipe) {
         pipeline -= 1;
     }
-    out[pipeline] = Some(exit_code);
+    if exit_code == 0 {
+        let mut first = start;
+        if start > 0 && commands[start - 1].op == Some(Op::Or) {
+            // Skip the pipeline right after `||`.
+            while first < commands.len() - 1 && commands[first].op == Some(Op::Pipe) {
+                first += 1;
+            }
+            first += 1;
+        }
+        for status in out.iter_mut().skip(first) {
+            *status = Some(0);
+        }
+        return out;
+    }
+    let only_cd = commands[start..pipeline]
+        .iter()
+        .all(|c| matches!(c.program(), Some("cd" | "pushd")));
+    if !only_cd {
+        return out;
+    }
+    let pipefail = commands[..start].iter().any(|c| {
+        c.program() == Some("set")
+            && c.argv()
+                .iter()
+                .any(|w| w == "pipefail" || w == "-o pipefail")
+    });
+    let blamed = if pipefail {
+        pipeline
+    } else {
+        commands.len() - 1
+    };
+    out[blamed] = Some(exit_code);
     out
 }
 
@@ -597,8 +631,33 @@ mod tests {
     fn a_failure_belongs_to_the_last_pipeline_only() {
         assert_eq!(status_of("cd crate && cargo test", 101), [None, Some(101)]);
         assert_eq!(status_of("cargo test; echo done", 1), [None, Some(1)]);
-        assert_eq!(status_of("cargo test | tee log", 1), [Some(1), None]);
         assert_eq!(status_of("cargo test &", 0), [None]);
+        assert_eq!(status_of("false || cargo test", 101), [None, Some(101)]);
+    }
+
+    #[test]
+    fn a_pipeline_fails_with_its_last_command_unless_pipefail() {
+        assert_eq!(
+            status_of("cargo test 2>&1 | grep FAILED", 1),
+            [None, Some(1)]
+        );
+        assert_eq!(
+            status_of("set -o pipefail; cargo test | tee log", 101),
+            [None, Some(101), None]
+        );
+        assert_eq!(
+            status_of("set -euo pipefail\ncargo test | tail", 101),
+            [None, Some(101), None]
+        );
+    }
+
+    #[test]
+    fn a_failure_in_an_and_chain_is_ambiguous() {
+        assert_eq!(status_of("cargo build && cargo test", 101), [None, None]);
+        assert_eq!(
+            status_of("cd a && pushd b && cargo test", 101),
+            [None, None, Some(101)]
+        );
     }
 
     #[test]
@@ -607,7 +666,13 @@ mod tests {
             status_of("cd x; cargo build && cargo test | tail -5", 0),
             [None, Some(0), Some(0), Some(0)]
         );
-        assert_eq!(status_of("cargo test || true", 0), [None, Some(0)]);
+        // Either side may be the one that ran.
+        assert_eq!(status_of("cargo test || true", 0), [None, None]);
+        // `a || b && c`: b may not have run.
+        assert_eq!(
+            status_of("cargo check || cargo build && cargo test", 0),
+            [None, None, Some(0)]
+        );
     }
 
     #[test]

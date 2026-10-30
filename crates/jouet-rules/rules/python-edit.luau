@@ -1,6 +1,10 @@
 --!strict
--- A Python heredoc that reads a file, calls `.replace(` and writes it back is
--- an edit without a check that the text matched.
+--- name: python-edit
+--- why: A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local function is_python(program: string?): boolean
 	if not program or string.sub(program, 1, 6) ~= "python" then
@@ -19,7 +23,6 @@ local function edits(code: string): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny Python heredoc rewrites with `.replace(`; use `jouet edit`",
 	needs = { "edit" },
 	check = function(call: JouetCall): JouetDecision?
 		for _, command in call.commands do

@@ -1,6 +1,10 @@
 --!strict
--- A sleep loop around a CI query spends a model turn on every "is it done
--- yet". `jouet wait ci` blocks until the checks settle.
+--- name: sleep-poll
+--- why: A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+--- mode: deny
+--- scope: builtin
+--- author: builtin
+--- created: 2026-10-30
 
 local function polls_ci(command: JouetCommand): boolean
 	local args = jouet.gh(command)
@@ -21,7 +25,6 @@ local function polls_ci(command: JouetCommand): boolean
 end
 
 local rule: JouetRule = {
-	description = "Deny sleep loops around `gh pr checks` and `gh run view`; use `jouet wait ci`",
 	needs = { "wait", "ci" },
 	check = function(call: JouetCall): JouetDecision?
 		local sleeps, polls = false, false
