@@ -142,7 +142,7 @@ impl Client {
 
     /// Runs a GraphQL mutation. Unlike a query it is not retried after a 5xx
     /// or a dropped connection, which can follow a write that succeeded.
-    pub(crate) fn mutate(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
+    pub fn mutate(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
         self.graphql_with(query, variables, false)
     }
 

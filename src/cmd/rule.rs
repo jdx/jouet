@@ -1,8 +1,11 @@
-//! `jouet rule list|test|types|trust|untrust`.
+//! `jouet rule list|test|types|trust|untrust|new|promote|log`.
 
 use super::Output;
 use crate::rules;
-use crate::{RuleArgs, RuleCmd, RuleTestArgs};
+use crate::wind::{self, Paths, Status, replay, rulefile};
+use crate::{
+    RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
+};
 use jouet_output::exit::Exit;
 use jouet_rules::{Call, Engine, Origin, Rule, Source, State, Trust};
 use serde::Serialize;
@@ -25,6 +28,10 @@ pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
         }
         RuleCmd::Trust(_) => trust(&cwd, true, out),
         RuleCmd::Untrust(_) => trust(&cwd, false, out),
+        RuleCmd::New(new_args) => new(new_args, out),
+        RuleCmd::Promote(promote_args) => promote(promote_args, out),
+        RuleCmd::Log(log_args) => log(log_args, out),
+        RuleCmd::Gap(gap_args) => gap(gap_args, out),
     }
 }
 
@@ -190,8 +197,15 @@ fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
             harness: "test".into(),
             ..Call::default()
         },
+        (None, None) if args.replay => return replay_ledger(&engine, rule, out),
         (None, None) => return examples(&engine, rule, out),
     };
+    if args.replay {
+        return out.error(
+            Exit::Usage,
+            "--replay runs over the ledger; leave out --command and --payload",
+        );
+    }
     // The rule's own event decides how it runs; a post-tool-use rule with
     // no exit code given sees a command that succeeded.
     let call = Call {
@@ -202,7 +216,9 @@ fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
         },
         ..call
     };
-    match engine.check(rule, &call) {
+    let checked = engine.check(rule, &call);
+    crate::share::record_gaps(&engine);
+    match checked {
         Ok((decision, records)) => {
             let tested = Tested {
                 rule: rule.name.clone(),
@@ -236,7 +252,9 @@ fn tested_text(t: &Tested) -> String {
 }
 
 fn examples(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
-    let examples = match engine.examples(rule) {
+    let examples = engine.examples(rule);
+    crate::share::record_gaps(engine);
+    let examples = match examples {
         Ok(examples) => examples,
         Err(e) => return out.error(Exit::Failed, &format!("rule {}: {e}", rule.name)),
     };
@@ -277,6 +295,279 @@ fn examples(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
         text
     });
     if failed > 0 { Exit::Failed } else { Exit::Ok }
+}
+
+#[derive(Serialize)]
+struct Replayed {
+    rule: String,
+    #[serde(flatten)]
+    report: replay::Replay,
+}
+
+fn replay_ledger(engine: &Engine, rule: &Rule, out: &Output) -> Exit {
+    let Some(dir) = crate::ledger::dir() else {
+        return out.error(Exit::Failed, "there is no home directory, so no ledger");
+    };
+    let entries = wind::reader::read_all(&dir);
+    if entries.is_empty() {
+        return out.error(
+            Exit::Precondition,
+            &format!(
+                "the ledger in {} is empty; it fills as jouet's hooks run (`jouet setup`)",
+                dir.display()
+            ),
+        );
+    }
+    let report = Replayed {
+        rule: rule.name.clone(),
+        report: replay::replay(engine, rule, &entries),
+    };
+    crate::share::record_gaps(engine);
+    out.result(&report, || replayed_text(&report));
+    if report.report.fired_total == 0 {
+        Exit::Failed
+    } else {
+        Exit::Ok
+    }
+}
+
+fn replayed_text(r: &Replayed) -> String {
+    let rep = &r.report;
+    let mut text = format!(
+        "{}: fired on {} of {} calls in the ledger\n",
+        r.rule, rep.fired_total, rep.calls
+    );
+    let section = |text: &mut String, title: &str, hits: &[replay::Hit], distinct: usize| {
+        if hits.is_empty() {
+            return;
+        }
+        let _ = writeln!(text, "{title}:");
+        for hit in hits {
+            let _ = writeln!(
+                text,
+                "  {:>4}x  {:<11}  {}",
+                hit.count, hit.verdict, hit.command
+            );
+        }
+        if distinct > hits.len() {
+            let _ = writeln!(text, "  ... {} more", distinct - hits.len());
+        }
+    };
+    section(&mut text, "fires on", &rep.fired, rep.fired_distinct);
+    section(
+        &mut text,
+        "stays quiet on (near misses)",
+        &rep.near_misses,
+        rep.near_misses_distinct,
+    );
+    for e in &rep.errors {
+        let _ = writeln!(text, "error: {e}");
+    }
+    if rep.fired_total == 0 {
+        text.push_str("it fired on nothing the hooks have seen: check what it matches\n");
+    }
+    text
+}
+
+/// Who is writing a rule: the flag, else the session from the environment.
+fn author(flag: Option<&str>) -> String {
+    flag.map(str::to_string)
+        .or_else(|| {
+            ["JOUET_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID"]
+                .iter()
+                .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        })
+        .unwrap_or_else(|| "user".into())
+}
+
+#[derive(Serialize)]
+struct Created {
+    rule: String,
+    path: String,
+    mode: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from_note: Option<String>,
+}
+
+fn new(args: &RuleNewArgs, out: &Output) -> Exit {
+    let name = &args.name;
+    if !rulefile::valid_name(name) {
+        return out.error(
+            Exit::Usage,
+            &format!(
+                "`{name}` is not a rule name: use lowercase words joined by dashes, such as no-tags"
+            ),
+        );
+    }
+    if jouet_rules::builtin().iter().any(|s| &s.name == name) {
+        return out.error(
+            Exit::Precondition,
+            &format!("`{name}` is a built-in rule, which cannot be replaced; choose another name"),
+        );
+    }
+    let Some(paths) = Paths::locate() else {
+        return out.error(Exit::Failed, "there is no home directory to keep rules in");
+    };
+    let path = paths.rules.join(format!("{name}.luau"));
+    if path.exists() {
+        return out.error(
+            Exit::Precondition,
+            &format!(
+                "{} already exists; edit it, or choose another name",
+                path.display()
+            ),
+        );
+    }
+    let author = author(args.author.as_deref());
+    let created = jouet_output::time::date(crate::wind::now());
+    let (code, reason) = match &args.from_note {
+        Some(id) => {
+            let state = wind::State::load(&paths.state);
+            let Some(note) = state.note(id) else {
+                return out.error(Exit::NotFound, &format!("no winding note `{id}`"));
+            };
+            let code = rulefile::set_field(&note.code, "name", name);
+            let code = rulefile::set_field(&code, "author", &author);
+            let code = match &args.why {
+                Some(why) => rulefile::set_field(&code, "why", why),
+                None => code,
+            };
+            (code, format!("from winding note {id}: {}", note.why))
+        }
+        None => {
+            let Some(why) = &args.why else {
+                return out.error(
+                    Exit::Usage,
+                    "pass --why with what the rule is for, or --from-note with a winding note",
+                );
+            };
+            let code = rulefile::scaffold(&rulefile::Header {
+                name,
+                why,
+                author: &author,
+                created: &created,
+            });
+            (code, why.clone())
+        }
+    };
+    let written = std::fs::create_dir_all(&paths.rules).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, code.as_bytes()))
+    });
+    if let Err(e) = written {
+        return out.error(Exit::Failed, &format!("writing {}: {e}", path.display()));
+    }
+    let change = rulefile::Change {
+        ts: crate::wind::now(),
+        rule: name.clone(),
+        change: "created".into(),
+        from: None,
+        to: Some("warn".into()),
+        reason,
+        by: author,
+    };
+    if let Err(e) = rulefile::log(&paths.log, &change) {
+        eprintln!("jouet: writing the rule log: {e}");
+    }
+    if let Some(id) = &args.from_note {
+        wind::set_status(&paths, id, Status::Adopted);
+    }
+    let report = Created {
+        rule: name.clone(),
+        path: path.display().to_string(),
+        mode: "warn",
+        from_note: args.from_note.clone(),
+    };
+    out.result(&report, || {
+        let next = if args.from_note.is_some() {
+            format!("check it: `jouet rule test {name}` and `jouet rule test {name} --replay`")
+        } else {
+            format!("fill in its check and examples, then `jouet rule test {name}`")
+        };
+        format!(
+            "wrote {} (warn mode); {next}; `jouet rule promote {name}` when it is right\n",
+            report.path
+        )
+    });
+    Exit::Ok
+}
+
+fn promote(args: &RulePromoteArgs, out: &Output) -> Exit {
+    let Some(paths) = Paths::locate() else {
+        return out.error(Exit::Failed, "there is no home directory to keep rules in");
+    };
+    let reason = args
+        .reason
+        .clone()
+        .unwrap_or_else(|| "promoted by hand".into());
+    match wind::promote(&paths, &args.name, "user", &reason, crate::wind::now()) {
+        Ok(change) => {
+            out.result(&change, || {
+                format!("{} now denies (was warn)\n", change.rule)
+            });
+            Exit::Ok
+        }
+        Err(message) if message.starts_with("no rule") => out.error(Exit::NotFound, &message),
+        Err(message) => out.error(Exit::Precondition, &message),
+    }
+}
+
+#[derive(Serialize)]
+struct Log {
+    changes: Vec<rulefile::Change>,
+}
+
+fn log(args: &RuleLogArgs, out: &Output) -> Exit {
+    let changes: Vec<rulefile::Change> = rulefile::log_path()
+        .map(|p| rulefile::read_log(&p))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| args.name.as_ref().is_none_or(|n| *n == c.rule))
+        .collect();
+    let report = Log { changes };
+    out.result(&report, || {
+        if report.changes.is_empty() {
+            return "no changes logged\n".into();
+        }
+        let mut text = String::new();
+        for c in &report.changes {
+            let arrow = match (&c.from, &c.to) {
+                (Some(from), Some(to)) if c.change == "promoted" => format!(" {from} -> {to}"),
+                _ => String::new(),
+            };
+            let _ = writeln!(
+                text,
+                "{}  {}  {}{arrow}  by {}: {}",
+                jouet_output::time::date(c.ts),
+                c.rule,
+                c.change,
+                c.by,
+                c.reason
+            );
+        }
+        text
+    });
+    Exit::Ok
+}
+
+fn gap(args: &RuleGapArgs, out: &Output) -> Exit {
+    if args.text.trim().is_empty() {
+        return out.error(Exit::Usage, "say what the rule could not express");
+    }
+    let Some(path) = crate::share::gaps_path() else {
+        return out.error(Exit::Failed, "there is no home directory to record gaps in");
+    };
+    if let Err(e) = crate::share::record_note(&path, &args.text, args.rule.as_deref(), wind::now())
+    {
+        return out.error(Exit::Failed, &format!("recording the gap: {e}"));
+    }
+    out.result(&serde_json::json!({ "recorded": args.text.trim() }), || {
+        "recorded; `jouet share --idea` turns recorded gaps into a proposal for jouet's maintainers\n".into()
+    });
+    Exit::Ok
 }
 
 /// The engine to test with and the rule's name in it. A path loads that

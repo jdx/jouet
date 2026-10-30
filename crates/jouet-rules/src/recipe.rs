@@ -482,6 +482,7 @@ impl Recipes {
             refused: false,
         });
         self.vm.new_call();
+        self.vm.shared.current.replace(recipe.name.clone());
         let returned = self.vm.guarded(|| {
             let run: Function = table.raw_get("run")?;
             let args = args_table(&self.vm.lua, words)?;

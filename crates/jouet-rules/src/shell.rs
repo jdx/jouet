@@ -68,8 +68,7 @@ impl Script {
 ///   test` does not.
 /// - Success belongs to every command in the final `&&` chain, because all
 ///   of them ran and succeeded, except a first pipeline that follows `||`,
-///   which may not have run at all, and, without `pipefail`, a command that
-///   feeds a pipe: `cargo test | tail` exiting 0 is tail's success.
+///   which may not have run at all.
 /// - A script that ends in the background says nothing about anything.
 pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     let mut out = vec![None; commands.len()];
@@ -87,12 +86,6 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     while pipeline > start && commands[pipeline - 1].op == Some(Op::Pipe) {
         pipeline -= 1;
     }
-    let pipefail = commands[..start].iter().any(|c| {
-        c.program() == Some("set")
-            && c.argv()
-                .iter()
-                .any(|w| w == "pipefail" || w == "-o pipefail")
-    });
     if exit_code == 0 {
         let mut first = start;
         if start > 0 && commands[start - 1].op == Some(Op::Or) {
@@ -102,12 +95,8 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
             }
             first += 1;
         }
-        // Without pipefail a pipeline exits with its last command's status,
-        // so a command feeding a pipe has no known result.
-        for (status, command) in out.iter_mut().zip(commands).skip(first) {
-            if pipefail || command.op != Some(Op::Pipe) {
-                *status = Some(0);
-            }
+        for status in out.iter_mut().skip(first) {
+            *status = Some(0);
         }
         return out;
     }
@@ -117,6 +106,12 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     if !only_cd {
         return out;
     }
+    let pipefail = commands[..start].iter().any(|c| {
+        c.program() == Some("set")
+            && c.argv()
+                .iter()
+                .any(|w| w == "pipefail" || w == "-o pipefail")
+    });
     let blamed = if pipefail {
         pipeline
     } else {
@@ -148,22 +143,9 @@ impl Command {
     /// The words with wrappers such as `env FOO=1`, `sudo`, `timeout 60`,
     /// `rtk` and `mise x tool --` removed, so `[0]` is the program that runs.
     pub fn argv(&self) -> &[String] {
-        self.unwrap().0
-    }
-
-    /// `Some("rtk")` when rtk wraps the command (`rtk git status`, the form
-    /// rtk's hook rewrites commands to), so a rule can tell.
-    pub fn via(&self) -> Option<&'static str> {
-        self.unwrap().1.then_some("rtk")
-    }
-
-    fn unwrap(&self) -> (&[String], bool) {
         let mut w = &self.words[..];
-        let mut via_rtk = false;
         loop {
-            let Some(first) = w.first() else {
-                return (w, via_rtk);
-            };
+            let Some(first) = w.first() else { return w };
             let rest = &w[1..];
             w = match basename(first) {
                 "env" => skip_options(rest, &["-u", "-C", "-S", "--unset", "--chdir"], true),
@@ -173,30 +155,14 @@ impl Command {
                     let rest = skip_options(rest, &["-s", "-k", "--signal", "--kill-after"], false);
                     rest.get(1..).unwrap_or_default()
                 }
-                "command" | "exec" | "nohup" | "time" => skip_options(rest, &[], false),
-                "rtk" => {
-                    // `rtk [-v] CMD ...` and `rtk bypass CMD ...` run CMD;
-                    // `rtk gain` and the like are rtk's own commands.
-                    let rest = skip_options(rest, &[], false);
-                    match rest.first().map(String::as_str) {
-                        Some("bypass") => {
-                            via_rtk = true;
-                            &rest[1..]
-                        }
-                        Some(sub) if !RTK_OWN.contains(&sub) => {
-                            via_rtk = true;
-                            rest
-                        }
-                        _ => return (w, via_rtk),
-                    }
-                }
+                "command" | "exec" | "nohup" | "time" | "rtk" => skip_options(rest, &[], false),
                 "mise" if matches!(rest.first().map(String::as_str), Some("x" | "exec")) => {
                     match rest.iter().position(|a| a == "--") {
                         Some(i) => &rest[i + 1..],
-                        None => return (w, via_rtk),
+                        None => return w,
                     }
                 }
-                _ => return (w, via_rtk),
+                _ => return w,
             };
         }
     }
@@ -206,22 +172,6 @@ impl Command {
         self.argv().first().map(|p| basename(p))
     }
 }
-
-/// rtk's own subcommands, which run no other command.
-const RTK_OWN: &[&str] = &[
-    "config",
-    "discover",
-    "gain",
-    "help",
-    "init",
-    "proxy",
-    "read",
-    "rewrite",
-    "session",
-    "uninstall",
-    "update",
-    "version",
-];
 
 pub fn basename(word: &str) -> &str {
     let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
@@ -666,32 +616,6 @@ mod tests {
     }
 
     #[test]
-    fn rtk_wrapped_commands_are_seen_through() {
-        let c = &parse("rtk git add -A").commands[0];
-        assert_eq!(
-            (c.argv(), c.via()),
-            (&["git", "add", "-A"].map(String::from)[..], Some("rtk"))
-        );
-        let c = &parse("rtk -v bypass git stash").commands[0];
-        assert_eq!(c.argv(), ["git", "stash"]);
-        assert_eq!(c.via(), Some("rtk"));
-        // rtk's own commands are not unwrapped.
-        for script in [
-            "rtk gain --graph",
-            "rtk init -g",
-            "rtk",
-            "rtk read src/lib.rs",
-        ] {
-            let c = &parse(script).commands[0];
-            assert_eq!((c.program(), c.via()), (Some("rtk"), None), "{script}");
-        }
-        // rtk as an argument to another command is just a word.
-        let c = &parse("echo rtk git add -A").commands[0];
-        assert_eq!((c.program(), c.via()), (Some("echo"), None));
-        assert_eq!(parse("git status").commands[0].via(), None);
-    }
-
-    #[test]
     fn shell_c_scripts_are_parsed_too() {
         let script = parse("bash -lc 'sleep 30; gh pr checks'");
         let inner = script.inner_scripts();
@@ -738,14 +662,9 @@ mod tests {
 
     #[test]
     fn success_belongs_to_the_final_chain() {
-        // `cargo test` feeds a pipe, so tail's success says nothing about it.
         assert_eq!(
             status_of("cd x; cargo build && cargo test | tail -5", 0),
-            [None, Some(0), None, Some(0)]
-        );
-        assert_eq!(
-            status_of("set -o pipefail; cargo test | tail -5", 0),
-            [None, Some(0), Some(0)]
+            [None, Some(0), Some(0), Some(0)]
         );
         // Either side may be the one that ran.
         assert_eq!(status_of("cargo test || true", 0), [None, None]);

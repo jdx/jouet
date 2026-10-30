@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
+import { diffLines, languages } from "./languages.mts";
 import { socialCard, writeSocialCard } from "./social-images.mjs";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
@@ -14,9 +15,6 @@ if (!versionMatch) {
 }
 const latestVersion = versionMatch[1];
 const siteUrl = "https://jouet.jdx.dev";
-// Marks commands whose pull requests are still open.
-const soon = '<span class="jouet-status is-soon">soon</span>';
-
 export default defineConfig({
   title: "jouet",
   description:
@@ -35,13 +33,24 @@ export default defineConfig({
   sitemap: {
     hostname: siteUrl,
   },
+  markdown: {
+    // `spec` and `output` fences: jouet edit specs and jouet's reports.
+    languages,
+    codeTransformers: [diffLines],
+  },
+  transformPageData(pageData) {
+    // The generated CLI reference gets its own styles in custom.css.
+    if (pageData.relativePath.startsWith("cli/")) {
+      pageData.frontmatter.pageClass = "jouet-cli-page";
+    }
+  },
   themeConfig: {
     logo: "/logo.svg",
     nav: [
       {
         text: "Guide",
         link: "/getting-started",
-        activeMatch: "^/(getting-started|why|conventions|rules|setup)",
+        activeMatch: "^/(getting-started|why|conventions|rules|winding|setup)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -58,6 +67,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Rules", link: "/rules" },
+          { text: "Self-winding", link: "/winding" },
           { text: "Agent setup and hooks", link: "/setup" },
         ],
       },
@@ -66,11 +76,11 @@ export default defineConfig({
         items: [
           { text: "jouet edit", link: "/commands/edit" },
           { text: "jouet wait", link: "/commands/wait" },
-          { text: `jouet pr status ${soon}`, link: "/commands/pr-status" },
+          { text: "jouet pr status", link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
-          { text: `jouet pr next ${soon}`, link: "/commands/pr-next" },
-          { text: `jouet pr land ${soon}`, link: "/commands/pr-land" },
-          { text: `jouet run ${soon}`, link: "/commands/run" },
+          { text: "jouet pr next", link: "/commands/pr-next" },
+          { text: "jouet pr land", link: "/commands/pr-land" },
+          { text: "jouet run", link: "/commands/run" },
         ],
       },
       {
@@ -96,7 +106,17 @@ export default defineConfig({
                 collapsed: true,
                 items: [
                   { text: "status", link: "/cli/pr/status" },
-                  { text: "threads", link: "/cli/pr/threads" },
+                  {
+                    text: "threads",
+                    link: "/cli/pr/threads",
+                    collapsed: true,
+                    items: [
+                      { text: "reply", link: "/cli/pr/threads/reply" },
+                      { text: "resolve", link: "/cli/pr/threads/resolve" },
+                      { text: "unresolve", link: "/cli/pr/threads/unresolve" },
+                      { text: "apply", link: "/cli/pr/threads/apply" },
+                    ],
+                  },
                 ],
               },
               {
@@ -125,9 +145,24 @@ export default defineConfig({
                   { text: "types", link: "/cli/rule/types" },
                   { text: "trust", link: "/cli/rule/trust" },
                   { text: "untrust", link: "/cli/rule/untrust" },
+                  { text: "new", link: "/cli/rule/new" },
+                  { text: "promote", link: "/cli/rule/promote" },
+                  { text: "log", link: "/cli/rule/log" },
+                  { text: "gap", link: "/cli/rule/gap" },
                 ],
               },
               { text: "run", link: "/cli/run" },
+              {
+                text: "wind",
+                link: "/cli/wind/",
+                collapsed: true,
+                items: [
+                  { text: "show", link: "/cli/wind/show" },
+                  { text: "dismiss", link: "/cli/wind/dismiss" },
+                ],
+              },
+              { text: "unwind", link: "/cli/unwind" },
+              { text: "share", link: "/cli/share" },
               { text: "agent-help", link: "/cli/agent-help" },
               { text: "skill", link: "/cli/skill" },
               { text: "setup", link: "/cli/setup" },
