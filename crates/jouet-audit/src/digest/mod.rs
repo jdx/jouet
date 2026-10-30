@@ -13,6 +13,7 @@
 //! the network.
 
 pub mod correction;
+pub mod jouet;
 mod render;
 
 pub use correction::Kind;
@@ -98,6 +99,9 @@ pub struct Digest {
     /// Costly patterns `jouet audit` knows, with its advice.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<KnownPattern>,
+    /// Where jouet itself crashed, misbehaved or fell short.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub jouet: Vec<JouetFinding>,
     /// Every file read, and how often, for [`across`].
     #[serde(skip)]
     reads: BTreeMap<String, u64>,
@@ -212,6 +216,17 @@ pub struct Retyped {
     pub span: Span,
 }
 
+/// Something jouet did wrong or fell short in, found by [`jouet::scan`].
+#[derive(Debug, Clone, Serialize)]
+pub struct JouetFinding {
+    pub span: Span,
+    #[serde(flatten)]
+    pub found: jouet::Found,
+    /// The command, raw: whoever keeps it reduces it to a shape first.
+    #[serde(skip)]
+    pub command: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct KnownPattern {
     pub pattern: String,
@@ -292,6 +307,7 @@ pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Opti
         rereads: Vec::new(),
         retyped: Vec::new(),
         patterns: Vec::new(),
+        jouet: jouet_findings(t),
         reads: BTreeMap::new(),
         commands: BTreeMap::new(),
     };
@@ -901,6 +917,45 @@ fn retyped(t: &Transcript, home: Option<&str>, clean: &dyn Fn(&str) -> String, d
             });
         }
     }
+}
+
+/// What a call's exit code was: the one recorded, or Claude Code's `Exit
+/// code N` at the start of a failure's output, or 0 for a call that did
+/// not fail.
+fn exit_code(call: &Call) -> Option<i32> {
+    if call.exit_code.is_some() {
+        return call.exit_code;
+    }
+    if !call.failed {
+        return Some(0);
+    }
+    let head = call.error.as_deref()?;
+    let rest = head.trim_start().strip_prefix("Exit code ")?;
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
+    let shells: Vec<&Call> = t
+        .calls
+        .iter()
+        .filter(|c| c.tool == Tool::Shell && c.command.is_some())
+        .collect();
+    let runs: Vec<jouet::Run<'_>> = shells
+        .iter()
+        .map(|c| jouet::Run {
+            command: c.command.as_deref().unwrap_or_default(),
+            exit_code: exit_code(c),
+            output: c.output.as_deref().or(c.error.as_deref()),
+        })
+        .collect();
+    jouet::scan(&runs)
+        .into_iter()
+        .map(|found| JouetFinding {
+            span: Span::at(shells[found.index].line),
+            command: runs[found.index].command.to_string(),
+            found,
+        })
+        .collect()
 }
 
 /// Where `jouet audit` puts the session's tokens and time, and the costly

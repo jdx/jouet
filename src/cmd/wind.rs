@@ -228,7 +228,7 @@ fn adopt(paths: &Paths, id: &str, out: &Output) -> Exit {
 #[derive(Serialize)]
 struct DigestReport<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    prompt: Option<&'static str>,
+    prompt: Option<String>,
     redaction: String,
     digests: &'a [jouet_audit::digest::Digest],
     #[serde(skip_serializing_if = "is_empty_across")]
@@ -296,10 +296,13 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
     if digests.is_empty() {
         return out.error(Exit::NotFound, "no session there to digest");
     }
+    for d in &digests {
+        crate::share::record_digest(d);
+    }
     let budget = args.budget.unwrap_or(BUDGET).max(200);
     let across = jouet_audit::digest::across(&digests);
     let report = DigestReport {
-        prompt: prompt.then_some(wind::review::PROMPT),
+        prompt: prompt.then(|| wind::review::prompt(Settings::load().share.contribute)),
         redaction: redactor.describe(),
         digests: &digests,
         across: &across,
@@ -309,7 +312,8 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
         let mut text = String::new();
         if prompt {
             let ids: Vec<&str> = digests.iter().map(|d| d.session.as_str()).collect();
-            text.push_str(&wind::review::PROMPT.replace("SESSION_ID", &ids.join(", ")));
+            let prompt = report.prompt.as_deref().unwrap_or_default();
+            text.push_str(&prompt.replace("SESSION_ID", &ids.join(", ")));
             text.push_str("\n---\n\n");
         }
         let _ = writeln!(text, "Redacted with {}; local only.\n", report.redaction);
@@ -381,10 +385,16 @@ fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
         for id in &recorded.recorded {
             let _ = writeln!(text, "recorded {id}; the next session starts show it");
         }
+        for key in &recorded.ideas {
+            let _ = writeln!(
+                text,
+                "recorded idea {key} for jouet's maintainers; `jouet share --idea {key}` drafts it, and posts only with --yes"
+            );
+        }
         for s in &recorded.skipped {
             let _ = writeln!(text, "skipped \"{}\": {}", s.title, s.reason);
         }
-        if recorded.recorded.is_empty() && recorded.skipped.is_empty() {
+        if recorded.recorded.is_empty() && recorded.skipped.is_empty() && recorded.ideas.is_empty() {
             text.push_str(if recorded.nothing {
                 "nothing to record: the review found nothing worth changing\n"
             } else {

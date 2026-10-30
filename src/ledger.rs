@@ -45,7 +45,8 @@ pub(crate) struct Entry {
     /// path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
-    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop` or `override`.
+    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `override`,
+    /// or `slow-hook` (a hook over its time budget; `tool` names its event).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -55,6 +56,10 @@ pub(crate) struct Entry {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// For a `slow-hook` entry: the budget the hook ran over, in
+    /// milliseconds; `duration_ms` is how long it took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_ms: Option<u64>,
     /// For a call that recorded a check: the work tree it ran against, as
     /// `jouet_rules::tree` hashes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

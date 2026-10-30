@@ -25,6 +25,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const TREE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
+    let started = std::time::Instant::now();
     let result = std::panic::catch_unwind(|| {
         let harness = args.harness.as_deref().and_then(Harness::parse)?;
         let event = args.event.as_deref()?;
@@ -34,7 +35,10 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         if event == "session-start" {
             verify::prune_sessions();
         }
-        handle(harness, event, &payload, &Settings::load())
+        let settings = Settings::load();
+        let output = handle(harness, event, &payload, &settings);
+        record_slow(harness, event, &payload, &settings, started.elapsed());
+        output
     });
     match result {
         Ok(Some(output)) => println!("{output}"),
@@ -46,6 +50,30 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         _ => {}
     }
     jouet_output::exit::Exit::Ok
+}
+
+/// Records a hook that ran over its budget, for `jouet share --idea`:
+/// every tool call waits for it.
+fn record_slow(
+    harness: Harness,
+    event: &str,
+    payload: &Value,
+    settings: &Settings,
+    took: Duration,
+) {
+    let hooks = &settings.hooks;
+    let budget = crate::share::signals::hook_budget(event, hooks.budget_ms);
+    let ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    if !hooks.enabled || !hooks.ledger || ms <= budget {
+        return;
+    }
+    let Some(dir) = ledger::dir() else { return };
+    let session = payload.get("session_id").and_then(Value::as_str);
+    let mut entry = Entry::new(harness.name(), session, "slow-hook");
+    entry.tool = Some(event.to_string());
+    entry.duration_ms = Some(ms);
+    entry.budget_ms = Some(budget);
+    ledger::append(&dir, &entry);
 }
 
 /// The hook's stdout for one event, or `None` to print nothing.
@@ -140,6 +168,13 @@ fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) ->
     lines.extend(wind::review::lines_for_session(
         &paths, session, repo, room, now,
     ));
+    if settings.share.contribute
+        && lines.len() < wind::MAX_PER_START
+        && let Some(gaps) = crate::share::gaps_path()
+    {
+        let _ = crate::share::refresh_signals(&gaps, &paths);
+        lines.extend(crate::share::line_for_session(&gaps, session));
+    }
     lines
 }
 
@@ -168,6 +203,7 @@ fn review_on_stop(
     else {
         return;
     };
+    crate::share::record_digest(&digest);
     let signals = wind::review::Signals::of(&digest);
     wind::review::consider(
         paths,

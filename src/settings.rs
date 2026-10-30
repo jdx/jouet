@@ -28,6 +28,17 @@ pub(crate) struct Settings {
     pub stats: StatsSettings,
     #[usage(flatten)]
     pub wind: WindSettings,
+    #[usage(flatten)]
+    pub share: ShareSettings,
+}
+
+/// Contributing back to jouet, through `jouet share`.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "share")]
+pub(crate) struct ShareSettings {
+    /// Suggest, at session start, sharing what sessions show about jouet itself (crashes, confusing flags, abandoned output) with its maintainers; every post still needs the user's yes
+    #[usage(env = "JOUET_SHARE_CONTRIBUTE", default = false)]
+    pub contribute: bool,
 }
 
 /// Self-winding: the ledger the hooks keep, and the rules drafted from it.
@@ -77,6 +88,9 @@ pub(crate) struct HookSettings {
     /// Keep a ledger of command shapes and rule decisions
     #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
     pub ledger: bool,
+    /// Milliseconds a tool hook may take before the ledger records it as slow; session start and stop get ten times this
+    #[usage(env = "JOUET_HOOKS_BUDGET_MS", default = 500)]
+    pub budget_ms: u64,
 }
 
 /// What `jouet stats` prints.
@@ -196,6 +210,15 @@ mod tests {
         assert_eq!(s.wind.promote_after, 20);
         let s = Settings::load_from(&env(&[("JOUET_WIND", "0")]), None);
         assert!(!s.wind.enabled);
+    }
+
+    #[test]
+    fn contributing_is_off_and_hooks_have_a_budget() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(!s.share.contribute);
+        assert_eq!(s.hooks.budget_ms, 500);
+        let s = Settings::load_from(&env(&[("JOUET_SHARE_CONTRIBUTE", "1")]), None);
+        assert!(s.share.contribute);
     }
 
     #[test]

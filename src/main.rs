@@ -70,7 +70,7 @@ enum Cmd {
     Wind(WindArgs),
     /// Propose retiring rules that are noisy or always overridden
     Unwind(UnwindArgs),
-    /// Propose a proven rule, or a missing primitive, to jouet's maintainers
+    /// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
     Share(ShareArgs),
     /// Print a short usage guide written for agents
     AgentHelp(AgentHelpArgs),
@@ -870,21 +870,28 @@ pub struct RuleGapArgs {
     rule: Option<String>,
 }
 
-/// Propose a proven rule, or a missing primitive, to jouet's maintainers
+/// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
 ///
 /// Builds a proposal and prints the exact text, with paths, repository
 /// names, hostnames and emails replaced, and a diff of what that changed.
-/// Nothing is posted without --yes, which a person must approve: it posts a
-/// Discussion in the "Rules & ideas" category of jdx/jouet with your GitHub
-/// login. A rule is shared only once it passes its tests, has denied for a
-/// week and fired often with few overrides. At most three posts a week.
+/// Nothing is posted without --yes, which a person must approve: it posts
+/// with your GitHub login, a bug as an Issue on jdx/jouet and anything else
+/// as a Discussion in its "Rules & ideas" category. A rule is shared only
+/// once it passes its tests, has denied for a week and fired often with few
+/// overrides. --idea also covers what sessions show about jouet itself:
+/// crashes, exit codes outside its table, malformed JSON, usage errors,
+/// output agents abandon, built-in rules overridden again and again, slow
+/// hooks, and scripts written in many sessions. At most three posts a week.
 #[derive(Args)]
 pub struct ShareArgs {
     /// The rule to share; with --idea, the idea's key (default: the most recorded)
     name: Option<String>,
-    /// Share an idea from recorded gaps instead of a rule
+    /// Share an idea: a missing primitive, or something sessions show about jouet itself
     #[usage(long)]
     idea: bool,
+    /// List the ideas ready to share, with their keys
+    #[usage(long)]
+    list: bool,
     /// Post it; without this, only show what would be posted
     #[usage(long)]
     yes: bool,

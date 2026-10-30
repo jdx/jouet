@@ -135,6 +135,7 @@ Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger
 - **A shape never holds values.** It keeps each command's program, up to two of that program's known subcommands (`git stash push`, `gh pr checks`) and its flag names. Every other positional (paths, task and script names, `echo`'s words), flag values, message text, here-documents and environment assignments become placeholders, and anything token-like is redacted. `GH_TOKEN=... git -C /repo commit -m "fix it"` is recorded as `git -C <arg> commit -m <arg>`. A loop, conditional, `case` or subshell keeps its structure, with its list, patterns and names as placeholders: `for pr in 1 2; do gh pr checks $pr; done` is `for <arg> in <arg>…; do gh pr checks <arg>; done` (see [compound commands](/winding#compound-commands)).
 - **Overrides.** When a command is denied or warned about and the session runs a command of the same shape within ten minutes, and it goes ahead this time, the ledger records an `override` of that rule. It is a heuristic for measuring rules later: same shape means the same program, subcommands and flags, whatever the values. Each denial or warning is counted once.
 - **Rotation.** The file is rotated at 4 MiB, and rotated files are removed after 30 days.
+- **Slow hooks.** A hook that runs over its time budget (`[hooks] budget_ms`, 500 ms by default for the tool hooks, ten times that for session start and stop) appends a `slow-hook` entry naming its event, how long it took and the budget, for [`jouet share`](/winding#what-sessions-show-about-jouet).
 - **Turning it off.** `[hooks] ledger = false` or `JOUET_HOOKS_LEDGER=0`.
 
 Explicit `allow` decisions are not recorded: under the [floor](/rules#where-rules-come-from) an allow decides nothing. The stop check still keeps its own small state file.
@@ -150,6 +151,7 @@ steer = true   # JOUET_HOOKS_STEER: the pre-tool-use rules
 prime = true   # JOUET_HOOKS_PRIME: the session-start guide
 verify = true  # JOUET_HOOKS_VERIFY: the stop check
 ledger = true  # JOUET_HOOKS_LEDGER: the ledger
+budget_ms = 500 # JOUET_HOOKS_BUDGET_MS: a tool hook slower than this is recorded as slow (session start and stop: 10×)
 
 [rules]
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule

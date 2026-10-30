@@ -330,6 +330,8 @@ impl State {
                 });
             } else if call.failed {
                 call.error = Some(head.clone());
+            } else if runs_jouet(call) {
+                call.output = Some(head.clone());
             }
         }
     }
@@ -362,6 +364,11 @@ fn tool_kind(name: &str) -> Tool {
         }
         _ => Tool::Other,
     }
+}
+
+/// A shell call that may run jouet, whose own output a digest checks.
+pub(crate) fn runs_jouet(call: &Call) -> bool {
+    call.command.as_deref().is_some_and(|c| c.contains("joue"))
 }
 
 /// Text Claude Code writes as the user's that the user did not type: a
