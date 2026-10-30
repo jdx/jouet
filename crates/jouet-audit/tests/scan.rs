@@ -234,3 +234,72 @@ fn missing_harness_directories_have_no_transcripts() {
     };
     assert_eq!(none.discover(&Filter::default()).unwrap(), vec![]);
 }
+
+/// One Claude Code line: an assistant request with input tokens and a call.
+fn request(session: &str, id: &str, at: &str, command: &str) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{at}","sessionId":"{session}","cwd":"/work/app","message":{{"id":"{id}","role":"assistant","usage":{{"input_tokens":1000,"output_tokens":5}},"content":[{{"type":"tool_use","id":"t-{id}","name":"Bash","input":{{"command":"{command}"}}}}]}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn a_forked_sessions_copies_of_its_parents_requests_count_once() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects/-work-app");
+    std::fs::create_dir_all(&dir).unwrap();
+    let parent = "aaaaaaaa-0000-4000-8000-000000000001";
+    let fork = "aaaaaaaa-0000-4000-8000-000000000002";
+    let first = request(parent, "msg_1", "2026-10-30T10:00:00Z", "gh pr checks 1");
+    let second = request(parent, "msg_2", "2026-10-30T10:00:10Z", "gh pr checks 1");
+    std::fs::write(
+        dir.join(format!("{parent}.jsonl")),
+        [&*first, &*second].concat(),
+    )
+    .unwrap();
+    // The fork repeats both, IDs and all, then makes a request of its own.
+    let own = request(fork, "msg_3", "2026-10-30T10:01:00Z", "cargo test");
+    std::fs::write(
+        dir.join(format!("{fork}.jsonl")),
+        [
+            first.replace(parent, fork),
+            second.replace(parent, fork),
+            own,
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let claude = ClaudeCode {
+        root: home.path().to_path_buf(),
+    };
+    for threads in [1, 4] {
+        let s = scan(&[&claude], &Filter::default(), Analyzer::default(), threads);
+        let report = s.analyzer.report(5);
+        let totals = &harness(&report, "claude").totals;
+        assert_eq!((s.stats.files, s.stats.copied_requests), (2, 2));
+        assert_eq!((totals.requests, totals.input_tokens), (3, 3000));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_directory_hides_only_what_is_inside_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects/-work-app");
+    let session = "aaaaaaaa-0000-4000-8000-000000000001";
+    let locked = dir.join(session).join("subagents");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(
+        dir.join(format!("{session}.jsonl")),
+        request(session, "msg_1", "2026-10-30T10:00:00Z", "cargo test"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let found = ClaudeCode {
+        root: home.path().to_path_buf(),
+    }
+    .discover(&Filter::default());
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let found = found.expect("the readable transcripts are still listed");
+    assert_eq!(found.len(), 1);
+}

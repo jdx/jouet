@@ -9,7 +9,7 @@ use jouet_output::exit::Exit;
 use jouet_output::time;
 use serde::Serialize;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 /// Categories listed per harness unless --top says otherwise.
 const DEFAULT_TOP: usize = 10;
@@ -21,7 +21,10 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
     let now = time::now();
     let since_ms = match args.since.as_deref().map(|s| parse_since(s, now)) {
         None => None,
-        Some(Ok(secs)) => Some(secs * 1000),
+        Some(Ok(secs)) => match secs.checked_mul(1000) {
+            Some(ms) => Some(ms),
+            None => return out.error(Exit::Usage, "--since: too far back"),
+        },
         Some(Err(e)) => return out.error(Exit::Usage, &format!("--since: {e}")),
     };
     let (claude, codex) = match args.harness.as_deref().unwrap_or("all") {
@@ -37,7 +40,7 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
     };
     let project = match args.project.as_deref().map(std::path::absolute) {
         None => None,
-        Some(Ok(path)) => Some(path),
+        Some(Ok(path)) => Some(lexical(&path)),
         Some(Err(e)) => return out.error(Exit::Usage, &format!("--project: {e}")),
     };
     let top = match args.top {
@@ -65,7 +68,7 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
         project: project.clone(),
         ..Filter::default()
     };
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
+    let home = jouet_audit::home().map(|h| h.to_string_lossy().into_owned());
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let scan = jouet_audit::scan(
         &readers,
@@ -107,13 +110,37 @@ pub(crate) fn parse_since(s: &str, now: i64) -> Result<i64, String> {
     let bad = || format!("`{s}` is not a time; write it as 7d, 12h, 2026-10-01 or RFC 3339");
     if let Some(n) = s.strip_suffix('d').or_else(|| s.strip_suffix('w')) {
         let days: i64 = n.parse().map_err(|_| bad())?;
-        let days = if s.ends_with('w') { days * 7 } else { days };
-        return Ok(now - days * 86_400);
+        let days = if s.ends_with('w') {
+            days.checked_mul(7)
+        } else {
+            Some(days)
+        };
+        return days
+            .and_then(|d| d.checked_mul(86_400))
+            .and_then(|secs| now.checked_sub(secs))
+            .ok_or_else(bad);
     }
     if s.len() == 10 && s.as_bytes()[4] == b'-' {
         return time::parse_utc(&format!("{s}T00:00:00Z")).ok_or_else(bad);
     }
     time::parse_time(s, now).map_err(|_| bad())
+}
+
+/// `path` with `.` and `..` resolved by name, the way a session records
+/// the directory it ran in. Symlinks are not followed: `--project` matches
+/// the path as written, not where a link leads.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[derive(Serialize)]
@@ -136,6 +163,8 @@ struct ScanDoc {
     other_projects: u64,
     #[serde(skip_serializing_if = "is_zero")]
     bad_lines: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    copied_requests: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     unreadable: Vec<UnreadableDoc>,
     elapsed_ms: u64,
@@ -158,6 +187,7 @@ impl ScanDoc {
             skipped_old: stats.skipped_old,
             other_projects: stats.other_projects,
             bad_lines: stats.bad_lines,
+            copied_requests: stats.copied_requests,
             unreadable: stats
                 .unreadable
                 .iter()
@@ -472,6 +502,18 @@ mod tests {
         assert_eq!(parse_since("1970-01-02", now), Ok(86_400));
         assert_eq!(parse_since("1970-01-01T00:01:00Z", now), Ok(60));
         assert!(parse_since("last tuesday", now).is_err());
+        // Too far back to count is a usage error, not an overflow.
+        assert!(parse_since("999999999999999d", now).is_err());
+        assert!(parse_since("9999999999999999w", now).is_err());
+    }
+
+    #[test]
+    fn project_paths_are_resolved_by_name() {
+        assert_eq!(
+            lexical(Path::new("/home/me/src/../other/./app")),
+            Path::new("/home/me/other/app")
+        );
+        assert_eq!(lexical(Path::new("/../x")), Path::new("/x"));
     }
 
     #[test]

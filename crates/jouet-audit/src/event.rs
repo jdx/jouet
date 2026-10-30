@@ -32,6 +32,10 @@ pub struct Request {
     pub output_tokens: Option<u64>,
     /// The calls this request issued, as indexes into [`Transcript::calls`].
     pub calls: Range<usize>,
+    /// What identifies this request wherever it is copied: a forked or
+    /// resumed Claude Code session repeats its parent's requests, message
+    /// IDs and all, so [`scan`](crate::scan) counts each ID once.
+    pub id: Option<u64>,
 }
 
 /// One tool call.

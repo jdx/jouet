@@ -9,6 +9,7 @@ pub use codex::Codex;
 
 use crate::analyze::Analyzer;
 use crate::event::Transcript;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -128,6 +129,9 @@ pub struct ScanStats {
     pub other_projects: u64,
     /// Lines that were not valid JSON, skipped.
     pub bad_lines: u64,
+    /// Requests left out because another transcript already counted them:
+    /// a forked or resumed session's copies of its parent's.
+    pub copied_requests: u64,
     /// Files that could not be read, or were cut short by a read error.
     pub unreadable: Vec<Unreadable>,
     pub elapsed_ms: u64,
@@ -175,6 +179,8 @@ pub fn scan(readers: &[&dyn Reader], filter: &Filter, analyzer: Analyzer, thread
 
     let next = AtomicUsize::new(0);
     let results = Mutex::new(Vec::new());
+    // Request IDs counted so far, across every file and thread.
+    let seen = Mutex::new(HashSet::new());
     std::thread::scope(|s| {
         for _ in 0..threads.max(1).min(work.len().max(1)) {
             s.spawn(|| {
@@ -188,7 +194,7 @@ pub fn scan(readers: &[&dyn Reader], filter: &Filter, analyzer: Analyzer, thread
                         break;
                     };
                     let reader = readers[*i];
-                    read_one(reader, source, filter, &mut local, &mut local_stats);
+                    read_one(reader, source, filter, &seen, &mut local, &mut local_stats);
                 }
                 results
                     .lock()
@@ -204,6 +210,7 @@ pub fn scan(readers: &[&dyn Reader], filter: &Filter, analyzer: Analyzer, thread
         stats.bytes += local_stats.bytes;
         stats.other_projects += local_stats.other_projects;
         stats.bad_lines += local_stats.bad_lines;
+        stats.copied_requests += local_stats.copied_requests;
         stats.unreadable.extend(local_stats.unreadable);
     }
     stats.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
@@ -218,6 +225,7 @@ fn read_one(
     reader: &dyn Reader,
     source: &Source,
     filter: &Filter,
+    seen: &Mutex<HashSet<u64>>,
     analyzer: &mut Analyzer,
     stats: &mut ScanStats,
 ) {
@@ -253,6 +261,18 @@ fn read_one(
                     .requests
                     .retain(|r| r.at.is_none_or(|at| at < until));
             }
+            // Copies are identical, so whichever transcript claims an ID
+            // first counts it.
+            if transcript.requests.iter().any(|r| r.id.is_some()) {
+                let mut seen = seen
+                    .lock()
+                    .expect("no scan thread panics while holding the lock");
+                let before = transcript.requests.len();
+                transcript
+                    .requests
+                    .retain(|r| r.id.is_none_or(|id| seen.insert(id)));
+                stats.copied_requests += (before - transcript.requests.len()) as u64;
+            }
             analyzer.add(reader.harness(), &transcript);
         }
         Ok(None) => stats.other_projects += 1,
@@ -280,8 +300,9 @@ pub(crate) fn lines(input: &mut dyn BufRead, mut f: impl FnMut(&[u8]) -> bool) -
     }
 }
 
-/// The user's home directory.
-pub(crate) fn home() -> Option<PathBuf> {
+/// The user's home directory, as the readers find it: `$HOME`, else
+/// `%USERPROFILE%`.
+pub fn home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .filter(|h| !h.is_empty())
@@ -289,19 +310,23 @@ pub(crate) fn home() -> Option<PathBuf> {
 }
 
 /// Every file under `dir`, recursively, whose name ends with one of
-/// `suffixes`. A missing directory has none.
+/// `suffixes`. A missing `dir` has none, and one that cannot be read is an
+/// error. Below it, a directory that cannot be read and an entry that
+/// vanishes while it is listed are skipped, so one of them does not hide
+/// the rest of a harness's transcripts.
 pub(crate) fn files_under(dir: &Path, suffixes: &[&str], out: &mut Vec<PathBuf>) -> io::Result<()> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    for entry in entries {
-        let entry = entry?;
+    for entry in entries.flatten() {
         let path = entry.path();
-        let kind = entry.file_type()?;
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         if kind.is_dir() {
-            files_under(&path, suffixes, out)?;
+            let _ = files_under(&path, suffixes, out);
         } else if path
             .file_name()
             .and_then(|n| n.to_str())

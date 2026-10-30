@@ -60,7 +60,7 @@ setup() {
 }
 
 @test "--harness, --project and --top narrow the report, and say what they leave out" {
-	run --separate-stderr jouet audit --display plain --harness codex --project /work/other
+	run --separate-stderr jouet audit --display plain --harness codex --project /work/app/../other/.
 	assert_success
 	assert_line --index 0 --partial 'jouet audit: 2 sessions in /work/other'
 	refute_output --partial 'Claude Code'
@@ -88,6 +88,10 @@ setup() {
 	run --separate-stderr jouet audit --since yesterday --json
 	assert_failure 2
 	[[ "$(jq -r '.error.code' <<<"$output")" == usage ]]
+
+	run --separate-stderr jouet audit --since 99999999999999d
+	assert_failure 2
+	assert_equal "$stderr" "jouet: --since: too far back"
 
 	rm -rf "$HOME/.claude" "$HOME/.codex"
 	run --separate-stderr jouet audit --json
