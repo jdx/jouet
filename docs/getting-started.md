@@ -61,6 +61,45 @@ jouet --version
 jouet edit --help
 ```
 
+## Shell completions
+
+`jouet completion SHELL` prints a completion script for bash, zsh, fish or PowerShell. The script asks the `jouet` on your `PATH` for each completion, so it needs nothing else installed and keeps up with upgrades without being regenerated.
+
+::: code-group
+
+```bash [Bash]
+mkdir -p ~/.local/share/bash-completion/completions
+jouet completion bash > ~/.local/share/bash-completion/completions/jouet
+```
+
+```zsh [Zsh]
+mkdir -p ~/.zfunc
+jouet completion zsh > ~/.zfunc/_jouet
+```
+
+```fish [Fish]
+mkdir -p ~/.config/fish/completions
+jouet completion fish > ~/.config/fish/completions/jouet.fish
+```
+
+```powershell [PowerShell]
+jouet completion powershell | Out-String | Invoke-Expression
+```
+
+:::
+
+Bash needs `bash-completion` loaded, or source the file from `~/.bashrc`. For zsh, add `~/.zfunc` to `fpath` before `compinit` in `~/.zshrc`:
+
+```zsh
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit
+compinit
+```
+
+For PowerShell, put that line in your `$PROFILE`. Start a new shell afterwards.
+
+Each release also carries the scripts (`jouet.bash`, `jouet.zsh`, `jouet.fish`, `jouet.powershell`) and a man page, `jouet.1`, beside the archives. With `mise use -g jouet` and [mise activated](https://mise.jdx.dev/shell-setup.html), you need none of this: mise installs jouet from its signed packslip, loads its completions in bash, zsh, fish and PowerShell, and makes `man jouet` open the active version's page. An install through `github:jdx/jouet` or cargo does not get them.
+
 ## Make a first edit
 
 Hand `jouet edit` a spec on stdin. It checks every edit before it writes any file, so this changes both files or neither:

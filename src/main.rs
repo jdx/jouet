@@ -25,7 +25,8 @@ use usage_rs::{Args, Cli, Subcommands};
     bin = "jouet",
     version,
     about = "A toolkit CLI for coding agents",
-    unknown_flags = "error"
+    unknown_flags = "error",
+    completion = true
 )]
 struct Jouet {
     /// Print one JSON document instead of text
@@ -74,6 +75,8 @@ enum Cmd {
     Skill(SkillArgs),
     /// Install jouet's hooks and skill into Claude Code or Codex
     Setup(SetupArgs),
+    /// Print a shell completion script
+    Completion(CompletionArgs),
     /// Answer a Claude Code or Codex hook
     #[usage(hide)]
     Hook(HookArgs),
@@ -935,6 +938,21 @@ pub struct SetupArgs {
     uninstall: bool,
 }
 
+/// Print a shell completion script
+///
+/// The script asks this binary for each completion, so it needs nothing else
+/// installed and follows whichever jouet is on PATH. Write it where your shell
+/// loads completions, or source it from your shell's startup file.
+#[derive(Args)]
+pub struct CompletionArgs {
+    /// The shell to complete for
+    #[usage(
+        arg,
+        choices("bash", "zsh", "fish", "powershell", "pwsh", "elvish", "nu", "nushell")
+    )]
+    shell: String,
+}
+
 /// Answer a Claude Code or Codex hook
 ///
 /// Reads the hook's JSON on stdin and runs jouet's rules. Installed by
@@ -1128,6 +1146,7 @@ fn main() -> ExitCode {
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),
         Cmd::Skill(args) => cmd::skill::run(&args, &out),
         Cmd::Setup(args) => cmd::setup::run(&args, &out),
+        Cmd::Completion(args) => cmd::completion::run(&args, &out),
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     exit.into()
