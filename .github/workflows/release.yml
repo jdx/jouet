@@ -127,6 +127,15 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # The packslip manifest and the glibc check, from the commit the
+      # binaries were built from. First, because checkout cleans the
+      # workspace the archives are collected into.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+          sparse-checkout: .github
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
@@ -192,11 +201,18 @@ jobs:
       # archive's digest, the executable inside it, the shared objects it
       # needs from the host, and the build provenance of each file, signed
       # keylessly with this job's identity. See https://packslip.dev.
+      #
+      # The manifest declares the GNU archives' glibc floor, so a consumer such
+      # as mise takes the musl build on an older host; check it first.
+      - name: Check the declared glibc floor
+        run: python3 .github/scripts/check-glibc-min.py .github/packslip/release.toml release-assets/jouet-*.tar.gz
+
       - uses: jdx/packslip@ddcddd9c8c33977d2d08d5db91caec579da59aab # v1.11.0
         with:
           tag: ${{ inputs.tag }}
           commit: ${{ needs.source.outputs.commit }}
           artifacts: release-assets/jouet-*.tar.gz release-assets/jouet-*.zip
+          manifest: .github/packslip/release.toml
           bin: jouet
           resources: |
             cli-spec/usage=asset:jouet.usage.kdl
