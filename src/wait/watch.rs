@@ -337,7 +337,7 @@ pub fn poll(
     }
     snap.sha = Some(sha.clone());
     let checks = fetch_checks(client, &base, &sha, &mut snap.cache)?;
-    update_required(client, repo, number, &checks, snap);
+    update_required(client, repo, number, &sha, &checks, snap);
     let checks: Vec<Check> = checks
         .into_iter()
         .map(|mut c| {
@@ -395,22 +395,26 @@ fn fetch_checks(
     Ok(checks)
 }
 
-/// Asks which checks are required, for names not asked about yet. Only
-/// GraphQL says this for checks on a PR (the branch protection API needs
-/// admin rights), so it is asked again only when new names appear. A failure
-/// leaves the names unknown and is retried at the next poll.
+/// Asks which checks on `sha` are required, for names not asked about
+/// yet. Only GraphQL says this for checks on a PR (the branch protection API
+/// needs admin rights), so it is asked again only when new names appear.
+/// `sha` is the commit being waited on, which with `--sha` need not be the
+/// PR head. A name counts as known only once GraphQL has answered for it, so
+/// a check that REST lists before GraphQL does, or a failed query, is asked
+/// about again at the next poll.
 fn update_required(
     client: &mut Client,
     repo: &Repo,
     number: u64,
+    sha: &str,
     checks: &[Check],
     snap: &mut Snapshot,
 ) {
     if checks.iter().all(|c| snap.required_known.contains(&c.name)) {
         return;
     }
-    const QUERY: &str = "query($o: String!, $r: String!, $n: Int!, $a: String) {
-  repository(owner: $o, name: $r) { pullRequest(number: $n) { commits(last: 1) { nodes { commit {
+    const QUERY: &str = "query($o: String!, $r: String!, $n: Int!, $s: String!, $a: String) {
+  repository(owner: $o, name: $r) { object(expression: $s) { ... on Commit {
     statusCheckRollup { contexts(first: 100, after: $a) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -418,20 +422,24 @@ fn update_required(
         ... on StatusContext { context isRequired(pullRequestNumber: $n) }
       }
     } }
-  } } } } }
+  } } }
 }";
     let mut after: Option<String> = None;
     let mut required = BTreeSet::new();
+    let mut answered = BTreeSet::new();
     for _ in 0..MAX_PAGES {
-        let vars = json!({ "o": repo.owner, "r": repo.name, "n": number, "a": after });
+        let vars = json!({ "o": repo.owner, "r": repo.name, "n": number, "s": sha, "a": after });
         let Ok(data) = client.graphql(QUERY, &vars) else {
             return;
         };
-        let contexts = &data["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
-            ["contexts"];
+        let contexts = &data["repository"]["object"]["statusCheckRollup"]["contexts"];
         for node in contexts["nodes"].as_array().into_iter().flatten() {
             let name = node["name"].as_str().or(node["context"].as_str());
-            if let (Some(name), Some(true)) = (name, node["isRequired"].as_bool()) {
+            let (Some(name), Some(is_required)) = (name, node["isRequired"].as_bool()) else {
+                continue;
+            };
+            answered.insert(name.to_string());
+            if is_required {
                 required.insert(name.to_string());
             }
         }
@@ -442,8 +450,7 @@ fn update_required(
         }
     }
     snap.required.extend(required);
-    snap.required_known
-        .extend(checks.iter().map(|c| c.name.clone()));
+    snap.required_known.extend(answered);
 }
 
 /// Logs `check_registered` for checks not seen before and

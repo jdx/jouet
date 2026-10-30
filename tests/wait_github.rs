@@ -78,6 +78,16 @@ impl Default for World {
     }
 }
 
+impl World {
+    /// The checks on a commit, which GitHub also finds by an abbreviated SHA.
+    fn checks_on(&self, sha: &str) -> Option<&Vec<CheckRun>> {
+        self.checks
+            .iter()
+            .find(|(full, _)| !sha.is_empty() && full.starts_with(sha))
+            .map(|(_, checks)| checks)
+    }
+}
+
 #[derive(Default)]
 struct Log {
     /// Every request as `METHOD path`, with the status answered.
@@ -128,10 +138,15 @@ fn job_json(id: u64, name: &str, status: &str, conclusion: Option<&str>) -> Valu
 }
 
 /// The REST and GraphQL answers for the current world.
-fn respond(world: &mut World, method: &str, target: &str) -> (u16, Vec<(String, String)>, String) {
+fn respond(
+    world: &mut World,
+    method: &str,
+    target: &str,
+    body: &[u8],
+) -> (u16, Vec<(String, String)>, String) {
     let (path, _query) = target.split_once('?').unwrap_or((target, ""));
     if method == "POST" && path == "/graphql" {
-        return (200, Vec::new(), graphql(world));
+        return (200, Vec::new(), graphql(world, body));
     }
     if let Some(after) = world.rate_limit_for.take() {
         let reset = std::time::SystemTime::now()
@@ -168,8 +183,7 @@ fn respond(world: &mut World, method: &str, target: &str) -> (u16, Vec<(String, 
         )),
         ["commits", sha, "check-runs"] => {
             let runs: Vec<Value> = world
-                .checks
-                .get(sha)
+                .checks_on(sha)
                 .into_iter()
                 .flatten()
                 .map(|c| run_json(c.id, c.name, c.status, c.conclusion))
@@ -213,21 +227,21 @@ fn respond(world: &mut World, method: &str, target: &str) -> (u16, Vec<(String, 
     }
 }
 
-/// GraphQL answers: required checks for `wait ci`, a PR for `wait pr`.
-fn graphql(world: &World) -> String {
+/// GraphQL answers: the required checks on the commit a `wait ci` query
+/// names (its `$s`), and a PR for `wait pr`.
+fn graphql(world: &World, body: &[u8]) -> String {
+    let request: Value = serde_json::from_slice(body).unwrap_or_default();
+    let sha = request["variables"]["s"].as_str().unwrap_or_default();
     let nodes: Vec<Value> = world
-        .checks
-        .get(world.head)
+        .checks_on(sha)
         .into_iter()
         .flatten()
         .map(|c| json!({ "name": c.name, "isRequired": world.required.contains(&c.name) }))
         .collect();
     json!({ "data": {
-        "repository": { "pullRequest": { "commits": { "nodes": [ { "commit": {
-            "statusCheckRollup": { "contexts": {
-                "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": nodes
-            } }
-        } } ] } } },
+        "repository": { "object": { "statusCheckRollup": { "contexts": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": nodes
+        } } } },
         "l0": { "pullRequest": {
             "id": "PR_1", "number": 7, "title": "a change", "url": "https://github.com/jdx/demo/pull/7",
             "state": "OPEN", "isDraft": false, "baseRefName": "main", "headRefName": "feat",
@@ -284,7 +298,8 @@ fn serve(world: World) -> Fake {
             }
             let mut body = vec![0; length];
             reader.read_exact(&mut body).unwrap();
-            let (mut status, headers, text) = respond(&mut w.lock().unwrap(), &method, &target);
+            let (mut status, headers, text) =
+                respond(&mut w.lock().unwrap(), &method, &target, &body);
             let tag = etag(&text);
             let text = if status == 200 && if_none_match.as_deref() == Some(tag.as_str()) {
                 status = 304;
@@ -570,6 +585,55 @@ fn ci_pinned_to_a_sha_ignores_the_head() {
     );
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     assert_eq!(json_doc(&out)["head_sha"], SHA_A);
+}
+
+#[test]
+fn required_checks_are_those_of_the_pinned_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    // The PR has moved on to B, which has no checks yet; the pinned A has
+    // finished, with `unit` required.
+    let mut world = World {
+        head: SHA_B,
+        required: vec!["unit"],
+        ..World::default()
+    };
+    world.checks.insert(
+        SHA_A,
+        vec![
+            check(1, "unit", "completed", Some("success")),
+            check(2, "lint", "completed", Some("success")),
+        ],
+    );
+    let fake = serve(world);
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[
+            &CI[..],
+            &[
+                "1s",
+                "--sha",
+                &SHA_A[..12],
+                "--required",
+                "--appear-timeout",
+                "2s",
+            ],
+            &["--timeout", "10s", "--json"],
+        ]
+        .concat(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let doc = json_doc(&out);
+    assert_eq!(doc["result"], "success");
+    assert_eq!(doc["checks"].as_array().unwrap().len(), 1, "{doc}");
+    assert_eq!(doc["checks"][0]["name"], "unit");
+    assert_eq!(doc["checks"][0]["required"], true);
 }
 
 #[test]
