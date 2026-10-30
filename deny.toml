@@ -9,6 +9,9 @@ confidence-threshold = 0.8
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
+  # webpki-roots, the Mozilla root certificates ureq's TLS trusts. mise allows
+  # it for the same crate.
+  "CDLA-Permissive-2.0",
   "ISC",
   "MIT",
   "MPL-2.0",
