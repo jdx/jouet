@@ -44,6 +44,7 @@
 - [`jouet rule <SUBCOMMAND>`](/cli/rule.md)
 - [`jouet rule list`](/cli/rule/list.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
+- [`jouet rule schema`](/cli/rule/schema.md)
 - [`jouet rule types`](/cli/rule/types.md)
 - [`jouet rule trust`](/cli/rule/trust.md)
 - [`jouet rule untrust`](/cli/rule/untrust.md)

@@ -1,18 +1,19 @@
 //! A rule's examples: tool calls it must fire on, and near misses it must
 //! leave alone, after ast-grep's valid and invalid rule tests.
 //!
-//! ```lua
-//! examples = {
-//!     fires = { "git stash", { command = "git stash pop", harness = "codex" } },
-//!     quiet = { "git stash list", "echo 'git stash'" },
-//! },
+//! ```toml
+//! [rule.examples]
+//! fires = ["git stash", { command = "git stash pop", harness = "codex" }]
+//! quiet = ["git stash list", "echo 'git stash'"]
 //! ```
 //!
-//! Every rule declares at least one of each. A rule of yours or a
+//! A Luau rule file lists them in its table's `examples`, in the same
+//! shapes. Every rule declares at least one of each. A rule of yours or a
 //! repository's without them still runs, but only warns, and cannot be
 //! promoted to deny or shared until it has them and passes them.
 
-use crate::{Action, Call, Engine, Event, Kind, Record, Rule, State};
+use crate::decl::{CaseDecl, CaseTable, ExamplesDecl, ExpectAction};
+use crate::{Action, Body, Call, Engine, Event, Kind, Record, Rule, State};
 use mlua::{Table, Value};
 use serde::Serialize;
 
@@ -20,6 +21,7 @@ use serde::Serialize;
 const CASE_KEYS: &[&str] = &[
     "command",
     "tool",
+    "path",
     "harness",
     "exit_code",
     "action",
@@ -66,6 +68,8 @@ pub struct Case {
     pub command: Option<String>,
     /// The harness's tool name; `Bash` unless the example says.
     pub tool: String,
+    /// For a file tool, the path it reads or writes.
+    pub path: Option<String>,
     /// `test` unless the example names a harness, such as `codex`.
     pub harness: String,
     /// For a post-tool-use rule; 0 unless the example says.
@@ -82,6 +86,8 @@ pub struct Example {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub tool: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub harness: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
@@ -106,6 +112,9 @@ impl Example {
         let mut extra = Vec::new();
         if self.tool != "Bash" {
             extra.push(format!("tool {}", self.tool));
+        }
+        if let Some(path) = &self.path {
+            extra.push(format!("path {path}"));
         }
         if self.harness != "test" {
             extra.push(format!("harness {}", self.harness));
@@ -199,6 +208,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
     let mut case = Case {
         command: None,
         tool: "Bash".into(),
+        path: None,
         harness: "test".into(),
         exit_code: None,
         scope: None,
@@ -242,6 +252,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
     if let Some(tool) = text("tool")? {
         case.tool = tool;
     }
+    case.path = text("path")?;
     if let Some(harness) = text("harness")? {
         case.harness = harness;
     }
@@ -280,6 +291,71 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
     Ok(case)
 }
 
+/// A TOML rule's examples, and why they do not cover both kinds, if they
+/// do not; or what is wrong with one of them.
+pub(crate) fn from_decl(
+    examples: Option<&ExamplesDecl>,
+) -> Result<(Vec<Case>, Option<String>), String> {
+    let Some(examples) = examples else {
+        return Ok((Vec::new(), Some("it has no examples".into())));
+    };
+    let problem = match (examples.fires.is_empty(), examples.quiet.is_empty()) {
+        (true, true) => Some("it has no examples".to_string()),
+        (true, false) => Some("it has no `fires` examples: calls it must fire on".to_string()),
+        (false, true) => {
+            Some("it has no `quiet` examples: near misses it must leave alone".to_string())
+        }
+        (false, false) => None,
+    };
+    let mut cases = Vec::new();
+    for (name, items) in [("fires", &examples.fires), ("quiet", &examples.quiet)] {
+        for (i, item) in items.iter().enumerate() {
+            let at = format!("examples.{name}[{}]", i + 1);
+            let case = case_from_decl(item, name == "fires").map_err(|e| format!("`{at}`: {e}"))?;
+            cases.push(case);
+        }
+    }
+    Ok((cases, problem))
+}
+
+fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
+    let empty = CaseTable::default();
+    let (command, t) = match item {
+        CaseDecl::Command(command) => (Some(command.clone()), &empty),
+        CaseDecl::Call(t) => (t.command.clone(), t),
+    };
+    let tool = t.tool.clone().unwrap_or_else(|| "Bash".into());
+    if command.is_none() && tool == "Bash" {
+        return Err("a shell example needs a `command`".into());
+    }
+    if !fires && (t.action.is_some() || t.kind.is_some()) {
+        return Err("a `quiet` example takes no `action` or `kind`".into());
+    }
+    if t.scope.is_some() && t.kind.is_none() {
+        return Err("`scope` needs a `kind`: it is the scope of the record".into());
+    }
+    let action = t.action.map(|a| match a {
+        ExpectAction::Deny => Action::Deny,
+        ExpectAction::Warn => Action::Warn,
+    });
+    Ok(Case {
+        command,
+        tool,
+        path: t.path.clone(),
+        harness: t.harness.clone().unwrap_or_else(|| "test".into()),
+        exit_code: t.exit_code,
+        scope: t.scope.clone(),
+        expect: if fires {
+            Expect::Fires {
+                action,
+                kind: t.kind,
+            }
+        } else {
+            Expect::Quiet
+        },
+    })
+}
+
 /// Whether what the rule did is what the example expects.
 fn met(case: &Case, action: Option<Action>, records: &[Record]) -> bool {
     let spoke = matches!(action, Some(Action::Deny | Action::Warn));
@@ -303,17 +379,24 @@ impl Engine {
     /// shows `deny`. A rule whose examples could not be read has none to run;
     /// [`Rule::missing_examples`] says why.
     pub fn examples(&self, rule: &Rule) -> Result<Vec<Example>, String> {
-        if rule.table.is_none() {
+        if matches!(rule.body, Body::None) {
             return Err(match &rule.state {
                 State::Broken(e) => e.clone(),
                 _ => "the rule is not loaded".into(),
             });
         }
         // Examples are tests, so they give the same answer anywhere: every
-        // probe returns nil and a reason, whatever the machine holds.
-        let probes = self.vm.shared.probes.borrow_mut().take();
+        // probe returns nil and a reason, whatever the machine holds. A VM
+        // that starts while they run starts without probes too.
+        let probes = self.probes.borrow_mut().take();
+        if let Some(Ok(vm)) = self.vm.get() {
+            vm.shared.probes.borrow_mut().take();
+        }
         let out = self.run_examples(rule);
-        *self.vm.shared.probes.borrow_mut() = probes;
+        if let Some(Ok(vm)) = self.vm.get() {
+            vm.shared.probes.borrow_mut().clone_from(&probes);
+        }
+        *self.probes.borrow_mut() = probes;
         Ok(out)
     }
 
@@ -325,6 +408,7 @@ impl Engine {
                 harness: case.harness.clone(),
                 tool: case.tool.clone(),
                 command: case.command.clone(),
+                path: case.path.clone(),
                 cwd: None,
                 exit_code: match rule.event {
                     Event::PostToolUse => Some(case.exit_code.unwrap_or(0)),
@@ -332,8 +416,9 @@ impl Engine {
                 },
             };
             // Each example is a call of its own: probes are asked afresh.
-            self.vm.new_call();
-            let (ok, actual, message) = match self.run_check(rule, &call, false) {
+            self.new_call();
+            let commands = crate::call_commands(&call);
+            let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
                 Ok((decision, records)) => {
                     let action = decision.as_ref().map(|d| d.action);
                     let actual = match crate::summarize(decision.as_ref(), &records) {
@@ -354,6 +439,7 @@ impl Engine {
             out.push(Example {
                 command: case.command.clone(),
                 tool: case.tool.clone(),
+                path: case.path.clone(),
                 harness: case.harness.clone(),
                 exit_code: call.exit_code,
                 expected: match &case.scope {

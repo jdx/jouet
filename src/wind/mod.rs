@@ -99,7 +99,12 @@ pub(crate) struct Note {
     pub rule: String,
     pub why: String,
     pub message: String,
+    /// The drafted rule file, in TOML (in Luau, from a jouet before rules
+    /// were TOML).
     pub code: String,
+    /// Its script, when a matcher cannot express it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
     pub count: u64,
     pub sessions: u64,
     pub status: Status,
@@ -167,7 +172,7 @@ pub(crate) fn update<T>(path: &Path, change: impl FnOnce(&mut State) -> T) -> st
 /// The built-in and user rules, which decide what counts as a check and
 /// which rules exist. A repository's rules are left out: winding writes
 /// only user rules.
-pub(crate) fn user_engine(rules_dir: &Path) -> Option<Engine> {
+pub(crate) fn user_engine(rules_dir: &Path) -> Engine {
     let (sources, _) =
         jouet_rules::discover(Some(rules_dir), None, &jouet_rules::TrustStore::load(None));
     Engine::new(
@@ -179,17 +184,16 @@ pub(crate) fn user_engine(rules_dir: &Path) -> Option<Engine> {
             cache_dir: None,
         },
     )
-    .ok()
 }
 
 /// Whether the post-tool-use rules record a script as a test, lint or build.
-fn is_check(engine: Option<&Engine>, script: &str) -> bool {
-    let Some(engine) = engine else { return false };
+fn is_check(engine: &Engine, script: &str) -> bool {
     let call = Call {
         event: Some(Event::PostToolUse),
         harness: "wind".into(),
         tool: "Bash".into(),
         command: Some(script.to_string()),
+        path: None,
         cwd: None,
         exit_code: Some(1),
     };
@@ -226,12 +230,12 @@ pub(crate) fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool)
         for entry in &entries {
             state
                 .detector
-                .observe(entry, &|script| is_check(engine.as_ref(), script));
+                .observe(entry, &|script| is_check(&engine, script));
         }
         state.detector.finish(now);
         state.cursor = cursor;
         state.last_run = now;
-        report.drafted = draft_notes(state, paths, engine.as_ref(), now);
+        report.drafted = draft_notes(state, paths, &engine, now);
         report
     });
     let mut report = result.unwrap_or_default();
@@ -242,7 +246,7 @@ pub(crate) fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool)
 }
 
 /// Turns ready patterns into notes, within the daily limit.
-fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u64) -> Vec<String> {
+fn draft_notes(state: &mut State, paths: &Paths, engine: &Engine, now: u64) -> Vec<String> {
     let today = jouet_output::time::date(now);
     let mut budget = MAX_NEW_PER_DAY.saturating_sub(
         state
@@ -271,7 +275,7 @@ fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u
         let d = draft::draft(&evidence, &name, &today, &near);
         // A draft that fails its own examples (it would warn about what
         // worked, say) is never offered; the pattern is not drafted again.
-        if draft::verify(&d.name, &d.code).is_err() {
+        if draft::verify(&d).is_err() {
             state.noted.insert(key);
             continue;
         }
@@ -286,6 +290,7 @@ fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u
             why: d.why,
             message: d.message,
             code: d.code,
+            script: d.script,
             count: evidence.count,
             sessions: evidence.sessions.len() as u64,
             status: Status::Pending,
@@ -298,11 +303,13 @@ fn draft_notes(state: &mut State, paths: &Paths, engine: Option<&Engine>, now: u
     drafted
 }
 
-/// A rule name no file, built-in rule or pending note already has.
-fn free_name(base: &str, state: &State, paths: &Paths, engine: Option<&Engine>) -> String {
+/// A rule name no file, rule or pending note already has.
+fn free_name(base: &str, state: &State, paths: &Paths, engine: &Engine) -> String {
     let taken = |name: &str| {
-        paths.rules.join(format!("{name}.luau")).exists()
-            || engine.is_some_and(|e| e.rule(name).is_some())
+        ["toml", "luau"]
+            .iter()
+            .any(|ext| paths.rules.join(format!("{name}.{ext}")).exists())
+            || engine.rule(name).is_some()
             || state.notes.iter().any(|n| n.rule == name)
     };
     if !taken(base) {
@@ -373,7 +380,7 @@ pub(crate) fn promote(
     reason: &str,
     now: u64,
 ) -> Result<Change, String> {
-    let engine = user_engine(&paths.rules).ok_or("starting the rule engine failed")?;
+    let engine = user_engine(&paths.rules);
     let rule = engine
         .rule(name)
         .ok_or_else(|| format!("no rule named `{name}`"))?;
@@ -397,11 +404,16 @@ pub(crate) fn promote(
             "`{name}` cannot deny until it passes examples of both kinds ({problem}); `jouet rule test {name}` shows them"
         ));
     }
-    let path = paths.rules.join(format!("{name}.luau"));
+    let jouet_rules::Origin::User(path) = &rule.origin else {
+        return Err(format!("`{name}` has no file of yours"));
+    };
     let code =
-        std::fs::read_to_string(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
-    std::fs::write(&path, rulefile::set_mode(&code, Mode::Deny))
-        .map_err(|e| format!("writing {}: {e}", path.display()))?;
+        std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let code = match rule.format {
+        jouet_rules::Format::Toml => rulefile::set_mode(&code, name, Mode::Deny)?,
+        jouet_rules::Format::Luau => rulefile::set_luau_mode(&code, Mode::Deny),
+    };
+    std::fs::write(path, code).map_err(|e| format!("writing {}: {e}", path.display()))?;
     let change = Change {
         ts: now,
         rule: name.to_string(),
@@ -418,9 +430,7 @@ pub(crate) fn promote(
 /// Promotes every user rule in warn mode that has fired `after` times in at
 /// least two sessions without an override.
 fn auto_promote(paths: &Paths, after: u64, now: u64) -> Vec<String> {
-    let Some(engine) = user_engine(&paths.rules) else {
-        return Vec::new();
-    };
+    let engine = user_engine(&paths.rules);
     let stats = stats::compute(&reader::read_all(&paths.ledger));
     let candidates: Vec<String> = engine
         .rules()

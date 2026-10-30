@@ -1,0 +1,32 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "review-threads"
+why = "Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["pr", "threads"]
+suggest = "jouet pr threads"
+message = "It lists, replies to and resolves review threads, where raw reviewThreads GraphQL is long and easy to get wrong (`jouet agent-help pr`)."
+
+[[rule.match]]
+command = "gh api graphql"
+text = "reviewThreads"
+
+[[rule.match]]
+command = "curl"
+text = ['api\.github\.com/graphql', "reviewThreads"]
+
+[rule.examples]
+fires = [
+  "gh api graphql -f query='{ repository(owner:\"a\",name:\"b\") { pullRequest(number:1) { reviewThreads(first:100) { nodes { id } } } } }'",
+  "gh api graphql -F query=@- <<'EOF'\n{ reviewThreads(first: 50) { nodes { isResolved } } }\nEOF",
+  "curl -s https://api.github.com/graphql -d '{\"query\":\"{ reviewThreads }\"}'",
+]
+quiet = [
+  "rg reviewThreads src/",
+  "gh api graphql -f query='{ viewer { login } }'",
+  "echo 'gh api graphql reviewThreads'",
+  "curl -s https://api.github.com/graphql -d '{\"query\":\"{ viewer { login } }\"}'",
+]

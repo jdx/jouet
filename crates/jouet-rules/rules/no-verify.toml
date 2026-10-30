@@ -1,0 +1,45 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "no-verify"
+why = "Skipping git hooks with `--no-verify` hides what they would have caught."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+message = "Do not skip git hooks with --no-verify: fix what the hook reports, or ask the user."
+
+# `git commit -n` is `--no-verify` too. Its options that take a value make
+# `-m -n` and `-m --no-verify` messages, and `-mn` a message `n`.
+[[rule.match]]
+command = "git commit"
+flags = ["-n", "--no-verify"]
+value_flags = [
+  "-m", "-F", "-C", "-c", "-t",
+  "--message", "--file", "--author", "--date", "--template", "--reuse-message",
+  "--reedit-message", "--fixup", "--squash", "--trailer", "--cleanup",
+]
+
+# The other commands that run hooks; `-n` means something else to them.
+[[rule.match]]
+command = ["git push", "git merge", "git pull", "git am", "git rebase"]
+flags = "--no-verify"
+
+[rule.examples]
+fires = [
+  "git commit --no-verify -m x",
+  "git push --no-verify",
+  "git commit -n -m x",
+  "git commit -nm x",
+  "git -c core.x=1 commit -am x --no-verify",
+  "git merge --no-verify feat",
+]
+quiet = [
+  "git commit -m 'drop --no-verify'",
+  "git commit -m -n",
+  "git commit -m '--no-verify'",
+  "git commit --message --no-verify",
+  "git commit -mn",
+  "git push -n",
+  "git log --no-verify-sig",
+  "cargo publish --no-verify",
+]

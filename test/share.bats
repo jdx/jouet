@@ -25,10 +25,7 @@ setup() {
 }
 
 @test "a rule that has not proven itself is refused, with every reason" {
-	cat >"$RULES/no-tags.luau" <<'LUAU'
---- why: tags are cut by the release job
-return { check = function(c) return if c.commands[1].argv[2] == "tag" then jouet.deny("no") else nil end }
-LUAU
+	printf '[[rule]]\nname = "no-tags"\nwhy = "tags are cut by the release job"\nmessage = "no"\nmatch = { command = "git tag" }\n' >"$RULES/no-tags.toml"
 	run --separate-stderr jouet share no-tags --yes
 	assert_failure 4
 	[[ "$stderr" == *"is not ready to share:"* ]]
@@ -40,10 +37,8 @@ LUAU
 }
 
 @test "a missing primitive and a written wish become ideas, shown before posting" {
-	cat >"$RULES/wants-ci.luau" <<'LUAU'
---- why: pushing while CI is red
-return { check = function(c) return if jouet.ci_state then jouet.deny("red") else nil end }
-LUAU
+	printf '[[rule]]\nname = "wants-ci"\nwhy = "pushing while CI is red"\nscript = "wants-ci.luau"\n' >"$RULES/wants-ci.toml"
+	printf 'return { check = function(c) return if jouet.ci_state then jouet.deny("red") else nil end }\n' >"$RULES/wants-ci.luau"
 	run --separate-stderr jouet rule test wants-ci --command 'git push'
 	assert_success
 

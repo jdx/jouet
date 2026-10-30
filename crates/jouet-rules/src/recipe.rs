@@ -22,7 +22,7 @@
 //! - A repository's recipes run only once it is trusted, like its rules.
 
 use crate::json::{from_lua, to_lua};
-use crate::{Budget, HasCommand, Origin, Probes, Scope, Source, TrustStore, Vm, header};
+use crate::{Budget, Format, HasCommand, Origin, Probes, Scope, Source, TrustStore, Vm, header};
 use mlua::{Function, Lua, Table, Value};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -371,12 +371,7 @@ pub struct Options {
 pub fn builtin() -> Vec<Source> {
     BUILTIN
         .iter()
-        .map(|(name, code)| Source {
-            name: (*name).into(),
-            origin: Origin::Builtin,
-            code: (*code).into(),
-            trusted: true,
-        })
+        .map(|(name, code)| Source::luau(*name, Origin::Builtin, *code))
         .collect()
 }
 
@@ -387,7 +382,7 @@ pub fn discover(
     repo_dir: Option<&Path>,
     trust: &TrustStore,
 ) -> (Vec<Source>, Vec<String>) {
-    crate::discover_after(builtin(), user_dir, repo_dir, trust)
+    crate::discover_after(builtin(), user_dir, repo_dir, trust, &[Format::Luau])
 }
 
 pub struct Recipes {

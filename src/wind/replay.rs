@@ -73,6 +73,7 @@ pub(crate) fn replay(engine: &Engine, rule: &Rule, entries: &[Entry]) -> Replay 
             harness: entry.harness.clone(),
             tool: "Bash".into(),
             command: Some(reader::script(command)),
+            path: None,
             cwd: None,
             exit_code: entry.exit_code,
         };
@@ -133,12 +134,11 @@ mod tests {
 
     pub(super) fn engine(name: &str, code: &str) -> Engine {
         Engine::new(
-            vec![Source {
-                name: name.into(),
-                origin: Origin::User(format!("{name}.luau").into()),
-                code: code.into(),
-                trusted: true,
-            }],
+            vec![Source::luau(
+                name,
+                Origin::User(format!("{name}.luau").into()),
+                code,
+            )],
             Options {
                 has_command: Box::new(|_| true),
                 disabled: Vec::new(),
@@ -146,7 +146,6 @@ mod tests {
                 cache_dir: None,
             },
         )
-        .unwrap()
     }
 
     const NO_TAGS: &str = r#"--- why: tags

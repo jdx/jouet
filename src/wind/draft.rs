@@ -1,8 +1,9 @@
-//! Drafting a rule from a noticed pattern: a Luau file against the public
-//! `jouet` API, in warn mode, whose `fires` examples are the calls that
-//! motivated it and whose `quiet` examples are the near misses it must leave
-//! alone: what worked instead, and calls from the ledger that run the same
-//! programs.
+//! Drafting a rule from a noticed pattern: a TOML rule in warn mode, whose
+//! `fires` examples are the calls that motivated it and whose `quiet`
+//! examples are the near misses it must leave alone: what worked instead,
+//! and calls from the ledger that run the same programs. A matcher
+//! expresses most patterns; a long sleep, which compares durations, gets a
+//! Luau script behind its matcher.
 
 use super::detect::{Evidence, Pattern};
 use super::reader;
@@ -20,7 +21,10 @@ pub(crate) struct Draft {
     pub why: String,
     /// What the rule tells the agent.
     pub message: String,
+    /// The rule file, in TOML.
     pub code: String,
+    /// Its script, `<name>.luau`, when a matcher cannot express it.
+    pub script: Option<String>,
 }
 
 /// A Luau string literal.
@@ -41,11 +45,6 @@ pub(crate) fn lua_str(text: &str) -> String {
     }
     out.push('"');
     out
-}
-
-fn list(items: &[String]) -> String {
-    let quoted: Vec<String> = items.iter().map(|i| lua_str(i)).collect();
-    format!("{{ {} }}", quoted.join(", "))
 }
 
 /// A rule name from a pattern and the command's words: `wind-gh-pr-view`.
@@ -131,7 +130,7 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str, near: &[String]) ->
     });
     // Examples are commands: the ledger's placeholders become plain words.
     let examples: Vec<String> = e.examples.iter().map(|x| reader::script(x)).collect();
-    let (body, mut quiet) = match e.pattern {
+    let (body, script, mut quiet) = match e.pattern {
         Pattern::NeverWorks => {
             let mut quiet: Vec<String> = e.fix.iter().map(|f| reader::script(f)).collect();
             quiet.push(format!("echo {}", e.signature.words.join(" ")));
@@ -152,18 +151,23 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str, near: &[String]) ->
                     .collect();
                 quiet.push(fewer.join(" "));
             }
-            (
-                format!(
-                    "local WORDS = {}\nlocal FLAGS = {}\nlocal MESSAGE = {}\n{MATCHES}",
-                    list(&e.signature.words),
-                    list(&e.signature.flags),
-                    lua_str(&message)
-                ),
-                quiet,
-            )
+            let body = format!(
+                "message = {}\n\n# The command the detector saw fail, with exactly these options, whatever\n# their values: a variant with another option (often what worked) is left alone.\n[rule.match]\ncommand = {}\nexact_flags = {}\n",
+                rulefile::toml_str(&message),
+                rulefile::toml_str(&e.signature.words.join(" ")),
+                rulefile::toml_list(&single_flags(&e.signature.flags)),
+            );
+            (body, None, quiet)
         }
         Pattern::Sleep => (
-            format!("local MESSAGE = {}\n{SLEEPS}", lua_str(&message)),
+            format!(
+                "needs = [\"wait\"]\n# A matcher cannot compare durations, so a script decides.\nscript = {}\n\n# The script only sees calls that sleep.\n[rule.match]\ncommand = \"sleep\"\nargs = \"*\"\n",
+                rulefile::toml_str(&format!("{name}.luau"))
+            ),
+            Some(format!(
+                "--!strict\n-- The `{name}` rule's script ({name}.toml), drafted by `jouet wind`.\n\nlocal MESSAGE = {}\n{SLEEPS}\nlocal rule: JouetRule = {{\n\tcheck = function(call: JouetCall): JouetDecision?\n\t\tfor _, command in call.commands do\n\t\t\tif matches(command) then\n\t\t\t\treturn jouet.deny(MESSAGE)\n\t\t\tend\n\t\tend\n\t\treturn nil\n\tend,\n}}\n\nreturn rule\n",
+                lua_str(&message)
+            )),
             vec!["sleep 1".to_string(), "echo sleep 60".to_string()],
         ),
     };
@@ -173,41 +177,62 @@ pub(crate) fn draft(e: &Evidence, name: &str, created: &str, near: &[String]) ->
             quiet.push(script);
         }
     }
-    let needs = if e.pattern == Pattern::Sleep {
-        "\tneeds = { \"wait\" },\n"
-    } else {
-        ""
-    };
     let code = format!(
-        "{header}\n-- Drafted by `jouet wind` from this machine's hook ledger. Check it with\n-- `jouet rule test {name} --replay` before relying on it.\n\n{body}\nlocal rule: JouetRule = {{\n{needs}\tcheck = function(call: JouetCall): JouetDecision?\n\t\tfor _, command in call.commands do\n\t\t\tif not command.nested and matches(command) then\n\t\t\t\treturn jouet.deny(MESSAGE)\n\t\t\tend\n\t\tend\n\t\treturn nil\n\tend,\n\texamples = {{\n\t\t-- The calls that showed the pattern.\n\t\tfires = {examples},\n\t\t-- What worked instead, and calls running the same programs.\n\t\tquiet = {quiet},\n\t}},\n}}\n\nreturn rule\n",
-        examples = list(&examples),
-        quiet = list(&quiet),
+        "{}# Drafted by `jouet wind` from this machine's hook ledger. Check it with\n# `jouet rule test {name} --replay` before relying on it.\n{header}{body}\n[rule.examples]\n# The calls that showed the pattern.\nfires = {}\n# What worked instead, and calls running the same programs.\nquiet = {}\n",
+        rulefile::schema_line(),
+        rulefile::toml_list(&examples),
+        rulefile::toml_list(&quiet),
     );
     Draft {
         name: name.to_string(),
         why,
         message,
         code,
+        script,
     }
 }
 
+/// The signature's options, one to an entry: `-fu` is `-f` and `-u`, as the
+/// matcher reads them.
+fn single_flags(flags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for flag in flags {
+        let singles: Vec<String> = if flag.starts_with("--") {
+            vec![flag.split('=').next().unwrap_or(flag).to_string()]
+        } else {
+            flag.chars().skip(1).map(|c| format!("-{c}")).collect()
+        };
+        for single in singles {
+            if !out.contains(&single) {
+                out.push(single);
+            }
+        }
+    }
+    out
+}
+
 /// A draft's rule, loaded on its own as a rule of yours.
-fn load(name: &str, code: &str) -> Option<jouet_rules::Engine> {
-    jouet_rules::Engine::new(
-        vec![jouet_rules::Source {
-            name: name.to_string(),
-            origin: jouet_rules::Origin::User(format!("{name}.luau").into()),
-            code: code.to_string(),
-            trusted: true,
-        }],
+fn load(draft: &Draft) -> jouet_rules::Engine {
+    let name = &draft.name;
+    let mut source = jouet_rules::Source::toml(
+        name.clone(),
+        jouet_rules::Origin::User(format!("{name}.toml").into()),
+        draft.code.clone(),
+    );
+    if let Some(script) = &draft.script {
+        source = source.with_script(format!("{name}.luau"), script.clone());
+    }
+    let mut engine = jouet_rules::Engine::new(
+        vec![source],
         jouet_rules::Options {
             has_command: Box::new(|_| true),
             disabled: Vec::new(),
             budget: jouet_rules::Budget::default(),
             cache_dir: None,
         },
-    )
-    .ok()
+    );
+    engine.load_scripts();
+    engine
 }
 
 /// The calls in the ledger that run the pattern's program and that a draft
@@ -216,9 +241,7 @@ pub(crate) fn near_misses(draft: &Draft, e: &Evidence, entries: &[Entry]) -> Vec
     let Some(program) = e.signature.words.first() else {
         return Vec::new();
     };
-    let Some(engine) = load(&draft.name, &draft.code) else {
-        return Vec::new();
-    };
+    let engine = load(draft);
     let Some(rule) = engine.rule(&draft.name) else {
         return Vec::new();
     };
@@ -233,9 +256,9 @@ pub(crate) fn near_misses(draft: &Draft, e: &Evidence, entries: &[Entry]) -> Vec
 
 /// Checks that a drafted rule loads as a warn-mode rule of yours and passes
 /// examples of both kinds, returning how many, or what is wrong.
-pub(crate) fn verify(name: &str, code: &str) -> Result<usize, String> {
-    let engine = load(name, code).ok_or("the rule engine did not start")?;
-    let rule = engine.rule(name).ok_or("the rule did not load")?;
+pub(crate) fn verify(draft: &Draft) -> Result<usize, String> {
+    let engine = load(draft);
+    let rule = engine.rule(&draft.name).ok_or("the rule did not load")?;
     if let jouet_rules::State::Broken(e) = &rule.state {
         return Err(format!("it does not load: {e}"));
     }
@@ -244,42 +267,6 @@ pub(crate) fn verify(name: &str, code: &str) -> Result<usize, String> {
     }
     engine.proven(rule)
 }
-
-/// A command whose program and subcommands are `WORDS` and whose flags are
-/// exactly `FLAGS`, whatever their values: the signature the detector saw
-/// fail, so a variant with another flag (often what worked) is left alone.
-const MATCHES: &str = "
-local function matches(command: JouetCommand): boolean
-\tif command.program ~= WORDS[1] then
-\t\treturn false
-\tend
-\tfor i = 2, #WORDS do
-\t\tif command.argv[i] ~= WORDS[i] then
-\t\t\treturn false
-\t\tend
-\tend
-\tlocal seen: { [string]: boolean } = {}
-\tlocal count = 0
-\tfor _, arg in jouet.options(command.argv) do
-\t\tif #arg > 1 and string.sub(arg, 1, 1) == \"-\" then
-\t\t\tlocal name = string.match(arg, \"^([^=]+)\") or arg
-\t\t\tif not seen[name] then
-\t\t\t\tseen[name] = true
-\t\t\t\tcount += 1
-\t\t\tend
-\t\tend
-\tend
-\tif count ~= #FLAGS then
-\t\treturn false
-\tend
-\tfor _, flag in FLAGS do
-\t\tif not seen[flag] then
-\t\t\treturn false
-\t\tend
-\tend
-\treturn true
-end
-";
 
 /// A `sleep` of at least ten seconds, or of a length the rule cannot read,
 /// such as `sleep $DELAY`, or a placeholder when the rule is replayed over
@@ -307,25 +294,7 @@ mod tests {
     use super::*;
     use crate::wind::detect::Detector;
     use crate::wind::detect::tests::ran;
-    use jouet_rules::{Budget, Engine, Mode, Options, Origin, Source, State};
-
-    fn load(name: &str, code: &str) -> Engine {
-        Engine::new(
-            vec![Source {
-                name: name.into(),
-                origin: Origin::User(format!("{name}.luau").into()),
-                code: code.into(),
-                trusted: true,
-            }],
-            Options {
-                has_command: Box::new(|_| true),
-                disabled: Vec::new(),
-                budget: Budget::default(),
-                cache_dir: None,
-            },
-        )
-        .unwrap()
-    }
+    use jouet_rules::{Engine, Mode, State};
 
     /// Feeds commands to a detector and drafts a rule from each pattern it
     /// notices; every draft must load in warn mode and pass its examples.
@@ -340,7 +309,7 @@ mod tests {
             .map(|(_, e)| {
                 let name = name_for(e);
                 let draft = draft(e, &name, "2026-10-30", &[]);
-                let engine = load(&name, &draft.code);
+                let engine = load(&draft);
                 (draft, engine)
             })
             .collect()
@@ -357,7 +326,7 @@ mod tests {
         for example in &examples {
             assert!(example.ok, "{example:?}\n{}", draft.code);
         }
-        assert_eq!(verify(&draft.name, &draft.code), Ok(examples.len()));
+        assert_eq!(verify(draft), Ok(examples.len()));
     }
 
     #[test]
@@ -376,7 +345,15 @@ mod tests {
             "{}",
             draft.message
         );
-        assert!(draft.code.contains("--- mode: warn\n--- scope: user\n"));
+        assert!(draft.code.contains("mode = \"warn\"\nscope = \"user\"\n"));
+        assert!(
+            draft
+                .code
+                .contains("command = \"mytool\"\nexact_flags = [\"--all\"]\n"),
+            "{}",
+            draft.code
+        );
+        assert_eq!(draft.script, None);
         assert_sound(draft, engine);
         let rule = engine.rule(&draft.name).unwrap();
         let fires = |command: &str| {
@@ -426,6 +403,15 @@ mod tests {
         assert_eq!(names, ["wind-sleep"]);
         assert!(out[0].0.why.contains("5m"), "{}", out[0].0.why);
         assert_sound(&out[0].0, &out[0].1);
+        let script = out[0].0.script.as_deref().unwrap();
+        assert!(script.contains("local MESSAGE = "), "{script}");
+        assert!(out[0].0.code.contains("script = \"wind-sleep.luau\"\n"));
+    }
+
+    #[test]
+    fn clusters_become_single_options() {
+        let flags = |f: &[&str]| single_flags(&f.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(flags(&["-fu", "--all", "-u"]), ["-f", "-u", "--all"]);
     }
 
     #[test]

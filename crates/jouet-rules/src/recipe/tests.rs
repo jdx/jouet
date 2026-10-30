@@ -64,12 +64,11 @@ fn load(extra: Vec<Source>) -> Recipes {
 }
 
 fn user(name: &str, body: &str) -> Source {
-    Source {
-        name: name.into(),
-        origin: Origin::User(PathBuf::from(format!("{name}.luau"))),
-        code: format!("--- why: a test recipe\nreturn {{ run = function(args)\n{body}\nend }}\n"),
-        trusted: true,
-    }
+    Source::luau(
+        name,
+        Origin::User(PathBuf::from(format!("{name}.luau"))),
+        format!("--- why: a test recipe\nreturn {{ run = function(args)\n{body}\nend }}\n"),
+    )
 }
 
 fn run(
@@ -355,21 +354,18 @@ fn recipes_cannot_take_a_builtin_name_and_untrusted_ones_do_not_run() {
 #[test]
 fn rules_cannot_run_commands() {
     let engine = crate::Engine::new(
-        vec![Source {
-            name: "sneaky".into(),
-            origin: Origin::User("sneaky.luau".into()),
-            code: "--- why: t\nreturn { check = function() jouet.cmd.pr_land({ yes = true }) end }"
-                .into(),
-            trusted: true,
-        }],
+        vec![Source::luau(
+            "sneaky",
+            Origin::User("sneaky.luau".into()),
+            "--- why: t\nreturn { check = function() jouet.cmd.pr_land({ yes = true }) end }",
+        )],
         crate::Options {
             has_command: Box::new(|_| true),
             disabled: Vec::new(),
             budget: Budget::default(),
             cache_dir: None,
         },
-    )
-    .unwrap();
+    );
     let outcome = engine.evaluate(&crate::Call {
         command: Some("true".into()),
         ..crate::Call::default()

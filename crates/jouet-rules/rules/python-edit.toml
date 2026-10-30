@@ -1,0 +1,29 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "python-edit"
+why = "A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["edit"]
+suggest = "jouet edit"
+message = "It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`)."
+
+# Code in `-c` or a here-document that replaces text and writes a file.
+[[rule.match]]
+command = ["python", "python2", "python3", "python2.*", "python3.*"]
+text = ['\.replace\(', 'write(_text|_bytes)?\(']
+
+[rule.examples]
+fires = [
+  "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('a.rs')\np.write_text(p.read_text().replace('a', 'b'))\nEOF",
+  "python3 -c \"s=open('f').read().replace('x','y'); open('f','w').write(s)\"",
+  "cd src && python3.12 <<EOF\nt = open('x').read()\nt = t.replace('a', 'b')\nopen('x', 'w').write(t)\nEOF",
+]
+quiet = [
+  "python3 - <<'EOF'\nprint(open('f').read().replace('a', 'b'))\nEOF",
+  "python3 fix.py",
+  "cat <<'EOF' > fix.py\nopen('f','w').write(s.replace('a','b'))\nEOF",
+  "pythonic --replace( write(",
+]

@@ -8,7 +8,7 @@ Run a rule against a command or hook payload, or against its examples
 With neither --command nor --payload, runs the rule's `examples`: every `fires` example must make it deny, warn or record, and every `quiet` one must leave it silent. It fails, showing what was expected and what the rule did, when one does not, or when the rule lacks either kind. --all does this for every rule. --replay runs the rule over every call in the hook ledger instead, and fails if it fires on none of them.
 
 ## Arguments
-- **`[RULE]`** — A rule's name, or the path to a .luau file
+- **`[RULE]`** — A rule's name, or the path to a .toml (or .luau) rule file
 
 ## Flags
 - **`--all`** — Run the examples of every rule: built in, yours and this repository's

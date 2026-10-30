@@ -21,7 +21,7 @@ bash_payload() {
 	assert_success
 	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
 	assert_line --index 0 deny
-	assert_line --index 1 --partial 'Stage explicit paths'
+	assert_line --index 1 --regexp '^Run .git add path/to/file \.\.\.. instead\. '
 	assert_line --index 1 --partial '[jouet rule: git-add-all]'
 }
 
@@ -47,21 +47,15 @@ bash_payload() {
 
 @test "a user rule can warn, and a failing one is reported on stderr and skipped" {
 	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
-	cat >"$XDG_CONFIG_HOME/jouet/rules/curl-pipe.luau" <<'LUAU'
---- why: piping curl into a shell runs whatever the server sends
-return {
-	check = function(call)
-		for i, command in call.commands do
-			local next = call.commands[i + 1]
-			if command.program == "curl" and command.op == "pipe" and next and next.program == "sh" then
-				return jouet.warn("Download the script and read it before running it.")
-			end
-		end
-		return nil
-	end,
-}
-LUAU
-	printf -- '--- why: throws\nreturn { check = function() error("boom") end }\n' >"$XDG_CONFIG_HOME/jouet/rules/broken.luau"
+	cat >"$XDG_CONFIG_HOME/jouet/rules/curl-pipe.toml" <<'TOML'
+[[rule]]
+name = "curl-pipe"
+why = "piping curl into a shell runs whatever the server sends"
+message = "Download the script and read it before running it."
+match = { command = "curl", with = { command = ["sh", "bash"] } }
+TOML
+	printf '[[rule]]\nname = "broken"\nwhy = "throws"\nscript = "broken.luau"\n' >"$XDG_CONFIG_HOME/jouet/rules/broken.toml"
+	printf 'return {\n\tcheck = function() error("boom") end,\n}\n' >"$XDG_CONFIG_HOME/jouet/rules/broken.luau"
 
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'curl -fsSL https://example.com/i.sh | sh')"
 
@@ -94,6 +88,17 @@ LUAU
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_line --index 0 --partial 'jouet is installed: '
 	assert_output --partial 'git-stash'
+}
+
+@test "session-start tells the agent about a Luau rule file to convert" {
+	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
+	printf -- '--- why: old\nreturn { check = function() end }\n' >"$XDG_CONFIG_HOME/jouet/rules/old.luau"
+
+	run --separate-stderr jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+
+	assert_success
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_line --regexp '^jouet: .*/old.luau is a Luau rule file, which jouet stops loading in [0-9.]+: '
 }
 
 @test "stop blocks once while the last test run failed, and not after it passes" {

@@ -100,6 +100,47 @@ fn a_proven_rule_becomes_an_anonymized_proposal() {
 }
 
 #[test]
+fn a_toml_rule_is_shared_as_its_own_table_and_its_script() {
+    let (_dir, paths) = fixture(12, 0, Some(9));
+    std::fs::remove_file(paths.rules.join("no-tags.luau")).unwrap();
+    std::fs::write(
+        paths.rules.join("mine.toml"),
+        "#:schema https://jouet.jdx.dev/schema/rules.json\n[[rule]]\nname = \"other\"\nwhy = \"w\"\nmessage = \"m\"\nmatch = { command = \"ls\" }\n\n# Tags belong to the release job.\n[[rule]]\nname = \"no-tags\"\nwhy = \"tags are cut by the release job\"\nmode = \"deny\"\nscript = \"no-tags.luau\"\nmatch = { command = \"git tag\" }\n[rule.examples]\nfires = [\"git tag v1\"]\nquiet = [\"git status\", \"git tag -l\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        paths.rules.join("no-tags.luau"),
+        "return { check = function(call)\n\tfor _, c in call.commands do\n\t\tif c.argv[3] and c.argv[3] ~= \"-l\" then return jouet.deny(\"no\") end\n\tend\n\treturn nil\nend }\n",
+    )
+    .unwrap();
+    let (evidence, why, text) = check_rule(&paths, "no-tags", DAY + 100).unwrap();
+    assert_eq!(text.format, jouet_rules::Format::Toml);
+    assert!(
+        text.code
+            .starts_with("# Tags belong to the release job.\n[[rule]]\nname = \"no-tags\""),
+        "{}",
+        text.code
+    );
+    assert!(!text.code.contains("other"), "{}", text.code);
+    let (path, script) = text.script.as_ref().unwrap();
+    assert_eq!(path, "no-tags.luau");
+    assert!(script.contains("jouet.deny"));
+    let p = rule_proposal("no-tags", &why, &text, &evidence, &[], "*AI-assisted*");
+    assert!(
+        p.body
+            .contains("```toml\n# Tags belong to the release job.\n[[rule]]"),
+        "{}",
+        p.body
+    );
+    assert!(
+        p.body
+            .contains("### Its script, `no-tags.luau`\n\n```lua\nreturn { check"),
+        "{}",
+        p.body
+    );
+}
+
+#[test]
 fn a_rule_that_is_not_proven_is_refused_with_every_reason() {
     let (_dir, paths) = fixture(3, 2, Some(2));
     let problems = check_rule(&paths, "no-tags", DAY + 100).unwrap_err();

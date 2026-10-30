@@ -56,7 +56,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "rule",
         Some(
-            "writing or checking a jouet rule, the Luau scripts behind jouet's hooks: write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
+            "writing or checking a jouet rule, the TOML matchers behind jouet's hooks (`jouet rule schema`): write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
         ),
     ),
     (

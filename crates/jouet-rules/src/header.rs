@@ -1,4 +1,4 @@
-//! The header every rule file starts with: a few `--- key: value` lines that
+//! The header every Luau rule file starts with: a few `--- key: value` lines that
 //! say what the rule is for and who wrote it, readable without running it.
 //!
 //! ```lua
@@ -10,10 +10,11 @@
 //! --- created: 2026-10-30
 //! ```
 
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// What a rule's denials do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     /// A denial is shown as a warning, and the call goes ahead.
@@ -22,7 +23,7 @@ pub enum Mode {
 }
 
 /// Where a rule lives, which decides what it may do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     Builtin,

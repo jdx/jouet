@@ -1,9 +1,9 @@
 --!strict
---- name: checks
---- why: Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
---- scope: builtin
---- author: builtin
---- created: 2026-10-30
+-- The `checks` rule's script (checks.toml): which test, lint and build runs
+-- to record, and how much of the suite each covered. It is a script because
+-- it reads task names (`mise run test:e2e`, but not `lint-fix`), each
+-- tool's subcommands and the packages a cargo run selects, and records
+-- rather than denies.
 
 type Kind = "test" | "lint" | "build"
 
@@ -333,7 +333,6 @@ local function cd(dir: string | false | nil, command: JouetCommand): string | fa
 end
 
 local rule: JouetRule = {
-	on = "post-tool-use",
 	check = function(call: JouetCall): JouetDecision?
 		local dir: string | false | nil = nil
 		for _, command in call.commands do
@@ -349,53 +348,6 @@ local rule: JouetRule = {
 		end
 		return nil
 	end,
-	examples = {
-		fires = {
-			{ command = "cargo test --all-targets", exit_code = 101, kind = "test" },
-			{ command = "cd crate && cargo test", exit_code = 101, kind = "test" },
-			{ command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
-			{ command = "cargo clippy -- -D warnings", exit_code = 101, kind = "lint" },
-			{ command = "cargo fmt --check", exit_code = 1, kind = "lint" },
-			{ command = "mise run test:e2e edit", exit_code = 0, kind = "test" },
-			{ command = "mise run lint", exit_code = 1, kind = "lint" },
-			{ command = "npm run build", exit_code = 0, kind = "build" },
-			{ command = "pnpm test", exit_code = 0, kind = "test" },
-			{ command = "python3 -m pytest -x", exit_code = 1, kind = "test" },
-			{ command = "go vet ./...", exit_code = 0, kind = "lint" },
-			{ command = "make check", exit_code = 0, kind = "lint" },
-			{ command = "set -o pipefail; cargo test | tee log", exit_code = 101, kind = "test" },
-			-- How much each run covered.
-			{ command = "cargo test --workspace", exit_code = 101, kind = "test", scope = "full" },
-			{ command = "cargo nextest run --workspace --no-fail-fast", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "cargo clippy --workspace --all-targets -- -D warnings", exit_code = 0, kind = "lint", scope = "full" },
-			{ command = "cargo test -p jouet-rules --lib", exit_code = 0, kind = "test", scope = "partial -p jouet-rules --lib" },
-			{ command = "cargo test -pjouet", exit_code = 0, kind = "test", scope = "partial -p jouet" },
-			{ command = "cargo test --workspace wait_github", exit_code = 0, kind = "test", scope = "partial wait_github" },
-			{ command = "cargo test --workspace -- --exact verify::tests", exit_code = 0, kind = "test", scope = "partial --exact verify::tests" },
-			{ command = "cargo test --workspace --test cli", exit_code = 0, kind = "test", scope = "partial --test cli" },
-			{ command = "cargo nextest run --workspace -E 'test(conflict)'", exit_code = 0, kind = "test", scope = "partial -E test(conflict)" },
-			{ command = "cargo test --workspace -- --test-threads 1", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "cd ~/elsewhere && cargo test --workspace", exit_code = 0, kind = "test", scope = "partial" },
-			{ command = "mise run test", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "mise run test:e2e edit", exit_code = 0, kind = "test", scope = "partial test:e2e edit" },
-			{ command = "npm test", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "go test ./...", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "go test ./pkg -run TestWait", exit_code = 0, kind = "test", scope = "partial ./pkg -run TestWait" },
-			{ command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
-			{ command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
-			{ command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
-			{ command = "bats test/edit.bats", exit_code = 0, kind = "test", scope = "partial" },
-		},
-		quiet = {
-			{ command = "cargo fmt", exit_code = 0 },
-			{ command = "mise run lint-fix", exit_code = 0 },
-			{ command = "cargo run", exit_code = 0 },
-			{ command = "npm install", exit_code = 0 },
-			{ command = "cargo test; echo done", exit_code = 1 },
-			{ command = "cargo test || true", exit_code = 0 },
-			{ command = "cargo test &", exit_code = 0 },
-		},
-	},
 }
 
 return rule

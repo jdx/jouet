@@ -154,6 +154,7 @@ export default defineConfig({
                 items: [
                   { text: "list", link: "/cli/rule/list" },
                   { text: "test", link: "/cli/rule/test" },
+                  { text: "schema", link: "/cli/rule/schema" },
                   { text: "types", link: "/cli/rule/types" },
                   { text: "trust", link: "/cli/rule/trust" },
                   { text: "untrust", link: "/cli/rule/untrust" },
