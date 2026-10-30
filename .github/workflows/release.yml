@@ -1,0 +1,223 @@
+name: release
+
+# Builds a binary per target and attaches them to an existing release.
+#
+# Normally called by release-plz.yml against the draft it just created, so the
+# release is only published once its assets are in place. `workflow_dispatch`
+# is there for re-running a build that failed after the tag already existed.
+
+permissions: {}
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to attach binaries to, e.g. v0.1.0"
+        required: true
+        type: string
+
+# One asset upload per tag. Re-running a failed build by hand while the
+# automated release is still uploading would have two runs writing the same
+# asset names. Keyed by tag so re-running one release never waits on another,
+# and not cancelling, because a half-uploaded set of assets is the thing being
+# avoided.
+concurrency:
+  group: release-assets-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Every build and the packslip name one commit, even if the tag were moved
+  # while the matrix runs.
+  source:
+    name: Resolve release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ format('refs/tags/{0}', inputs.tag) }}
+          persist-credentials: false
+      - name: Pin the binaries to one commit
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.target }}
+    needs: source
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      # One target failing should not deny the others their artifacts.
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+
+      # Cross-compiles and produces the archive. `dry-run` builds without
+      # uploading, so a later target failing cannot leave a half-populated
+      # release behind — everything is attached in one step at the end.
+      #
+      # `cross` for every GNU target, so Cross.toml's pinned images set a
+      # deliberate glibc floor instead of inheriting the rolling runner's, and
+      # for aarch64 musl; plain cargo elsewhere.
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1
+        with:
+          bin: jouet
+          target: ${{ matrix.target }}
+          build-tool: ${{ (endsWith(matrix.target, '-linux-gnu') || matrix.target == 'aarch64-unknown-linux-musl') && 'cross' || 'cargo' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          dry-run: true
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-${{ matrix.target }}
+          path: |
+            jouet-*.tar.gz
+            jouet-*.zip
+          # Only needed long enough for the attach job to collect them.
+          retention-days: 1
+          if-no-files-found: error
+
+  attach:
+    name: Attach to release
+    # Needs every target: a release carrying only some of its archives is worse
+    # than one that arrives late, and the draft stays unpublished either way.
+    needs: [source, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      # The packslip is signed with this job's OIDC identity and its
+      # artifacts are attested; neither is possible without these.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Collect assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) \
+            -exec mv {} release-assets/ \;
+          ls -la release-assets/
+          # An empty upload would silently produce a release with no binaries.
+          [ -n "$(ls -A release-assets/)" ] || {
+            echo "::error::no binaries were produced"; exit 1; }
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Called from release-plz.yml the release always exists, drafted.
+      # Dispatched by hand it may not: the documented recovery is for a tag
+      # whose release does not exist, because release-plz failed after tagging
+      # or someone deleted the draft. `--verify-tag` keeps a mistyped tag from
+      # conjuring a release for a ref that does not exist.
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --draft \
+              --generate-notes \
+              --title "$TAG" \
+              --verify-tag
+          fi
+          if [[ $(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq .isDraft) != true ]]; then
+            echo "::error::refusing to replace assets on published release $TAG"
+            exit 1
+          fi
+          gh release upload "$TAG" release-assets/* --repo "${{ github.repository }}" --clobber
+
+      # The usage spec is the CLI definition that completions and docs are
+      # generated from; jouet serves it at the built-in `__usage_spec__`.
+      - name: Publish the CLI specification
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p bin
+          tar -xzf release-assets/jouet-x86_64-unknown-linux-gnu.tar.gz -C bin
+          bin/jouet __usage_spec__ > jouet.usage.kdl
+          test -s jouet.usage.kdl
+          gh release upload "$TAG" jouet.usage.kdl --repo "$REPO" --clobber
+
+      # SHA256SUMS says the files did not change in transit; the packslip
+      # says who built them. It is one signed document holding every
+      # archive's digest, the executable inside it, the shared objects it
+      # needs from the host, and the build provenance of each file, signed
+      # keylessly with this job's identity. See https://packslip.dev.
+      - uses: jdx/packslip@ddcddd9c8c33977d2d08d5db91caec579da59aab # v1.11.0
+        with:
+          tag: ${{ inputs.tag }}
+          commit: ${{ needs.source.outputs.commit }}
+          artifacts: release-assets/jouet-*.tar.gz release-assets/jouet-*.zip
+          bin: jouet
+          resources: |
+            cli-spec/usage=asset:jouet.usage.kdl
+
+      # Called from release-plz.yml, undrafting is that workflow's job — it
+      # happens after this one returns. Run by hand, nothing else will do it,
+      # and the release would sit drafted forever.
+      - name: Publish the release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
+
+  comment-release-fixes:
+    needs: attach
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.attach.result == 'success' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      discussions: write
+    uses: jdx/workflows/.github/workflows/comment-release-fixes.yml@7e4ea6cf326e2b3bb4335f733381af531aaa699d # v1.2.1
+    with:
+      tag: ${{ inputs.tag }}
+      marker_prefix: jouet-fixed-in

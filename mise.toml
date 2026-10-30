@@ -1,0 +1,52 @@
+# mise.lock is lockfile revision 3 (forge repository IDs), which mise reads
+# from 2026.9.16.
+min_version = "2026.9.16"
+
+[tools]
+# hk.pkl amends a pinned hk package; the tool itself floats and is resolved by mise.lock.
+hk = { version = "latest", minimum_release_age = "0s" }
+jactionlint = "latest"
+mr-boxington = { version = "latest", minimum_release_age = "0s" }
+# communique rewrites release bodies. Resolved by mise.lock rather than floating,
+# so release-plz.yml's MISE_LOCKED install cannot pick up an unreviewed build.
+# Bump with `mise lock`, deliberately.
+communique = { version = "latest", minimum_release_age = "0s" }
+# Rust is deliberately absent: it comes from the runner image in CI and from
+# rustup locally, so a new stable is caught by CI rather than by a user.
+
+[wrappers.cargo]
+command = "mbx"
+env = { MBX_CARGO_SHIM_MODE = "1" }
+
+[tasks.build]
+alias = "b"
+description = "Build the debug binary"
+run = "cargo build --all-targets"
+
+[tasks.test]
+alias = "t"
+description = "Run the test suite"
+run = "cargo test --all-targets"
+
+[tasks.lint]
+description = "Check formatting and run clippy"
+depends = ["lint:fmt", "lint:clippy"]
+
+[tasks."lint:fmt"]
+description = "Check formatting"
+run = "cargo fmt --check"
+
+[tasks."lint:clippy"]
+description = "Run clippy, warnings as errors"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.lint-fix]
+description = "Auto-fix formatting and the clippy lints that can be fixed"
+run = [
+    "cargo fmt",
+    "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings",
+]
+
+[tasks.ci]
+description = "Everything CI runs"
+depends = ["build", "test", "lint"]

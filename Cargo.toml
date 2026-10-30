@@ -1,0 +1,27 @@
+[package]
+name = "jouet"
+version = "0.0.0"
+edition = "2024"
+# usage-rs 7's own floor. CI checks it in the msrv job.
+rust-version = "1.91"
+description = "A toolkit CLI for coding agents"
+keywords = ["cli", "agents", "github", "ci"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/jdx/jouet"
+# Published crates carry the source and its licence, not the machinery used to
+# develop and ship it. A list of what to ship, so files added to the repository
+# (or left untracked in a checkout) are never published by accident.
+include = ["/src/**", "/LICENSE", "/README.md"]
+
+[dependencies]
+usage-rs = "7"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+debug = 1
