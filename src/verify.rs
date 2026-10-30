@@ -94,16 +94,19 @@ pub fn state_path(session_id: &str) -> Option<PathBuf> {
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
         .take(128)
         .collect();
-    (!safe.is_empty()).then(|| sessions_dir().join(format!("{safe}.json")))
+    if safe.is_empty() {
+        return None;
+    }
+    Some(sessions_dir()?.join(format!("{safe}.json")))
 }
 
-pub fn sessions_dir() -> PathBuf {
-    crate::paths::state_dir().join("sessions")
+pub fn sessions_dir() -> Option<PathBuf> {
+    crate::paths::state_dir().map(|d| d.join("sessions"))
 }
 
 /// Removes session files untouched for a week. Best effort.
 pub fn prune_sessions() {
-    let Ok(entries) = std::fs::read_dir(sessions_dir()) else {
+    let Some(Ok(entries)) = sessions_dir().map(std::fs::read_dir) else {
         return;
     };
     let week = std::time::Duration::from_secs(7 * 24 * 60 * 60);

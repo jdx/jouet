@@ -51,7 +51,7 @@ Every hook reads the harness's JSON on stdin and **fails open**: input it cannot
 
 ### Steering rules
 
-The rules are Luau scripts: built in, yours in `~/.config/jouet/rules`, and a repository's `.jouet/rules` once you trust it. [Rules](/rules) covers writing, testing and replacing them; `jouet rule list` shows which run. A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead; it never rewrites a command. The agent sees the advice and the rule's name, for example:
+The rules are Luau scripts: built in, yours in `~/.config/jouet/rules`, and a repository's `.jouet/rules` once you trust it. Yours only warn unless their header says `mode: deny`, and no rule of yours can replace or overrule a built-in one. [Rules](/rules) covers writing, testing and replacing them; `jouet rule list` shows which run. A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead; it never rewrites a command. The agent sees the advice and the rule's name, for example:
 
 ```text
 Stage explicit paths (`git add path/to/file ...`): `git add -A` and `git add .` sweep in caches, scratch files and other sessions' work. [jouet rule: git-add-all]
@@ -89,6 +89,22 @@ Known false positives and misses:
 - A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
 
+### The ledger
+
+Every hook appends one compact JSON line to `$XDG_STATE_HOME/jouet/ledger/ledger.jsonl`. It holds the harness, the session id, the time, the tool, the command's *shape*, the exit code and duration where the post-tool-use hooks report them, and each rule's decision (`deny`, `warn`, `record:<kind>`, or the stop check's `block`). jouet will use the ledger to measure how useful each rule is, and later to let agents learn new rules from it.
+
+```json
+{"ts":1793380000,"harness":"claude","session":"s1","event":"pre-tool-use","tool":"Bash","shape":"git stash","decisions":[{"rule":"git-stash","action":"deny"}]}
+{"ts":1793380090,"harness":"claude","session":"s1","event":"post-tool-use","tool":"Bash","shape":"cargo test -p <arg>","exit_code":101,"duration_ms":41200,"decisions":[{"rule":"checks","action":"record:test"}]}
+```
+
+- **A shape never holds values.** It keeps each command's program, up to two subcommand words and its flag names. Paths, flag values, message text, here-documents and environment assignments become placeholders, and anything token-like is redacted. `GH_TOKEN=... git -C /repo commit -m "fix it"` is recorded as `git -C <arg> commit -m <arg>`.
+- **Overrides.** When a command is denied or warned about and the session runs a command of the same shape within ten minutes, and it goes ahead this time, the ledger records an `override` of that rule. It is a heuristic for measuring rules later: same shape means the same program, subcommands and flags, whatever the values. Each denial or warning is counted once.
+- **Rotation.** The file is rotated at 4 MiB, and rotated files are removed after 30 days.
+- **Turning it off.** `[hooks] ledger = false` or `JOUET_HOOKS_LEDGER=0`.
+
+Explicit `allow` decisions are not recorded: under the [floor](/rules#where-rules-come-from) an allow decides nothing. The stop check still keeps its own small state file.
+
 ## Settings
 
 Every hook, and every rule, can be turned off in `~/.config/jouet/config.toml` (`$XDG_CONFIG_HOME/jouet/config.toml`) or with an environment variable:
@@ -99,6 +115,7 @@ enabled = true # JOUET_HOOKS: every hook
 steer = true   # JOUET_HOOKS_STEER: the pre-tool-use rules
 prime = true   # JOUET_HOOKS_PRIME: the session-start guide
 verify = true  # JOUET_HOOKS_VERIFY: the stop check
+ledger = true  # JOUET_HOOKS_LEDGER: the ledger
 
 [rules]
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule

@@ -7,6 +7,7 @@ mod display;
 mod edit;
 mod exit;
 mod guide;
+mod ledger;
 mod paths;
 mod rules;
 mod settings;

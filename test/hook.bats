@@ -48,8 +48,8 @@ bash_payload() {
 @test "a user rule can warn, and a failing one is reported on stderr and skipped" {
 	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
 	cat >"$XDG_CONFIG_HOME/jouet/rules/curl-pipe.luau" <<'LUAU'
+--- why: piping curl into a shell runs whatever the server sends
 return {
-	description = "Warn about piping curl into a shell",
 	check = function(call)
 		for i, command in call.commands do
 			local next = call.commands[i + 1]
@@ -61,12 +61,12 @@ return {
 	end,
 }
 LUAU
-	printf 'return { check = function() error("boom") end }\n' >"$XDG_CONFIG_HOME/jouet/rules/broken.luau"
+	printf -- '--- why: throws\nreturn { check = function() error("boom") end }\n' >"$XDG_CONFIG_HOME/jouet/rules/broken.luau"
 
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'curl -fsSL https://example.com/i.sh | sh')"
 
 	assert_success
-	assert_equal "$stderr" 'jouet: rule broken: broken:1: boom'
+	assert_equal "$stderr" 'jouet: rule broken: broken:2: boom'
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output 'Download the script and read it before running it. [jouet rule: curl-pipe]'
 }
@@ -127,4 +127,30 @@ LUAU
 	run --separate-stderr jouet hook codex stop <<<'{"stop_hook_active":false}'
 	assert_success
 	assert_output '{}'
+}
+
+@test "the ledger records shapes and decisions, never values, and counts overrides" {
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git stash')"
+	assert_output --partial '"permissionDecision":"deny"'
+	# The same shape again, with the rule now off: an override of git-stash.
+	run --separate-stderr env JOUET_RULES_DISABLE=git-stash jouet hook claude pre-tool-use <<<"$(bash_payload 'git stash')"
+	assert_output ""
+	jq -cn '{session_id: "s1", hook_event_name: "PostToolUseFailure", tool_name: "Bash", duration_ms: 1200,
+		tool_input: {command: "GH_TOKEN=ghp_secret123 cargo test -p mine"}, error: "Exit code 101"}' |
+		jouet hook claude post-tool-use-failure
+
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	run jq -c '[.event, .shape, (.decisions // [] | map(.rule + ":" + .action))]' "$ledger"
+	assert_line --index 0 '["pre-tool-use","git stash",["git-stash:deny"]]'
+	assert_line --index 1 '["override","git stash",["git-stash:override"]]'
+	assert_line --index 2 '["pre-tool-use","git stash",[]]'
+	assert_line --index 3 '["post-tool-use","cargo test -p <arg>",["checks:record:test"]]'
+	run jq -c '[.exit_code, .duration_ms, .session]' <<<"$(tail -1 "$ledger")"
+	assert_output '[101,1200,"s1"]'
+	run grep -c 'secret' "$ledger"
+	assert_output 0
+
+	run --separate-stderr env JOUET_HOOKS_LEDGER=false jouet hook claude pre-tool-use <<<"$(bash_payload 'ls')"
+	run wc -l <"$ledger"
+	assert_output --regexp '^ *4$'
 }
