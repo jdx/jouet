@@ -302,6 +302,8 @@ impl Engine {
                     Event::PreToolUse => case.exit_code,
                 },
             };
+            // Each example is a call of its own: probes are asked afresh.
+            self.vm.new_call();
             let (ok, actual, message) = match self.run_check(rule, &call, false) {
                 Ok((decision, records)) => {
                     let action = decision.as_ref().map(|d| d.action);

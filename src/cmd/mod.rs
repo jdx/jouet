@@ -8,6 +8,7 @@ pub(crate) mod land;
 pub(crate) mod next;
 pub(crate) mod pr;
 pub(crate) mod rule;
+pub(crate) mod run;
 pub(crate) mod setup;
 pub(crate) mod share;
 pub(crate) mod skill;

@@ -10,20 +10,28 @@
 //! Every failure is contained: a rule that does not compile, throws, runs past
 //! its time or instruction budget or returns something unexpected is reported
 //! in [`Outcome::errors`] and treated as having said nothing.
+//!
+//! Rules (and recipes) can also ask about jouet's state through read-only
+//! probes ([`probe`]), and recipes ([`recipe`]) sequence jouet's commands.
 
 mod cache;
 mod examples;
 mod header;
+mod json;
+pub mod probe;
+pub mod recipe;
 pub mod shell;
 mod trust;
 
 pub use examples::{Case, Example, Expect};
 pub use header::{Mode, Scope};
+pub use probe::Probes;
 pub use trust::{Trust, TrustStore};
 
 use mlua::{Lua, Table, Value, Variadic, VmState};
 use serde::Serialize;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -284,7 +292,7 @@ impl Default for Budget {
     }
 }
 
-type HasCommand = dyn Fn(&[&str]) -> bool;
+pub(crate) type HasCommand = dyn Fn(&[&str]) -> bool;
 
 pub struct Options {
     /// Whether this jouet has the command at a path such as `["wait", "ci"]`.
@@ -304,7 +312,7 @@ struct Loader<'a> {
 }
 
 /// State the VM's callbacks share with the engine.
-struct Shared {
+pub(crate) struct Shared {
     records: RefCell<Vec<(Kind, String, i32)>>,
     /// The rule running now, and the missing `jouet` fields rules have read.
     current: RefCell<String>,
@@ -312,12 +320,131 @@ struct Shared {
     deadline: Cell<Option<Instant>>,
     interrupts: Cell<u32>,
     budget: Budget,
+    /// What the probes read; None until a caller sets them up.
+    probes: RefCell<Option<Probes>>,
+    /// Probe answers for the current hook call or recipe step.
+    cache: RefCell<HashMap<String, Result<Option<serde_json::Value>, String>>>,
+    /// The recipe being run, while one is.
+    recipe: RefCell<Option<recipe::RunState>>,
+}
+
+impl Shared {
+    /// What is left of the current budget's time.
+    fn remaining(&self) -> Duration {
+        self.deadline.get().map_or(self.budget.time, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        })
+    }
+
+    /// Starts the budget afresh, as at the start of a rule's `check`.
+    fn restart_budget(&self) {
+        self.interrupts.set(0);
+        self.deadline.set(Some(Instant::now() + self.budget.time));
+    }
+}
+
+/// A sandboxed Luau VM with the `jouet` module, and the state its
+/// callbacks share.
+pub(crate) struct Vm {
+    lua: Lua,
+    shared: Rc<Shared>,
+}
+
+impl Vm {
+    fn new(budget: Budget, has_command: Rc<HasCommand>) -> mlua::Result<Self> {
+        let lua = Lua::new();
+        lua.set_memory_limit(budget.memory)?;
+        let shared = Rc::new(Shared {
+            records: RefCell::new(Vec::new()),
+            current: RefCell::new(String::new()),
+            gaps: RefCell::new(Vec::new()),
+            deadline: Cell::new(None),
+            interrupts: Cell::new(0),
+            budget,
+            probes: RefCell::new(None),
+            cache: RefCell::new(HashMap::new()),
+            recipe: RefCell::new(None),
+        });
+        install_module(&lua, &shared, &has_command)?;
+        let guard = shared.clone();
+        lua.set_interrupt(move |_| {
+            let Some(deadline) = guard.deadline.get() else {
+                return Ok(VmState::Continue);
+            };
+            let count = guard.interrupts.get() + 1;
+            guard.interrupts.set(count);
+            if count > guard.budget.interrupts {
+                return Err(mlua::Error::runtime("exceeded its instruction budget"));
+            }
+            if Instant::now() > deadline {
+                return Err(mlua::Error::runtime("exceeded its time budget"));
+            }
+            Ok(VmState::Continue)
+        });
+        lua.sandbox(true)?;
+        Ok(Self { lua, shared })
+    }
+
+    /// Compiles (or reads from the cache) and runs a script file, in an
+    /// environment of its own, returning the table it returns.
+    fn load_table(
+        &self,
+        name: &str,
+        code: &str,
+        cache_dir: Option<&Path>,
+    ) -> Result<Table, String> {
+        self.shared.current.replace(name.to_string());
+        let (bytecode, cached) = cache::compile(code, cache_dir)?;
+        let value = match self.run_chunk(name, &bytecode) {
+            // A cached chunk from another Luau version, or a damaged file:
+            // compile it again rather than leave the script broken.
+            Err(_) if cached => self.run_chunk(name, &cache::recompile(code, cache_dir)?)?,
+            result => result?,
+        };
+        match value {
+            Value::Table(table) => Ok(table),
+            other => Err(format!(
+                "the file must return a table, not {}",
+                other.type_name()
+            )),
+        }
+    }
+
+    /// Runs a compiled file in an environment of its own.
+    fn run_chunk(&self, name: &str, bytecode: &[u8]) -> Result<Value, String> {
+        let env = self.lua.create_table().map_err(|e| e.to_string())?;
+        let meta = self.lua.create_table().map_err(|e| e.to_string())?;
+        meta.set("__index", self.lua.globals())
+            .map_err(|e| e.to_string())?;
+        env.set_metatable(Some(meta)).map_err(|e| e.to_string())?;
+        self.guarded(|| {
+            self.lua
+                .load(bytecode)
+                .set_name(format!("={name}"))
+                .set_mode(mlua::chunk::ChunkMode::Binary)
+                .set_environment(env)
+                .eval()
+        })
+    }
+
+    /// Runs `f` under the budget.
+    fn guarded<T>(&self, f: impl FnOnce() -> mlua::Result<T>) -> Result<T, String> {
+        self.shared.restart_budget();
+        let result = f();
+        self.shared.deadline.set(None);
+        result.map_err(|e| first_line(&e.to_string()))
+    }
+
+    /// Forgets the probes' answers: a new hook call or recipe step asks
+    /// again.
+    fn new_call(&self) {
+        self.shared.cache.borrow_mut().clear();
+    }
 }
 
 pub struct Engine {
-    lua: Lua,
+    vm: Vm,
     rules: Vec<Rule>,
-    shared: Rc<Shared>,
 }
 
 /// The built-in rules' sources.
@@ -356,7 +483,17 @@ pub fn discover(
     repo_dir: Option<&Path>,
     trust: &TrustStore,
 ) -> (Vec<Source>, Vec<String>) {
-    let mut sources = builtin();
+    discover_after(builtin(), user_dir, repo_dir, trust)
+}
+
+/// `sources`, then the `*.luau` files of the user's directory, then a
+/// repository's (untrusted unless its directory is trusted).
+fn discover_after(
+    mut sources: Vec<Source>,
+    user_dir: Option<&Path>,
+    repo_dir: Option<&Path>,
+    trust: &TrustStore,
+) -> (Vec<Source>, Vec<String>) {
     let mut errors = Vec::new();
     let mut add = |dir: &Path, repo: bool, trusted: bool, sources: &mut Vec<Source>| {
         let files = match rule_files(dir) {
@@ -412,39 +549,10 @@ impl Engine {
             budget,
             cache_dir,
         } = options;
-        let lua = Lua::new();
-        lua.set_memory_limit(budget.memory)?;
-        let shared = Rc::new(Shared {
-            records: RefCell::new(Vec::new()),
-            current: RefCell::new(String::new()),
-            gaps: RefCell::new(Vec::new()),
-            deadline: Cell::new(None),
-            interrupts: Cell::new(0),
-            budget,
-        });
         let has_command: Rc<HasCommand> = Rc::from(has_command);
-        install_module(&lua, &shared, &has_command)?;
-        let guard = shared.clone();
-        lua.set_interrupt(move |_| {
-            let Some(deadline) = guard.deadline.get() else {
-                return Ok(VmState::Continue);
-            };
-            let count = guard.interrupts.get() + 1;
-            guard.interrupts.set(count);
-            if count > guard.budget.interrupts {
-                return Err(mlua::Error::runtime("exceeded its instruction budget"));
-            }
-            if Instant::now() > deadline {
-                return Err(mlua::Error::runtime("exceeded its time budget"));
-            }
-            Ok(VmState::Continue)
-        });
-        lua.sandbox(true)?;
-
         let mut engine = Self {
-            lua,
+            vm: Vm::new(budget, has_command.clone())?,
             rules: Vec::new(),
-            shared,
         };
         let loader = Loader {
             disabled: &disabled,
@@ -508,7 +616,10 @@ impl Engine {
             rule.state = State::Untrusted;
             return rule;
         }
-        let table = match self.load_table(&rule.name, &source.code, loader.cache_dir) {
+        let table = match self
+            .vm
+            .load_table(&rule.name, &source.code, loader.cache_dir)
+        {
             Ok(table) => table,
             Err(e) => {
                 rule.state = State::Broken(e);
@@ -539,63 +650,17 @@ impl Engine {
         rule
     }
 
-    /// Compiles (or reads from the cache) and runs a rule file, in an
-    /// environment of its own, returning the table it returns.
-    fn load_table(
-        &self,
-        name: &str,
-        code: &str,
-        cache_dir: Option<&Path>,
-    ) -> Result<Table, String> {
-        self.shared.current.replace(name.to_string());
-        let (bytecode, cached) = cache::compile(code, cache_dir)?;
-        let value = match self.run_chunk(name, &bytecode) {
-            // A cached chunk from another Luau version, or a damaged file:
-            // compile it again rather than leave the rule broken.
-            Err(_) if cached => self.run_chunk(name, &cache::recompile(code, cache_dir)?)?,
-            result => result?,
-        };
-        match value {
-            Value::Table(table) => Ok(table),
-            other => Err(format!(
-                "the file must return a rule table, not {}",
-                other.type_name()
-            )),
-        }
-    }
-
-    /// Runs a compiled rule file in an environment of its own.
-    fn run_chunk(&self, name: &str, bytecode: &[u8]) -> Result<Value, String> {
-        let env = self.lua.create_table().map_err(|e| e.to_string())?;
-        let meta = self.lua.create_table().map_err(|e| e.to_string())?;
-        meta.set("__index", self.lua.globals())
-            .map_err(|e| e.to_string())?;
-        env.set_metatable(Some(meta)).map_err(|e| e.to_string())?;
-        self.guarded(|| {
-            self.lua
-                .load(bytecode)
-                .set_name(format!("={name}"))
-                .set_mode(mlua::chunk::ChunkMode::Binary)
-                .set_environment(env)
-                .eval()
-        })
-    }
-
-    /// Runs `f` under the per-rule budget.
-    fn guarded<T>(&self, f: impl FnOnce() -> mlua::Result<T>) -> Result<T, String> {
-        self.shared.interrupts.set(0);
-        self.shared
-            .deadline
-            .set(Some(Instant::now() + self.shared.budget.time));
-        let result = f();
-        self.shared.deadline.set(None);
-        result.map_err(|e| first_line(&e.to_string()))
+    /// Lets the rules' probes run, reading what `probes` points at. Without
+    /// this every probe returns nil and says why.
+    pub fn set_probes(&self, probes: Probes) {
+        *self.vm.shared.probes.borrow_mut() = Some(probes);
+        self.vm.new_call();
     }
 
     /// The primitives rules reached for that the `jouet` module does not
     /// have, since the last call: what the API could not express.
     pub fn take_gaps(&self) -> Vec<Gap> {
-        let mut gaps = self.shared.gaps.take();
+        let mut gaps = self.vm.shared.gaps.take();
         gaps.sort();
         gaps.dedup();
         gaps
@@ -612,13 +677,14 @@ impl Engine {
     /// Runs every enabled rule for the call's event, in order, stopping at
     /// the first denial.
     pub fn evaluate(&self, call: &Call) -> Outcome {
+        self.vm.new_call();
         let mut outcome = Outcome::default();
         let event = call.event.unwrap_or(Event::PreToolUse);
         for rule in &self.rules {
             if rule.state != State::Enabled || rule.event != event {
                 continue;
             }
-            match self.check(rule, call) {
+            match self.run_check(rule, call, true) {
                 Ok((decision, records)) => {
                     outcome.records.extend(records);
                     match decision {
@@ -638,12 +704,13 @@ impl Engine {
 
     /// Runs one rule's `check`, whatever its state, and returns its decision,
     /// as enforced (a warn-mode rule's denial is a warning), and anything it
-    /// recorded.
+    /// recorded. A call of its own: probes are asked afresh.
     pub fn check(
         &self,
         rule: &Rule,
         call: &Call,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
+        self.vm.new_call();
         self.run_check(rule, call, true)
     }
 
@@ -656,7 +723,7 @@ impl Engine {
         call: &Call,
         enforce: bool,
     ) -> Result<(Option<Decision>, Vec<Record>), String> {
-        self.shared.current.replace(rule.name.clone());
+        self.vm.shared.current.replace(rule.name.clone());
         let Some(table) = &rule.table else {
             return Err(match &rule.state {
                 State::Broken(e) => e.clone(),
@@ -666,9 +733,9 @@ impl Engine {
         // Raw reads throughout: a rule's tables can carry metamethods, which
         // must never run outside the budget.
         let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
-        let call_table = call_table(&self.lua, call).map_err(|e| e.to_string())?;
-        self.shared.records.borrow_mut().clear();
-        let returned = self.guarded(|| {
+        let call_table = call_table(&self.vm.lua, call).map_err(|e| e.to_string())?;
+        self.vm.shared.records.borrow_mut().clear();
+        let returned = self.vm.guarded(|| {
             Ok(match check.call::<Value>(call_table)? {
                 Value::Nil => None,
                 Value::Table(t) => Some(Ok((
@@ -679,6 +746,7 @@ impl Engine {
             })
         })?;
         let records = self
+            .vm
             .shared
             .records
             .borrow_mut()
@@ -819,13 +887,20 @@ fn read_fields(rule: &mut Rule, table: &Table) -> Result<(), String> {
     Ok(())
 }
 
-/// The `jouet` module: the Rust functions, then the prelude's.
+/// The `jouet` module: the Rust functions, the probes and `cmd`, then the
+/// prelude's.
 fn install_module(
     lua: &Lua,
     shared: &Rc<Shared>,
     has_command: &Rc<HasCommand>,
 ) -> mlua::Result<()> {
     let jouet = lua.create_table()?;
+    // `jouet.git(command)` is the prelude's, through `__call`; the table
+    // also holds the git probe.
+    let git = lua.create_table()?;
+    jouet.set("git", &git)?;
+    probe::install(lua, &jouet, &git, shared)?;
+    recipe::install(lua, &jouet, shared, has_command)?;
     jouet.set(
         "parse",
         lua.create_function(|lua, (script, exit_code): (String, Option<i32>)| {
