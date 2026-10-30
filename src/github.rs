@@ -14,9 +14,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 use std::process::Command;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use ureq::tls::{Certificate, RootCerts, TlsConfig};
 
 const ENV_SOURCES: [&str; 3] = ["JOUET_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"];
 const GH_SOURCE: &str = "gh auth token";
@@ -107,7 +105,7 @@ impl Client {
             .unwrap_or_else(|| "https://api.github.com".into());
         let api = api.trim_end_matches('/').to_string();
         let agent = ureq::Agent::config_builder()
-            .tls_config(tls_config())
+            .tls_config(crate::tls::config())
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
             .user_agent(concat!("jouet/", env!("CARGO_PKG_VERSION")))
@@ -323,21 +321,6 @@ impl Client {
             return Ok(Sent { status, etag, text });
         }
     }
-}
-
-/// TLS that trusts the system's root certificates (`SSL_CERT_FILE` and
-/// `SSL_CERT_DIR` are honoured), as gh and curl do, so a proxy's CA
-/// installed on the machine works too.
-fn tls_config() -> TlsConfig {
-    let roots = rustls_native_certs::load_native_certs()
-        .certs
-        .iter()
-        .map(|der| Certificate::from_der(der).to_owned())
-        .collect();
-    TlsConfig::builder()
-        .root_certs(RootCerts::Specific(Arc::new(roots)))
-        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .build()
 }
 
 /// Reads a token from `gh`, with `GH_TOKEN` and `GITHUB_TOKEN` removed so
