@@ -13,12 +13,14 @@
 
 ## Subcommands
 
+- [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet commit [FLAGS] [PATHS]…`](/cli/commit.md)
 - [`jouet edit [FLAGS] [SUBCOMMAND]`](/cli/edit.md)
 - [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
 - [`jouet handoff [FLAGS]`](/cli/handoff.md)
 - [`jouet pickup [FILE]`](/cli/pickup.md)
+- [`jouet stats [FLAGS]`](/cli/stats.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)
 - [`jouet pr next [FLAGS] [PRS]…`](/cli/pr/next.md)

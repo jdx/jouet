@@ -9,6 +9,9 @@
 //! [hooks]
 //! verify = false
 //!
+//! [stats]
+//! summary = "plain"
+//!
 //! [wind]
 //! enabled = false
 //! ```
@@ -21,6 +24,8 @@ pub(crate) struct Settings {
     pub rules: RuleSettings,
     #[usage(flatten)]
     pub hooks: HookSettings,
+    #[usage(flatten)]
+    pub stats: StatsSettings,
     #[usage(flatten)]
     pub wind: WindSettings,
 }
@@ -59,6 +64,19 @@ pub(crate) struct HookSettings {
     /// Keep a ledger of command shapes and rule decisions
     #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
     pub ledger: bool,
+}
+
+/// What `jouet stats` prints.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "stats")]
+pub(crate) struct StatsSettings {
+    /// How `jouet stats --summary` tells its line: quips, plain, or off for no line
+    #[usage(
+        env = "JOUET_STATS_SUMMARY",
+        default = "quips",
+        choices("quips", "plain", "off")
+    )]
+    pub summary: String,
 }
 
 /// Which rules run.
@@ -144,6 +162,18 @@ mod tests {
         std::fs::write(&path, "[hooks]\nverify = false\n").unwrap();
         let s = Settings::load_from(&env(&[("JOUET_HOOKS_PRIME", "false")]), Some(path));
         assert!(!s.hooks.verify && !s.hooks.prime && s.hooks.steer);
+    }
+
+    #[test]
+    fn the_stats_summary_is_quips_until_set() {
+        assert_eq!(Settings::load_from(&env(&[]), None).stats.summary, "quips");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[stats]\nsummary = \"plain\"\n").unwrap();
+        let s = Settings::load_from(&env(&[]), Some(path.clone()));
+        assert_eq!(s.stats.summary, "plain");
+        let s = Settings::load_from(&env(&[("JOUET_STATS_SUMMARY", "off")]), Some(path));
+        assert_eq!(s.stats.summary, "off");
     }
 
     #[test]

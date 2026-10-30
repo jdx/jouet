@@ -81,6 +81,8 @@ export default defineConfig({
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
           { text: "jouet run", link: "/commands/run" },
+          { text: "jouet audit", link: "/commands/audit" },
+          { text: "jouet stats", link: "/commands/stats" },
           { text: "jouet commit", link: "/commands/commit" },
           { text: "jouet review-package", link: "/commands/review-package" },
           { text: "jouet handoff", link: "/commands/handoff" },
@@ -94,6 +96,8 @@ export default defineConfig({
             link: "/cli/",
             collapsed: true,
             items: [
+              { text: "audit", link: "/cli/audit" },
+              { text: "stats", link: "/cli/stats" },
               { text: "commit", link: "/cli/commit" },
               {
                 text: "edit",
