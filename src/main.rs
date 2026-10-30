@@ -187,6 +187,12 @@ pub struct WaitArgs {
 
 #[derive(Subcommands)]
 pub enum WaitCmd {
+    /// Wait for a PR's checks, and show why any failed
+    Ci(WaitCiArgs),
+    /// Wait for a GitHub Actions run
+    Run(WaitRunArgs),
+    /// Wait for a PR to become mergeable, merged, approved, ready, ...
+    Pr(WaitPrArgs),
     /// Wait for a file to exist, contain a match, or be gone
     File(WaitFileArgs),
     /// Wait for a line matching a regex to be appended to a log
@@ -199,6 +205,94 @@ pub enum WaitCmd {
     Pid(WaitPidArgs),
     /// Re-run a command until it exits with the expected code
     Cmd(WaitCmdArgs),
+}
+
+/// Wait for a PR's checks, and show why any failed
+///
+/// Follows the PR head, switching to a new head when one is pushed, unless
+/// --sha pins a commit. Returns on the first failed check unless --all.
+/// Skipped and neutral checks count as passing. A conflicted PR returns
+/// `conflict` (exit 4) at once, since pull_request workflows will not run;
+/// no checks within --appear-timeout returns `no_checks` (exit 1). For each
+/// failed Actions job, the failed step's log is excerpted and the full log
+/// saved. Waits on the same PR share their state, so they poll GitHub once.
+#[derive(Args)]
+pub struct WaitCiArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Wait on this commit's checks instead of following the PR head
+    #[usage(long, value_name = "SHA")]
+    sha: Option<String>,
+    /// Only checks that branch protection requires
+    #[usage(long)]
+    required: bool,
+    /// Only checks whose name matches GLOB (`*` and `?`). Repeatable
+    #[usage(long, value_name = "GLOB")]
+    check: Vec<String>,
+    /// Leave out checks whose name matches GLOB. Repeatable
+    #[usage(long, value_name = "GLOB")]
+    ignore: Vec<String>,
+    /// Wait for every check to finish, even after one fails
+    #[usage(long)]
+    all: bool,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+    /// How long checks may take to appear on a commit (default 3m)
+    #[usage(long, value_name = "DUR")]
+    appear_timeout: Option<String>,
+}
+
+/// Wait for a GitHub Actions run
+///
+/// Returns when the run completes, or on its first failed job, with the
+/// failed step's log excerpted as for `wait ci`.
+#[derive(Args)]
+pub struct WaitRunArgs {
+    /// The run ID, or its Actions URL
+    run: String,
+    /// The repository for a bare run ID. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// Lines of each failure log to show (default 60; 0 shows the whole
+    /// failed step)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not fetch failure logs
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Wait for a PR to become mergeable, merged, approved, ready, ...
+///
+/// --until is one of: mergeable (keeps waiting while GitHub reports
+/// UNKNOWN; exit 1 on a conflict), merged (exit 1 if closed unmerged),
+/// closed, approved (exit 1 when changes are requested), checks-registered
+/// (any check on the head), ready (no `pr status` attention codes and no
+/// pending checks; exit 1 on conflict, checks_failing, changes_requested or
+/// unresolved_threads), or any-change (the next push, check result, review,
+/// thread or state change, printed as one event).
+#[derive(Args)]
+pub struct WaitPrArgs {
+    /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
+    /// current branch's PR
+    pr: Option<String>,
+    /// The repository for a bare number or branch. Defaults to the git
+    /// remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Option<String>,
+    /// The condition to wait for
+    #[usage(long, value_name = "CONDITION")]
+    until: String,
 }
 
 /// Wait for a file to exist, contain a match, or be gone

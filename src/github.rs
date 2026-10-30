@@ -1,4 +1,5 @@
-//! A small blocking GitHub client: finding a token that works, and GraphQL.
+//! A small blocking GitHub client: finding a token that works, GraphQL, and
+//! REST GETs with ETags.
 //!
 //! Tokens are tried in order: `JOUET_GITHUB_TOKEN`, `GH_TOKEN`,
 //! `GITHUB_TOKEN`, then `gh auth token`. There is no separate probe: the
@@ -6,6 +7,9 @@
 //! source, so a stale `GH_TOKEN` costs one rejected request rather than a
 //! failed command. `JOUET_GITHUB_API_URL` points the client at another API
 //! root, such as a GitHub Enterprise server or a test's fake server.
+//!
+//! REST GETs send `If-None-Match` when given an ETag, so an unchanged poll
+//! comes back as a 304 that costs nothing against the rate limit.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -21,6 +25,8 @@ const MAX_RETRY_AFTER: u64 = 60;
 
 pub struct Client {
     agent: ureq::Agent,
+    /// The API root, without a trailing slash.
+    api: String,
     graphql_url: String,
     /// Token sources not yet tried, in order.
     sources: Vec<&'static str>,
@@ -32,6 +38,49 @@ pub struct Client {
 struct Token {
     source: &'static str,
     value: String,
+}
+
+/// A REST response. `status` is 304, with an empty body, when the ETag
+/// given still matches.
+#[derive(Debug)]
+pub struct Rest {
+    pub status: u16,
+    pub etag: Option<String>,
+    pub body: String,
+}
+
+/// Why a request got no usable response.
+#[derive(Debug)]
+pub enum Failure {
+    /// The primary rate limit is used up until `reset`, in Unix seconds.
+    RateLimited {
+        reset: i64,
+    },
+    Other(String),
+}
+
+impl Failure {
+    pub fn message(&self) -> String {
+        match self {
+            Self::RateLimited { reset } => format!(
+                "GitHub rate limit exhausted; it resets in {}",
+                crate::time::age(reset - crate::time::now())
+            ),
+            Self::Other(message) => message.clone(),
+        }
+    }
+}
+
+/// What a request sends.
+enum Request<'a> {
+    Graphql(&'a str),
+    Get { url: &'a str, etag: Option<&'a str> },
+}
+
+struct Sent {
+    status: u16,
+    etag: Option<String>,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +103,7 @@ impl Client {
             .ok()
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| "https://api.github.com".into());
+        let api = api.trim_end_matches('/').to_string();
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
@@ -62,7 +112,8 @@ impl Client {
             .into();
         Self {
             agent,
-            graphql_url: format!("{}/graphql", api.trim_end_matches('/')),
+            graphql_url: format!("{api}/graphql"),
+            api,
             sources: ENV_SOURCES.into_iter().chain([GH_SOURCE]).collect(),
             tried: Vec::new(),
             token: None,
@@ -75,13 +126,55 @@ impl Client {
     /// the call.
     pub fn graphql(&mut self, query: &str, variables: &Value) -> Result<Value, String> {
         let body = serde_json::json!({ "query": query, "variables": variables }).to_string();
+        let Sent { status, text, .. } = self
+            .authorized(&Request::Graphql(&body))
+            .map_err(|f| f.message())?;
+        if status != 200 {
+            return Err(format!("GitHub returned {status}: {}", message(&text)));
+        }
+        let resp: GraphqlResponse = serde_json::from_str(&text)
+            .map_err(|e| format!("GitHub sent a response jouet could not read: {e}"))?;
+        if let Some(e) = resp
+            .errors
+            .iter()
+            .find(|e| e.kind.as_deref() != Some("NOT_FOUND"))
+        {
+            return Err(match e.kind.as_deref() {
+                Some("RATE_LIMITED") => format!("GitHub rate limit: {}", e.message),
+                _ => format!("GitHub: {}", e.message),
+            });
+        }
+        resp.data
+            .ok_or_else(|| "GitHub returned no data".to_string())
+    }
+
+    /// GETs a REST path such as `/repos/o/r/pulls/1`, or a full URL,
+    /// sending `If-None-Match` when `etag` is given. Statuses other than 401
+    /// are the caller's to read; a 401 moves on to the next token.
+    pub fn get(&mut self, path: &str, etag: Option<&str>) -> Result<Rest, Failure> {
+        let url = if path.starts_with('/') {
+            format!("{}{path}", self.api)
+        } else {
+            path.to_string()
+        };
+        let sent = self.authorized(&Request::Get { url: &url, etag })?;
+        Ok(Rest {
+            status: sent.status,
+            etag: sent.etag,
+            body: sent.text,
+        })
+    }
+
+    /// Sends with the first token that is not rejected (401), and says which
+    /// sources were rejected once one works.
+    fn authorized(&mut self, request: &Request<'_>) -> Result<Sent, Failure> {
         loop {
             let token = match self.token.take() {
                 Some(token) => token,
-                None => self.next_token()?,
+                None => self.next_token().map_err(Failure::Other)?,
             };
-            let (status, text) = self.post(&token.value, &body)?;
-            if status == 401 {
+            let sent = self.send(&token.value, request)?;
+            if sent.status == 401 {
                 self.rejected.push(token.source);
                 continue;
             }
@@ -95,24 +188,7 @@ impl Client {
                 );
             }
             self.token = Some(token);
-            if status != 200 {
-                return Err(format!("GitHub returned {status}: {}", message(&text)));
-            }
-            let resp: GraphqlResponse = serde_json::from_str(&text)
-                .map_err(|e| format!("GitHub sent a response jouet could not read: {e}"))?;
-            if let Some(e) = resp
-                .errors
-                .iter()
-                .find(|e| e.kind.as_deref() != Some("NOT_FOUND"))
-            {
-                return Err(match e.kind.as_deref() {
-                    Some("RATE_LIMITED") => format!("GitHub rate limit: {}", e.message),
-                    _ => format!("GitHub: {}", e.message),
-                });
-            }
-            return resp
-                .data
-                .ok_or_else(|| "GitHub returned no data".to_string());
+            return Ok(sent);
         }
     }
 
@@ -148,17 +224,36 @@ impl Client {
         })
     }
 
-    /// POSTs `body`, retrying 5xx responses, dropped connections and
+    /// Sends one request, retrying 5xx responses, dropped connections and
     /// secondary rate limits with jittered backoff.
-    fn post(&self, token: &str, body: &str) -> Result<(u16, String), String> {
+    fn send(&self, token: &str, request: &Request<'_>) -> Result<Sent, Failure> {
+        let target = match request {
+            Request::Graphql(_) => self.graphql_url.as_str(),
+            Request::Get { url, .. } => url,
+        };
         let mut attempt = 0;
         loop {
-            let sent = self
-                .agent
-                .post(&self.graphql_url)
-                .header("Authorization", format!("bearer {token}"))
-                .content_type("application/json")
-                .send(body);
+            let auth = format!("bearer {token}");
+            let sent = match request {
+                Request::Graphql(body) => self
+                    .agent
+                    .post(&self.graphql_url)
+                    .header("Authorization", &auth)
+                    .content_type("application/json")
+                    .send(*body),
+                Request::Get { url, etag } => {
+                    let mut req = self
+                        .agent
+                        .get(*url)
+                        .header("Authorization", &auth)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("X-GitHub-Api-Version", "2022-11-28");
+                    if let Some(etag) = etag {
+                        req = req.header("If-None-Match", *etag);
+                    }
+                    req.call()
+                }
+            };
             let mut resp = match sent {
                 Ok(resp) => resp,
                 Err(e) if attempt < RETRIES => {
@@ -167,7 +262,7 @@ impl Client {
                     std::thread::sleep(backoff(attempt));
                     continue;
                 }
-                Err(e) => return Err(format!("could not reach {}: {e}", self.graphql_url)),
+                Err(e) => return Err(Failure::Other(format!("could not reach {target}: {e}"))),
             };
             let status = resp.status().as_u16();
             let header = |name: &str| {
@@ -179,21 +274,17 @@ impl Client {
             let retry_after = header("retry-after").and_then(|v| v.parse::<u64>().ok());
             let remaining = header("x-ratelimit-remaining");
             let reset = header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok());
+            let etag = header("etag");
             let text = resp
                 .body_mut()
                 .with_config()
                 .limit(256 * 1024 * 1024)
                 .read_to_string()
-                .map_err(|e| format!("reading GitHub's response: {e}"))?;
+                .map_err(|e| Failure::Other(format!("reading GitHub's response: {e}")))?;
             if status == 403 || status == 429 {
                 if remaining.as_deref() == Some("0") {
-                    let when = reset.map_or(String::new(), |r| {
-                        format!(
-                            "; it resets in {}",
-                            crate::time::age(r - crate::time::now())
-                        )
-                    });
-                    return Err(format!("GitHub rate limit exhausted{when}"));
+                    let reset = reset.unwrap_or_else(|| crate::time::now() + 60);
+                    return Err(Failure::RateLimited { reset });
                 }
                 let secondary = retry_after.is_some()
                     || text.to_ascii_lowercase().contains("secondary rate limit");
@@ -211,7 +302,10 @@ impl Client {
                     continue;
                 }
                 if secondary {
-                    return Err(format!("GitHub secondary rate limit: {}", message(&text)));
+                    return Err(Failure::Other(format!(
+                        "GitHub secondary rate limit: {}",
+                        message(&text)
+                    )));
                 }
             }
             if status >= 500 && attempt < RETRIES {
@@ -220,7 +314,7 @@ impl Client {
                 std::thread::sleep(backoff(attempt));
                 continue;
             }
-            return Ok((status, text));
+            return Ok(Sent { status, etag, text });
         }
     }
 }
