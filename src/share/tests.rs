@@ -75,7 +75,7 @@ fn a_proven_rule_becomes_an_anonymized_proposal() {
         "{}",
         p.body
     );
-    assert!(p.body.contains("- `git tag v1` (12x)"), "{}", p.body);
+    assert!(p.body.contains("- `git tag <arg>` (12x)"), "{}", p.body);
     assert!(p.body.ends_with("*AI-assisted*\n"));
     for private in ["/home/alice", "ci.acme.internal", "acme"] {
         assert!(!p.body.contains(private), "{private} leaked:\n{}", p.body);
