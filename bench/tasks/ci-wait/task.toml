@@ -1,0 +1,36 @@
+description = "Wait for a PR's CI, which fails after about a minute on a test that only runs in CI; fix it from the log and commit"
+chore = "ci-wait"
+rules = ["sleep-poll", "checks", "git-add-all"]
+branch = "thousands-separators"
+timeout_s = 900
+prompt = """
+PR #7 (branch thousands-separators, checked out here) has CI running on GitHub. Wait for its
+checks to finish. If any fail, find the cause in the CI logs, fix it locally, check the fix, and
+commit it. Don't push.
+"""
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "7", "--json", "--timeout", "10s"]
+exit = 1
+stdout_contains = "parse_amount('(12.50)')"
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "7", "--json", "--timeout", "2s"]
+exit = 124
+at_s = 0
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "7"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "parse_amount('(12.50)')"
+
+[[probe]]
+tool = "gh"
+args = ["pr", "view", "7"]

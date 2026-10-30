@@ -1,0 +1,129 @@
+import io
+import json
+import unittest
+import urllib.request
+import zipfile
+
+from jbench.fake_github import FakeGitHub, materialize
+
+FIXTURE = {
+    "repo": "jdx/demo",
+    "rest": {
+        "/repos/jdx/demo/pulls/7": {"number": 7, "head": {"sha": "abc"}},
+        "/repos/jdx/demo/actions/jobs/1/logs": {"$text": "the log", "$until": 30, "$before": {"$status": 404}},
+        "/repos/jdx/demo/actions/runs/1/logs": {"$zip": {"0_test.txt": "the log"}},
+    },
+    "graphql": {
+        "viewer": {"__typename": "User", "login": "jdx"},
+        "repository": {
+            "__typename": "Repository",
+            "pullRequests": {
+                "nodes": [
+                    {
+                        "__typename": "PullRequest",
+                        "id": "PR_7",
+                        "number": 7,
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "__typename": "PullRequestReviewThread",
+                                    "id": "T1",
+                                    "isResolved": False,
+                                    "path": "a.py",
+                                    "line": 3,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "__typename": "PullRequestReviewComment",
+                                                "id": "C1",
+                                                "databaseId": 11,
+                                                "body": "rename this",
+                                                "author": {"login": "reviewer"},
+                                            }
+                                        ]
+                                    },
+                                }
+                            ]
+                        },
+                        "check": {"state": "SUCCESS", "$until": 30, "$before": {"state": "PENDING"}},
+                    }
+                ]
+            },
+        },
+    },
+}
+
+
+def get(url, proxy=None):
+    handlers = [urllib.request.ProxyHandler({"http": proxy} if proxy else {})]
+    try:
+        with urllib.request.build_opener(*handlers).open(url) as r:
+            return r.status, r.headers.get("Content-Type"), r.read()
+    except urllib.error.HTTPError as e:
+        with e:
+            return e.code, e.headers.get("Content-Type"), e.read()
+
+
+def post(url, body):
+    request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request) as r:
+        return r.status, json.load(r)
+
+
+class MaterializeTest(unittest.TestCase):
+    def test_before_and_after(self):
+        tree = {"a": {"state": "done", "$until": 10, "$before": {"state": "pending"}}}
+        self.assertEqual(materialize(tree, 5), {"a": {"state": "pending"}})
+        self.assertEqual(materialize(tree, 10), {"a": {"state": "done"}})
+
+
+class ServerTest(unittest.TestCase):
+    def test_rest_as_a_proxy_target_and_directly(self):
+        with FakeGitHub(FIXTURE) as fake:
+            status, _, body = get("http://api.github.localhost/repos/jdx/demo/pulls/7", proxy=fake.url)
+            self.assertEqual((status, json.loads(body)["number"]), (200, 7))
+            status, _, body = get(fake.url + "/api/v3/repos/jdx/demo/pulls/7?per_page=1")
+            self.assertEqual(status, 200)
+            status, _, _ = get(fake.url + "/repos/jdx/demo/nope")
+            self.assertEqual(status, 404)
+            summary = fake.world.summary()
+        self.assertEqual(summary["requests"], 3)
+        self.assertEqual(summary["unanswered_examples"], ["GET /repos/jdx/demo/nope -> 404"])
+
+    def test_text_status_and_zip(self):
+        with FakeGitHub(FIXTURE) as fake:
+            self.assertEqual(get(fake.url + "/repos/jdx/demo/actions/jobs/1/logs")[0], 404)
+        with FakeGitHub(FIXTURE, offset_s=60) as fake:
+            status, kind, body = get(fake.url + "/repos/jdx/demo/actions/jobs/1/logs")
+            self.assertEqual((status, kind.split(";")[0], body), (200, "text/plain", b"the log"))
+            status, kind, body = get(fake.url + "/repos/jdx/demo/actions/runs/1/logs")
+            self.assertEqual(kind, "application/zip")
+            self.assertEqual(zipfile.ZipFile(io.BytesIO(body)).read("0_test.txt"), b"the log")
+
+    def test_time_and_writes_persist(self):
+        query = "{ repository { pullRequest(number: 7) { check { state } reviewThreads { nodes { isResolved comments { totalCount } } } } } }"
+        with FakeGitHub(FIXTURE) as fake:
+            _, before = post(fake.url + "/graphql", {"query": query})
+            self.assertEqual(before["data"]["repository"]["pullRequest"]["check"]["state"], "PENDING")
+            post(
+                fake.url + "/graphql",
+                {
+                    "query": "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id } } }",
+                    "variables": {"id": "T1"},
+                },
+            )
+            status, reply = post(fake.url + "/repos/jdx/demo/pulls/7/comments/11/replies", {"body": "done"})
+            self.assertEqual((status, reply["in_reply_to_id"]), (201, 11))
+            _, after = post(fake.url + "/graphql", {"query": query})
+            comments = json.loads(get(fake.url + "/repos/jdx/demo/pulls/7/comments")[2])
+        thread = after["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"][0]
+        self.assertEqual(thread, {"isResolved": True, "comments": {"totalCount": 2}})
+        self.assertEqual([c["body"] for c in comments], ["rename this", "done"])
+        # The fixture passed in is never changed.
+        self.assertFalse(
+            FIXTURE["graphql"]["repository"]["pullRequests"]["nodes"][0]["reviewThreads"]["nodes"][0]["isResolved"]
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

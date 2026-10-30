@@ -1,0 +1,9 @@
+description = "Fix one function so the tests pass, then commit: the cheapest task, for checking the harness works"
+chore = "test-fix"
+rules = ["checks", "git-add-all"]
+smoke = true
+timeout_s = 300
+prompt = """
+The tests in this repository fail. Fix wordcount.py so that `python3 -m unittest` passes, without
+changing the tests, then commit the fix.
+"""

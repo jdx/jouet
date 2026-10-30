@@ -1,0 +1,8 @@
+description = "Fix four bugs behind six failing tests, without touching the tests, then commit"
+chore = "test-fix"
+rules = ["checks", "git-add-all"]
+timeout_s = 600
+prompt = """
+The test suite fails. Fix the library in textstats/ (not the tests) until
+`python3 -m unittest discover -s tests` passes, then commit the fix.
+"""
