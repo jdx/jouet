@@ -219,11 +219,13 @@ fn search_pages_are_followed() {
     let lookups = [Lookup::Search {
         query: "is:pr is:open repo:jdx/jouet".into(),
         after: None,
+        listed: 0,
     }];
     let mut result = FetchResult::default();
     let more = read_prs(&lookups, &data(SEARCH), &mut result).unwrap();
     assert!(more.is_empty());
-    assert_eq!(result.prs.len(), 2);
+    assert_eq!(result.prs.len(), 4);
+    assert!(result.incomplete.is_empty());
 
     let mut page = data(SEARCH);
     page["l0"]["pageInfo"] = json!({ "hasNextPage": true, "endCursor": "Y3Vyc29yOjI=" });
@@ -233,7 +235,31 @@ fn search_pages_are_followed() {
         more,
         [Lookup::Search {
             query: "is:pr is:open repo:jdx/jouet".into(),
-            after: Some("Y3Vyc29yOjI=".into())
+            after: Some("Y3Vyc29yOjI=".into()),
+            listed: 4,
+        }]
+    );
+}
+
+#[test]
+fn a_search_past_githubs_listing_limit_is_reported() {
+    // GitHub lists at most 1,000 results; issueCount says how many matched.
+    let lookups = [Lookup::Search {
+        query: "is:pr is:merged repo:jdx/mise".into(),
+        after: Some("Y3Vyc29yOjk5Ng==".into()),
+        listed: 996,
+    }];
+    let mut page = data(SEARCH);
+    page["l0"]["issueCount"] = json!(1234);
+    let mut result = FetchResult::default();
+    let more = read_prs(&lookups, &page, &mut result).unwrap();
+    assert!(more.is_empty());
+    assert_eq!(
+        result.incomplete,
+        [Incomplete {
+            query: "is:pr is:merged repo:jdx/mise".into(),
+            matched: 1234,
+            listed: 1000,
         }]
     );
 }

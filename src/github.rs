@@ -10,7 +10,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use ureq::tls::{Certificate, RootCerts, TlsConfig};
 
 const ENV_SOURCES: [&str; 3] = ["JOUET_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"];
 const GH_SOURCE: &str = "gh auth token";
@@ -55,6 +57,7 @@ impl Client {
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| "https://api.github.com".into());
         let agent = ureq::Agent::config_builder()
+            .tls_config(tls_config())
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
             .user_agent(concat!("jouet/", env!("CARGO_PKG_VERSION")))
@@ -148,8 +151,8 @@ impl Client {
         })
     }
 
-    /// POSTs `body`, retrying 5xx responses, dropped connections and
-    /// secondary rate limits with jittered backoff.
+    /// POSTs `body`, retrying 5xx responses, connections dropped before or
+    /// during the response, and secondary rate limits with jittered backoff.
     fn post(&self, token: &str, body: &str) -> Result<(u16, String), String> {
         let mut attempt = 0;
         loop {
@@ -158,9 +161,17 @@ impl Client {
                 .post(&self.graphql_url)
                 .header("Authorization", format!("bearer {token}"))
                 .content_type("application/json")
-                .send(body);
-            let mut resp = match sent {
-                Ok(resp) => resp,
+                .send(body)
+                .and_then(|mut resp| {
+                    let text = resp
+                        .body_mut()
+                        .with_config()
+                        .limit(256 * 1024 * 1024)
+                        .read_to_string()?;
+                    Ok((resp, text))
+                });
+            let (resp, text) = match sent {
+                Ok(sent) => sent,
                 Err(e) if attempt < RETRIES => {
                     eprintln!("jouet: request to GitHub failed ({e}); retrying");
                     attempt += 1;
@@ -179,12 +190,6 @@ impl Client {
             let retry_after = header("retry-after").and_then(|v| v.parse::<u64>().ok());
             let remaining = header("x-ratelimit-remaining");
             let reset = header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok());
-            let text = resp
-                .body_mut()
-                .with_config()
-                .limit(256 * 1024 * 1024)
-                .read_to_string()
-                .map_err(|e| format!("reading GitHub's response: {e}"))?;
             if status == 403 || status == 429 {
                 if remaining.as_deref() == Some("0") {
                     let when = reset.map_or(String::new(), |r| {
@@ -223,6 +228,21 @@ impl Client {
             return Ok((status, text));
         }
     }
+}
+
+/// TLS that trusts the system's root certificates (`SSL_CERT_FILE` and
+/// `SSL_CERT_DIR` are honoured), as gh and curl do, so a proxy's CA
+/// installed on the machine works too.
+fn tls_config() -> TlsConfig {
+    let roots = rustls_native_certs::load_native_certs()
+        .certs
+        .iter()
+        .map(|der| Certificate::from_der(der).to_owned())
+        .collect();
+    TlsConfig::builder()
+        .root_certs(RootCerts::Specific(Arc::new(roots)))
+        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .build()
 }
 
 /// Reads a token from `gh`, with `GH_TOKEN` and `GITHUB_TOKEN` removed so

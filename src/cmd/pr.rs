@@ -3,7 +3,7 @@
 use super::Output;
 use crate::exit::Exit;
 use crate::github::Client;
-use crate::pr::status::{self, Fetched, Lookup, Mergeability, PrStatus, State};
+use crate::pr::status::{self, Fetched, Incomplete, Lookup, Mergeability, PrStatus, State};
 use crate::pr::target::{self, Arg, Repo, Target};
 use crate::time;
 use crate::{PrArgs, PrCmd, StatusArgs};
@@ -26,6 +26,8 @@ struct Report {
     prs: Vec<PrStatus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     not_found: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    incomplete: Vec<Incomplete>,
 }
 
 fn run_status(args: &StatusArgs, out: &Output) -> Exit {
@@ -50,6 +52,7 @@ fn run_status(args: &StatusArgs, out: &Output) -> Exit {
     let report = Report {
         prs: fetched.prs.into_iter().map(|p| p.finish(now)).collect(),
         not_found: fetched.not_found,
+        incomplete: fetched.incomplete,
     };
     out.result(&report, || render(&report));
     if !report.not_found.is_empty() {
@@ -119,7 +122,11 @@ fn search(query: &str, repos: &[Repo]) -> Lookup {
     for repo in repos {
         let _ = write!(query, " repo:{repo}");
     }
-    Lookup::Search { query, after: None }
+    Lookup::Search {
+        query,
+        after: None,
+        listed: 0,
+    }
 }
 
 /// Re-queries open PRs whose mergeable state is still unknown until GitHub
@@ -222,6 +229,13 @@ fn render(report: &Report) -> String {
     if !report.not_found.is_empty() {
         let _ = writeln!(s, "not found: {}", report.not_found.join(", "));
     }
+    for i in &report.incomplete {
+        let _ = writeln!(
+            s,
+            "search `{}` matched {} PRs but GitHub listed only {} (it lists at most 1000)",
+            i.query, i.matched, i.listed
+        );
+    }
     let n = report.prs.len();
     let _ = write!(s, "{n} {}", if n == 1 { "PR" } else { "PRs" });
     let needing: Vec<String> = report
@@ -245,6 +259,13 @@ fn render(report: &Report) -> String {
     }
     if !report.not_found.is_empty() {
         let _ = write!(s, "; {} not found", report.not_found.len());
+    }
+    let unlisted: u64 = report.incomplete.iter().map(|i| i.matched - i.listed).sum();
+    if unlisted > 0 {
+        let _ = write!(
+            s,
+            "; {unlisted} more matched the search but were not listed"
+        );
     }
     s.push('\n');
     s
@@ -311,6 +332,25 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_short_search_is_reported() {
+        let report = Report {
+            prs: Vec::new(),
+            not_found: Vec::new(),
+            incomplete: vec![Incomplete {
+                query: "is:pr is:merged repo:jdx/mise".into(),
+                matched: 1234,
+                listed: 1000,
+            }],
+        };
+        assert_eq!(
+            render(&report),
+            "search `is:pr is:merged repo:jdx/mise` matched 1234 PRs but GitHub listed only 1000 \
+             (it lists at most 1000)\n\
+             0 PRs; 234 more matched the search but were not listed\n"
+        );
+    }
+
+    #[test]
     fn searches_are_scoped_to_repos() {
         let repos = [
             Repo::parse("jdx/mise").unwrap(),
@@ -320,7 +360,8 @@ mod tests {
             search("is:open author:@me", &repos),
             Lookup::Search {
                 query: "is:pr is:open author:@me repo:jdx/mise repo:jdx/hk".into(),
-                after: None
+                after: None,
+                listed: 0,
             }
         );
     }
