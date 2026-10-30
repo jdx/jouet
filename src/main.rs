@@ -6,7 +6,10 @@ mod cmd;
 mod display;
 mod edit;
 mod exit;
+mod github;
 mod paths;
+mod pr;
+mod time;
 
 use display::Mode;
 use exit::Exit;
@@ -36,6 +39,8 @@ struct Jouet {
 enum Cmd {
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Inspect pull requests
+    Pr(PrArgs),
 }
 
 /// Make exact, all-or-nothing edits across files
@@ -107,11 +112,55 @@ pub struct HashArgs {
     paths: Vec<String>,
 }
 
+/// Inspect pull requests
+#[derive(Args)]
+pub struct PrArgs {
+    #[usage(subcommand)]
+    cmd: PrCmd,
+}
+
+#[derive(Subcommands)]
+pub enum PrCmd {
+    /// Show where PRs stand and why any need attention
+    Status(StatusArgs),
+}
+
+/// Show where PRs stand and why any need attention
+///
+/// Prints one line per PR, then a summary. All PRs are fetched in one batched
+/// GraphQL query. Each PR lists fixed attention codes: conflict,
+/// checks_failing, checks_missing, changes_requested, unresolved_threads,
+/// behind_base, draft and mergeable_unknown.
+#[derive(Args)]
+pub struct StatusArgs {
+    /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
+    /// current branch's PR
+    prs: Vec<String>,
+    /// Add the open PRs authored by the token's user
+    #[usage(long)]
+    mine: bool,
+    /// Add the PRs matching a GitHub search query
+    #[usage(long, value_name = "QUERY")]
+    search: Option<String>,
+    /// The repository for bare numbers, branches, --mine and --search.
+    /// Repeatable. Defaults to the git remote
+    #[usage(long, value_name = "OWNER/NAME")]
+    repo: Vec<String>,
+    /// How long to wait for GitHub to compute an unknown mergeable state
+    /// (default 20s; 0 disables)
+    #[usage(long, value_name = "DUR")]
+    settle: Option<String>,
+    /// Exit 1 when any PR needs attention
+    #[usage(long)]
+    fail_on_attention: bool,
+}
+
 fn main() -> ExitCode {
     let cli = Jouet::parse();
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Pr(args) => cmd::pr::run(args, &out),
     };
     exit.into()
 }

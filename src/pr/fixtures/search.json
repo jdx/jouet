@@ -1,0 +1,256 @@
+{
+  "data": {
+    "l0": {
+      "nodes": [
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "main",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T15:04:45Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 3,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 9,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKGZkZTIxZjk1MzUxOWY5OGNhMzM4ZDliYjA2NzFjZGQ4YzJlZjg0M2I"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "release-plz-2026-10-30T15-04-43Z",
+          "headRefOid": "fde21f953519f98ca338d9bb0671cdd8c2ef843b",
+          "id": "PR_kwDOVdIDQc8AAAABLy1lng",
+          "isDraft": false,
+          "mergeStateStatus": "CLEAN",
+          "mergeable": "MERGEABLE",
+          "number": 4,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [],
+            "pageInfo": {
+              "endCursor": null,
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "chore: release v0.0.1",
+          "url": "https://github.com/jdx/jouet/pull/4"
+        },
+        {
+          "autoMergeRequest": null,
+          "baseRefName": "main",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "committedDate": "2026-10-30T14:59:29Z",
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "ACTION_REQUIRED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "CANCELLED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "COMPLETED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "IN_PROGRESS"
+                        },
+                        {
+                          "count": 1,
+                          "state": "NEUTRAL"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "QUEUED"
+                        },
+                        {
+                          "count": 1,
+                          "state": "SKIPPED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STALE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "STARTUP_FAILURE"
+                        },
+                        {
+                          "count": 9,
+                          "state": "SUCCESS"
+                        },
+                        {
+                          "count": 0,
+                          "state": "TIMED_OUT"
+                        },
+                        {
+                          "count": 0,
+                          "state": "WAITING"
+                        }
+                      ],
+                      "statusContextCountsByState": [
+                        {
+                          "count": 0,
+                          "state": "EXPECTED"
+                        },
+                        {
+                          "count": 0,
+                          "state": "ERROR"
+                        },
+                        {
+                          "count": 0,
+                          "state": "FAILURE"
+                        },
+                        {
+                          "count": 0,
+                          "state": "PENDING"
+                        },
+                        {
+                          "count": 0,
+                          "state": "SUCCESS"
+                        }
+                      ]
+                    },
+                    "id": "SCR_kwDOVdIDQdoAKDYzMTg0ZDI5NTAzNjYxMWVmZDExYzE5MDgxZGUzNDJiZDlkYzg3YWQ"
+                  }
+                }
+              }
+            ]
+          },
+          "headRefName": "feat/edit",
+          "headRefOid": "63184d295036611efd11c19081de342bd9dc87ad",
+          "id": "PR_kwDOVdIDQc8AAAABLym_fQ",
+          "isDraft": false,
+          "mergeStateStatus": "DIRTY",
+          "mergeable": "CONFLICTING",
+          "number": 3,
+          "repository": {
+            "nameWithOwner": "jdx/jouet"
+          },
+          "reviewDecision": null,
+          "reviewThreads": {
+            "nodes": [],
+            "pageInfo": {
+              "endCursor": null,
+              "hasNextPage": false
+            }
+          },
+          "state": "OPEN",
+          "timelineItems": {
+            "nodes": []
+          },
+          "title": "feat(edit): add jouet edit for exact, all-or-nothing edits",
+          "url": "https://github.com/jdx/jouet/pull/3"
+        }
+      ],
+      "pageInfo": {
+        "endCursor": "Y3Vyc29yOjI=",
+        "hasNextPage": false
+      }
+    }
+  }
+}
