@@ -1,14 +1,15 @@
 //! `jouet.pr.status()` and `jouet.pr.next()`: one PR, fetched the way
-//! `jouet pr status` fetches it, through jouet-github.
+//! `jouet pr status` fetches it, through jouet-github's host for the
+//! repository's forge.
 //!
 //! Unlike the command, a probe does not wait for GitHub to settle an
 //! unknown mergeable state: it answers with what GitHub says now.
 
 use super::PrView;
-use jouet_github::Client;
 use jouet_github::pr::next;
-use jouet_github::pr::status::{self, Lookup};
+use jouet_github::pr::status::Lookup;
 use jouet_github::pr::target::{self, Arg, Target};
+use jouet_github::{Client, host};
 
 /// Fetches the PR `arg` names (a number, URL, `OWNER/REPO#N` or branch), or
 /// the current branch's PR. `Ok(None)` when there is no such PR.
@@ -28,7 +29,7 @@ pub(crate) fn fetch(arg: Option<&str>) -> Result<Option<PrView>, String> {
             Arg::InRepo(repo, n) => Target::Number(repo, n),
         },
     };
-    let fetched = status::fetch(&mut Client::from_env(), vec![Lookup::Pr(target)])?;
+    let fetched = host::fetch(&mut Client::from_env(), vec![Lookup::Pr(target)])?;
     let Some(pr) = fetched.prs.into_iter().next() else {
         return Ok(None);
     };

@@ -284,6 +284,15 @@ pub(crate) fn setup(branch: Option<&str>) -> Result<(Git, Client, Repo, String),
         Exit::Precondition,
         "no GitHub remote in this checkout".to_string(),
     ))?;
+    if let (Some(host), Some(forge)) = (&repo.host, repo.forge()) {
+        return Err((
+            Exit::Precondition,
+            format!(
+                "jouet stack works with GitHub PRs only so far, and this checkout's remote is {} on {host}",
+                forge.name()
+            ),
+        ));
+    }
     let branch = match branch {
         Some(b) => b.to_string(),
         None => target::current_branch().ok_or((

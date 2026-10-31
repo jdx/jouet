@@ -1,0 +1,22 @@
+{
+  "iid": 4266,
+  "title": "fix(auth): validate OAuth client ID before browser step",
+  "state": "opened",
+  "draft": false,
+  "work_in_progress": false,
+  "detailed_merge_status": "not_approved",
+  "merge_status": "can_be_merged",
+  "has_conflicts": false,
+  "sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf",
+  "source_branch": "8698-validate-oauth-client-id",
+  "target_branch": "main",
+  "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4266",
+  "diff_refs": {
+    "base_sha": "c2544a91621d99803bff37be58a17eff33778e3e",
+    "head_sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf",
+    "start_sha": "c2544a91621d99803bff37be58a17eff33778e3e"
+  },
+  "source_project_id": 45049979,
+  "target_project_id": 34675721,
+  "merge_when_pipeline_succeeds": false
+}

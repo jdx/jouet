@@ -53,7 +53,7 @@ export default defineConfig({
       {
         text: "Guide",
         link: "/getting-started",
-        activeMatch: "^/(getting-started|why|conventions|stability|rules|winding|setup)",
+        activeMatch: "^/(getting-started|why|conventions|stability|forges|rules|winding|setup)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -70,6 +70,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Stability and deprecations", link: "/stability" },
+          { text: "GitLab and Forgejo", link: "/forges" },
           { text: "Rules", link: "/rules" },
           { text: "Routines and joue", link: "/routines" },
           { text: "Self-winding", link: "/winding" },

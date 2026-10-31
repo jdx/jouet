@@ -1,0 +1,6 @@
+[
+  { "id": 9001, "sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf", "ref": "8698-validate-oauth-client-id", "status": "failed", "name": "test", "allow_failure": false, "pipeline_id": 3011158147, "target_url": "https://gitlab.com/gitlab-org/cli/-/jobs/9001" },
+  { "id": 9002, "sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf", "ref": "8698-validate-oauth-client-id", "status": "failed", "name": "lint", "allow_failure": true, "pipeline_id": 3011158147, "target_url": "https://gitlab.com/gitlab-org/cli/-/jobs/9002" },
+  { "id": 9003, "sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf", "ref": "8698-validate-oauth-client-id", "status": "success", "name": "build", "allow_failure": false, "pipeline_id": 3011158147, "target_url": "https://gitlab.com/gitlab-org/cli/-/jobs/9003" },
+  { "id": 77, "sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf", "ref": "8698-validate-oauth-client-id", "status": "success", "name": "danger-review", "allow_failure": false, "target_url": "https://ci.example.com/builds/77" }
+]

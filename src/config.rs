@@ -5,7 +5,9 @@
 
 use jouet_git::agent::Agent;
 use jouet_git::conventional::{self, Policy};
+use jouet_github::forge::{self, Forge};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Deserialize)]
@@ -15,6 +17,52 @@ pub(crate) struct Config {
     bots: Vec<String>,
     #[serde(default)]
     commit: CommitConfig,
+    /// Self-hosted forges by host: `[forges."git.example.com"]`.
+    #[serde(default)]
+    forges: BTreeMap<String, ForgeConfig>,
+}
+
+/// A `[forges."HOST"]` table: which forge a host runs, and its API root.
+#[derive(Debug, Default, Deserialize)]
+struct ForgeConfig {
+    /// `gitlab` or `forgejo` (`gitea` is the same API).
+    kind: String,
+    api_url: Option<String>,
+    /// The environment variable that holds the host's token.
+    token_env: Option<String>,
+}
+
+/// The hosts the config names, for [`forge::configure`]. A table jouet
+/// cannot use is reported and left out; an unreadable file names none.
+pub(crate) fn forges() -> Vec<forge::Configured> {
+    let Ok(config) = Config::load() else {
+        return Vec::new();
+    };
+    config
+        .forges
+        .into_iter()
+        .filter_map(|(host, table)| match Forge::parse(&table.kind) {
+            Some(forge @ (Forge::GitLab | Forge::Forgejo)) => Some(forge::Configured {
+                host,
+                forge,
+                api_url: table.api_url,
+                token_env: table.token_env,
+            }),
+            Some(Forge::GitHub) => {
+                eprintln!(
+                    "jouet: [forges.\"{host}\"]: a GitHub Enterprise server is set with JOUET_GITHUB_API_URL, not here"
+                );
+                None
+            }
+            None => {
+                eprintln!(
+                    "jouet: [forges.\"{host}\"] kind must be gitlab or forgejo, not `{}`",
+                    table.kind
+                );
+                None
+            }
+        })
+        .collect()
 }
 
 /// The `[commit]` table, for `jouet commit`.

@@ -13,6 +13,7 @@ use crate::LandArgs;
 use crate::ledger;
 use crate::settings::Settings;
 use jouet_github::Client;
+use jouet_github::host::Feature;
 use jouet_github::pr::land::{self, Method, Refused};
 use jouet_github::pr::next::{self, Action, Next};
 use jouet_github::pr::status::{Lookup, PrStatus};
@@ -22,6 +23,7 @@ use jouet_output::exit::Exit;
 use jouet_output::time::{elapsed, parse_duration};
 use jouet_wait::checks::Selection;
 use jouet_wait::ci::{self, CiWait};
+use jouet_wait::host::Remote;
 use jouet_wait::remote::{self, Watch};
 use jouet_wait::{Reporter, Timing};
 use serde::Serialize;
@@ -119,6 +121,13 @@ pub(crate) fn run(args: &LandArgs, out: &Output) -> Exit {
         Ok(target) => target,
         Err(message) => return out.error(Exit::Usage, &message),
     };
+    if target.repo().host.is_some() {
+        let reason = jouet_github::host::connect(target.repo())
+            .map(|mut host| host.lacks(Feature::Land))
+            .unwrap_or_else(Some)
+            .unwrap_or_else(|| "`pr land` merges GitHub PRs only so far".into());
+        return out.error(Exit::Precondition, &reason);
+    }
     match land(&mut Client::from_env(), &target, &options, out) {
         Ok((landed, exit)) => {
             out.result(&landed, || render(&landed));
@@ -200,7 +209,7 @@ fn land(
         let head = moved_head(client, &repo, pr.number, &pr.head_oid)?;
         landed.updated = true;
         landed.head_sha = head.chars().take(10).collect();
-        let (doc, exit, text) = wait_for_checks(client, &repo, pr.number, &head, options, out)?;
+        let (doc, exit, text) = wait_for_checks(&repo, pr.number, &head, options, out)?;
         landed.ci = Some(doc);
         if exit != Exit::Ok {
             landed.result = match exit {
@@ -450,7 +459,6 @@ fn moved_head(client: &mut Client, repo: &Repo, number: u64, old: &str) -> Resul
 
 /// `wait ci` on the updated head: its result document, exit code and text.
 fn wait_for_checks(
-    client: &mut Client,
     repo: &Repo,
     number: u64,
     head: &str,
@@ -472,7 +480,8 @@ fn wait_for_checks(
         timeout: options.timeout,
         interval: options.interval,
     };
-    let doc = remote::wait(&mut w, client, &timing, &mut reporter)
+    let mut remote = Remote::GitHub(Client::from_env());
+    let doc = remote::wait(&mut w, &mut remote, &timing, &mut reporter)
         .map_err(|s| Stop::new(s.exit, s.message))?;
     let exit = w.exit(&doc);
     let text = w.text(&doc, &reporter);

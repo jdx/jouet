@@ -5,7 +5,7 @@
 
 Show where PRs stand and why any need attention
 
-Prints one line per PR, then a summary. All PRs are fetched in one batched GraphQL query. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, behind_base, draft and mergeable_unknown.
+Prints one line per PR, then a summary. GitHub PRs are fetched in one batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are read through their REST APIs. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, behind_base, draft and mergeable_unknown.
 
 ## Arguments
 - **`[PRS]…`** — PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the current branch's PR
