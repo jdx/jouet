@@ -291,19 +291,22 @@ fn dedent_keep_first(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A README paragraph that is not prose: HTML, badges, a lone heading.
+fn preamble(paragraph: &str) -> bool {
+    let heading = paragraph.starts_with('#') && !paragraph.contains('\n');
+    heading
+        || paragraph.starts_with('<')
+        || paragraph.starts_with("[![")
+        || paragraph.starts_with("![")
+}
+
 /// A doc's first sentence or line, for an outline.
 pub(crate) fn summary(doc: &str) -> String {
     // Past a README's badges, HTML and title.
     let first = doc
         .split("\n\n")
         .map(str::trim)
-        .find(|p| {
-            !p.is_empty()
-                && !p.starts_with('<')
-                && !p.starts_with("[![")
-                && !p.starts_with("![")
-                && !(p.starts_with('#') && !p.contains('\n'))
-        })
+        .find(|p| !p.is_empty() && !preamble(p))
         .unwrap_or("")
         .lines()
         .map(str::trim)
