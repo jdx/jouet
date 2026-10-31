@@ -1,0 +1,625 @@
+//! `jouet graph`, and the hook and `jouet edit` keeping the graph fresh.
+
+use serde_json::{Value, json};
+use std::io::Write as _;
+use std::path::Path;
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
+
+struct Env {
+    repo: tempfile::TempDir,
+    home: tempfile::TempDir,
+}
+
+impl Env {
+    fn new() -> Self {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir(repo.path().join(".git")).unwrap();
+        Self {
+            repo,
+            home: tempfile::tempdir().unwrap(),
+        }
+    }
+
+    fn root(&self) -> &Path {
+        self.repo.path()
+    }
+
+    fn write(&self, rel: &str, text: &str) {
+        let path = self.root().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        // Older than now, so a rewrite in the same tick still differs.
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 + text.len() as u64))
+            .unwrap();
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_jouet"));
+        cmd.args(args)
+            .current_dir(self.root())
+            .env("HOME", self.home.path())
+            .env("XDG_CACHE_HOME", self.home.path().join("cache"))
+            .env("XDG_STATE_HOME", self.home.path().join("state"))
+            .env("XDG_CONFIG_HOME", self.home.path().join("config"))
+            .env("JOUET_DISPLAY", "plain");
+        cmd
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        self.command(args).output().unwrap()
+    }
+
+    fn json(&self, args: &[&str]) -> Value {
+        let mut all = vec!["--json"];
+        all.extend_from_slice(args);
+        let out = self.run(&all);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    }
+
+    fn hook(&self, payload: &Value) {
+        let mut child = self
+            .command(&["hook", "claude", "post-tool-use"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
+    fn db_files(&self) -> Vec<String> {
+        let dir = self.home.path().join("cache/jouet/graph");
+        std::fs::read_dir(dir)
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".db"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[test]
+fn index_builds_the_graph_in_the_cache_and_nothing_in_the_repo() {
+    let env = Env::new();
+    env.write("src/lib.rs", "pub fn alpha() {}\n");
+    let report = env.json(&["graph", "index"]);
+    assert_eq!(report["indexed"], 1);
+    assert_eq!(report["files"], 1);
+    let db = report["db"].as_str().unwrap();
+    assert!(
+        db.starts_with(env.home.path().join("cache/jouet/graph").to_str().unwrap()),
+        "{db}"
+    );
+    let in_repo: Vec<_> = std::fs::read_dir(env.root())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(in_repo.len(), 2, "{in_repo:?}");
+
+    let again = env.json(&["graph", "index"]);
+    assert_eq!(again.get("indexed"), Some(&json!(0)));
+
+    let full = env.json(&["graph", "index", "--full"]);
+    assert_eq!(full["indexed"], 1);
+
+    let text = env.run(&["graph", "status"]);
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("1 files"), "{text}");
+    assert!(text.contains("outside the repository"), "{text}");
+}
+
+#[test]
+fn outside_a_work_tree_is_a_precondition_failure() {
+    let env = Env::new();
+    std::fs::remove_dir(env.root().join(".git")).unwrap();
+    let out = env.run(&["graph", "status"]);
+    assert_eq!(out.status.code(), Some(4));
+}
+
+fn edit_payload(env: &Env, tool: &str, input: Value) -> Value {
+    json!({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s1",
+        "cwd": env.root(),
+        "tool_name": tool,
+        "tool_input": input,
+    })
+}
+
+/// The function names in the graph, read straight from its database, so
+/// these tests do not depend on a query command refreshing it first.
+fn outline(env: &Env) -> String {
+    let status = env.json(&["graph", "status"]);
+    let conn = rusqlite::Connection::open(status["db"].as_str().unwrap()).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT name FROM nodes WHERE kind = 'function' ORDER BY name")
+        .unwrap();
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    names.join(",")
+}
+
+#[test]
+fn the_hook_reindexes_what_a_file_tool_wrote_only_when_a_graph_exists() {
+    let env = Env::new();
+    env.write("a.py", "def one():\n    pass\n");
+    env.hook(&edit_payload(
+        &env,
+        "Write",
+        json!({"file_path": env.root().join("a.py")}),
+    ));
+    assert!(env.db_files().is_empty(), "a hook must not build a graph");
+
+    env.json(&["graph", "index"]);
+    env.write("a.py", "def two():\n    pass\n");
+    env.hook(&edit_payload(
+        &env,
+        "Edit",
+        json!({"file_path": env.root().join("a.py")}),
+    ));
+    assert_eq!(outline(&env), "two");
+    let status = env.json(&["graph", "status"]);
+    assert_eq!(status["files"], 1);
+}
+
+#[test]
+fn the_hook_reads_the_files_a_codex_patch_names() {
+    let env = Env::new();
+    env.write("x.go", "package x\n\nfunc A() {}\n");
+    env.json(&["graph", "index"]);
+    env.write("x.go", "package x\n\nfunc B() {}\n");
+    env.write("y.go", "package x\n\nfunc C() {}\n");
+    let patch = "*** Begin Patch\n*** Update File: x.go\n@@\n-func A() {}\n+func B() {}\n*** Add File: y.go\n+package x\n*** End Patch\n";
+    env.hook(&edit_payload(
+        &env,
+        "apply_patch",
+        json!({"command": patch}),
+    ));
+    let status = env.json(&["graph", "status"]);
+    assert_eq!(status["files"], 2);
+    assert_eq!(outline(&env), "B,C");
+}
+
+#[test]
+fn jouet_edit_reindexes_what_it_wrote() {
+    let env = Env::new();
+    env.write("m.rb", "def old_name\nend\n");
+    env.json(&["graph", "index"]);
+    let mut child = env
+        .command(&["edit"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            b"=== m.rb\n<<<<<<< SEARCH\ndef old_name\n=======\ndef new_name\n>>>>>>> REPLACE\n",
+        )
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    assert_eq!(outline(&env), "new_name");
+}
+
+fn many_callers(env: &Env) {
+    env.write("lib.py", "def target():\n    return 1\n");
+    let mut caller = String::from("from lib import target\n\n");
+    for i in 0..40 {
+        caller.push_str(&format!(
+            "\ndef caller_number_{i}():\n    return target()\n"
+        ));
+    }
+    env.write("use.py", &caller);
+}
+
+#[test]
+fn queries_refresh_first_and_page_within_their_budget() {
+    let env = Env::new();
+    many_callers(&env);
+    // No index was ever built: the first query builds it.
+    let out = env.run(&["graph", "callers", "target", "--budget", "400"]);
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.starts_with("callers of function target (lib.py:1): 40\n"),
+        "{text}"
+    );
+    assert!(text.len() < 700, "{text}");
+    let marker = text.lines().last().unwrap();
+    assert!(marker.starts_with("... "), "{marker}");
+    assert!(marker.contains("--page 2)"), "{marker}");
+
+    // Page 2 continues where page 1 stopped, and every caller is on a page.
+    let mut seen = Vec::new();
+    for page in 1..=20 {
+        let doc = env.json(&[
+            "graph",
+            "callers",
+            "target",
+            "--budget",
+            "400",
+            "--page",
+            &page.to_string(),
+        ]);
+        let s = &doc["symbols"][0];
+        for item in s["items"].as_array().unwrap() {
+            seen.push(item["name"].as_str().unwrap().to_string());
+        }
+        if s["page"] == s["pages"] {
+            break;
+        }
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 40);
+
+    // A file changed since: the next query sees it.
+    env.write(
+        "use.py",
+        "from lib import target\n\n\ndef only():\n    return target()\n",
+    );
+    let doc = env.json(&["graph", "callers", "target"]);
+    assert_eq!(doc["symbols"][0]["total"], 1);
+}
+
+#[test]
+fn symbols_explore_and_impact_answer_and_say_what_they_left_out() {
+    let env = Env::new();
+    many_callers(&env);
+    let symbols = env.json(&["graph", "symbols", "caller number", "--budget", "300"]);
+    assert_eq!(symbols["total"], 40);
+    assert!(symbols["pages"].as_u64().unwrap() > 1);
+
+    let out = env.run(&["graph", "explore", "target", "--budget", "2000"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("lib.py:1-2 function target"), "{text}");
+    assert!(text.contains("called by: caller_number_0"), "{text}");
+    assert!(text.contains("... 35 more"), "{text}");
+
+    // The 40 callers, and the file that imports it.
+    let impact = env.json(&["graph", "impact", "lib.py#target"]);
+    assert_eq!(impact["symbols"][0]["total"], 41);
+
+    let missing = env.run(&["graph", "callers", "no_such_thing"]);
+    assert_eq!(missing.status.code(), Some(3));
+}
+
+#[test]
+fn affected_lists_tests_and_fails_when_a_file_is_unknown() {
+    let env = Env::new();
+    env.write("src/util.py", "def f():\n    return 1\n");
+    env.write(
+        "tests/test_util.py",
+        "from src.util import f\n\n\ndef test_f():\n    assert f() == 1\n",
+    );
+    let ok = env.run(&["graph", "affected", "src/util.py"]);
+    assert!(ok.status.success());
+    let text = String::from_utf8(ok.stdout).unwrap();
+    assert_eq!(text, "tests/test_util.py  (via src/util.py)\n");
+    let unknown = env.run(&["graph", "affected", "src/util.py", "notes.txt"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(
+        String::from_utf8(unknown.stdout)
+            .unwrap()
+            .contains("unknown: notes.txt")
+    );
+}
+
+#[test]
+fn a_routine_queries_the_graph_through_jouet_code() {
+    let env = Env::new();
+    many_callers(&env);
+    let dir = env.home.path().join("config/jouet/routines");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("caller-count.luau"),
+        r#"--- about: Count a symbol's callers
+--- capabilities: fs.read
+--- usage: arg "<symbol>" help="The symbol"
+return {
+    run = function(args)
+        local ran = jouet.code.callers({ args.symbol, budget = 0 })
+        local found = ran.json.symbols[1]
+        return { total = found.total, first = found.items[1].name }
+    end,
+}
+"#,
+    )
+    .unwrap();
+    let doc = env.json(&["run", "caller-count", "target"]);
+    assert_eq!(doc, json!({ "total": 40, "first": "caller_number_0" }));
+}
+
+#[test]
+fn a_changed_signature_lists_its_callers_from_the_graph() {
+    let env = Env::new();
+    env.write("pay.py", "def charge(amount):\n    return amount\n");
+    env.write(
+        "shop.py",
+        "from pay import charge\n\n\ndef buy():\n    return charge(3)\n",
+    );
+    // A namesake: text matching would list it, the graph does not.
+    env.write("other.py", "def charge():\n    return 0\n\n\ncharge()\n");
+    env.json(&["graph", "index"]);
+    let mut child = env
+        .command(&["edit"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"=== pay.py#charge\ndef charge(amount, currency):\n    return amount\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(
+            "warning: the signature of charge changed; 1 caller in files this edit does not change may need updating:\n  shop.py:5\n"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("other.py"), "{text}");
+}
+
+#[test]
+fn reading_a_symbol_names_its_callers_when_there_is_a_graph() {
+    let env = Env::new();
+    many_callers(&env);
+    let read = |env: &Env| {
+        let out = env.run(&["read", "lib.py", "--symbol", "target", "--again"]);
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    // No graph: the read is as it always was.
+    assert!(!read(&env).contains("called by"));
+    env.json(&["graph", "index"]);
+    let text = read(&env);
+    assert!(
+        text.ends_with(
+            "called by: caller_number_0 (use.py:5), caller_number_1 (use.py:8), caller_number_2 (use.py:11), caller_number_3 (use.py:14), caller_number_4 (use.py:17), ... 35 more (jouet graph callers lib.py:1)\n"
+        ),
+        "{text}"
+    );
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+}
+
+#[test]
+fn test_affected_falls_back_to_the_graph_for_go() {
+    let env = Env::new();
+    let root = env.root();
+    std::fs::remove_dir(root.join(".git")).unwrap();
+    env.write("go.mod", "module example.com/shop\n\ngo 1.22\n");
+    env.write(
+        "price/price.go",
+        "package price\n\nfunc Total(n int) int { return n * 2 }\n",
+    );
+    env.write(
+        "cart/cart.go",
+        "package cart\n\nimport \"example.com/shop/price\"\n\nfunc Sum(n int) int { return price.Total(n) }\n",
+    );
+    env.write(
+        "cart/cart_test.go",
+        "package cart\n\nimport \"testing\"\n\nfunc TestSum(t *testing.T) { Sum(1) }\n",
+    );
+    env.write(
+        "other/other_test.go",
+        "package other\n\nimport \"testing\"\n\nfunc TestNothing(t *testing.T) {}\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    // A fresh mtime, so git sees the same-sized change.
+    std::fs::write(
+        root.join("price/price.go"),
+        "package price\n\nfunc Total(n int) int { return n * 3 }\n",
+    )
+    .unwrap();
+
+    let report = env.json(&["test", "--affected", "--since", "main", "--dry-run"]);
+    let suite = &report["suites"][0];
+    assert_eq!(suite["adapter"], "graph", "{report}");
+    assert_eq!(suite["decision"], "affected", "{report}");
+    assert_eq!(
+        suite["tests"],
+        json!([{ "path": "cart/cart_test.go", "via": ["price/price.go", "cart/cart.go", "cart/cart_test.go"] }])
+    );
+    assert_eq!(suite["command"], json!(["go", "test", "./cart"]));
+}
+
+/// A real repository with two committed files, and a second worktree of it
+/// beside it, both under one temporary directory.
+fn worktrees(env: &Env) -> (std::path::PathBuf, std::path::PathBuf) {
+    let main = env.root().join("main");
+    std::fs::remove_dir(env.root().join(".git")).unwrap();
+    std::fs::create_dir(&main).unwrap();
+    std::fs::write(main.join("a.py"), "def one():\n    return 1\n").unwrap();
+    std::fs::write(
+        main.join("b.py"),
+        "from a import one\n\n\ndef two():\n    return one()\n",
+    )
+    .unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    let wt = env.root().join("wt");
+    git(
+        &main,
+        &["worktree", "add", "-q", "--detach", wt.to_str().unwrap()],
+    );
+    (main, wt)
+}
+
+fn index_in(env: &Env, dir: &Path) -> Value {
+    let out = env
+        .command(&["--json", "graph", "index"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+#[test]
+fn a_new_worktree_starts_from_its_siblings_graph() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    let first = index_in(&env, &main);
+    assert_eq!(first["indexed"], 2);
+    assert!(first.get("seeded").is_none());
+
+    // A file differs in the new worktree: only it is extracted.
+    std::fs::write(
+        wt.join("b.py"),
+        "from a import one\n\n\ndef three():\n    return one()\n",
+    )
+    .unwrap();
+    let seeded = index_in(&env, &wt);
+    assert_eq!(seeded["seeded"], true, "{seeded}");
+    assert_eq!(seeded["indexed"], 1, "{seeded}");
+    assert_eq!(seeded["files"], 2);
+    assert_ne!(seeded["db"], first["db"]);
+    // The copy is this worktree's, not a view of the sibling's.
+    let callers = env
+        .command(&["--json", "graph", "callers", "one"])
+        .current_dir(&wt)
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&callers.stdout).unwrap();
+    assert_eq!(doc["symbols"][0]["items"][0]["name"], "three", "{doc}");
+    let main_callers = env
+        .command(&["--json", "graph", "callers", "one"])
+        .current_dir(&main)
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&main_callers.stdout).unwrap();
+    assert_eq!(doc["symbols"][0]["items"][0]["name"], "two", "{doc}");
+}
+
+#[test]
+fn a_sibling_graph_from_another_schema_is_not_copied() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    let first = index_in(&env, &main);
+    let conn = rusqlite::Connection::open(first["db"].as_str().unwrap()).unwrap();
+    conn.execute(
+        "UPDATE meta SET value = '0' WHERE key = 'schema_version'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let built = index_in(&env, &wt);
+    assert!(built.get("seeded").is_none(), "{built}");
+    assert_eq!(built["indexed"], 2);
+}
+
+#[test]
+fn prune_deletes_only_graphs_whose_worktree_is_gone() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    index_in(&env, &main);
+    let wt_db = index_in(&env, &wt)["db"].as_str().unwrap().to_string();
+    git(
+        &main,
+        &["worktree", "remove", "--force", wt.to_str().unwrap()],
+    );
+    let pruned = env.json(&["graph", "prune"]);
+    assert_eq!(pruned["removed"].as_array().unwrap().len(), 1, "{pruned}");
+    assert!(
+        pruned["removed"][0].as_str().unwrap().ends_with("wt"),
+        "{pruned}"
+    );
+    assert_eq!(pruned["kept"], 1);
+    assert!(!Path::new(&wt_db).exists());
+    let again = env.json(&["graph", "prune"]);
+    assert!(
+        again
+            .get("removed")
+            .is_none_or(|r| r.as_array().unwrap().is_empty())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prune_keeps_a_graph_whose_root_cannot_be_checked() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    index_in(&env, &main);
+    index_in(&env, &wt);
+    let parent = env.root();
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root ignores permissions; then there is nothing to test.
+    let blind = std::fs::metadata(wt.join("a.py")).is_err();
+    let out = env
+        .command(&["--json", "graph", "prune"])
+        .current_dir(env.home.path())
+        .output()
+        .unwrap();
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pruned: Value = serde_json::from_slice(&out.stdout).unwrap();
+    if blind {
+        assert!(
+            pruned
+                .get("removed")
+                .is_none_or(|r| r.as_array().unwrap().is_empty()),
+            "{pruned}"
+        );
+        assert_eq!(pruned["kept"], 2);
+    }
+}

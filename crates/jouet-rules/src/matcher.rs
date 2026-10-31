@@ -4,6 +4,7 @@
 
 use crate::decl::{Flag, Matcher};
 use crate::{Call, glob, shell};
+use std::path::{Component, Path, PathBuf};
 
 /// Whether any of the matchers matches the call, whose commands are
 /// `commands` (every command it runs, nested ones included).
@@ -23,6 +24,25 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
         if !m.paths.iter().any(|g| glob::matches_path(&g.0, path)) {
             return false;
         }
+    }
+    if let Some(path) = call.path.as_deref() {
+        let path = relative(path, call.cwd.as_deref());
+        if m.unless_paths
+            .iter()
+            .any(|g| glob::matches_path(&g.0, path))
+        {
+            return false;
+        }
+    }
+    if m.fnox.is_some_and(|want| call.fnox.is_some() != want) {
+        return false;
+    }
+    // Without a command, `secret_files` is about a file tool's path.
+    if m.command.is_empty()
+        && let Some(want) = m.secret_files
+        && call.path.as_deref().is_some_and(|p| secret_file(call, p)) != want
+    {
+        return false;
     }
     if !input(m, call) {
         return false;
@@ -45,9 +65,9 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
             commands
                 .iter()
                 .enumerate()
-                .any(|(j, other)| j != i && command(with, other))
+                .any(|(j, other)| j != i && command(with, other, call))
         };
-        command(m, c)
+        command(m, c, call)
             && m.with.as_deref().is_none_or(other)
             && !m.unless_with.as_deref().is_some_and(other)
     })
@@ -79,8 +99,48 @@ fn relative<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
         .unwrap_or(path)
 }
 
+/// Whether `path` is one of the files the project's fnox config reads
+/// secrets from, both read from the working directory.
+fn secret_file(call: &Call, path: &str) -> bool {
+    let Some(fnox) = &call.fnox else {
+        return false;
+    };
+    let cwd = call.cwd.as_deref().map(Path::new);
+    let full = |p: &str| {
+        let p = Path::new(p);
+        normalize(&match cwd {
+            Some(cwd) if p.is_relative() => cwd.join(p),
+            _ => p.to_path_buf(),
+        })
+    };
+    let path = full(path);
+    fnox.files.iter().any(|f| full(f) == path)
+}
+
+/// Folds `.` and `..` without touching the filesystem.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Whether `name` is a secret the project's fnox config defines.
+fn secret(call: &Call, name: &str) -> bool {
+    call.fnox
+        .as_ref()
+        .is_some_and(|f| f.secrets.iter().any(|s| s == name))
+}
+
 /// Whether one command matches the matcher's command keys.
-fn command(m: &Matcher, c: &shell::Command) -> bool {
+fn command(m: &Matcher, c: &shell::Command, call: &Call) -> bool {
     let argv = c.argv();
     let Some((first, args)) = argv.split_first() else {
         return false;
@@ -126,6 +186,25 @@ fn command(m: &Matcher, c: &shell::Command) -> bool {
         return false;
     }
     if m.max_args.is_some_and(|max| words.args.len() > max) {
+        return false;
+    }
+    if m.secret_files
+        .is_some_and(|want| words.args.iter().any(|a| secret_file(call, a)) != want)
+    {
+        return false;
+    }
+    if m.secret_vars
+        .is_some_and(|want| c.vars.iter().any(|v| secret(call, v)) != want)
+    {
+        return false;
+    }
+    if m.secret_args
+        .is_some_and(|want| words.args.iter().any(|a| secret(call, a)) != want)
+    {
+        return false;
+    }
+    let prints = !c.stdout_redirected && !c.captured && c.op != Some(shell::Op::Pipe);
+    if m.prints.is_some_and(|want| prints != want) {
         return false;
     }
     m.text.iter().all(|pattern| {

@@ -21,6 +21,7 @@ ast-grep-core = "0.51"
 jouet-audit = { path = "crates/jouet-audit", version = "0.0.1" }
 jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
 jouet-git = { path = "crates/jouet-git", version = "0.0.1" }
+jouet-graph = { path = "crates/jouet-graph", version = "0.0.1" }
 jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
 jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
 jouet-routines = { path = "crates/jouet-routines", version = "0.0.1" }
@@ -40,6 +41,8 @@ regex = "1"
 # default bundles webpki-roots, and its platform verifier pulls in
 # webpki-root-certs; the org's dependency policy does not allow their licence
 # (CDLA-Permissive-2.0).
+# SQLite compiled in, with FTS5, so the code graph needs no system library.
+rusqlite = { version = "0.41", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-native-certs = "0.8"
 schemars = "1"
@@ -49,10 +52,10 @@ sha2 = "0.11"
 similar = "3"
 tempfile = "3"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
-# tree-sitter and the grammars jouet-search compiles in. The grammars depend
-# only on tree-sitter-language, so any of their versions works with this
-# tree-sitter; ast-grep-core must share it, since tree-sitter links its C
-# runtime once.
+# tree-sitter and the grammars jouet-search and jouet-graph compile in. The
+# grammars depend only on tree-sitter-language, so any of their versions
+# works with this tree-sitter; ast-grep-core must share it, since tree-sitter
+# links its C runtime once.
 tree-sitter = "0.27"
 tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
@@ -92,7 +95,7 @@ readme.workspace = true
 # Published crates carry the source and its licence, not the machinery used to
 # develop and ship it. A list of what to ship, so files added to the repository
 # (or left untracked in a checkout) are never published by accident.
-include = ["/src/**", "/LICENSE", "/README.md"]
+include = ["/src/**", "/LICENSE", "/NOTICE", "/README.md"]
 # src/bin/joue.rs is the `joue` launcher; `cargo run` means jouet.
 default-run = "jouet"
 
@@ -104,6 +107,7 @@ jouet-audit.workspace = true
 jouet-edit.workspace = true
 jouet-git.workspace = true
 jouet-github.workspace = true
+jouet-graph.workspace = true
 jouet-output.workspace = true
 jouet-routines.workspace = true
 jouet-rules.workspace = true
@@ -147,5 +151,6 @@ strip = true
 debug = 1
 
 [dev-dependencies]
+rusqlite.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

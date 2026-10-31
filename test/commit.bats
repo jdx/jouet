@@ -97,3 +97,80 @@ MSG
 	assert_equal "$(jq -r .subject <<<"$output")" "fix: keep the message exactly"
 	assert_equal "$(git log -1 --format=%b)" "Body with \`backticks\` and \"quotes\"."
 }
+
+@test "in a fnox project, fnox scans exactly what is committed" {
+	fake_fnox
+	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
+	git add fnox.toml && git commit -q -m "add fnox"
+	printf 'a2\n' >a.txt
+	# Staged by someone else, with the value: not part of this commit.
+	printf 'key sk_test_value_123\n' >other.txt && git add other.txt
+	printf 'FAKE_FNOX_VALUE=sk_test_value_123\nFAKE_FNOX_NAME=STRIPE_KEY\n' >"$BATS_TEST_TMPDIR/fnox.env"
+
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
+
+	assert_success
+	assert_line --index 1 "  modified  a.txt  +1 -1"
+	assert_line --index 2 "  fnox found no secret values in 1 file"
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/fnox.log")" "scan --values --staged --format json"
+	assert_equal "$(git status --porcelain)" "A  other.txt"
+}
+
+@test "a secret's value refuses the commit with exit 1, naming the secret and file but never the value" {
+	fake_fnox
+	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
+	git add fnox.toml && git commit -q -m "add fnox"
+	printf 'a2\n' >a.txt
+	mkdir -p config && printf 'STRIPE=sk_test_value_123\n' >config/app.env
+	printf 'FAKE_FNOX_VALUE=sk_test_value_123\nFAKE_FNOX_NAME=STRIPE_KEY\n' >"$BATS_TEST_TMPDIR/fnox.env"
+
+	run --separate-stderr jouet commit a.txt config -m "feat: config"
+
+	assert_failure 1
+	assert_line --index 0 "commit refused: fnox found the value of a secret in what would be committed; nothing was committed and nothing was left staged"
+	assert_line --index 1 "  STRIPE_KEY  config/app.env:1"
+	refute_output --partial sk_test_value_123
+	assert_equal "$(git rev-list --count HEAD)" 2
+	assert_equal "$(git status --porcelain --untracked-files=all)" " M a.txt
+?? config/app.env"
+
+	run --separate-stderr jouet --json commit config -m "feat: config"
+	assert_failure 1
+	run jq -c '[.committed, .secret_scan.status, .secret_scan.findings]' <<<"$output"
+	assert_output '[null,"found",[{"secret":"STRIPE_KEY","path":"config/app.env","line":1}]]'
+}
+
+@test "a scan fnox cannot run refuses with exit 4, unless the agent runs under fnox proxy run" {
+	fake_fnox
+	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
+	printf 'a2\n' >a.txt
+	printf '%s\n' "FAKE_FNOX_ERROR=\"None of the profile's secrets could be resolved\"" >"$BATS_TEST_TMPDIR/fnox.env"
+
+	run --separate-stderr jouet commit a.txt -m "fix: a"
+
+	assert_failure 4
+	assert_equal "${stderr_lines[0]}" "jouet: fnox could not scan the commit for secret values, so nothing was committed: Configuration error: None of the profile's secrets could be resolved (exit 1)"
+	assert_equal "$(git rev-list --count HEAD)" 1
+
+	JOUET_COMMIT_TRAILERS='' FNOX_PROXY_MCP=1 run --separate-stderr jouet commit a.txt -m "fix: a"
+	assert_success
+	assert_equal "$stderr" "jouet: warning: fnox scan failed (Configuration error: None of the profile's secrets could be resolved (exit 1)); the agent runs under fnox proxy run, so it was only given placeholders"
+}
+
+@test "without fnox installed the commit goes ahead and says it was not scanned; config can turn the scan off" {
+	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
+	printf 'a2\n' >a.txt
+
+	JOUET_COMMIT_TRAILERS='' PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet --json commit a.txt -m "fix: a"
+
+	assert_success
+	run jq -r '.secret_scan.status, .warnings[0]' <<<"$output"
+	assert_line --index 0 skipped
+	assert_line --index 1 "this repository uses fnox, but fnox is not installed, so the commit was not scanned for secret values"
+
+	fake_fnox
+	printf 'a3\n' >a.txt
+	JOUET_COMMIT_TRAILERS='' JOUET_COMMIT_SECRET_SCAN=off run --separate-stderr jouet commit a.txt -m "fix: a3"
+	assert_success
+	assert [ ! -e "$BATS_TEST_TMPDIR/fnox.log" ]
+}

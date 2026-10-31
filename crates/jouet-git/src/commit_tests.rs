@@ -352,3 +352,147 @@ fn hooks_run_and_a_commit_msg_hook_can_rewrite_the_message() {
     // A commit that succeeded leaves no log behind.
     assert_eq!(std::fs::read_dir(logs.path()).unwrap().count(), 0);
 }
+
+/// Reports every file in the scanned index that differs from HEAD and
+/// contains `hunter2-secret`, as a secret named `PASSWORD`.
+struct Grep {
+    seen: std::cell::RefCell<Vec<String>>,
+}
+
+impl Scanner for Grep {
+    fn scan(&self, top: &Path, index: &Path) -> Result<SecretScan, Error> {
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(top)
+                .args(args)
+                .env("GIT_INDEX_FILE", index)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let names = git(&["diff", "--cached", "--name-only", "--diff-filter=ACMR"]);
+        let mut findings = Vec::new();
+        for name in names.lines() {
+            self.seen.borrow_mut().push(name.to_string());
+            if git(&["show", &format!(":{name}")]).contains("hunter2-secret") {
+                findings.push(SecretFinding {
+                    secret: "PASSWORD".into(),
+                    path: name.into(),
+                    line: 1,
+                });
+            }
+        }
+        Ok(SecretScan {
+            tool: "grep".into(),
+            status: if findings.is_empty() {
+                ScanStatus::Clean
+            } else {
+                ScanStatus::Found
+            },
+            files_scanned: Some(self.seen.borrow().len() as u64),
+            findings,
+            reason: None,
+            notes: Vec::new(),
+        })
+    }
+}
+
+#[test]
+fn the_scanner_sees_exactly_what_would_be_committed() {
+    let repo = Repo::new();
+    let logs = tempfile::tempdir().unwrap();
+    repo.commit(&[("a.txt", "a\n"), ("b.txt", "b\n")], "init");
+    repo.write("a.txt", "a2\n");
+    // Staged by someone else, with a secret: not part of this commit.
+    repo.write("b.txt", "hunter2-secret\n");
+    repo.git(&["add", "b.txt"]);
+    repo.write("dir/new.txt", "new\n");
+    let grep = Grep {
+        seen: std::cell::RefCell::default(),
+    };
+
+    let report = run_scanned(
+        &repo.git_handle(),
+        &request(&["a.txt", "dir"], "change a", logs.path()),
+        Some(&grep),
+    )
+    .unwrap();
+
+    assert!(report.committed, "{report:?}");
+    assert_eq!(*grep.seen.borrow(), ["a.txt", "dir/new.txt"]);
+    let scan = report.secret_scan.unwrap();
+    assert_eq!(scan.status, ScanStatus::Clean);
+    // The other session's staged file is still staged.
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "b.txt");
+}
+
+#[test]
+fn a_secret_refuses_the_commit_and_leaves_the_checkout_alone() {
+    let repo = Repo::new();
+    let logs = tempfile::tempdir().unwrap();
+    let head = repo.commit(&[("a.txt", "a\n")], "init");
+    repo.write("a.txt", "a2\n");
+    repo.write("config/app.env", "PASSWORD=hunter2-secret\n");
+    let grep = Grep {
+        seen: std::cell::RefCell::default(),
+    };
+
+    let report = run_scanned(
+        &repo.git_handle(),
+        &request(&["a.txt", "config"], "add config", logs.path()),
+        Some(&grep),
+    )
+    .unwrap();
+
+    assert!(!report.committed);
+    assert!(report.secret_found());
+    let scan = report.secret_scan.unwrap();
+    assert_eq!(scan.findings[0].path, "config/app.env");
+    assert_eq!(scan.findings[0].secret, "PASSWORD");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    // Nothing staged, and the new file is still untracked.
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "");
+    assert_eq!(
+        repo.git(&["status", "--porcelain", "--untracked-files=all"]),
+        "M a.txt\n?? config/app.env"
+    );
+}
+
+#[test]
+fn a_dry_run_does_not_scan() {
+    let repo = Repo::new();
+    let logs = tempfile::tempdir().unwrap();
+    repo.commit(&[("a.txt", "a\n")], "init");
+    repo.write("a.txt", "hunter2-secret\n");
+    let grep = Grep {
+        seen: std::cell::RefCell::default(),
+    };
+    let mut req = request(&["a.txt"], "change a", logs.path());
+    req.dry_run = true;
+
+    let report = run_scanned(&repo.git_handle(), &req, Some(&grep)).unwrap();
+
+    assert!(report.secret_scan.is_none());
+    assert!(grep.seen.borrow().is_empty());
+}
+
+#[test]
+fn an_unborn_branch_is_scanned_too() {
+    let repo = Repo::new();
+    let logs = tempfile::tempdir().unwrap();
+    repo.write("a.txt", "hunter2-secret\n");
+    let grep = Grep {
+        seen: std::cell::RefCell::default(),
+    };
+
+    let report = run_scanned(
+        &repo.git_handle(),
+        &request(&["a.txt"], "first", logs.path()),
+        Some(&grep),
+    )
+    .unwrap();
+
+    assert!(report.secret_found(), "{report:?}");
+    assert!(repo.git_handle().head().is_none());
+}

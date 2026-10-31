@@ -88,6 +88,15 @@ declare jouet: {
 	diag_delta: (args: { [any]: any }?) -> Ran,
 	-- fs.write: hk's fixers (`hk run fix --safe`); with --yes when joue was, else --dry-run
 	diag_fix: (args: { [any]: any }?) -> Ran,
+	-- fs.read: the code graph (`jouet graph`), refreshed before each query
+	code: {
+		symbols: (args: { [any]: any }?) -> Ran,
+		callers: (args: { [any]: any }?) -> Ran,
+		callees: (args: { [any]: any }?) -> Ran,
+		impact: (args: { [any]: any }?) -> Ran,
+		explore: (args: { [any]: any }?) -> Ran,
+		affected: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

@@ -7,6 +7,7 @@
 //! failed step's output cut to what an agent needs.
 
 pub(crate) mod plan;
+pub(crate) mod secrets;
 pub(crate) mod transcript;
 
 use jouet_output::exit::Exit;
@@ -31,6 +32,8 @@ pub(crate) struct Request {
     pub(crate) log_lines: usize,
     /// Copy the transcript to stderr as it arrives.
     pub(crate) live: bool,
+    /// Resolve the secrets the jobs read through fnox.
+    pub(crate) secrets_from_fnox: bool,
     pub(crate) log_dir: PathBuf,
 }
 
@@ -72,6 +75,9 @@ pub(crate) struct Report {
     pub(crate) jobs: Vec<Job>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) warnings: Vec<String>,
+    /// The secrets `--secrets-from` gave the run, by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) secrets: Option<secrets::Given>,
     /// IDs for `jactionlint run --explain`, from every pointer the run
     /// printed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -109,6 +115,32 @@ pub(crate) fn run(req: &Request, cwd: &Path) -> Result<Report, Refusal> {
     if let Some(event) = &req.event {
         args.extend(["-e".to_string(), event.clone()]);
     }
+    // Held until the run ends; the file is deleted when it drops.
+    let secrets = if req.secrets_from_fnox {
+        if req
+            .extra
+            .iter()
+            .any(|a| a == "--secret-file" || a.starts_with("--secret-file="))
+        {
+            return Err(Refusal::new(
+                Exit::Usage,
+                "--secrets-from fnox writes the --secret-file itself: pass one or the other",
+            ));
+        }
+        let selected = selected_jobs(req, cwd, workflow.as_deref(), &jobs)?;
+        Some(secrets::from_fnox(
+            cwd,
+            &secrets::referenced(cwd, &selected),
+        )?)
+    } else {
+        None
+    };
+    if let Some(file) = secrets.as_ref().and_then(|s| s.file.as_ref()) {
+        args.extend([
+            "--secret-file".to_string(),
+            file.path().display().to_string(),
+        ]);
+    }
     args.extend(req.extra.iter().cloned());
     let log_path = log_path(&req.log_dir);
     let start = Instant::now();
@@ -141,6 +173,7 @@ pub(crate) fn run(req: &Request, cwd: &Path) -> Result<Report, Refusal> {
         exit_code: code,
         jobs: parsed.jobs,
         warnings: parsed.warnings,
+        secrets: secrets.map(|s| s.given),
         explain: parsed.explain,
         output,
         output_truncated,
@@ -270,6 +303,50 @@ fn find_check(
         (None, None) => plans.iter().collect(),
     };
     plan::check(&scope, check)
+}
+
+/// The jobs that will run, by workflow file: the plan of `jactionlint run
+/// --list --json` for this workflow and these jobs, where jactionlint has
+/// marked each job it selected.
+fn selected_jobs(
+    req: &Request,
+    cwd: &Path,
+    workflow: Option<&str>,
+    jobs: &[String],
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, Refusal> {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["run", "--list", "--json"]);
+    cmd.args(workflow);
+    for job in jobs {
+        cmd.args(["-j", job]);
+    }
+    if let Some(event) = &req.event {
+        cmd.args(["-e", event]);
+    }
+    let out = cmd
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| Refusal::new(Exit::Precondition, format!("running jactionlint: {e}")))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(Refusal::new(
+            Exit::Precondition,
+            format!(
+                "jactionlint run --list failed: {}",
+                err.lines().next().unwrap_or("no message")
+            ),
+        ));
+    }
+    let plans = plan::parse(&String::from_utf8_lossy(&out.stdout))
+        .map_err(|e| Refusal::new(Exit::Failed, e))?;
+    Ok(plans
+        .into_iter()
+        .map(|p| {
+            let ids = p.jobs.into_iter().filter(|j| j.selected).map(|j| j.id);
+            (p.workflow, ids.collect())
+        })
+        .collect())
 }
 
 /// The plan of every workflow, as JSON or as text.

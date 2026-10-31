@@ -63,7 +63,7 @@ If you work across many repositories or worktrees, install with `--global` inste
 
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
-| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules. |
+| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules, and in a fnox project, how to use its secrets. |
 | Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
 | After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
@@ -91,6 +91,8 @@ The built-in rules:
 | `no-verify` | `--no-verify` on any git command, and `git commit -n` | fixing what the hook reports |
 | `force-push` | `git push --force`, `-f` or a `+refspec` without `--force-with-lease` | `--force-with-lease` |
 | `push-untested` | warns (does not deny) on `git push` and `gh pr create` when no full test run has passed at the current tree | running the full suite first, or saying why it is not needed |
+| `print-secrets` | in a [fnox project](#fnox): bare `env`, `printenv`, `export -p` and `set`, `printenv NAME` and `echo $NAME` for a secret its `fnox.toml` defines; anywhere: `fnox get`, `fnox export` without `-o`, `fnox list -V` and `fnox env --json`, unless redirected, piped or captured | `fnox exec -- <command>` |
+| `secret-files` | in a fnox project: reading `.env` or `.env.*` (not `.env.example`, `.sample`, `.template` or `.dist`), and the files fnox's `plain` providers read, with Read, `cat`, `grep`, `sed -n` and similar | `fnox exec -- <command>` |
 | `scoped-lint` | warns (does not deny) on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint` | `jouet diag check --changed` while iterating, and the full lint once at the end |
 | `affected-tests` | warns (does not deny) on a whole-suite `pytest`, `jest`, `vitest run`, `npm test` or `mise run test` within 30 minutes of the last whole-suite run, in a repository where `jouet test --affected` can select | `jouet test --affected` while iterating, keeping the full run for the end |
 
@@ -126,6 +128,17 @@ Known false positives and misses:
 - A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
 - A command that changes tracked files and then runs the tests, such as a formatter in the same script, is recorded at the tree after it finished.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
+
+### fnox
+
+[fnox](https://fnox.jdx.dev) keeps a project's secrets encrypted or in a vault and hands them to programs as environment variables. In a project that uses it (a `fnox.toml`, `.fnox.toml` or `.config/fnox.toml` in the working directory or above), jouet helps keep the secrets out of the transcript, which leaves the machine with every turn, and out of commits:
+
+- **Rules.** `print-secrets` and `secret-files` (in the table above) deny the usual ways an agent prints a secret, and suggest `fnox exec -- <command>`. The hook reads the secret names and the plain providers' files from the fnox config on every call, never a value. `env FOO=bar cmd`, `echo "$TOKEN" | gh auth login --with-token` and `fnox get NAME > file` stay allowed.
+- **The primer.** The session-start context says that the project keeps its secrets in fnox. When the agent runs under `fnox proxy run`, it says so instead: its secret variables hold placeholders, which are not broken credentials. jouet detects the proxy by the `FNOX_PROXY_MCP=1` that `fnox proxy run` sets for its command.
+- **Setup.** `jouet setup` recommends starting the agent with `fnox proxy run -- claude` (or `codex`). Under the proxy the agent's environment holds only placeholders, and fnox puts the real values into the HTTPS requests its `[[proxy.rules]]` allow, so a printed variable gives nothing away. See [fnox's credential proxy](https://fnox.jdx.dev/guide/proxy).
+- **Commits.** [`jouet commit`](/commands/commit#secrets-in-fnox-projects) runs `fnox scan --values` over exactly what it is about to commit.
+
+The rules are pattern matches, and they miss what they cannot see: a script that prints a variable, `python -c 'import os; print(os.environ)'`, or a value an agent copies out of a file under another name. The proxy is the stronger protection, because without it the values are in the agent's environment.
 
 ### The ledger
 
@@ -178,4 +191,4 @@ enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 
 `jouet skill` prints the skill `jouet setup` installs, about 25 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
 
-`jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk or beads (`bd`) is on `PATH`, the guide says what each is for instead of jouet duplicating it.
+`jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk, beads (`bd`) or [fnox](https://fnox.jdx.dev) is on `PATH`, the guide says what each is for instead of jouet duplicating it.
