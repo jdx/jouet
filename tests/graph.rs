@@ -220,3 +220,107 @@ fn jouet_edit_reindexes_what_it_wrote() {
     assert!(child.wait().unwrap().success());
     assert_eq!(outline(&env), "new_name");
 }
+
+fn many_callers(env: &Env) {
+    env.write("lib.py", "def target():\n    return 1\n");
+    let mut caller = String::from("from lib import target\n\n");
+    for i in 0..40 {
+        caller.push_str(&format!(
+            "\ndef caller_number_{i}():\n    return target()\n"
+        ));
+    }
+    env.write("use.py", &caller);
+}
+
+#[test]
+fn queries_refresh_first_and_page_within_their_budget() {
+    let env = Env::new();
+    many_callers(&env);
+    // No index was ever built: the first query builds it.
+    let out = env.run(&["graph", "callers", "target", "--budget", "400"]);
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.starts_with("callers of function target (lib.py:1): 40\n"),
+        "{text}"
+    );
+    assert!(text.len() < 700, "{text}");
+    let marker = text.lines().last().unwrap();
+    assert!(marker.starts_with("... "), "{marker}");
+    assert!(marker.contains("--page 2)"), "{marker}");
+
+    // Page 2 continues where page 1 stopped, and every caller is on a page.
+    let mut seen = Vec::new();
+    for page in 1..=20 {
+        let doc = env.json(&[
+            "graph",
+            "callers",
+            "target",
+            "--budget",
+            "400",
+            "--page",
+            &page.to_string(),
+        ]);
+        let s = &doc["symbols"][0];
+        for item in s["items"].as_array().unwrap() {
+            seen.push(item["name"].as_str().unwrap().to_string());
+        }
+        if s["page"] == s["pages"] {
+            break;
+        }
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 40);
+
+    // A file changed since: the next query sees it.
+    env.write(
+        "use.py",
+        "from lib import target\n\n\ndef only():\n    return target()\n",
+    );
+    let doc = env.json(&["graph", "callers", "target"]);
+    assert_eq!(doc["symbols"][0]["total"], 1);
+}
+
+#[test]
+fn symbols_explore_and_impact_answer_and_say_what_they_left_out() {
+    let env = Env::new();
+    many_callers(&env);
+    let symbols = env.json(&["graph", "symbols", "caller number", "--budget", "300"]);
+    assert_eq!(symbols["total"], 40);
+    assert!(symbols["pages"].as_u64().unwrap() > 1);
+
+    let out = env.run(&["graph", "explore", "target", "--budget", "2000"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("lib.py:1-2 function target"), "{text}");
+    assert!(text.contains("called by: caller_number_0"), "{text}");
+    assert!(text.contains("... 35 more"), "{text}");
+
+    // The 40 callers, and the file that imports it.
+    let impact = env.json(&["graph", "impact", "lib.py#target"]);
+    assert_eq!(impact["symbols"][0]["total"], 41);
+
+    let missing = env.run(&["graph", "callers", "no_such_thing"]);
+    assert_eq!(missing.status.code(), Some(3));
+}
+
+#[test]
+fn affected_lists_tests_and_fails_when_a_file_is_unknown() {
+    let env = Env::new();
+    env.write("src/util.py", "def f():\n    return 1\n");
+    env.write(
+        "tests/test_util.py",
+        "from src.util import f\n\n\ndef test_f():\n    assert f() == 1\n",
+    );
+    let ok = env.run(&["graph", "affected", "src/util.py"]);
+    assert!(ok.status.success());
+    let text = String::from_utf8(ok.stdout).unwrap();
+    assert_eq!(text, "tests/test_util.py  (via src/util.py)\n");
+    let unknown = env.run(&["graph", "affected", "src/util.py", "notes.txt"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(
+        String::from_utf8(unknown.stdout)
+            .unwrap()
+            .contains("unknown: notes.txt")
+    );
+}

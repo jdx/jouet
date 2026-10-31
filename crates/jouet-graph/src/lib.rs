@@ -5,7 +5,11 @@
 //! Colby Mchenry (MIT; see the `NOTICE` file):
 //! - [`extract`] is a port of codegraph-kernel, codegraph's Rust tree-sitter
 //!   walkers, with napi removed and trimmed to eleven languages;
-//! - the storage schema follows codegraph's `src/db/schema.sql`.
+//! - the storage schema follows codegraph's `src/db/schema.sql`;
+//! - linking (`link`) keeps the cascade of codegraph's `ReferenceResolver`
+//!   (imports, then names by scope, then a visibility gate) in a much
+//!   smaller form, without its framework routing;
+//! - the queries follow codegraph's traversal, search and test conventions.
 //!
 //! jouet owns the code from here on: there is no parity goal, and no MCP
 //! server, file watcher or daemon. Instead every query first runs a cheap
@@ -18,9 +22,12 @@
 
 pub mod extract;
 mod index;
+mod link;
+mod query;
 mod store;
 
 pub use index::Refresh;
+pub use query::{Affected, AffectedTest, Explored, MAX_RESULTS, Reach, SymbolQuery, is_test_path};
 
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -82,18 +89,23 @@ pub(crate) const SYMBOL_COLUMNS: &str = "id, kind, name, qualified_name, file_pa
 
 impl Symbol {
     pub(crate) fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Symbol> {
+        Symbol::from_row_at(r, 0)
+    }
+
+    /// Reads [`SYMBOL_COLUMNS`] starting at column `at`.
+    pub(crate) fn from_row_at(r: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Symbol> {
         Ok(Symbol {
-            id: r.get(0)?,
-            kind: r.get(1)?,
-            name: r.get(2)?,
-            qualified_name: r.get(3)?,
-            path: r.get(4)?,
-            language: r.get(5)?,
-            start_line: r.get(6)?,
-            end_line: r.get(7)?,
-            signature: r.get(8)?,
-            docstring: r.get(9)?,
-            exported: r.get(10)?,
+            id: r.get(at)?,
+            kind: r.get(at + 1)?,
+            name: r.get(at + 2)?,
+            qualified_name: r.get(at + 3)?,
+            path: r.get(at + 4)?,
+            language: r.get(at + 5)?,
+            start_line: r.get(at + 6)?,
+            end_line: r.get(at + 7)?,
+            signature: r.get(at + 8)?,
+            docstring: r.get(at + 9)?,
+            exported: r.get(at + 10)?,
         })
     }
 }

@@ -133,6 +133,12 @@ export default defineConfig({
                 link: "/cli/graph/",
                 collapsed: true,
                 items: [
+                  { text: "explore", link: "/cli/graph/explore" },
+                  { text: "symbols", link: "/cli/graph/symbols" },
+                  { text: "callers", link: "/cli/graph/callers" },
+                  { text: "callees", link: "/cli/graph/callees" },
+                  { text: "impact", link: "/cli/graph/impact" },
+                  { text: "affected", link: "/cli/graph/affected" },
                   { text: "index", link: "/cli/graph/index/" },
                   { text: "status", link: "/cli/graph/status" },
                 ],

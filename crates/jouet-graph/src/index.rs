@@ -11,6 +11,7 @@
 //! next refresh picks them up.
 
 use crate::extract::{self, Extraction};
+use crate::link;
 use crate::store::{self, FileUpdate};
 use crate::{Error, Graph};
 use rusqlite::Connection;
@@ -68,6 +69,12 @@ pub struct Refresh {
     pub deferred: usize,
     /// Files extraction could not walk, with why.
     pub failed: Vec<(String, String)>,
+    /// References linking resolved, and left unresolved, in this refresh.
+    pub resolved: usize,
+    pub unresolved: usize,
+    /// What the files written offer linking that they did not before.
+    #[serde(skip)]
+    pub(crate) offered: link::Offered,
     #[serde(serialize_with = "millis")]
     pub elapsed: Duration,
 }
@@ -138,7 +145,7 @@ fn list(root: &Path) -> Vec<Seen> {
         let Some(rel) = relative(root, entry.path()) else {
             continue;
         };
-        if extract::language_for_path(&rel).is_none() {
+        if extract::language_for_path(&rel).is_none() || is_minified(&rel) {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
@@ -247,6 +254,7 @@ impl Graph {
             store::end_bulk(&self.conn)?;
         }
         result?;
+        self.link(&mut report, start, budget)?;
         report.elapsed = start.elapsed();
         Ok(report)
     }
@@ -282,6 +290,7 @@ impl Graph {
             };
             if extract::language_for_path(&rel).is_none()
                 || is_skipped(&rel)
+                || is_minified(&rel)
                 || !seen_paths.insert(rel.clone())
             {
                 continue;
@@ -312,9 +321,35 @@ impl Graph {
             changed.push(seen);
         }
         process(&mut self.conn, changed, &hashes, start, budget, &mut report)?;
+        self.link(&mut report, start, budget)?;
         report.elapsed = start.elapsed();
         Ok(report)
     }
+
+    /// Links what the refresh left pending, unless the budget is spent:
+    /// pending references wait for the next refresh.
+    fn link(
+        &mut self,
+        report: &mut Refresh,
+        start: Instant,
+        budget: Option<Duration>,
+    ) -> Result<(), Error> {
+        link::reopen(&self.conn, &report.offered)?;
+        if budget.is_some_and(|b| start.elapsed() >= b) {
+            return Ok(());
+        }
+        let linked = link::link(&mut self.conn, &self.root)?;
+        report.resolved += linked.resolved;
+        report.unresolved += linked.unresolved;
+        Ok(())
+    }
+}
+
+/// Minified JavaScript: one line of single-letter names, never read.
+fn is_minified(rel: &str) -> bool {
+    [".min.js", ".min.mjs", ".min.cjs"]
+        .iter()
+        .any(|ext| rel.ends_with(ext))
 }
 
 /// A path under a directory the walk never enters.
@@ -424,7 +459,17 @@ fn write(
                     Err(e) => report.failed.push((update.path.clone(), e.clone())),
                     Ok(_) => {}
                 }
+                let before = link::names_in(&tx, &update.path)?;
+                let existed = store::file_row(&tx, &update.path)?.is_some();
                 store::write_file(&tx, &update)?;
+                let after = link::names_in(&tx, &update.path)?;
+                report
+                    .offered
+                    .names
+                    .extend(after.difference(&before).cloned());
+                if !existed {
+                    report.offered.files.push(update.path.clone());
+                }
                 report.indexed += 1;
             }
             Outcome::Touched(path, modified_ns) => {

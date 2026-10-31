@@ -742,7 +742,8 @@ impl<'t> Walker<'t> {
     }
 
     /// extractEnum — body required; enum_variant children → enum_member nodes
-    /// (name field only, payloads never walked); other children re-dispatched.
+    /// (codegraph walks no payloads; jouet takes the payload's type refs);
+    /// other children re-dispatched.
     fn extract_enum(&mut self, node: Node<'t>) {
         stack_guard!();
         let Some(body) = node.child_by_field_name("body") else {
@@ -771,7 +772,13 @@ impl<'t> Walker<'t> {
             if c.kind() == "enum_variant" {
                 if let Some(name_node) = c.child_by_field_name("name") {
                     let vname = self.text(name_node).to_string();
-                    self.create_node("enum_member", &vname, c, Extra::default());
+                    let member = self.create_node("enum_member", &vname, c, Extra::default());
+                    // jouet, not codegraph: the types a variant carries
+                    // (`Status(status::DotfilesStatus)`, clap's subcommand
+                    // enums) are referenced like a struct field's.
+                    if let (Some(member), Some(payload)) = (member, c.child_by_field_name("body")) {
+                        self.extract_type_refs_from_subtree(payload, member);
+                    }
                 }
             } else {
                 self.visit_node(c);

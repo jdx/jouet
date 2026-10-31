@@ -105,8 +105,8 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
-    // Agents get a line once the graph answers questions; building it is
-    // setup.
+    // Not in the overview yet: its eight subcommands would take it past 80
+    // lines until the overview prints one line per command family.
     ("graph", None),
     ("share", None),
     ("agent-help", None),
