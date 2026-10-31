@@ -30,6 +30,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "diag",
+        Some(
+            "after an edit: the errors and warnings in just the files you changed (`diag check --changed`), or only the ones your edit introduced (`diag delta`, same arguments), from the project's hk checks, instead of a full `mise run lint` or `cargo clippy | head`; `diag fix` formats them",
+        ),
+    ),
+    (
         "wait",
         Some(
             "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process or command, instead of a sleep loop",
@@ -114,7 +120,14 @@ const WHEN: &[(&str, Option<&str>)] = &[
 /// Subcommands an agent is told about where it needs them, in a line jouet
 /// prints (a proposal's note, the review prompt), so the overview leaves
 /// them out. `jouet agent-help COMMAND` still lists them.
-const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
+const PROMPTED: &[(&str, &str)] = &[
+    ("wind", "adopt"),
+    ("wind", "propose"),
+    ("wind", "dismiss"),
+    // `diag`'s when line names them, and they take check's arguments.
+    ("diag", "delta"),
+    ("diag", "fix"),
+];
 
 /// Subcommands for a person's decision, not an agent's, which the overview
 /// leaves out as it leaves out `jouet setup`: trusting a repository's rules.
