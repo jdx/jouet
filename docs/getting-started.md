@@ -149,7 +149,7 @@ jouet edit replace src/main.rs --old 'let x = 2;' --new 'let x = 3;'
 
 ## Tell your agent
 
-Agents use what their instructions mention. For Claude Code or Codex, let jouet install a skill and hooks that steer the agent toward its commands:
+Agents use what their instructions mention. For Claude Code or Codex, let jouet install hooks that prime each session and steer the agent toward its commands:
 
 ```sh
 jouet setup claude   # or: jouet setup codex

@@ -20,7 +20,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing",
+            "reading a long file (400 lines or more): `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading it whole to find one thing. Read a shorter file whole, in one call",
         ),
     ),
     (
@@ -32,7 +32,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "diag",
         Some(
-            "after an edit: the errors and warnings in just the files you changed (`diag check --changed`), or only the ones your edit introduced (`diag delta`, same arguments), from the project's hk checks, instead of a full `mise run lint` or `cargo clippy | head`; `diag fix` formats them",
+            "after an edit, in a project with an hk config (hk.pkl): the errors and warnings in just the files you changed (`diag check --changed`), or only the ones your edit introduced (`diag delta`, same arguments), from the project's hk checks, instead of a full `mise run lint` or `cargo clippy | head`; `diag fix` formats them. Without hk.pkl it exits 4 and checks nothing",
         ),
     ),
     (
@@ -84,9 +84,15 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "stack",
+        Some(
+            "working on a stack of PRs: `jouet stack status` shows each layer's PR and whether it really contains the layer below, by ancestry and by content (a restack that reverted a parent's change is flagged), and `jouet stack sync` merges each layer up to date from its local branch and verifies it, instead of trusting `gh stack view` or restacking with rebase, `checkout -B` or force pushes",
+        ),
+    ),
+    (
         "test",
         Some(
-            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push",
+            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest or pytest; for anything else (such as plain `python -m unittest`) it exits 4, so run the project's own command",
         ),
     ),
     (
@@ -207,6 +213,10 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
+/// Commands that work as a pair, which the overview and the skill describe
+/// in one entry to stay within their budgets.
+pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in
 /// `jouet agent-help COMMAND`, so a new subcommand costs the overview a word,
@@ -216,8 +226,27 @@ pub(crate) fn overview() -> String {
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
         env!("CARGO_PKG_VERSION")
     );
-    for (meta, when) in agent_commands() {
+    let commands = agent_commands();
+    for (meta, when) in &commands {
         let name = meta.cmd.name;
+        if PAIRED.iter().any(|(_, second)| *second == name) {
+            continue;
+        }
+        let partner = PAIRED
+            .iter()
+            .find(|(first, _)| *first == name)
+            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
+        if let Some((other, other_when)) = partner {
+            let _ = writeln!(
+                out,
+                "jouet {name} / jouet {}: {} / {}",
+                other.cmd.name,
+                meta.about.unwrap_or(""),
+                lowercase_first(other.about.unwrap_or(""))
+            );
+            let _ = writeln!(out, "  when: {when}; {other_when}");
+            continue;
+        }
         let subs: Vec<&str> = meta
             .subcommands
             .iter()
@@ -281,27 +310,49 @@ fn describe(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
     }
 }
 
-/// The short primer printed when a session starts.
-pub(crate) fn summary(rules: &[&str], verify: bool) -> String {
-    let commands: Vec<String> = agent_commands()
-        .iter()
-        .map(|(meta, _)| {
-            format!(
-                "`jouet {}` ({})",
-                meta.cmd.name,
-                lowercase_first(meta.about.unwrap_or(""))
-            )
-        })
-        .collect();
+/// The commands the primer gives a usage line for, with the flags it shows:
+/// the ones agents reach for in almost every task, so the first use costs
+/// no `--help`.
+const PRIMED: &[(&[&str], &[&str])] = &[
+    (&["commit"], &["--message"]),
+    (&["edit", "replace"], &["--old", "--new"]),
+];
+
+/// The short primer printed when a session starts: the command families by
+/// name, usage for the few used in almost every task, and the deny rules
+/// with what each suggests, so the agent neither looks those up nor pays a
+/// denied call to learn them. When to use each command and its flags are
+/// one `jouet agent-help COMMAND` away; listing them here as well made every
+/// session pay for them.
+pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
+    let names: Vec<&str> = agent_commands().iter().map(|(m, _)| m.cmd.name).collect();
     let mut out = format!(
-        "jouet is installed: {}. Run `jouet agent-help` for when to use each and its flags, before hand-rolling a script.\n",
-        commands.join(", ")
+        "jouet is installed, a CLI toolkit for coding agents: {}. When a task matches one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
+        names.join(", ")
     );
-    if !rules.is_empty() {
+    let usage: Vec<String> = PRIMED
+        .iter()
+        .filter_map(|(path, flags)| short_synopsis(path, flags))
+        .map(|s| format!("`{s}`"))
+        .collect();
+    if let [commit, edit] = usage.as_slice() {
         let _ = writeln!(
             out,
-            "jouet's hooks deny some commands and name a better one (rules: {}).",
-            rules.join(", ")
+            "Commit only the paths you name with {commit}; make an exact, checked edit with {edit} or your own edit tool."
+        );
+    }
+    if !rules.is_empty() {
+        let named: Vec<String> = rules
+            .iter()
+            .map(|(name, suggest)| match suggest {
+                Some(s) => format!("{name} (use `{s}`)"),
+                None => (*name).to_string(),
+            })
+            .collect();
+        let _ = writeln!(
+            out,
+            "jouet's hooks deny these and say what to do instead: {}.",
+            named.join(", ")
         );
     }
     if verify {
@@ -310,6 +361,23 @@ pub(crate) fn summary(rules: &[&str], verify: bool) -> String {
         );
     }
     out
+}
+
+/// A command's positional arguments and the given flags, or `None` when it
+/// lacks one of them.
+fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
+    let meta = lookup(path)?;
+    let mut parts = vec![format!("jouet {}", path.join(" "))];
+    for arg in meta.args {
+        let value = arg.value_names.first().copied().unwrap_or(arg.arg.name);
+        parts.push(format!("<{value}>{}", if arg.arg.var { "..." } else { "" }));
+    }
+    for long in flags {
+        let flag =
+            visible_flags(meta).find(|f| f.flag.longs.iter().any(|l| format!("--{l}") == *long))?;
+        parts.push(flag_usage(flag));
+    }
+    Some(parts.join(" "))
 }
 
 fn lowercase_first(text: &str) -> String {
@@ -460,6 +528,40 @@ mod tests {
         assert!(text.contains("jouet wait <ci|"), "{text}");
         assert!(text.contains("4 precondition"), "{text}");
         assert!(!text.contains("jouet setup"), "{text}");
+    }
+
+    #[test]
+    fn the_primer_is_short_and_needs_no_lookup_for_the_common_commands() {
+        for (path, flags) in PRIMED {
+            assert!(
+                short_synopsis(path, flags).is_some(),
+                "{path:?} lost one of {flags:?}: update PRIMED"
+            );
+        }
+        let text = summary(
+            &[("python-edit", Some("jouet edit")), ("git-stash", None)],
+            true,
+        );
+        assert!(
+            text.contains("`jouet commit <PATHS>... --message MSG`"),
+            "{text}"
+        );
+        assert!(
+            text.contains("`jouet edit replace <PATH> --old TEXT --new TEXT`"),
+            "{text}"
+        );
+        assert!(
+            text.contains("python-edit (use `jouet edit`), git-stash."),
+            "{text}"
+        );
+        // The family names, not each one's description: that is agent-help's.
+        assert!(text.contains("commit, "), "{text}");
+        assert!(
+            !text.contains("Commit only the named paths, with trailers"),
+            "{text}"
+        );
+        assert!(text.lines().count() <= 4, "{text}");
+        assert!(text.len() <= 1200, "{} bytes:\n{text}", text.len());
     }
 
     #[test]

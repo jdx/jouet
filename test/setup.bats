@@ -26,8 +26,24 @@ hook_command() {
 	assert_success
 	assert_output --partial "would create $HOME/.claude/settings.json"
 	assert_output --partial '+            "command": "sh -c '"'"'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"'"'",'
-	assert_output --partial "would create $HOME/.claude/skills/jouet/SKILL.md"
+	refute_output --partial "SKILL.md"
 	assert [ ! -e "$HOME/.claude" ]
+}
+
+@test "setup leaves the skill to the primer unless asked, and removes its own from an earlier install" {
+	run --separate-stderr jouet setup claude --skill
+	assert_success
+	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
+
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_line "removed $HOME/.claude/skills/jouet/SKILL.md"
+	assert [ ! -e "$HOME/.claude/skills/jouet" ]
+
+	# Without the primer, the skill is what tells the agent about jouet.
+	JOUET_HOOKS_PRIME=0 run --separate-stderr jouet setup claude
+	assert_success
+	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
 }
 
 @test "setup merges into existing hooks, and a re-run changes nothing" {
@@ -35,7 +51,7 @@ hook_command() {
 	printf '%s\n' '{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-tool stop"}]}]}}' \
 		>"$HOME/.claude/settings.json"
 
-	run --separate-stderr jouet setup claude
+	run --separate-stderr jouet setup claude --skill
 	assert_success
 	assert_line "updated $HOME/.claude/settings.json"
 	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
@@ -43,7 +59,7 @@ hook_command() {
 	assert_output '["opus",["other-tool stop","sh -c '"'"'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"'"'"]]'
 
 	cp "$HOME/.claude/settings.json" before.json
-	run --separate-stderr jouet setup claude
+	run --separate-stderr jouet setup claude --skill
 	assert_success
 	assert_line "unchanged $HOME/.claude/settings.json"
 	assert_line "unchanged $HOME/.claude/skills/jouet/SKILL.md"
@@ -55,7 +71,7 @@ hook_command() {
 	mkdir -p "$HOME/.claude"
 	printf '%s\n' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-tool stop"}]}]}}' \
 		>"$HOME/.claude/settings.json"
-	jouet setup claude >/dev/null
+	jouet setup claude --skill >/dev/null
 
 	run --separate-stderr jouet setup claude --uninstall
 
@@ -74,21 +90,28 @@ hook_command() {
 	assert_line "kept $HOME/.claude/skills/jouet/SKILL.md"
 	assert_content "$HOME/.claude/skills/jouet/SKILL.md" $'my own notes\n'
 
-	run --separate-stderr jouet setup claude
+	run --separate-stderr jouet setup claude --skill
 	assert_line "kept $HOME/.claude/skills/jouet/SKILL.md"
 	assert_line --partial 'move it aside to install'
 	assert_content "$HOME/.claude/skills/jouet/SKILL.md" $'my own notes\n'
 
+	# Without --skill, setup has nothing to say about it.
+	run --separate-stderr jouet setup claude
+	refute_output --partial "SKILL.md"
+	assert_content "$HOME/.claude/skills/jouet/SKILL.md" $'my own notes\n'
+
 	# jouet's own, once edited, is the user's.
 	rm "$HOME/.claude/skills/jouet/SKILL.md"
-	jouet setup claude >/dev/null
+	jouet setup claude --skill >/dev/null
 	printf 'one more rule\n' >>"$HOME/.claude/skills/jouet/SKILL.md"
 	run --separate-stderr jouet setup claude --uninstall
 	assert_line "kept $HOME/.claude/skills/jouet/SKILL.md"
+	run --separate-stderr jouet setup claude
+	refute_output --partial "SKILL.md"
 }
 
 @test "setup codex writes hooks.json and the skill under .agents, and says to trust the hooks" {
-	run --separate-stderr jouet setup codex --json
+	run --separate-stderr jouet setup codex --skill --json
 
 	assert_success
 	run jq -r '.files[].path, .notes[0]' <<<"$output"
@@ -103,7 +126,7 @@ hook_command() {
 	mkdir -p repo/.git repo/sub
 	cd repo/sub
 
-	run --separate-stderr jouet setup codex --shared
+	run --separate-stderr jouet setup codex --shared --skill
 
 	assert_success
 	assert_line --partial "everyone who clones this repository gets these hooks"
@@ -156,7 +179,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	mkdir sub
 	cd sub
 
-	run --separate-stderr jouet setup claude --project
+	run --separate-stderr jouet setup claude --project --skill
 
 	assert_success
 	assert_line "created $work/.claude/settings.local.json"
@@ -166,7 +189,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert [ ! -e "$work/.claude/settings.json" ]
 
 	printf '.claude/settings.local.json\n.claude/skills/jouet/\n' >>"$work/.git/info/exclude"
-	run --separate-stderr jouet setup claude --project
+	run --separate-stderr jouet setup claude --project --skill
 	assert_success
 	refute_line --partial "git does not ignore"
 }
@@ -231,7 +254,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 @test "setup --uninstall removes jouet's hooks from either project file" {
 	init_repo
 	work=$(pwd -P) # macOS reports /private/tmp for /tmp
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --skill >/dev/null
 	run --separate-stderr jouet setup claude --project --uninstall
 	assert_success
 	assert_line "updated $work/.claude/settings.json"

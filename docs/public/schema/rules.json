@@ -399,6 +399,10 @@
         "git": {
           "description": "What `jouet.git.state()` reports for the work tree; omitted, it has\nno answer, as for any probe in an example.",
           "$ref": "#/$defs/ExampleGit"
+        },
+        "stack": {
+          "description": "Where `jouet.stack.layer()` places the current branch in a stack;\nomitted, it has no answer.",
+          "$ref": "#/$defs/ExampleStack"
         }
       },
       "additionalProperties": false
@@ -446,13 +450,49 @@
       "type": "object",
       "properties": {
         "dirty": {
-          "description": "Whether anything is changed, untracked or conflicted.",
-          "type": "boolean"
+          "description": "Whether anything is changed, untracked or conflicted; `false` if\nomitted.",
+          "type": "boolean",
+          "default": false
+        },
+        "branch": {
+          "description": "The branch checked out; omitted, HEAD is detached.",
+          "type": "string"
+        },
+        "ahead": {
+          "description": "What `jouet.git.ahead()` answers, for any branch: how many of its\ncommits the other commit lacks. Omitted, it has no answer.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExampleStack": {
+      "description": "An example's place in a stack, as `jouet.stack.layer()` would report it.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "The current branch.",
+          "type": "string"
+        },
+        "parent": {
+          "description": "The layer below it, or the trunk.",
+          "type": "string"
+        },
+        "trunk": {
+          "description": "The trunk; `main` if omitted.",
+          "type": "string"
+        },
+        "parent_merged": {
+          "description": "Whether the layer below has merged.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,
       "required": [
-        "dirty"
+        "branch",
+        "parent"
       ]
     }
   }
