@@ -39,6 +39,11 @@ pub enum EditStatus {
     TooManyMatches,
     TooFewMatches,
     AnchorNotFound,
+    /// A symbol edit on a file jouet cannot read definitions from, or a
+    /// malformed selector.
+    Unsupported,
+    /// A symbol edit whose result has more syntax errors than the file had.
+    DoesNotParse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -79,6 +84,76 @@ pub struct EditReport {
     pub anchor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closest: Option<Closest>,
+    /// For a symbol edit: the selector.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    /// For a symbol edit that matched nothing, the file's definitions; for
+    /// one that matched several, each of them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<String>,
+    /// Why a symbol edit was refused, when the status alone does not say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// For a symbol edit that changed the definition's first line: what it
+    /// was and what it is now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignatureChange>,
+}
+
+/// A symbol edit that changed a definition's first line, its signature in
+/// most languages, so callers may need changing too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SignatureChange {
+    /// The definition's name, without its scope.
+    pub name: String,
+    pub before: String,
+    pub after: String,
+}
+
+/// Finds definitions for symbol edits. jouet's binary implements it with
+/// tree-sitter, so this crate needs no grammars.
+pub trait Symbols: std::fmt::Debug + Sync {
+    /// The definitions `selector` names in `text`, the contents of `path`.
+    fn locate(&self, path: &Path, text: &str, selector: &str) -> Result<Vec<Span>, SymbolError>;
+    /// How many syntax errors `text` has, or `None` if that cannot be told.
+    fn syntax_errors(&self, path: &Path, text: &str) -> Option<usize>;
+}
+
+/// Where a definition is: bytes `start..end` of the text, its first line,
+/// and a short description such as `method Vfox::download (40-88)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub describe: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SymbolError {
+    /// jouet cannot read definitions from this kind of file.
+    Unsupported,
+    /// The selector is malformed.
+    Invalid(String),
+    /// Nothing matched; the file's definitions, described.
+    NotFound(Vec<String>),
+}
+
+/// A definition whose signature changed, and references to its name in
+/// files the edit did not touch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Callers {
+    pub symbol: String,
+    pub references: Vec<Reference>,
+    /// References left out of the list.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub more: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Reference {
+    pub path: String,
+    pub line: usize,
 }
 
 fn serialize_count<S: Serializer>(count: &Count, s: S) -> Result<S::Ok, S::Error> {
@@ -121,6 +196,10 @@ pub struct Report {
     pub files: Vec<FileReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckReport>,
+    /// Definitions whose signature a symbol edit changed, with references
+    /// to them elsewhere: callers that may need changing too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub callers: Vec<Callers>,
 }
 
 /// The result of `--check`: the command run after writing, and its output.
@@ -217,6 +296,9 @@ pub struct Options {
     /// Paths and SHA-256 hashes their current contents must have.
     pub expect_hashes: Vec<(String, String)>,
     pub diff: bool,
+    /// What finds definitions for symbol edits; without it, they are
+    /// refused.
+    pub symbols: Option<&'static dyn Symbols>,
 }
 
 /// What is on disk for one path, and what the plan has turned it into.
@@ -316,7 +398,7 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
         }
     }
     for op in &spec.ops {
-        let mut report = apply_op(&mut entries, op)?;
+        let mut report = apply_op(&mut entries, op, options.symbols)?;
         if let Some((_, error)) = hash_failures.remove(&identity(Path::new(op.path())))
             && report.error.is_none()
         {
@@ -344,6 +426,7 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
             files_written: 0,
             files,
             check: None,
+            callers: Vec::new(),
         },
         entries,
     })
@@ -404,7 +487,11 @@ fn not_found(path: &str) -> FileReport {
     )
 }
 
-fn apply_op(entries: &mut BTreeMap<PathBuf, Entry>, op: &FileOp) -> io::Result<FileReport> {
+fn apply_op(
+    entries: &mut BTreeMap<PathBuf, Entry>,
+    op: &FileOp,
+    symbols: Option<&dyn Symbols>,
+) -> io::Result<FileReport> {
     match op {
         FileOp::Add { path, content } => {
             let entry = load(entries, path)?;
@@ -459,7 +546,8 @@ fn apply_op(entries: &mut BTreeMap<PathBuf, Entry>, op: &FileOp) -> io::Result<F
             let mut cursor = 0;
             let mut reports = Vec::new();
             for (index, edit) in edits.iter().enumerate() {
-                let (next, report) = apply_edit(&text, edit, index, &mut cursor);
+                let (next, report) =
+                    apply_edit(&text, edit, index, &mut cursor, Path::new(path), symbols);
                 if report.status == EditStatus::Ok {
                     text = next;
                 }
@@ -572,9 +660,8 @@ fn file_diff(entries: &BTreeMap<PathBuf, Entry>, f: &FileReport) -> Option<Strin
 /// Applies one edit to `text`. On failure the text is returned unchanged and
 /// the report says why, so later edits can still be checked and every
 /// problem in a spec is reported at once.
-fn apply_edit(text: &str, edit: &Edit, index: usize, cursor: &mut usize) -> (String, EditReport) {
-    let newline = newline_of(text);
-    let mut report = EditReport {
+fn edit_report(index: usize) -> EditReport {
+    EditReport {
         index,
         status: EditStatus::Ok,
         expected: Count::Exactly(1),
@@ -582,8 +669,140 @@ fn apply_edit(text: &str, edit: &Edit, index: usize, cursor: &mut usize) -> (Str
         lines: Vec::new(),
         anchor: None,
         closest: None,
+        symbol: None,
+        candidates: Vec::new(),
+        message: None,
+        signature: None,
+    }
+}
+
+/// Replaces the one definition `selector` names with `new`, indented to
+/// where the definition sits.
+fn apply_symbol(
+    path: &Path,
+    text: &str,
+    selector: &str,
+    new: &str,
+    index: usize,
+    symbols: Option<&dyn Symbols>,
+) -> (String, EditReport) {
+    let mut report = edit_report(index);
+    report.symbol = Some(selector.to_string());
+    let refuse = |mut report: EditReport, status, message: &str| {
+        report.status = status;
+        report.message = Some(message.to_string());
+        (text.to_string(), report)
     };
+    let Some(symbols) = symbols else {
+        return refuse(
+            report,
+            EditStatus::Unsupported,
+            "symbol edits need tree-sitter grammars, which this jouet or this caller lacks; use a search block",
+        );
+    };
+    let spans = match symbols.locate(path, text, selector) {
+        Ok(spans) => spans,
+        Err(SymbolError::Unsupported) => {
+            return refuse(
+                report,
+                EditStatus::Unsupported,
+                "jouet cannot read definitions from this kind of file; use a search block",
+            );
+        }
+        Err(SymbolError::Invalid(message)) => {
+            return refuse(report, EditStatus::Unsupported, &message);
+        }
+        Err(SymbolError::NotFound(available)) => {
+            report.status = EditStatus::NoMatch;
+            report.candidates = available;
+            return (text.to_string(), report);
+        }
+    };
+    report.found = spans.len();
+    report.lines = spans.iter().map(|s| s.line).collect();
+    let [span] = spans.as_slice() else {
+        report.status = EditStatus::TooManyMatches;
+        report.candidates = spans.iter().map(|s| s.describe.clone()).collect();
+        return (text.to_string(), report);
+    };
+    let newline = newline_of(text);
+    let line_start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+    let indent = &text[line_start..span.start];
+    let indent = if indent.chars().all(char::is_whitespace) {
+        indent
+    } else {
+        ""
+    };
+    let body = with_newline(&reindent(new, indent), newline);
+    let out = format!("{}{}{}", &text[..span.start], body, &text[span.end..]);
+    let before = symbols.syntax_errors(path, text);
+    let after = symbols.syntax_errors(path, &out);
+    if let (Some(before), Some(after)) = (before, after)
+        && after > before
+    {
+        let errors = |n: usize| format!("{n} syntax {}", if n == 1 { "error" } else { "errors" });
+        let message = format!(
+            "the file would have {} where it has {}: check that the new text is a whole definition",
+            errors(after),
+            errors(before)
+        );
+        return refuse(report, EditStatus::DoesNotParse, &message);
+    }
+    let first = |s: &str| s.lines().next().unwrap_or("").trim().to_string();
+    let (was, is) = (first(&text[span.start..span.end]), first(&body));
+    if was != is {
+        let name = selector
+            .rsplit(|c: char| c == ':' || c == '.' || c.is_whitespace())
+            .next()
+            .unwrap_or(selector);
+        report.signature = Some(SignatureChange {
+            name: name.to_string(),
+            before: was,
+            after: is,
+        });
+    }
+    (out, report)
+}
+
+/// `new` moved to `indent`: its common leading whitespace removed, and every
+/// line after the first indented, as the first takes the definition's place
+/// after its indentation. Trailing newlines are dropped, so what followed the
+/// definition stays as it was.
+fn reindent(new: &str, indent: &str) -> String {
+    let lines: Vec<&str> = new.trim_end_matches(['\n', '\r']).lines().collect();
+    let common = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let l = l.get(common..).unwrap_or_else(|| l.trim_start());
+            if i == 0 || l.is_empty() {
+                l.to_string()
+            } else {
+                format!("{indent}{l}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn apply_edit(
+    text: &str,
+    edit: &Edit,
+    index: usize,
+    cursor: &mut usize,
+    path: &Path,
+    symbols: Option<&dyn Symbols>,
+) -> (String, EditReport) {
+    let newline = newline_of(text);
+    let mut report = edit_report(index);
     match edit {
+        Edit::Symbol { selector, new } => apply_symbol(path, text, selector, new, index, symbols),
         Edit::Replace {
             old,
             new,

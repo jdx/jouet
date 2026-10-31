@@ -374,3 +374,180 @@ fn a_moved_file_keeps_its_mode() {
         .mode();
     assert_eq!(mode & 0o777, 0o755);
 }
+
+/// A stand-in for tree-sitter: `fn NAME` up to the first `}` at the same
+/// indentation, and unbalanced braces as syntax errors.
+#[derive(Debug)]
+struct Braces;
+
+impl Symbols for Braces {
+    fn locate(&self, _: &Path, text: &str, selector: &str) -> Result<Vec<Span>, SymbolError> {
+        if selector.contains(' ') {
+            return Err(SymbolError::Invalid(format!("bad selector `{selector}`")));
+        }
+        let needle = format!("fn {selector}(");
+        let spans: Vec<Span> = text
+            .match_indices(&needle)
+            .map(|(start, _)| {
+                let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+                let indent = &text[line_start..start];
+                let line_end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+                let end = if text[start..line_end].trim_end().ends_with('}') {
+                    line_end
+                } else {
+                    let close = format!("\n{indent}}}");
+                    text[start..]
+                        .find(&close)
+                        .map_or(text.len(), |i| start + i + close.len())
+                };
+                Span {
+                    start,
+                    end,
+                    line: text[..start].lines().count()
+                        + usize::from(line_start == start && start > 0),
+                    describe: format!("fn {selector}"),
+                }
+            })
+            .collect();
+        if spans.is_empty() {
+            let all = text
+                .match_indices("fn ")
+                .map(|(i, _)| text[i..].split('(').next().unwrap_or("").to_string())
+                .collect();
+            return Err(SymbolError::NotFound(all));
+        }
+        Ok(spans)
+    }
+
+    fn syntax_errors(&self, _: &Path, text: &str) -> Option<usize> {
+        let open = text.matches('{').count();
+        let close = text.matches('}').count();
+        Some(open.abs_diff(close))
+    }
+}
+
+static BRACES: Braces = Braces;
+
+fn with_braces() -> Options {
+    Options {
+        symbols: Some(&BRACES),
+        ..Options::default()
+    }
+}
+
+const IMPL: &str = "impl Vfox {\n    fn download(&self) {\n        get(\n            url,\n        );\n    }\n\n    fn other(&self) {}\n}\n";
+
+#[test]
+fn a_symbol_edit_replaces_the_definition_and_indents_the_new_text() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let spec =
+        "=== {a.rs}#download\nfn download(&self, retries: u32) {\n    get(url, retries);\n}\n";
+    let (report, _) = f.run_with(spec, Format::Blocks, &with_braces());
+    assert!(report.applied || report.files_written == 1, "{report:?}");
+    assert_eq!(
+        f.read("a.rs"),
+        "impl Vfox {\n    fn download(&self, retries: u32) {\n        get(url, retries);\n    }\n\n    fn other(&self) {}\n}\n"
+    );
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.symbol.as_deref(), Some("download"));
+    assert_eq!(
+        edit.signature,
+        Some(SignatureChange {
+            name: "download".into(),
+            before: "fn download(&self) {".into(),
+            after: "fn download(&self, retries: u32) {".into(),
+        })
+    );
+}
+
+#[test]
+fn an_unchanged_signature_is_not_reported() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let spec = "=== {a.rs}#download\n    fn download(&self) {\n        get(url);\n    }\n";
+    let (report, _) = f.run_with(spec, Format::Blocks, &with_braces());
+    assert_eq!(report.files_written, 1);
+    assert_eq!(report.files[0].edits[0].signature, None);
+    assert!(
+        f.read("a.rs")
+            .contains("    fn download(&self) {\n        get(url);\n    }\n")
+    );
+}
+
+#[test]
+fn a_symbol_edit_that_finds_nothing_lists_the_definitions_and_writes_nothing() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let (report, _) = f.run_with(
+        "=== {a.rs}#upload\nfn upload() {}\n",
+        Format::Blocks,
+        &with_braces(),
+    );
+    assert_eq!(report.files_written, 0);
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::NoMatch);
+    assert_eq!(edit.candidates, ["fn download", "fn other"]);
+    assert_eq!(f.read("a.rs"), IMPL);
+}
+
+#[test]
+fn an_ambiguous_symbol_is_refused_with_each_match() {
+    let text = "fn a() {\n}\nmod m {\n    fn a() {\n    }\n}\n";
+    let f = Fixture::new(&[("a.rs", text)]);
+    let (report, _) = f.run_with("=== {a.rs}#a\nfn a() {}\n", Format::Blocks, &with_braces());
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::TooManyMatches);
+    assert_eq!(edit.found, 2);
+    assert_eq!(f.read("a.rs"), text);
+}
+
+#[test]
+fn a_symbol_edit_that_breaks_the_syntax_is_refused() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let (report, _) = f.run_with(
+        "=== {a.rs}#download\nfn download(&self) {\n    get(url);\n",
+        Format::Blocks,
+        &with_braces(),
+    );
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::DoesNotParse);
+    assert!(
+        edit.message
+            .as_deref()
+            .unwrap()
+            .contains("1 syntax error where it has 0")
+    );
+    assert_eq!(f.read("a.rs"), IMPL);
+}
+
+#[test]
+fn symbol_edits_need_a_resolver_and_a_valid_selector() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let (report, _) = f.run("=== {a.rs}#download\nfn download() {}\n", Format::Blocks);
+    assert_eq!(report.files[0].edits[0].status, EditStatus::Unsupported);
+    let (report, _) = f.run_with(
+        "=== {a.rs}#fn x y\nfn x() {}\n",
+        Format::Blocks,
+        &with_braces(),
+    );
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::Unsupported);
+    assert_eq!(edit.message.as_deref(), Some("bad selector `fn x y`"));
+}
+
+#[test]
+fn symbol_and_search_edits_to_one_file_apply_in_order() {
+    let f = Fixture::new(&[("a.rs", IMPL)]);
+    let spec = format!(
+        "=== {{a.rs}}#other\nfn other(&self) -> u8 {{\n    1\n}}\n{}",
+        block(
+            "a.rs",
+            "        get(\n            url,\n        );\n",
+            "        get(url);\n"
+        )
+    );
+    let (report, _) = f.run_with(&spec, Format::Blocks, &with_braces());
+    assert_eq!(report.files_written, 1, "{report:?}");
+    assert_eq!(
+        f.read("a.rs"),
+        "impl Vfox {\n    fn download(&self) {\n        get(url);\n    }\n\n    fn other(&self) -> u8 {\n        1\n    }\n}\n"
+    );
+}
