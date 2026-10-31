@@ -361,6 +361,14 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     out
 }
 
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// A command's positional arguments and the given flags, or `None` when it
 /// lacks one of them.
 fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
