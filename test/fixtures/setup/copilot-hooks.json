@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot session-start'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot session-start } else { '{}' }",
+        "timeoutSec": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot pre-tool-use'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot pre-tool-use } else { '{}' }",
+        "matcher": "bash|powershell|view|create|edit|str_replace_editor|grep|rg",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-tool-use'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot post-tool-use } else { '{}' }",
+        "matcher": "bash|powershell|view",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-edit'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot post-edit } else { '{}' }",
+        "matcher": "create|edit|str_replace_editor",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-tool-use-failure'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot post-tool-use-failure } else { '{}' }",
+        "matcher": "bash|powershell",
+        "timeoutSec": 10
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot stop'",
+        "powershell": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot stop } else { '{}' }",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

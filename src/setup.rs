@@ -1,13 +1,16 @@
 //! Installing jouet's hooks into a harness's configuration, without touching
 //! anyone else's.
 //!
-//! Claude Code reads hooks from `settings.json` and Codex from `hooks.json`,
-//! in the same shape: `{"hooks": {EVENT: [{"matcher": ..., "hooks":
-//! [HANDLER, ...]}]}}`. jouet adds one matcher group per event, holding one
-//! handler whose command runs `jouet hook HARNESS EVENT`, behind a guard that
-//! exits 0 when jouet is not on `PATH`. That command is how jouet recognises
-//! its own entries, guarded or bare: everything else is left as it is,
-//! re-running is a no-op, and uninstalling removes only those.
+//! Claude Code reads hooks from `settings.json`, Codex from `hooks.json` and
+//! Gemini CLI from its `settings.json`, in the same shape: `{"hooks": {EVENT:
+//! [{"matcher": ..., "hooks": [HANDLER, ...]}]}}`. Cursor's `hooks.json` and
+//! Copilot's `hooks/*.json` list handlers directly, each with its own
+//! matcher: `{"version": 1, "hooks": {EVENT: [HANDLER, ...]}}`. jouet adds one
+//! matcher group (or handler) per event, whose command runs `jouet hook
+//! HARNESS EVENT`, behind a guard that exits 0 when jouet is not on `PATH`.
+//! That command is how jouet recognises its own entries, guarded or bare:
+//! everything else is left as it is, re-running is a no-op, and uninstalling
+//! removes only those.
 //!
 //! One exception: hk's stop hook (`hk agent stop-hook`, from `hk agent
 //! hooks`) in the same file is merged into jouet's, so a stop gets one
@@ -22,6 +25,9 @@ use std::path::{Path, PathBuf};
 pub(crate) enum Harness {
     Claude,
     Codex,
+    Cursor,
+    Gemini,
+    Copilot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,17 +42,27 @@ pub(crate) enum Scope {
 }
 
 /// Seconds a harness waits for a hook. jouet's take milliseconds; this is the
-/// bound on a hung one, after which both harnesses carry on without it.
+/// bound on a hung one, after which the harness carries on without it.
 const TIMEOUT: u64 = 10;
 /// Claude Code's default for a command hook, which a merged hk stop hook
 /// without a timeout of its own had.
 const HK_TIMEOUT: u64 = 600;
+/// Gemini CLI's tools that jouet steers: the shell, reading, searching and
+/// editing. Its matchers are unanchored regular expressions.
+const GEMINI_TOOLS: &str =
+    "^(run_shell_command|read_file|grep_search|search_file_content|replace|write_file)$";
+
+/// The harnesses `jouet setup` and `jouet hook` take, for messages.
+pub(crate) const NAMES: &str = "claude, codex, cursor, gemini or copilot";
 
 impl Harness {
     pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "claude" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
+            "cursor" => Some(Self::Cursor),
+            "gemini" => Some(Self::Gemini),
+            "copilot" => Some(Self::Copilot),
             _ => None,
         }
     }
@@ -55,7 +71,40 @@ impl Harness {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Cursor => "cursor",
+            Self::Gemini => "gemini",
+            Self::Copilot => "copilot",
         }
+    }
+
+    /// The harness's name in prose.
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+            Self::Cursor => "Cursor",
+            Self::Gemini => "Gemini CLI",
+            Self::Copilot => "Copilot",
+        }
+    }
+
+    /// Whether the hook file lists handlers directly, each with its own
+    /// matcher, under a `version`, rather than in matcher groups.
+    pub(crate) fn flat(self) -> bool {
+        matches!(self, Self::Cursor | Self::Copilot)
+    }
+
+    /// Whether the hook file is jouet's alone: Copilot reads every
+    /// `hooks/*.json`, so jouet's go in `jouet.json`, which uninstalling
+    /// removes once nothing else is in it.
+    pub(crate) fn owns_file(self) -> bool {
+        self == Self::Copilot
+    }
+
+    /// Whether the harness has a project hooks file of your own, which git
+    /// does not share. Only Claude Code's `settings.local.json` is one.
+    pub(crate) fn has_local_file(self) -> bool {
+        self == Self::Claude
     }
 
     /// `(harness event, matcher, jouet hook event)` for each hook installed.
@@ -64,6 +113,14 @@ impl Harness {
     /// hooks: its stop hook reads the session transcript instead. Claude
     /// Code's Read and Grep tools reach the hooks too, so rules can steer
     /// them, and a Read is remembered for the session.
+    ///
+    /// Cursor and Gemini CLI cannot tell the agent anything before a tool
+    /// runs without denying it, so a rule's warning waits for the
+    /// post-tool-use hook, which every steered tool gets. Cursor's Write
+    /// sends the whole file to hooks, which fails to start them for a large
+    /// one, so it is not steered; its file comes from `afterFileEdit`
+    /// instead, whose output Cursor ignores, so a format after an edit
+    /// happens without a word.
     pub(crate) fn hooks(self) -> &'static [(&'static str, Option<&'static str>, &'static str)] {
         match self {
             Self::Claude => &[
@@ -85,6 +142,46 @@ impl Harness {
                 ("PreToolUse", Some("^Bash$"), "pre-tool-use"),
                 ("Stop", None, "stop"),
             ],
+            Self::Cursor => &[
+                ("sessionStart", None, "session-start"),
+                ("preToolUse", Some("Shell|Read|Grep"), "pre-tool-use"),
+                ("postToolUse", Some("Shell|Read|Grep"), "post-tool-use"),
+                (
+                    "postToolUseFailure",
+                    Some("Shell|Read|Grep"),
+                    "post-tool-use-failure",
+                ),
+                ("afterFileEdit", None, "post-edit"),
+                ("stop", None, "stop"),
+            ],
+            Self::Gemini => &[
+                ("SessionStart", None, "session-start"),
+                ("BeforeTool", Some(GEMINI_TOOLS), "pre-tool-use"),
+                ("AfterTool", Some(GEMINI_TOOLS), "post-tool-use"),
+                ("AfterTool", Some("^(replace|write_file)$"), "post-edit"),
+                ("AfterAgent", None, "stop"),
+            ],
+            // Copilot's own tool names; its matchers are anchored.
+            Self::Copilot => &[
+                ("sessionStart", None, "session-start"),
+                (
+                    "preToolUse",
+                    Some("bash|powershell|view|create|edit|str_replace_editor|grep|rg"),
+                    "pre-tool-use",
+                ),
+                ("postToolUse", Some("bash|powershell|view"), "post-tool-use"),
+                (
+                    "postToolUseFailure",
+                    Some("bash|powershell"),
+                    "post-tool-use-failure",
+                ),
+                (
+                    "postToolUse",
+                    Some("create|edit|str_replace_editor"),
+                    "post-edit",
+                ),
+                ("agentStop", None, "stop"),
+            ],
         }
     }
 
@@ -104,20 +201,42 @@ impl Harness {
             (Self::Codex, Scope::Local | Scope::Shared) => {
                 project.join(".codex").join("hooks.json")
             }
+            (Self::Cursor, Scope::Global) => home.join(".cursor").join("hooks.json"),
+            (Self::Cursor, Scope::Local | Scope::Shared) => {
+                project.join(".cursor").join("hooks.json")
+            }
+            (Self::Gemini, Scope::Global) => home.join(".gemini").join("settings.json"),
+            (Self::Gemini, Scope::Local | Scope::Shared) => {
+                project.join(".gemini").join("settings.json")
+            }
+            (Self::Copilot, Scope::Global) => jouet_output::paths::env_dir("COPILOT_HOME")
+                .unwrap_or_else(|| home.join(".copilot"))
+                .join("hooks")
+                .join("jouet.json"),
+            (Self::Copilot, Scope::Local | Scope::Shared) => {
+                project.join(".github").join("hooks").join("jouet.json")
+            }
         }
     }
 
-    /// Where the harness looks for the jouet skill.
+    /// Where the harness looks for the jouet skill. Every harness but Claude
+    /// Code reads the shared `.agents/skills`.
     pub(crate) fn skill_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
         let dir = match (self, scope) {
             (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
                 .join("skills"),
             (Self::Claude, Scope::Local | Scope::Shared) => project.join(".claude").join("skills"),
-            (Self::Codex, Scope::Global) => home.join(".agents").join("skills"),
-            (Self::Codex, Scope::Local | Scope::Shared) => project.join(".agents").join("skills"),
+            (_, Scope::Global) => home.join(".agents").join("skills"),
+            (_, Scope::Local | Scope::Shared) => project.join(".agents").join("skills"),
         };
         dir.join("jouet").join("SKILL.md")
+    }
+
+    /// Whether the harness reads a hook's stdout as JSON even when the hook
+    /// has nothing to say, so a missing jouet answers `{}`.
+    pub(crate) fn wants_json(self) -> bool {
+        matches!(self, Self::Cursor | Self::Gemini | Self::Copilot)
     }
 
     /// The hook's command. The guard makes a missing `jouet` (a contributor
@@ -129,41 +248,119 @@ impl Harness {
     /// With `hk`, hk's stop hook merged into this one: jouet runs it, and
     /// without jouet the guard runs it alone.
     fn command(self, event: &str, hk: Option<&str>) -> String {
+        let name = self.name();
         match hk {
+            None if self.wants_json() => format!(
+                "sh -c 'command -v jouet >/dev/null 2>&1 || {{ echo {{}}; exit 0; }}; exec jouet hook {name} {event}'"
+            ),
             None => format!(
-                "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {} {event}'",
-                self.name()
+                "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {name} {event}'"
             ),
             Some(hk) => format!(
-                "sh -c 'command -v jouet >/dev/null 2>&1 || exec {hk}; exec jouet hook {} {event} --hk \"{hk}\"'",
-                self.name()
+                "sh -c 'command -v jouet >/dev/null 2>&1 || exec {hk}; exec jouet hook {name} {event} --hk \"{hk}\"'"
             ),
         }
     }
 
-    /// The command Codex runs instead on Windows, where its hook shell is
-    /// PowerShell. Claude Code has no such field.
-    fn windows_command(self, event: &str, hk: Option<&str>) -> Option<String> {
-        (self == Self::Codex).then(|| match hk {
-            None => format!(
-                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {} {event} }}",
-                self.name()
+    /// The command for PowerShell, which Codex, Copilot, and Cursor and
+    /// Gemini CLI on Windows run hooks with.
+    fn powershell(self, event: &str, hk: Option<&str>) -> String {
+        let name = self.name();
+        match hk {
+            None if self.wants_json() => format!(
+                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} }} else {{ '{{}}' }}"
             ),
+            None => {
+                format!(
+                    "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} }}"
+                )
+            }
             Some(hk) => format!(
-                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {} {event} --hk \"{hk}\" }} else {{ {hk} }}",
-                self.name()
+                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} --hk \"{hk}\" }} else {{ {hk} }}"
             ),
-        })
+        }
+    }
+
+    /// The handler for one hook, in the harness's own fields. Cursor and
+    /// Gemini CLI have one command for every platform, run with PowerShell
+    /// on Windows, so a global install there gets the PowerShell form; a
+    /// project's, which others may use elsewhere, gets `sh -c`.
+    fn handler(
+        self,
+        scope: Scope,
+        jouet_event: &str,
+        matcher: Option<&str>,
+        hk: Option<&(String, Option<u64>)>,
+    ) -> Map<String, Value> {
+        let hk_command = hk.map(|(command, _)| command.as_str());
+        let command = if cfg!(windows)
+            && scope == Scope::Global
+            && matches!(self, Self::Cursor | Self::Gemini)
+        {
+            self.powershell(jouet_event, hk_command)
+        } else {
+            self.command(jouet_event, hk_command)
+        };
+        // A merged stop runs hk's check, so it gets hk's time.
+        let timeout = hk.map_or(TIMEOUT, |(_, t)| t.unwrap_or(HK_TIMEOUT).max(TIMEOUT));
+        let mut handler = Map::new();
+        match self {
+            Self::Claude | Self::Codex => {
+                handler.insert("type".into(), json!("command"));
+                handler.insert("command".into(), json!(command));
+                if self == Self::Codex {
+                    handler.insert(
+                        "commandWindows".into(),
+                        json!(self.powershell(jouet_event, hk_command)),
+                    );
+                }
+                handler.insert("timeout".into(), json!(timeout));
+            }
+            Self::Gemini => {
+                handler.insert("name".into(), json!(format!("jouet-{jouet_event}")));
+                handler.insert("type".into(), json!("command"));
+                handler.insert("command".into(), json!(command));
+                // Milliseconds.
+                handler.insert("timeout".into(), json!(timeout * 1000));
+            }
+            Self::Cursor => {
+                handler.insert("command".into(), json!(command));
+                if let Some(matcher) = matcher {
+                    handler.insert("matcher".into(), json!(matcher));
+                }
+                handler.insert("timeout".into(), json!(timeout));
+            }
+            Self::Copilot => {
+                handler.insert("type".into(), json!("command"));
+                handler.insert("bash".into(), json!(self.command(jouet_event, None)));
+                handler.insert(
+                    "powershell".into(),
+                    json!(self.powershell(jouet_event, None)),
+                );
+                if let Some(matcher) = matcher {
+                    handler.insert("matcher".into(), json!(matcher));
+                }
+                handler.insert("timeoutSec".into(), json!(timeout));
+            }
+        }
+        handler
     }
 }
 
-/// Whether a handler is one jouet installed: its command runs `jouet hook`,
-/// directly (as older versions installed it) or inside `sh -c`.
+/// Whether a handler is one jouet installed: its command (or Copilot's
+/// `bash` or `powershell`) runs `jouet hook`, directly (as older versions
+/// installed it), inside `sh -c`, or behind PowerShell's guard.
 fn is_jouet(handler: &Value) -> bool {
-    handler
-        .get("command")
-        .and_then(Value::as_str)
-        .is_some_and(|command| runs_jouet_hook(&jouet_rules::shell::parse(command)))
+    ["command", "bash", "powershell"].iter().any(|field| {
+        handler
+            .get(*field)
+            .and_then(Value::as_str)
+            .is_some_and(|command| {
+                runs_jouet_hook(&jouet_rules::shell::parse(command))
+                    || (command.starts_with("if (Get-Command jouet ")
+                        && command.contains("{ jouet hook "))
+            })
+    })
 }
 
 /// hk's stop hook, as `hk agent hooks` prints it: a handler with only
@@ -246,7 +443,8 @@ fn runs_jouet_hook(script: &jouet_rules::shell::Script) -> bool {
     direct || script.inner_scripts().iter().any(runs_jouet_hook)
 }
 
-/// The matcher groups holding a jouet handler, with their events, in order.
+/// The matcher groups holding a jouet handler (in a flat file, jouet's
+/// handlers), with their events, in order.
 fn jouet_groups(doc: &Value) -> Vec<(&str, &Value)> {
     let Some(hooks) = doc.get("hooks").and_then(Value::as_object) else {
         return Vec::new();
@@ -268,11 +466,14 @@ pub(crate) fn has_jouet(doc: &Value) -> bool {
     !jouet_groups(doc).is_empty()
 }
 
+/// A matcher group's handlers. An entry without `hooks` is a flat file's
+/// handler, its own only one.
 fn handlers(group: &Value) -> &[Value] {
-    group
-        .get("hooks")
-        .and_then(Value::as_array)
-        .map_or(&[], Vec::as_slice)
+    match group.get("hooks") {
+        Some(Value::Array(list)) => list,
+        Some(_) => &[],
+        None => std::slice::from_ref(group),
+    }
 }
 
 /// Checks that a document has the shape a hook file must have, so a merge
@@ -297,42 +498,39 @@ pub(crate) fn validate(doc: &Value) -> Result<(), String> {
 
 /// Adds jouet's hooks for `harness`, replacing any jouet hooks already there.
 /// Leaves the document untouched when they are already exactly as wanted.
-pub(crate) fn install(doc: &mut Value, harness: Harness) {
+pub(crate) fn install(doc: &mut Value, harness: Harness, scope: Scope) {
     let before = doc.clone();
     uninstall(doc);
     let hk = take_hk_stop(doc);
     let object = doc.as_object_mut().expect("validated as an object");
+    // Cursor requires the version; it goes first in a new file.
+    if harness.flat() && !object.contains_key("version") {
+        object.insert("version".into(), json!(1));
+    }
     let hooks = object
         .entry("hooks")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .expect("validated as an object");
     for (event, matcher, jouet_event) in harness.hooks() {
-        let mut group = Map::new();
-        if let Some(matcher) = matcher {
-            group.insert("matcher".into(), json!(matcher));
-        }
         let merged = hk.as_ref().filter(|_| *jouet_event == "stop");
-        let hk_command = merged.map(|(command, _)| command.as_str());
-        let mut handler = Map::new();
-        handler.insert("type".into(), json!("command"));
-        handler.insert(
-            "command".into(),
-            json!(harness.command(jouet_event, hk_command)),
-        );
-        if let Some(command) = harness.windows_command(jouet_event, hk_command) {
-            handler.insert("commandWindows".into(), json!(command));
-        }
-        // A merged stop runs hk's check, so it gets hk's time.
-        let timeout = merged.map_or(TIMEOUT, |(_, t)| t.unwrap_or(HK_TIMEOUT).max(TIMEOUT));
-        handler.insert("timeout".into(), json!(timeout));
-        group.insert("hooks".into(), json!([handler]));
+        let handler = harness.handler(scope, jouet_event, *matcher, merged);
+        let entry = if harness.flat() {
+            handler
+        } else {
+            let mut group = Map::new();
+            if let Some(matcher) = matcher {
+                group.insert("matcher".into(), json!(matcher));
+            }
+            group.insert("hooks".into(), json!([handler]));
+            group
+        };
         hooks
             .entry(*event)
             .or_insert_with(|| Value::Array(Vec::new()))
             .as_array_mut()
             .expect("validated as an array")
-            .push(Value::Object(group));
+            .push(Value::Object(entry));
     }
     // A re-run would move jouet's groups after any added since; when they
     // are already right, where they sit is left alone.
@@ -344,6 +542,13 @@ pub(crate) fn install(doc: &mut Value, harness: Harness) {
     if only_jouet(&before) && jouet_groups(&before) == jouet_groups(doc) {
         *doc = before;
     }
+}
+
+/// Whether a document holds nothing but a flat file's `version`, as
+/// uninstalling leaves a file only jouet wrote.
+pub(crate) fn is_empty(doc: &Value) -> bool {
+    doc.as_object()
+        .is_some_and(|o| o.keys().all(|k| k == "version"))
 }
 
 /// Removes every jouet handler, then any group, event or `hooks` object that
@@ -361,6 +566,10 @@ pub(crate) fn uninstall(doc: &mut Value) {
         };
         let had = list.len();
         list.retain_mut(|group| {
+            if group.get("hooks").is_none() {
+                // A flat file's handler.
+                return !is_jouet(group);
+            }
             let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
                 return true;
             };
@@ -395,7 +604,7 @@ mod tests {
 
     fn installed(mut doc: Value, harness: Harness) -> Value {
         validate(&doc).unwrap();
-        install(&mut doc, harness);
+        install(&mut doc, harness, Scope::Global);
         doc
     }
 
@@ -838,6 +1047,66 @@ mod tests {
     }
 
     #[test]
+    fn a_flat_file_gets_a_version_and_handlers_with_their_own_matchers() {
+        let doc = installed(json!({}), Harness::Cursor);
+        assert_eq!(
+            pretty(&json!({"version": doc["version"], "preToolUse": doc["hooks"]["preToolUse"]})),
+            r#"{
+  "version": 1,
+  "preToolUse": [
+    {
+      "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor pre-tool-use'",
+      "matcher": "Shell|Read|Grep",
+      "timeout": 10
+    }
+  ]
+}"#
+        );
+        assert_eq!(doc.as_object().unwrap().keys().next().unwrap(), "version");
+        // Others' handlers stay, jouet's are replaced, and a re-run is a no-op.
+        let mine = json!({"command": "./audit.sh", "matcher": "Shell"});
+        let mut with_mine = doc.clone();
+        with_mine["hooks"]["preToolUse"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, mine.clone());
+        let again = installed(with_mine.clone(), Harness::Cursor);
+        assert_eq!(again, with_mine);
+        let mut removed = again;
+        uninstall(&mut removed);
+        assert_eq!(
+            removed,
+            json!({"version": 1, "hooks": {"preToolUse": [mine]}})
+        );
+
+        let copilot = installed(json!({}), Harness::Copilot);
+        let stop = &copilot["hooks"]["agentStop"][0];
+        assert_eq!(stop["type"], "command");
+        assert_eq!(
+            stop["powershell"],
+            "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot stop } else { '{}' }"
+        );
+        assert_eq!(stop["timeoutSec"], 10);
+        let mut removed = copilot;
+        uninstall(&mut removed);
+        assert!(is_empty(&removed), "{removed}");
+    }
+
+    #[test]
+    fn gemini_gets_named_handlers_with_millisecond_timeouts() {
+        let doc = installed(json!({"ui": {"theme": "x"}}), Harness::Gemini);
+        let before = &doc["hooks"]["BeforeTool"][0];
+        assert_eq!(before["matcher"], GEMINI_TOOLS);
+        assert_eq!(before["hooks"][0]["name"], "jouet-pre-tool-use");
+        assert_eq!(before["hooks"][0]["timeout"], 10_000);
+        assert_eq!(
+            doc["hooks"]["AfterAgent"][0]["hooks"][0]["command"],
+            "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"
+        );
+        assert_eq!(installed(doc.clone(), Harness::Gemini), doc);
+    }
+
+    #[test]
     fn refuses_shapes_it_does_not_understand() {
         assert!(validate(&json!([])).is_err());
         assert!(validate(&json!({"hooks": []})).is_err());
@@ -858,7 +1127,19 @@ mod tests {
         assert!(is_jouet(
             &json!({"command": Harness::Codex.command("stop", None)})
         ));
+        for harness in [Harness::Cursor, Harness::Gemini, Harness::Copilot] {
+            assert!(is_jouet(&json!({"command": harness.command("stop", None)})));
+            assert!(is_jouet(
+                &json!({"command": harness.powershell("stop", None)})
+            ));
+        }
+        assert!(is_jouet(
+            &json!({"bash": "jouet hook copilot stop", "powershell": "x"})
+        ));
         assert!(!is_jouet(&json!({"command": "echo jouet hook"})));
+        assert!(!is_jouet(
+            &json!({"command": "if (Get-Command jouet -ErrorAction Ignore) { jouet edit }"})
+        ));
         assert!(!is_jouet(
             &json!({"command": "sh -c 'echo jouet hook; command -v jouet'"})
         ));

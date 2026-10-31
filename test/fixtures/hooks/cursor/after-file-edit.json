@@ -1,0 +1,1 @@
+{"conversation_id":"c1","generation_id":"g1","model":"claude-opus-4-7-thinking-max","model_id":"claude-opus-4-7","model_params":[],"hook_event_name":"afterFileEdit","cursor_version":"3.23.13","workspace_roots":["/work/app"],"user_email":null,"transcript_path":null,"file_path":"/work/app/src/main.rs","edits":[{"old_string":"fn main() {}","new_string":"fn main() { }"}]}
