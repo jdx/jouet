@@ -56,7 +56,7 @@ description = "The platform team's rules and routines"
 jouet = "0.3"                      # the oldest jouet it works with
 ```
 
-Its rules and routines are named after it, so a plugin never takes the name of a built-in, yours or another plugin's: the rule above is `acme/no-prod-db` (in `[jouet rule: acme/no-prod-db]`, `jouet rule test` and `[rules] disable`), and the routine runs as `joue acme/deploy`. A file at the plugin's root other than the manifest, such as a README, is left out, and so is a directory whose name starts with `.`; any other directory, or a key the manifest does not know, is refused, so that new kinds of thing can be added to plugins later.
+Its rules and routines are named after it, so a plugin never takes the name of a built-in, yours or another plugin's: the rule above is `acme/no-prod-db` (in `[jouet rule: acme/no-prod-db]`, `jouet rule test` and `[rules] disable`), and the routine runs as `joue acme/deploy`. A name belongs to one plugin: `jouet plugin add` refuses a name already pinned elsewhere or enforced (adding it to the same `plugins.toml` replaces the pin), and of two plugins with one name only the first loads, the system's before yours before a repository's, so an enforced plugin keeps its name; `jouet plugin ls` shows the other as invalid. A file at the plugin's root other than the manifest, such as a README, is left out, and so is a directory whose name starts with `.`; any other directory, or a key the manifest does not know, is refused, so that new kinds of thing can be added to plugins later.
 
 `jouet plugin add` fetches a plugin, runs its rules' examples, and pins it in `~/.config/jouet/plugins.toml`, or with `--repo` in this repository's `.jouet/plugins.toml`:
 

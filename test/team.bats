@@ -368,3 +368,55 @@ TOML
 	run --separate-stderr joue org-check
 	assert_failure 4
 }
+
+@test "a plugin's name is its own: adding one refuses a name already pinned or enforced" {
+	plugin_files "$BATS_TEST_TMPDIR/mine" 'mine'
+	plugin_files "$BATS_TEST_TMPDIR/theirs" 'theirs'
+	jouet plugin add "$BATS_TEST_TMPDIR/mine" --yes >/dev/null
+
+	# The same name, pinned by the repository as well, would make
+	# `acme/no-curl` name two rules.
+	run --separate-stderr jouet plugin add "$BATS_TEST_TMPDIR/theirs" --repo --yes
+	assert_failure 4
+	[[ "$stderr" == *"there is already a plugin named acme, pinned by the user plugins.toml"* ]]
+	[[ ! -e .jouet/plugins.toml ]]
+
+	# Into the same plugins.toml, it replaces the pin.
+	run --separate-stderr jouet plugin add "$BATS_TEST_TMPDIR/theirs" --yes
+	assert_success
+	run --separate-stderr joue acme/hello
+	assert_output 'theirs'
+
+	# The system's name comes first.
+	jouet plugin rm acme >/dev/null
+	mkdir -p "$JOUET_SYSTEM_DIR/plugins"
+	plugin_files "$JOUET_SYSTEM_DIR/plugins/acme" 'the organisation'"'"'s'
+	chmod -R go-w "$JOUET_SYSTEM_DIR"
+	run --separate-stderr jouet plugin add "$BATS_TEST_TMPDIR/mine" --yes
+	assert_failure 4
+	[[ "$stderr" == *"there is already a plugin named acme, installed in $JOUET_SYSTEM_DIR/plugins/acme"* ]]
+}
+
+@test "of two plugins with one name, only the first loads, and the enforced one is first" {
+	plugin_files "$BATS_TEST_TMPDIR/mine" 'mine'
+	jouet plugin add "$BATS_TEST_TMPDIR/mine" --yes >/dev/null
+	run --separate-stderr joue acme/hello
+	assert_output 'mine'
+
+	# The organisation installs a plugin of the same name afterwards.
+	mkdir -p "$JOUET_SYSTEM_DIR/plugins"
+	plugin_files "$JOUET_SYSTEM_DIR/plugins/acme" 'the organisation'"'"'s'
+	chmod -R go-w "$JOUET_SYSTEM_DIR"
+
+	run --separate-stderr jouet rule list
+	assert_line --regexp '^acme/no-curl +enabled +deny +enforced:acme +'
+	refute_line --regexp '^acme/no-curl +.* plugin:acme'
+	assert_line --partial "note: plugin acme: the plugin acme installed in $JOUET_SYSTEM_DIR/plugins/acme comes first, so this one (pinned by the user plugins.toml) does not run; a plugin's name must be its own"
+	run --separate-stderr jouet plugin ls
+	assert_line --regexp '^acme  invalid  user  '
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'curl x')"
+	assert_output --partial "the organisation's"
+	refute_output --partial 'mine'
+	run --separate-stderr joue acme/hello
+	assert_output "the organisation's"
+}

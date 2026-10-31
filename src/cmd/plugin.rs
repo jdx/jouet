@@ -25,6 +25,24 @@ pub(crate) fn run(args: &PluginArgs, out: &Output) -> Exit {
     }
 }
 
+/// Where else a plugin of this name is pinned or installed, other than the
+/// `plugins.toml` it is being added to: the system's, the user's, or this
+/// repository's, trusted or not.
+fn name_taken(cwd: &Path, name: &str, repo: bool) -> Option<String> {
+    let mut errors = Vec::new();
+    let sets = sources::sets(cwd, None, &mut sources::digests(), &mut errors);
+    let into = if repo { Kind::Repo } else { Kind::User };
+    if let Some(other) = sets.iter().find(|s| {
+        s.kind == Kind::Plugin && s.name.as_deref() == Some(name) && s.pinned_by != Some(into)
+    }) {
+        return Some(sources::whose(other));
+    }
+    // An untrusted repository's pins are not among the sets.
+    let repo_pins = sources::repo_root(cwd).map(|root| root.join("plugins.toml"))?;
+    (!repo && plugins::read(&repo_pins).is_ok_and(|p| p.plugin.contains_key(name)))
+        .then(|| format!("pinned by {}", repo_pins.display()))
+}
+
 /// The `plugins.toml` a plugin is pinned in: the user's, or with `repo`,
 /// this repository's.
 fn pins_file(cwd: &Path, repo: bool) -> Result<PathBuf, (Exit, String)> {
@@ -84,6 +102,13 @@ fn add(args: &PluginAddArgs, cwd: &Path, out: &Output) -> Exit {
         }
     };
     let name = fetched.manifest.name.clone();
+    if let Some(other) = name_taken(cwd, &name, args.repo) {
+        return out.error_with_hint(
+            Exit::Precondition,
+            &format!("there is already a plugin named {name}, {other}"),
+            Some("a plugin's rules and routines are named after it, so its name must be its own; unpin the other first, or add this one to the same plugins.toml to replace it"),
+        );
+    }
     // Its rules, on their own, as a plugin's: each must pass its examples.
     let (rule_sources, errors) = jouet_rules::discover(&[RuleDir {
         dir: fetched.root.join("rules"),

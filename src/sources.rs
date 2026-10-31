@@ -330,7 +330,40 @@ pub(crate) fn sets(
             ));
         }
     }
+    claim_names(&mut out);
     out
+}
+
+/// Where a plugin comes from, for a person: who pins it, or the system's
+/// `plugins/`.
+pub(crate) fn whose(set: &Set) -> String {
+    match (set.pinned_by, &set.pin) {
+        (Some(Kind::System), None) => format!("installed in {}", set.root.display()),
+        (Some(by), _) => format!("pinned by the {} plugins.toml", by.name()),
+        (None, _) => set.root.display().to_string(),
+    }
+}
+
+/// Refuses each plugin with the name of one before it, whatever state that
+/// one is in, so `acme/no-curl` names one plugin's rule wherever it is
+/// written, and no plugin can stand in for another. The system's come
+/// first, so an enforced plugin always keeps its name.
+fn claim_names(sets: &mut [Set]) {
+    let mut claimed: Vec<(String, String)> = Vec::new();
+    for set in sets.iter_mut().filter(|s| s.kind == Kind::Plugin) {
+        let Some(name) = set.name.clone() else {
+            continue;
+        };
+        match claimed.iter().find(|(n, _)| *n == name) {
+            Some((_, first)) => {
+                set.status = Status::Invalid(format!(
+                    "the plugin {name} {first} comes first, so this one ({}) does not run; a plugin's name must be its own",
+                    whose(set)
+                ));
+            }
+            None => claimed.push((name, whose(set))),
+        }
+    }
 }
 
 /// The plugins a `plugins.toml` pins, and whether each is kept as pinned.
