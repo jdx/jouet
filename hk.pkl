@@ -9,9 +9,32 @@ local linters = new Mapping<String, Step> {
         // One run over the whole workspace, rather than one per crate's
         // Cargo.toml that the builtin would otherwise start.
         workspace_indicator = null
-        check = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+        // Declared effects (it writes only target/), so `hk run check --safe`,
+        // which `jouet diag` runs, does not refuse it.
+        check = new CommandSpec {
+            command = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+            effect = "write"
+        }
         // Same as `mise run lint-fix`, so fixes cover the targets check does.
-        fix = "cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
+        fix = new CommandSpec {
+            command = "cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings"
+            effect = "write"
+        }
+    }
+    // Same invocation as `mise run lint:deps`: a dependency no crate uses,
+    // including one left in [workspace.dependencies], or a .rs file no crate
+    // compiles. It reads source rather than building, so it takes well under a
+    // second and runs in pre-commit. One run over the whole workspace.
+    ["cargo-shear"] {
+        glob = List("**/Cargo.toml", "**/*.rs")
+        check = new CommandSpec {
+            command = "mise x github:Boshen/cargo-shear -- cargo-shear --deny-warnings"
+            effect = "read"
+        }
+        fix = new CommandSpec {
+            command = "mise x github:Boshen/cargo-shear -- cargo-shear --fix"
+            effect = "write"
+        }
     }
     // The bats tests and their helper. `mise x` for the same reason as
     // jactionlint below.

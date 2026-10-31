@@ -23,6 +23,8 @@ jq = "latest"
 # hk.pkl lints the bats tests with these.
 shellcheck = "latest"
 shfmt = "latest"
+# `lint:deps` and hk.pkl fail on a dependency no code uses.
+"github:Boshen/cargo-shear" = "latest"
 node = "24"
 # Renders docs/cli from the usage spec the binary serves.
 usage = { version = "latest", minimum_release_age = "0s" }
@@ -84,8 +86,8 @@ depends = ["build"]
 run = "python3 bench/agents.py run --smoke"
 
 [tasks.lint]
-description = "Check formatting and run clippy"
-depends = ["lint:fmt", "lint:clippy"]
+description = "Check formatting, run clippy and look for unused dependencies"
+depends = ["lint:fmt", "lint:clippy", "lint:deps"]
 
 [tasks."lint:fmt"]
 description = "Check formatting"
@@ -95,11 +97,18 @@ run = "cargo fmt --all --check"
 description = "Run clippy, warnings as errors"
 run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 
+[tasks."lint:deps"]
+description = "Fail on a dependency no crate uses (workspace-level ones too), or a .rs file no crate compiles"
+# A false positive (a crate depended on only to turn on one of its features, say)
+# goes in that crate's `[package.metadata.cargo-shear] ignored`, with a comment.
+run = "cargo-shear --deny-warnings"
+
 [tasks.lint-fix]
 description = "Auto-fix formatting and the clippy lints that can be fixed"
 run = [
     "cargo fmt --all",
     "cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings",
+    "cargo-shear --fix",
 ]
 
 [tasks.ci]
