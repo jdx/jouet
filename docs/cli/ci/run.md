@@ -5,7 +5,7 @@
 
 Run a workflow's jobs here with jactionlint, and show why any failed
 
-Runs `jactionlint run`, which needs no container engine: each job runs in a copy of the checkout, in the OS sandbox, with a throwaway home and no secrets unless given. Prints one line for the run, then each failed step with the end of its output (cut like `wait ci`'s log excerpts) and the jobs that were skipped and why; the whole transcript is kept in a log. WORKFLOW is a file of .github/workflows (the extension is optional), a path, or a workflow's `name:`. --check takes a check's name as `wait ci` prints it and runs the job behind it. Arguments after `--` go to `jactionlint run` as they are, such as `--secret NAME=VALUE`. It shows what happens on this machine, not whether GitHub will pass: jobs for another OS are skipped. Exits 1 when a job failed, 3 when no workflow or job matches, 4 when jactionlint is missing or the run could not start.
+Runs `jactionlint run`, which needs no container engine: each job runs in a copy of the checkout, in the OS sandbox, with a throwaway home and no secrets unless given. Prints one line for the run, then each failed step with the end of its output (cut like `wait ci`'s log excerpts) and the jobs that were skipped and why; the whole transcript is kept in a log. WORKFLOW is a file of .github/workflows (the extension is optional), a path, or a workflow's `name:`. --check takes a check's name as `wait ci` prints it and runs the job behind it. Arguments after `--` go to `jactionlint run` as they are, such as `--secret NAME=VALUE`. `--secrets-from fnox` resolves the `secrets.*` the jobs read through fnox and passes them in a temporary file, never on the command line. It shows what happens on this machine, not whether GitHub will pass: jobs for another OS are skipped. Exits 1 when a job failed, 3 when no workflow or job matches, 4 when jactionlint is missing or the run could not start.
 
 ## Arguments
 - **`[WORKFLOW]`** — The workflow. Needed when the repository has several and no --check is given
@@ -16,4 +16,7 @@ Runs `jactionlint run`, which needs no container engine: each job runs in a copy
 - **`--check <NAME>`** — Run the job behind this check name, such as `unit (ubuntu-latest)`
 - **`-e --event <EVENT>`** — The event that triggers the workflow (default push)
 - **`--log-lines <N>`** — Lines of each failed step to show (default 60; 0 shows all of it)
+- **`--secrets-from <SOURCE>`** — Give the jobs the secrets they read, resolved through this tool
+
+  **Choices:** `fnox`
 - **`-h --help`** — Print help
