@@ -39,7 +39,14 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
 - a short `PATH` whose first entry is a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm.
 
-The user's own `~/.claude`, `~/.codex` and jouet ledger are never read or written. The one exception is authentication. An API key in the environment (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; `OPENAI_API_KEY` or `CODEX_API_KEY`) is passed through. Without one, the harness's credentials file (`.credentials.json` or `auth.json`) is linked into the run's config directory, so a token refreshed during a run is written back where the harness will look next time. An agent in a run can read that file, as it could anyway.
+The user's own `~/.claude`, `~/.codex` and jouet ledger are never read or written. The one exception is authentication:
+
+- An API key or token in the environment (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; `OPENAI_API_KEY` or `CODEX_API_KEY`) is passed through. This is the dependable way to run a long suite. For Claude Code, `claude setup-token` prints a long-lived token for `CLAUDE_CODE_OAUTH_TOKEN`, and nothing then needs refreshing.
+- Without one, each run gets a copy of the harness's credentials file (`.credentials.json` or `auth.json`), readable only by you. A run whose access token has expired refreshes it, and that spends the old refresh token. So after the run, a copy that changed is written back over your file, atomically and under a lock. If your file changed during the run too, the newer of the two is kept. The run's record lists what was written back.
+
+A link to the file would not survive this: the harnesses replace the file when they refresh, which turns the link into a file of its own, and the run directory is deleted afterwards. That logs you out of your own CLI.
+
+When a run fails because the harness cannot log in at all, the suite stops instead of recording a failure for every remaining run. An agent in a run can read the credentials file, as it could anyway.
 
 ### Running the agents
 
@@ -106,7 +113,7 @@ python3 bench/agents.py report bench/results/<id>   # rewrite a summary
 | `--max-usd-per-run` | 3 | Claude Code's `--max-budget-usd` (Codex reports no cost) |
 | `--max-total-tokens` | 60,000,000 | skip the remaining runs once the suite has spent this |
 | `--timeout` | each task's | cap every task's timeout, in seconds |
-| `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs |
+| `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs. It is copied once when the suite starts, so a rebuild during the suite neither changes nor removes what is measured |
 | `--keep-work` | off | keep each run's work tree and home, for debugging |
 
 A run stopped by its timeout or a budget counts as a failure, and the report says which stopped it.

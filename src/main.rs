@@ -321,6 +321,30 @@ pub struct StatsArgs {
 ///   pub fn download(&self, url: &str, retries: u32) -> Result<()> {
 ///       ...
 ///   }
+///
+/// `--pattern PAT --rewrite REPL --lang LANG [PATH...]` rewrites every
+/// match of a structural pattern (ast-grep's) under the paths, instead of
+/// reading a spec. The rewrites go through the same all-or-nothing writes,
+/// --dry-run, --diff, --check and --revert-on-fail, a rewrite that adds
+/// syntax errors is refused, and a pattern that matches nothing writes
+/// nothing (exit 4). A pattern is code in LANG:
+///
+/// - Quote it in single quotes. In double quotes the shell expands `$X`,
+///   and `"$X.unwrap()"` becomes `.unwrap()`, which matches nothing.
+/// - `$X` (uppercase) matches exactly one node; `$$$X` matches any number,
+///   such as all of a call's arguments. `foo($A)` matches only one-argument
+///   calls, `foo($$$ARGS)` every call. `$_` matches without capturing.
+/// - It must be whole code: `client.get($URL)`, not `get($URL`. A Rust
+///   call pattern matches the call, not a `?` or `;` after it.
+/// - A name used twice must match the same text twice: `$A == $A`.
+/// - REPL is text with the pattern's `$X` filled in; the rest is copied as
+///   written, and indentation follows the match.
+///
+/// Examples:
+///   jouet edit --pattern '$C.get($URL).send()?' --rewrite '$C.get($URL).timeout(TIMEOUT).send()?' --lang rust src/
+///   jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app/ --check 'python -m pytest -q' --revert-on-fail
+///
+/// Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 #[derive(Args)]
 pub struct EditArgs {
     /// Read the spec from FILE instead of stdin (`-` is stdin)
@@ -346,6 +370,18 @@ pub struct EditArgs {
     /// Restore every edited file if --check or --diag fails
     #[usage(long, global)]
     revert_on_fail: bool,
+    /// Rewrite code matching this ast-grep pattern, instead of reading a spec
+    #[usage(long, value_name = "PAT")]
+    pattern: Option<String>,
+    /// What --pattern's matches become; its `$X` are the pattern's
+    #[usage(long, value_name = "REPL")]
+    rewrite: Option<String>,
+    /// The language of --pattern: rust, python, javascript, typescript, tsx,
+    /// go, ruby, java, c or cpp
+    #[usage(long, value_name = "LANG")]
+    lang: Option<String>,
+    /// With --pattern, the files and directories to rewrite (default .)
+    paths: Vec<String>,
     /// Refuse unless PATH's contents have this SHA-256 hash. Repeatable
     #[usage(long, global, value_name = "PATH=SHA256")]
     expect_hash: Vec<String>,
@@ -626,6 +662,11 @@ pub struct LandArgs {
 ///   that has not changed since, collapses to one line (`src/x.rs: 3 already
 ///   shown, unchanged`). --again shows them anyway.
 ///
+/// With --structural, PATTERN is code in --lang, matched by ast-grep: `$X`
+/// is one node, `$$$X` any number, and only files in that language are
+/// searched. Quote it in single quotes, or the shell expands `$X`
+/// (`jouet agent-help edit` has more on patterns).
+///
 /// Exits 0 with matches, 1 with none, 2 for a bad pattern or glob, and 3
 /// for a path that does not exist.
 ///
@@ -634,6 +675,10 @@ pub struct LandArgs {
 ///   jouet search -F 'client.get(' -g '*.rs'
 ///   jouet search -i timeout --budget 2000 --file-budget 400
 ///   jouet search -l TODO
+///   jouet search --structural --lang rust '$X.unwrap()'
+///   jouet search --structural --lang go 'if err != nil { return $$$ }'
+///   jouet search --structural --lang typescript 'useEffect($FN, [])'
+
 #[derive(Args)]
 pub struct SearchArgs {
     /// The regular expression to search for (a literal with -F)
@@ -667,6 +712,14 @@ pub struct SearchArgs {
     /// Show matches this session was already shown, too
     #[usage(long)]
     again: bool,
+    /// Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any
+    /// number. Needs --lang
+    #[usage(long)]
+    structural: bool,
+    /// The language of a --structural pattern: rust, python, javascript,
+    /// typescript, tsx, go, ruby, java, c or cpp
+    #[usage(long, value_name = "LANG")]
+    lang: Option<String>,
 }
 
 /// Read a file by its outline, a symbol or a range

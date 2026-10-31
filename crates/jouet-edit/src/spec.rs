@@ -63,6 +63,13 @@ pub enum Edit {
     /// [`crate::Symbols`] finds it, so a formatter reflowing the text does
     /// not break the match.
     Symbol { selector: String, new: String },
+    /// Replace byte ranges of the file, computed by the caller against
+    /// `original`, such as the matches of a structural pattern. Refused if
+    /// the file is no longer `original`.
+    Spans {
+        original: String,
+        spans: Vec<(usize, usize, String)>,
+    },
     /// A patch hunk. It is searched for after the previous hunk, and after
     /// each anchor line in turn, and must match exactly once in what remains.
     Hunk {

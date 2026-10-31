@@ -7,4 +7,5 @@
 
 pub mod memory;
 pub mod search;
+pub mod structural;
 pub mod symbols;

@@ -17,6 +17,7 @@ repository = "https://github.com/jdx/jouet"
 readme = "README.md"
 
 [workspace.dependencies]
+ast-grep-core = "0.51"
 jouet-audit = { path = "crates/jouet-audit", version = "0.0.1" }
 jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
 jouet-git = { path = "crates/jouet-git", version = "0.0.1" }

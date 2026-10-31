@@ -75,9 +75,10 @@ helpers, the setup, hook, ledger and agent-guide code, and the test selection be
   categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
   `stats`, the ledger reader and estimates behind `jouet stats`.
 - `jouet-search`: `jouet search` (ripgrep's walker and searcher, with budgets and grouping by
-  enclosing definition), the session memory of what an agent was shown, and the tree-sitter
-  grammars the `grammars` feature compiles in. Without the feature (`--no-default-features`),
-  search is plain text.
+  enclosing definition), the session memory of what an agent was shown, the tree-sitter
+  grammars the `grammars` feature compiles in, and structural search and rewrites on
+  `ast-grep-core`, which shares tree-sitter with the grammars. Without the feature
+  (`--no-default-features`), search is plain text.
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
   in the binary, so the crate makes no network calls.

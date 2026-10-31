@@ -17,6 +17,7 @@ workspace = true
 [features]
 # The tree-sitter grammars: the definitions search groups matches by.
 grammars = [
+  "dep:ast-grep-core",
   "dep:tree-sitter",
   "dep:tree-sitter-c",
   "dep:tree-sitter-cpp",
@@ -30,6 +31,7 @@ grammars = [
 ]
 
 [dependencies]
+ast-grep-core = { workspace = true, optional = true }
 grep-regex.workspace = true
 grep-searcher.workspace = true
 ignore.workspace = true
