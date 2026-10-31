@@ -84,7 +84,7 @@ writes() {
 
 	assert_success
 	assert_line "[entire:01M4C997EA] resolved on Entire trail #424"
-	assert_line "Entire findings are separate from GitHub threads: no thread was changed by these."
+	assert_line "Entire findings are separate from GitHub threads: none was changed by these."
 	assert_equal "$(writes)" "trail finding resolve 424 $OPEN -m Fixed: uninstall tiny first --repo gh/jdx/mise"
 }
 

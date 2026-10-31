@@ -1,0 +1,46 @@
+{
+  "items": [
+    {
+      "id": "01M69HAFTFES527BAJQWFDZ5YA",
+      "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+      "kind": "discussion",
+      "title": "Tests",
+      "reviewCommentId": null,
+      "resolved": false,
+      "resolvedBy": null,
+      "resolvedAt": null,
+      "createdBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "createdAt": "2026-10-31T17:50:05.647Z",
+      "updatedAt": "2026-10-31T17:50:05.647Z",
+      "lastMessageAt": "2026-10-31T17:50:05.647Z",
+      "lastMessageAuthor": "jdx",
+      "messageCount": 1,
+      "participants": [
+        {
+          "login": "jdx"
+        }
+      ]
+    },
+    {
+      "id": "01M69GVB1SNG4YRX6R3J5ZHSDP",
+      "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+      "kind": "discussion",
+      "title": "Naming",
+      "reviewCommentId": null,
+      "resolved": true,
+      "resolvedBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "resolvedAt": "2026-10-31T17:42:45.445Z",
+      "createdBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "createdAt": "2026-10-31T17:41:49.241Z",
+      "updatedAt": "2026-10-31T17:42:45.445Z",
+      "lastMessageAt": "2026-10-31T17:42:20.887Z",
+      "lastMessageAuthor": "jdx",
+      "messageCount": 2,
+      "participants": [
+        {
+          "login": "jdx"
+        }
+      ]
+    }
+  ]
+}

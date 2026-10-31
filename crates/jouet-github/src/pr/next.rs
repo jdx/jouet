@@ -12,6 +12,7 @@
 use super::status::{PrStatus, State};
 use crate::forge::Forge;
 use serde::Serialize;
+use std::fmt::Write as _;
 
 /// Whose move it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -150,6 +151,10 @@ pub fn next(pr: &PrStatus) -> Next {
                 )),
                 // A Forgejo draft is a `WIP:` title, which no command clears.
                 Forge::Forgejo => None,
+                Forge::Entire => Some(format!(
+                    "entire trail update --branch {} --status open --repo et/{}",
+                    pr.head, pr.repo
+                )),
             },
         );
     }
@@ -254,15 +259,18 @@ pub fn next(pr: &PrStatus) -> Next {
             Some(format!("jouet wait pr {name} --until merged")),
         );
     }
-    step(
-        Action::ReadyToMerge,
-        ready_reason(pr),
-        Some(match forge {
-            Forge::GitHub => format!("jouet pr land {name}"),
-            Forge::GitLab => format!("glab mr merge {} -R {qualified}", pr.number),
-            Forge::Forgejo => format!("tea pulls merge {} --repo {}", pr.number, pr.repo),
-        }),
-    )
+    let land = match forge {
+        Forge::GitHub => Some(format!("jouet pr land {name}")),
+        Forge::GitLab => Some(format!("glab mr merge {} -R {qualified}", pr.number)),
+        Forge::Forgejo => Some(format!("tea pulls merge {} --repo {}", pr.number, pr.repo)),
+        // The entire CLI has no command that merges a trail.
+        Forge::Entire => None,
+    };
+    let mut reason = ready_reason(pr);
+    if land.is_none() {
+        let _ = write!(reason, "; merge it on entire.com: {}", pr.url);
+    }
+    step(Action::ReadyToMerge, reason, land)
 }
 
 /// `Checks pass (46/46), approved, no unresolved threads`.

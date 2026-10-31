@@ -439,7 +439,7 @@ fn cli_token(forge: Forge, host: &str) -> Option<String> {
     let (dir, read): (&str, ReadToken) = match forge {
         Forge::GitLab => ("glab-cli", glab_token),
         Forge::Forgejo => ("tea", tea_token),
-        Forge::GitHub => return None,
+        Forge::GitHub | Forge::Entire => return None,
     };
     let override_dir = match forge {
         Forge::GitLab => std::env::var_os("GLAB_CONFIG_DIR").map(PathBuf::from),

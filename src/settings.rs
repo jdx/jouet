@@ -47,10 +47,10 @@ pub(crate) struct Settings {
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "entire")]
 pub(crate) struct EntireSettings {
-    /// Draw on Entire (sessions, checkpoints, line origins and review findings) where `entire` is installed and its login works; off never runs it
+    /// Draw on Entire (sessions, checkpoints, line origins, review findings and the repositories it hosts) where `entire` is installed and its login works; off never runs it
     #[usage(env = "JOUET_ENTIRE", default = true)]
     pub enabled: bool,
-    /// Milliseconds each `entire` call for status, sessions, checkpoints, trails and findings may take before jouet stops waiting
+    /// Milliseconds each `entire` call for status, sessions, checkpoints, trails, findings and discussions may take before jouet stops waiting
     #[usage(env = "JOUET_ENTIRE_TIMEOUT_MS", default = 5000)]
     pub timeout_ms: u64,
     /// Milliseconds each `entire why` for --why may take; a repository with a long history can take a minute

@@ -8,6 +8,9 @@
 //! fail counts as skipped, every other job as required); Forgejo's are the
 //! head's commit statuses, which is where Forgejo Actions reports. Job logs
 //! come from GitHub Actions and GitLab; Forgejo's API has none to give.
+//! An Entire-hosted trail's checks are its check runs and its blocking
+//! gates as one Entire Gates check, read through the `entire` CLI, which
+//! gives no logs either.
 
 use super::checks::{Check, State};
 use super::ci;
@@ -15,6 +18,7 @@ use super::joblog;
 use super::remote::Halt;
 use super::run;
 use super::watch::{self, Cached, PollError, Pr, Snapshot};
+use jouet_github::entire_forge::{self, EntireForge};
 use jouet_github::forgejo::{self, Forgejo};
 use jouet_github::gitlab::{self, GitLab};
 use jouet_github::host::Host;
@@ -28,6 +32,7 @@ pub enum Remote {
     GitHub(Client),
     GitLab(GitLab),
     Forgejo(Forgejo),
+    Entire(EntireForge),
 }
 
 impl Remote {
@@ -37,6 +42,7 @@ impl Remote {
         match (repo.forge(), repo.host.as_deref()) {
             (Some(Forge::GitLab), Some(host)) => Ok(Self::GitLab(GitLab::new(host))),
             (Some(Forge::Forgejo), Some(host)) => Ok(Self::Forgejo(Forgejo::new(host))),
+            (Some(Forge::Entire), Some(_)) => Ok(Self::Entire(EntireForge::new())),
             (None, Some(host)) => Err(jouet_github::forge::unknown(host)),
             _ => Ok(Self::GitHub(Client::from_env())),
         }
@@ -48,6 +54,7 @@ impl Remote {
             Self::GitHub(c) => c,
             Self::GitLab(g) => g,
             Self::Forgejo(f) => f,
+            Self::Entire(e) => e,
         }
     }
 
@@ -62,6 +69,7 @@ impl Remote {
             Self::GitHub(c) => c,
             Self::GitLab(g) => g,
             Self::Forgejo(f) => f,
+            Self::Entire(e) => e,
         }
     }
 }
@@ -415,6 +423,98 @@ impl Ci for Forgejo {
     }
 }
 
+impl Ci for EntireForge {
+    fn resolve(&mut self, target: Target) -> Result<(Repo, u64), Halt> {
+        let doc = self.show(&target).map_err(Failure::Other)?;
+        match doc.and_then(|d| d["number"].as_u64()) {
+            Some(n) => Ok((target.repo().clone(), n)),
+            None => Err(not_found(&target)),
+        }
+    }
+
+    fn poll(
+        &mut self,
+        repo: &Repo,
+        number: u64,
+        pinned: Option<&str>,
+        snap: &mut Snapshot,
+    ) -> Result<(), PollError> {
+        let doc = self
+            .fresh(repo, number)
+            .map_err(Failure::Other)?
+            .ok_or_else(|| PollError::NotFound(format!("trail {repo}#{number} does not exist")))?;
+        let (pr, checks) = entire_snapshot(&doc, number);
+        // A trail's checks are its head's; a pinned commit that is no
+        // longer the head has none to read.
+        let sha = pinned.map_or_else(|| pr.head_sha.clone(), str::to_string);
+        let checks = if sha == pr.head_sha {
+            checks
+        } else {
+            Vec::new()
+        };
+        watch::record(snap, pr, sha, checks);
+        Ok(())
+    }
+
+    /// Entire gives no job logs; the checks keep their URLs.
+    fn attach_logs(&mut self, _repo: &Repo, _checks: &mut [Check], _lines: usize) {}
+
+    fn run(
+        &mut self,
+        _repo: &Repo,
+        _id: u64,
+        _cache: &mut BTreeMap<String, Cached>,
+    ) -> Result<Run, Halt> {
+        use jouet_github::host::Feature;
+        let reason = self
+            .lacks(Feature::Runs)
+            .unwrap_or_else(|| "Entire runs cannot be read".into());
+        Err(Halt::refused(reason))
+    }
+}
+
+/// The trail as a wait sees it: its state and head, and its check runs and
+/// gates as checks.
+fn entire_snapshot(doc: &Value, number: u64) -> (Pr, Vec<Check>) {
+    let m = &doc["mergeability"];
+    let conflicting = m["conflict_status"] == "conflicting";
+    let pr = Pr {
+        number,
+        state: match doc["status"].as_str() {
+            Some("merged") => "merged",
+            Some("closed") => "closed",
+            _ => "open",
+        }
+        .into(),
+        head_sha: m["head_sha"].as_str().unwrap_or_default().to_string(),
+        base_ref: doc["base"].as_str().unwrap_or_default().to_string(),
+        mergeable: match m["conflict_status"].as_str() {
+            Some("clean" | "conflicting") => Some(!conflicting),
+            _ => None,
+        },
+        mergeable_state: if conflicting { "dirty" } else { "clean" }.into(),
+    };
+    let mut checks: Vec<Check> = entire_forge::runs(doc)
+        .iter()
+        .filter_map(Check::from_check_run)
+        .collect();
+    if let Some(gates) = entire_forge::gates(doc) {
+        let state = match gates.state.as_str() {
+            "passed" => State::Pass,
+            "failed" => State::Fail,
+            _ => State::Pending,
+        };
+        let mut check = Check::new(jouet_github::entire::CHECK.into(), state);
+        if state.finished() {
+            check.conclusion = Some(gates.state.clone());
+        }
+        check.url.clone_from(&gates.url);
+        check.entire = Some(gates);
+        checks.push(check);
+    }
+    (pr, checks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +542,35 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(external.job_id, None);
+    }
+
+    #[test]
+    fn an_entire_trail_s_runs_and_gates_are_its_checks() {
+        let doc: Value = serde_json::from_str(include_str!(
+            "../../jouet-github/src/entire_forge/fixtures/show-failing.json"
+        ))
+        .unwrap();
+        let (pr, checks) = entire_snapshot(&doc, 1);
+        assert_eq!((pr.state.as_str(), pr.mergeable), ("open", Some(true)));
+        assert_eq!(pr.head_sha, "e971859eedb817c773cf883ac85d75fbe05eb4ac");
+        let states: Vec<(&str, State)> =
+            checks.iter().map(|c| (c.name.as_str(), c.state)).collect();
+        assert_eq!(
+            states,
+            [
+                ("buildkite/test", State::Fail),
+                ("buildkite/lint", State::Pending),
+                ("Entire Gates", State::Fail),
+            ]
+        );
+        // A findings gate is a failure of its own, not one derived from the
+        // runs or the branch.
+        let gates = &checks[2];
+        assert!(!gates.derived());
+        assert_eq!(
+            gates.url.as_deref(),
+            Some("https://entire.com/et/jdx/jouet-entire-forge-test/trails/1")
+        );
     }
 
     #[test]

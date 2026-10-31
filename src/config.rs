@@ -54,7 +54,8 @@ pub(crate) fn forges() -> Vec<forge::Configured> {
                 );
                 None
             }
-            None => {
+            // Entire is not self-hosted, so `parse` never names it.
+            Some(Forge::Entire) | None => {
                 eprintln!(
                     "jouet: [forges.\"{host}\"] kind must be gitlab or forgejo, not `{}`",
                     table.kind

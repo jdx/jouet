@@ -1,0 +1,111 @@
+{
+  "counts": {
+    "Open": 1,
+    "OpenHigh": 0,
+    "OpenMedium": 0,
+    "OpenLow": 1,
+    "Resolved": 1,
+    "Dismissed": 0,
+    "Stale": 1
+  },
+  "findings": [
+    {
+      "id": "01M69HBX3M23S8EWR0CQKRAER5",
+      "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+      "repositoryId": "01M69GSPCKKAX2HEQC6QY0J85E",
+      "reviewId": "01M69HBX0863WRF7BF8GVK3JJ6",
+      "codeVersionId": "01M69GWKCXWDH5PST8QXAZ0BDR",
+      "actorId": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "title": null,
+      "body": "main prints both results on one line with no labels; print them as add=4 subtract=2 so the output says which is which.",
+      "severity": "low",
+      "confidence": null,
+      "status": "open",
+      "statusReason": null,
+      "staleOutcome": "current",
+      "staleCheckedAt": null,
+      "staleCheckedCodeVersionId": null,
+      "clientId": "entire-cli:fdd011a4-1ea4-4ce4-9ed5-b07ba8a4f2d6",
+      "clientIdHash": "9aabbe0bdc87fe42dfebbd8c39e6d098446298e9b398a7d220968d4978b5baa1",
+      "createdAt": "2026-10-31T17:50:52.019Z",
+      "updatedAt": "2026-10-31T17:50:52.019Z",
+      "location": {
+        "id": "01M69HBX3MDNZPQZYG6QRCJFE8",
+        "reviewCommentId": "01M69HBX3M23S8EWR0CQKRAER5",
+        "codeVersionId": "01M69GWKCXWDH5PST8QXAZ0BDR",
+        "granularity": "line",
+        "filePath": "main.rs",
+        "startLine": 10,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "    println!(\"{} {}\", add(2, 2), subtract(5, 3));",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M69HBX3MK4WVG1V56DTSE9CQ"
+    },
+    {
+      "id": "01M69GVBXEY4FK6JM2RYYRWBZH",
+      "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+      "repositoryId": "01M69GSPCKKAX2HEQC6QY0J85E",
+      "reviewId": "01M69GVBSK8CE4BF99FVBQDFT8",
+      "codeVersionId": "01M69GVBSC1P7NT9C3EMB0DENP",
+      "actorId": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "title": null,
+      "body": "subtract returns a + b, so subtract(5, 3) is 8; it should be a - b.",
+      "severity": "medium",
+      "confidence": null,
+      "status": "resolved",
+      "statusReason": "Fixed in e971859: subtract is a - b",
+      "staleOutcome": "stale",
+      "staleCheckedAt": "2026-10-31T17:42:30.589Z",
+      "staleCheckedCodeVersionId": "01M69GWKCXWDH5PST8QXAZ0BDR",
+      "clientId": "entire-cli:f54cdaeb-b333-440c-ae06-802f27de2e22",
+      "clientIdHash": "59ba7eb3313713fcdd9603083e3a8d2328937af4e3edd7d6cbff610ae692172e",
+      "createdAt": "2026-10-31T17:41:50.124Z",
+      "updatedAt": "2026-10-31T17:50:42.843Z",
+      "location": {
+        "id": "01M69GVBXEYEEJT7MR6Q6HJ46W",
+        "reviewCommentId": "01M69GVBXEY4FK6JM2RYYRWBZH",
+        "codeVersionId": "01M69GVBSC1P7NT9C3EMB0DENP",
+        "granularity": "line",
+        "filePath": "main.rs",
+        "startLine": 6,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "    a + b",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M69GVBXEBCY4PNYWVD1GP3R3"
+    }
+  ],
+  "has_more": false,
+  "trail": {
+    "id": "01M69GTKJQHAD55FSC4R38FEDZ",
+    "number": 1,
+    "url": "https://entire.com/et/jdx/jouet-entire-forge-test/trails/1",
+    "branch": "feat/subtract",
+    "originalBranch": "feat/subtract",
+    "base": "main",
+    "title": "feat: add subtract",
+    "status": "open",
+    "author": {
+      "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "login": "jdx"
+    },
+    "assignees": [
+      "jdx"
+    ],
+    "createdAt": "2026-10-31T17:41:25.207Z",
+    "updatedAt": "2026-10-31T17:50:52.019Z",
+    "commentCount": 3,
+    "unresolvedCount": 2,
+    "bodyDocument": {
+      "textSnapshot": "",
+      "etag": "W/\"2026-10-31T17:41:25.232705Z\""
+    }
+  }
+}

@@ -10,6 +10,7 @@
 use super::threads::Stop;
 use jouet_github::entire::findings::{self, PREFIX};
 use jouet_github::entire::{self, Availability, Change, Entire, Finding};
+use jouet_github::forge::Forge;
 use jouet_github::pr::target::Repo;
 use jouet_github::pr::threads::condense::condense;
 use jouet_github::pr::threads::{self, Filter, Status};
@@ -59,6 +60,9 @@ pub(super) struct Listing {
     error: Option<String>,
     #[serde(skip)]
     status: Status,
+    /// What findings are told apart from on this forge.
+    #[serde(skip)]
+    threads: &'static str,
 }
 
 #[derive(Serialize)]
@@ -92,6 +96,7 @@ pub(super) fn list(
         incomplete: false,
         error: None,
         status: filter.status,
+        threads: threads_of(repo),
     };
     let Ok(entire) = probed else {
         return listing;
@@ -176,8 +181,10 @@ pub(super) fn render(s: &mut String, l: &Listing, now: i64) {
     if n == 0 {
         return;
     }
-    s.push_str(
-        "These are Entire's, not GitHub threads: resolving one leaves the other as it was.\n",
+    let _ = writeln!(
+        s,
+        "These are Entire's, not {}: resolving one leaves the other as it was.",
+        l.threads
     );
     for shown in &l.findings {
         let f = &shown.finding;
@@ -303,6 +310,19 @@ impl Outcome {
 pub(super) struct Written {
     pub(super) trail: u64,
     pub(super) results: Vec<Outcome>,
+    #[serde(skip)]
+    threads: &'static str,
+}
+
+/// What a finding is told apart from: the forge's review threads, or on
+/// a repository Entire hosts, the trail's discussions.
+fn threads_of(repo: &Repo) -> &'static str {
+    match repo.forge() {
+        Some(Forge::Entire) => "the trail's discussions",
+        Some(Forge::GitLab) => "GitLab threads",
+        Some(Forge::Forgejo) => "Forgejo threads",
+        _ => "GitHub threads",
+    }
 }
 
 /// `entire`, or a refusal (exit 4) saying why it cannot change findings.
@@ -447,13 +467,14 @@ pub(super) fn write(entire: &Entire, repo: &Repo, plan: &Plan, dry_run: bool) ->
         Written {
             trail: plan.trail,
             results,
+            threads: threads_of(repo),
         },
         ok,
     )
 }
 
-/// One line per finding changed, and a line saying GitHub threads were not
-/// touched by it.
+/// One line per finding changed, and a line saying the forge's threads
+/// were not touched by it.
 pub(super) fn render_written(s: &mut String, w: &Written, dry_run: bool) {
     for o in &w.results {
         let _ = write!(s, "[{}] ", o.id);
@@ -486,8 +507,10 @@ pub(super) fn render_written(s: &mut String, w: &Written, dry_run: bool) {
             let _ = writeln!(s, "  | {command}");
         }
     }
-    s.push_str(
-        "Entire findings are separate from GitHub threads: no thread was changed by these.\n",
+    let _ = writeln!(
+        s,
+        "Entire findings are separate from {}: none was changed by these.",
+        w.threads
     );
 }
 

@@ -9,6 +9,8 @@
 | Up to date | The branch is behind its base, or conflicts with it | Treats it as derived: reports `behind_base` with the command that merges the base |
 | Approvals | The trail needs an approval it does not have yet | Reports it as `entire_gates`, a wait. `wait ci` and `ci explain` do not count it as a CI failure |
 
+On a repository Entire hosts itself, the trail is the pull request, and the same gates are read from it directly; see [Entire-hosted repositories](/forges#entire-hosted-repositories).
+
 Entire sits beside the forge rather than inside it. Trail numbers are not pull request numbers, and a finding's lifecycle is Entire's own: resolving a finding leaves every GitHub review thread as it was, and resolving a thread leaves the findings.
 
 ## What needs the `entire` CLI
@@ -51,5 +53,5 @@ Once a finding is fixed and pushed:
 ```console
 $ jouet pr threads resolve entire:01M4C997EA --reply 'Fixed in {sha}: the test uninstalls tiny first'
 [entire:01M4C997EA] resolved on Entire trail #424
-Entire findings are separate from GitHub threads: no thread was changed by these.
+Entire findings are separate from GitHub threads: none was changed by these.
 ```

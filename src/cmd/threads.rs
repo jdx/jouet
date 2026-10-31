@@ -359,7 +359,8 @@ fn render_thread(s: &mut String, t: &Thread, now: i64) {
     let _ = write!(s, "[{}] ", t.id);
     match t.kind {
         Kind::Thread => {
-            s.push_str(t.path.as_deref().unwrap_or("?"));
+            // A thread on no file: an Entire trail's discussion.
+            s.push_str(t.path.as_deref().unwrap_or("discussion"));
             if let Some(line) = t.line.or(t.original_line) {
                 match t.start_line.filter(|&start| start < line) {
                     Some(start) => {

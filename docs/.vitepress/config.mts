@@ -70,7 +70,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Stability and deprecations", link: "/stability" },
-          { text: "GitLab and Forgejo", link: "/forges" },
+          { text: "GitLab, Forgejo and Entire", link: "/forges" },
           { text: "Rules", link: "/rules" },
           { text: "Routines and joue", link: "/routines" },
           { text: "Plugins and trust", link: "/plugins" },

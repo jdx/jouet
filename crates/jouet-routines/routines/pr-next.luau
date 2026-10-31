@@ -20,7 +20,7 @@
 
 type Pr = {
 	repo: string,
-	-- `gitlab` or `forgejo`, with the host, for a PR not on GitHub.
+	-- `gitlab`, `forgejo` or `entire`, with the host, for a PR not on GitHub.
 	forge: string?,
 	host: string?,
 	number: number,
@@ -28,6 +28,7 @@ type Pr = {
 	url: string,
 	state: string,
 	base: string,
+	head: string,
 	merge_state: string,
 	checks: { pass: number?, fail: number?, pending: number?, skipped: number? }?,
 	review: string?,
@@ -69,7 +70,7 @@ local function attention(pr: Pr, code: string): string?
 end
 
 -- The forge's name in messages.
-local FORGE = { gitlab = "GitLab", forgejo = "Forgejo" }
+local FORGE = { gitlab = "GitLab", forgejo = "Forgejo", entire = "Entire" }
 
 -- The first state that applies: (action, reason, command).
 local function decide(pr: Pr): (string, string, string?)
@@ -89,6 +90,8 @@ local function decide(pr: Pr): (string, string, string?)
 		elseif pr.forge == "forgejo" then
 			-- A Forgejo draft is a `WIP:` title, which no command clears.
 			return "draft", reason, nil
+		elseif pr.forge == "entire" then
+			return "draft", reason, `entire trail update --branch {pr.head} --status open --repo et/{pr.repo}`
 		end
 		return "draft", reason, `gh pr ready {pr.number} --repo {pr.repo}`
 	end
@@ -154,13 +157,18 @@ local function decide(pr: Pr): (string, string, string?)
 	end
 	local ran = if total == 0 then "No checks ran" else `Checks pass ({checks.pass or 0}/{total})`
 	local review = if pr.review == "approved" then "approved" else "no review required"
-	local land = `jouet pr land {name}`
+	local land: string? = `jouet pr land {name}`
+	local ready = `{ran}, {review}, no unresolved threads`
 	if pr.forge == "gitlab" then
 		land = `glab mr merge {pr.number} -R {qualified}`
 	elseif pr.forge == "forgejo" then
 		land = `tea pulls merge {pr.number} --repo {pr.repo}`
+	elseif pr.forge == "entire" then
+		-- The entire CLI has no command that merges a trail.
+		land = nil
+		ready = `{ready}; merge it on entire.com: {pr.url}`
 	end
-	return "ready_to_merge", `{ran}, {review}, no unresolved threads`, land
+	return "ready_to_merge", ready, land
 end
 
 local function pad(text: string, width: number): string
