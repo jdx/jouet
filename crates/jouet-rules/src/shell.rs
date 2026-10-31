@@ -80,7 +80,9 @@ impl Script {
 ///   test` does not.
 /// - Success belongs to every command in the final `&&` chain, because all
 ///   of them ran and succeeded, except a first pipeline that follows `||`,
-///   which may not have run at all.
+///   which may not have run at all, and, without `pipefail`, a command whose
+///   output is piped into another: `cargo test | tail` exits with tail's 0
+///   whatever the tests did.
 /// - A script that ends in the background says nothing about anything.
 pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     let mut out = vec![None; commands.len()];
@@ -98,6 +100,12 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     while pipeline > start && commands[pipeline - 1].op == Some(Op::Pipe) {
         pipeline -= 1;
     }
+    let pipefail = commands[..start].iter().any(|c| {
+        c.program() == Some("set")
+            && c.argv()
+                .iter()
+                .any(|w| w == "pipefail" || w == "-o pipefail")
+    });
     if exit_code == 0 {
         let mut first = start;
         if start > 0 && commands[start - 1].op == Some(Op::Or) {
@@ -107,8 +115,10 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
             }
             first += 1;
         }
-        for status in out.iter_mut().skip(first) {
-            *status = Some(0);
+        for (status, command) in out.iter_mut().zip(commands).skip(first) {
+            if pipefail || command.op != Some(Op::Pipe) {
+                *status = Some(0);
+            }
         }
         return out;
     }
@@ -118,12 +128,6 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     if !only_cd {
         return out;
     }
-    let pipefail = commands[..start].iter().any(|c| {
-        c.program() == Some("set")
-            && c.argv()
-                .iter()
-                .any(|w| w == "pipefail" || w == "-o pipefail")
-    });
     let blamed = if pipefail {
         pipeline
     } else {
@@ -761,9 +765,21 @@ mod tests {
 
     #[test]
     fn success_belongs_to_the_final_chain() {
+        // Without pipefail, tail's 0 says nothing about the tests.
         assert_eq!(
             status_of("cd x; cargo build && cargo test | tail -5", 0),
+            [None, Some(0), None, Some(0)]
+        );
+        assert_eq!(
+            status_of("set -o pipefail; cargo build && cargo test | tail -5", 0),
             [None, Some(0), Some(0), Some(0)]
+        );
+        assert_eq!(
+            status_of(
+                "jouet test --cmd -- cargo test --workspace 2>&1 | head -3",
+                0
+            ),
+            [None, Some(0)]
         );
         // Either side may be the one that ran.
         assert_eq!(status_of("cargo test || true", 0), [None, None]);

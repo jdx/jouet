@@ -428,6 +428,20 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_output '["jouet test --cmd -- cargo build",1]'
 }
 
+@test "a test run piped into head does not count as passing, so a failure still holds up finishing" {
+	project pytest
+	ran 'pytest' 1
+	# Six tests could have failed here: without pipefail the 0 is head's.
+	ran 'jouet test --cmd -- pytest 2>&1 | head -3' 0
+	run --separate-stderr jq -c '.runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '["pytest",1]'
+
+	# With pipefail, the 0 is the tests' own.
+	ran 'set -o pipefail; jouet test --cmd -- pytest 2>&1 | head -3' 0
+	run --separate-stderr jq -c '.runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '["jouet test --cmd -- pytest",0]'
+}
+
 @test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
 	ran 'jouet test --cmd -- python3 -m unittest' 0
 	run --separate-stderr jq -c '.runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
