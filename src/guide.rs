@@ -99,9 +99,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
-    // Not in the overview yet: its eight subcommands would take it past 80
-    // lines until the overview prints one line per command family.
-    ("graph", None),
+    (
+        "graph",
+        Some(
+            "finding your way around code: `graph explore QUESTION` for the code that answers it, with its source; `graph callers`/`callees`/`impact SYMBOL` before changing a definition; `graph affected FILES` for the tests a change reaches; instead of grep chains and whole-file reads",
+        ),
+    ),
     ("share", None),
     ("agent-help", None),
     ("audit", None),
