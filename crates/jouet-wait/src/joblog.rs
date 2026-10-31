@@ -47,10 +47,10 @@ impl Step {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Excerpt {
-    pub(crate) lines: Vec<String>,
+pub struct Excerpt {
+    pub lines: Vec<String>,
     /// Whether anything of the step was left out.
-    pub(crate) truncated: bool,
+    pub truncated: bool,
 }
 
 /// Splits a raw log line into its timestamp and the rest.
@@ -123,6 +123,13 @@ pub(crate) fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
                 .map_or(l.clone(), str::to_string)
         })
         .collect();
+    trim(lines, tail)
+}
+
+/// Lines of a step's output cut to their last `tail` lines, plus earlier
+/// lines that look like errors with a little context, as [`excerpt`] does
+/// for a GitHub log. `tail` 0 keeps them all.
+pub fn trim(lines: Vec<String>, tail: usize) -> Excerpt {
     if tail == 0 || lines.len() <= tail {
         return Excerpt {
             lines,

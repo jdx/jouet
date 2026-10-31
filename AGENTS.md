@@ -3,9 +3,10 @@
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
-`jouet search` (budgeted search with session memory), `jouet audit` (where
-your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
-and the git recipes `jouet commit`, `jouet review-package` and `jouet handoff`/`pickup`. It is in
+`jouet search` (budgeted search with session memory), `jouet audit` (where your agent sessions
+spend tokens and time), `jouet stats` (what jouet saved), `jouet test --affected` (only the tests a
+change affects), and the git recipes `jouet commit`, `jouet review-package` and
+`jouet handoff`/`pickup`. It is in
 early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
@@ -54,7 +55,8 @@ MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester t
 
 The repository is a Cargo workspace. The `jouet` package at the root is the binary: the usage-rs
 CLI declaration in `src/main.rs`, the command glue in `src/cmd/`, the config file, the git
-helpers, and the setup, hook, ledger and agent-guide code. The rest lives in library crates under
+helpers, the setup, hook, ledger and agent-guide code, and the test selection behind `jouet test
+--affected` (`src/affected/`: the changed set, the fallbacks, and one adapter per test runner). The rest lives in library crates under
 `crates/`:
 
 - `jouet-output`: the shared conventions: exit codes, display modes, `Output` (results and the
