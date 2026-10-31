@@ -324,3 +324,88 @@ fn affected_lists_tests_and_fails_when_a_file_is_unknown() {
             .contains("unknown: notes.txt")
     );
 }
+
+#[test]
+fn a_routine_queries_the_graph_through_jouet_code() {
+    let env = Env::new();
+    many_callers(&env);
+    let dir = env.home.path().join("config/jouet/routines");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("caller-count.luau"),
+        r#"--- about: Count a symbol's callers
+--- capabilities: fs.read
+--- usage: arg "<symbol>" help="The symbol"
+return {
+    run = function(args)
+        local ran = jouet.code.callers({ args.symbol, budget = 0 })
+        local found = ran.json.symbols[1]
+        return { total = found.total, first = found.items[1].name }
+    end,
+}
+"#,
+    )
+    .unwrap();
+    let doc = env.json(&["run", "caller-count", "target"]);
+    assert_eq!(doc, json!({ "total": 40, "first": "caller_number_0" }));
+}
+
+#[test]
+fn a_changed_signature_lists_its_callers_from_the_graph() {
+    let env = Env::new();
+    env.write("pay.py", "def charge(amount):\n    return amount\n");
+    env.write(
+        "shop.py",
+        "from pay import charge\n\n\ndef buy():\n    return charge(3)\n",
+    );
+    // A namesake: text matching would list it, the graph does not.
+    env.write("other.py", "def charge():\n    return 0\n\n\ncharge()\n");
+    env.json(&["graph", "index"]);
+    let mut child = env
+        .command(&["edit"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"=== pay.py#charge\ndef charge(amount, currency):\n    return amount\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(
+            "warning: the signature of charge changed; 1 caller in files this edit does not change may need updating:\n  shop.py:5\n"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("other.py"), "{text}");
+}
+
+#[test]
+fn reading_a_symbol_names_its_callers_when_there_is_a_graph() {
+    let env = Env::new();
+    many_callers(&env);
+    let read = |env: &Env| {
+        let out = env.run(&["read", "lib.py", "--symbol", "target", "--again"]);
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    // No graph: the read is as it always was.
+    assert!(!read(&env).contains("called by"));
+    env.json(&["graph", "index"]);
+    let text = read(&env);
+    assert!(
+        text.ends_with(
+            "called by: caller_number_0 (use.py:5), caller_number_1 (use.py:8), caller_number_2 (use.py:11), caller_number_3 (use.py:14), caller_number_4 (use.py:17), ... 35 more (jouet graph callers lib.py:1)\n"
+        ),
+        "{text}"
+    );
+}

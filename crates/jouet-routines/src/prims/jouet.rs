@@ -7,6 +7,11 @@
 //!   `wait.pid{pid}`: `jouet wait`'s engine.
 //! - `jouet.pr_status`, `jouet.pr_next`, `jouet.pr_threads`, and the writes
 //!   `jouet.pr_reply`, `jouet.pr_resolve` and `jouet.pr_land`.
+//! - `jouet.code.symbols{query}`, `jouet.code.callers{symbol}`,
+//!   `jouet.code.callees{symbol}`, `jouet.code.impact{symbol}`,
+//!   `jouet.code.explore{query}` and `jouet.code.affected{files}`: the code
+//!   graph's queries (`jouet graph`), with `budget` and `page` to page a long
+//!   answer.
 //!
 //! Each takes a table: positional arguments in order (or by name), flags by
 //! name with `_` for `-`. Each returns `{ ok, exit_code, json, error,
@@ -89,6 +94,9 @@ const fn read(
 }
 
 /// Every command `wait` and `jouet` have.
+/// The flags `jouet graph callers`, `callees` and `impact` share.
+const CODE_TRAVERSE: &[(&str, Flag)] = &[("depth", Val), ("budget", Val), ("page", Val)];
+
 pub const COMMANDS: &[Command] = &[
     read(
         "jouet",
@@ -178,6 +186,55 @@ pub const COMMANDS: &[Command] = &[
             ]],
         )
     },
+    // `jouet.code`: the code graph. Each query refreshes it first.
+    read(
+        "jouet.code",
+        "symbols",
+        &["graph", "symbols"],
+        FsRead,
+        &[("query", false)],
+        &[&[("kind", Val), ("path", Val), ("budget", Val), ("page", Val)]],
+    ),
+    read(
+        "jouet.code",
+        "callers",
+        &["graph", "callers"],
+        FsRead,
+        &[("symbol", false)],
+        &[CODE_TRAVERSE],
+    ),
+    read(
+        "jouet.code",
+        "callees",
+        &["graph", "callees"],
+        FsRead,
+        &[("symbol", false)],
+        &[CODE_TRAVERSE],
+    ),
+    read(
+        "jouet.code",
+        "impact",
+        &["graph", "impact"],
+        FsRead,
+        &[("symbol", false)],
+        &[CODE_TRAVERSE],
+    ),
+    read(
+        "jouet.code",
+        "explore",
+        &["graph", "explore"],
+        FsRead,
+        &[("query", true)],
+        &[&[("budget", Val), ("source_budget", Val), ("page", Val)]],
+    ),
+    read(
+        "jouet.code",
+        "affected",
+        &["graph", "affected"],
+        FsRead,
+        &[("files", true)],
+        &[],
+    ),
     read(
         "wait",
         "ci",
@@ -437,6 +494,7 @@ fn result_table(lua: &Lua, command: &str, output: &StepOutput) -> mlua::Result<V
 pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result<()> {
     let wait = lua.create_table()?;
     let jouet = lua.create_table()?;
+    let code = lua.create_table()?;
     for command in COMMANDS {
         let name = command.name();
         let f = primitive(
@@ -472,9 +530,11 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
         )?;
         match command.table {
             "wait" => wait.set(command.key, f)?,
+            "jouet.code" => code.set(command.key, f)?,
             _ => jouet.set(command.key, f)?,
         }
     }
+    jouet.set("code", code)?;
     globals.set("wait", wait)?;
     globals.set("jouet", jouet)?;
     Ok(())
@@ -514,6 +574,18 @@ mod tests {
         assert_eq!(
             built("pr_next", "return nil").unwrap(),
             Vec::<String>::new()
+        );
+        assert_eq!(
+            built("callers", r#"return { "src/a.rs#run", depth = 2 }"#).unwrap(),
+            ["src/a.rs#run", "--depth=2"]
+        );
+        assert_eq!(
+            built(
+                "explore",
+                r#"return { query = { "retry", "backoff" }, budget = 2000 }"#
+            )
+            .unwrap(),
+            ["retry", "backoff", "--budget=2000"]
         );
     }
 
