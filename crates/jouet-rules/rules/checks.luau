@@ -255,6 +255,114 @@ local function runner_scope(args: { string }, from: number): Scope
 	return if #picks == 0 then FULL else partial(table.concat(picks, " "))
 end
 
+-- hk options that take a value, that narrow what a check covers, and that
+-- print a plan or help instead of checking.
+local HK_VALUE = set({
+	"--step", "-S", "--skip-step", "--glob", "-g", "--exclude", "-e", "--from-ref", "--to-ref",
+	"--files0-from", "--stash", "--profile", "-p", "--jobs", "-j", "--cd", "--format", "--sarif",
+	"--junit-xml",
+})
+local HK_NARROW = set({
+	"--step", "-S", "--skip-step", "--glob", "-g", "--exclude", "-e", "--from-ref", "--to-ref",
+	"--pr", "--staged", "--unstaged",
+})
+local HK_INSPECT = set({ "--help", "-h", "--plan", "-P", "--why", "-W" })
+
+-- The scope of `hk check` or `hk run check`, from its arguments after the
+-- hook. Without files or options that narrow it, hk checks the changed
+-- files, or with `--all` everything. A file list read from stdin is a
+-- selection the rule cannot name, so it clears only a run of the same
+-- command.
+local function hk_scope(args: { string }, from: number): (Kind?, Scope)
+	local files: { string } = {}
+	local narrow: { string } = {}
+	local all = false
+	local stdin = false
+	local i = from
+	while i <= #args do
+		local arg = args[i]
+		i += 1
+		local name = string.match(arg, "^(%-%-[%w%-]+)=") or arg
+		local takes = name == arg and HK_VALUE[name]
+		if HK_INSPECT[name] then
+			return nil, partial(nil)
+		elseif name == "--all" or name == "-a" then
+			all = true
+		elseif name == "--files0-from" then
+			stdin = true
+		elseif HK_NARROW[name] then
+			table.insert(narrow, if takes then `{arg} {args[i] or ""}` else arg)
+		elseif string.sub(arg, 1, 1) ~= "-" then
+			table.insert(files, arg)
+		end
+		if takes then
+			i += 1
+		end
+	end
+	if stdin then
+		return "lint", partial(nil)
+	end
+	local selected: { string } = {}
+	if #files > 0 then
+		table.insert(selected, "files " .. table.concat(files, " "))
+	end
+	for _, n in narrow do
+		table.insert(selected, n)
+	end
+	if #selected > 0 then
+		return "lint", partial(table.concat(selected, " "))
+	end
+	return "lint", if all then FULL else partial("changed files")
+end
+
+-- jouet's subcommand, past its output options (`jouet --json diag ...`).
+local function jouet_subcommand(args: { string }): string?
+	local i = 1
+	while i <= #args do
+		local arg = args[i]
+		if arg == "--display" then
+			i += 2
+		elseif arg == "--json" or string.sub(arg, 1, 10) == "--display=" then
+			i += 1
+		else
+			return arg
+		end
+	end
+	return nil
+end
+
+-- `jouet diag check` runs `hk run check` on the files given, or on the
+-- changed files. `diag delta` exits 0 with findings that were already there,
+-- so it says nothing about whether the check passed, and is not recorded;
+-- nor is help.
+local function diag_scope(args: { string }): (Kind?, Scope)
+	local files: { string } = {}
+	local sub: string? = nil
+	local seen_diag = false
+	local i = 1
+	while i <= #args do
+		local arg = args[i]
+		i += 1
+		if arg == "--display" or arg == "--max" then
+			i += 1
+		elseif arg == "--help" or arg == "-h" then
+			return nil, partial(nil)
+		elseif string.sub(arg, 1, 1) == "-" then
+			-- `--json`, `--changed`, `--max=N`, `--display=MODE`
+		elseif not seen_diag then
+			seen_diag = arg == "diag"
+		elseif not sub then
+			sub = arg
+		else
+			table.insert(files, arg)
+		end
+	end
+	if sub ~= "check" then
+		return nil, partial(nil)
+	end
+	return "lint", partial(if #files > 0 then "files " .. table.concat(files, " ") else "changed files")
+end
+
 -- `jouet test`: the full suite, unless `--affected` or words after `--`
 -- narrow it; the selector names them. A dry run, help, a usage error (2)
 -- and no runner found (4) ran no tests.
@@ -343,29 +451,12 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		-- `hk run fix` and `hk run pre-commit` change files rather than
 		-- check them; `hk run check` checks, like `hk check`.
 		local hook = if first == "run" then args[2] else first
-		local kind: Kind? = if hook == "check" then "lint" else nil
-		local from = if first == "run" then 3 else 2
-		if jouet.contains(args, "--all") then
-			return kind, FULL
+		if hook ~= "check" then
+			return nil, unknown
 		end
-		-- Without files, hk checks the changed files.
-		for i = from, #args do
-			local arg = args[i]
-			if arg == "--files0-from" or string.sub(arg, 1, 1) ~= "-" then
-				return kind, partial("files")
-			end
-		end
-		return kind, partial("changed files")
-	elseif program == "jouet" and first == "diag" then
-		-- `jouet diag check|delta` runs `hk run check` on the files given,
-		-- or on the changed files.
-		local kind: Kind? = if args[2] == "check" or args[2] == "delta" then "lint" else nil
-		for i = 3, #args do
-			if string.sub(args[i], 1, 1) ~= "-" then
-				return kind, partial("files")
-			end
-		end
-		return kind, partial("changed files")
+		return hk_scope(args, if first == "run" then 3 else 2)
+	elseif program == "jouet" and jouet_subcommand(args) == "diag" then
+		return diag_scope(args)
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)

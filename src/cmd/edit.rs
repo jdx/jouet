@@ -79,7 +79,10 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             .collect();
         match diag_cmd::target(&named, false) {
             Ok(target) => Some(target),
-            Err(e) => return out.error(Exit::Usage, &e),
+            // Without --diag, a path the fixers cannot take (outside the
+            // repository) only means nothing is formatted.
+            Err(e) if args.diag => return out.error(Exit::Usage, &e),
+            Err(_) => None,
         }
     } else {
         None
@@ -161,13 +164,20 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         failed |= !check.passed;
         plan.report.check = Some(check);
     }
+    // A check after writing that cannot run leaves the edit unverified: exit
+    // 4, and with --revert-on-fail the files are restored, as when --check
+    // cannot start.
+    let mut unverified = false;
     let diagnosed = match (&after_edit, &before) {
         (Some((root, files)), Some(before)) => {
             let after = diag_cmd::checked(root, written(root, files));
-            let outcome = DiagOutcome::of(before, &after);
+            let outcome = DiagOutcome::of(before, &after, &renames(root, &plan.report));
             match outcome.status {
                 "introduced" => failed = true,
-                "refused" | "unavailable" => exit = Exit::Precondition,
+                "refused" | "unavailable" => {
+                    exit = Exit::Precondition;
+                    unverified = true;
+                }
                 _ => {}
             }
             Some(outcome)
@@ -176,21 +186,21 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     };
     if failed {
         exit = Exit::Failed;
-        if args.revert_on_fail {
-            if let Err(e) = edit::revert(&journal) {
-                return out.error(
-                    Exit::Failed,
-                    &format!("the check failed and restoring the files failed too: {e}"),
-                );
-            }
-            if let Some(check) = &mut plan.report.check {
-                check.reverted = true;
-            }
-            plan.report.applied = false;
-            plan.report.files_written = 0;
-            for f in &mut plan.report.files {
-                f.status = FileStatus::Reverted;
-            }
+    }
+    if (failed || unverified) && args.revert_on_fail {
+        if let Err(e) = edit::revert(&journal) {
+            return out.error(
+                Exit::Failed,
+                &format!("the check failed and restoring the files failed too: {e}"),
+            );
+        }
+        if let Some(check) = &mut plan.report.check {
+            check.reverted = true;
+        }
+        plan.report.applied = false;
+        plan.report.files_written = 0;
+        for f in &mut plan.report.files {
+            f.status = FileStatus::Reverted;
         }
     }
     print_report(out, &plan.report, fixed.as_ref(), diagnosed.as_ref());
@@ -211,12 +221,12 @@ struct DiagOutcome {
 }
 
 impl DiagOutcome {
-    fn of(before: &diag::Report, after: &diag::Report) -> Self {
+    fn of(before: &diag::Report, after: &diag::Report, renamed: &[(String, String)]) -> Self {
         let (status, delta) = match after.status {
             Status::Refused => ("refused", delta::Delta::default()),
             Status::Unavailable => ("unavailable", delta::Delta::default()),
             Status::Clean | Status::Findings => {
-                let d = delta::between(before, after);
+                let d = delta::between(before, after, renamed);
                 (
                     if d.introduced() {
                         "introduced"
@@ -234,6 +244,25 @@ impl DiagOutcome {
             log_path: after.log_path.clone(),
         }
     }
+}
+
+/// Each moved file's path before and after, relative to `root`.
+fn renames(root: &std::path::Path, report: &Report) -> Vec<(String, String)> {
+    let Ok(cwd) = std::env::current_dir().and_then(|d| d.canonicalize()) else {
+        return Vec::new();
+    };
+    report
+        .files
+        .iter()
+        .filter_map(|f| {
+            let to = f.moved_to.as_ref()?;
+            let pair = diag::resolve(root, &cwd, &[f.path.clone(), to.clone()]).ok()?;
+            match pair.as_slice() {
+                [from, to] => Some((from.clone(), to.clone())),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// The files' findings as they are now: from the cache when every file was

@@ -218,7 +218,7 @@ new: notes.txt:1:1: warning: TODO left in [todo] (todo)
 diag: 1 new, 1 kept, 0 fixed
 ```
 
-When the files were checked at exactly their current contents before, by `jouet diag check` or an earlier `--diag`, that result is the baseline and only the check after writing runs. When hk refuses to check (`--safe` rejects a command whose effect is unknown or destructive) or nothing can check the files, nothing is written and the exit code is `4`.
+When the files were checked at exactly their current contents before, by `jouet diag check` or an earlier `--diag`, that result is the baseline and only the check after writing runs. When hk refuses to check (`--safe` rejects a command whose effect is unknown or destructive) or nothing can check the files, nothing is written and the exit code is `4`. If the check after writing cannot run, for example because the edit created a file no checker covers, the exit code is also `4`: the edit is unverified, and `--revert-on-fail` restores the files.
 
 With `[edit] fix_after = true` in the [config file](/setup#settings), the project's hk fixers format the written files first, so a formatting-only finding never fails the edit; see [formatting after edits](/commands/diag#formatting-after-edits).
 
@@ -303,6 +303,6 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | 1 | The check failed or could not start, or `--diag` found a new finding (the files are restored with `--revert-on-fail` and kept otherwise), or reading or writing a file failed |
 | 2 | A malformed spec or bad flags |
 | 3 | Every failure was a missing file to update or delete |
-| 4 | Nothing was written: a match count was wrong, an anchor was missing, a hash did not match, a file to create already exists, a file is not UTF-8 text, or `--diag` could not check the files |
+| 4 | Nothing was written: a match count was wrong, an anchor was missing, a hash did not match, a file to create already exists, a file is not UTF-8 text, or `--diag` could not check the files before writing. Also when `--diag` could not check them after writing: the files are restored with `--revert-on-fail` and kept otherwise |
 
 These are the [shared exit codes](/conventions#exit-codes).

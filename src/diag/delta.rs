@@ -298,8 +298,29 @@ impl Delta {
 }
 
 /// Compares `after` with an explicit `before` run of the same files.
-pub(crate) fn between(before: &Report, after: &Report) -> Delta {
-    let comparison = compare(&before.findings, &after.findings);
+/// `renamed` maps a file's path before the edit to its path after, so a
+/// moved file's findings are compared with themselves. A baseline from the
+/// cache holds only the asked files' findings, so then only those are
+/// compared; a baseline from a check also compares the other files a step
+/// reported.
+pub(crate) fn between(before: &Report, after: &Report, renamed: &[(String, String)]) -> Delta {
+    let moved = |f: &Finding| {
+        let mut f = f.clone();
+        if let Some((_, to)) = renamed.iter().find(|(from, _)| *from == f.file) {
+            f.file.clone_from(to);
+        }
+        f
+    };
+    let asked_only = before.source == "cache";
+    let in_scope = |f: &Finding| !asked_only || after.files.contains(&f.file);
+    let earlier: Vec<Finding> = before.findings.iter().map(moved).filter(in_scope).collect();
+    let later: Vec<Finding> = after
+        .findings
+        .iter()
+        .filter(|f| in_scope(f))
+        .cloned()
+        .collect();
+    let comparison = compare(&earlier, &later);
     let failed_before: Vec<&str> = before.failed_steps().map(|s| s.name.as_str()).collect();
     Delta {
         new: comparison.new,
@@ -341,9 +362,14 @@ pub(crate) fn against_cache(
             no_baseline.push(file.clone());
         }
     }
+    // Findings in files the check was not asked about (a step such as
+    // Clippy reports the whole crate) have no baseline in the cache, which
+    // keeps only the asked files', so they are left out rather than counted
+    // as new.
     let (unknown, known): (Vec<Finding>, Vec<Finding>) = after
         .findings
         .iter()
+        .filter(|f| after.files.contains(&f.file))
         .cloned()
         .partition(|f| no_baseline.contains(&f.file));
     let comparison = compare(&before, &known);
@@ -457,6 +483,42 @@ mod tests {
         assert_eq!(cache.at("a.rs", "h2").unwrap().findings[0].line, Some(2));
         cache.record(vec![("a.rs".into(), seen("h2", 3))]);
         assert_eq!(cache.before("a.rs", "h2").unwrap().hash, "h1");
+    }
+
+    #[test]
+    fn other_files_compare_only_against_a_baseline_that_has_them() {
+        let report = |files: &[&str], findings: Vec<Finding>, source: &str| {
+            let mut r = Report::empty(
+                super::super::Status::Findings,
+                files.iter().map(|f| f.to_string()).collect(),
+            );
+            r.findings = findings;
+            r.source = source.into();
+            r
+        };
+        let elsewhere = f("lib.rs", 9, "r", "old");
+        // From the cache: only the asked file's findings were kept, so the
+        // one in lib.rs is not new.
+        let before = report(&["a.rs"], vec![], "cache");
+        let after = report(&["a.rs"], vec![elsewhere.clone()], "hk");
+        assert!(between(&before, &after, &[]).new.is_empty());
+        // From a check: lib.rs was reported then too, so it compares.
+        let before = report(&["a.rs"], vec![elsewhere.clone()], "hk");
+        let d = between(&before, &after, &[]);
+        assert!(d.new.is_empty());
+        assert_eq!(d.kept, 1);
+        // A moved file's findings follow it.
+        let before = report(&["old.rs"], vec![f("old.rs", 3, "r", "m")], "hk");
+        let after = report(&["new.rs"], vec![f("new.rs", 3, "r", "m")], "hk");
+        let renamed = [("old.rs".to_string(), "new.rs".to_string())];
+        assert!(between(&before, &after, &renamed).new.is_empty());
+        assert_eq!(between(&before, &after, &[]).new.len(), 1);
+        // The cache's delta leaves out files it was not asked about.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        let after = report(&["a.rs"], vec![elsewhere], "hk");
+        let d = against_cache(dir.path(), &Cache::default(), &after, |_| true);
+        assert!(d.new.is_empty() && d.unknown.is_empty());
     }
 
     #[test]

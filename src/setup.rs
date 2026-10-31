@@ -218,18 +218,20 @@ fn stop_handlers(doc: &Value) -> impl Iterator<Item = &Value> {
 /// Takes hk's stop hook out of the document, leaving no empty group behind.
 fn take_hk_stop(doc: &mut Value) -> Option<(String, Option<u64>)> {
     let groups = doc.get_mut("hooks")?.get_mut("Stop")?.as_array_mut()?;
-    let mut found = None;
-    for group in groups.iter_mut() {
+    for (at, group) in groups.iter_mut().enumerate() {
         let Some(list) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
             continue;
         };
         if let Some(i) = list.iter().position(|h| hk_stop_hook(h).is_some()) {
-            found = hk_stop_hook(&list.remove(i));
-            break;
+            let found = hk_stop_hook(&list.remove(i));
+            // Only the group this emptied goes; anyone else's empty group stays.
+            if list.is_empty() {
+                groups.remove(at);
+            }
+            return found;
         }
     }
-    groups.retain(|g| !handlers(g).is_empty() || g.get("hooks").is_none());
-    found
+    None
 }
 
 fn runs_jouet_hook(script: &jouet_rules::shell::Script) -> bool {
@@ -622,6 +624,18 @@ mod tests {
             ]}})
         );
         assert!(!has_jouet(&removed));
+    }
+
+    #[test]
+    fn merging_hk_leaves_other_empty_stop_groups_alone() {
+        let doc = json!({"hooks": {"Stop": [
+            {"hooks": []},
+            {"hooks": [{"type": "command", "command": "hk agent stop-hook"}]}
+        ]}});
+        let doc = installed(doc, Harness::Claude);
+        let stops = doc["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stops.len(), 2, "{}", pretty(&doc));
+        assert_eq!(stops[0], json!({"hooks": []}));
     }
 
     #[test]

@@ -512,6 +512,10 @@ pub(crate) fn render(report: &Report, max: usize) -> String {
             let _ = writeln!(s, "  {line}");
         }
     }
+    // Files no checker covered: never part of a pass.
+    if let Some(reason) = report.reason.as_deref() {
+        let _ = writeln!(s, "note: {reason}");
+    }
     let files = report.files.len();
     let summary = if report.status == Status::Clean {
         format!("clean: {files} {}", plural(files, "file"))

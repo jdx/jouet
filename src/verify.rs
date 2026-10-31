@@ -87,10 +87,20 @@ pub(crate) struct State {
 /// `jouet diag`, which runs it.
 fn through_hk(command: &str) -> bool {
     let words: Vec<&str> = command.split_whitespace().collect();
-    words.windows(2).any(|w| {
-        (w[0] == "hk" || w[0].ends_with("/hk")) && matches!(w[1], "check" | "run")
-            || (w[0] == "jouet" || w[0].ends_with("/jouet")) && w[1] == "diag"
-    })
+    let hk = words
+        .windows(2)
+        .any(|w| (w[0] == "hk" || w[0].ends_with("/hk")) && matches!(w[1], "check" | "run"));
+    // `jouet diag`, also past jouet's output options (`jouet --json diag`).
+    let diag = words
+        .iter()
+        .position(|w| *w == "jouet" || w.ends_with("/jouet"))
+        .is_some_and(|at| {
+            words[at + 1..]
+                .iter()
+                .find(|w| !w.starts_with('-') && **w != "agent" && **w != "human" && **w != "plain")
+                == Some(&"diag")
+        });
+    hk || diag
 }
 
 impl Run {
@@ -155,7 +165,16 @@ impl State {
             return Some(reason);
         }
         let hk = self.hk.as_ref().filter(|_| hk_repo)?;
-        if !hk.passed() || hk.tree.is_none() || hk.tree == tree() {
+        if !hk.passed() || hk.tree.is_none() {
+            return None;
+        }
+        if !hk.covers_changes() {
+            return Some(format!(
+                "The last hk check passed for only some files (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
+                hk.command
+            ));
+        }
+        if hk.tree == tree() {
             return None;
         }
         Some(format!(
@@ -477,8 +496,14 @@ mod tests {
         );
         // Not without an hk config, and not for a check of a few files.
         assert_eq!(state.block_reason(|| Some("t2".into()), false), None);
-        state.record([lint("hk check src/a.rs", 0, "files")], Some("t1"));
+        state.record([lint("hk check src/a.rs", 0, "files src/a.rs")], Some("t1"));
         assert!(!state.hk_passed_at(|| Some("t1".into())));
+        // At the same tree, a check of some files still asks for the changed ones.
+        let why = state.block_reason(|| Some("t1".into()), true).unwrap();
+        assert!(
+            why.starts_with("The last hk check passed for only some files (`hk check src/a.rs`)"),
+            "{why}"
+        );
         // A failing hk check is a lint failure like any other.
         state.record([lint("hk check --all", 1, "full")], Some("t3"));
         let why = state.block_reason(|| Some("t3".into()), true).unwrap();
@@ -486,6 +511,9 @@ mod tests {
         // Other linters are not hk.
         assert!(!through_hk("cargo clippy --workspace"));
         assert!(through_hk("mise x hk -- hk run check --files0-from -"));
+        assert!(through_hk("jouet --json diag check --changed"));
+        assert!(through_hk("jouet --display agent diag check"));
+        assert!(!through_hk("jouet edit replace diag --old a --new b"));
     }
 
     #[test]

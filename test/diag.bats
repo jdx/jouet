@@ -323,3 +323,20 @@ fake_hk_stop() {
 	assert_failure 4
 	assert_output --partial 'diagnostics unavailable: no hk config (hk.pkl) here, and no fallback checker for notes.txt'
 }
+
+@test "edit --diag that cannot check the files it wrote exits 4, and --revert-on-fail removes them" {
+	git rm -q hk.pkl
+	git commit -qm 'no hk'
+
+	run --separate-stderr jouet edit --diag --revert-on-fail <<'SPEC'
+=== new.md
+<<<<<<< SEARCH
+=======
+# New
+>>>>>>> REPLACE
+SPEC
+
+	assert_failure 4
+	assert_line --partial 'diag: could not check the edited files: no hk config'
+	[[ ! -e new.md ]]
+}
