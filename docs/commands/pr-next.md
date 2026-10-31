@@ -12,6 +12,8 @@ jouet pr next [PR...] [--mine] [--search QUERY] [--repo OWNER/NAME]... [--settle
 
 The flags are listed in the [CLI reference](/cli/pr/next). Pull requests are chosen the same way as for [`jouet pr status`](/commands/pr-status#choosing-pull-requests).
 
+`jouet pr next` runs the built-in [`pr-next` routine](/routines), so its decisions are a Luau program you can read with `joue pr-next --help` and copy into a routine of your own. The routine selects and fetches pull requests through the same primitive as `pr status`; against GitHub it takes the same time as the Rust version it replaced.
+
 ```text
 $ jouet pr next --repo jdx/mise 15187 15169 15172 15205
 #15187 done merged: Merged

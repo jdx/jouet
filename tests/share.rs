@@ -10,6 +10,7 @@ use std::process::{Command, Output};
 
 const TOKEN: &str = "good-token";
 const URL: &str = "https://github.com/jdx/jouet/discussions/99";
+const ISSUE_URL: &str = "https://github.com/jdx/jouet/issues/101";
 
 /// A rule of the user's, with private details in its why and message.
 const RULE: &str = r#"--- why: tags are cut by the release job, see /home/alice/acme/RELEASING.md
@@ -112,7 +113,9 @@ fn github(script: Script) -> Fake {
 
 fn respond(script: Script, request: &Request) -> (u16, String) {
     let q = query(request);
-    let body = if q.starts_with("mutation") {
+    let body = if q.starts_with("mutation") && q.contains("createIssue") {
+        json!({"data": {"createIssue": {"issue": {"url": ISSUE_URL}}}})
+    } else if q.starts_with("mutation") {
         json!({"data": {"createDiscussion": {"discussion": {"url": URL}}}})
     } else {
         let mut categories = vec![json!({"id": "C1", "name": "General"})];
@@ -296,7 +299,7 @@ fn an_idea_from_recorded_gaps() {
     let out = jouet(&fake, home.path(), &["share", "--idea"]);
     assert_eq!(out.status.code(), Some(4));
     assert!(
-        stderr(&out).contains("no gaps are recorded"),
+        stderr(&out).contains("no ideas are recorded"),
         "{}",
         stderr(&out)
     );
@@ -335,5 +338,117 @@ fn a_github_failure_posts_nothing_and_exits_5() {
     });
     let out = jouet(&fake, home(RULE).path(), &["share", "no-tags", "--yes"]);
     assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
+    assert!(mutations(&fake).is_empty());
+}
+
+/// Adds ledger lines in which `jouet pr threads` panicked in two sessions,
+/// with a private repository in its arguments' place.
+fn crashed(home: &Path) {
+    let t = now() - 60;
+    let mut lines = String::new();
+    for session in ["c1", "c2"] {
+        lines.push_str(&format!(
+            "{{\"ts\":{t},\"harness\":\"claude\",\"session\":\"{session}\",\"event\":\"post-tool-use\",\"tool\":\"Bash\",\"shape\":\"jouet pr threads <arg> --repo <arg>\",\"exit_code\":101}}\n"
+        ));
+    }
+    let path = home.join("state/jouet/ledger/ledger.jsonl");
+    let mut ledger = std::fs::read_to_string(&path).unwrap();
+    ledger.push_str(&lines);
+    std::fs::write(path, ledger).unwrap();
+}
+
+#[test]
+fn a_crash_in_the_ledger_is_listed_and_drafted_as_an_issue() {
+    let home = home(RULE);
+    crashed(home.path());
+    let fake = github(FINE);
+    let out = jouet(&fake, home.path(), &["share", "--list", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let ideas = json(&out)["ideas"].clone();
+    assert_eq!(ideas[0]["key"], "crash-pr-threads", "{ideas}");
+    assert_eq!(ideas[0]["destination"], "issue");
+    assert_eq!(
+        ideas[0]["summary"],
+        "`jouet pr threads` crashed 2 times (exit 101)"
+    );
+
+    let out = jouet(&fake, home.path(), &["share", "--idea", "crash-pr-threads"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.starts_with("title: Bug: `jouet pr threads` panicked\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("### To reproduce\n\n- `jouet pr threads <arg> --repo <arg>`"),
+        "{text}"
+    );
+    assert!(text.contains("Seen in 2 sessions."), "{text}");
+    assert!(text.contains("post it as an Issue on jdx/jouet"), "{text}");
+    assert!(fake.requests().is_empty());
+}
+
+#[test]
+fn yes_posts_a_bug_as_an_issue_once_and_never_needs_the_category() {
+    let home = home(RULE);
+    crashed(home.path());
+    let fake = github(Script {
+        category: false,
+        duplicate: false,
+    });
+    let out = jouet(
+        &fake,
+        home.path(),
+        &["share", "--idea", "crash-pr-threads", "--yes", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(json(&out)["url"], ISSUE_URL);
+    let lookups: Vec<Request> = fake
+        .requests()
+        .into_iter()
+        .filter(|r| query(r).starts_with("query"))
+        .collect();
+    assert_eq!(lookups[0].body["variables"]["type"], "ISSUE");
+    assert!(
+        lookups[0].body["variables"]["q"]
+            .as_str()
+            .unwrap()
+            .contains("is:issue in:title"),
+        "{:?}",
+        lookups[0].body
+    );
+    let posts = mutations(&fake);
+    assert_eq!(posts.len(), 1);
+    assert!(query(&posts[0]).contains("createIssue"));
+    let body = posts[0].body["variables"]["body"].as_str().unwrap();
+    assert!(body.ends_with("*AI-assisted — Tool: test.*\n"), "{body}");
+    assert!(!body.contains("alice"), "{body}");
+
+    // Shared, it is not proposed again.
+    let out = jouet(&fake, home.path(), &["share", "--list", "--json"]);
+    assert!(
+        json(&out)["ideas"]
+            .as_array()
+            .is_none_or(|ideas| ideas.iter().all(|i| i["key"] != "crash-pr-threads")),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn a_duplicate_issue_posts_nothing() {
+    let home = home(RULE);
+    crashed(home.path());
+    let fake = github(Script {
+        category: true,
+        duplicate: true,
+    });
+    let out = jouet(
+        &fake,
+        home.path(),
+        &["share", "--idea", "crash-pr-threads", "--yes"],
+    );
+    assert_eq!(out.status.code(), Some(4));
+    assert!(stderr(&out).contains("already exists"), "{}", stderr(&out));
     assert!(mutations(&fake).is_empty());
 }

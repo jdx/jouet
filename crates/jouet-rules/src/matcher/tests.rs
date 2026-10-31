@@ -190,3 +190,72 @@ fn a_matcher_that_says_too_little_is_refused() {
             .contains("add `command`")
     );
 }
+
+#[test]
+fn unless_with_refuses_a_call_with_the_other_command() {
+    let m = "command = \"rg\"\nunless_with = { command = [\"head\", \"wc\"] }";
+    assert!(fires(m, "rg TODO"));
+    assert!(fires(m, "rg TODO && echo done"));
+    assert!(!fires(m, "rg TODO | head -20"));
+    assert!(!fires(m, "rg -n TODO | wc -l"));
+    assert!(
+        toml::from_str::<Matcher>(
+            "command = \"a\"\nunless_with = { tool = \"Bash\", command = \"b\" }"
+        )
+        .unwrap()
+        .problem(false)
+        .unwrap()
+        .contains("`unless_with`")
+    );
+}
+
+#[test]
+fn input_fields_match_a_tool_s_input() {
+    let m: Matcher = toml::from_str(
+        "tool = \"Grep\"\ninput = { output_mode = \"content\", multiline = \"true\" }\nunless_input = \"head_limit\"",
+    )
+    .unwrap();
+    assert_eq!(m.problem(false), None);
+    let grep = |input: serde_json::Value| Call {
+        tool: "Grep".into(),
+        input: Some(input),
+        ..Call::default()
+    };
+    let fires = |c: Call| any(std::slice::from_ref(&m), &c, &[]);
+    assert!(fires(grep(
+        serde_json::json!({"pattern": "x", "output_mode": "content", "multiline": true})
+    )));
+    // A value that is not a string matches as its JSON text.
+    assert!(!fires(grep(
+        serde_json::json!({"pattern": "x", "output_mode": "content", "multiline": false})
+    )));
+    assert!(!fires(grep(
+        serde_json::json!({"pattern": "x", "multiline": true})
+    )));
+    assert!(!fires(grep(serde_json::json!({
+        "output_mode": "content", "multiline": true, "head_limit": 20
+    }))));
+    // A null field is an absent one.
+    assert!(fires(grep(serde_json::json!({
+        "output_mode": "content", "multiline": true, "head_limit": null
+    }))));
+    assert!(!fires(Call {
+        tool: "Grep".into(),
+        ..Call::default()
+    }));
+}
+
+#[test]
+fn seen_matches_what_the_caller_worked_out() {
+    let m: Matcher = toml::from_str("tool = \"Read\"\nseen = true").unwrap();
+    let read = |seen: Option<bool>| Call {
+        tool: "Read".into(),
+        path: Some("a.rs".into()),
+        seen,
+        ..Call::default()
+    };
+    let fires = |c: Call| any(std::slice::from_ref(&m), &c, &[]);
+    assert!(fires(read(Some(true))));
+    assert!(!fires(read(Some(false))));
+    assert!(!fires(read(None)));
+}

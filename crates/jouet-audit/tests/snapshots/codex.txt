@@ -1,0 +1,31 @@
+# Session 01a00000-0000-7000-8000-00000000d1d1 (codex) in /work/app
+2026-10-30 10:00 UTC, 3m14s wall, 2 prompts, 6 requests, 6 calls (2 failed), 180k input tokens, 60 output, 2m43s in tools
+Transcript: <fixtures>/codex/sessions/2026/10/30/rollout-2026-10-30T10-00-00-01a00000-0000-7000-8000-00000000d1d1.jsonl (L = its line numbers)
+
+## User corrections (2)
+- L14-17 interrupt — after `cargo xtask <v> --verbose`
+- L14-18 stop (after an interrupt): "stop. use mise run release:check instead" — after `cargo xtask <v> --verbose`
+
+## Failures (1)
+- L8-14 `cargo xtask <v> --verbose` failed 2 of 2, never worked: error: no such command: `xtask`
+
+## Long calls (3, 2m43s in all)
+- L8 `cargo xtask <v> --verbose` 1m02s
+- L14 `cargo xtask <v> --verbose` 1m01s
+- L19 `mise run release:check` 40s
+
+## Where tokens and time went
+- build_test_lint 50%: 90k tokens, 3 calls, 2m43s (most: `cargo xtask <v> --verbose`)
+- read_search 50%: 90k tokens, 3 calls, 600ms (most: `sed -n <s> <path>`)
+
+## Files read repeatedly (1)
+- docs/release.md 3 reads, 2 with no edit since the last — L5-22
+
+## Timeline (2 phases)
+1. L4-14 +0ms for 2m14s, 4 requests, 120k tokens, 4 calls: "check the release notes build"
+   `cargo xtask` ×2 (2 failed): cargo xtask release-check --verbose
+   `cat` ×1: cat docs/release.md
+   `sed` ×1: sed -n '1,80p' docs/release.md
+2. L18-22 +2m23s for 50s, 2 requests, 60k tokens, 2 calls: "stop. use mise run release:check instead"
+   `mise run release:check` ×1: mise run release:check
+   `sed` ×1: sed -n '1,80p' docs/release.md

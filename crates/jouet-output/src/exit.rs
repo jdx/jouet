@@ -55,7 +55,7 @@ impl Exit {
     }
 
     /// The exit with this code, for a code another jouet command (or a
-    /// recipe) exited with.
+    /// routine) exited with.
     pub fn from_code(code: i32) -> Option<Self> {
         [
             Self::Ok,

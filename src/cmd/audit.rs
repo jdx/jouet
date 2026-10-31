@@ -129,7 +129,7 @@ pub(crate) fn parse_since(s: &str, now: i64) -> Result<i64, String> {
 /// `path` with `.` and `..` resolved by name, the way a session records
 /// the directory it ran in. Symlinks are not followed: `--project` matches
 /// the path as written, not where a link leads.
-fn lexical(path: &Path) -> PathBuf {
+pub(crate) fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
         match part {

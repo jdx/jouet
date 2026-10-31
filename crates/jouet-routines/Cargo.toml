@@ -1,0 +1,32 @@
+[package]
+name = "jouet-routines"
+version = "0.0.1"
+description = "Routines for jouet: small Luau programs on jouet's primitives, run by joue"
+keywords = ["agents", "luau", "github", "routines"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source, the built-in routines and their fixtures, the type definitions
+# and the licence, and nothing a checkout happens to hold.
+include = ["/src/**", "/routines/**", "/routines.d.luau", "/LICENSE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+jouet-edit.workspace = true
+jouet-git.workspace = true
+jouet-github.workspace = true
+jouet-output.workspace = true
+mlua.workspace = true
+serde.workspace = true
+# A routine's result keeps the key order it asked for (`joue.object`).
+serde_json = { workspace = true, features = ["preserve_order"] }
+toml.workspace = true
+usage-lib.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

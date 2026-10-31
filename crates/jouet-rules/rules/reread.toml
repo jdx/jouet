@@ -1,0 +1,38 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "reread"
+why = "Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["search"]
+message = "This session already read these lines, and the file has not changed since: use what you read earlier. To look for something in it, `jouet search PATTERN FILE` shows only matches you have not seen (`jouet agent-help search`)."
+
+# `seen` is worked out by jouet's hook from what the session was shown:
+# Read calls, `cat`/`head`/`tail`/`sed -n`/`nl` reads, and `jouet search`.
+[[rule.match]]
+tool = "Read"
+seen = true
+
+[[rule.match]]
+command = ["cat", "head", "tail", "sed", "nl"]
+seen = true
+
+[rule.examples]
+fires = [
+  { tool = "Read", path = "src/main.rs", seen = true },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", offset = 40, limit = 20 }, seen = true },
+  { command = "cat src/main.rs", seen = true },
+  { command = "sed -n '10,40p' src/lib.rs", seen = true },
+  { command = "nl -ba src/lib.rs | sed -n '1,80p'", seen = true },
+  { command = "rtk cat src/main.rs", seen = true },
+]
+quiet = [
+  { tool = "Read", path = "src/main.rs" },
+  { tool = "Read", path = "src/main.rs", seen = false },
+  { command = "cat src/main.rs" },
+  { tool = "Edit", path = "src/main.rs", seen = true },
+  { command = "cargo test", seen = true },
+  { command = "jouet search download src/lib.rs", seen = true },
+]

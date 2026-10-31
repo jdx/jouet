@@ -8,7 +8,7 @@
 
 /// The lexer's tokens.
 #[derive(Debug, Clone, PartialEq)]
-enum Tok {
+pub(crate) enum Tok {
     Word(Word),
     /// `|`, `|&`, `||`, `&&`, `;`, `;;`, `&`, a newline, `(` or `)`.
     Op(&'static str),
@@ -19,9 +19,9 @@ enum Tok {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-struct Word {
+pub(crate) struct Word {
     /// The word with its quotes removed.
-    text: String,
+    pub(crate) text: String,
     /// Some part of it was quoted.
     quoted: bool,
     /// It holds an expansion or a command substitution.
@@ -37,7 +37,7 @@ struct WordBuf {
 
 /// Splits a shell command into words and operators, the way a POSIX shell
 /// would, without expanding anything. Unbalanced quotes run to the end.
-fn lex(src: &str) -> Vec<Tok> {
+pub(crate) fn lex(src: &str) -> Vec<Tok> {
     let b = src.as_bytes();
     let mut toks = Vec::new();
     let mut cur: Option<WordBuf> = None;

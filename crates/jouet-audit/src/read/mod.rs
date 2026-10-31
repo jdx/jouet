@@ -48,6 +48,10 @@ pub struct Filter {
     pub until_ms: Option<i64>,
     /// Only sessions that ran in this directory or below it.
     pub project: Option<PathBuf>,
+    /// Also read what a session digest needs and an audit does not: the
+    /// user's messages, each call's line and target, and the start of each
+    /// failure's output.
+    pub detail: bool,
 }
 
 impl Filter {
