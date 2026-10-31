@@ -81,7 +81,7 @@ Affected runs speed up iteration. They never replace the full suite:
 - **Recorded as partial.** With `jouet setup`'s hooks installed, the built-in `checks` rule records `jouet test` as a full test run and `jouet test --affected` as a partial one, with `--affected` as its selector. A partial pass never clears a failed full run, the stop hook asks for the full suite when only partial runs followed a change, and the `push-untested` rule and `jouet pr land` want a full pass at the exact tree. See [finishing on a failing check](/setup#finishing-on-a-failing-check).
 - **The whole suite when in doubt.** A change jouet cannot trace to tests runs everything, and says why.
 - **Nothing for docs.** A change to documentation alone runs no tests, and says so.
-- **Steering, not rewriting.** The `affected-tests` rule warns (it never denies) when an agent runs the whole suite again a few minutes after the last whole-suite run, in a repository with an adapter. It never fires after an affected run, because the next full run is the one that has to happen.
+- **Steering, not rewriting.** The `affected-tests` rule warns (it never denies) when an agent runs the whole suite again a few minutes after the last whole-suite run, in a repository with an adapter. It never fires after an affected run, because the next full run is the one that has to happen, nor after a whole-suite run whose output was cut with `head`, `tail`, `grep`, `rg` or `sed`: the agent did not see that run, and running it again whole is what `piped-test-output` asks for.
 
 ## The changed set
 

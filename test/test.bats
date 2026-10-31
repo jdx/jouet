@@ -311,6 +311,25 @@ ran() {
 	assert_output ""
 }
 
+@test "the whole suite run again after its output was cut is not iterating" {
+	project pytest
+	payload() {
+		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
+	}
+
+	# The agent cut the run's output, and piped-test-output asked for the
+	# whole run again: affected-tests leaves that run alone.
+	ran 'pytest 2>&1 | tail -5' 0
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'jouet test')"
+	assert_output ""
+
+	# Once it saw a whole run, running it whole again is iterating.
+	ran 'jouet test' 0
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'jouet test')"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial "\`jouet test --affected\` (pytest) runs only the tests your changes affect"
+}
+
 # A script that prints a TAP run, as bats does: N tests, the ones in FAILING
 # failing with two comment lines each, exiting 1 when any failed.
 tap_script() {
