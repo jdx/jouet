@@ -224,3 +224,29 @@ fn a_corrupt_database_is_rebuilt() {
     graph.refresh(None).unwrap();
     assert_eq!(names(&graph, "a.java"), ["A", "A::m"]);
 }
+
+#[cfg(unix)]
+#[test]
+fn paths_through_a_symlink_to_the_work_tree_are_the_same_files() {
+    let dir = repo();
+    let cache = tempfile::tempdir().unwrap();
+    let link_dir = tempfile::tempdir().unwrap();
+    let link = link_dir.path().join("via");
+    std::os::unix::fs::symlink(dir.path(), &link).unwrap();
+    write(dir.path(), "a.rb", "def one; end\n");
+    let mut graph = open(&link, cache.path());
+    graph.refresh(None).unwrap();
+    write(dir.path(), "a.rb", "def two; end\n");
+    age(dir.path(), "a.rb");
+    let report = graph.reindex_paths(&[link.join("a.rb")], None).unwrap();
+    assert_eq!(report.indexed, 1);
+    assert_eq!(names(&graph, &link.join("a.rb").to_string_lossy()), ["two"]);
+    std::fs::remove_file(dir.path().join("a.rb")).unwrap();
+    assert_eq!(
+        graph
+            .reindex_paths(&[link.join("a.rb")], None)
+            .unwrap()
+            .removed,
+        1
+    );
+}
