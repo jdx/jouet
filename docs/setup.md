@@ -64,7 +64,7 @@ If you work across many repositories or worktrees, install with `--global` inste
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
 | Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules, and in a fnox project, how to use its secrets. |
-| Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
+| Before a shell command, a Read, a Grep or a file edit | `PreToolUse` (`Bash\|Read\|Grep\|Edit\|Write\|MultiEdit\|NotebookEdit`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
 | After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
 | Stop | `Stop` | `Stop` | Blocks finishing once while a recorded check failed, when only partial test runs followed a change, or when files changed after the last hk check passed. With hk's stop hook merged in, its verdict too. |
@@ -99,6 +99,7 @@ The built-in rules:
 | `job-ready` | `sleep` together with `curl`, `wget`, `http` or `nc` against `localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]`, as in `sleep 5 && curl localhost:3000` or `until curl ...; do sleep 1; done` | `jouet job start ID --http URL -- CMD`, or for a server already running `jouet wait http URL` (`jouet wait port PORT` for one that does not speak HTTP) |
 | `job-logs` | warns on `tail -f` of a `*.log` or `*.out` file, and on reading `nohup.out` | `jouet job logs ID -n 50` |
 | `job-stop` | warns on `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall` of a dev server, `fuser -k` and `kill-port` | `jouet job stop ID` |
+| `claimed-path` | warns (does not deny) on an edit (Edit, Write, MultiEdit, NotebookEdit), `git commit`, `jouet commit` or `jouet edit replace` that touches a path another live session [claims](/commands/claim), naming that session, its worktree and branch | leaving the path to that session, or coordinating first |
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.
 

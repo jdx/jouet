@@ -51,6 +51,8 @@ struct Jouet {
 enum Cmd {
     /// Report where coding-agent sessions spend tokens and time
     Audit(AuditArgs),
+    /// Claim paths for this session, so other sessions are warned off them
+    Claim(ClaimArgs),
     /// Commit only the named paths, with trailers
     Commit(CommitArgs),
     /// Report the errors and warnings in files you changed, through hk
@@ -1033,6 +1035,63 @@ pub struct WaitJobArgs {
     no_logs: bool,
 }
 
+/// Claim paths for this session, so other sessions are warned off them
+///
+/// A claim is advisory: it blocks nothing. It tells other agent sessions on
+/// this machine that this session works on these paths, and jouet's hooks
+/// warn a session that edits or commits a path another live session claims,
+/// naming that session and its worktree. Every worktree of a repository
+/// shares its claims. PATH is a file, a directory (covering everything
+/// under it) or a glob (`*`, `**`, `?`). A claim lasts --for (default 2h),
+/// and lapses early when its worktree is removed or its agent exits.
+/// Claiming a path again renews it. Refuses (exit 1) when another live
+/// session claims an overlapping path, naming it; exits 4 outside an agent
+/// session (set JOUET_SESSION_ID to claim from elsewhere).
+#[derive(Args)]
+#[usage(args_conflicts_with_subcommands)]
+pub struct ClaimArgs {
+    #[usage(subcommand)]
+    cmd: Option<ClaimCmd>,
+    /// The files, directories or globs to claim
+    paths: Vec<String>,
+    /// How long the claim lasts (default 2h)
+    #[usage(long = "for", value_name = "DUR")]
+    duration: Option<String>,
+    /// What the session is doing there, shown to the others
+    #[usage(long, value_name = "TEXT")]
+    note: Option<String>,
+}
+
+#[derive(Subcommands)]
+pub enum ClaimCmd {
+    /// List the live claims in this repository, every session's
+    Ls(ClaimLsArgs),
+    /// Release this session's claims
+    Release(ClaimReleaseArgs),
+}
+
+/// List the live claims in this repository, every session's
+///
+/// Claims that expired, or whose worktree or agent is gone, are removed
+/// first; --all lists them before they go.
+#[derive(Args)]
+pub struct ClaimLsArgs {
+    /// Also list the claims that no longer hold
+    #[usage(long)]
+    all: bool,
+}
+
+/// Release this session's claims
+///
+/// Releases the claims on the paths given, or all of this session's claims
+/// in this repository. Another session's claim is never released: it lapses
+/// on its own.
+#[derive(Args)]
+pub struct ClaimReleaseArgs {
+    /// The claimed paths to release; all of this session's when none
+    paths: Vec<String>,
+}
+
 /// Run one-off background work, such as a build or a server for one check
 ///
 /// A job is a command running in the background, detached in a process
@@ -1915,6 +1974,7 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
+        Cmd::Claim(args) => cmd::claim::run(args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
         Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),

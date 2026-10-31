@@ -30,6 +30,7 @@ job-start          enabled  deny    builtin  builtin  2026-10-31  A server or a 
 job-ready          enabled  deny    builtin  builtin  2026-10-31  Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies.
 job-logs           enabled  warn    builtin  builtin  2026-10-31  Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name.
 job-stop           enabled  warn    builtin  builtin  2026-10-31  Killing a server by its port or its command line can hit the wrong process, or leave its children running; `jouet job stop` stops a job's whole process group by name.
+claimed-path       enabled  warn    builtin  builtin  2026-10-31  Two sessions changing the same files on one machine overwrite or commit each other's work; `jouet claim` says who is working where.
 checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
 large-read         enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
@@ -248,12 +249,13 @@ ok    job-start          26 examples passed
 ok    job-ready          12 examples passed
 ok    job-logs           11 examples passed
 ok    job-stop           15 examples passed
+ok    claimed-path       16 examples passed
 ok    checks             66 examples passed
 ok    reread             12 examples passed
 ok    large-read         11 examples passed
 ok    unbudgeted-search  23 examples passed
 FAIL  no-rm-rf           it has no `quiet` examples: near misses it must leave alone
-20 of 21 rules passed their examples
+21 of 22 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -280,7 +282,7 @@ stays quiet on (near misses):
 
 ## Scripts
 
-Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Three built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Four built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too; `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
 
 ```toml
 [[rule]]

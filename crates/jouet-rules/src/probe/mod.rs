@@ -19,6 +19,7 @@
 //! turns them on, so a hook never waits on the network by default.
 
 mod cargo;
+mod claims;
 pub(crate) mod git;
 mod github;
 mod ledger;
@@ -76,6 +77,8 @@ pub struct Probes {
     repo_key: Option<String>,
     github: Arc<PrFetch>,
     adapters: Option<Arc<Adapters>>,
+    /// Where `jouet claim` keeps its claims.
+    claims: Option<PathBuf>,
 }
 
 impl Probes {
@@ -91,7 +94,16 @@ impl Probes {
             repo_key: None,
             github: Arc::new(github::fetch),
             adapters: None,
+            claims: None,
         }
+    }
+
+    /// The same probes, reading `jouet claim`'s claims from `dir` (`<state
+    /// dir>/claims`), for `jouet.claims.held()`. Without it, that probe
+    /// answers nil and a reason.
+    pub fn with_claims(mut self, dir: Option<PathBuf>) -> Self {
+        self.claims = dir;
+        self
     }
 
     /// The same probes, with how to find the test adapters for a
@@ -314,6 +326,51 @@ pub(crate) fn install(
         })?,
     )?;
     jouet.set("test", test_table)?;
+
+    let claims_table = lua.create_table()?;
+    let s = shared.clone();
+    claims_table.set(
+        "held",
+        lua.create_function(move |lua, paths: Vec<String>| {
+            let found = cached(&s, "claims", |p, _| {
+                let state = p.claims.as_deref().ok_or("claims are not available here")?;
+                let dir = match &p.dir {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_dir().map_err(|e| e.to_string())?,
+                };
+                claims::list(state, &dir)
+            })?;
+            // An example's claims come without probes, and so without a
+            // work tree to place its paths in.
+            let dir = s
+                .probes
+                .borrow()
+                .as_ref()
+                .map(|p| p.dir.clone().or_else(|| std::env::current_dir().ok()));
+            let held = found
+                .map(|list| list.map(|list| claims::held(&list, &paths, dir.flatten().as_deref())));
+            answer(lua, held)
+        })?,
+    )?;
+    jouet.set("claims", claims_table)?;
+
+    let s = shared.clone();
+    git_table.set(
+        "changed",
+        lua.create_function(move |lua, scope: Option<String>| {
+            let scope = scope.unwrap_or_else(|| "staged".into());
+            if !["staged", "tracked"].contains(&scope.as_str()) {
+                return Err(mlua::Error::runtime(format!(
+                    "jouet.git.changed: scope must be \"staged\" or \"tracked\", not `{scope}`"
+                )));
+            }
+            let key = format!("changed:{scope}");
+            let found = cached(&s, &key, |p, left| {
+                claims::changed(p.dir.as_deref(), &scope, left).map(Some)
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
 
     let s = shared.clone();
     jouet.set(

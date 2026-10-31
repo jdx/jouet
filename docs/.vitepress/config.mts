@@ -97,6 +97,7 @@ export default defineConfig({
           { text: "jouet commit", link: "/commands/commit" },
           { text: "jouet review-package", link: "/commands/review-package" },
           { text: "jouet handoff", link: "/commands/handoff" },
+          { text: "jouet claim", link: "/commands/claim" },
         ],
       },
       {

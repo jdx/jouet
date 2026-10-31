@@ -7,6 +7,7 @@
 //! `*.rs` or `:/` means that file, never a pattern or the whole tree.
 
 pub mod agent;
+pub mod claim;
 pub mod commit;
 pub mod conventional;
 pub mod handoff;

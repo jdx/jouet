@@ -545,6 +545,8 @@ return {
             read_lines: None,
             fnox: None,
             git_dirty: None,
+            session: None,
+            claims: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
