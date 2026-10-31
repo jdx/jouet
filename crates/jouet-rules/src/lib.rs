@@ -116,6 +116,10 @@ const BUILTIN: &[(&str, &str)] = &[
         "unbudgeted-search",
         include_str!("../rules/unbudgeted-search.toml"),
     ),
+    (
+        "unbounded-query",
+        include_str!("../rules/unbounded-query.toml"),
+    ),
     ("curl-json", include_str!("../rules/curl-json.toml")),
 ];
 
@@ -146,6 +150,10 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/pitchfork-stop.luau"),
     ),
     ("job-start.luau", include_str!("../rules/job-start.luau")),
+    (
+        "unbounded-query.luau",
+        include_str!("../rules/unbounded-query.luau"),
+    ),
     (
         "scoped-lint.luau",
         include_str!("../rules/scoped-lint.luau"),

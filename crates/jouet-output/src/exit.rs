@@ -14,7 +14,7 @@ pub enum Exit {
     NotFound,
     Precondition,
     /// Authentication, network or rate-limit failure talking to GitHub, a
-    /// package registry or the server `jouet http` asked.
+    /// package registry, a database or the server `jouet http` asked.
     Remote,
     /// Still pending when `--timeout` expired; running the same command
     /// again keeps waiting.
@@ -94,10 +94,10 @@ impl Exit {
             Self::Ok => "done",
             Self::Failed => "the answer is no: fix the code",
             Self::Usage => "bad arguments",
-            Self::NotFound => "no such file, PR, thread or package",
+            Self::NotFound => "no such file, PR, thread, package or table",
             Self::Precondition => "refused before doing anything: fix the request",
             Self::Remote => {
-                "GitHub, a registry or a server could not be reached or refused: check auth, then retry"
+                "GitHub, a registry, a database or a server could not be reached or refused: check auth, then retry"
             }
             Self::Timeout => "still pending: run the same command again to keep waiting",
             Self::Act => "the agent has something to do: run the suggested command",
