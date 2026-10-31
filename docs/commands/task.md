@@ -14,7 +14,7 @@ jouet task apply ID --file local|shared [--name NAME] [--dry-run] [--json]
 The flags are listed in the CLI reference: [`task propose`](/cli/task/propose) and [`task apply`](/cli/task/apply).
 
 ::: warning Needs a recent mise
-`jouet task apply` needs mise 2026.10.25 or later, the first release with `mise tasks set` and `mise tasks rm`, file selection for `mise tasks add`, and `--json` on all three. With an older mise it refuses with exit 4 and says which version it needs. `jouet task propose` only reads `mise tasks ls --json`, which older versions have.
+`jouet task apply` needs a mise newer than 2026.10.24. The next release (2026.10.25, or 2026.11.0 if it lands in November) is the first with `mise tasks set` and `mise tasks rm`, file selection for `mise tasks add`, and `--json` on all three. A build of mise's `main` branch from after jdx/mise#15213 works too, though it still reports 2026.10.24: jouet checks that its `mise tasks set` exists. With an older mise, `apply` refuses with exit 4 and says which version it needs. `jouet task propose` only reads `mise tasks ls --json`, which older versions have.
 :::
 
 ## Proposing
@@ -77,7 +77,7 @@ Without `--file`, `apply` always refuses with exit 4, whoever runs it, and never
 
 - `--file local` runs `mise tasks add --json --env local`, which writes `mise.local.toml` (or `.mise.local.toml`, if that exists).
 - `--file shared` runs `mise tasks add --json --path` with the repository's shared config: the first of `mise.toml`, `.mise.toml`, `mise/config.toml` and the other config paths mise reads that git tracks. If there is none, it uses `mise.toml`.
-- For a task jouet added before, it runs `mise tasks set` instead, which changes the task in place. A task of the same name that jouet did not add is left alone: `apply` refuses with exit 4, and `--name NAME` picks another name.
+- For a task jouet added before, it runs `mise tasks set` instead, which changes the task in place. That works only in the file that has the task, so applying it with the other `--file` refuses with exit 4. A task of the same name that jouet did not add is left alone: `apply` refuses with exit 4, and `--name NAME` picks another name.
 
 The command, the mise version, and the JSON mise printed (the file, `added`, `updated` or `unchanged`, the task's table, and whether mise trusted the file's directory) are all in `--json`. `--dry-run` passes mise's `--dry-run` and records nothing. When the task goes in `mise.local.toml` and git does not ignore that file, `apply` warns, because a local task that gets committed is no longer only yours.
 

@@ -8,16 +8,17 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// The first mise release whose `tasks add` chooses the file and prints
-/// JSON, and that has `tasks set` and `tasks rm`.
-pub(crate) const MIN_VERSION: &str = "2026.10.25";
+/// The last mise release before `tasks add` chose the file and printed
+/// JSON, and before `tasks set` and `tasks rm` (jdx/mise#15213). The next
+/// release has them, whether it is 2026.10.25 or 2026.11.0.
+pub(crate) const BEFORE: &str = "2026.10.24";
 
 /// Why mise could not do what jouet asked.
 #[derive(Debug)]
 pub(crate) enum Problem {
     /// No `mise` on PATH.
     Missing,
-    /// Older than [`MIN_VERSION`]; the version it reported.
+    /// No newer than [`BEFORE`]; the version it reported.
     TooOld(String),
     /// It ran and failed, or printed something jouet could not read.
     Failed(String),
@@ -27,10 +28,10 @@ impl Problem {
     pub(crate) fn message(&self) -> String {
         match self {
             Self::Missing => format!(
-                "mise is not installed; jouet writes tasks through mise {MIN_VERSION} or later"
+                "mise is not installed; jouet writes tasks through a mise newer than {BEFORE}"
             ),
             Self::TooOld(version) => format!(
-                "this needs mise {MIN_VERSION} or later, for `mise tasks set` and `rm` and their JSON; the mise on PATH is {version}"
+                "this needs a mise newer than {BEFORE}, the first with `mise tasks set` and `rm` and their JSON; the mise on PATH is {version}"
             ),
             Self::Failed(message) => message.clone(),
         }
@@ -72,8 +73,8 @@ pub(crate) fn check(root: &Path) -> Result<String, Problem> {
         .next()
         .unwrap_or("unknown")
         .to_string();
-    let min = parse_version(MIN_VERSION);
-    if parse_version(&text).is_some_and(|v| Some(v) >= min) {
+    let before = parse_version(BEFORE);
+    if parse_version(&text).is_some_and(|v| Some(v) > before) {
         return Ok(version);
     }
     // Before `set` existed, `mise tasks set --help` is the help of `mise
@@ -159,7 +160,9 @@ mod tests {
             parse_version("2026.10.24-DEBUG linux-x64"),
             Some((2026, 10, 24))
         );
-        assert!(parse_version("2026.11.0").unwrap() > parse_version(MIN_VERSION).unwrap());
+        let before = parse_version(BEFORE).unwrap();
+        assert!(parse_version("2026.10.25").unwrap() > before);
+        assert!(parse_version("2026.11.0").unwrap() > before);
         assert_eq!(parse_version("mise"), None);
     }
 

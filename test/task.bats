@@ -5,7 +5,7 @@
 # through mise, the session start naming what was noticed, and `jouet
 # unwind` proposing to remove a task nobody runs. A fake `mise` records its
 # arguments in $MISE_LOG and answers `--version`, `tasks ls --json` (from
-# $MISE_TASKS) and `tasks add|set|rm --json` the way mise 2026.10.25
+# $MISE_TASKS) and `tasks add|set|rm --json` the way a mise newer than 2026.10.24
 # does.
 
 setup() {
@@ -35,13 +35,14 @@ fake_mise() {
 printf '%s\0' "$@" | jq -cRs 'split("\u0000")[:-1]' >>"$MISE_LOG"
 # What `tasks add|set|rm --json` prints for the task its arguments name.
 report() {
-	local action=$1 path="$PWD/mise.toml" name="" run=() dry=false
+	local action=$1 path="$PWD/mise.toml" name="" run=() dry=false table='{}'
 	shift 2
 	while (($#)); do
 		case $1 in
 		--env) path="$PWD/mise.$2.toml"; shift ;;
 		--path) path=$2; shift ;;
-		--description | --depends | --sources) shift ;;
+		--description) table=$(jq -c --arg v "$2" '.description = $v' <<<"$table"); shift ;;
+		--depends | --sources) table=$(jq -c --arg k "${1#--}" --arg v "$2" '.[$k] += [$v]' <<<"$table"); shift ;;
 		--dry-run) dry=true ;;
 		--json | --yes) ;;
 		--) shift; run=("$@"); break ;;
@@ -51,8 +52,8 @@ report() {
 	done
 	local text="${run[*]}"
 	[[ ${run[0]} == sh && ${run[1]} == -c ]] && text="sh -c '${run[2]}'"
-	jq -n --arg t "$name" --arg a "$action" --arg p "$path" --arg r "$text" --argjson d "$dry" \
-		'{task: $t, action: $a, kind: "toml", path: $p, table: {run: $r}, newly_trusted: false, dry_run: $d}'
+	jq -n --arg t "$name" --arg a "$action" --arg p "$path" --arg r "$text" --argjson d "$dry" --argjson table "$table" \
+		'{task: $t, action: $a, kind: "toml", path: $p, table: ($table + {run: $r}), newly_trusted: false, dry_run: $d}'
 }
 case "$1 $2" in
 "--version ") echo "${FAKE_MISE_VERSION:-2026.10.25} linux-x64 (2026-10-31)" ;;
@@ -60,7 +61,8 @@ case "$1 $2" in
 "tasks set")
 	# An old mise reads `set` as a task name and prints the help of `mise tasks`.
 	[[ $3 == --help ]] && { echo "Usage: mise tasks [TASK]"; exit 0; }
-	report updated "$@" ;;
+	# jouet sets a task to what it wrote before, which changes nothing.
+	report unchanged "$@" ;;
 "tasks add") report added "$@" ;;
 "tasks rm") report removed "$@" | jq -s . ;;
 *) echo "fake mise: unexpected $*" >&2; exit 1 ;;
@@ -159,7 +161,7 @@ ran() {
 	rm "$BATS_TEST_TMPDIR/bin/mise"
 	PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet task propose
 	assert_failure 4
-	assert_equal "$stderr" "jouet: reading the project's tasks, to propose none it has: mise is not installed; jouet writes tasks through mise 2026.10.25 or later"
+	assert_equal "$stderr" "jouet: reading the project's tasks, to propose none it has: mise is not installed; jouet writes tasks through a mise newer than 2026.10.24"
 }
 
 @test "apply asks for the user's choice of file, needs a recent mise, and writes through mise" {
@@ -178,7 +180,7 @@ ran() {
 
 	FAKE_MISE_VERSION=2026.10.24 run jouet task apply t1 --file local
 	assert_failure 4
-	assert_line --index 0 "jouet: this needs mise 2026.10.25 or later, for \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
+	assert_line --index 0 "jouet: this needs a mise newer than 2026.10.24, the first with \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
 	assert_equal "$(tail -1 "$MISE_LOG")" '["tasks","set","--help"]'
 
 	run --separate-stderr jouet task apply t1 --file local --json
@@ -190,13 +192,17 @@ ran() {
 	run --separate-stderr jouet wind show t1
 	assert_line --partial 't1 (adopted)'
 
-	# The task is jouet's now, so applying again changes it in place.
+	# The task is jouet's now, so applying again changes it in place, in the
+	# file that has it: `mise tasks set` fails on another.
 	ours
-	run --separate-stderr jouet task apply t1 --file shared
+	run --separate-stderr jouet task apply t1 --file local
 	assert_success
-	assert_output "task build-test updated in $ROOT/mise.toml; run it with \`mise run build-test\`"
+	assert_line --index 0 "task build-test unchanged in $ROOT/mise.local.toml; run it with \`mise run build-test\`"
 	run jq -r '.[1:5] | join(" ")' <<<"$(tail -1 "$MISE_LOG")"
-	assert_output "set --json --path $ROOT/mise.toml"
+	assert_output "set --json --env local"
+	run jouet task apply t1 --file shared
+	assert_failure 4
+	assert_line --index 0 "jouet: jouet added \`build-test\` to $ROOT/mise.local.toml, not mise.toml"
 
 	# Anyone else's task is left alone.
 	echo '[{"name": "lint", "run": ["cargo fmt && cargo clippy"]}]' >"$MISE_TASKS"

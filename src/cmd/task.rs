@@ -443,16 +443,31 @@ fn apply(paths: &Paths, args: &TaskApplyArgs, out: &Output) -> Exit {
         .tasks
         .applied
         .iter()
-        .any(|a| a.root == root_text && a.name == name);
+        .find(|a| a.root == root_text && a.name == name);
     // A task of jouet's changes in place; anyone else's is left alone.
     let verb = if existing.iter().any(|t| t.name == name) {
-        if !ours {
+        let Some(ours) = ours else {
             return out.error_with_hint(
                 Exit::Precondition,
                 &format!("the project already has a task named `{name}`"),
                 Some(&format!(
                     "choose another name: `jouet task apply {id} --file {} --name NAME`",
                     file.name()
+                )),
+            );
+        };
+        // `mise tasks set` changes a task only in the file that has it.
+        if ours.file != file {
+            return out.error_with_hint(
+                Exit::Precondition,
+                &format!(
+                    "jouet added `{name}` to {}, not {}",
+                    ours.path,
+                    file.config()
+                ),
+                Some(&format!(
+                    "change it there with `jouet task apply {id} --file {}`, or add it under another name with `--name NAME`",
+                    ours.file.name()
                 )),
             );
         }

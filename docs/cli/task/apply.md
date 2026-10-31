@@ -5,7 +5,7 @@
 
 Add a proposed task through mise, to the file the user chose
 
-Runs `mise tasks add --json` (or `mise tasks set` for a task jouet added before) with `--env local` for mise.local.toml or `--path` to the repository's shared config for mise.toml, and prints the JSON mise returns. Without --file it refuses (exit 4) and says which file jouet suggests: ask the user, then pass their choice. A mise older than 2026.10.25 is refused (exit 4). A command with shell syntax (`&&`, pipes, quotes) is written as `sh -c '...'`, since mise quotes each word of a task's command.
+Runs `mise tasks add --json` (or `mise tasks set` for a task jouet added before) with `--env local` for mise.local.toml or `--path` to the repository's shared config for mise.toml, and prints the JSON mise returns. Without --file it refuses (exit 4) and says which file jouet suggests: ask the user, then pass their choice. A mise older than 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes, quotes) is written as `sh -c '...'`, since mise quotes each word of a task's command.
 
 ## Arguments
 - **`<ID>`** — The proposal, such as t2
