@@ -87,7 +87,7 @@ A rule's keys:
 | `author` | Who wrote it: a person, or the agent session that did. |
 | `created` | When. |
 | `message` | What the agent is told when the rule matches. |
-| `suggest` | A command to run instead. The agent sees ``Run `SUGGEST` instead.`` before the message. |
+| `suggest` | A command to run instead. The agent sees ``Run `SUGGEST` instead.`` before the message. For a script rule, only the session-start primer names it. |
 | `needs` | The jouet command the advice names, such as `["wait", "ci"]`. The rule stays off until the installed jouet has it. |
 | `requires` | The project files the rule is about: `requires = { files = ["pitchfork.toml", ".config/pitchfork.toml"] }`. The rule runs only where one of them is in the call's directory or one above it, so a script about them never starts a VM elsewhere. Its examples run as if one were. |
 | `match` | Which calls it matches: a table, or a list of `[[rule.match]]` tables of which any may match. |
@@ -283,7 +283,7 @@ local rule: JouetRule = {
 return rule
 ```
 
-The script returns a table with a `check` function, which gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing. The rule's name, mode, `needs`, `on` and examples stay in its TOML, and a script rule takes no `message` or `suggest`: its `check` says what to tell the agent. `jouet rule new NAME --script` writes both files.
+The script returns a table with a `check` function, which gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing. The rule's name, mode, `needs`, `on` and examples stay in its TOML, and a script rule takes no `message`: its `check` says what to tell the agent. Its `suggest`, if any, is for the session-start primer. `jouet rule new NAME --script` writes both files.
 
 A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
 

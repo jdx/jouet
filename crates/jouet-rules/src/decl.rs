@@ -92,7 +92,8 @@ pub(crate) struct RuleDecl {
     /// `script` decides.
     pub message: Option<String>,
     /// A command to run instead, shown before the message as "Run `...`
-    /// instead."
+    /// instead." For a script rule, which writes its own message, only the
+    /// session-start primer names it.
     pub suggest: Option<String>,
     /// The calls the rule fires on: a table, or a list of tables of which
     /// any may match.

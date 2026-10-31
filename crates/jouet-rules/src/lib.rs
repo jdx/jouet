@@ -127,6 +127,10 @@ const BUILTIN: &[(&str, &str)] = &[
 /// The scripts built-in rules name.
 const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
+        "python-edit.luau",
+        include_str!("../rules/python-edit.luau"),
+    ),
+    (
         "committed-secrets.luau",
         include_str!("../rules/committed-secrets.luau"),
     ),
@@ -375,16 +379,19 @@ enum Body {
         matchers: Vec<decl::Matcher>,
         code: String,
         table: OnceCell<Result<Table, String>>,
+        /// The command the primer names to use instead; the script writes
+        /// its own message.
+        suggest: Option<String>,
     },
     /// A whole-file Luau rule's table.
     Luau(Table),
 }
 
 impl Rule {
-    /// The command a matcher rule names to run instead.
+    /// The command a rule names to run instead.
     pub fn suggest(&self) -> Option<&str> {
         match &self.body {
-            Body::Match { suggest, .. } => suggest.as_deref(),
+            Body::Match { suggest, .. } | Body::Script { suggest, .. } => suggest.as_deref(),
             _ => None,
         }
     }
@@ -1119,6 +1126,7 @@ impl Engine {
                         matchers: d.matchers,
                         code,
                         table: OnceCell::new(),
+                        suggest: d.suggest,
                     },
                     Err(e) => {
                         rule.state = State::Broken(e);
@@ -1419,6 +1427,7 @@ impl Engine {
                 matchers,
                 code,
                 table,
+                ..
             } => {
                 if !matchers.is_empty() && !matcher::any(matchers, call, commands) {
                     return Ok((None, Vec::new()));
@@ -1578,9 +1587,9 @@ fn rule_problem(d: &decl::RuleDecl, event: Event) -> Option<String> {
         }
     }
     match &d.script {
-        Some(_) if message.is_some() || d.suggest.is_some() => Some(
-            "a script's `check` returns its own message: leave out `message` and `suggest`".into(),
-        ),
+        Some(_) if message.is_some() => {
+            Some("a script's `check` returns its own message: leave out `message`".into())
+        }
         Some(_) => None,
         None if matchers.is_empty() => {
             Some("give it a `match`, or a `script` for logic a matcher cannot express".into())

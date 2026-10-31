@@ -1,29 +1,38 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "python-edit"
-why = "A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does."
+why = "A Python heredoc that reads a file and writes it back, by `.replace(`, slicing or a regex, never checks that the text it changes is the text it meant; `jouet edit` does."
 mode = "deny"
 scope = "builtin"
 author = "builtin"
 created = "2026-10-30"
 needs = ["edit"]
 suggest = "jouet edit"
-message = "It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`)."
+# The matcher finds inline Python that writes a file; the script fires when
+# it reads the same file, which makes it an edit.
+script = "python-edit.luau"
 
-# Code in `-c` or a here-document that replaces text and writes a file.
 [[rule.match]]
 command = ["python", "python2", "python3", "python2.*", "python3.*"]
-text = ['\.replace\(', 'write(_text|_bytes)?\(']
+text = ['\.write(_text|_bytes)?\(|open\([^)]*,\s*.(w|a|r\+)']
 
 [rule.examples]
 fires = [
   "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('a.rs')\np.write_text(p.read_text().replace('a', 'b'))\nEOF",
   "python3 -c \"s=open('f').read().replace('x','y'); open('f','w').write(s)\"",
   "cd src && python3.12 <<EOF\nt = open('x').read()\nt = t.replace('a', 'b')\nopen('x', 'w').write(t)\nEOF",
+  # Cutting by `.index()` and writing back, with no `.replace(`.
+  "python3 - <<'PY'\np='src/config_root.rs'\ns=open(p).read()\na=s.index('/// The git checkout')\nb=s.index('mod tests')\ns=s[:a]+s[b:]\nopen(p,'w').write(s)\nPY",
+  "python3 - <<'EOF'\nimport re\nt = open(\"a.rs\").read()\nopen('a.rs', 'w').write(re.sub(r'old', 'new', t))\nEOF",
+  "python3 -c \"from pathlib import Path; Path('a.rs').write_text(Path('a.rs').read_text()[:-1])\"",
 ]
 quiet = [
   "python3 - <<'EOF'\nprint(open('f').read().replace('a', 'b'))\nEOF",
   "python3 fix.py",
   "cat <<'EOF' > fix.py\nopen('f','w').write(s.replace('a','b'))\nEOF",
   "pythonic --replace( write(",
+  # Writing one file from another is not an edit.
+  "python3 - <<'EOF'\nrows = open('data.csv').read().splitlines()\nopen('report.md', 'w').write('\\n'.join(rows))\nEOF",
+  # A structured rewrite, which `jouet edit` cannot do.
+  "python3 - <<'EOF'\nimport json\np = 'package.json'\nd = json.load(open(p))\nd['version'] = '1.0.0'\njson.dump(d, open(p, 'w'), indent=2)\nEOF",
 ]
