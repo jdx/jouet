@@ -3,7 +3,8 @@
 //! (the hooks' ledger), `jouet.git.state()`, `jouet.git.tree()` and
 //! `jouet.repo()` (plain `git`), `jouet.cargo.workspace()` (`Cargo.toml`
 //! files), `jouet.test.adapters()` (the test runners `jouet test --affected`
-//! can select for, as the binary detects them), and `jouet.env()` (an
+//! can select for, as the binary detects them), `jouet.pitchfork.daemons()`
+//! (the daemons a project's pitchfork config declares), and `jouet.env()` (an
 //! allowlist).
 //!
 //! Every probe:
@@ -22,11 +23,12 @@ mod cargo;
 pub(crate) mod git;
 mod github;
 mod ledger;
+mod pitchfork;
 
 use crate::Shared;
 use crate::json::to_lua;
 use mlua::{Lua, Table, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -315,6 +317,23 @@ pub(crate) fn install(
     )?;
     jouet.set("test", test_table)?;
 
+    let pitchfork_table = lua.create_table()?;
+    let s = shared.clone();
+    pitchfork_table.set(
+        "daemons",
+        lua.create_function(move |lua, ()| {
+            let found = cached(&s, "pitchfork:daemons", |p, _| {
+                let dir = match &p.dir {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_dir().map_err(|e| e.to_string())?,
+                };
+                pitchfork::daemons(&dir)
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("pitchfork", pitchfork_table)?;
+
     let s = shared.clone();
     jouet.set(
         "repo",
@@ -338,6 +357,19 @@ pub(crate) fn install(
         })?,
     )?;
     Ok(())
+}
+
+impl Probes {
+    /// The directory the probes look in, when they were given one.
+    pub(crate) fn dir(&self) -> Option<PathBuf> {
+        self.dir.clone()
+    }
+}
+
+/// Whether one of `files` is in `dir` or a directory above it.
+pub(crate) fn has_file(files: &[String], dir: &Path) -> bool {
+    dir.ancestors()
+        .any(|d| files.iter().any(|f| d.join(f).is_file()))
 }
 
 #[cfg(test)]

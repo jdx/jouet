@@ -26,6 +26,9 @@ secret-files       enabled  deny    builtin  builtin  2026-10-31  Reading a plai
 push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
 scoped-lint        enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
 affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
+pitchfork-start    enabled  deny    builtin  builtin  2026-10-31  Starting by hand a server the project's pitchfork config declares runs a second copy beside pitchfork's, without its ready check, log or restarts; `pitchfork start` runs the declared one.
+pitchfork-stop     enabled  deny    builtin  builtin  2026-10-31  Killing a daemon pitchfork runs, by its port or its command line, looks to pitchfork like a crash and skips its graceful stop; `pitchfork stop` or `restart` does it by name.
+pitchfork-logs     enabled  warn    builtin  builtin  2026-10-31  Following a daemon's log with `pitchfork logs --follow` never returns to the agent; `-n` prints the end of it and returns.
 job-start          enabled  deny    builtin  builtin  2026-10-31  A server or a build started with `&` or nohup has no ready check, no log to ask for and no name to stop it by, so the agent polls it; `jouet job start` gives it all three.
 job-ready          enabled  deny    builtin  builtin  2026-10-31  Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies.
 job-logs           enabled  warn    builtin  builtin  2026-10-31  Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name.
@@ -104,6 +107,7 @@ A rule's keys:
 | `message` | What the agent is told when the rule matches. |
 | `suggest` | A command to run instead. The agent sees ``Run `SUGGEST` instead.`` before the message. |
 | `needs` | The jouet command the advice names, such as `["wait", "ci"]`. The rule stays off until the installed jouet has it. |
+| `requires` | The project files the rule is about: `requires = { files = ["pitchfork.toml", ".config/pitchfork.toml"] }`. The rule runs only where one of them is in the call's directory or one above it, so a script about them never starts a VM elsewhere. Its examples run as if one were. |
 | `match` | Which calls it matches: a table, or a list of `[[rule.match]]` tables of which any may match. |
 | `examples` | `fires` and `quiet`, the calls it must fire on and leave alone. |
 | `script` | A Luau file beside this one, for logic a matcher cannot express. See [Scripts](#scripts). |
@@ -244,6 +248,9 @@ ok    secret-files       25 examples passed
 ok    push-untested      13 examples passed
 ok    scoped-lint        21 examples passed
 ok    affected-tests     22 examples passed
+ok    pitchfork-start    8 examples passed
+ok    pitchfork-stop     9 examples passed
+ok    pitchfork-logs     7 examples passed
 ok    job-start          26 examples passed
 ok    job-ready          12 examples passed
 ok    job-logs           11 examples passed
@@ -253,7 +260,7 @@ ok    reread             12 examples passed
 ok    large-read         11 examples passed
 ok    unbudgeted-search  23 examples passed
 FAIL  no-rm-rf           it has no `quiet` examples: near misses it must leave alone
-20 of 21 rules passed their examples
+23 of 24 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -351,6 +358,7 @@ A script can also ask about jouet's state. The probes only read, and each return
 | `jouet.git.state()` | The branch, its upstream, `ahead` and `behind`, and whether the work tree is `dirty`, from plain `git` |
 | `jouet.git.tree()` | A hash of the content of every tracked file in the work tree, staged or not: the `tree` a recorded run carries. A commit with the same content hashes the same |
 | `jouet.cargo.workspace(dir?)` | The Cargo workspace around a directory: its `root`, the `package` a plain cargo command there builds, every member's name in `members`, and whether it sets `default_members` |
+| `jouet.pitchfork.daemons()` | The daemons the project's pitchfork config declares, from `pitchfork.toml`, `pitchfork.local.toml` and their `.config/` forms from the filesystem root down to the call's directory, a nearer file winning: each one's `name`, its `run` command as one line, the `ports` it is said to listen on (`port`, `expected_port`, `ready_port`, and `--port N` or `-p N` in `run`), and its `file`. Read from the files, without running pitchfork; `nil` when none declares any |
 | `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |
 | `jouet.env(name)` | An environment variable on a short allowlist, such as `CI` or `JOUET_*`. A name with `TOKEN`, `SECRET`, `PASSWORD` or `KEY` in it is never on it. |
 

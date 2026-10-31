@@ -4,9 +4,9 @@
 //! A handoff records facts only: the branch and its upstream, HEAD, an
 //! operation in progress, uncommitted and untracked files, the PR and its
 //! `pr status` attention codes, the session's last test, lint and build
-//! runs, background processes running in the worktree, and its `jouet job`s.
-//! What the work is and what to do next is the agent's to write; this is
-//! what it can stand on.
+//! runs, background processes running in the worktree, its `jouet job`s and
+//! its pitchfork daemons. What the work is and what to do next is the
+//! agent's to write; this is what it can stand on.
 //!
 //! The markdown file carries the same facts as JSON in a trailing HTML
 //! comment, so `pickup` reads exactly what was written, and a reader sees
@@ -65,6 +65,10 @@ pub struct Handoff {
     /// The worktree's `jouet job`s; the caller adds them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub jobs: Vec<Job>,
+    /// The pitchfork daemons in the worktree's namespace; the caller adds
+    /// them, since they take running pitchfork.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub daemons: Vec<Daemon>,
     /// Facts that could not be gathered, and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
@@ -168,6 +172,112 @@ pub fn jobs_now(then: &[Job], now: &[Job]) -> (Vec<JobNow>, Vec<Drift>) {
             code: "job_ended",
             message,
         });
+    }
+    (states, drift)
+}
+
+/// A pitchfork daemon, as `pitchfork list --project --json` described it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Daemon {
+    /// The qualified ID, `namespace/name`.
+    pub id: String,
+    /// pitchfork's status, such as `running` or `errored`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub port: Vec<u16>,
+    /// Why it errored or failed, such as `exit code 7`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl Daemon {
+    /// Whether it has a process: running, or on its way up or down.
+    pub fn alive(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "running" | "waiting" | "stopping" | "restarting"
+        )
+    }
+
+    fn failed(&self) -> bool {
+        matches!(self.status.as_str(), "errored" | "failed")
+    }
+
+    /// Its status, with the error and the PID when there are any.
+    fn describe(&self) -> String {
+        let mut s = self.status.clone();
+        if let Some(error) = &self.error {
+            let _ = write!(s, " ({error})");
+        }
+        if let Some(pid) = self.pid {
+            let _ = write!(s, ", pid {pid}");
+        }
+        if !self.port.is_empty() {
+            let ports: Vec<String> = self.port.iter().map(u16::to_string).collect();
+            let _ = write!(s, ", port {}", ports.join(", "));
+        }
+        s
+    }
+}
+
+/// A daemon a handoff recorded, as it is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DaemonNow {
+    pub id: String,
+    /// Its status when the handoff was written.
+    pub then: String,
+    /// Its status now, or `gone` when pitchfork no longer knows it.
+    pub now: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// How the daemons a handoff recorded are doing, given `now`, what
+/// pitchfork lists in the namespace today; and the drift: a daemon that was
+/// running and has since stopped, failed, gone or restarted.
+pub fn daemons_now(then: &[Daemon], now: &[Daemon]) -> (Vec<DaemonNow>, Vec<Drift>) {
+    let mut states = Vec::new();
+    let mut drift = Vec::new();
+    for d in then {
+        let current = now.iter().find(|n| n.id == d.id);
+        states.push(DaemonNow {
+            id: d.id.clone(),
+            then: d.status.clone(),
+            now: current.map_or_else(|| "gone".into(), |n| n.status.clone()),
+            error: current.and_then(|n| n.error.clone()),
+        });
+        if !d.alive() {
+            continue;
+        }
+        let (code, message) = match current {
+            None => (
+                "daemon_gone",
+                format!("`{}` is no longer known to pitchfork", d.id),
+            ),
+            Some(n) if n.failed() => (
+                "daemon_failed",
+                format!(
+                    "`{}` has {}; `pitchfork logs {} -n 50` shows why",
+                    d.id,
+                    n.describe(),
+                    d.id
+                ),
+            ),
+            Some(n) if !n.alive() => ("daemon_stopped", format!("`{}` is {} now", d.id, n.status)),
+            Some(n) if n.pid.is_some() && d.pid.is_some() && n.pid != d.pid => (
+                "daemon_restarted",
+                format!(
+                    "`{}` has restarted: pid {} then, {} now",
+                    d.id,
+                    d.pid.unwrap_or(0),
+                    n.pid.unwrap_or(0)
+                ),
+            ),
+            Some(_) => continue,
+        };
+        drift.push(Drift { code, message });
     }
     (states, drift)
 }
@@ -423,6 +533,24 @@ impl Handoff {
             })
             .collect();
         list(&mut s, "Jobs", &jobs, data);
+        let daemons: Vec<String> = self
+            .daemons
+            .iter()
+            .map(|d| {
+                let follow = if d.alive() {
+                    format!(", `jouet wait daemon {}`", d.id)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "`{}` {}: `pitchfork logs {} -n 50`{follow}",
+                    d.id,
+                    d.describe(),
+                    d.id
+                )
+            })
+            .collect();
+        list(&mut s, "pitchfork daemons", &daemons, data);
         if !self.notes.is_empty() {
             s.push_str("- **Not gathered:**\n");
             for n in &self.notes {

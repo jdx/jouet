@@ -99,6 +99,11 @@ The built-in rules:
 | `job-ready` | `sleep` together with `curl`, `wget`, `http` or `nc` against `localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]`, as in `sleep 5 && curl localhost:3000` or `until curl ...; do sleep 1; done` | `jouet job start ID --http URL -- CMD`, or for a server already running `jouet wait http URL` (`jouet wait port PORT` for one that does not speak HTTP) |
 | `job-logs` | warns on `tail -f` of a `*.log` or `*.out` file, and on reading `nohup.out` | `jouet job logs ID -n 50` |
 | `job-stop` | warns on `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall` of a dev server, `fuser -k` and `kill-port` | `jouet job stop ID` |
+| `pitchfork-start` | starting by hand a daemon the project's pitchfork config declares: a command that is a daemon's `run` command (arguments added or not), or a server told to listen on a daemon's port | `pitchfork start ID`, with the daemon named |
+| `pitchfork-stop` | `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall`, `fuser -k` or `kill-port` aimed at a declared daemon's port or command line | `pitchfork stop ID` or `pitchfork restart ID` |
+| `pitchfork-logs` | warns on `pitchfork logs --follow` | `pitchfork logs ID -n 50` |
+
+The `pitchfork-start` and `pitchfork-stop` rules run only in a project with a pitchfork config (`pitchfork.toml`, `pitchfork.local.toml`, `.config/pitchfork.toml` or `.config/pitchfork.local.toml` in the call's directory or one above it), and read the daemons it declares from the files, without running pitchfork. They run before the `job-*` rules, so a declared daemon goes to pitchfork and anything else to `jouet job`; elsewhere the session-start primer leaves them out. The stop hook leaves pitchfork daemons alone: they are meant to keep running.
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.
 

@@ -17,9 +17,10 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 
 ## The loop
 
-1. **Notice.** At the end of each turn and at session start, `jouet wind` reads the ledger from where it last stopped. It looks for two patterns:
+1. **Notice.** At the end of each turn and at session start, `jouet wind` reads the ledger from where it last stopped. It looks for three patterns:
    - **A command that never works:** the same program, subcommands and flags failing at least three times, across at least two sessions, and never succeeding, such as a tool that is not installed. Test, lint and build runs are left out, because they fail while code is being fixed.
    - **Long sleeps:** at least five sleeps of ten seconds or more, across at least two sessions, where `jouet wait` would wait for the thing itself.
+   - **A repeated sequence:** the same sequence of commands succeeding at least three times, across at least two sessions, in one repository. This one becomes a mise task, not a rule. See [Winding into mise tasks](#winding-into-mise-tasks).
 2. **Draft.** For each pattern, it writes a rule against the public `jouet` API. The rule is in warn mode. Its `fires` examples are the calls that motivated it. Its `quiet` examples are near misses it must leave alone: what worked instead, and calls in the ledger running the same program. A draft that fails its own examples is dropped. It keeps the draft as a note, and drafts at most two notes a day.
 3. **Show.** A session start shows at most two pending notes, one line each, after jouet's primer:
 
@@ -31,7 +32,7 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 4. **Adopt.** `jouet rule new NAME --from-note ID` writes the rule to `~/.config/jouet/rules/NAME.toml`, with the session that adopted it as its author. Most drafts are a matcher: the command that kept failing, with exactly the options it failed with. A draft about long sleeps also writes `NAME.luau`, a script that compares durations, which a matcher cannot.
 5. **Test.** `jouet rule test NAME` runs its examples. `jouet rule test NAME --replay` runs it over every call in the ledger, lists the calls it fires on and the near misses it leaves alone, and fails if it fires on nothing.
 6. **Promote.** A rule stays in warn mode until `jouet rule promote NAME` switches it to deny, which it does only for a rule that passes examples of both kinds. With `auto_promote` on, a rule that has fired `promote_after` times, in at least two sessions, with no overrides, is promoted on its own.
-7. **Unwind.** `jouet unwind` proposes retiring rules that are nearly always overridden, fire on a large share of calls, or no longer load. `jouet unwind --apply` moves your rules to `~/.config/jouet/rules/retired/`.
+7. **Unwind.** `jouet unwind` proposes retiring rules that are nearly always overridden, fire on a large share of calls, or no longer load. `jouet unwind --apply` moves your rules to `~/.config/jouet/rules/retired/`. It also proposes removing mise tasks jouet added that no session has run in 21 days.
 
 `jouet rule log` lists every change (created, promoted, retired), when, by whom and why.
 
@@ -42,6 +43,12 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 - **Few notes.** At most two notes per session start and two new drafts a day.
 - **The sandbox.** Every rule fails open and runs within its budget, whoever wrote it.
 - **Plain files.** The notes are in `$XDG_STATE_HOME/jouet/wind.json` and the log is in `$XDG_STATE_HOME/jouet/rule-log.jsonl`.
+
+## Winding into mise tasks
+
+Many commands an agent retypes belong in the project's task runner, where people can run them too. The ledger notices a repeated sequence by its shape, and the next session start in that repository names it. The ledger never keeps the command itself, so [`jouet task propose`](/commands/task) reads the repository's session transcripts and drafts the task: its name, `run`, description, `depends` and `sources` where they can be inferred, and the evidence. It also suggests `mise.local.toml` (personal, not committed) or `mise.toml` (shared, committed), and says why.
+
+Which file is always the user's choice. A pending task's line at session start tells the agent to ask the user at a natural pause, giving jouet's suggestion. `jouet task apply ID` refuses until it is given `--file local` or `--file shared`. It then writes the task through `mise tasks add`. jouet never edits a mise config file itself, and applying needs a mise newer than 2026.10.24. `jouet unwind` later proposes removing a task jouet added that nobody runs.
 
 ## Replaying shapes
 
@@ -144,7 +151,7 @@ jouet wind: session d1d1d1d1 (2h ago, this repository) had 3 user corrections, 2
 
 Proposals share the ledger notes' guardrails:
 
-- At most two lines per session start, the ledger's notes first, then suggested reviews, then proposals. A line shown to three sessions without being acted on lapses.
+- At most two lines per session start, the ledger's notes first, then mise tasks for the repository, then suggested reviews, then proposals. A line shown to three sessions without being acted on lapses.
 - At most three proposals per review and three a day. One with the same kind and title as an earlier proposal is skipped.
 - A proposal that looks like it holds a secret is refused, as is one without a title, a why and a draft, with an unknown scope, or with evidence that is not a span.
 - Nothing is applied by jouet. Rules start in warn mode in your rules; anything for the project (`mise.toml`, AGENTS.md, a repository rule) needs the user's yes, and a repository's rules change through a reviewed PR.

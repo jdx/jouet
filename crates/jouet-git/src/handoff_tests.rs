@@ -323,3 +323,76 @@ fn writes_markdown_or_json_by_extension() {
             .ends_with(".git/jouet/handoff.md")
     );
 }
+
+fn daemon(id: &str, status: &str, pid: Option<u32>) -> Daemon {
+    Daemon {
+        id: id.into(),
+        status: status.into(),
+        pid,
+        port: Vec::new(),
+        error: (status == "errored").then(|| "exit code 1".into()),
+    }
+}
+
+#[test]
+fn daemons_that_were_running_drift_when_they_stop_fail_go_or_restart() {
+    let then = [
+        daemon("p/same", "running", Some(10)),
+        daemon("p/stopped", "running", Some(11)),
+        daemon("p/failed", "running", Some(12)),
+        daemon("p/gone", "running", Some(13)),
+        daemon("p/restarted", "running", Some(14)),
+        daemon("p/was-failed", "errored", None),
+    ];
+    let now = [
+        daemon("p/same", "running", Some(10)),
+        daemon("p/stopped", "stopped", None),
+        daemon("p/failed", "errored", None),
+        daemon("p/restarted", "running", Some(99)),
+        daemon("p/was-failed", "errored", None),
+    ];
+    let (states, drift) = daemons_now(&then, &now);
+    let codes: Vec<&str> = drift.iter().map(|d| d.code).collect();
+    assert_eq!(
+        codes,
+        [
+            "daemon_stopped",
+            "daemon_failed",
+            "daemon_gone",
+            "daemon_restarted"
+        ]
+    );
+    assert!(
+        drift[1].message.contains("errored (exit code 1)"),
+        "{drift:?}"
+    );
+    assert_eq!(states.len(), then.len());
+    assert_eq!(states[3].now, "gone");
+    assert_eq!(states[0].now, "running");
+}
+
+#[test]
+fn daemons_show_in_the_markdown_and_round_trip() {
+    let h = Handoff {
+        created_at: "2026-10-31T00:00:00Z".into(),
+        worktree: "/w".into(),
+        daemons: vec![
+            daemon("p/web", "running", Some(7)),
+            daemon("p/bad", "errored", None),
+        ],
+        ..Handoff::default()
+    };
+    let md = h.markdown(true);
+    assert!(md.contains("- **pitchfork daemons (2):**"), "{md}");
+    assert!(
+        md.contains(
+            "`p/web` running, pid 7: `pitchfork logs p/web -n 50`, `jouet wait daemon p/web`"
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains("`p/bad` errored (exit code 1): `pitchfork logs p/bad -n 50`\n"),
+        "{md}"
+    );
+    assert_eq!(parse(&md).unwrap(), h);
+}
