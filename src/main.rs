@@ -7,6 +7,7 @@ mod config;
 mod git;
 mod guide;
 mod ledger;
+mod reads;
 mod redact;
 mod rules;
 mod settings;
@@ -58,8 +59,12 @@ enum Cmd {
     Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
+    /// Read a map of the repository's most important definitions
+    Read(ReadArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
+    /// Search files like rg, within a budget, grouped by symbol
+    Search(SearchArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
@@ -444,6 +449,101 @@ pub struct LandArgs {
     /// say why; the reason is kept in the hook ledger
     #[usage(long, value_name = "REASON")]
     skip_verify: Option<String>,
+}
+
+/// Search files like rg, within a budget, grouped by symbol
+///
+/// Embeds ripgrep's walker and searcher, so it respects .gitignore, skips
+/// hidden and binary files, and is about as fast as rg. Patterns are rg's
+/// regular expressions (-F for a literal). Beyond rg:
+///
+/// - Matches are grouped by file, then by the function, method, class or
+///   module they are in (for Rust, Python, JavaScript, TypeScript, Go,
+///   Ruby, Java, C and C++).
+/// - Output stops at a byte budget, in total and per file, and says what it
+///   left out: `... 4 more in src/x.rs`, and a closing line naming the files
+///   it never reached. Nothing is cut silently; --budget 0 removes a limit.
+/// - Inside an agent session (JOUET_SESSION_ID, CLAUDE_CODE_SESSION_ID or
+///   CODEX_THREAD_ID), a match this session was already shown, in a file
+///   that has not changed since, collapses to one line (`src/x.rs: 3 already
+///   shown, unchanged`). --again shows them anyway.
+///
+/// Exits 0 with matches, 1 with none, 2 for a bad pattern or glob, and 3
+/// for a path that does not exist.
+///
+/// Examples:
+///   jouet search 'fn download' src/
+///   jouet search -F 'client.get(' -g '*.rs'
+///   jouet search -i timeout --budget 2000 --file-budget 400
+///   jouet search -l TODO
+#[derive(Args)]
+pub struct SearchArgs {
+    /// The regular expression to search for (a literal with -F)
+    pattern: String,
+    /// Files and directories to search (default .)
+    paths: Vec<String>,
+    /// Treat the pattern as a literal string
+    #[usage(short = 'F', long)]
+    fixed_strings: bool,
+    /// Match case-insensitively
+    #[usage(short = 'i', long)]
+    ignore_case: bool,
+    /// Match whole words only
+    #[usage(short = 'w', long)]
+    word_regexp: bool,
+    /// Include or exclude files, as rg's -g: `*.rs`, `!*_test.go`. Repeatable
+    #[usage(short = 'g', long, var, value_name = "GLOB")]
+    glob: Vec<String>,
+    /// Search hidden files and directories too
+    #[usage(long)]
+    hidden: bool,
+    /// List the matching files with their match counts, not the lines
+    #[usage(short = 'l', long)]
+    files_with_matches: bool,
+    /// The most bytes to print in total (default 6000; 0 is no limit)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// The most bytes to print from one file (default 1500; 0 is no limit)
+    #[usage(long, value_name = "BYTES")]
+    file_budget: Option<usize>,
+    /// Show matches this session was already shown, too
+    #[usage(long)]
+    again: bool,
+}
+
+/// Read a map of the repository's most important definitions
+///
+/// `--map` prints, for the files that matter most, the line of each of
+/// their most important definitions, sized to a token budget, so an agent
+/// can find its way around a repository without reading whole files. It is
+/// Aider's repo map rebuilt in Rust: tree-sitter finds every definition and
+/// reference, files are ranked by personalised PageRank over who refers to
+/// whom, and as many top-ranked definitions are shown as fit the budget.
+/// Tags are cached by modification time, so a second map of the same tree
+/// only re-reads files that changed.
+///
+/// --focus names a file you are working on, or an identifier you care
+/// about: what it uses ranks higher, and a focused file's own definitions
+/// are left out, as you already have it open. The budget defaults to 1024
+/// tokens with --focus and 8192 without.
+///
+/// Examples:
+///   jouet read --map
+///   jouet read --map --focus src/backend/vfox.rs --focus download
+///   jouet read --map crates/ --budget 2000
+#[derive(Args)]
+pub struct ReadArgs {
+    /// With --map, the directory to map (default .)
+    path: Option<String>,
+    /// Print a map of the most important definitions
+    #[usage(long)]
+    map: bool,
+    /// The map's size in tokens, estimated at 4 bytes each
+    #[usage(long, value_name = "TOKENS")]
+    budget: Option<usize>,
+    /// A file you are working on, or an identifier you care about. Repeatable
+    #[usage(long, var, value_name = "FILE|NAME")]
+    focus: Vec<String>,
 }
 
 /// Block until a condition holds, then print one summary
@@ -1261,6 +1361,8 @@ fn main() -> ExitCode {
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
+        Cmd::Read(args) => cmd::read::run(&args, &out),
+        Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::Run(args) => return cmd::run::run(args, &out),

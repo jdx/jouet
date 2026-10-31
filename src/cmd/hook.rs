@@ -8,14 +8,17 @@
 //! code 2, which both harnesses read as "block", is never used.
 
 use crate::HookArgs;
+use crate::cmd;
 use crate::guide;
 use crate::ledger::{self, Entry};
+use crate::reads;
 use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
 use crate::verify::{self, State};
 use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
+use jouet_search::memory::Memory;
 use serde_json::{Value, json};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -101,7 +104,8 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
-            let call = Call::from_hook(payload, harness.name());
+            let mut call = Call::from_hook(payload, harness.name());
+            call.seen = seen(&call, log.session);
             let (output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);
@@ -110,6 +114,9 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         }
         "post-tool-use" | "post-tool-use-failure" => {
             let call = Call::from_hook(payload, harness.name());
+            if call.exit_code == Some(0) {
+                remember(&call, log.session);
+            }
             let (records, tree) = if hooks.verify {
                 record(payload, &call)
             } else {
@@ -145,6 +152,27 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
         }
         _ => None,
     }
+}
+
+/// Whether the session was already shown everything the call reads, for
+/// the matchers' `seen`; `None` when the call reads nothing jouet can
+/// account for, or there is no session.
+fn seen(call: &Call, session: Option<&str>) -> Option<bool> {
+    let reads = reads::of(call)?;
+    let memory = Memory::open(&cmd::search::seen_dir()?, session?);
+    Some(reads::seen(&memory, &reads))
+}
+
+/// Adds what a successful call read to the session's memory.
+fn remember(call: &Call, session: Option<&str>) {
+    let (Some(reads), Some(dir), Some(session)) =
+        (reads::of(call), cmd::search::seen_dir(), session)
+    else {
+        return;
+    };
+    let mut memory = Memory::open(&dir, session);
+    reads::record(&mut memory, &reads);
+    memory.save();
 }
 
 /// Winds, then picks the notes to show a starting session: at most
@@ -498,6 +526,7 @@ fn codex_state(engine: &Engine, commands: Vec<(String, i32)>) -> State {
             path: None,
             cwd: None,
             exit_code: Some(exit_code),
+            ..Call::default()
         };
         // The transcript does not say what tree each command saw.
         state.record(evaluate(engine, &call).records, None);

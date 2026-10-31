@@ -138,7 +138,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool` and `paths` is about a command, and needs\n`command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `input`, `unless_input` and\n`seen` is about a command, and needs `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -203,6 +203,26 @@
         "with": {
           "description": "Another command in the same call must match this too, as in `sleep\n60 && gh pr checks`. It takes the command keys, not `tool`, `paths`\nor another `with`.",
           "$ref": "#/$defs/Matcher"
+        },
+        "unless_with": {
+          "description": "No other command in the same call may match this, as in `rg x |\nhead`. It takes the command keys, like `with`.",
+          "$ref": "#/$defs/Matcher"
+        },
+        "input": {
+          "description": "The tool's input has these fields with these values, such as\n`{ output_mode = \"content\" }` for Claude Code's Grep. A value that\nis not a string is matched as its JSON text; `*` and `?` are\nwildcards.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "unless_input": {
+          "description": "The tool's input has none of these fields, such as `head_limit`.",
+          "$ref": "#/$defs/OneOrMany_string",
+          "default": []
+        },
+        "seen": {
+          "description": "Whether this agent session was already shown everything the call\nreads, every line, in files unchanged since. jouet's hook works it\nout for Claude Code's Read tool and for shell calls that only read\nfiles with `cat`, `head`, `tail`, `sed -n` or `nl`; any other call is\nunseen. In an example, set it with `seen = true`.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -303,6 +323,15 @@
         "scope": {
           "description": "For a `fires` example with a `kind`: the scope the record must have,\n`full`, or `partial` and its selector, such as `partial -p jouet`.",
           "type": "string"
+        },
+        "input": {
+          "description": "The tool's input, for a tool other than `Bash`, such as `{ pattern =\n\"todo\", output_mode = \"content\" }`.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "seen": {
+          "description": "Whether the session was already shown everything the call reads,\nas jouet's hook would work it out; `false` if omitted.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false

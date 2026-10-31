@@ -1,0 +1,47 @@
+app/client.py
+  1: class Client:
+  2:     def __init__(self, base):
+  5:     def fetch(self, path):
+  9: def _request(url):
+app/main.py
+  4: def run():
+c/util.c
+  3: struct buffer {
+  8: size_t buffer_len(const struct buffer *b) {
+cpp/thing.cpp
+  3: class Circle {
+  5:     explicit Circle(double r) : radius(r) {}
+  6:     double area() const;
+  12: double Circle::area() const {
+go/server.go
+  3: type Server struct {
+  7: func NewServer(addr string) *Server {
+  11: func (s *Server) Serve() error {
+  15: func listen(addr string) error {
+java/App.java
+  1: public class App {
+  2:     public static void main(String[] args) {
+  8: class Greeter {
+  9:     void greet(String name) {
+ruby/app.rb
+  1: module Shop
+  2:   class Cart
+  3:     def initialize
+  7:     def add(item)
+  12:     def total
+src/lib.rs
+  3: pub struct Downloader {
+  8:     pub fn new(base: &str) -> Self {
+  12:     pub fn download(&self, path: &str) -> Result<Vec<u8>, String> {
+  18: fn join_url(base: &str, path: &str) -> String {
+  22: fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+src/main.rs
+  3: fn main() {
+web/api.ts
+  1: export interface Api {
+  2:   request(path: string): Promise<string>;
+  5: export class Session {
+  8:   request(path: string): Promise<string> {
+  13: function fetchText(url: string): Promise<string> {
+web/index.js
+  3: function main() {

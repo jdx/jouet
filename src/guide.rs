@@ -12,6 +12,18 @@ use usage_rs::spec::CommandMeta;
 /// command that is for people setting jouet up, not for agents.
 const WHEN: &[(&str, Option<&str>)] = &[
     (
+        "search",
+        Some(
+            "searching code: like rg, but grouped by the function each match is in, cut to a budget with markers for what it left out, and collapsing matches this session already saw",
+        ),
+    ),
+    (
+        "read",
+        Some(
+            "finding your way around a repository: `jouet read --map` prints the most important definitions to fit a token budget, instead of listing and reading whole files",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -142,12 +154,14 @@ fn when(name: &str) -> Option<&'static str> {
 /// The guide for the whole tool, kept under about 80 lines.
 pub(crate) fn overview() -> String {
     let mut out = format!(
-        "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n",
+        "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
         env!("CARGO_PKG_VERSION")
     );
     for (meta, when) in agent_commands() {
         let name = meta.cmd.name;
-        let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
+        // No blank line between commands: each starts at the margin, and
+        // the overview stays inside its line budget.
+        let _ = writeln!(out, "jouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
         let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
         let listed = meta

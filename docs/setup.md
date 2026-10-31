@@ -64,8 +64,8 @@ If you work across many repositories or worktrees, install with `--global` inste
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
 | Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules. |
-| Before a shell command | `PreToolUse` (`Bash`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
-| After a shell command | `PostToolUse`, `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs. |
+| Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
+| After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | Stop | `Stop` | `Stop` | Blocks finishing once while a recorded check failed, or when only partial test runs followed a change. |
 
 Every hook reads the harness's JSON on stdin and **fails open**: input it cannot read, a broken config file, a bad `JOUET_DISPLAY`, a rule that throws or runs out of its budget, or a crash all exit 0 with no decision, so a problem in jouet never blocks the agent. Rule errors are reported on stderr. A pre-tool-use hook takes about 2 ms in a release build, starting the process included.
