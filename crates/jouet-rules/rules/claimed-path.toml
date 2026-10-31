@@ -30,6 +30,7 @@ fires = [
   { command = "git commit -am wip -- src/", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
   { command = "jouet commit src/cmd -m 'feat: x'", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
   { command = "jouet edit replace src/main.rs --old a --new b", claims = [{ pattern = "src/main.rs", session = "theirs" }] },
+  { command = "jouet edit replace README.md src/main.rs --old a --new b --old c --new d", session = "mine", claims = [{ pattern = "src/main.rs", session = "theirs" }] },
 ]
 quiet = [
   # The session's own claim.
@@ -38,6 +39,7 @@ quiet = [
   { tool = "Edit", path = "src/main.rs", session = "mine", claims = [{ pattern = "src/cmd/", session = "theirs" }] },
   { command = "git commit -m 'src/cmd/claim.rs' README.md", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
   { command = "git commit -F src/cmd/claim.rs README.md", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  { command = "jouet edit replace README.md --old src/main.rs --new src/lib.rs --old x --new src/main.rs --check 'cat src/main.rs'", session = "mine", claims = [{ pattern = "src/main.rs", session = "theirs" }] },
   # No claims, or no answer from the store.
   { tool = "Edit", path = "src/cmd/claim.rs", session = "mine", claims = [] },
   { tool = "Edit", path = "src/cmd/claim.rs" },

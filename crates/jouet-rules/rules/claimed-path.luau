@@ -24,7 +24,8 @@ local GIT_COMMIT_VALUES = {
 	"--pathspec-from-file",
 }
 local GIT_COMMIT_SHORT_VALUES = "mFCct"
-local JOUET_VALUES = { "-m", "--message", "-F", "--file", "--trailer", "--old", "--new", "--count" }
+local JOUET_VALUES =
+	{ "-m", "--message", "-F", "--file", "--trailer", "--old", "--new", "--count", "--check", "--expect-hash" }
 local JOUET_SHORT_VALUES = "mF"
 
 -- The arguments that are not options or their values.
@@ -74,11 +75,8 @@ local function paths_of(command: JouetCommand): { string }?
 		for i = if argv[2] == "commit" then 3 else 4, #argv do
 			table.insert(rest, argv[i])
 		end
-		local named = positional(rest, JOUET_VALUES, JOUET_SHORT_VALUES)
-		if argv[2] == "edit" then
-			return { named[1] }
-		end
-		return named
+		-- `edit replace` takes several files, like `commit`.
+		return positional(rest, JOUET_VALUES, JOUET_SHORT_VALUES)
 	end
 	return nil
 end
