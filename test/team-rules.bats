@@ -3,8 +3,7 @@
 
 # Rules from outside: a repository's .jouet/rules, rule packs pinned by
 # commit, and the system directory's enforced rules. HOME is a scratch
-# directory; JOUET_SYSTEM_DIR points at one, since bats cannot make a
-# directory root owns.
+# directory, and JOUET_SYSTEM_DIR points at one.
 
 setup() {
 	load "test_helper/common_setup"
@@ -115,7 +114,7 @@ TOML
 }
 
 @test "an agent is denied trusting rules or adding a pack, with or without --yes" {
-	for command in 'jouet rule trust' 'jouet rule trust --yes' 'jouet rule trust --system --yes' \
+	for command in 'jouet rule trust' 'jouet rule trust --yes' \
 		'jouet rule pack add team https://github.com/acme/rules --yes'; do
 		run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload "$command")"
 		assert_success
@@ -260,23 +259,14 @@ TOML
 @test "an enforced rule runs whatever the user's settings say" {
 	mkdir -p "$JOUET_SYSTEM_DIR/rules"
 	rule org ls 'the organisation says no' >"$JOUET_SYSTEM_DIR/rules/org.toml"
-
-	# The user owns this directory, so it is not the administrator's: it
-	# runs only once trusted, or anything could set JOUET_SYSTEM_DIR.
-	run --separate-stderr jouet rule list
-	assert_line --regexp '^org +untrusted +deny +enforced:untrusted'
-	assert_line --regexp "is not trusted and is not the administrator's \(.* is owned by uid [0-9]+, not root\)|jouet runs as root"
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'ls')"
-	assert_output ''
-
-	run --separate-stderr jouet rule trust --system --yes
-	assert_success
+	chmod 755 "$JOUET_SYSTEM_DIR" "$JOUET_SYSTEM_DIR/rules"
+	chmod 644 "$JOUET_SYSTEM_DIR/rules/org.toml"
 
 	mkdir -p "$HOME/.config/jouet"
 	printf '[rules]\ndisable = ["org", "git-stash"]\n' >"$HOME/.config/jouet/config.toml"
 	export JOUET_RULES_DISABLE=all
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^org +enabled +deny +enforced:trusted'
+	assert_line --regexp '^org +enabled +deny +enforced +'
 	assert_line --regexp '^git-stash +disabled'
 	assert_line --partial 'org is enforced by '
 	assert_line --partial 'so the setting that disables it does not apply'
@@ -284,4 +274,12 @@ TOML
 	run jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$output"
 	assert_output --partial 'the organisation says no'
 	assert_output --partial '[jouet rule: org]'
+
+	# Others could have written it: it is not the organisation's alone.
+	chmod 664 "$JOUET_SYSTEM_DIR/rules/org.toml"
+	run --separate-stderr jouet rule list
+	assert_line --regexp '^org +untrusted +deny +enforced:writable'
+	assert_line --regexp 'org\.toml can be written by its group or others, so the enforced rules in .* do not run until only its owner can write them$'
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'ls')"
+	assert_output ''
 }

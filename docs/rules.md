@@ -45,14 +45,14 @@ unbudgeted-search   enabled  warn    builtin  builtin  2026-10-30  A search of t
 trust-rules         enabled  deny    builtin  builtin  2026-10-31  A repository's rules put text in front of the agent, so an agent that could trust them could be talked into trusting them; trusting rules and adding a rule pack are the user's decisions.
 ```
 
-The columns are: name, state, mode, scope, author, created, and why. For a rule from outside, the scope says whether its rules run: `repo:trusted`, `repo:changed` or `repo:untrusted`; `pack:NAME`, or `pack:NAME:mismatch`; and `enforced`, or `enforced:trusted` for a system directory you trusted. `--json` gives the same as `trust` and `pack` fields.
+The columns are: name, state, mode, scope, author, created, and why. For a rule from outside, the scope says whether its rules run: `repo:trusted`, `repo:changed` or `repo:untrusted`; `pack:NAME`, or `pack:NAME:mismatch`; and `enforced`, or `enforced:writable` when its group or others can write the system directory. `--json` gives the same as `trust` and `pack` fields.
 
 ## Where rules come from
 
 | Source | Directory | Runs | Mode unless the rule says |
 |---|---|---|---|
 | Built in | embedded in the binary | always | deny |
-| [Enforced](#enforced-rules) | `/etc/jouet/rules/*.toml` (`$JOUET_SYSTEM_DIR`, `%ProgramData%\jouet` on Windows), and the packs `/etc/jouet/packs.toml` pins | when root owns the directory and no one else can write it, or once trusted with `jouet rule trust --system`; your settings cannot turn them off | deny |
+| [Enforced](#enforced-rules) | `/etc/jouet/rules/*.toml` (`$JOUET_SYSTEM_DIR`, `%ProgramData%\jouet` on Windows), and the packs `/etc/jouet/packs.toml` pins | always, unless its group or others can write it; your settings cannot turn them off | deny |
 | Yours | `~/.config/jouet/rules/*.toml` (`$XDG_CONFIG_HOME/jouet/rules`) | always | warn |
 | [A pack](#rule-packs) you pin | the packs `~/.config/jouet/packs.toml` pins | once fetched as pinned | deny |
 | A repository's | `.jouet/rules/*.toml` at the repository root, and the packs `.jouet/packs.toml` pins | once [trusted](#trusting-a-repository-s-rules) with `jouet rule trust` | deny |
@@ -88,7 +88,7 @@ trusted /src/app/.jouet/rules (2 rules); a change to any of them needs trusting 
 - **Examples first.** Trusting runs every rule's examples, and those of the packs `.jouet/packs.toml` pins, which it fetches first. If one fails, or a rule lacks examples of either kind or does not load, nothing is trusted and it exits 1.
 - **The user's decision.** Without a terminal, `jouet rule trust` refuses (exit 4) unless given `--yes`, which is for a script or CI job you run. The built-in rule `trust-rules` denies `jouet rule trust` and `jouet rule pack add` to an agent, with or without `--yes`: the rules being trusted are the text that would be steering it. The session-start primer says in one line when this repository has rules that do not run, and that trusting them is the user's decision.
 
-`jouet rule untrust` withdraws trust. `jouet rule trust --list` shows whether this repository's rules and the system's are trusted, and every directory trusted.
+`jouet rule untrust` withdraws trust. `jouet rule trust --list` shows whether this repository's rules are trusted, and every directory trusted.
 
 ### Rule packs
 
@@ -126,12 +126,12 @@ org-no-prod-db      enabled   deny    enforced  it-team  2026-10-31  Connecting 
 note: org-no-prod-db is enforced by /etc/jouet/rules/org.toml, so the setting that disables it does not apply
 ```
 
-- **Who wrote them.** The rules run without trusting only when the directory, everything in it, and every directory above it are owned by root and writable by no one else, so only an administrator could have put them there. Otherwise, `$JOUET_SYSTEM_DIR` included, they need `jouet rule trust --system` like a repository's, and `jouet rule list` says why. That way a repository that sets `JOUET_SYSTEM_DIR` in a hook's environment, through a mise `[env]` or direnv, cannot run its rules unreviewed. When jouet runs as root, and on Windows, ownership cannot tell, so the system directory always needs trusting.
+- **No trusting.** They run without `jouet rule trust`: whoever can write the system directory, or set `JOUET_SYSTEM_DIR`, can already change what the machine runs. On Unix, a system directory, rule file or `packs.toml` that its group or others can write is refused: its rules do not run, and `jouet rule list` shows them as `enforced:writable`, naming the file.
 - **Not turned off.** `[rules] disable`, `JOUET_RULES_DISABLE` and `"all"` do not apply to them, and no other rule can take an enforced rule's name. They default to `deny` and must pass their examples, like any rule from outside.
 
 ### What this does not protect against
 
-- **A user who wants out.** Enforcement is policy over configuration, not a sandbox. Whoever runs jouet can still turn every hook off (`[hooks] steer = false`, `jouet setup --uninstall`), or point `JOUET_SYSTEM_DIR` elsewhere.
+- **A user who wants out.** Enforcement is policy over configuration, not a sandbox. Whoever runs jouet can still turn every hook off (`[hooks] steer = false`, `jouet setup --uninstall`), or point `JOUET_SYSTEM_DIR` elsewhere. Anything that can set an environment variable for jouet can already run what it likes, so jouet does not guard against it.
 - **An agent with a shell.** `trust-rules` stops an agent from trusting rules by running jouet, but an agent that can write files can still edit `trusted-rules.json` or write a rule in `~/.config/jouet/rules`, which runs untrusted. It is a guard against an agent talked into trusting, not a boundary.
 - **The kept copies.** The digest cache trusts a file whose size, times and inode are unchanged. Anything that can write to your state or cache directory can change what runs, as it could change your config.
 - **Aggregated audits.** Collecting rule decisions across a team, opt-in, is left out: it needs a server, which jouet does not have.

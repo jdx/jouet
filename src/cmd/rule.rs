@@ -36,7 +36,7 @@ pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
             Exit::Ok
         }
         RuleCmd::Trust(trust_args) => trust::trust(trust_args, &cwd, out),
-        RuleCmd::Untrust(untrust_args) => trust::untrust(untrust_args, &cwd, out),
+        RuleCmd::Untrust(_) => trust::untrust(&cwd, out),
         RuleCmd::Pack(pack_args) => pack::run(pack_args, &cwd, out),
         RuleCmd::New(new_args) => new(new_args, out),
         RuleCmd::Promote(promote_args) => promote(promote_args, out),
@@ -185,7 +185,7 @@ fn scope_text(r: &ListedRule) -> String {
         text.push(':');
         text.push_str(pack);
     }
-    if let Some(trust) = r.trust.filter(|t| !matches!(*t, "admin" | "verified")) {
+    if let Some(trust) = r.trust.filter(|t| !matches!(*t, "enforced" | "verified")) {
         text.push(':');
         text.push_str(trust);
     }
@@ -197,22 +197,16 @@ fn set_notes(sets: &[Set]) -> Vec<String> {
     sets.iter()
         .filter_map(|s| {
             let dir = s.dir.display();
-            let trust = if s.kind == Kind::System {
-                "`jouet rule trust --system`"
-            } else {
-                "`jouet rule trust`"
-            };
-            let owner = s
-                .why
-                .as_deref()
-                .map(|why| format!(" and is not the administrator's ({why})"))
-                .unwrap_or_default();
             Some(match &s.status {
                 rules::Status::Untrusted => format!(
-                    "{dir} is not trusted{owner}, so its rules do not run; review them, then run {trust}"
+                    "{dir} is not trusted, so its rules do not run; review them, then run `jouet rule trust`"
                 ),
                 rules::Status::Changed => format!(
-                    "{dir} changed since it was trusted{owner}, so its rules do not run; review them, then run {trust}"
+                    "{dir} changed since it was trusted, so its rules do not run; review them, then run `jouet rule trust`"
+                ),
+                rules::Status::Writable => format!(
+                    "{}, so the enforced rules in {dir} do not run until only its owner can write them",
+                    s.why.as_deref().unwrap_or_default()
                 ),
                 rules::Status::Missing => format!(
                     "{} ({}) is not fetched, so its rules do not run; run `jouet rule pack sync`",
@@ -225,7 +219,7 @@ fn set_notes(sets: &[Set]) -> Vec<String> {
                 ),
                 rules::Status::Invalid(problem) => format!("{}: {problem}", s.label()),
                 rules::Status::Own
-                | rules::Status::Admin
+                | rules::Status::Enforced
                 | rules::Status::Trusted
                 | rules::Status::Verified => return None,
             })

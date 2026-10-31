@@ -2172,11 +2172,8 @@ Prints the rules, fetches the packs .jouet/packs.toml pins, and runs every rule'
 \fB\-\-yes\fR
 Trust without a terminal, for a script or CI run by the user
 .TP
-\fB\-\-system\fR
-Trust the system directory's rules ($JOUET_SYSTEM_DIR, /etc/jouet) where they are not root\-owned
-.TP
 \fB\-\-list\fR
-List every directory trusted, and whether this repository's and the system's rules are
+List every directory trusted, and whether this repository's rules are
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2187,9 +2184,6 @@ Stop trusting this repository's .jouet/rules
 .PP
 \fBOptions:\fR
 .PP
-.TP
-\fB\-\-system\fR
-Stop trusting the system directory's rules instead
 .TP
 \fB\-h, \-\-help\fR
 Print help

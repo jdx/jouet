@@ -20,6 +20,6 @@ Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforc
 - [`jouet rule promote [--reason <TEXT>] <NAME>`](/cli/rule/promote.md)
 - [`jouet rule schema`](/cli/rule/schema.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
-- [`jouet rule trust [FLAGS]`](/cli/rule/trust.md)
+- [`jouet rule trust [--yes] [--list]`](/cli/rule/trust.md)
 - [`jouet rule types`](/cli/rule/types.md)
-- [`jouet rule untrust [--system]`](/cli/rule/untrust.md)
+- [`jouet rule untrust`](/cli/rule/untrust.md)

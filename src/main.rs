@@ -1970,21 +1970,14 @@ pub struct RuleTrustArgs {
     /// Trust without a terminal, for a script or CI run by the user
     #[usage(long)]
     yes: bool,
-    /// Trust the system directory's rules ($JOUET_SYSTEM_DIR, /etc/jouet) where they are not root-owned
+    /// List every directory trusted, and whether this repository's rules are
     #[usage(long)]
-    system: bool,
-    /// List every directory trusted, and whether this repository's and the system's rules are
-    #[usage(long, conflicts = "--system")]
     list: bool,
 }
 
 /// Stop trusting this repository's .jouet/rules
 #[derive(Args)]
-pub struct RuleUntrustArgs {
-    /// Stop trusting the system directory's rules instead
-    #[usage(long)]
-    system: bool,
-}
+pub struct RuleUntrustArgs {}
 
 /// Add, remove, list and fetch rule packs: named sets of rules pinned by commit
 ///

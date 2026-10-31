@@ -29,8 +29,10 @@ pub(crate) enum Kind {
 pub(crate) enum Status {
     /// The user's own rules.
     Own,
-    /// The system directory, owned by root and out of the user's reach.
-    Admin,
+    /// The system directory's: the organisation's rules.
+    Enforced,
+    /// The system directory, when its group or others can write it.
+    Writable,
     Trusted,
     /// Trusted once, but changed since.
     Changed,
@@ -49,14 +51,15 @@ impl Status {
     pub(crate) fn runs(&self) -> bool {
         matches!(
             self,
-            Self::Own | Self::Admin | Self::Trusted | Self::Verified
+            Self::Own | Self::Enforced | Self::Trusted | Self::Verified
         )
     }
 
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Own => "own",
-            Self::Admin => "admin",
+            Self::Enforced => "enforced",
+            Self::Writable => "writable",
             Self::Trusted => "trusted",
             Self::Changed => "changed",
             Self::Untrusted => "untrusted",
@@ -89,7 +92,7 @@ pub(crate) struct Set {
     /// The `packs.toml` beside the rules, for a set that can pin packs.
     pub pins: Option<PathBuf>,
     pub status: Status,
-    /// Why a system directory needs trusting.
+    /// Why the system directory's rules do not run.
     pub why: Option<String>,
     /// The hash of the rules and pins, as trust records it.
     pub digest: Option<String>,
@@ -273,10 +276,13 @@ pub(crate) fn sets(
         let dir = system.join("rules");
         let pins = system.join("packs.toml");
         if dir.is_dir() || pins.is_file() {
-            let (status, digest) = trusted(&dir, &pins, digests);
-            let (status, why) = match admin_owned(&system, &dir, &pins) {
-                Ok(()) => (Status::Admin, None),
-                Err(why) => (status, Some(why)),
+            // An unreadable file shows when its rules load.
+            let digest = digests.of(&dir, Some(&pins)).ok();
+            let why = writable_by_others(&system, &dir, &pins);
+            let status = if why.is_some() {
+                Status::Writable
+            } else {
+                Status::Enforced
             };
             out.push(Set {
                 kind: Kind::System,
@@ -420,97 +426,80 @@ fn remember(file: Option<&Path>, failing: &[(String, String)]) {
     }
 }
 
-/// Whether the system directory, its rules and pins, and every directory
-/// above it are owned by root and writable by no one else, so that only an
-/// administrator could have put the rules there. jouet running as root
-/// cannot tell, and neither can it on Windows: the directory then needs
-/// trusting like a repository's.
+/// Why the system directory's rules do not run: the directory, or
+/// something in it, can be written by its group or others, so it is not the
+/// organisation's alone.
 #[cfg(unix)]
-fn admin_owned(system: &Path, dir: &Path, pins: &Path) -> Result<(), String> {
+fn writable_by_others(system: &Path, dir: &Path, pins: &Path) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
-    // SAFETY: geteuid(2) takes nothing and always succeeds.
-    if unsafe { libc::geteuid() } == 0 {
-        return Err("jouet runs as root, so the owner of the directory does not say an administrator wrote it".into());
-    }
-    let system = system
-        .canonicalize()
-        .map_err(|e| format!("reading {}: {e}", system.display()))?;
-    let mut paths: Vec<PathBuf> = system.ancestors().map(Path::to_path_buf).collect();
+    let mut paths = vec![system.to_path_buf()];
     if dir.is_dir() {
-        walk(dir, &mut paths).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+        walk(dir, &mut paths);
     }
     if pins.exists() {
         paths.push(pins.to_path_buf());
     }
-    for path in &paths {
-        let meta = std::fs::symlink_metadata(path)
-            .map_err(|e| format!("reading {}: {e}", path.display()))?;
-        if meta.file_type().is_symlink() {
-            return Err(format!("{} is a symlink", path.display()));
-        }
-        if meta.uid() != 0 {
-            return Err(format!(
-                "{} is owned by uid {}, not root",
-                path.display(),
-                meta.uid()
-            ));
-        }
-        if meta.mode() & 0o022 != 0 {
-            return Err(format!(
-                "{} can be written by its group or others",
-                path.display()
-            ));
-        }
-    }
-    Ok(())
+    paths.into_iter().find_map(|path| {
+        let mode = std::fs::metadata(&path).ok()?.mode();
+        (mode & 0o022 != 0)
+            .then(|| format!("{} can be written by its group or others", path.display()))
+    })
 }
 
 #[cfg(not(unix))]
-fn admin_owned(_system: &Path, _dir: &Path, _pins: &Path) -> Result<(), String> {
-    Err("jouet does not check who owns the system directory on this platform".into())
+fn writable_by_others(_system: &Path, _dir: &Path, _pins: &Path) -> Option<String> {
+    None
 }
 
 /// The directory and everything below it.
 #[cfg(unix)]
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     out.push(dir.to_path_buf());
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if std::fs::symlink_metadata(&path)?.is_dir() {
-            walk(&path, out)?;
+    for path in std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+    {
+        if path.is_dir() {
+            walk(&path, out);
         } else {
             out.push(path);
         }
     }
-    Ok(())
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn a_directory_the_user_owns_is_not_the_administrators() {
+    fn a_system_directory_others_can_write_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let rules = dir.path().join("rules");
         std::fs::create_dir(&rules).unwrap();
-        let why = admin_owned(dir.path(), &rules, &dir.path().join("packs.toml")).unwrap_err();
+        std::fs::write(rules.join("org.toml"), "").unwrap();
+        let pins = dir.path().join("packs.toml");
+        for path in [dir.path(), rules.as_path()] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::set_permissions(
+            rules.join("org.toml"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert_eq!(writable_by_others(dir.path(), &rules, &pins), None);
+
+        std::fs::set_permissions(
+            rules.join("org.toml"),
+            std::fs::Permissions::from_mode(0o664),
+        )
+        .unwrap();
+        let why = writable_by_others(dir.path(), &rules, &pins).unwrap();
         assert!(
-            why.contains("not root") || why.contains("runs as root"),
+            why.ends_with("org.toml can be written by its group or others"),
             "{why}"
         );
-    }
-
-    #[test]
-    fn root_owned_directories_are_the_administrators() {
-        // SAFETY: geteuid(2) takes nothing and always succeeds.
-        let root = unsafe { libc::geteuid() } == 0;
-        let none = Path::new("/nonexistent-jouet");
-        let checked = admin_owned(
-            Path::new("/"),
-            &none.join("rules"),
-            &none.join("packs.toml"),
-        );
-        assert_eq!(checked.is_ok(), !root, "{checked:?}");
     }
 }

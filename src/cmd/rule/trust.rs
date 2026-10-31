@@ -2,8 +2,8 @@
 //! rules run.
 
 use super::super::Output;
-use crate::rules::{self, Kind, Load, Set, Status, packs};
-use crate::{RuleTrustArgs, RuleUntrustArgs};
+use crate::RuleTrustArgs;
+use crate::rules::{self, Kind, Load, Set, packs};
 use jouet_output::exit::Exit;
 use jouet_rules::{Engine, State};
 use serde::Serialize;
@@ -95,34 +95,28 @@ struct Trusted {
     rules: Vec<Checked>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     packs: Vec<String>,
-    /// Owned by root: it runs without being trusted.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    enforced_by_owner: bool,
 }
 
-/// The repository's set of rules, or the system directory's.
-fn target(cwd: &Path, system: bool) -> Result<Set, (Exit, String)> {
+/// The repository's set of rules.
+fn target(cwd: &Path) -> Result<Set, (Exit, String)> {
     let mut errors = Vec::new();
     let sets = rules::sets(cwd, None, &mut rules::digests(), &mut errors);
-    let kind = if system { Kind::System } else { Kind::Repo };
-    sets.into_iter().find(|s| s.kind == kind).ok_or_else(|| {
-        let message = if system {
-            match rules::system_dir() {
-                Some(dir) => format!("{} has no rules/ or packs.toml", dir.display()),
-                None => "there is no system directory; set JOUET_SYSTEM_DIR".into(),
-            }
-        } else {
-            "no .jouet/rules directory or .jouet/packs.toml at the root of this repository".into()
-        };
-        (Exit::NotFound, message)
-    })
+    sets.into_iter()
+        .find(|s| s.kind == Kind::Repo)
+        .ok_or_else(|| {
+            (
+                Exit::NotFound,
+                "no .jouet/rules directory or .jouet/packs.toml at the root of this repository"
+                    .into(),
+            )
+        })
 }
 
 pub(super) fn trust(args: &RuleTrustArgs, cwd: &Path, out: &Output) -> Exit {
     if args.list {
         return list(cwd, out);
     }
-    let set = match target(cwd, args.system) {
+    let set = match target(cwd) {
         Ok(set) => set,
         Err((exit, message)) => return out.error(exit, &message),
     };
@@ -130,22 +124,6 @@ pub(super) fn trust(args: &RuleTrustArgs, cwd: &Path, out: &Output) -> Exit {
         return exit;
     }
     let dir = set.dir.display().to_string();
-    if set.status == Status::Admin {
-        let report = Trusted {
-            dir,
-            trusted: true,
-            rules: Vec::new(),
-            packs: Vec::new(),
-            enforced_by_owner: true,
-        };
-        out.result(&report, || {
-            format!(
-                "{} is owned by root and no one else can write it, so its rules run without trusting\n",
-                report.dir
-            )
-        });
-        return Exit::Ok;
-    }
     // The packs it pins are part of what is trusted: fetch them first.
     let mut digests = rules::digests();
     let pinned = match set.pins.as_deref().map(packs::read).transpose() {
@@ -183,7 +161,6 @@ pub(super) fn trust(args: &RuleTrustArgs, cwd: &Path, out: &Output) -> Exit {
         trusted: !failed && !changed,
         rules: checked,
         packs: pinned.pack.keys().cloned().collect(),
-        enforced_by_owner: false,
     };
     if failed {
         out.result(&report, || {
@@ -236,8 +213,8 @@ struct Untrusted {
     trusted: bool,
 }
 
-pub(super) fn untrust(args: &RuleUntrustArgs, cwd: &Path, out: &Output) -> Exit {
-    let set = match target(cwd, args.system) {
+pub(super) fn untrust(cwd: &Path, out: &Output) -> Exit {
+    let set = match target(cwd) {
         Ok(set) => set,
         Err((exit, message)) => return out.error(exit, &message),
     };
@@ -254,13 +231,12 @@ pub(super) fn untrust(args: &RuleUntrustArgs, cwd: &Path, out: &Output) -> Exit 
         dir: set.dir.display().to_string(),
         trusted: false,
     };
-    out.result(&report, || match (was, set.status) {
-        (_, Status::Admin) => format!(
-            "{} is owned by root, so its rules run whether trusted or not\n",
-            report.dir
-        ),
-        (true, _) => format!("no longer trusting {}\n", report.dir),
-        (false, _) => format!("{} was not trusted\n", report.dir),
+    out.result(&report, || {
+        if was {
+            format!("no longer trusting {}\n", report.dir)
+        } else {
+            format!("{} was not trusted\n", report.dir)
+        }
     });
     Exit::Ok
 }

@@ -20,15 +20,6 @@ pub enum Trust {
     Untrusted,
 }
 
-/// The hashes a directory has been trusted at, newest last. An older
-/// store held one.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Stored {
-    One(String),
-    Many(Vec<String>),
-}
-
 /// How many hashes a directory keeps: enough for the branches in use.
 const KEEP: usize = 32;
 
@@ -43,18 +34,11 @@ pub struct TrustStore {
 impl TrustStore {
     /// Reads the store; a missing or unreadable file trusts nothing.
     pub fn load(path: Option<PathBuf>) -> Self {
-        let stored: BTreeMap<String, Stored> = path
+        let dirs = path
             .as_ref()
             .and_then(|p| std::fs::read(p).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        let dirs = stored
-            .into_iter()
-            .map(|(dir, s)| match s {
-                Stored::One(digest) => (dir, vec![digest]),
-                Stored::Many(digests) => (dir, digests),
-            })
-            .collect();
         Self { path, dirs }
     }
 
@@ -359,18 +343,6 @@ mod tests {
 
         assert!(store.untrust(&rules).unwrap());
         assert_eq!(store.check(&rules), Trust::Untrusted);
-    }
-
-    #[test]
-    fn an_older_store_with_one_hash_a_directory_still_reads() {
-        let dir = tempfile::tempdir().unwrap();
-        let rules = dir.path().join("rules");
-        std::fs::create_dir(&rules).unwrap();
-        std::fs::write(rules.join("a.toml"), "").unwrap();
-        let old = BTreeMap::from([(key(&rules), digest(&rules).unwrap())]);
-        let path = dir.path().join("trust.json");
-        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert_eq!(TrustStore::load(Some(path)).check(&rules), Trust::Trusted);
     }
 
     #[test]

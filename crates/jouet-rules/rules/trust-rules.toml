@@ -20,7 +20,6 @@ unless_flags = ["--help", "-h"]
 fires = [
   "jouet rule trust",
   "jouet rule trust --yes",
-  "jouet rule trust --system --yes",
   "cd repo && jouet rule trust --yes",
   "jouet rule pack add team https://github.com/acme/jouet-rules --yes",
   "jouet rule pack add team ../team-rules --repo --yes",
