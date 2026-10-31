@@ -1,6 +1,6 @@
 [package]
 name = "jouet-routines"
-version = "0.0.1"
+version = "0.0.2"
 description = "Routines for jouet: small Luau programs on jouet's primitives, run by joue"
 keywords = ["agents", "luau", "github", "routines"]
 categories = ["development-tools"]
