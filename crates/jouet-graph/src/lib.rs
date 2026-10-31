@@ -187,7 +187,7 @@ impl Graph {
         } else {
             self.root.join(path)
         };
-        let Some(rel) = index::relative(&self.root, &abs) else {
+        let Some(rel) = index::relative_resolved(&self.root, &abs) else {
             return Ok(Vec::new());
         };
         let mut stmt = self.conn.prepare_cached(&format!(

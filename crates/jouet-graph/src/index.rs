@@ -101,6 +101,20 @@ pub(crate) fn relative(root: &Path, path: &Path) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
+/// Like [`relative`], for a path from outside the walk: one spelled
+/// through a symlink (macOS's `/var` is `/private/var`, and the work tree's
+/// root is canonical) is resolved first, or its directory is, when the file
+/// is gone.
+pub(crate) fn relative_resolved(root: &Path, path: &Path) -> Option<String> {
+    relative(root, path).or_else(|| {
+        let resolved = path.canonicalize().ok().or_else(|| {
+            let dir = path.parent()?.canonicalize().ok()?;
+            Some(dir.join(path.file_name()?))
+        })?;
+        relative(root, &resolved)
+    })
+}
+
 /// Every source file under `root` that jouet extracts.
 fn list(root: &Path) -> Vec<Seen> {
     let walker = ignore::WalkBuilder::new(root)
@@ -263,7 +277,7 @@ impl Graph {
             } else {
                 self.root.join(path)
             };
-            let Some(rel) = relative(&self.root, &abs) else {
+            let Some(rel) = relative_resolved(&self.root, &abs) else {
                 continue;
             };
             if extract::language_for_path(&rel).is_none()
