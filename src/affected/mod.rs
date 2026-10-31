@@ -17,6 +17,7 @@
 
 mod changes;
 mod classify;
+mod codegraph;
 mod graph;
 mod js;
 mod pyimports;
@@ -189,11 +190,11 @@ pub(crate) struct Known {
 }
 
 /// Every adapter, in the order they are tried. Native adapters, which hand
-/// the selection to the runner's own tool, come first. A fallback serving
-/// several languages from one import graph (a jouet-graph adapter, planned)
-/// goes last, covers only the ecosystems no native adapter found in the
-/// same directory covers, and reports a changed file it cannot speak for
-/// through `traces`, so the whole suite runs.
+/// the selection to the runner's own tool, come first. The fallback serving
+/// several languages from jouet's code graph (`graph`) goes last, covers
+/// only the ecosystems no native adapter covers (Go, Ruby, Java), and
+/// reports a changed file it cannot speak for through `traces`, so the
+/// whole suite runs.
 pub(crate) const ADAPTERS: &[Known] = &[
     Known {
         name: "vitest",
@@ -209,6 +210,11 @@ pub(crate) const ADAPTERS: &[Known] = &[
         name: "pytest",
         detect: python::detect,
         load: |p| Box::new(python::Pytest::load(p)),
+    },
+    Known {
+        name: "graph",
+        detect: codegraph::detect,
+        load: |p| Box::new(codegraph::Graph::load(p)),
     },
 ];
 

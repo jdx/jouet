@@ -409,3 +409,66 @@ fn reading_a_symbol_names_its_callers_when_there_is_a_graph() {
         "{text}"
     );
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+}
+
+#[test]
+fn test_affected_falls_back_to_the_graph_for_go() {
+    let env = Env::new();
+    let root = env.root();
+    std::fs::remove_dir(root.join(".git")).unwrap();
+    env.write("go.mod", "module example.com/shop\n\ngo 1.22\n");
+    env.write(
+        "price/price.go",
+        "package price\n\nfunc Total(n int) int { return n * 2 }\n",
+    );
+    env.write(
+        "cart/cart.go",
+        "package cart\n\nimport \"example.com/shop/price\"\n\nfunc Sum(n int) int { return price.Total(n) }\n",
+    );
+    env.write(
+        "cart/cart_test.go",
+        "package cart\n\nimport \"testing\"\n\nfunc TestSum(t *testing.T) { Sum(1) }\n",
+    );
+    env.write(
+        "other/other_test.go",
+        "package other\n\nimport \"testing\"\n\nfunc TestNothing(t *testing.T) {}\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    // A fresh mtime, so git sees the same-sized change.
+    std::fs::write(
+        root.join("price/price.go"),
+        "package price\n\nfunc Total(n int) int { return n * 3 }\n",
+    )
+    .unwrap();
+
+    let report = env.json(&["test", "--affected", "--since", "main", "--dry-run"]);
+    let suite = &report["suites"][0];
+    assert_eq!(suite["adapter"], "graph", "{report}");
+    assert_eq!(suite["decision"], "affected", "{report}");
+    assert_eq!(
+        suite["tests"],
+        json!([{ "path": "cart/cart_test.go", "via": ["price/price.go", "cart/cart.go", "cart/cart_test.go"] }])
+    );
+    assert_eq!(suite["command"], json!(["go", "test", "./cart"]));
+}

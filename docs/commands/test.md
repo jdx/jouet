@@ -4,7 +4,7 @@ description: Run the full test suite, or only the tests a change affects, chosen
 
 # jouet test
 
-`jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It is one command for every ecosystem: adapters hand the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data), and jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
+`jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It is one command for every ecosystem: adapters hand the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data), or to jouet's code graph where there is none, and jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
 
 `jouet test` without `--affected` runs the full suite.
 
@@ -95,11 +95,19 @@ jouet looks for adapters in the current directory, then each directory above it 
 - **The whole suite for** any `conftest.py`, `pyproject.toml`, `setup.py`, `setup.cfg`, `pytest.ini`, `tox.ini`, `noxfile.py` and `.coveragerc`.
 - **Limits of the import graph:** dynamic imports (`importlib.import_module`, `__import__`), plugins and entry points, and data files are invisible to it. Over-selection is possible: a module name found under two roots selects the tests of both.
 
+### graph
+
+The fallback for languages without a native adapter, built on jouet's [code graph](/commands/graph).
+
+- **Found by** `go.mod` (Go), a `Gemfile` (Ruby), `pom.xml` or `build.gradle` (Java). It runs only where no native adapter covers the language.
+- **Selection:** the graph is brought up to date, then followed backwards from each changed file, through imports, calls, references and inheritance, to the test files that reach it, by codegraph's test conventions (`*_test.go`, `spec/` and `*_spec.rb`, `test/`, `*Test.java` and the like). Each pick shows the chain of files that reaches it.
+- **Runner:** `go test` on the selected tests' packages; `bundle exec rspec` on their files (with `.rspec` or a `spec/` directory), else minitest through `bundle exec ruby -Itest -Ilib`; `mvn test -Dtest=…` or `gradle test --tests …` on their classes, through `mvnw` or `gradlew` when the project has one.
+- **The whole suite for** `go.mod`, the `Gemfile`, `.rspec`, a spec or test helper, the Maven or Gradle build, test data, a deleted file (the graph cannot follow a file that is gone), and a file the graph could not index.
+
 ### Planned
 
 These slot into the same adapter trait and are follow-ups:
 
-- **A code-graph fallback:** one adapter built on jouet's own cross-language import graph (in progress), for languages without a strong native tool: Ruby, Go, Java, C and C++ among them. It runs only where no native adapter in the same directory covers the language, picks the test files that import a changed file, directly or not, with the chain for the explanation, and runs the whole suite for a changed file the graph cannot speak for.
 - **go:** `go list -deps` gives the package graph, on top of Go's own test cache.
 - **cargo:** narrowing what is built (`-p`) rather than which tests run, with `determinator`. In Rust, compiling dominates, so selecting tests saves little.
 - **Ruby:** best-effort, from coverage maps in the style of crystalball, or file naming conventions.
