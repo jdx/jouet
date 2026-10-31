@@ -63,7 +63,7 @@ If you work across many repositories or worktrees, install with `--global` inste
 
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
-| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the command families by name, how to commit and edit with jouet, the rules that deny and what each suggests instead, and in a fnox project, how to use its secrets. |
+| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the command families by name, how to commit and edit with jouet, the rules that deny and what each suggests instead, in a fnox project how to use its secrets, and one line when this repository has rules that do not run until the user trusts them. |
 | Before a shell command, a Read, a Grep or a file edit | `PreToolUse` (`Bash\|Read\|Grep\|Edit\|Write\|MultiEdit\|NotebookEdit`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
 | After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
@@ -73,7 +73,7 @@ Every hook reads the harness's JSON on stdin and **fails open**: input it cannot
 
 ### Steering rules
 
-The rules are TOML: built in, yours in `~/.config/jouet/rules`, and a repository's `.jouet/rules` once you trust it. Yours only warn unless they say `mode = "deny"`, and no rule of yours can replace or overrule a built-in one. [Rules](/rules) covers writing, testing and replacing them; `jouet rule list` shows which run. A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead; it never rewrites a command. The agent sees the advice and the rule's name, for example:
+The rules are TOML: built in, your organisation's in `/etc/jouet/rules`, which your settings cannot turn off, yours in `~/.config/jouet/rules`, the [rule packs](/rules#rule-packs) you pin by commit, and a repository's `.jouet/rules` once you trust it with `jouet rule trust`. Yours only warn unless they say `mode = "deny"`, and no rule of yours can replace or overrule a built-in one. Rules from outside run only once they pass their examples. [Rules](/rules) covers writing, testing and replacing them; `jouet rule list` shows which run. A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead; it never rewrites a command. The agent sees the advice and the rule's name, for example:
 
 ```text
 Stage explicit paths (`git add path/to/file ...`): `git add -A` and `git add .` sweep in caches, scratch files and other sessions' work. [jouet rule: git-add-all]
@@ -107,6 +107,7 @@ The built-in rules:
 | `pitchfork-start` | starting by hand a daemon the project's pitchfork config declares: a command that is a daemon's `run` command (arguments added or not), or a server told to listen on a daemon's port | `pitchfork start ID`, with the daemon named |
 | `pitchfork-stop` | `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall`, `fuser -k` or `kill-port` aimed at a declared daemon's port or command line | `pitchfork stop ID` or `pitchfork restart ID` |
 | `pitchfork-logs` | warns on `pitchfork logs --follow` | `pitchfork logs ID -n 50` |
+| `trust-rules` | `jouet rule trust` and `jouet rule pack add`, with or without `--yes`: a repository's rules put text in front of the agent, so the agent must not be the one to trust them | asking the user to run it in their own terminal |
 
 The `pitchfork-start` and `pitchfork-stop` rules run only in a project with a pitchfork config (`pitchfork.toml`, `pitchfork.local.toml`, `.config/pitchfork.toml` or `.config/pitchfork.local.toml` in the call's directory or one above it), and read the daemons it declares from the files, without running pitchfork. They run before the `job-*` rules, so a declared daemon goes to pitchfork and anything else to `jouet job`; elsewhere the session-start primer leaves them out. The stop hook leaves pitchfork daemons alone: they are meant to keep running.
 
@@ -186,7 +187,7 @@ ledger = true  # JOUET_HOOKS_LEDGER: the ledger
 budget_ms = 500 # JOUET_HOOKS_BUDGET_MS: a tool hook slower than this is recorded as slow (session start and stop: 10×)
 
 [rules]
-disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule
+disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule but the enforced ones
 
 [edit]
 fix_after = false     # JOUET_EDIT_FIX_AFTER: format edited files with `hk run fix --safe`
@@ -199,6 +200,8 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 [wind]
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 ```
+
+An organisation's [enforced rules](/rules#enforced-rules) in `/etc/jouet/rules` (`JOUET_SYSTEM_DIR`) are not turned off by `disable`. Turning the hooks off still turns them off: they are policy over configuration, not a sandbox.
 
 [Self-winding](/winding) is on after setup: the session-start primer shows at most two notes about rules jouet drafted from the ledger. `JOUET_WIND=0` turns it off.
 

@@ -210,6 +210,17 @@ export default defineConfig({
                   { text: "types", link: "/cli/rule/types" },
                   { text: "trust", link: "/cli/rule/trust" },
                   { text: "untrust", link: "/cli/rule/untrust" },
+                  {
+                    text: "pack",
+                    link: "/cli/rule/pack",
+                    collapsed: true,
+                    items: [
+                      { text: "add", link: "/cli/rule/pack/add" },
+                      { text: "rm", link: "/cli/rule/pack/rm" },
+                      { text: "ls", link: "/cli/rule/pack/ls" },
+                      { text: "sync", link: "/cli/rule/pack/sync" },
+                    ],
+                  },
                   { text: "new", link: "/cli/rule/new" },
                   { text: "promote", link: "/cli/rule/promote" },
                   { text: "log", link: "/cli/rule/log" },

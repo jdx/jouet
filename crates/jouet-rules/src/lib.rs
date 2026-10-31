@@ -39,7 +39,7 @@ pub use decl::{SCHEMA_URL, schema, valid_name};
 pub use examples::{Case, Example, Expect};
 pub use header::{Mode, Scope};
 pub use probe::Probes;
-pub use trust::{Trust, TrustStore};
+pub use trust::{Digests, Trust, TrustStore};
 
 use mlua::{Lua, Table, Value, Variadic, VmState};
 use serde::Serialize;
@@ -112,6 +112,7 @@ const BUILTIN: &[(&str, &str)] = &[
         "unbudgeted-search",
         include_str!("../rules/unbudgeted-search.toml"),
     ),
+    ("trust-rules", include_str!("../rules/trust-rules.toml")),
 ];
 
 /// The scripts built-in rules name.
@@ -195,6 +196,10 @@ pub enum Origin {
     Builtin,
     User(PathBuf),
     Repo(PathBuf),
+    /// A file in an installed rule pack.
+    Pack(PathBuf),
+    /// A file in the system directory.
+    Enforced(PathBuf),
 }
 
 impl Origin {
@@ -203,13 +208,25 @@ impl Origin {
             Self::Builtin => Scope::Builtin,
             Self::User(_) => Scope::User,
             Self::Repo(_) => Scope::Repo,
+            Self::Pack(_) => Scope::Pack,
+            Self::Enforced(_) => Scope::Enforced,
+        }
+    }
+
+    /// The file it came from; none for a built-in rule.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Builtin => None,
+            Self::User(path) | Self::Repo(path) | Self::Pack(path) | Self::Enforced(path) => {
+                Some(path)
+            }
         }
     }
 
     pub fn describe(&self) -> String {
-        match self {
-            Self::Builtin => "builtin".into(),
-            Self::User(path) | Self::Repo(path) => path.display().to_string(),
+        match self.path() {
+            None => "builtin".into(),
+            Some(path) => path.display().to_string(),
         }
     }
 }
@@ -785,32 +802,27 @@ fn format_of(path: &Path) -> Option<Format> {
     }
 }
 
-/// Every rule source: built-in, then the user's, then a repository's
-/// (marked untrusted unless its directory is trusted). Unreadable files are
-/// reported, not fatal.
-pub fn discover(
-    user_dir: Option<&Path>,
-    repo_dir: Option<&Path>,
-    trust: &TrustStore,
-) -> (Vec<Source>, Vec<String>) {
-    discover_after(builtin(), user_dir, repo_dir, trust)
+/// A directory of rule files to load, after the built-in rules.
+pub struct RuleDir {
+    pub dir: PathBuf,
+    /// What its files' rules are: `Origin::User`, `Origin::Repo`, ...
+    pub origin: fn(PathBuf) -> Origin,
+    /// False to list its rules without running them.
+    pub trusted: bool,
 }
 
-/// `sources`, then the rule files of the user's directory, then a
-/// repository's (untrusted unless its directory is trusted).
-fn discover_after(
-    mut sources: Vec<Source>,
-    user_dir: Option<&Path>,
-    repo_dir: Option<&Path>,
-    trust: &TrustStore,
-) -> (Vec<Source>, Vec<String>) {
+/// Every rule source: built-in, then each directory's in order, marked
+/// untrusted where the directory is not trusted. Unreadable files are
+/// reported, not fatal.
+pub fn discover(dirs: &[RuleDir]) -> (Vec<Source>, Vec<String>) {
+    let mut sources = builtin();
     let mut errors = Vec::new();
-    let mut add = |dir: &Path, repo: bool, trusted: bool, sources: &mut Vec<Source>| {
-        let files = match rule_files(dir) {
+    for dir in dirs {
+        let files = match rule_files(&dir.dir) {
             Ok(files) => files,
             Err(e) => {
-                errors.push(format!("reading {}: {e}", dir.display()));
-                return;
+                errors.push(format!("reading {}: {e}", dir.dir.display()));
+                continue;
             }
         };
         for path in files {
@@ -826,25 +838,12 @@ fn discover_after(
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let origin = if repo {
-                Origin::Repo(path)
-            } else {
-                Origin::User(path)
-            };
-            let source = Source {
-                trusted,
+            sources.push(Source {
+                trusted: dir.trusted,
                 format,
-                ..Source::toml(name, origin, code)
-            };
-            sources.push(source);
+                ..Source::toml(name, (dir.origin)(path), code)
+            });
         }
-    };
-    if let Some(dir) = user_dir {
-        add(dir, false, true, &mut sources);
-    }
-    if let Some(dir) = repo_dir {
-        let trusted = trust.check(dir) == Trust::Trusted;
-        add(dir, true, trusted, &mut sources);
     }
     (sources, errors)
 }
@@ -877,10 +876,7 @@ impl Engine {
         // Even a TOML file that does not load claims its namesake script.
         let mut scripts: Vec<PathBuf> = toml
             .iter()
-            .filter_map(|(_, s)| match &s.origin {
-                Origin::User(path) | Origin::Repo(path) => Some(path.with_extension("luau")),
-                Origin::Builtin => None,
-            })
+            .filter_map(|(_, s)| s.origin.path().map(|path| path.with_extension("luau")))
             .collect();
         let mut loaded = Vec::new();
         for (order, source) in toml {
@@ -888,10 +884,10 @@ impl Engine {
             loaded.extend(rules.into_iter().map(|rule| (order, rule)));
         }
         for (order, source) in luau {
-            let is_script = match &source.origin {
-                Origin::User(path) | Origin::Repo(path) => scripts.contains(path),
-                Origin::Builtin => false,
-            };
+            let is_script = source
+                .origin
+                .path()
+                .is_some_and(|path| scripts.iter().any(|s| s == path));
             if !is_script {
                 loaded.push((order, engine.load_luau(source, &disabled)));
             }
@@ -980,10 +976,11 @@ impl Engine {
                 "{file}: it has no `[[rule]]` tables"
             )))];
         }
-        let dir = match &source.origin {
-            Origin::User(path) | Origin::Repo(path) => path.parent().map(Path::to_path_buf),
-            Origin::Builtin => None,
-        };
+        let dir = source
+            .origin
+            .path()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
         decls
             .into_iter()
             .map(|(line, d)| {
@@ -1010,7 +1007,7 @@ impl Engine {
         let scope = source.origin.scope();
         let examples = examples::from_decl(d.examples.as_ref());
         let event = d.on.unwrap_or(Event::PreToolUse);
-        let problem = if d.scope.is_some_and(|s| s != scope) {
+        let problem = if d.scope.is_some_and(|s| !scope.accepts(s)) {
             Some(format!(
                 "it says scope `{}`, but this is a {} rule",
                 d.scope.map_or("", Scope::name),
@@ -1095,7 +1092,9 @@ impl Engine {
             rule.mode = Mode::Warn;
         }
         let needs: Vec<&str> = rule.needs.iter().map(String::as_str).collect();
-        if disabled.iter().any(|d| d == &rule.name || d == "all") {
+        // The system directory's rules are the organisation's: the user's
+        // settings cannot turn them off.
+        if rule.scope != Scope::Enforced && disabled.iter().any(|d| d == &rule.name || d == "all") {
             rule.state = State::Disabled;
         } else if !needs.is_empty() && !(self.has_command)(&needs) {
             rule.state = State::Needs(format!("jouet {}", needs.join(" ")));
@@ -1245,6 +1244,37 @@ impl Engine {
 
     pub fn rule(&self, name: &str) -> Option<&Rule> {
         self.rules.iter().find(|r| r.name == name)
+    }
+
+    /// The rules from files in `dir` or below it that load but do not pass
+    /// their examples of both kinds, and why: a rule from outside, a
+    /// repository's, a pack's or the system's, must, before it runs.
+    pub fn unproven(&self, dir: &Path) -> Vec<(String, String)> {
+        self.rules
+            .iter()
+            .filter(|r| r.origin.path().is_some_and(|p| p.starts_with(dir)))
+            .filter_map(|r| match &r.state {
+                State::Broken(_) | State::Untrusted => None,
+                _ => self
+                    .proven(r)
+                    .err()
+                    .map(|e| (r.name.clone(), format!("its examples do not pass: {e}"))),
+            })
+            .collect()
+    }
+
+    /// Stops the rule of this name from a file in `dir` from running, as
+    /// broken for this reason.
+    pub fn set_broken(&mut self, name: &str, dir: &Path, why: &str) {
+        for rule in &mut self.rules {
+            if rule.name == name
+                && rule.origin.path().is_some_and(|p| p.starts_with(dir))
+                && !matches!(rule.state, State::Broken(_) | State::Untrusted)
+            {
+                rule.state = State::Broken(why.to_string());
+                rule.body = Body::None;
+            }
+        }
     }
 
     /// Forgets the probes' answers, when a VM has started: a new hook call

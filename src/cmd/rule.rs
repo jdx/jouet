@@ -1,13 +1,16 @@
-//! `jouet rule list|test|schema|types|trust|untrust|new|promote|log`.
+//! `jouet rule list|test|schema|types|trust|untrust|pack|new|promote|log`.
+
+mod pack;
+mod trust;
 
 use super::Output;
-use crate::rules;
+use crate::rules::{self, Kind, Set};
 use crate::wind::{self, Paths, Status, replay, rulefile};
 use crate::{
     RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
 };
 use jouet_output::exit::Exit;
-use jouet_rules::{Call, Engine, Origin, Rule, Source, State, Trust};
+use jouet_rules::{Call, Engine, Origin, Rule, Source, State};
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::Read;
@@ -32,8 +35,9 @@ pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
             out.result(&serde_json::json!({ "text": text }), || text.to_string());
             Exit::Ok
         }
-        RuleCmd::Trust(_) => trust(&cwd, true, out),
-        RuleCmd::Untrust(_) => trust(&cwd, false, out),
+        RuleCmd::Trust(trust_args) => trust::trust(trust_args, &cwd, out),
+        RuleCmd::Untrust(untrust_args) => trust::untrust(untrust_args, &cwd, out),
+        RuleCmd::Pack(pack_args) => pack::run(pack_args, &cwd, out),
         RuleCmd::New(new_args) => new(new_args, out),
         RuleCmd::Promote(promote_args) => promote(promote_args, out),
         RuleCmd::Log(log_args) => log(log_args, out),
@@ -51,6 +55,14 @@ struct ListedRule<'a> {
     #[serde(skip_serializing_if = "str::is_empty")]
     created: &'a str,
     source: String,
+    /// For a rule from outside: whether its set runs. trusted, changed or
+    /// untrusted for a repository's or the system's, admin for a
+    /// root-owned system directory, verified or mismatch for a pack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trust: Option<&'static str>,
+    /// The rule pack it comes from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pack: Option<&'a str>,
     event: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
     why: &'a str,
@@ -77,38 +89,55 @@ fn list(cwd: &Path, out: &Output) -> Exit {
     // the broken ones.
     loaded.engine.load_scripts();
     let mut notes = loaded.errors.clone();
-    if let Some((dir, trust)) = &loaded.repo {
-        match trust {
-            Trust::Trusted => {}
-            Trust::Untrusted => notes.push(format!(
-                "{} is not trusted, so its rules do not run; review them, then run `jouet rule trust`",
-                dir.display()
-            )),
-            Trust::Changed => notes.push(format!(
-                "{} changed since it was trusted, so its rules do not run; review them, then run `jouet rule trust`",
-                dir.display()
-            )),
-        }
-    }
+    notes.extend(set_notes(&loaded.sets));
+    let disabled = crate::settings::Settings::load()
+        .rules
+        .disable
+        .unwrap_or_default();
     let listed: Vec<ListedRule> = loaded
         .engine
         .rules()
         .iter()
-        .map(|rule| ListedRule {
-            name: &rule.name,
-            state: &rule.state,
-            mode: rule.mode,
-            scope: rule.scope,
-            author: &rule.author,
-            created: &rule.created,
-            source: rule.origin.describe(),
-            event: rule.event.name(),
-            why: &rule.why,
-            format: rule.format,
-            script: rule.script.as_deref(),
-            missing_examples: rule.missing_examples.as_deref(),
+        .map(|rule| {
+            let set = set_of(&loaded.sets, rule);
+            ListedRule {
+                name: &rule.name,
+                state: &rule.state,
+                mode: rule.mode,
+                scope: rule.scope,
+                author: &rule.author,
+                created: &rule.created,
+                source: rule.origin.describe(),
+                trust: set
+                    .filter(|s| s.kind != Kind::User)
+                    .map(|s| s.status.name()),
+                pack: set.and_then(|s| s.name.as_deref()),
+                event: rule.event.name(),
+                why: &rule.why,
+                format: rule.format,
+                script: rule.script.as_deref(),
+                missing_examples: rule.missing_examples.as_deref(),
+            }
         })
         .collect();
+    notes.extend(
+        loaded
+            .engine
+            .rules()
+            .iter()
+            .filter(|r| {
+                r.scope == jouet_rules::Scope::Enforced
+                    && r.state != State::Untrusted
+                    && disabled.iter().any(|d| *d == r.name || d == "all")
+            })
+            .map(|r| {
+                format!(
+                    "{} is enforced by {}, so the setting that disables it does not apply",
+                    r.name,
+                    r.origin.describe()
+                )
+            }),
+    );
     notes.extend(
         loaded
             .engine
@@ -142,6 +171,68 @@ fn list(cwd: &Path, out: &Output) -> Exit {
     Exit::Ok
 }
 
+/// The set a rule's file is in.
+fn set_of<'a>(sets: &'a [Set], rule: &Rule) -> Option<&'a Set> {
+    let path = rule.origin.path()?;
+    sets.iter().find(|s| s.holds(path))
+}
+
+/// The scope column: the scope, the pack, and whether its set runs, such
+/// as `repo:trusted`, `pack:acme`, `pack:acme:mismatch` or `enforced`.
+fn scope_text(r: &ListedRule) -> String {
+    let mut text = r.scope.name().to_string();
+    if let Some(pack) = r.pack {
+        text.push(':');
+        text.push_str(pack);
+    }
+    if let Some(trust) = r.trust.filter(|t| !matches!(*t, "admin" | "verified")) {
+        text.push(':');
+        text.push_str(trust);
+    }
+    text
+}
+
+/// What to do about each set of rules from outside that does not run.
+fn set_notes(sets: &[Set]) -> Vec<String> {
+    sets.iter()
+        .filter_map(|s| {
+            let dir = s.dir.display();
+            let trust = if s.kind == Kind::System {
+                "`jouet rule trust --system`"
+            } else {
+                "`jouet rule trust`"
+            };
+            let owner = s
+                .why
+                .as_deref()
+                .map(|why| format!(" and is not the administrator's ({why})"))
+                .unwrap_or_default();
+            Some(match &s.status {
+                rules::Status::Untrusted => format!(
+                    "{dir} is not trusted{owner}, so its rules do not run; review them, then run {trust}"
+                ),
+                rules::Status::Changed => format!(
+                    "{dir} changed since it was trusted{owner}, so its rules do not run; review them, then run {trust}"
+                ),
+                rules::Status::Missing => format!(
+                    "{} ({}) is not fetched, so its rules do not run; run `jouet rule pack sync`",
+                    s.label(),
+                    s.pin.as_ref().map(rules::packs::Pin::source).unwrap_or_default()
+                ),
+                rules::Status::Mismatch => format!(
+                    "{}: the rules kept in {dir} do not match its pin, so they do not run; run `jouet rule pack sync`",
+                    s.label()
+                ),
+                rules::Status::Invalid(problem) => format!("{}: {problem}", s.label()),
+                rules::Status::Own
+                | rules::Status::Admin
+                | rules::Status::Trusted
+                | rules::Status::Verified => return None,
+            })
+        })
+        .collect()
+}
+
 fn state_text(state: &State) -> String {
     match state {
         State::Enabled => "enabled".into(),
@@ -167,7 +258,7 @@ fn list_text(report: &List) -> String {
                 r.name.to_string(),
                 state_text(r.state),
                 mode.to_string(),
-                r.scope.name().to_string(),
+                scope_text(r),
                 r.author.to_string(),
                 r.created.to_string(),
                 r.why.to_string(),
@@ -433,7 +524,7 @@ fn test_all(cwd: &Path, out: &Output) -> Exit {
     let mut reports = Vec::new();
     for rule in loaded.engine.rules() {
         let report = match (&rule.state, &rule.origin) {
-            (State::Untrusted, origin @ Origin::Repo(_)) => match single(origin.clone(), cwd) {
+            (State::Untrusted, origin) => match single(origin.clone(), cwd) {
                 Ok((engine, _)) => match engine.rule(&rule.name) {
                     Some(rule) => Examples::run(&engine, rule),
                     None => continue,
@@ -871,9 +962,9 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, St
         .iter()
         .find(|r| r.name == rule && r.state == State::Untrusted)
         .map(|r| r.origin.clone());
-    // Keep it a repository rule, so its scope and default mode are the
-    // ones it will have once trusted.
-    let Some(origin @ Origin::Repo(_)) = untrusted else {
+    // Keep it a repository's, pack's or system rule, so its scope and
+    // default mode are the ones it will have once trusted.
+    let Some(origin) = untrusted else {
         return Ok((loaded.engine, vec![rule.to_string()]));
     };
     let (engine, _) = single(origin, cwd)?;
@@ -883,7 +974,7 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, St
 /// An engine holding just the rules of the file at `origin`'s path, as
 /// that origin, with the probes a hook in `cwd` would have, and their names.
 fn single(origin: Origin, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, String)> {
-    let (Origin::User(path) | Origin::Repo(path)) = &origin else {
+    let Some(path) = origin.path() else {
         return Err((Exit::Failed, "a built-in rule has no file".into()));
     };
     let code = std::fs::read_to_string(path).map_err(|e| {
@@ -930,60 +1021,4 @@ fn read_payload(path: &str) -> Result<serde_json::Value, String> {
         std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))?
     };
     serde_json::from_str(&text).map_err(|e| format!("the payload is not JSON: {e}"))
-}
-
-#[derive(Serialize)]
-struct Trusted {
-    dir: String,
-    trusted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rules: Option<usize>,
-}
-
-fn trust(cwd: &Path, trust: bool, out: &Output) -> Exit {
-    let Some(dir) = rules::repo_dir(cwd) else {
-        return out.error(
-            Exit::NotFound,
-            "no .jouet/rules directory at the root of this repository",
-        );
-    };
-    let mut store = rules::trust_store();
-    let result = if trust {
-        store.trust(&dir).map(|()| true)
-    } else {
-        store.untrust(&dir)
-    };
-    let changed = match result {
-        Ok(changed) => changed,
-        Err(e) => {
-            return out.error(
-                Exit::Failed,
-                &format!("updating trust for {}: {e}", dir.display()),
-            );
-        }
-    };
-    // The rules the directory holds, scripts aside.
-    let count = trust.then(|| {
-        rules::load(cwd)
-            .engine
-            .rules()
-            .iter()
-            .filter(|r| matches!(&r.origin, Origin::Repo(path) if path.starts_with(&dir)))
-            .count()
-    });
-    let report = Trusted {
-        dir: dir.display().to_string(),
-        trusted: trust,
-        rules: count,
-    };
-    out.result(&report, || match (trust, changed) {
-        (true, _) => format!(
-            "trusted {} ({} rules); a change to any of them needs trusting again\n",
-            report.dir,
-            count.unwrap_or(0)
-        ),
-        (false, true) => format!("no longer trusting {}\n", report.dir),
-        (false, false) => format!("{} was not trusted\n", report.dir),
-    });
-    Exit::Ok
 }

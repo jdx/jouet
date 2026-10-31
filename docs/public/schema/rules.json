@@ -107,11 +107,25 @@
     },
     "Scope": {
       "description": "Where a rule lives, which decides what it may do.",
-      "type": "string",
-      "enum": [
-        "builtin",
-        "user",
-        "repo"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "user",
+            "repo"
+          ]
+        },
+        {
+          "description": "From a rule pack, pinned by its content and, from git, its commit.",
+          "type": "string",
+          "const": "pack"
+        },
+        {
+          "description": "From the system directory, `/etc/jouet`: the settings cannot turn it\noff.",
+          "type": "string",
+          "const": "enforced"
+        }
       ]
     },
     "Event": {

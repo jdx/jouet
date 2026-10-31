@@ -235,10 +235,25 @@ Print the JSON schema of rule files
 Print the Luau type definitions of the jouet module, for rule scripts
 .TP
 \fBrule trust\fR
-Trust this repository's .jouet/rules as they are now
+Trust this repository's .jouet/rules as they are now, once they pass their examples
 .TP
 \fBrule untrust\fR
 Stop trusting this repository's .jouet/rules
+.TP
+\fBrule pack\fR
+Add, remove, list and fetch rule packs: named sets of rules pinned by commit
+.TP
+\fBrule pack add\fR
+Fetch a pack, run its rules' examples and pin it
+.TP
+\fBrule pack rm\fR
+Unpin a pack
+.TP
+\fBrule pack ls\fR
+List every pinned pack and whether its rules are kept as pinned
+.TP
+\fBrule pack sync\fR
+Fetch every pinned pack that is missing or does not match its pin
 .TP
 \fBrule new\fR
 Write a new rule of yours, in warn mode, from a template or a winding note
@@ -2071,7 +2086,7 @@ The PR: a number, URL, OWNER/REPO#N or branch, or an Actions run or job URL. Def
 .SH "JOUET RULE"
 List, test and trust the rules jouet's hooks run
 
-Rules are `[[rule]]` tables in TOML files: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
+Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforced: your settings cannot turn them off), in ~/.config/jouet/rules, in a repository's .jouet/rules once it is trusted, and in rule packs, pinned by commit. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
 .PP
 \fBUsage:\fR jouet rule [OPTIONS] <COMMAND>
 .PP
@@ -2145,12 +2160,23 @@ Print the Luau type definitions of the jouet module, for rule scripts
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET RULE TRUST"
-Trust this repository's .jouet/rules as they are now
+Trust this repository's .jouet/rules as they are now, once they pass their examples
+
+Prints the rules, fetches the packs .jouet/packs.toml pins, and runs every rule's examples; trusts nothing (exit 1) if one fails or lacks either kind. Trust is kept against a hash of every rule file, script and pin: a change on a pull or another branch needs trusting again, and going back to rules trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless \-\-yes is given, and the built\-in `trust\-rules` rule denies it to an agent.
 .PP
 \fBUsage:\fR jouet rule trust [OPTIONS]
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-yes\fR
+Trust without a terminal, for a script or CI run by the user
+.TP
+\fB\-\-system\fR
+Trust the system directory's rules ($JOUET_SYSTEM_DIR, /etc/jouet) where they are not root\-owned
+.TP
+\fB\-\-list\fR
+List every directory trusted, and whether this repository's and the system's rules are
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2158,6 +2184,93 @@ Print help
 Stop trusting this repository's .jouet/rules
 .PP
 \fBUsage:\fR jouet rule untrust [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-system\fR
+Stop trusting the system directory's rules instead
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE PACK"
+Add, remove, list and fetch rule packs: named sets of rules pinned by commit
+
+A pack is a git repository, or a directory, whose rules are in rules/ or .jouet/rules/. `add` pins a git pack at a full commit and the hash of its rule files, in ~/.config/jouet/packs.toml, or with \-\-repo in this repository's .jouet/packs.toml (which then needs trusting again). Every hook checks the kept rules against the hash, and never fetches; `sync` fetches the pins missing or changed. /etc/jouet/packs.toml pins packs that are enforced.
+.PP
+\fBUsage:\fR jouet rule pack [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE PACK ADD"
+Fetch a pack, run its rules' examples and pin it
+
+SOURCE is a git URL, or a directory. A git pack is pinned at the full commit \-\-rev names (default: the remote's HEAD), and `git rev\-parse` checks the commit fetched is that one. A directory is copied and pinned by the hash of its rules; give \-\-rev to fetch it as a git repository. Every rule must pass its examples of both kinds, or nothing is pinned (exit 1). Like trusting, it needs a terminal or \-\-yes, and an agent is denied it.
+.PP
+\fBUsage:\fR jouet rule pack add [OPTIONS] <NAME> <SOURCE>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-rev\fR \fI<REV>\fR
+The commit, tag or branch to pin, resolved to a full commit
+.TP
+\fB\-\-dir\fR \fI<DIR>\fR
+The directory in the pack holding its rules (default: rules, else .jouet/rules)
+.TP
+\fB\-\-repo\fR
+Pin it in this repository's .jouet/packs.toml rather than yours
+.TP
+\fB\-\-yes\fR
+Pin it without a terminal, for a script or CI run by the user
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The pack's name: lowercase words joined by dashes
+.TP
+\fB<SOURCE>\fR
+A git URL, or a directory
+.SH "JOUET RULE PACK RM"
+Unpin a pack
+.PP
+\fBUsage:\fR jouet rule pack rm [OPTIONS] <NAME>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR
+Unpin it from this repository's .jouet/packs.toml rather than yours
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The pack's name
+.SH "JOUET RULE PACK LS"
+List every pinned pack and whether its rules are kept as pinned
+.PP
+\fBUsage:\fR jouet rule pack ls [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET RULE PACK SYNC"
+Fetch every pinned pack that is missing or does not match its pin
+
+Only the pins of rules that run: yours, the system's, and this repository's once trusted. Each fetch must give the pinned commit and hash, or it fails (exit 5 when the fetch itself failed).
+.PP
+\fBUsage:\fR jouet rule pack sync [OPTIONS]
 .PP
 \fBOptions:\fR
 .PP

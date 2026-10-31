@@ -1820,11 +1820,12 @@ pub struct CiRunArgs {
 
 /// List, test and trust the rules jouet's hooks run
 ///
-/// Rules are `[[rule]]` tables in TOML files: built in, in
-/// ~/.config/jouet/rules, and in a repository's .jouet/rules once it is
-/// trusted. `jouet rule schema` prints their JSON schema; a rule with logic
-/// a matcher cannot express names a Luau `script`, written against the API
-/// `jouet rule types` prints.
+/// Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules
+/// (enforced: your settings cannot turn them off), in
+/// ~/.config/jouet/rules, in a repository's .jouet/rules once it is
+/// trusted, and in rule packs, pinned by commit. `jouet rule schema` prints
+/// their JSON schema; a rule with logic a matcher cannot express names a
+/// Luau `script`, written against the API `jouet rule types` prints.
 #[derive(Args)]
 pub struct RuleArgs {
     #[usage(subcommand)]
@@ -1841,10 +1842,12 @@ pub enum RuleCmd {
     Schema(RuleSchemaArgs),
     /// Print the Luau type definitions of the jouet module, for rule scripts
     Types(RuleTypesArgs),
-    /// Trust this repository's .jouet/rules as they are now
+    /// Trust this repository's .jouet/rules as they are now, once they pass their examples
     Trust(RuleTrustArgs),
     /// Stop trusting this repository's .jouet/rules
-    Untrust(RuleTrustArgs),
+    Untrust(RuleUntrustArgs),
+    /// Add, remove, list and fetch rule packs: named sets of rules pinned by commit
+    Pack(RulePackArgs),
     /// Write a new rule of yours, in warn mode, from a template or a winding note
     New(RuleNewArgs),
     /// Switch a rule of yours from warn to deny
@@ -1953,9 +1956,113 @@ pub struct RuleSchemaArgs {}
 #[derive(Args)]
 pub struct RuleTypesArgs {}
 
-/// Trust or stop trusting this repository's .jouet/rules
+/// Trust this repository's .jouet/rules as they are now, once they pass their examples
+///
+/// Prints the rules, fetches the packs .jouet/packs.toml pins, and runs
+/// every rule's examples; trusts nothing (exit 1) if one fails or lacks
+/// either kind. Trust is kept against a hash of every rule file, script and
+/// pin: a change on a pull or another branch needs trusting again, and
+/// going back to rules trusted before does not. Trusting is the user's
+/// decision: without a terminal it is refused (exit 4) unless --yes is
+/// given, and the built-in `trust-rules` rule denies it to an agent.
 #[derive(Args)]
-pub struct RuleTrustArgs {}
+pub struct RuleTrustArgs {
+    /// Trust without a terminal, for a script or CI run by the user
+    #[usage(long)]
+    yes: bool,
+    /// Trust the system directory's rules ($JOUET_SYSTEM_DIR, /etc/jouet) where they are not root-owned
+    #[usage(long)]
+    system: bool,
+    /// List every directory trusted, and whether this repository's and the system's rules are
+    #[usage(long, conflicts = "--system")]
+    list: bool,
+}
+
+/// Stop trusting this repository's .jouet/rules
+#[derive(Args)]
+pub struct RuleUntrustArgs {
+    /// Stop trusting the system directory's rules instead
+    #[usage(long)]
+    system: bool,
+}
+
+/// Add, remove, list and fetch rule packs: named sets of rules pinned by commit
+///
+/// A pack is a git repository, or a directory, whose rules are in rules/
+/// or .jouet/rules/. `add` pins a git pack at a full commit and the hash of
+/// its rule files, in ~/.config/jouet/packs.toml, or with --repo in this
+/// repository's .jouet/packs.toml (which then needs trusting again). Every
+/// hook checks the kept rules against the hash, and never fetches; `sync`
+/// fetches the pins missing or changed. /etc/jouet/packs.toml pins packs
+/// that are enforced.
+#[derive(Args)]
+pub struct RulePackArgs {
+    #[usage(subcommand)]
+    cmd: RulePackCmd,
+}
+
+#[derive(Subcommands)]
+pub enum RulePackCmd {
+    /// Fetch a pack, run its rules' examples and pin it
+    Add(RulePackAddArgs),
+    /// Unpin a pack
+    Rm(RulePackRmArgs),
+    /// List every pinned pack and whether its rules are kept as pinned
+    Ls(RulePackLsArgs),
+    /// Fetch every pinned pack that is missing or does not match its pin
+    Sync(RulePackSyncArgs),
+}
+
+/// Fetch a pack, run its rules' examples and pin it
+///
+/// SOURCE is a git URL, or a directory. A git pack is pinned at the full
+/// commit --rev names (default: the remote's HEAD), and `git rev-parse`
+/// checks the commit fetched is that one. A directory is copied and pinned
+/// by the hash of its rules; give --rev to fetch it as a git repository.
+/// Every rule must pass its examples of both kinds, or nothing is pinned
+/// (exit 1). Like trusting, it needs a terminal or --yes, and an agent is
+/// denied it.
+#[derive(Args)]
+pub struct RulePackAddArgs {
+    /// The pack's name: lowercase words joined by dashes
+    name: String,
+    /// A git URL, or a directory
+    source: String,
+    /// The commit, tag or branch to pin, resolved to a full commit
+    #[usage(long, value_name = "REV")]
+    rev: Option<String>,
+    /// The directory in the pack holding its rules (default: rules, else .jouet/rules)
+    #[usage(long, value_name = "DIR")]
+    dir: Option<String>,
+    /// Pin it in this repository's .jouet/packs.toml rather than yours
+    #[usage(long)]
+    repo: bool,
+    /// Pin it without a terminal, for a script or CI run by the user
+    #[usage(long)]
+    yes: bool,
+}
+
+/// Unpin a pack
+#[derive(Args)]
+pub struct RulePackRmArgs {
+    /// The pack's name
+    name: String,
+    /// Unpin it from this repository's .jouet/packs.toml rather than yours
+    #[usage(long)]
+    repo: bool,
+}
+
+/// List every pinned pack and whether its rules are kept as pinned
+#[derive(Args)]
+pub struct RulePackLsArgs {}
+
+/// Fetch every pinned pack that is missing or does not match its pin
+///
+/// Only the pins of rules that run: yours, the system's, and this
+/// repository's once trusted. Each fetch must give the pinned commit and
+/// hash, or it fails (exit 5 when the fetch itself failed).
+#[derive(Args)]
+pub struct RulePackSyncArgs {}
 
 /// Write a new rule of yours, in warn mode, from a template or a winding note
 ///

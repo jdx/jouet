@@ -110,9 +110,10 @@ fn handle(
     match event {
         "session-start" => {
             log.append(log.entry("session-start"));
-            let engine = load(payload).filter(|_| hooks.prime)?;
-            let primer = session_start(&engine, hooks.steer, hooks.verify);
+            let loaded = load_all(payload).filter(|_| hooks.prime)?;
+            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify);
             let mut notes = wind_notes(settings, log.session, log.repo.as_deref());
+            notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
                 fnox::under_proxy(),
@@ -409,6 +410,11 @@ impl Log<'_> {
 
 /// The rules for the session's directory, or for this process's.
 fn load(payload: &Value) -> Option<Engine> {
+    load_all(payload).map(|loaded| loaded.engine)
+}
+
+/// The rules, and the sets they come from.
+fn load_all(payload: &Value) -> Option<rules::Loaded> {
     let cwd = payload
         .get("cwd")
         .and_then(Value::as_str)
@@ -418,7 +424,49 @@ fn load(payload: &Value) -> Option<Engine> {
     for error in &loaded.errors {
         eprintln!("jouet: {error}");
     }
-    Some(loaded.engine)
+    Some(loaded)
+}
+
+/// One line on rules here that do not run until the user trusts them or
+/// fetches them. It never asks the agent to trust them: the rules are the
+/// ones that would be steering it.
+fn untrusted_note(loaded: &rules::Loaded) -> Option<String> {
+    let mut untrusted = Vec::new();
+    let mut unfetched = Vec::new();
+    for set in &loaded.sets {
+        let count = loaded
+            .engine
+            .rules()
+            .iter()
+            .filter(|r| r.origin.path().is_some_and(|p| set.holds(p)))
+            .count();
+        match set.status {
+            rules::Status::Untrusted | rules::Status::Changed => {
+                let changed = if set.status == rules::Status::Changed {
+                    ", changed since they were trusted"
+                } else {
+                    ""
+                };
+                untrusted.push(format!("{count} in {}{changed}", set.dir.display()));
+            }
+            rules::Status::Missing | rules::Status::Mismatch => unfetched.push(set.label()),
+            _ => {}
+        }
+    }
+    let mut parts = Vec::new();
+    if !untrusted.is_empty() {
+        parts.push(format!(
+            "rules here are not trusted, so they do not run ({}); trusting them is the user's decision, in their own terminal (`jouet rule trust`), not yours",
+            untrusted.join("; ")
+        ));
+    }
+    if !unfetched.is_empty() {
+        parts.push(format!(
+            "{} not fetched as pinned; `jouet rule pack sync` fetches it",
+            unfetched.join(", ")
+        ));
+    }
+    (!parts.is_empty()).then(|| format!("jouet: {}.", parts.join("; ")))
 }
 
 fn evaluate(engine: &Engine, call: &Call) -> Outcome {
@@ -908,7 +956,7 @@ mod tests {
             "{context}"
         );
         // Every built-in deny rule, not a sample, fits the primer's budget.
-        assert!(context.len() <= 1200, "{} bytes:\n{context}", context.len());
+        assert!(context.len() <= 1250, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call.
         assert!(!context.contains("large-read"), "{context}");
         assert!(!context.contains("checks"), "{context}");

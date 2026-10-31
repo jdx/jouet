@@ -43,7 +43,7 @@ setup() {
 	assert_success
 	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
-	assert_line '28 of 28 rules passed their examples'
+	assert_line '29 of 29 rules passed their examples'
 
 	cat >"$RULES/no-rm.toml" <<'TOML'
 [[rule]]
@@ -62,12 +62,12 @@ TOML
 	assert_line '            - expected: quiet'
 	assert_line '            + actual:   deny: rm deletes for good'
 	assert_line --regexp '^FAIL  bare +it has no examples$'
-	assert_line '28 of 30 rules passed their examples'
+	assert_line '29 of 31 rules passed their examples'
 	refute_line --partial 'echo rm'
 
 	run --separate-stderr jouet rule test --all --json
 	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
-	assert_output '[28,2,[2,1]]'
+	assert_output '[29,2,[2,1]]'
 
 	run --separate-stderr jouet rule test
 	assert_failure 2
@@ -319,7 +319,7 @@ examples = { fires = ["ls"], quiet = ["pwd"] }
 TOML
 
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^team +untrusted +deny +repo +unknown +a team rule$'
+	assert_line --regexp '^team +untrusted +deny +repo:untrusted +unknown +a team rule$'
 	assert_line --partial 'is not trusted, so its rules do not run'
 
 	# Tested before trusting, it behaves as it will once trusted: a
@@ -331,11 +331,11 @@ TOML
 	assert_output 'deny: no'
 	rm .jouet/rules/scoped.toml
 
-	run --separate-stderr jouet rule trust
+	run --separate-stderr jouet rule trust --yes
 	assert_success
 	assert_output --partial '(1 rules)'
 	run --separate-stderr jouet rule list
-	assert_line --regexp '^team +enabled'
+	assert_line --regexp '^team +enabled +deny +repo:trusted'
 
 	# A script below the directory counts too.
 	mkdir .jouet/rules/lib

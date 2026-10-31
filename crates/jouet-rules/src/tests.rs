@@ -331,18 +331,59 @@ fn discovery_layers_user_and_trusted_repository_rules() {
     let rule = "--- why: test\nreturn { check = function() end }";
     std::fs::write(user_dir.join("mine.luau"), rule).unwrap();
     std::fs::write(repo_dir.join("team.luau"), rule).unwrap();
-    let mut trust = TrustStore::load(Some(dir.path().join("trust.json")));
+    let dirs = |trusted| {
+        [
+            RuleDir {
+                dir: user_dir.clone(),
+                origin: Origin::User,
+                trusted: true,
+            },
+            RuleDir {
+                dir: repo_dir.clone(),
+                origin: Origin::Repo,
+                trusted,
+            },
+        ]
+    };
 
-    let (sources, errors) = discover(Some(&user_dir), Some(&repo_dir), &trust);
+    let (sources, errors) = discover(&dirs(false));
     assert!(errors.is_empty());
     let mine = sources.iter().find(|s| s.name == "mine").unwrap();
     assert!(matches!(mine.origin, Origin::User(_)) && mine.trusted);
     let team = sources.iter().find(|s| s.name == "team").unwrap();
-    assert!(!team.trusted);
+    assert!(matches!(team.origin, Origin::Repo(_)) && !team.trusted);
 
-    trust.trust(&repo_dir).unwrap();
-    let (sources, _) = discover(Some(&user_dir), Some(&repo_dir), &trust);
+    let (sources, _) = discover(&dirs(true));
     assert!(sources.iter().find(|s| s.name == "team").unwrap().trusted);
+}
+
+#[test]
+fn the_settings_cannot_turn_off_an_enforced_rule() {
+    let rule = "[[rule]]\nname = \"org\"\nwhy = \"policy\"\nmessage = \"no\"\nscope = \"repo\"\nmatch = { command = \"ls\" }\nexamples = { fires = [\"ls\"], quiet = [\"pwd\"] }\n";
+    let source = |origin: Origin| Source::toml("org", origin, rule);
+    for disabled in [vec!["org".to_string()], vec!["all".to_string()]] {
+        let engine = engine_with(
+            vec![source(Origin::Enforced(PathBuf::from(
+                "/etc/jouet/rules/org.toml",
+            )))],
+            Budget::default(),
+            disabled.clone(),
+        );
+        let org = engine.rule("org").unwrap();
+        assert_eq!(
+            (org.state.clone(), org.scope, org.mode),
+            (State::Enabled, Scope::Enforced, Mode::Deny)
+        );
+        assert!(engine.evaluate(&bash("ls")).deny.is_some());
+
+        // A pack's rule, written for a repository, is turned off as usual.
+        let engine = engine_with(
+            vec![source(Origin::Pack(PathBuf::from("/packs/x/org.toml")))],
+            Budget::default(),
+            disabled,
+        );
+        assert_eq!(engine.rule("org").unwrap().state, State::Disabled);
+    }
 }
 
 #[test]
@@ -989,12 +1030,17 @@ quiet = ["rm -r a", "ls a b c d"]
         "return { check = function(call)\n  for _, c in call.commands do\n    if #c.argv > 4 then return jouet.deny('one at a time') end\n  end\n  return nil\nend }\n",
     )
     .unwrap();
-    let (sources, errors) = discover(Some(&rules), None, &TrustStore::load(None));
+    let user_rules = [RuleDir {
+        dir: rules.clone(),
+        origin: Origin::User,
+        trusted: true,
+    }];
+    let (sources, errors) = discover(&user_rules);
     assert!(errors.is_empty());
     // A script beside a TOML file that does not load is still a script.
     std::fs::write(rules.join("broken.toml"), "[[rule]]\nname = 1\n").unwrap();
     std::fs::write(rules.join("broken.luau"), "return {}\n").unwrap();
-    let broken = self::engine(discover(Some(&rules), None, &TrustStore::load(None)).0);
+    let broken = self::engine(discover(&user_rules).0);
     let formats: Vec<(&str, Format)> = broken
         .rules()
         .iter()
@@ -1019,7 +1065,7 @@ quiet = ["rm -r a", "ls a b c d"]
     assert_eq!(rule.script.as_deref(), Some("big-rm.luau"));
     assert_eq!(engine.proven(rule), Ok(3));
     // `ls a b c d` never reached the script: no VM for it.
-    let fresh = self::engine(discover(Some(&rules), None, &TrustStore::load(None)).0);
+    let fresh = self::engine(discover(&user_rules).0);
     assert!(fresh.evaluate(&bash("ls a b c d e")).deny.is_none());
     assert!(!fresh.vm_started());
     assert_eq!(
