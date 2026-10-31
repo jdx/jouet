@@ -440,6 +440,7 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
                 r.state == jouet_rules::State::Enabled
                     && r.event == Event::PreToolUse
                     && r.mode == jouet_rules::Mode::Deny
+                    && r.primer
             })
             // A rule about project files not here never fires here.
             .filter(|r| engine.in_use_here(r))
@@ -909,8 +910,10 @@ mod tests {
         );
         // Every built-in deny rule, not a sample, fits the primer's budget.
         assert!(context.len() <= 1200, "{} bytes:\n{context}", context.len());
-        // Only deny rules: a warning costs the agent no call.
+        // Only deny rules: a warning costs the agent no call, and neither
+        // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");
+        assert!(!context.contains("committed-secrets"), "{context}");
         assert!(!context.contains("checks"), "{context}");
         assert_eq!(
             context.contains("sleep-poll"),

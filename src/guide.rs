@@ -78,6 +78,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "secrets",
+        Some(
+            "checking for API keys, tokens and private keys before they are committed or pushed: `jouet secrets scan` (files), `--staged` or `--diff REF` (the lines being added), with gitleaks' rules; `jouet commit` runs the same scan, and `--allow-secret RULE:PATH:LINE` lets a false positive through",
+        ),
+    ),
+    (
         "review-package",
         Some(
             "handing a range of commits to a reviewer: one file with the commits, a diffstat and the full diff, refusing a range that would show the wrong diff",
@@ -231,7 +237,11 @@ fn when(name: &str) -> Option<&'static str> {
 
 /// Commands that work together, which the overview and the skill describe
 /// in one entry, led by the first, to stay within their budgets.
-pub(crate) const GROUPED: &[&[&str]] = &[&["handoff", "pickup"], &["read", "docs", "deps"]];
+pub(crate) const GROUPED: &[&[&str]] = &[
+    &["commit", "secrets"],
+    &["handoff", "pickup"],
+    &["read", "docs", "deps"],
+];
 
 /// The group `name` belongs to, if any.
 pub(crate) fn group(name: &str) -> Option<&'static [&'static str]> {
@@ -380,7 +390,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     if let [commit, edit, reply] = usage.as_slice() {
         let _ = writeln!(
             out,
-            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and repeated --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}."
+            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}."
         );
     }
     if !rules.is_empty() {
@@ -616,7 +626,7 @@ mod tests {
             "{text}"
         );
         // The family names, not each one's description: that is agent-help's.
-        assert!(text.contains("commit, "), "{text}");
+        assert!(text.contains("commit/secrets, "), "{text}");
         assert!(
             !text.contains("Commit only the named paths, with trailers"),
             "{text}"

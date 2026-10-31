@@ -108,6 +108,12 @@ declare jouet: {
 		info: (args: { [any]: any }?) -> Ran,
 		audit: (args: { [any]: any }?) -> Ran,
 	},
+	-- git.read: gitleaks' rules over files, or the lines the index or the
+	-- commits since a ref add (`jouet secrets scan`); { paths?, staged?, diff? }.
+	-- Exit 1 with the findings, redacted, when it finds any
+	secrets: {
+		scan: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

@@ -17,6 +17,7 @@ repository = "https://github.com/jdx/jouet"
 readme = "README.md"
 
 [workspace.dependencies]
+aho-corasick = "1"
 ast-grep-core = "0.51"
 jouet-audit = { path = "crates/jouet-audit", version = "0.0.1" }
 jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
@@ -27,6 +28,7 @@ jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
 jouet-routines = { path = "crates/jouet-routines", version = "0.0.1" }
 jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
 jouet-search = { path = "crates/jouet-search", version = "0.0.1" }
+jouet-secrets = { path = "crates/jouet-secrets", version = "0.0.1" }
 jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
 grep-regex = "0.1"
 grep-searcher = "0.1"
@@ -110,6 +112,7 @@ jouet-output.workspace = true
 jouet-routines.workspace = true
 jouet-rules.workspace = true
 jouet-search.workspace = true
+jouet-secrets.workspace = true
 jouet-wait.workspace = true
 mise-agent-env.workspace = true
 regex.workspace = true

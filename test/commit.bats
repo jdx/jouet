@@ -111,7 +111,7 @@ MSG
 
 	assert_success
 	assert_line --index 1 "  modified  a.txt  +1 -1"
-	assert_line --index 2 "  fnox found no secret values in 1 file"
+	assert_line --index 2 "  no secrets found by gitleaks' rules or fnox in 1 file"
 	assert_equal "$(cat "$BATS_TEST_TMPDIR/fnox.log")" "scan --values --staged --format json"
 	assert_equal "$(git status --porcelain)" "A  other.txt"
 }
@@ -157,20 +157,77 @@ MSG
 	assert_equal "$stderr" "jouet: warning: fnox scan failed (Configuration error: None of the profile's secrets could be resolved (exit 1)); the agent runs under fnox proxy run, so it was only given placeholders"
 }
 
-@test "without fnox installed the commit goes ahead and says it was not scanned; config can turn the scan off" {
+@test "without fnox installed the commit goes ahead and says fnox did not check it; config can turn the scan off" {
 	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
 	printf 'a2\n' >a.txt
 
 	JOUET_COMMIT_TRAILERS='' PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet --json commit a.txt -m "fix: a"
 
 	assert_success
-	run jq -r '.secret_scan.status, .warnings[0]' <<<"$output"
-	assert_line --index 0 skipped
-	assert_line --index 1 "this repository uses fnox, but fnox is not installed, so the commit was not scanned for secret values"
+	run jq -r '.secret_scan.tool, .secret_scan.status, .warnings[0]' <<<"$output"
+	assert_line --index 0 jouet
+	assert_line --index 1 clean
+	assert_line --index 2 "this repository uses fnox, but fnox is not installed, so the commit was not checked for its secrets' values (gitleaks' rules still scanned it)"
 
 	fake_fnox
 	printf 'a3\n' >a.txt
 	JOUET_COMMIT_TRAILERS='' JOUET_COMMIT_SECRET_SCAN=off run --separate-stderr jouet commit a.txt -m "fix: a3"
 	assert_success
 	assert [ ! -e "$BATS_TEST_TMPDIR/fnox.log" ]
+}
+
+# A GitHub classic token's shape with a made-up body, put together here so
+# this file holds nothing a scanner takes for a secret.
+fake_token() {
+	printf 'ghp_%s' "Zq3XvB7mN2kL9pR4tY6wC1dF8gH0jK5sA2eU"
+}
+
+@test "gitleaks' rules refuse a token in what is committed, never printing it, and --allow-secret lets one through" {
+	printf 'a2\n' >a.txt
+	mkdir -p src && printf 'fn x() {}\nconst T: &str = "%s";\n' "$(fake_token)" >src/gh.rs
+	# Staged by someone else: not part of this commit.
+	printf 'token %s\n' "$(fake_token)" >other.txt && git add other.txt
+
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt src -m "feat: gh"
+
+	assert_failure 1
+	assert_line --index 0 "commit refused: gitleaks' rules found a secret in what would be committed; nothing was committed and nothing was left staged"
+	assert_line --index 1 "  github-pat  src/gh.rs:2  ghp_****"
+	refute_output --partial Zq3XvB7m
+	assert_equal "$(git rev-list --count HEAD)" 1
+	assert_equal "$(git status --porcelain --untracked-files=all)" " M a.txt
+A  other.txt
+?? src/gh.rs"
+
+	run --separate-stderr jouet --json commit src -m "feat: gh"
+	assert_failure 1
+	run jq -c '.secret_scan | [.tool, .status, .findings]' <<<"$output"
+	assert_output '["jouet","found",[{"rule":"github-pat","path":"src/gh.rs","line":2,"redacted":"ghp_****"}]]'
+
+	run --separate-stderr jouet commit src -m "feat: gh" --allow-secret src/gh.rs:2
+	assert_failure 2
+	assert_equal "$stderr" "jouet: --allow-secret takes RULE:PATH:LINE, as the refusal lists the finding, not \`src/gh.rs:2\`"
+
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt src -m "feat: gh" --allow-secret github-pat:src/gh.rs:2
+	assert_success
+	assert_line --index 3 "  no secrets found by gitleaks' rules in 2 files"
+	assert_line --index 4 "  1 finding passed over (.gitleaksignore or --allow-secret)"
+	assert_equal "$(git status --porcelain --untracked-files=all)" "A  other.txt"
+}
+
+@test "a token already committed does not refuse later commits of the same file" {
+	printf 'const T: &str = "%s"; // gitleaks:allow\n' "$(fake_token)" >a.txt
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "chore: known test token"
+	assert_success
+
+	# The line is in HEAD now; only the added line is scanned.
+	sed -i.bak 's| // gitleaks:allow||' a.txt && rm a.txt.bak
+	printf 'more\n' >>a.txt
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
+	assert_failure 1
+	assert_line --index 1 "  github-pat  a.txt:1  ghp_****"
+	git checkout -q a.txt
+	printf 'more\n' >>a.txt
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
+	assert_success
 }

@@ -87,6 +87,11 @@ helpers, the setup, hook, ledger and agent-guide code, and the test selection be
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
   in the binary, so the crate makes no network calls.
+- `jouet-secrets`: the secret scanner behind `jouet secrets scan`, `jouet commit`'s scan and the
+  `committed-secrets` rule's probe: gitleaks' rules, vendored unchanged in `gitleaks/` (MIT, see
+  `NOTICE`; `mise run secrets:update` refreshes them), applied as gitleaks applies them
+  (`rules.rs`), and the added lines of a diff or log (`diff.rs`). Test data that looks like a
+  secret is put together at run time, so the repository holds none.
 
 The libraries export only what the binary or a sibling crate uses; `unreachable_pub` is denied
 workspace-wide, so everything else is `pub(crate)`. Shared fields go in `[workspace.package]`,

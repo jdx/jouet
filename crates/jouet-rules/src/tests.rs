@@ -551,6 +551,7 @@ return {
             git_branch: None,
             git_ahead: None,
             stack: None,
+            secrets: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine

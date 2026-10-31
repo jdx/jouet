@@ -380,6 +380,7 @@ impl Scanner for Grep {
                     secret: "PASSWORD".into(),
                     path: name.into(),
                     line: 1,
+                    ..SecretFinding::default()
                 });
             }
         }
