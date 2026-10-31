@@ -79,6 +79,29 @@ teardown() {
 	run --separate-stderr jouet deps info cargo:demo-yanked@9.9.9
 	assert_failure 3
 	assert_output 'cargo demo-yanked 9.9.9: crates.io has no such version; the latest is 1.0.1'
+	# With no version, the latest is checked like any other.
+	run --separate-stderr jouet deps info cargo:demo-newest
+	assert_failure 1
+	assert_line --index 0 'cargo demo-newest 2.0.0-rc.1 (latest)'
+	assert_line --index 1 '  yanked'
+}
+
+@test "a name the lockfile locks from git is refused, not looked up on the public registry" {
+	cat >Cargo.lock <<-'EOF'
+		version = 4
+
+		[[package]]
+		name = "secret-crate"
+		version = "1.0.0"
+		source = "git+https://git.example.com/secret-crate#0123456789abcdef"
+	EOF
+	run --separate-stderr jouet deps info secret-crate
+	assert_failure 4
+	assert_equal "$stderr" 'jouet: Cargo.lock locks secret-crate from a private registry, a path, a workspace or git, so jouet deps does not send its name
+hint: check it where it is published'
+	run --separate-stderr jouet deps info cargo:secret-crate@1.0.0
+	assert_failure 4
+	assert_equal "$(wc -c <"$REQUESTS")" 0
 }
 
 @test "a Go module's deprecation comes from its latest go.mod" {

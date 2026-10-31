@@ -359,8 +359,19 @@ fn locked_in(dir: &Path, lang: Lang, goprivate: &str) -> Option<Locked> {
         }
     };
     pins.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
-    pins.dedup_by(|a, b| a.name == b.name && a.version == b.version);
+    dedup(&mut pins);
     Some(Locked { lang, path, pins })
+}
+
+/// One pin per version, private when any of its entries is.
+fn dedup(pins: &mut Vec<Pin>) {
+    pins.dedup_by(|later, kept| {
+        let same = later.name == kept.name && later.version == kept.version;
+        if same {
+            kept.public &= later.public;
+        }
+        same
+    });
 }
 
 // --- Rust -----------------------------------------------------------------
@@ -689,27 +700,46 @@ fn npm_packages(lockfile: &Path) -> Vec<Pin> {
             }
             found
         }
-        "pnpm-lock.yaml" => text
-            .lines()
-            .filter(|l| l.starts_with("  ") && !l.starts_with("   ") && l.trim_end().ends_with(':'))
-            .filter_map(|l| {
-                let key = l.trim().trim_end_matches(':').trim_matches(['\'', '"']);
-                let key = key.strip_prefix('/').unwrap_or(key);
-                let key = key.split('(').next().unwrap_or(key);
-                // v6 and later: `name@1.2.3(peer@x)`; v5: `/name/1.2.3`.
-                let (name, version) = key
-                    .rfind('@')
-                    .filter(|&at| at > 0)
-                    .map(|at| (&key[..at], &key[at + 1..]))
-                    .filter(|(_, v)| registry(v))
-                    .or_else(|| key.rsplit_once('/'))?;
-                Some(Pin {
-                    name: name.to_string(),
-                    version: version.to_string(),
-                    public: true,
-                })
-            })
-            .collect(),
+        "pnpm-lock.yaml" => {
+            let mut found: Vec<Pin> = Vec::new();
+            // Whether the last key read was a package, whose fields follow.
+            let mut in_package = false;
+            for l in text.lines() {
+                if l.starts_with("  ") && !l.starts_with("   ") && l.trim_end().ends_with(':') {
+                    let key = l.trim().trim_end_matches(':').trim_matches(['\'', '"']);
+                    let key = key.strip_prefix('/').unwrap_or(key);
+                    let key = key.split('(').next().unwrap_or(key);
+                    // v6 and later: `name@1.2.3(peer@x)`; v5: `/name/1.2.3`.
+                    let pin = key
+                        .rfind('@')
+                        .filter(|&at| at > 0)
+                        .map(|at| (&key[..at], &key[at + 1..]))
+                        .filter(|(_, v)| registry(v))
+                        .or_else(|| key.rsplit_once('/'));
+                    in_package = pin.is_some();
+                    if let Some((name, version)) = pin {
+                        found.push(Pin {
+                            name: name.to_string(),
+                            version: version.to_string(),
+                            public: true,
+                        });
+                    }
+                } else if !l.starts_with("   ") {
+                    in_package = false;
+                } else if in_package
+                    && let Some(url) = l.trim().strip_prefix("resolution:").and_then(|r| {
+                        // A package from another registry or a URL names its
+                        // tarball; one from npm only its integrity.
+                        let (_, rest) = r.split_once("tarball:")?;
+                        rest.split([',', '}']).next()
+                    })
+                    && let Some(pin) = found.last_mut()
+                {
+                    pin.public = public(Some(url.trim().trim_matches(['\'', '"'])));
+                }
+            }
+            found
+        }
         "yarn.lock" => {
             let mut found: Vec<Pin> = Vec::new();
             // The block's names, and where its pins start in `found`.
@@ -749,22 +779,28 @@ fn npm_packages(lockfile: &Path) -> Vec<Pin> {
             }
             found
         }
-        "bun.lock" => regex::Regex::new(r#""[^"]+": \["((?:@[^"@/]+/)?[^"@]+)@([^"]+)""#)
-            .map(|re| {
-                re.captures_iter(&text)
-                    .map(|c| Pin {
-                        name: c[1].to_string(),
-                        version: c[2].to_string(),
-                        public: true,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        // `"name": ["name@1.0.0", "REGISTRY", {...}, "sha"]`, the registry
+        // empty for the default one.
+        "bun.lock" => {
+            regex::Regex::new(r#""[^"]+": \["((?:@[^"@/]+/)?[^"@]+)@([^"]+)"(?:,\s*"([^"]*)")?"#)
+                .map(|re| {
+                    re.captures_iter(&text)
+                        .map(|c| Pin {
+                            name: c[1].to_string(),
+                            version: c[2].to_string(),
+                            public: c
+                                .get(3)
+                                .is_none_or(|r| r.as_str().is_empty() || public(Some(r.as_str()))),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
         _ => Vec::new(),
     };
     out.retain(|p| !p.name.is_empty() && registry(&p.version));
     out.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
-    out.dedup_by(|a, b| a.name == b.name && a.version == b.version);
+    dedup(&mut out);
     out
 }
 
@@ -1077,25 +1113,41 @@ fn gomodcache() -> Option<PathBuf> {
         .map(|p| p.join("pkg").join("mod"))
 }
 
-/// A Go setting: the environment variable, else `go env -w`'s file.
+/// A Go setting: the environment variable, else `go env -w`'s file, where
+/// Go looks for it: `$GOENV`, else `go/env` in the user's config directory
+/// (`$XDG_CONFIG_HOME` or `~/.config`, `~/Library/Application Support`,
+/// `%AppData%`).
 fn go_env(key: &str) -> Option<String> {
     if let Some(value) = std::env::var(key).ok().filter(|v| !v.is_empty()) {
         return Some(value);
     }
-    let home = std::env::home_dir()?;
-    [
-        home.join(".config/go/env"),
-        home.join("Library/Application Support/go/env"),
-    ]
-    .iter()
-    .filter_map(|f| std::fs::read_to_string(f).ok())
-    .find_map(|t| {
-        t.lines().find_map(|l| {
-            l.strip_prefix(key)?
-                .strip_prefix('=')
-                .map(|v| v.trim().to_string())
+    let files: Vec<PathBuf> = match std::env::var_os("GOENV").filter(|v| !v.is_empty()) {
+        Some(v) if v == "off" => Vec::new(),
+        Some(v) => vec![PathBuf::from(v)],
+        None => {
+            let home = std::env::home_dir();
+            [
+                jouet_output::paths::env_dir("XDG_CONFIG_HOME").filter(|d| d.is_absolute()),
+                home.as_ref().map(|h| h.join(".config")),
+                home.as_ref().map(|h| h.join("Library/Application Support")),
+                jouet_output::paths::env_dir("APPDATA"),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|dir| dir.join("go").join("env"))
+            .collect()
+        }
+    };
+    files
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .find_map(|t| {
+            t.lines().find_map(|l| {
+                l.strip_prefix(key)?
+                    .strip_prefix('=')
+                    .map(|v| v.trim().to_string())
+            })
         })
-    })
 }
 
 /// Whether `module` matches GOPRIVATE's comma-separated path prefixes, each
@@ -1330,6 +1382,27 @@ mod tests {
                 ("github.com/spf13/cobra@v1.8.0", true)
             ])
         );
+        let other = tempfile::tempdir().unwrap();
+        let pnpm = other.path().join("pnpm-lock.yaml");
+        std::fs::write(
+            &pnpm,
+            "lockfileVersion: '9.0'\n\npackages:\n\n  zod@4.1.0:\n    resolution: {integrity: sha512-x}\n\n  '@corp/x@1.0.0':\n    resolution: {integrity: sha512-y, tarball: https://npm.corp.example.com/@corp/x/-/x-1.0.0.tgz}\n\nsnapshots:\n\n  zod@4.1.0: {}\n\n  '@corp/x@1.0.0': {}\n",
+        )
+        .unwrap();
+        let public = |path: &Path| -> Vec<(String, bool)> {
+            npm_packages(path)
+                .into_iter()
+                .map(|p| (p.name, p.public))
+                .collect()
+        };
+        assert_eq!(public(&pnpm), owned(&[("@corp/x", false), ("zod", true)]));
+        let bun = other.path().join("bun.lock");
+        std::fs::write(
+            &bun,
+            "{\n  \"packages\": {\n    \"zod\": [\"zod@4.1.0\", \"\", {}, \"sha\"],\n    \"@corp/x\": [\"@corp/x@1.0.0\", \"https://npm.corp.example.com/\", {}, \"sha\"],\n  },\n}\n",
+        )
+        .unwrap();
+        assert_eq!(public(&bun), owned(&[("@corp/x", false), ("zod", true)]));
         assert!(go_private("github.com/me/*", "github.com/me/x/v2"));
         assert!(!go_private("github.com/me/*", "github.com/you/x"));
     }

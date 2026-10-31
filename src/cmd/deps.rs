@@ -103,8 +103,8 @@ fn info(args: &DepsInfoArgs, out: &Output) -> Exit {
     for spec in &args.packages {
         match target(&cwd, &locked, spec) {
             Ok(t) => targets.push(t),
-            Err((message, hint)) => {
-                return out.error_with_hint(Exit::Usage, &message, hint.as_deref());
+            Err((exit, message, hint)) => {
+                return out.error_with_hint(exit, &message, hint.as_deref());
             }
         }
     }
@@ -112,10 +112,19 @@ fn info(args: &DepsInfoArgs, out: &Output) -> Exit {
     let mut packages = Vec::new();
     let mut queries = Vec::new();
     for t in targets {
-        let facts = match registry::lookup(&http, t.lang, &t.name, t.version.as_deref()) {
+        let mut facts = match registry::lookup(&http, t.lang, &t.name, t.version.as_deref()) {
             Ok(facts) => facts,
             Err(e) => return out.error(Exit::Remote, &e),
         };
+        // The latest version is checked like any other: it may be yanked.
+        if t.version.is_none()
+            && let Some(latest) = facts.as_ref().and_then(|f| f.latest.clone())
+        {
+            facts = match registry::lookup(&http, t.lang, &t.name, Some(&latest)) {
+                Ok(facts) => facts,
+                Err(e) => return out.error(Exit::Remote, &e),
+            };
+        }
         let package = describe(&http, t, facts);
         if let Some(version) = package
             .version
@@ -159,12 +168,16 @@ fn info(args: &DepsInfoArgs, out: &Output) -> Exit {
 }
 
 /// `cargo:serde@1.0`, `npm:@scope/x`, or a bare name the project places.
-fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, Option<String>)> {
+/// Why a target was refused: the exit, the message and a hint.
+type Refusal = (Exit, String, Option<String>);
+
+fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, Refusal> {
     let (lang, rest) = match spec.split_once(':') {
         Some((prefix, rest)) => match Lang::parse(prefix) {
             Some(lang) => (Some(lang), rest),
             None => {
                 return Err((
+                    Exit::Usage,
                     format!("`{prefix}` is not an ecosystem: cargo, npm, pypi or go"),
                     None,
                 ));
@@ -174,7 +187,7 @@ fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, 
     };
     let (name, version) = docs::split_spec(rest);
     if name.is_empty() {
-        return Err((format!("`{spec}` names no package"), None));
+        return Err((Exit::Usage, format!("`{spec}` names no package"), None));
     }
     let pinned = |lang: Lang| -> Vec<(&Locked, &docs::Pin)> {
         locked
@@ -197,6 +210,7 @@ fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, 
                     [one] => *one,
                     [] => {
                         return Err((
+                            Exit::Usage,
                             format!(
                                 "no lockfile or manifest here says which ecosystem `{name}` is in"
                             ),
@@ -212,6 +226,20 @@ fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, 
         }
     };
     let name = name.to_string();
+    let mut pins = pinned(lang);
+    // A name locked from anywhere but the public registry is not sent, not
+    // even to look up the public package of the same name.
+    if let Some(&(lockfile, _)) = pins.iter().find(|(_, p)| !p.public) {
+        let shown = lockfile.path.strip_prefix(cwd).unwrap_or(&lockfile.path);
+        return Err((
+            Exit::Precondition,
+            format!(
+                "{} locks {name} from a private registry, a path, a workspace or git, so jouet deps does not send its name",
+                shown.display()
+            ),
+            Some("check it where it is published".into()),
+        ));
+    }
     if let Some(v) = version {
         return Ok(Target {
             lang,
@@ -221,7 +249,6 @@ fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, 
             notes: Vec::new(),
         });
     }
-    let mut pins = pinned(lang);
     let Some(&(lockfile, _)) = pins.first() else {
         return Ok(Target {
             lang,
@@ -244,36 +271,23 @@ fn target(cwd: &Path, locked: &[Locked], spec: &str) -> Result<Target, (String, 
             others.join(", ")
         ));
     }
-    if !newest.public {
-        notes.push(
-            "the lockfile locks it from a private registry, a path or git: only its name was sent"
-                .into(),
-        );
-    }
     let shown = lockfile.path.strip_prefix(cwd).unwrap_or(&lockfile.path);
     Ok(Target {
         lang,
-        name: if newest.public {
-            newest.name.clone()
-        } else {
-            name
-        },
-        version: newest.public.then(|| newest.version.clone()),
-        from: if newest.public {
-            From::Lockfile(shown.display().to_string())
-        } else {
-            From::Latest
-        },
+        name: newest.name.clone(),
+        version: Some(newest.version.clone()),
+        from: From::Lockfile(shown.display().to_string()),
         notes,
     })
 }
 
-fn ambiguous(name: &str, langs: &[Lang], why: &str) -> (String, Option<String>) {
+fn ambiguous(name: &str, langs: &[Lang], why: &str) -> Refusal {
     let named: Vec<String> = langs
         .iter()
         .map(|l| format!("{}:{name}", ecosystem(*l)))
         .collect();
     (
+        Exit::Usage,
         format!("`{name}` could be in {} ecosystems: {why}", langs.len()),
         Some(format!("name one: {}", named.join(" or "))),
     )
@@ -347,7 +361,7 @@ fn describe(http: &Http, t: Target, facts: Option<Facts>) -> Package {
     package.repository = facts.repository.clone();
     package.deprecated = facts.deprecated.clone();
     match (&t.from, facts.release) {
-        (From::Latest, _) | (_, None) => package.version = facts.latest,
+        (_, None) => package.version = facts.latest,
         (from, Some(release)) => {
             package.version = Some(release.version.clone());
             if let From::Lockfile(path) = from {

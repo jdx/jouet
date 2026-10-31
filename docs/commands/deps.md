@@ -63,7 +63,9 @@ It reads the nearest lockfile of each ecosystem from the current directory up to
 
 ## What leaves the machine
 
-Only package names and versions. A registry is asked about one package by name (and one version of it); OSV is asked about (ecosystem, name, version) triples. Packages a lockfile locks from anywhere but the public registry are never sent: a private registry or index, a path, a workspace member, a git repository, a module `replace`d in `go.mod` or matching `GOPRIVATE`. `audit` counts them as private.
+Only package names and versions. A registry is asked about one package by name (and one version of it); OSV is asked about (ecosystem, name, version) triples. Packages a lockfile locks from anywhere but the public registry are never sent: a private registry or index, a path, a workspace member, a git repository, a module `replace`d in `go.mod` or matching `GOPRIVATE` (read as Go does, from the environment or `go env -w`'s file). `audit` counts them as private, and `info` refuses one (exit 4) rather than look up the public package of the same name.
+
+Where a lockfile does not record a package's source, jouet cannot tell it is private: pnpm records a tarball URL for a package from a URL but not for one from a registry set in `.npmrc`, and yarn 2+ records neither. Packages like those are sent.
 
 Requests use jouet's TLS (the system's root certificates) and time out after 15 seconds. A dropped connection, a 5xx or a 429 is retried once; after that the command exits 5.
 
@@ -120,6 +122,7 @@ There is no rule that runs `jouet deps` on `cargo add`, `npm install` or `pip in
 | `1` | A version checked has an advisory, or is yanked or retracted, or the package is deprecated; `audit` found an affected package |
 | `2` | An ecosystem is not `cargo`, `npm`, `pypi` or `go`, or a bare name could be in several |
 | `3` | A package, or the version asked for, does not exist; `audit` found no lockfile |
+| `4` | `info` was asked about a package the lockfile locks from somewhere other than the public registry |
 | `5` | A registry or OSV could not be reached, or answered with an error |
 
 When `info` checks several packages, a missing one (3) outranks an advisory (1).

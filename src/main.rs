@@ -909,8 +909,8 @@ pub struct ReadArgs {
 /// Asks the package's registry (crates.io, npm, PyPI or the Go module
 /// proxy) and OSV (osv.dev), so a dependency that does not exist, is
 /// deprecated or yanked, or has a known advisory is caught before it is
-/// added. Only package names and versions are sent; a package locked from
-/// a private registry, a path or a git repository is never sent. Answers
+/// added. Only package names and versions are sent; a package the lockfile
+/// says comes from a private registry, a path or git is never sent. Answers
 /// are cached under jouet's cache directory: a registry's for ten minutes,
 /// OSV's for a day.
 #[derive(Args)]
@@ -941,7 +941,9 @@ pub enum DepsCmd {
 ///
 /// Exits 3 when a package does not exist (or has no such version), 1 when
 /// the version checked has an advisory or is yanked or retracted, or the
-/// package is deprecated, and 5 when a registry or OSV cannot be reached.
+/// package is deprecated, 4 when the lockfile locks it from somewhere other
+/// than the public registry (its name is not sent), and 5 when a registry or
+/// OSV cannot be reached.
 ///
 /// Examples:
 ///   jouet deps info cargo:serde_json

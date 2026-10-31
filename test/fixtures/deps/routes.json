@@ -15,8 +15,20 @@
     "body": { "version": { "num": "1.0.0", "yanked": true, "license": "MIT", "yank_message": "breaks semver" } }
   },
   "GET /cargo/api/v1/crates/demo-yanked/9.9.9": { "status": 404, "body": { "errors": [{ "detail": "not found" }] } },
+  "GET /cargo/api/v1/crates/demo-newest?include=default_version": {
+    "status": 200,
+    "body": {
+      "crate": { "name": "demo-newest", "max_stable_version": null, "newest_version": "2.0.0-rc.1" },
+      "versions": [{ "num": "2.0.0-rc.1", "license": "MIT", "yanked": true }]
+    }
+  },
+  "GET /cargo/api/v1/crates/demo-newest/2.0.0-rc.1": {
+    "status": 200,
+    "body": { "version": { "num": "2.0.0-rc.1", "yanked": true, "license": "MIT", "yank_message": null } }
+  },
   "GET /cargo/api/v1/crates/demo-down?include=default_version": { "status": 503, "body": "unavailable" },
   "GET /npm/request/latest": "registry/npm-request-latest.json",
+  "GET /npm/request/2.88.2": "registry/npm-request-latest.json",
   "GET /npm/lodash/latest": "registry/npm-lodash-latest.json",
   "GET /npm/lodash/4.17.15": "registry/npm-lodash-4.17.15.json",
   "GET /pypi/pypi/requests/json": "registry/pypi-requests.json",

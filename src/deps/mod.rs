@@ -4,8 +4,8 @@
 //!
 //! Only package names and versions leave the machine: a registry is asked
 //! about one package by name, and OSV about (ecosystem, name, version)
-//! triples. A package locked from a private registry, a path or a git
-//! repository is never sent ([`crate::docs::Pin::public`]).
+//! triples. A package its lockfile says comes from a private registry, a
+//! path or a git repository is never sent ([`crate::docs::Pin::public`]).
 //!
 //! Answers are cached under jouet's cache directory: a registry's for ten
 //! minutes, OSV's for a day.

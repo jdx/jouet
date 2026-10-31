@@ -9,7 +9,7 @@ PKG is ECOSYSTEM:NAME[@VERSION], where ECOSYSTEM is cargo, npm, pypi or go. A ba
 
 For a package that does not exist, crates.io's and npm's search name close matches; PyPI and the Go proxy have no search. Go modules have no licence in the proxy.
 
-Exits 3 when a package does not exist (or has no such version), 1 when the version checked has an advisory or is yanked or retracted, or the package is deprecated, and 5 when a registry or OSV cannot be reached.
+Exits 3 when a package does not exist (or has no such version), 1 when the version checked has an advisory or is yanked or retracted, or the package is deprecated, 4 when the lockfile locks it from somewhere other than the public registry (its name is not sent), and 5 when a registry or OSV cannot be reached.
 
 Examples:
   jouet deps info cargo:serde_json
