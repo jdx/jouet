@@ -27,28 +27,49 @@ need() {
 	skip "$1: $2"
 }
 
+# Runs the rest of its arguments holding the lock for directory $1, so tests
+# run in parallel install a fixture once rather than over each other and
+# leave it half written. `mkdir` is the lock, which macOS has and `flock` is
+# not; after ten minutes it goes ahead, past a lock a killed run left.
+locked() {
+	local lock="$1.lock" i=0 status
+	shift
+	until mkdir "$lock" 2>/dev/null; do
+		((i++ < 6000)) || break
+		sleep 0.1
+	done
+	"$@"
+	status=$?
+	rmdir "$lock" 2>/dev/null
+	return "$status"
+}
+
 # The fixture NAME's npm dependencies, installed once at their pinned versions.
 npm_deps() {
 	command -v npm >/dev/null || need npm "not installed"
+	locked "$DEPS/$1" npm_install "$1" || need "$1" "npm install failed"
+}
+
+npm_install() {
 	local dir="$DEPS/$1"
-	if [[ ! -x "$dir/node_modules/.bin/$1" ]]; then
-		mkdir -p "$dir"
-		cp "$FIXTURES/$1/package.json" "$dir/"
-		(cd "$dir" && npm install --no-audit --no-fund --silent >/dev/null 2>&1) ||
-			need "$1" "npm install failed"
-	fi
+	[[ -x "$dir/node_modules/.bin/$1" ]] && return 0
+	mkdir -p "$dir"
+	cp "$FIXTURES/$1/package.json" "$dir/"
+	(cd "$dir" && npm install --no-audit --no-fund --silent >/dev/null 2>&1)
 }
 
 # A virtualenv NAME with pytest, plus the packages given.
 venv() {
+	command -v python3 >/dev/null || need python3 "not installed"
+	locked "$DEPS/$1" venv_install "$@" || need pytest "installing it into a virtualenv failed"
+}
+
+venv_install() {
 	local dir="$DEPS/$1"
 	shift
-	if [[ ! -x "$dir/bin/pytest" ]]; then
-		command -v python3 >/dev/null || need python3 "not installed"
-		rm -rf "$dir"
-		{ python3 -m venv "$dir" && "$dir/bin/pip" install -q pytest==9.2.0 "$@"; } >/dev/null 2>&1 ||
-			need pytest "installing it into a virtualenv failed"
-	fi
+	[[ -x "$dir/bin/pytest" ]] && return 0
+	rm -rf "$dir"
+	{ python3 -m venv "$dir" && "$dir/bin/pip" install -q pytest==9.2.0 "$@"; } >/dev/null 2>&1
 }
 
 # Commits fixture NAME on main as the work directory's project, with its

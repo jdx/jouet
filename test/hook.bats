@@ -208,6 +208,30 @@ stop_reason() {
 	assert_output --partial 'exited 101'
 }
 
+@test "a jouet test run still going holds up nothing, and its end restores the check" {
+	git init -q repo
+	ran 'cargo test --workspace' 101
+
+	# The agent waits on a run it started in the background: the failure
+	# before it is not raised while the run goes.
+	(cd repo && CLAUDE_CODE_SESSION_ID=s1 jouet test --cmd -- sh -c 'sleep 3' >/dev/null 2>&1 &)
+	state="$XDG_STATE_HOME/jouet/sessions/s1.json"
+	for _ in $(seq 50); do
+		jq -e '.trees[].running' "$state" >/dev/null 2>&1 && break
+		sleep 0.1
+	done
+	run stop_reason
+	assert_output ""
+
+	# Once it has ended, the failure it did not clear holds up finishing again.
+	for _ in $(seq 100); do
+		jq -e '[.trees[].running] | all(. == null)' "$state" >/dev/null 2>&1 && break
+		sleep 0.1
+	done
+	run stop_reason
+	assert_output --partial 'exited 101'
+}
+
 @test "a failure stops counting when the files are back to ones that passed" {
 	git init -q repo
 	echo 'fixed' >repo/a.go
