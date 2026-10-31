@@ -387,6 +387,14 @@ pub(crate) fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
     Some(parts.join(" "))
 }
 
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 fn conventions() -> String {
     let codes: Vec<String> = Exit::ALL
         .iter()
