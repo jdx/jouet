@@ -66,6 +66,8 @@ enum Cmd {
     Handoff(HandoffArgs),
     /// Print a handoff and check that it still holds
     Pickup(PickupArgs),
+    /// Show which agent sessions are working where on this machine
+    Sessions(SessionsArgs),
     /// Show what jouet saved: measured from its ledger, estimated from your history
     Stats(StatsArgs),
     /// Inspect pull requests
@@ -249,6 +251,31 @@ pub struct PickupArgs {
     file: Option<String>,
 }
 
+/// Show which agent sessions are working where on this machine
+///
+/// Reads Claude Code's transcripts (~/.claude/projects, or
+/// $CLAUDE_CONFIG_DIR) and Codex's rollouts (~/.codex/sessions, or
+/// $CODEX_HOME) written within --since (default 24h). For each session it
+/// shows the harness, the directory it last worked in, that directory's
+/// work tree and checked-out branch, and when its transcript was last
+/// written. A session is live when its transcript was written in the last
+/// 15 minutes. Only the end of each transcript is read, never what the
+/// session said, and nothing is written. Warns about two live sessions in
+/// one work tree, which commit each other's uncommitted work, and about a
+/// live session whose directory is gone. Lists live sessions; --all also
+/// lists idle ones, marking those whose directory is gone. Exits 0 whether
+/// or not there are warnings.
+#[derive(Args)]
+pub struct SessionsArgs {
+    /// Only sessions active since TIME: a duration ago such as 24h or 7d, a
+    /// date such as 2026-10-01, or RFC 3339 (default 24h)
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// List idle sessions too, not only live ones
+    #[usage(long)]
+    all: bool,
+}
+
 /// Report where coding-agent sessions spend tokens and time
 ///
 /// Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts
@@ -422,7 +449,7 @@ pub struct EditArgs {
 
 #[derive(Subcommands)]
 pub enum EditCmd {
-    /// Replace text in one file, given on the command line
+    /// Replace text in files, given on the command line
     Replace(ReplaceArgs),
     /// Print the SHA-256 hash of files, for --expect-hash
     Hash(HashArgs),
@@ -513,24 +540,33 @@ pub struct DiagFixArgs {
     dry_run: bool,
 }
 
-/// Replace text in one file, given on the command line
+/// Replace text in files, given on the command line
 ///
-/// Matches anywhere in the file, like `str::replace`, and requires exactly one
-/// match unless --count or --all says otherwise.
+/// Matches anywhere in a file, like `str::replace`, and requires exactly one
+/// match in each file unless --count or --all says otherwise. Repeat --old
+/// and --new for several replacements: the Nth --new replaces the Nth
+/// --old, in order. Every replacement applies to every file, and every file
+/// is checked before any is written, so a rename across files is one call
+/// that lands whole or not at all.
+///
+/// Examples:
+///   jouet edit replace src/lib.rs --old 'let x = 1;' --new 'let x = 2;'
+///   jouet edit replace a.py b.py --old retry_limit --new max_attempts --all
+///   jouet edit replace app.py --old 'a()' --new 'b()' --old 'c()' --new 'd()'
 #[derive(Args)]
 pub struct ReplaceArgs {
-    /// The file to edit
-    path: String,
-    /// The text to find
-    #[usage(long, value_name = "TEXT")]
-    old: String,
-    /// The text to put in its place
-    #[usage(long, value_name = "TEXT")]
-    new: String,
-    /// How many matches there must be
+    /// The files to edit
+    paths: Vec<String>,
+    /// The text to find. Repeatable
+    #[usage(long, var, value_name = "TEXT")]
+    old: Vec<String>,
+    /// The text to put in its place, one for each --old
+    #[usage(long, var, value_name = "TEXT")]
+    new: Vec<String>,
+    /// How many matches each --old must have in each file
     #[usage(long, value_name = "N")]
     count: Option<String>,
-    /// Replace every match (at least one)
+    /// Replace every match (at least one in each file)
     #[usage(long)]
     all: bool,
 }
@@ -775,7 +811,9 @@ pub struct SearchArgs {
 /// 3. `--range A:B`: lines A to B (`A:` to the end, `:B` from the start).
 ///
 /// With none of them, a file of up to 300 lines is printed whole, and a
-/// longer one as its outline. Code is printed with line numbers, at most
+/// longer one as its outline. `--outline` prints a file of up to 100 lines
+/// whole too (with its outline in --json), since reading it after its
+/// outline would cost another call. Code is printed with line numbers, at most
 /// --max-lines lines (default 400; 0 is no limit) with a marker for the
 /// rest. Inside an agent session, lines this session was already shown, from
 /// a file unchanged since, collapse to one line; --again prints them.
@@ -806,7 +844,8 @@ pub struct SearchArgs {
 pub struct ReadArgs {
     /// The file to read, or with --map the directory to map (default .)
     path: Option<String>,
-    /// List the file's definitions and their line ranges
+    /// List the file's definitions and their line ranges (a file of up to
+    /// 100 lines is printed whole)
     #[usage(long)]
     outline: bool,
     /// Print the definitions this names: NAME, KIND NAME or Scope::NAME
@@ -2218,6 +2257,7 @@ fn main() -> ExitCode {
         Cmd::Graph(args) => cmd::graph::run(&args, &out),
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
+        Cmd::Sessions(args) => cmd::sessions::run(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stack(args) => cmd::stack::run(args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),

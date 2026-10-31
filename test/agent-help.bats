@@ -20,7 +20,7 @@ setup() {
 	local own
 	own=$(grep -cv '^Also installed:' <<<"$output")
 	assert [ "$own" -le 40 ]
-	assert_output --partial 'jouet edit replace <PATH> --old TEXT --new TEXT'
+	assert_output --partial 'jouet edit replace <PATHS>... --old TEXT --new TEXT'
 	assert_output --partial 'Also installed: bd (beads)'
 }
 

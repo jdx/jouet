@@ -39,13 +39,35 @@ RS
 }
 
 @test "read --outline lists definitions with their scope and lines" {
+	for i in $(seq 1 100); do printf '// %d\n' "$i"; done >>src/lib.rs
 	run --separate-stderr jouet read src/lib.rs --outline
 	assert_success
-	assert_output "src/lib.rs: 18 lines, 4 definitions
+	assert_output "src/lib.rs: 118 lines, 4 definitions
   1-3    class Client
   6-9    method Client::download
   12-14  function join_url
   16-18  function fetch"
+}
+
+@test "read --outline prints a short file whole, with its outline in --json" {
+	run --separate-stderr jouet read src/main.rs --outline
+	assert_success
+	assert_output "src/main.rs: 4 lines, short enough to print whole instead of its outline
+1	fn main() {
+2	    let client = Client { base: String::new() };
+3	    client.download(\"index.html\");
+4	}"
+
+	run --separate-stderr jouet read src/lib.rs --outline --json
+	assert_success
+	assert_equal "$(jq -c '[.short, (.outline | length), .sections[0].end]' <<<"$output")" '[true,4,18]'
+
+	# Already shown this session, it gets only the outline it asked for.
+	JOUET_SESSION_ID=s1 run --separate-stderr jouet read src/main.rs --outline
+	assert_line --index 0 --partial 'short enough to print whole'
+	JOUET_SESSION_ID=s1 run --separate-stderr jouet read src/main.rs --outline
+	assert_output "src/main.rs: 4 lines, 1 definitions
+  1-4  function main"
 }
 
 @test "read --symbol prints the definition with line numbers, and --range prints lines" {
@@ -65,10 +87,14 @@ RS
 	assert_failure 3
 	assert_stderr --partial 'it defines: class Client (1-3), method Client::download (6-9)'
 
-	printf 'hello\n' >notes.txt
+	for i in $(seq 1 101); do printf 'note %d\n' "$i"; done >notes.txt
 	run --separate-stderr jouet read notes.txt --outline
 	assert_failure 2
-	run --separate-stderr jouet read notes.txt
+	printf 'hello\n' >short.txt
+	run --separate-stderr jouet read short.txt --outline
+	assert_success
+	assert_line --index 1 "1	hello"
+	run --separate-stderr jouet read short.txt
 	assert_success
 	assert_output "1	hello"
 }

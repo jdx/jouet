@@ -187,6 +187,9 @@ impl Subject for DaemonWait {
                 });
             }
             Err(Error::Failed(said)) => return Ok(Observation::pending(said)),
+            // `status` reads pitchfork's state without the supervisor; if a
+            // later pitchfork needs it, the daemon is not up yet.
+            Err(e @ Error::NoSupervisor) => return Ok(Observation::pending(e.message())),
         };
         let (met, state) = match (daemon.phase(), self.until) {
             (Phase::Failed, _) => {

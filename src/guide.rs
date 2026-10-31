@@ -20,13 +20,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "reading a long file (400 lines or more): `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading it whole to find one thing. Read a shorter file whole, in one call. For a repository new to you, `jouet read --map` prints its most important definitions to fit a token budget",
+            "reading a long file (400 lines or more): `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading it whole to find one thing. Read a shorter file whole, in one call; `--outline` prints a file of up to 100 lines whole anyway. For a repository new to you, `jouet read --map` prints its most important definitions to fit a token budget",
         ),
     ),
     (
         "edit",
         Some(
-            "changing files: exact replacements (`jouet edit replace <PATH> --old TEXT --new TEXT`, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
+            "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
         ),
     ),
     (
@@ -80,7 +80,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pickup",
         Some(
-            "starting a session that continues earlier work: prints the last handoff and checks that it still holds",
+            "starting a session that continues earlier work: prints the last handoff and checks that it still holds; `jouet sessions` shows which other agent sessions are working where on this machine, and warns when two share a worktree",
         ),
     ),
     (
@@ -92,7 +92,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "test",
         Some(
-            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest or pytest; for anything else (such as plain `python -m unittest`) it exits 4, so run the project's own command",
+            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`; for anything else it exits 4, so run the project's own command",
         ),
     ),
     (
@@ -122,6 +122,8 @@ const WHEN: &[(&str, Option<&str>)] = &[
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // `pickup`'s line names it.
+    ("sessions", None),
     // `wind`'s line names it.
     ("unwind", None),
     // Named where it is needed: in a winding note at session start, which
@@ -318,6 +320,7 @@ fn describe(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
 const PRIMED: &[(&[&str], &[&str])] = &[
     (&["commit"], &["--message"]),
     (&["edit", "replace"], &["--old", "--new"]),
+    (&["pr", "threads", "reply"], &["--body", "--resolve"]),
 ];
 
 /// The short primer printed when a session starts: the command families by
@@ -337,20 +340,22 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
         .filter_map(|(path, flags)| short_synopsis(path, flags))
         .map(|s| format!("`{s}`"))
         .collect();
-    if let [commit, edit] = usage.as_slice() {
+    if let [commit, edit, reply] = usage.as_slice() {
         let _ = writeln!(
             out,
-            "Commit only the paths you name with {commit}; make an exact, checked edit with {edit} or your own edit tool."
+            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and repeated --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}."
         );
     }
     if !rules.is_empty() {
-        let named: Vec<String> = rules
-            .iter()
-            .map(|(name, suggest)| match suggest {
-                Some(s) => format!("{name} (use `{s}`)"),
-                None => (*name).to_string(),
-            })
-            .collect();
+        // Rules that suggest the same command share it.
+        let mut named: Vec<String> = Vec::new();
+        for (i, (name, suggest)) in rules.iter().enumerate() {
+            let last = rules.get(i + 1).is_none_or(|(_, next)| next != suggest);
+            named.push(match suggest {
+                Some(s) if last => format!("{name} (use `{s}`)"),
+                _ => (*name).to_string(),
+            });
+        }
         let _ = writeln!(
             out,
             "jouet's hooks deny these and say what to do instead: {}.",
@@ -367,12 +372,18 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
 
 /// A command's positional arguments and the given flags, or `None` when it
 /// lacks one of them.
-fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
+pub(crate) fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
     let meta = lookup(path)?;
     let mut parts = vec![format!("jouet {}", path.join(" "))];
     for arg in meta.args {
         let value = arg.value_names.first().copied().unwrap_or(arg.arg.name);
-        parts.push(format!("<{value}>{}", if arg.arg.var { "..." } else { "" }));
+        parts.push(if arg.arg.var {
+            format!("<{value}>...")
+        } else if arg.arg.required {
+            format!("<{value}>")
+        } else {
+            format!("[{value}]")
+        });
     }
     for long in flags {
         let flag =
@@ -520,7 +531,7 @@ mod tests {
             .count();
         assert!(own <= 40, "{own} lines:\n{text}");
         assert!(
-            text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
+            text.contains("jouet edit replace <PATHS>... --old TEXT --new TEXT"),
             "{text}"
         );
         // Families list their subcommands by name, so a new one costs a word.
@@ -541,7 +552,12 @@ mod tests {
             );
         }
         let text = summary(
-            &[("python-edit", Some("jouet edit")), ("git-stash", None)],
+            &[
+                ("python-edit", Some("jouet edit")),
+                ("git-stash", None),
+                ("print-secrets", Some("fnox exec")),
+                ("secret-files", Some("fnox exec")),
+            ],
             true,
         );
         assert!(
@@ -549,11 +565,17 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("`jouet edit replace <PATH> --old TEXT --new TEXT`"),
+            text.contains("`jouet edit replace <PATHS>... --old TEXT --new TEXT`"),
             "{text}"
         );
         assert!(
-            text.contains("python-edit (use `jouet edit`), git-stash."),
+            text.contains("`jouet pr threads reply <ID> [PR] --body TEXT --resolve`"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "python-edit (use `jouet edit`), git-stash, print-secrets, secret-files (use `fnox exec`)."
+            ),
             "{text}"
         );
         // The family names, not each one's description: that is agent-help's.

@@ -618,7 +618,17 @@ fn read_spec(args: &EditArgs) -> Result<Spec, String> {
 }
 
 fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
-    if args.old.is_empty() {
+    if args.paths.is_empty() {
+        return Err("give at least one file to edit".into());
+    }
+    if args.old.is_empty() || args.old.len() != args.new.len() {
+        return Err(format!(
+            "give one --new for each --old (got {} --old and {} --new)",
+            args.old.len(),
+            args.new.len()
+        ));
+    }
+    if args.old.iter().any(String::is_empty) {
         return Err("--old cannot be empty".into());
     }
     let count = match (&args.count, args.all) {
@@ -630,17 +640,27 @@ fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
             _ => return Err(format!("--count must be a positive number, not `{n}`")),
         },
     };
+    let edits: Vec<Edit> = args
+        .old
+        .iter()
+        .zip(&args.new)
+        .map(|(old, new)| Edit::Replace {
+            old: old.clone(),
+            new: new.clone(),
+            count,
+            line_aligned: false,
+        })
+        .collect();
     Ok(Spec {
-        ops: vec![FileOp::Update {
-            path: args.path.clone(),
-            edits: vec![Edit::Replace {
-                old: args.old.clone(),
-                new: args.new.clone(),
-                count,
-                line_aligned: false,
-            }],
-            move_to: None,
-        }],
+        ops: args
+            .paths
+            .iter()
+            .map(|path| FileOp::Update {
+                path: path.clone(),
+                edits: edits.clone(),
+                move_to: None,
+            })
+            .collect(),
     })
 }
 

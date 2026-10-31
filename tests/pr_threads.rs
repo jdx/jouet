@@ -309,6 +309,25 @@ fn text_listing_has_a_header_and_a_block_per_thread() {
         text.contains("  [P1] **Inherited tool paths disappear**"),
         "{text}"
     );
+    // With unresolved threads shown, the listing ends with how to reply.
+    assert!(
+        text.trim_end().ends_with(
+            "Reply with `jouet pr threads reply <ID> [PR] --body TEXT`, ID being the number in brackets; add --resolve to resolve it too, or `jouet pr threads apply` takes many at once."
+        ),
+        "{text}"
+    );
+    let resolved = [
+        "pr",
+        "threads",
+        "14922",
+        "--repo",
+        "jdx/mise",
+        "--resolved",
+        "--display",
+        "plain",
+    ];
+    let out = jouet(&fake, dir.path(), &resolved, None);
+    assert!(!stdout(&out).contains("Reply with"), "{}", stdout(&out));
 }
 
 #[test]

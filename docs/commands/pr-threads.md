@@ -49,6 +49,7 @@ The pull request is chosen as for [`jouet pr status`](/commands/pr-status#choosi
 - **Who started it.** `--author LOGIN` (repeatable) keeps threads started by that user; `coderabbitai` matches `coderabbitai[bot]`. `--bots` and `--no-bots` keep or drop threads started by bots: logins ending in `[bot]`, plus any listed in the config's `bots` or in `JOUET_BOTS`.
 - **Where.** `--path` (repeatable) takes a glob, where `*` and `?` stay within a directory and `**` crosses them, a directory such as `src/backend`, or a file name such as `*.rs`.
 - **Reviews and comments.** `--include-reviews` also lists review summaries and the pull request's conversation comments, as `kind: "review"` and `kind: "comment"`. They cannot be replied to or resolved here.
+- **How to reply.** When it shows an unresolved thread, the text listing ends with the `reply` usage, since that is where an agent has the IDs and decides to reply.
 - **Context.** `--context N` shows N lines of the file around each thread's line. They come from the working tree when HEAD is the pull request's head and the file is unchanged, and from GitHub otherwise. A comment on the base side of the diff, such as one on a deleted line, is marked `base side`: its line numbers belong to the base version, so its context comes from the merge base, as GitHub's diff shows it.
 
 ### `--since`

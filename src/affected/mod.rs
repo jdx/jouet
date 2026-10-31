@@ -212,6 +212,11 @@ pub(crate) const ADAPTERS: &[Known] = &[
         load: |p| Box::new(python::Pytest::load(p)),
     },
     Known {
+        name: "unittest",
+        detect: python::detect_unittest,
+        load: |p| Box::new(python::Unittest::load(p)),
+    },
+    Known {
         name: "graph",
         detect: codegraph::detect,
         load: |p| Box::new(codegraph::Graph::load(p)),

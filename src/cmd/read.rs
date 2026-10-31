@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 
 /// A file this long or shorter is printed whole when no mode is given.
 const WHOLE: usize = 300;
+/// A file this long or shorter is printed whole even for --outline: its
+/// outline saves little, and reading it after the outline costs a call.
+const SHORT: usize = 100;
 /// The default for --max-lines.
 const MAX_LINES: usize = 400;
 
@@ -126,6 +129,9 @@ struct FileRead {
     more_definitions: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sections: Vec<Section>,
+    /// --outline of a short file: it is printed whole as well.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    short: bool,
 }
 
 #[derive(Serialize)]
@@ -234,6 +240,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         outline: Vec::new(),
         more_definitions: 0,
         sections: Vec::new(),
+        short: false,
     };
     let max = args.max_lines.unwrap_or(MAX_LINES);
     let mut memory = if args.again {
@@ -321,6 +328,15 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             }
             Err(e) => return out.error(Exit::Usage, &select_error(&e, path)),
         }
+    } else if let Some(whole) = (args.outline && !lines.is_empty() && lines.len() <= SHORT)
+        .then(|| section(None, 1, lines.len(), &mut memory))
+        .filter(|s| !s.already_shown)
+    {
+        // A short file whole, with its outline when jouet can read one. One
+        // this session was already shown gets only the outline asked for.
+        read.outline = outline().unwrap_or_default().iter().map(entry).collect();
+        read.sections.push(whole);
+        read.short = true;
     } else if args.outline || lines.len() > WHOLE {
         match outline() {
             Some(all) => read.outline = all.iter().map(entry).collect(),
@@ -400,7 +416,13 @@ fn parse_range(text: &str, len: usize) -> Option<(usize, usize)> {
 
 fn render(read: &FileRead, implicit_outline: bool) -> String {
     let mut text = String::new();
-    if !read.outline.is_empty() || implicit_outline && read.sections.is_empty() {
+    if read.short {
+        let _ = writeln!(
+            text,
+            "{}: {} lines, short enough to print whole instead of its outline",
+            read.path, read.lines
+        );
+    } else if !read.outline.is_empty() || implicit_outline && read.sections.is_empty() {
         let _ = writeln!(
             text,
             "{}: {} lines, {} definitions",
