@@ -11,6 +11,7 @@ mod fnox;
 mod git;
 mod guide;
 mod ledger;
+mod mise;
 mod reads;
 mod redact;
 mod rules;
@@ -87,8 +88,10 @@ enum Cmd {
     Run(RunArgs),
     /// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
     Wind(WindArgs),
-    /// Propose retiring rules that are noisy or always overridden
+    /// Propose retiring rules that are noisy or always overridden, and unused tasks
     Unwind(UnwindArgs),
+    /// Propose mise tasks for commands agents keep repeating, and add one
+    Task(TaskArgs),
     /// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
     Share(ShareArgs),
     /// Print a short usage guide written for agents
@@ -829,6 +832,8 @@ pub enum WaitCmd {
     Cmd(WaitCmdArgs),
     /// Wait for a `jouet job` to end, or to be ready
     Job(WaitJobArgs),
+    /// Wait for a pitchfork daemon to be ready, or to stop
+    Daemon(WaitDaemonArgs),
 }
 
 /// Wait for a PR's checks, and show why any failed
@@ -1029,6 +1034,40 @@ pub struct WaitJobArgs {
     #[usage(long, value_name = "N")]
     log_lines: Option<usize>,
     /// Do not show its log
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Wait for a pitchfork daemon to be ready, or to stop
+///
+/// For a project's long-running services, the daemons pitchfork runs (one-off
+/// work is `wait job`'s). Reads `pitchfork status ID --json` in this
+/// directory, so a short ID resolves in this project's namespace. Ready is
+/// `running` and, when there is a port to try (--port, or the port pitchfork
+/// says the daemon binds) or a URL (--http), answering there: pitchfork's
+/// JSON does not say whether its own ready check passed. --until stopped
+/// waits until the daemon no longer runs. A daemon that errors or fails ends
+/// the wait with exit 1; then, and on a timeout, the end of its log is shown
+/// and the whole log is saved. Exits 3 when pitchfork has no such daemon and
+/// 4 when pitchfork is not installed.
+#[derive(Args)]
+pub struct WaitDaemonArgs {
+    /// The daemon's ID: `api`, or `namespace/api`
+    id: String,
+    /// `ready` (the default) or `stopped`
+    #[usage(long, value_name = "CONDITION")]
+    until: Option<String>,
+    /// Ready once localhost's port N accepts connections
+    #[usage(long, value_name = "N")]
+    port: Option<u16>,
+    /// Ready once URL answers with a 2xx status
+    #[usage(long, value_name = "URL")]
+    http: Option<String>,
+    /// Lines of its log to show on failure or timeout (default 60; 0 shows
+    /// all of it)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not read its log
     #[usage(long)]
     no_logs: bool,
 }
@@ -1594,7 +1633,8 @@ pub enum WindCmd {
 /// Show or drop a winding note
 #[derive(Args)]
 pub struct WindNoteArgs {
-    /// The id of a note (n3), a proposal (p2) or a suggested review (r1)
+    /// The id of a note (n3), a proposal (p2), a suggested review (r1) or a
+    /// mise task (t1)
     id: String,
 }
 
@@ -1645,18 +1685,89 @@ pub struct WindProposeArgs {
     file: Option<String>,
 }
 
-/// Propose retiring rules that are noisy or always overridden
+/// Propose retiring rules that are noisy or always overridden, and unused tasks
 ///
 /// Lists your rules and a trusted repository's that the hook ledger shows
 /// are nearly always overridden, fire on a large share of calls, or no
 /// longer load. Built-in rules are never proposed. --apply moves your own
 /// rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules
-/// change through a PR.
+/// change through a PR. It also lists the mise tasks `jouet task apply` added
+/// that no agent session has run in the 21 days since, and still run what
+/// jouet wrote; --apply removes them with `mise tasks rm`.
 #[derive(Args)]
 pub struct UnwindArgs {
-    /// Retire the proposed rules of yours
+    /// Retire the proposed rules of yours, and remove the proposed tasks
     #[usage(long)]
     apply: bool,
+}
+
+/// Propose mise tasks for commands agents keep repeating, and add one
+///
+/// `jouet task propose` reads this repository's recent session transcripts
+/// (Claude Code and Codex) and drafts a mise task for each command sequence,
+/// or long command, that agents ran at least 3 times in 2 sessions and no
+/// task already runs: its name, `run`, description, `depends` and `sources`
+/// where they can be inferred, how often it ran, and which file it should go
+/// in (mise.local.toml or mise.toml) with why. The hook ledger notices such
+/// sequences too, and a session start then names them. `jouet task apply ID
+/// --file local|shared` adds the task through `mise tasks add`, never by
+/// editing TOML; which file is the user's choice, so ask them first. Applying
+/// needs a mise newer than 2026.10.24.
+#[derive(Args)]
+pub struct TaskArgs {
+    #[usage(subcommand)]
+    cmd: TaskCmd,
+}
+
+#[derive(Subcommands)]
+pub enum TaskCmd {
+    /// Draft mise tasks for commands agents repeat in this repository
+    Propose(TaskProposeArgs),
+    /// Add a proposed task through mise, to the file the user chose
+    Apply(TaskApplyArgs),
+}
+
+/// Draft mise tasks for commands agents repeat in this repository
+///
+/// Prints every pending proposal for the repository: the task, the evidence
+/// (runs, sessions, time, output tokens), the file jouet suggests and why,
+/// and the question to ask the user. Proposals are kept with winding's notes:
+/// `jouet wind show ID` prints one and `jouet wind dismiss ID` drops it.
+#[derive(Args)]
+pub struct TaskProposeArgs {
+    /// Read the sessions written since TIME (7d, 12h, a date or RFC 3339), the
+    /// 8 most recent (default 14d)
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// Which transcripts to read: claude, codex or all (default all)
+    #[usage(long, value_name = "HARNESS")]
+    harness: Option<String>,
+}
+
+/// Add a proposed task through mise, to the file the user chose
+///
+/// Runs `mise tasks add --json` (or `mise tasks set` for a task jouet added
+/// before) with `--env local` for mise.local.toml or `--path` to the
+/// repository's shared config for mise.toml, and prints the JSON mise
+/// returns. Without --file it refuses (exit 4) and says which file jouet
+/// suggests: ask the user, then pass their choice. A mise older than
+/// 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes,
+/// quotes) is written as `sh -c '...'`, since mise quotes each word of a
+/// task's command.
+#[derive(Args)]
+pub struct TaskApplyArgs {
+    /// The proposal, such as t2
+    id: String,
+    /// Which file the user chose: local (mise.local.toml, theirs, not
+    /// committed) or shared (mise.toml, committed)
+    #[usage(long, value_name = "FILE")]
+    file: Option<String>,
+    /// Name the task NAME instead of the proposed name
+    #[usage(long, value_name = "NAME")]
+    name: Option<String>,
+    /// Show what mise would write, writing nothing
+    #[usage(long)]
+    dry_run: bool,
 }
 
 /// Print a short usage guide written for agents
@@ -1940,6 +2051,7 @@ fn main() -> ExitCode {
         Cmd::Run(args) => return cmd::run::run(args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
+        Cmd::Task(args) => cmd::task::run(&args, &out),
         Cmd::Share(args) => cmd::share::run(&args, &out),
         Cmd::AgentHelp(args) => cmd::agent_help::run(&args, &out),
         Cmd::Skill(args) => cmd::skill::run(&args, &out),

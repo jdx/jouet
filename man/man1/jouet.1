@@ -159,6 +159,9 @@ Re\-run a command until it exits with the expected code
 \fBwait job\fR
 Wait for a `jouet job` to end, or to be ready
 .TP
+\fBwait daemon\fR
+Wait for a pitchfork daemon to be ready, or to stop
+.TP
 \fBjob\fR
 Run one\-off background work, such as a build or a server for one check
 .TP
@@ -244,7 +247,16 @@ Digest whole sessions: corrections, failures, waits, re\-reads
 Record what a review proposed, to show at the next session start
 .TP
 \fBunwind\fR
-Propose retiring rules that are noisy or always overridden
+Propose retiring rules that are noisy or always overridden, and unused tasks
+.TP
+\fBtask\fR
+Propose mise tasks for commands agents keep repeating, and add one
+.TP
+\fBtask propose\fR
+Draft mise tasks for commands agents repeat in this repository
+.TP
+\fBtask apply\fR
+Add a proposed task through mise, to the file the user chose
 .TP
 \fBshare\fR
 Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
@@ -1528,6 +1540,38 @@ Print help
 .TP
 \fB<ID>\fR
 The job's ID
+.SH "JOUET WAIT DAEMON"
+Wait for a pitchfork daemon to be ready, or to stop
+
+For a project's long\-running services, the daemons pitchfork runs (one\-off work is `wait job`'s). Reads `pitchfork status ID \-\-json` in this directory, so a short ID resolves in this project's namespace. Ready is `running` and, when there is a port to try (\-\-port, or the port pitchfork says the daemon binds) or a URL (\-\-http), answering there: pitchfork's JSON does not say whether its own ready check passed. \-\-until stopped waits until the daemon no longer runs. A daemon that errors or fails ends the wait with exit 1; then, and on a timeout, the end of its log is shown and the whole log is saved. Exits 3 when pitchfork has no such daemon and 4 when pitchfork is not installed.
+.PP
+\fBUsage:\fR jouet wait daemon [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-until\fR \fI<CONDITION>\fR
+`ready` (the default) or `stopped`
+.TP
+\fB\-\-port\fR \fI<N>\fR
+Ready once localhost's port N accepts connections
+.TP
+\fB\-\-http\fR \fI<URL>\fR
+Ready once URL answers with a 2xx status
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of its log to show on failure or timeout (default 60; 0 shows all of it)
+.TP
+\fB\-\-no\-logs\fR
+Do not read its log
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The daemon's ID: `api`, or `namespace/api`
 .SH "JOUET JOB"
 Run one\-off background work, such as a build or a server for one check
 
@@ -1926,7 +1970,7 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The id of a note (n3), a proposal (p2) or a suggested review (r1)
+The id of a note (n3), a proposal (p2), a suggested review (r1) or a mise task (t1)
 .SH "JOUET WIND DISMISS"
 Drop a note, a proposal or a suggested review, so it is never shown again
 .PP
@@ -1941,7 +1985,7 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The id of a note (n3), a proposal (p2) or a suggested review (r1)
+The id of a note (n3), a proposal (p2), a suggested review (r1) or a mise task (t1)
 .SH "JOUET WIND ADOPT"
 Mark a review's proposal as applied
 .PP
@@ -1956,7 +2000,7 @@ Print help
 .PP
 .TP
 \fB<ID>\fR
-The id of a note (n3), a proposal (p2) or a suggested review (r1)
+The id of a note (n3), a proposal (p2), a suggested review (r1) or a mise task (t1)
 .SH "JOUET WIND DIGEST"
 Digest whole sessions: corrections, failures, waits, re\-reads
 
@@ -2039,9 +2083,9 @@ Print help
 \fB<FILE>\fR
 Read the reply from FILE instead of stdin
 .SH "JOUET UNWIND"
-Propose retiring rules that are noisy or always overridden
+Propose retiring rules that are noisy or always overridden, and unused tasks
 
-Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built\-in rules are never proposed. \-\-apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR.
+Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built\-in rules are never proposed. \-\-apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR. It also lists the mise tasks `jouet task apply` added that no agent session has run in the 21 days since, and still run what jouet wrote; \-\-apply removes them with `mise tasks rm`.
 .PP
 \fBUsage:\fR jouet unwind [OPTIONS]
 .PP
@@ -2049,10 +2093,66 @@ Lists your rules and a trusted repository's that the hook ledger shows are nearl
 .PP
 .TP
 \fB\-\-apply\fR
-Retire the proposed rules of yours
+Retire the proposed rules of yours, and remove the proposed tasks
 .TP
 \fB\-h, \-\-help\fR
 Print help
+.SH "JOUET TASK"
+Propose mise tasks for commands agents keep repeating, and add one
+
+`jouet task propose` reads this repository's recent session transcripts (Claude Code and Codex) and drafts a mise task for each command sequence, or long command, that agents ran at least 3 times in 2 sessions and no task already runs: its name, `run`, description, `depends` and `sources` where they can be inferred, how often it ran, and which file it should go in (mise.local.toml or mise.toml) with why. The hook ledger notices such sequences too, and a session start then names them. `jouet task apply ID \-\-file local|shared` adds the task through `mise tasks add`, never by editing TOML; which file is the user's choice, so ask them first. Applying needs a mise newer than 2026.10.24.
+.PP
+\fBUsage:\fR jouet task [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET TASK PROPOSE"
+Draft mise tasks for commands agents repeat in this repository
+
+Prints every pending proposal for the repository: the task, the evidence (runs, sessions, time, output tokens), the file jouet suggests and why, and the question to ask the user. Proposals are kept with winding's notes: `jouet wind show ID` prints one and `jouet wind dismiss ID` drops it.
+.PP
+\fBUsage:\fR jouet task propose [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-since\fR \fI<TIME>\fR
+Read the sessions written since TIME (7d, 12h, a date or RFC 3339), the 8 most recent (default 14d)
+.TP
+\fB\-\-harness\fR \fI<HARNESS>\fR
+Which transcripts to read: claude, codex or all (default all)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET TASK APPLY"
+Add a proposed task through mise, to the file the user chose
+
+Runs `mise tasks add \-\-json` (or `mise tasks set` for a task jouet added before) with `\-\-env local` for mise.local.toml or `\-\-path` to the repository's shared config for mise.toml, and prints the JSON mise returns. Without \-\-file it refuses (exit 4) and says which file jouet suggests: ask the user, then pass their choice. A mise older than 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes, quotes) is written as `sh \-c '...'`, since mise quotes each word of a task's command.
+.PP
+\fBUsage:\fR jouet task apply [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Which file the user chose: local (mise.local.toml, theirs, not committed) or shared (mise.toml, committed)
+.TP
+\fB\-\-name\fR \fI<NAME>\fR
+Name the task NAME instead of the proposed name
+.TP
+\fB\-\-dry\-run\fR
+Show what mise would write, writing nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The proposal, such as t2
 .SH "JOUET SHARE"
 Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
 
