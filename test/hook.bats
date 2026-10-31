@@ -208,6 +208,25 @@ stop_reason() {
 	assert_output --partial 'exited 101'
 }
 
+@test "a failure stops counting when the files are back to ones that passed" {
+	git init -q repo
+	echo 'fixed' >repo/a.go
+	git -C repo add a.go
+
+	# The test passes with the fix, then fails with it taken out to prove the
+	# test: at the failing files, finishing waits.
+	ran 'go test -run TestA .' 0
+	echo 'unfixed' >repo/a.go
+	ran 'go test -run TestA .' 1
+	run stop_reason
+	assert_output --partial 'The last test run failed'
+
+	# With the fix back, the files are the ones that passed.
+	echo 'fixed' >repo/a.go
+	run stop_reason
+	assert_output ""
+}
+
 @test "a run after a cd counts for the work tree it went to" {
 	git init -q repo
 	git init -q other

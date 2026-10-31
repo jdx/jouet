@@ -95,6 +95,10 @@ pub(crate) struct Checks {
     /// Failed runs no later run has cleared, oldest first.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub failures: BTreeMap<Kind, Vec<Run>>,
+    /// The newest passes of each kind, one per selection, oldest first: what
+    /// a failure at another tree is judged by when the tree goes back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub passes: BTreeMap<Kind, Vec<Run>>,
     /// The newest lint run through hk (`hk check`, `jouet diag check`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hk: Option<Run>,
@@ -256,6 +260,14 @@ impl Checks {
             if failures.is_empty() {
                 self.failures.remove(&kind);
             }
+            if run.passed() {
+                let passes = self.passes.entry(kind).or_default();
+                passes.retain(|p| p.full != run.full || p.selection() != run.selection());
+                passes.push(run.clone());
+                if passes.len() > MAX_FAILURES {
+                    passes.remove(0);
+                }
+            }
             if kind == Kind::Lint && through_hk(&run.command) {
                 self.hk = Some(run.clone());
             }
@@ -300,7 +312,7 @@ impl Checks {
     /// gives the work tree now; it is only asked for when one of the last
     /// two could apply.
     pub(crate) fn reasons(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Vec<String> {
-        let mut reasons = self.failure_reasons();
+        let mut reasons = self.failure_reasons(&tree);
         reasons.extend(self.partial_test_reason(&tree));
         reasons.extend(self.hk_reason(&tree, hk_repo));
         reasons
@@ -351,14 +363,36 @@ impl Checks {
 
     /// A reason for each failure nothing has cleared, by kind, and within a
     /// kind full failures first, as they say the most, newest first.
-    fn failure_reasons(&self) -> Vec<String> {
+    ///
+    /// A failure at another tree than now does not count when a pass that
+    /// would clear it ran at the tree now: the files are back to ones that
+    /// passed, as after checking that a test fails without a fix and putting
+    /// the fix back. `tree` is only asked for when there is a failure.
+    fn failure_reasons(&self, tree: &impl Fn() -> Option<String>) -> Vec<String> {
+        let cell = std::cell::OnceCell::new();
+        let now = || cell.get_or_init(tree).clone();
+        let passed_now = |kind: &Kind, failed: &Run| {
+            failed.tree.is_some()
+                && now().is_some_and(|now| {
+                    failed.tree.as_deref() != Some(now.as_str())
+                        && self.passes.get(kind).is_some_and(|passes| {
+                            passes.iter().any(|p| {
+                                p.tree.as_deref() == Some(now.as_str())
+                                    && (p.full
+                                        || (!failed.full && p.selection() == failed.selection()))
+                            })
+                        })
+                })
+        };
         self.failures
             .iter()
             .flat_map(|(kind, failures)| {
                 let full = failures.iter().rev().filter(|f| f.full);
                 let partial = failures.iter().rev().filter(|f| !f.full);
                 full.chain(partial)
+                    .filter(|failed| !passed_now(kind, failed))
                     .map(|failed| self.failure_reason(*kind, failed))
+                    .collect::<Vec<_>>()
             })
             .collect()
     }
@@ -561,6 +595,38 @@ mod tests {
         assert!(why.contains("only a full test run clears it"), "{why}");
         state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn a_failure_at_another_tree_does_not_count_once_the_tree_is_back_to_a_pass() {
+        // A test passes with the fix, fails with it taken out to prove the
+        // test, and the fix goes back: the tree is the one that passed.
+        let mut state = Checks::default();
+        let run = |code| test("go test -run TestImages .", code, "-run TestImages");
+        state.record([run(0)], Some("fixed"));
+        state.record([run(1)], Some("unfixed"));
+        assert_eq!(reason(&state, "fixed"), None);
+        // At the failing tree, or a third one, it still counts.
+        let why = reason(&state, "unfixed").unwrap();
+        assert!(why.starts_with("The last test run failed"), "{why}");
+        assert!(reason(&state, "other").is_some());
+        // A pass of another selection at this tree does not clear it.
+        let mut other = Checks::default();
+        other.record(
+            [test("go test -run TestOther .", 0, "-run TestOther")],
+            Some("fixed"),
+        );
+        other.record([run(1)], Some("unfixed"));
+        assert!(reason(&other, "fixed").is_some());
+        // A full failure needs a full pass at this tree; a partial one is not enough.
+        let mut full = Checks::default();
+        full.record([run(0)], Some("fixed"));
+        full.record([test("go test ./...", 1, "full")], Some("unfixed"));
+        assert!(reason(&full, "fixed").is_some());
+        let mut both = Checks::default();
+        both.record([test("go test ./...", 0, "full")], Some("fixed"));
+        both.record([test("go test ./...", 1, "full")], Some("unfixed"));
+        assert_eq!(reason(&both, "fixed"), None);
     }
 
     #[test]
