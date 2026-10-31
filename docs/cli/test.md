@@ -13,6 +13,6 @@ Without --affected, runs the repository's test task as the full suite: a mise `t
 ## Flags
 - **`--affected`** — Run only the tests the changes affect
 - **`--since <REF>`** — Measure changes from the merge base with REF (default: the upstream, else the default branch)
-- **`--adapter <NAME>`** — Use only this adapter: vitest, jest or pytest
+- **`--adapter <NAME>`** — Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
 - **`--dry-run`** — Print what would run and why, running nothing
 - **`-h --help`** — Print help

@@ -80,7 +80,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "test",
         Some(
-            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push",
+            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push",
         ),
     ),
     (
@@ -105,8 +105,8 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
-    // Not in the overview yet: its eight subcommands would take it past 80
-    // lines until the overview prints one line per command family.
+    // Not in the overview: it is at its 40-line budget. `jouet agent-help
+    // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
     ("share", None),
     ("agent-help", None),

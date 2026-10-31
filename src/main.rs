@@ -170,7 +170,7 @@ pub struct TestArgs {
     /// else the default branch)
     #[usage(long, value_name = "REF")]
     since: Option<String>,
-    /// Use only this adapter: vitest, jest or pytest
+    /// Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
     #[usage(long, value_name = "NAME")]
     adapter: Option<String>,
     /// Print what would run and why, running nothing

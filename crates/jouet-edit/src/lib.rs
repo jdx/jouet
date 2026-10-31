@@ -106,6 +106,8 @@ pub struct EditReport {
 pub struct SignatureChange {
     /// The definition's name, without its scope.
     pub name: String,
+    /// The 1-based line of the definition's name, before the edit.
+    pub line: usize,
     pub before: String,
     pub after: String,
 }
@@ -145,6 +147,10 @@ pub enum SymbolError {
 pub struct Callers {
     pub symbol: String,
     pub references: Vec<Reference>,
+    /// The references are the definition's callers in the code graph,
+    /// resolved to it; otherwise they are its name, matched by text.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub resolved: bool,
     /// References left out of the list.
     #[serde(skip_serializing_if = "is_zero")]
     pub more: usize,
@@ -757,6 +763,7 @@ fn apply_symbol(
             .unwrap_or(selector);
         report.signature = Some(SignatureChange {
             name: name.to_string(),
+            line: span.line,
             before: was,
             after: is,
         });

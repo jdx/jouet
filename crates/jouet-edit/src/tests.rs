@@ -454,6 +454,7 @@ fn a_symbol_edit_replaces_the_definition_and_indents_the_new_text() {
         edit.signature,
         Some(SignatureChange {
             name: "download".into(),
+            line: 2,
             before: "fn download(&self) {".into(),
             after: "fn download(&self, retries: u32) {".into(),
         })
