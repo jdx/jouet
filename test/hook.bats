@@ -182,6 +182,32 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a failure is raised once per tree and runs, not at every turn's stop" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+
+	ran 'cargo test --workspace brew::cask' 101
+	run stop_reason
+	assert_output --partial 'exited 101'
+	# The next turn ends at the same tree, with no run since: the agent has
+	# already said why it cannot pass.
+	run stop_reason
+	assert_output ""
+
+	# The tree changed: raised again, then quiet again.
+	echo 'fn main() { todo!() }' >repo/main.rs
+	run stop_reason
+	assert_output --partial 'exited 101'
+	run stop_reason
+	assert_output ""
+
+	# A new run, even the same failure at the same tree, raises it again.
+	ran 'cargo test --workspace brew::cask' 101
+	run stop_reason
+	assert_output --partial 'exited 101'
+}
+
 @test "a run after a cd counts for the work tree it went to" {
 	git init -q repo
 	git init -q other
