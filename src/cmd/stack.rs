@@ -4,7 +4,7 @@
 //! on GitHub; what git says about them is jouet-git's.
 
 use super::Output;
-use crate::{StackArgs, StackCmd, StackStatusArgs, StackSyncArgs};
+use crate::cli::{StackArgs, StackCmd, StackStatusArgs, StackSyncArgs};
 use jouet_git::Git;
 use jouet_git::stack::{self, Layer, LayerState, Stack};
 use jouet_github::Client;

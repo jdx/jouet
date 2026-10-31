@@ -1,8 +1,8 @@
 //! `jouet handoff` and `jouet pickup`.
 
 use super::Output;
+use crate::cli::{HandoffArgs, PickupArgs};
 use crate::entire::{Entire, Recap};
-use crate::{HandoffArgs, PickupArgs};
 use jouet_git::Git;
 use jouet_git::handoff::{
     self, Attention, Daemon, DaemonNow, Drift, Handoff, Job, JobNow, Options, Pr,

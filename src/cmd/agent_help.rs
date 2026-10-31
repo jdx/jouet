@@ -1,7 +1,7 @@
 //! `jouet agent-help [COMMAND]`.
 
 use super::Output;
-use crate::AgentHelpArgs;
+use crate::cli::AgentHelpArgs;
 use crate::guide;
 use jouet_output::exit::Exit;
 

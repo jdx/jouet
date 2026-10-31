@@ -1,7 +1,7 @@
 //! `jouet wait` and its subjects.
 
 use super::Output;
-use crate::{
+use crate::cli::{
     WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitDaemonArgs, WaitFileArgs, WaitHttpArgs,
     WaitJobArgs, WaitLogArgs, WaitPidArgs, WaitPrArgs, WaitRunArgs,
 };

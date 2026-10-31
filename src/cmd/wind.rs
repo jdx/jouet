@@ -2,9 +2,11 @@
 //! proposing the ones to retire.
 
 use super::Output;
+use crate::cli::{
+    UnwindArgs, WindArgs, WindCmd, WindDigestArgs, WindMemoriesArgs, WindProposeArgs,
+};
 use crate::settings::Settings;
 use crate::wind::{self, Paths, Status, stats, unwind as retire};
-use crate::{UnwindArgs, WindArgs, WindCmd, WindDigestArgs, WindMemoriesArgs, WindProposeArgs};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;

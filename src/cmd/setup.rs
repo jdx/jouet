@@ -2,7 +2,7 @@
 
 use super::Output;
 use super::skill::{self, Format};
-use crate::SetupArgs;
+use crate::cli::SetupArgs;
 use crate::git;
 use crate::setup::{self, Harness, Scope, has_jouet};
 use jouet_output::exit::Exit;

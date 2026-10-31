@@ -2,11 +2,11 @@
 //! commands agents repeat in a repository, and adding one through mise.
 
 use super::Output;
+use crate::cli::{TaskApplyArgs, TaskArgs, TaskCmd, TaskProposeArgs};
 use crate::mise::{self, Problem};
 use crate::settings::Settings;
 use crate::wind::tasks::{self, Applied, Draft, File, Project, Recorded};
 use crate::wind::{self, Paths, Status};
-use crate::{TaskApplyArgs, TaskArgs, TaskCmd, TaskProposeArgs};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use serde_json::Value;

@@ -3,7 +3,7 @@
 use super::Output;
 use crate::ci::explain::{self, short_list};
 use crate::ci::{self, Report};
-use crate::{CiArgs, CiCmd, CiExplainArgs, CiRunArgs};
+use crate::cli::{CiArgs, CiCmd, CiExplainArgs, CiRunArgs};
 use jouet_github::Client;
 use jouet_github::host::Feature;
 use jouet_github::pr::target::{self, Repo};

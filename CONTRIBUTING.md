@@ -111,7 +111,7 @@ commit.
 
 The site at [jouet.jdx.dev](https://jouet.jdx.dev) is built with VitePress from
 `docs/` and deployed from `main`. `docs/cli` is generated from the usage spec
-the binary serves, so change a command's help in `src/main.rs`, never in those
+the binary serves, so change a command's help in `src/cli/`, never in those
 files.
 
 ```sh

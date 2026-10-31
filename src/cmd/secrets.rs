@@ -4,8 +4,8 @@
 //! builds.
 
 use super::Output;
+use crate::cli::{SecretsArgs, SecretsCmd, SecretsScanArgs};
 use crate::fnox;
-use crate::{SecretsArgs, SecretsCmd, SecretsScanArgs};
 use jouet_git::commit::{ScanStatus, Scanner as CommitScanner, SecretFinding, SecretScan};
 use jouet_output::exit::Exit;
 use jouet_secrets::{Report, Scanner, Source};

@@ -2,7 +2,7 @@
 //! routines and plugins run.
 
 use super::Output;
-use crate::TrustArgs;
+use crate::cli::TrustArgs;
 use crate::plugins;
 use crate::rules::{self, Load};
 use crate::sources::{self, Kind, Set};

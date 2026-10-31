@@ -2,8 +2,8 @@
 //! and read-only queries, cut to a budget.
 
 use super::Output;
+use crate::cli::{DbArgs, DbCmd, DbQueryArgs, DbSchemaArgs};
 use crate::db::{self, Connection, Error, Rows, Source, Table, Target, Value};
-use crate::{DbArgs, DbCmd, DbQueryArgs, DbSchemaArgs};
 use jouet_output::display::Mode;
 use jouet_output::exit::Exit;
 use serde::Serialize;

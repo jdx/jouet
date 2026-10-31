@@ -1,7 +1,7 @@
 //! `jouet docs PKG [SYMBOL]`: a dependency's API at the locked version.
 
 use super::Output;
-use crate::DocsArgs;
+use crate::cli::DocsArgs;
 use crate::docs::{self, Index, Item, Lang, Missing, Package, summary};
 use jouet_output::exit::Exit;
 use serde::Serialize;

@@ -3,9 +3,9 @@
 use super::Output;
 use super::diag as diag_cmd;
 use super::scope::{self, How, Scope};
+use crate::cli::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use crate::diag::{self, Status, delta};
 use crate::entire;
-use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
 use jouet_edit::{
     self as edit, Callers, EditStatus, FileStatus, NearMiss, Options, Reference, Report, Span,

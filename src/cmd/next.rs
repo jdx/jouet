@@ -5,7 +5,7 @@
 //! the wall time is GitHub's.
 
 use super::Output;
-use crate::NextArgs;
+use crate::cli::NextArgs;
 use jouet_output::exit::Exit;
 use jouet_routines::routine::{self, Catalog};
 use std::process::ExitCode;

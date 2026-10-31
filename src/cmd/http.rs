@@ -3,7 +3,7 @@
 //! are redacted from everything it prints or saves.
 
 use super::Output;
-use crate::HttpArgs;
+use crate::cli::HttpArgs;
 use crate::redact::{self, MASK};
 use jouet_output::display::Mode;
 use jouet_output::exit::Exit;

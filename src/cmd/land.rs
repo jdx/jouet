@@ -9,7 +9,7 @@
 
 use super::Output;
 use super::pr;
-use crate::LandArgs;
+use crate::cli::LandArgs;
 use crate::ledger;
 use crate::settings::Settings;
 use jouet_github::Client;

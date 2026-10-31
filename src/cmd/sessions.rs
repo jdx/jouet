@@ -4,7 +4,7 @@
 
 use super::Output;
 use super::audit::parse_since;
-use crate::SessionsArgs;
+use crate::cli::SessionsArgs;
 use crate::entire::{self, Entire};
 use crate::ledger::redact_id;
 use jouet_audit::redact;

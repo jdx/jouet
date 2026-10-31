@@ -2,7 +2,7 @@
 
 use super::Output;
 use super::audit::parse_since;
-use crate::StatsArgs;
+use crate::cli::StatsArgs;
 use crate::settings::Settings;
 use jouet_audit::stats::{self, Baseline, Estimate, Ledger, Measured, StatsFilter};
 use jouet_audit::{Analyzer, ClaudeCode, Codex, Filter, Reader};

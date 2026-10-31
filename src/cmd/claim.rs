@@ -2,7 +2,7 @@
 //! The store is jouet-git's; the hooks' `claimed-path` rule reads it.
 
 use super::Output;
-use crate::{ClaimArgs, ClaimCmd, ClaimLsArgs, ClaimReleaseArgs};
+use crate::cli::{ClaimArgs, ClaimCmd, ClaimLsArgs, ClaimReleaseArgs};
 use jouet_git::claim::{Claim, Conflict, Holder, Refused, Standing, Store};
 use jouet_output::exit::Exit;
 use jouet_output::time;

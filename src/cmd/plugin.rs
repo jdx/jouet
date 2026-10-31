@@ -3,9 +3,9 @@
 
 use super::Output;
 use super::trust::{Checked, check, checked_text, cwd, needs_person};
+use crate::cli::{PluginAddArgs, PluginArgs, PluginCmd, PluginRmArgs};
 use crate::plugins;
 use crate::sources::{self, Kind, Status};
-use crate::{PluginAddArgs, PluginArgs, PluginCmd, PluginRmArgs};
 use jouet_output::exit::Exit;
 use jouet_rules::{Engine, Origin, RuleDir};
 use serde::Serialize;

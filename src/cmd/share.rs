@@ -2,7 +2,7 @@
 //! missing primitive, to jouet's maintainers.
 
 use super::Output;
-use crate::ShareArgs;
+use crate::cli::ShareArgs;
 use crate::share::{self, Posted, Proposal, Refusal, anonymize};
 use crate::wind::{self, Paths, rulefile};
 use jouet_output::exit::Exit;

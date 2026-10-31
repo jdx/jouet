@@ -1,8 +1,8 @@
 //! `jouet diag check`, `jouet diag delta` and `jouet diag fix`.
 
 use super::Output;
+use crate::cli::{DiagArgs, DiagCmd};
 use crate::diag::{self, Report, Status, delta, fix};
-use crate::{DiagArgs, DiagCmd};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;
