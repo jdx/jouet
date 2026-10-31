@@ -124,6 +124,25 @@ class ServerTest(unittest.TestCase):
             FIXTURE["graphql"]["repository"]["pullRequests"]["nodes"][0]["reviewThreads"]["nodes"][0]["isResolved"]
         )
 
+    def test_a_reply_reads_back_like_githubs(self):
+        # GitHub never sends null for a new comment's ID or URL; a reply
+        # once came back without `fullDatabaseId` and under `pull/0`.
+        reply = "mutation($id: ID!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: \"ok\"}) { comment { url } } }"
+        query = "{ repository { pullRequest(number: 7) { reviewThreads { nodes { comments { nodes { fullDatabaseId url path author { __typename login } } } } } } } }"
+        with FakeGitHub(FIXTURE) as fake:
+            _, posted = post(fake.url + "/graphql", {"query": reply, "variables": {"id": "T1"}})
+            status, rest = post(fake.url + "/repos/jdx/demo/pulls/7/comments", {"body": "too", "in_reply_to": 11})
+            _, after = post(fake.url + "/graphql", {"query": query})
+        url = posted["data"]["addPullRequestReviewThreadReply"]["comment"]["url"]
+        self.assertEqual(url, "https://github.com/jdx/demo/pull/7#discussion_r900001")
+        self.assertEqual((status, rest["in_reply_to_id"]), (201, 11))
+        comments = after["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"][0]["comments"]["nodes"]
+        self.assertEqual(
+            comments[1],
+            {"fullDatabaseId": "900001", "url": url, "path": "a.py", "author": {"__typename": "User", "login": "jdx"}},
+        )
+        self.assertEqual(len(comments), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

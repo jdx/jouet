@@ -34,3 +34,15 @@ stdout_contains = "parse_amount('(12.50)')"
 [[probe]]
 tool = "gh"
 args = ["pr", "view", "7"]
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "next", "7", "--json"]
+exit = 10
+stdout_contains = "checks_failing"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "next", "7", "--json"]
+exit = 20
+at_s = 0

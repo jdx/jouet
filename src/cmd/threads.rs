@@ -97,8 +97,15 @@ struct Listing<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     since: Option<String>,
     threads: Vec<Thread>,
+    /// Comments left out because GitHub sent no ID for them.
+    #[serde(skip_serializing_if = "is_zero")]
+    unreadable: usize,
     #[serde(skip)]
     since_label: Option<&'a str>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
@@ -152,6 +159,7 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         counts: threads::counts(&pr),
         since: since.map(time::format_utc),
         threads: shown,
+        unreadable: pr.unreadable,
         since_label: args.since.as_deref(),
     };
     out.result(&listing, || render_list(&listing, now));
@@ -338,6 +346,19 @@ fn render_list(l: &Listing, now: i64) -> String {
         let _ = write!(s, "  since {since}");
     }
     s.push('\n');
+    if l.unreadable > 0 {
+        let _ = writeln!(
+            s,
+            "{} {} left out: GitHub sent no ID for {}",
+            l.unreadable,
+            if l.unreadable == 1 {
+                "comment"
+            } else {
+                "comments"
+            },
+            if l.unreadable == 1 { "it" } else { "them" },
+        );
+    }
     for t in &l.threads {
         s.push('\n');
         render_thread(&mut s, t, now);

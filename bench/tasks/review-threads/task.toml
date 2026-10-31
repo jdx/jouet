@@ -19,6 +19,13 @@ stdout_contains = "subtotal"
 tool = "jouet"
 args = ["pr", "threads", "reply", "55501", "12", "--body", "Renamed to `subtotal` in {sha}.", "--resolve", "--json"]
 
+# A reply, then a listing that must still read every thread.
+[[probe]]
+tool = "jouet"
+before = [["pr", "threads", "reply", "55501", "12", "--body", "Renamed to `subtotal`.", "--resolve"]]
+args = ["pr", "threads", "12", "--all", "--json"]
+stdout_contains = "Renamed to `subtotal`."
+
 [[probe]]
 tool = "gh"
 args = ["pr", "view", "12", "--comments"]
@@ -35,3 +42,9 @@ args = [
   "query=query($n: Int!) { repository(owner: \"jdx\", name: \"demo\") { pullRequest(number: $n) { reviewThreads(first: 50) { nodes { id isResolved path line comments(first: 20) { nodes { databaseId author { login } body } } } } } } }",
 ]
 stdout_contains = "PRRT_kwDOdemo1"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "next", "12", "--json"]
+exit = 10
+stdout_contains = "unresolved_threads"

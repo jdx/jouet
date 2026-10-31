@@ -131,6 +131,7 @@ Each thread gets one line: `replied`, `resolved`, `unresolved`, `reply already p
 - `start_line` is the first line of a comment on a range of lines. A range that starts on the other side of the diff has none.
 - `side` is `left` for a comment on the base side of the diff, whose `line` is a line of the base version. It is absent for the head's side.
 - `context` is `{"start": N, "lines": [...]}` with `--context`.
+- `unreadable` counts comments left out because GitHub sent no ID for them, in `fullDatabaseId` or in the URL. A thread whose first comment is one of them is left out whole, since that ID is its handle. The listing still succeeds, and the text output says how many were left out.
 
 Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per thread with `replied`, `already_replied`, `resolved`, `unresolved`, `url`, `skipped` or `failed`, and in a dry run the `body` that would be posted.
 

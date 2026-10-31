@@ -102,7 +102,7 @@ class World:
             pr = graphql.find_node(self.fixture.get("graphql", {}), data["subjectId"])
             if pr is None:
                 raise graphql.GraphQLError(f"Could not resolve to a node with the id of '{data['subjectId']}'.")
-            comment = self.new_comment(data["body"])
+            comment = self.new_comment(data["body"], pr.get("number", 0))
             pr.setdefault("comments", {"nodes": []})["nodes"].append(comment)
             return {"commentEdge": {"node": comment}, "subject": pr}
 
@@ -113,25 +113,47 @@ class World:
             "addComment": add_comment,
         }
 
-    def new_comment(self, body: str) -> dict[str, Any]:
+    # New comments carry every field GitHub's schema makes non-null, and the
+    # IDs it fills in, so a later read finds what a real one would.
+    def new_comment(self, body: str, number: int) -> dict[str, Any]:
+        """A conversation comment on PR `number`, by the viewer."""
         self.next_id += 1
-        login = self.fixture.get("graphql", {}).get("viewer", {}).get("login", "bench")
+        viewer = self.fixture.get("graphql", {}).get("viewer", {})
         return {
             "__typename": "IssueComment",
-            "id": f"C_bench{self.next_id}",
+            "id": f"IC_bench{self.next_id}",
             "databaseId": self.next_id,
+            "fullDatabaseId": str(self.next_id),
             "body": body,
-            "author": {"login": login},
+            "author": {
+                "__typename": "User",
+                "id": viewer.get("id", "U_bench"),
+                "login": viewer.get("login", "bench"),
+                "name": viewer.get("name"),
+            },
+            "authorAssociation": "OWNER",
             "createdAt": "2026-10-30T12:00:00Z",
-            "url": f"https://github.com/{self.fixture.get('repo', 'o/r')}/pull/0#issuecomment-{self.next_id}",
+            "updatedAt": "2026-10-30T12:00:00Z",
+            "url": f"https://github.com/{self.fixture.get('repo', 'o/r')}/pull/{number}#issuecomment-{self.next_id}",
         }
 
     def add_reply(self, thread: dict[str, Any], body: str) -> dict[str, Any]:
-        comment = self.new_comment(body)
-        comment["__typename"] = "PullRequestReviewComment"
+        """A reply in `thread`: its first comment's position and commit,
+        with the viewer's ID, body and URL."""
+        number = next((n for n, t in self.threads() if t is thread), 0)
         first = (thread.get("comments", {}).get("nodes") or [{}])[0]
-        comment["path"] = first.get("path", thread.get("path"))
-        comment["replyTo"] = {"databaseId": first.get("databaseId")}
+        own = self.new_comment(body, number)
+        comment = {
+            **copy.deepcopy(first),
+            **own,
+            "__typename": "PullRequestReviewComment",
+            "id": f"PRRC_bench{self.next_id}",
+            "path": first.get("path", thread.get("path")),
+            "url": f"https://github.com/{self.fixture.get('repo', 'o/r')}/pull/{number}#discussion_r{self.next_id}",
+            "replyTo": {"databaseId": first.get("databaseId")},
+            "state": "SUBMITTED",
+            "pullRequestReview": {"id": f"PRR_bench{self.next_id}"},
+        }
         thread.setdefault("comments", {"nodes": []})["nodes"].append(comment)
         return comment
 
@@ -161,25 +183,43 @@ class World:
                 return 200, {"login": login, "id": 1, "type": "User"}
             if bare == "/rate_limit":
                 return 200, {"resources": {"core": {"limit": 5000, "remaining": 4999, "reset": 0}}}
+        prefix = f"/repos/{repo}/pulls/"
+        if method == "PATCH" and bare.startswith(f"{prefix}comments/"):
+            found = self.find_comment(bare.split("/comments/")[1])
+            if found:
+                c, t = found
+                c["body"] = (body or {}).get("body", c.get("body"))
+                return 200, self.rest_comment(c, t)
         if method == "POST":
-            prefix = f"/repos/{repo}/pulls/"
+            # A reply, at `comments/ID/replies` or as `in_reply_to` on
+            # `PR/comments`.
+            comment_id = None
             if bare.startswith(prefix) and "/comments/" in bare and bare.endswith("/replies"):
                 comment_id = bare.split("/comments/")[1].split("/")[0]
-                for _, t in self.threads():
-                    for c in t.get("comments", {}).get("nodes", []):
-                        if str(c.get("databaseId")) == comment_id:
-                            reply = self.add_reply(t, (body or {}).get("body", ""))
-                            return 201, self.rest_comment(reply, t)
+            elif bare.startswith(prefix) and bare.endswith("/comments") and (body or {}).get("in_reply_to"):
+                comment_id = str(body["in_reply_to"])
+            found = self.find_comment(comment_id) if comment_id else None
+            if found:
+                reply = self.add_reply(found[1], (body or {}).get("body", ""))
+                return 201, self.rest_comment(reply, found[1])
             if bare.startswith(f"/repos/{repo}/issues/") and bare.endswith("/comments"):
                 number = int(bare.split("/issues/")[1].split("/")[0])
                 for pr in (
                     self.fixture.get("graphql", {}).get("repository", {}).get("pullRequests", {}).get("nodes", [])
                 ):
                     if pr.get("number") == number:
-                        comment = self.new_comment((body or {}).get("body", ""))
+                        comment = self.new_comment((body or {}).get("body", ""), number)
                         pr.setdefault("comments", {"nodes": []})["nodes"].append(comment)
                         return 201, {"id": comment["databaseId"], "body": comment["body"]}
         return 404, {"message": "Not Found", "documentation_url": "https://docs.github.com/rest"}
+
+    def find_comment(self, database_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """A review comment by its database ID, and its thread."""
+        for _, t in self.threads():
+            for c in t.get("comments", {}).get("nodes", []):
+                if str(c.get("databaseId")) == database_id:
+                    return c, t
+        return None
 
     @staticmethod
     def canned(raw: Any, elapsed: float) -> tuple[int, Any]:
@@ -281,6 +321,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
+        # The server speaks HTTP/1.0 and closes every connection after its
+        # response. Saying so keeps a client from reusing one from its pool
+        # and racing the close ("Peer disconnected").
+        self.send_header("Connection", "close")
         self.send_header("X-RateLimit-Limit", "5000")
         self.send_header("X-RateLimit-Remaining", "4999")
         self.end_headers()
