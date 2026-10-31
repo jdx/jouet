@@ -54,6 +54,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "http",
+        Some(
+            "calling an HTTP API or checking an endpoint: `jouet http GET URL --select '$.items[*].id'` prints the status and only those JSONPath values, `--expect 'jsonpath $.ok == true'` exits 1 when a value is wrong, and a long body is cut to --budget, instead of curl piped into jq or python. Put credentials in `${NAME}` (from the environment, or `fnox exec -- jouet http ...`), never inline",
+        ),
+    ),
+    (
         "job",
         Some(
             "running a build, a test suite, a long script or a server for one check in the background: `jouet job start ID --port N -- CMD` returns once it is ready, `jouet wait job ID` blocks until it ends, instead of `&`, nohup, sleep-and-curl loops and pkill",
@@ -231,7 +237,11 @@ fn when(name: &str) -> Option<&'static str> {
 
 /// Commands that work together, which the overview and the skill describe
 /// in one entry, led by the first, to stay within their budgets.
-pub(crate) const GROUPED: &[&[&str]] = &[&["handoff", "pickup"], &["read", "docs", "deps"]];
+pub(crate) const GROUPED: &[&[&str]] = &[
+    &["handoff", "pickup"],
+    &["read", "docs", "deps"],
+    &["wait", "http"],
+];
 
 /// The group `name` belongs to, if any.
 pub(crate) fn group(name: &str) -> Option<&'static [&'static str]> {
@@ -260,7 +270,7 @@ pub(crate) fn overview() -> String {
             .filter_map(|other| commands.iter().find(|(m, _)| m.cmd.name == *other))
             .collect();
         if !others.is_empty() {
-            let mut names = format!("jouet {name}");
+            let mut names = head(name, meta);
             let mut abouts = meta.about.unwrap_or("").to_string();
             let mut whens = (*when).to_string();
             for (other, other_when) in others {
@@ -272,24 +282,7 @@ pub(crate) fn overview() -> String {
             let _ = writeln!(out, "  when: {whens}");
             continue;
         }
-        let subs: Vec<&str> = meta
-            .subcommands
-            .iter()
-            .filter(|s| {
-                let at = (name, s.cmd.name);
-                !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
-            })
-            .map(|s| s.cmd.name)
-            .collect();
-        let head = if subs.is_empty() {
-            format!("jouet {name}")
-        } else if meta.subcommand_required() {
-            format!("jouet {name} <{}>", subs.join("|"))
-        } else {
-            // The family also runs on its own.
-            format!("jouet {name} [{}]", subs.join("|"))
-        };
-        let _ = writeln!(out, "{head}: {}", meta.about.unwrap_or(""));
+        let _ = writeln!(out, "{}: {}", head(name, meta), meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
     }
     out.push('\n');
@@ -301,6 +294,27 @@ pub(crate) fn overview() -> String {
         "Details: `jouet agent-help COMMAND` for its subcommands and flags, `jouet COMMAND --help`.\n",
     );
     out
+}
+
+/// `jouet NAME` and its subcommands by name, as the overview lists it.
+fn head(name: &str, meta: &CommandMeta<'_>) -> String {
+    let subs: Vec<&str> = meta
+        .subcommands
+        .iter()
+        .filter(|s| {
+            let at = (name, s.cmd.name);
+            !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
+        })
+        .map(|s| s.cmd.name)
+        .collect();
+    if subs.is_empty() {
+        format!("jouet {name}")
+    } else if meta.subcommand_required() {
+        format!("jouet {name} <{}>", subs.join("|"))
+    } else {
+        // The family also runs on its own.
+        format!("jouet {name} [{}]", subs.join("|"))
+    }
 }
 
 /// The guide for one command and its subcommands.
@@ -380,7 +394,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     if let [commit, edit, reply] = usage.as_slice() {
         let _ = writeln!(
             out,
-            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and repeated --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}."
+            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}."
         );
     }
     if !rules.is_empty() {

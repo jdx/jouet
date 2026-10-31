@@ -112,6 +112,7 @@ const BUILTIN: &[(&str, &str)] = &[
         "unbudgeted-search",
         include_str!("../rules/unbudgeted-search.toml"),
     ),
+    ("curl-json", include_str!("../rules/curl-json.toml")),
 ];
 
 /// The scripts built-in rules name.

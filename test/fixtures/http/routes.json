@@ -1,0 +1,14 @@
+{
+  "GET /repos/jdx/mise": {
+    "status": 200,
+    "body": {
+      "full_name": "jdx/mise",
+      "stargazers_count": 35588,
+      "license": { "spdx_id": "MIT" },
+      "topics": ["cli", "dev-tools", "rust"],
+      "note": "deployed with s3cr3t-token-abc"
+    }
+  },
+  "GET /health": { "status": 200, "body": { "status": "degraded", "db": "down" } },
+  "GET /repos/jdx/no-such-repo": { "status": 404, "body": { "message": "Not Found" } }
+}

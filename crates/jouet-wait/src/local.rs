@@ -4,7 +4,7 @@
 //! They stay deliberately small. Starting and supervising long-running
 //! services, and their ready checks, is pitchfork's job.
 
-use super::{Detail, Observation, Stop, Subject, os};
+use super::{Detail, Observation, Stop, Subject, http, os};
 use jouet_output::exit::Exit;
 use regex::Regex;
 use std::fs::File;
@@ -297,34 +297,30 @@ impl Subject for PortWait {
     }
 }
 
-/// `wait http URL [--status CODE] [--contains REGEX]`
+/// `wait http URL [--status CODE] [--contains REGEX] [--expect ASSERTION]...`
 pub struct HttpWait {
     url: String,
     status: Option<u16>,
     contains: Option<Regex>,
+    expect: Vec<http::Assertion>,
     agent: ureq::Agent,
 }
 
 impl HttpWait {
-    pub fn new(url: String, status: Option<u16>, contains: Option<Regex>) -> Self {
+    pub fn new(
+        url: String,
+        status: Option<u16>,
+        contains: Option<Regex>,
+        expect: Vec<http::Assertion>,
+    ) -> Self {
         // A 3xx is only seen when redirects are not followed.
-        let redirects = if status.is_some_and(|s| (300..400).contains(&s)) {
-            0
-        } else {
-            10
-        };
-        let agent = ureq::Agent::config_builder()
-            .tls_config(jouet_github::tls::config())
-            .http_status_as_error(false)
-            .max_redirects(redirects)
-            .user_agent(concat!("jouet/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .into();
+        let follow = !status.is_some_and(|s| (300..400).contains(&s));
         Self {
             url,
             status,
             contains,
-            agent,
+            expect,
+            agent: http::agent(follow),
         }
     }
 
@@ -347,72 +343,69 @@ impl Subject for HttpWait {
 
     fn check(&mut self, deadline: Instant) -> Result<Observation, Stop> {
         let left = deadline.saturating_duration_since(Instant::now());
-        let timeout = left.clamp(Duration::from_secs(1), REQUEST_TIMEOUT);
-        let sent = self
-            .agent
-            .get(&self.url)
-            .config()
-            .timeout_global(Some(timeout))
-            .build()
-            .call();
-        let mut resp = match sent {
+        let needs_body =
+            self.contains.is_some() || self.expect.iter().any(http::Assertion::needs_body);
+        let req = http::Request {
+            method: "GET",
+            url: &self.url,
+            headers: &[],
+            body: None,
+            timeout: left.clamp(Duration::from_secs(1), REQUEST_TIMEOUT),
+            body_limit: if needs_body { BODY_LIMIT } else { 0 },
+        };
+        let resp = match http::send(&self.agent, &req) {
             Ok(resp) => resp,
-            Err(e) => return Ok(Observation::pending(format!("unreachable: {e}"))),
-        };
-        let status = resp.status().as_u16();
-        let detail = Detail {
-            status: Some(status),
-            ..Detail::default()
-        };
-        if !self.status_ok(status) {
-            return Ok(Observation {
-                met: false,
-                failed: false,
-                state: format!("status {status}"),
-                detail,
-            });
-        }
-        let Some(re) = &self.contains else {
-            return Ok(Observation {
-                met: true,
-                failed: false,
-                state: format!("status {status}"),
-                detail,
-            });
-        };
-        let body = resp
-            .body_mut()
-            .with_config()
-            .limit(BODY_LIMIT)
-            .read_to_vec();
-        let body = match body {
-            Ok(body) => body,
             Err(e) => {
-                return Ok(Observation {
-                    met: false,
-                    failed: false,
-                    state: format!("status {status}, unreadable body: {e}"),
-                    detail,
-                });
+                return Ok(Observation::pending(format!(
+                    "unreachable: {}",
+                    e.message()
+                )));
             }
         };
-        Ok(match first_match(re, &String::from_utf8_lossy(&body)) {
-            Some(line) => Observation {
-                met: true,
-                failed: false,
-                state: format!("status {status}, matched"),
-                detail: Detail {
-                    line: Some(line),
-                    ..detail
-                },
+        let status = resp.status;
+        let pending = |state: String| Observation {
+            detail: Detail {
+                status: Some(status),
+                ..Detail::default()
             },
-            None => Observation {
-                met: false,
-                failed: false,
-                state: format!("status {status}, no match"),
-                detail,
+            ..Observation::pending(state)
+        };
+        if !self.status_ok(status) {
+            return Ok(pending(format!("status {status}")));
+        }
+        let json = serde_json::from_slice(&resp.body).ok();
+        let facts = resp.facts(json.as_ref());
+        if let Some(failed) = self
+            .expect
+            .iter()
+            .map(|a| a.check(&facts))
+            .find(|c| !c.passed)
+        {
+            let why = failed.reason.unwrap_or_default();
+            return Ok(pending(format!(
+                "status {status}, {}: {why}",
+                failed.assertion
+            )));
+        }
+        let met = |state: String, line: Option<String>| Observation {
+            met: true,
+            failed: false,
+            state,
+            detail: Detail {
+                status: Some(status),
+                line,
+                ..Detail::default()
             },
-        })
+        };
+        let Some(re) = &self.contains else {
+            return Ok(met(format!("status {status}"), None));
+        };
+        Ok(
+            match first_match(re, &String::from_utf8_lossy(&resp.body)) {
+                Some(line) => met(format!("status {status}, matched"), Some(line)),
+                None => pending(format!("status {status}, no match")),
+            },
+        )
     }
 }
 
