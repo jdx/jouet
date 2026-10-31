@@ -17,6 +17,7 @@ pub(crate) mod review;
 pub(crate) mod rulefile;
 pub(crate) mod session;
 pub(crate) mod stats;
+pub(crate) mod tasks;
 pub(crate) mod unwind;
 
 use crate::ledger;
@@ -134,6 +135,9 @@ pub(crate) struct State {
     /// proposed.
     #[serde(default)]
     pub reviews: review::Reviews,
+    /// Mise tasks: sequences noticed, tasks drafted, and the ones applied.
+    #[serde(default)]
+    pub tasks: tasks::Tasks,
 }
 
 impl State {
@@ -217,6 +221,9 @@ pub(crate) struct RunReport {
     /// Rules promoted to deny this run.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub promoted: Vec<String>,
+    /// Sequences noticed this run that a mise task may replace.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub noticed: Vec<String>,
     /// True when the last run was too recent and this one read nothing.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub skipped: bool,
@@ -238,11 +245,13 @@ pub(crate) fn run(paths: &Paths, settings: &WindSettings, now: u64, force: bool)
             state
                 .detector
                 .observe(entry, &|script| is_check(&engine, script));
+            state.tasks.observe(entry);
         }
         state.detector.finish(now);
         state.cursor = cursor;
         state.last_run = now;
         report.drafted = draft_notes(state, paths, &engine, now);
+        report.noticed = state.tasks.notice(now);
         report
     });
     let mut report = result.unwrap_or_default();
@@ -365,12 +374,12 @@ pub(crate) fn note_line(note: &Note, session: &str) -> String {
     )
 }
 
-/// Sets the status of a note, a proposal or a queued review; false when
-/// there is no such one.
+/// Sets the status of a note, a proposal, a queued review or a task
+/// proposal; false when there is no such one.
 pub(crate) fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
     update(&paths.state, |state| {
         let Some(note) = state.notes.iter_mut().find(|n| n.id == id) else {
-            return state.reviews.set_status(id, status);
+            return state.reviews.set_status(id, status) || state.tasks.set_status(id, status);
         };
         note.status = status;
         true

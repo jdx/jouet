@@ -38,7 +38,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wait",
         Some(
-            "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process, command or `jouet job`, instead of a sleep loop",
+            "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process, command, `jouet job` or pitchfork daemon, instead of a sleep loop",
         ),
     ),
     (
@@ -120,6 +120,9 @@ const WHEN: &[(&str, Option<&str>)] = &[
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // Named where it is needed: in a winding note at session start, which
+    // says what to ask the user.
+    ("task", None),
     ("share", None),
     ("agent-help", None),
     ("audit", None),
@@ -168,6 +171,10 @@ const COMPANIONS: &[(&str, &str)] = &[
     (
         "fnox",
         "fnox: a project's secrets, encrypted or in a vault. `fnox exec -- CMD` runs a command with them in its environment and `fnox list` shows their names; never print a value (`fnox get`, `env`) into the transcript",
+    ),
+    (
+        "pitchfork",
+        "pitchfork: runs a project's long-running services, the daemons in pitchfork.toml. `pitchfork start ID` starts one and returns once it is ready, `pitchfork logs ID -n 50` reads its log, `pitchfork restart ID` and `pitchfork stop ID` replace killing it, and `jouet wait daemon ID` waits for it; one-off background work is `jouet job`'s",
     ),
 ];
 

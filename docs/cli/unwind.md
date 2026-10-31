@@ -3,10 +3,10 @@
 
 - **Usage:** `jouet unwind [--apply]`
 
-Propose retiring rules that are noisy or always overridden
+Propose retiring rules that are noisy or always overridden, and unused tasks
 
-Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built-in rules are never proposed. --apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR.
+Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built-in rules are never proposed. --apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR. It also lists the mise tasks `jouet task apply` added that no agent session has run in the 21 days since, and still run what jouet wrote; --apply removes them with `mise tasks rm`.
 
 ## Flags
-- **`--apply`** — Retire the proposed rules of yours
+- **`--apply`** — Retire the proposed rules of yours, and remove the proposed tasks
 - **`-h --help`** — Print help
