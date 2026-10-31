@@ -25,6 +25,9 @@ pub struct Options {
     /// How long a reported conflict must persist to be believed;
     /// [`crate::CONFLICT_CONFIRM`] except in tests.
     pub confirm_conflict: Duration,
+    /// Whether jactionlint is installed, so a failed Actions job can be
+    /// run here with `jouet ci run`.
+    pub local_runner: bool,
 }
 
 pub struct CiWait {
@@ -279,6 +282,9 @@ impl Watch for CiWait {
                 let mut selected = selected;
                 if let Some(lines) = self.options.log_lines {
                     attach_logs(client, &self.repo, &mut selected, lines);
+                }
+                if self.options.local_runner {
+                    checks::suggest_local(&mut selected, None);
                 }
                 Poll::Done(self.doc("failure", selected, None))
             }

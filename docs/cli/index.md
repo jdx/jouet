@@ -54,6 +54,8 @@
 - [`jouet wait http [--status <CODE>] [--contains <REGEX>] <URL>`](/cli/wait/http.md)
 - [`jouet wait pid <PID>`](/cli/wait/pid.md)
 - [`jouet wait cmd [--expect-exit <N>] [-- CMD]…`](/cli/wait/cmd.md)
+- [`jouet ci <SUBCOMMAND>`](/cli/ci.md)
+- [`jouet ci run [FLAGS] [WORKFLOW] [-- ARGS]…`](/cli/ci/run.md)
 - [`jouet rule <SUBCOMMAND>`](/cli/rule.md)
 - [`jouet rule list`](/cli/rule/list.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
