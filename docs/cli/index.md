@@ -105,7 +105,7 @@
 - [`jouet task propose [--since <TIME>] [--harness <HARNESS>]`](/cli/task/propose.md)
 - [`jouet task apply [FLAGS] <ID>`](/cli/task/apply.md)
 - [`jouet share [FLAGS] [NAME]`](/cli/share.md)
-- [`jouet agent-help [COMMAND]…`](/cli/agent-help.md)
+- [`jouet agent-help [--full] [COMMAND]…`](/cli/agent-help.md)
 - [`jouet skill [--format <FORMAT>] [--contribute]`](/cli/skill.md)
 - [`jouet setup [FLAGS] <HARNESS>`](/cli/setup.md)
 - [`jouet completion [--joue] <SHELL>`](/cli/completion.md)

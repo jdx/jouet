@@ -241,6 +241,10 @@ def execute(
             run_dir, harness, arm, opts["harness_bins"][harness.name], opts["jouet_bin"], fake_url, "jdx/demo"
         )
         setup = arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
+        if arm.jouet:
+            # After setup, so that turning priming off here measures a
+            # session without the primer rather than one with the skill.
+            env.update(opts.get("jouet_env") or {})
         cmd = harness.command(harness.binary, task.prompt, opts, workdir)
         timeout_s = min(task.timeout_s, opts["timeout_s"]) if opts.get("timeout_s") else task.timeout_s
         config_dir = Path(env[harness.config_dir_env])
