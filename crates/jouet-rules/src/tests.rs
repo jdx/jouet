@@ -1300,6 +1300,32 @@ fn job_start_names_the_job_and_its_ready_check() {
         message.starts_with("Run `jouet job start dev -- npm run dev`"),
         "{message}"
     );
+    // Nor is a command the matchers did not find, run after it.
+    let then = Call {
+        input: Some(serde_json::json!({ "run_in_background": true })),
+        ..bash("cd web && npm run dev; echo started; ls -la")
+    };
+    let message = engine.evaluate(&then).warnings.remove(0).message.unwrap();
+    assert!(
+        message.starts_with("Run `jouet job start dev -- npm run dev`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_script_sees_which_commands_its_matchers_matched() {
+    let code =
+        "[[rule]]\nname = \"m\"\nwhy = \"w\"\nscript = \"m.luau\"\nmatch = { command = \"b\" }\n";
+    let script = "return { check = function(call)\n  local out = {}\n  for _, c in call.commands do\n    if c.matched then table.insert(out, c.text) end\n  end\n  return jouet.deny(table.concat(out, \",\"))\nend }";
+    let engine = engine(vec![toml_user("m", code).with_script("m.luau", script)]);
+    let matched = |command: &str| {
+        let outcome = engine.evaluate(&bash(command));
+        let d = outcome.deny.or(outcome.warnings.into_iter().next());
+        d.and_then(|d| d.message)
+    };
+    assert_eq!(matched("a; b 1; c && b 2").as_deref(), Some("b 1,b 2"));
+    assert_eq!(matched("echo $(b) | c").as_deref(), Some("b"));
+    assert_eq!(matched("a; c"), None);
 }
 
 /// A user rule that denies `serve`, only where `marker.toml` is.
