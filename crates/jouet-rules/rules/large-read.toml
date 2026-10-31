@@ -1,0 +1,38 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "large-read"
+why = "Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["read"]
+suggest = "jouet read FILE --outline"
+message = "It lists the file's definitions with their line ranges; `jouet read FILE --symbol NAME` then prints just the one you need (`jouet agent-help read`)."
+
+# Claude Code's Read with no offset or limit: up to 2,000 lines.
+[[rule.match]]
+tool = "Read"
+unless_input = ["offset", "limit"]
+min_read_lines = 400
+
+[[rule.match]]
+command = ["cat", "nl"]
+min_read_lines = 400
+
+[rule.examples]
+fires = [
+  { tool = "Read", path = "src/backend/mod.rs", read_lines = 2000 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs" }, read_lines = 650 },
+  { command = "cat src/backend/mod.rs", read_lines = 9339 },
+  { command = "nl -ba src/lib.rs", read_lines = 400 },
+]
+quiet = [
+  { tool = "Read", path = "src/main.rs", read_lines = 120 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", offset = 300, limit = 80 }, read_lines = 80 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", limit = 1000 }, read_lines = 1000 },
+  { command = "cat src/lib.rs", read_lines = 399 },
+  { command = "sed -n '1,80p' src/lib.rs", read_lines = 80 },
+  { command = "cat src/backend/mod.rs" },
+  { command = "jouet read src/backend/mod.rs --outline", read_lines = 9339 },
+]

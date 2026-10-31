@@ -61,13 +61,15 @@ impl Harness {
     /// `(harness event, matcher, jouet hook event)` for each hook installed.
     ///
     /// Codex sends no exit code to its hooks, so it gets no post-tool-use
-    /// hooks: its stop hook reads the session transcript instead.
+    /// hooks: its stop hook reads the session transcript instead. Claude
+    /// Code's Read and Grep tools reach the hooks too, so rules can steer
+    /// them, and a Read is remembered for the session.
     pub(crate) fn hooks(self) -> &'static [(&'static str, Option<&'static str>, &'static str)] {
         match self {
             Self::Claude => &[
                 ("SessionStart", None, "session-start"),
-                ("PreToolUse", Some("Bash"), "pre-tool-use"),
-                ("PostToolUse", Some("Bash"), "post-tool-use"),
+                ("PreToolUse", Some("Bash|Read|Grep"), "pre-tool-use"),
+                ("PostToolUse", Some("Bash|Read"), "post-tool-use"),
                 ("PostToolUseFailure", Some("Bash"), "post-tool-use-failure"),
                 // Formats edited files with `[edit] fix_after`; a no-op
                 // without it.
@@ -506,7 +508,7 @@ mod tests {
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Read|Grep",
         "hooks": [
           {
             "type": "command",
@@ -539,7 +541,7 @@ mod tests {
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Read",
         "hooks": [
           {
             "type": "command",
@@ -741,7 +743,7 @@ mod tests {
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Read|Grep",
         "hooks": [
           {
             "type": "command",
@@ -753,7 +755,7 @@ mod tests {
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Read",
         "hooks": [
           {
             "type": "command",

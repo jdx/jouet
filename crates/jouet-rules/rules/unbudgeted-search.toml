@@ -1,0 +1,82 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "unbudgeted-search"
+why = "A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["search"]
+suggest = "jouet search PATTERN"
+message = "It groups matches by the function they are in, stops at a byte budget with a marker for what it left out, and skips matches this session already saw (`jouet agent-help search`)."
+
+# rg over the whole working directory (no path, or `.`), printing every
+# matching line: no max count, no file list or count, and no `| head`.
+[[rule.match]]
+command = "rg"
+unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "--files-without-match", "-c", "--count", "--count-matches", "-q", "--quiet", "--files", "--json", "-h", "--help", "-V", "--version"]
+value_flags = ["-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "-M", "--max-columns", "-E", "--encoding", "-d", "--max-depth", "-r", "--replace", "-j", "--threads", "--sort", "--sortr", "--max-filesize"]
+max_args = 1
+unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+
+[[rule.match]]
+command = "rg"
+unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "--files-without-match", "-c", "--count", "--count-matches", "-q", "--quiet", "--files", "--json", "-h", "--help", "-V", "--version"]
+value_flags = ["-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "-M", "--max-columns", "-E", "--encoding", "-d", "--max-depth", "-r", "--replace", "-j", "--threads", "--sort", "--sortr", "--max-filesize"]
+args = [".", "./"]
+max_args = 2
+unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+
+# grep -r over the whole working directory, likewise.
+[[rule.match]]
+command = "grep"
+flags = ["-r", "-R", "--recursive", "--dereference-recursive"]
+unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "-L", "--files-without-match", "-c", "--count", "-q", "--quiet", "--silent", "--help"]
+value_flags = ["-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "--include", "--exclude", "--exclude-dir"]
+max_args = 1
+unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+
+[[rule.match]]
+command = "grep"
+flags = ["-r", "-R", "--recursive", "--dereference-recursive"]
+unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "-L", "--files-without-match", "-c", "--count", "-q", "--quiet", "--silent", "--help"]
+value_flags = ["-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "--include", "--exclude", "--exclude-dir"]
+args = [".", "./"]
+max_args = 2
+unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+
+# Claude Code's Grep tool printing matching lines, over the whole working
+# directory, with no head_limit.
+[[rule.match]]
+tool = "Grep"
+input = { output_mode = "content" }
+unless_input = ["head_limit", "path", "glob", "type"]
+
+[rule.examples]
+fires = [
+  "rg TODO",
+  "rg -n 'fn download' .",
+  "rtk rg -i timeout",
+  "rg -g '*.rs' -C 3 unwrap",
+  "grep -rn TODO .",
+  "grep -R fixme",
+  { tool = "Grep", input = { pattern = "TODO", output_mode = "content" } },
+]
+quiet = [
+  "rg TODO src/backend",
+  "rg -l TODO",
+  "rg -c TODO",
+  "rg -m 5 TODO",
+  "rg TODO | head -20",
+  "rg -n TODO | wc -l",
+  "rg --files",
+  "rg -g '*.rs' TODO src",
+  "grep TODO README.md",
+  "grep -rl TODO .",
+  "grep -rn TODO src/",
+  "echo 'rg TODO'",
+  "jouet search TODO",
+  { tool = "Grep", input = { pattern = "TODO", output_mode = "content", head_limit = 50 } },
+  { tool = "Grep", input = { pattern = "TODO" } },
+  { tool = "Grep", input = { pattern = "TODO", output_mode = "content", path = "src/x.rs" } },
+]

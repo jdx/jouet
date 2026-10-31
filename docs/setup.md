@@ -64,8 +64,8 @@ If you work across many repositories or worktrees, install with `--global` inste
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
 | Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules. |
-| Before a shell command | `PreToolUse` (`Bash`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
-| After a shell command | `PostToolUse`, `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs. |
+| Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
+| After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
 | Stop | `Stop` | `Stop` | Blocks finishing once while a recorded check failed, when only partial test runs followed a change, or when files changed after the last hk check passed. With hk's stop hook merged in, its verdict too. |
 

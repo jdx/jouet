@@ -76,6 +76,7 @@ pub(crate) fn replay(engine: &Engine, rule: &Rule, entries: &[Entry]) -> Replay 
             path: None,
             cwd: None,
             exit_code: entry.exit_code,
+            ..Call::default()
         };
         match engine.check(rule, &call) {
             Ok((decision, records)) => {

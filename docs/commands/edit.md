@@ -68,6 +68,47 @@ use crate::http::HTTP_FETCH;
 
 - Anything else outside a block, such as a line of prose, is an error.
 
+### Symbol targets
+
+A section headed `=== PATH#SYMBOL` replaces a whole definition, found with tree-sitter rather than by its text, so a formatter that reflowed it cannot break the match. The new text runs to the next `===` line or the end of the spec:
+
+```spec
+=== src/backend/vfox.rs#Vfox::download
+pub fn download(&self, url: &str, retries: u32) -> Result<()> {
+    let resp = self.client.get(url).send()?;
+    retry(resp, retries)
+}
+
+=== src/lockfile/generate.rs
+<<<<<<< SEARCH
+use crate::http::HTTP;
+=======
+use crate::http::HTTP_FETCH;
+>>>>>>> REPLACE
+```
+
+- `SYMBOL` is a name (`download`), a kind and a name (`fn download`, `class Cart`, `trait Backend`), or a name with its scope (`Vfox::download`, `Shop.Cart`), as [`jouet read FILE --outline`](/commands/read) lists them. It must match exactly one definition; when it matches none, the report lists the file's definitions, and when it matches several, each of them.
+- The definition is its signature and body. Comments and attributes above it stay as they are.
+- Write the new text at any indentation: it is moved to where the definition sits.
+- An edit that would leave the file with more syntax errors than it has is refused (`does_not_parse`). This also catches new text cut short.
+- When the edit changes the definition's first line, its signature in most languages, the report lists references to its name in files the edit does not change, from the [repo map](/commands/read#how-the-map-is-built)'s tags: callers that may need updating. Names are matched by text, so some may belong to another definition of the same name.
+
+  ```output
+  $ jouet edit <<'JOUET_EDIT'
+  === src/lib.rs#Client::download
+  pub fn download(&self, path: &str, retries: u32) -> String {
+      let _ = retries;
+      fetch(&join_url(&self.base, path))
+  }
+  JOUET_EDIT
+  ok          src/lib.rs  1 edit  +3 -3
+  warning: the signature of download changed; 1 reference to it in files this edit does not change may need updating:
+    src/main.rs:3
+  1 of 1 file written
+  ```
+
+Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
+
 ### Codex-style patch
 
 The format used by OpenAI Codex's `apply_patch`, accepted as is:
@@ -107,6 +148,7 @@ For specs that programs generate:
 
 - `old` matches anywhere in the file, like `str::replace`, not only whole lines.
 - `count` is a positive number or `"all"`, and defaults to `1`.
+- `symbol` replaces a whole definition, as a [symbol target](#symbol-targets) does, and takes `new` only.
 - An entry without `old` creates the file.
 
 ## Edit one file from the command line
@@ -245,7 +287,8 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `files[].added`, `files[].removed` | Lines added and removed |
 | `files[].error` | Why a file failed: `code` is `not_found`, `already_exists`, `hash_mismatch` or `not_text`, with a `message` |
 | `files[].diff` | The unified diff, with `--diff` |
-| `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches` or `anchor_not_found`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing |
+| `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
+| `callers` | For each definition whose signature changed: its `symbol`, `references` (`path`, `line`) in files the edit does not change, and how many `more` were left out of the list |
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
 | `diag` | The `--diag` result: `status` (`clean`, `introduced`, `refused` or `unavailable`), the `new` findings, `new_failed_steps`, and the `kept` and `fixed` counts |
 | `fix` | What `[edit] fix_after` did: `status`, the `formatted` files, `failed_steps` |
