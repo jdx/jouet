@@ -16,7 +16,7 @@ script = "piped-test-output.luau"
 command = [
   "cargo", "mbx", "cross", "go", "pytest", "python", "python3", "vitest", "jest",
   "npx", "bunx", "bats", "rspec", "tsc", "npm", "pnpm", "yarn", "bun", "mise",
-  "make", "just", "task", "dotnet", "gradle", "gradlew", "mvn",
+  "make", "just", "task", "dotnet", "gradle", "gradlew", "mvn", "jouet",
 ]
 with = { command = ["head", "tail", "grep", "egrep", "fgrep", "rg", "sed"] }
 
@@ -38,6 +38,11 @@ fires = [
   "npx vitest run 2>&1 | head -50",
   "make 2>&1 | tail",
   "RUST_LOG=debug cargo test --manifest-path $DIR/Cargo.toml 2>&1 | tail",
+  # `jouet test` cut, which only drops what it already kept short.
+  "jouet test --cmd -- mise run test 2>&1 | tail -10",
+  "jouet test --cmd -- cargo test --workspace --all-targets 2>&1 | tail -3 && git push",
+  "jouet --json test --affected | grep -c failed",
+  "jouet test > t.log 2>&1; tail -5 t.log",
 ]
 quiet = [
   # Left to `scoped-lint`.
@@ -61,4 +66,8 @@ quiet = [
   "git log --oneline | head",
   "echo 'cargo test | head'",
   "jouet test --cmd -- cargo test",
+  "jouet test --affected --dry-run | grep vitest",
+  "jouet test --help | head",
+  "jouet test --cmd -- cargo test 2>&1 | tee test.log",
+  "jouet pr status | head -3",
 ]

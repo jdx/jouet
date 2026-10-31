@@ -1328,6 +1328,31 @@ fn a_script_sees_which_commands_its_matchers_matched() {
     assert_eq!(matched("a; c"), None);
 }
 
+#[test]
+fn a_cut_jouet_test_is_told_to_drop_the_cut() {
+    let engine = engine(builtin());
+    let warning = |command: &str| {
+        let outcome = engine.evaluate(&bash(command));
+        let w = outcome
+            .warnings
+            .into_iter()
+            .find(|w| w.rule == "piped-test-output");
+        w.and_then(|w| w.message).unwrap_or_default()
+    };
+    let piped = warning("jouet test --cmd -- mise run test 2>&1 | tail -10");
+    assert!(
+        piped.starts_with("Drop the tail: `jouet test` already prints"),
+        "{piped}"
+    );
+    assert!(piped.contains("does not count as passing"), "{piped}");
+    // Read back from a file, the run's exit status is its own.
+    let read_back = warning("jouet test > t.log 2>&1; tail -5 t.log");
+    assert!(read_back.starts_with("Drop the tail"), "{read_back}");
+    assert!(!read_back.contains("exit"), "{read_back}");
+    // Other runners are still pointed at `jouet test`.
+    assert!(warning("cargo test 2>&1 | tail -3").starts_with("Run `jouet test`"));
+}
+
 /// A user rule that denies `serve`, only where `marker.toml` is.
 fn requiring() -> Source {
     toml_user(
