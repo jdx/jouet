@@ -304,6 +304,20 @@ def execute(
     return record
 
 
+def snapshot(jouet_bin: Path, work_root: Path) -> Path:
+    """A copy of the jouet under test that the whole suite runs.
+
+    `target/debug/jouet` can be a link into a shared build cache (mbx's), and
+    a build in another checkout during a suite that runs for hours can clean
+    it up. A copy also pins what is measured: rebuilding mid-suite does not
+    change the binary later runs use."""
+    copy = work_root / "jouet-under-test" / "jouet"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(jouet_bin.resolve(), copy)
+    copy.chmod(0o755)
+    return copy
+
+
 def auth_failed(record: dict[str, Any]) -> bool:
     """Whether a run failed before the model answered, for lack of a login."""
     u = record.get("usage") or {}
@@ -323,6 +337,7 @@ def copy_transcripts(config_dir: Path, dest: Path) -> None:
 def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: Any) -> list[dict[str, Any]]:
     budget = Budget(opts.get("max_total_tokens"))
     work_root = Path(tempfile.mkdtemp(prefix="jouet-bench-"))
+    opts = {**opts, "jouet_bin": snapshot(opts["jouet_bin"], work_root)}
     records = []
     results_path = out_dir / "runs.jsonl"
     try:

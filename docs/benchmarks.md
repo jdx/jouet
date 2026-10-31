@@ -113,7 +113,7 @@ python3 bench/agents.py report bench/results/<id>   # rewrite a summary
 | `--max-usd-per-run` | 3 | Claude Code's `--max-budget-usd` (Codex reports no cost) |
 | `--max-total-tokens` | 60,000,000 | skip the remaining runs once the suite has spent this |
 | `--timeout` | each task's | cap every task's timeout, in seconds |
-| `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs |
+| `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs. It is copied once when the suite starts, so a rebuild during the suite neither changes nor removes what is measured |
 | `--keep-work` | off | keep each run's work tree and home, for debugging |
 
 A run stopped by its timeout or a budget counts as a failure, and the report says which stopped it.

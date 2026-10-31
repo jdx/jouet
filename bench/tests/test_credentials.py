@@ -88,6 +88,23 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(target.read_text(), '{"token": "new"}')
 
 
+class SnapshotTest(unittest.TestCase):
+    def test_the_suite_keeps_running_its_copy_when_the_build_goes_away(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            cache = root / "cache" / "debug"
+            cache.mkdir(parents=True)
+            built = cache / "jouet"
+            built.write_text("#!/bin/sh\necho jouet\n")
+            link = root / "target-debug-jouet"
+            link.symlink_to(built)
+            copy = runner.snapshot(link, root / "work")
+            built.unlink()
+            self.assertFalse(copy.is_symlink())
+            self.assertEqual(copy.read_text(), "#!/bin/sh\necho jouet\n")
+            self.assertTrue(os.access(copy, os.X_OK))
+
+
 class AuthFailureTest(unittest.TestCase):
     def test_a_login_failure_stops_the_suite_and_nothing_else_does(self):
         failed = {
