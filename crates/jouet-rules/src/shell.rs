@@ -30,6 +30,9 @@ pub struct Command {
     /// The parameters the command expands outside single quotes, by name:
     /// `$HOME` and `${HOME:-/}` are both `HOME`.
     pub vars: Vec<String>,
+    /// The variable assignments before the program (`RUST_LOG=1 cargo
+    /// test`), as written after quote removal.
+    pub env: Vec<String>,
     /// The file its standard output goes to (`> out`, `>> log`, `&> all`)
     /// instead of where it would otherwise go, as written.
     pub stdout_to: Option<String>,
@@ -310,7 +313,11 @@ impl Builder {
             .iter()
             .position(|w| !RESERVED.contains(&w.as_str()) && !is_assignment(w))
             .unwrap_or(command.words.len());
-        command.words.drain(..keep);
+        command.env = command
+            .words
+            .drain(..keep)
+            .filter(|w| is_assignment(w))
+            .collect();
         command.op = op;
         if command.words.is_empty() && command.heredocs.is_empty() {
             // `do`, `done`, a blank line: carry the operator to the previous
@@ -665,6 +672,13 @@ mod tests {
             words("while true; do RUST_LOG=1 cargo test; sleep 5; done"),
             [vec!["true"], vec!["cargo", "test"], vec!["sleep", "5"]]
         );
+    }
+
+    #[test]
+    fn leading_assignments_are_kept_apart() {
+        let script = parse("do RUST_LOG=debug A='x y' cargo test; FOO=1");
+        assert_eq!(script.commands[0].words, ["cargo", "test"]);
+        assert_eq!(script.commands[0].env, ["RUST_LOG=debug", "A=x y"]);
     }
 
     #[test]

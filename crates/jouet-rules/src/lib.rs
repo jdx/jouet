@@ -1786,6 +1786,7 @@ fn command_table(
         }),
     )?;
     t.set("stdout_to", command.stdout_to.as_deref())?;
+    t.set("env", command.env.clone())?;
     t.set("nested", nested)?;
     t.set("status", status)?;
     let text = argv.join(" ");

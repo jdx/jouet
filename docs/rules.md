@@ -256,7 +256,7 @@ ok    secret-files        25 examples passed
 ok    push-untested       13 examples passed
 ok    scoped-lint         21 examples passed
 ok    affected-tests      22 examples passed
-ok    piped-test-output   33 examples passed
+ok    piped-test-output   34 examples passed
 ok    pitchfork-start     8 examples passed
 ok    pitchfork-stop      9 examples passed
 ok    pitchfork-logs      7 examples passed

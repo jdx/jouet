@@ -410,6 +410,11 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_output --partial "Run \`jouet test --cmd -- cargo test -q -p app\` instead of cutting its output with grep."
 	assert_output --partial '[jouet rule: piped-test-output]'
 
+	# Assignments stay in front, and what the shell would expand stays bare.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "RUST_LOG=debug cargo test --manifest-path \$DIR/Cargo.toml 'a b' | tail")"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial "Run \`RUST_LOG=debug jouet test --cmd -- cargo test --manifest-path \$DIR/Cargo.toml \"a b\"\` instead"
+
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
 	assert_output ""
 

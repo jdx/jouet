@@ -92,12 +92,21 @@ local function runs(command: JouetCommand): boolean
 	return false
 end
 
--- A word as the shell reads it back.
+-- A word as the shell reads it back. `$VAR`, globs and `~` stay bare, so
+-- the shell expands them as it would have in the original command, since
+-- `--cmd` runs without a shell. Any other word is double-quoted, which
+-- still expands `$`.
 local function quote(word: string): string
-	if word ~= "" and not string.find(word, "[^%w%-_./:=+,@%%]") then
+	if word ~= "" and not string.find(word, "[^%w%-_./:=+,@%%$*?%[%]~{}]") then
 		return word
 	end
-	return "'" .. (string.gsub(word, "'", "'\\''")) .. "'"
+	return '"' .. (string.gsub(word, '[\\"`]', "\\%0")) .. '"'
+end
+
+-- A leading `NAME=value` assignment, with its value quoted as a word.
+local function assignment(text: string): string
+	local name, value = string.match(text, "^([^=]*)=(.*)$")
+	return `{name}={if value == "" then '""' else quote(value :: string)}`
 end
 
 -- The command that cuts `commands[i]`'s output, if one does.
@@ -144,12 +153,18 @@ local rule: JouetRule = {
 			end
 			local cut = cutter(call.commands, i)
 			if cut then
+				-- Assignments go before jouet, whose environment the command
+				-- inherits.
+				local env = {}
+				for _, text in command.env do
+					table.insert(env, assignment(text) .. " ")
+				end
 				local words = {}
 				for _, word in command.words do
 					table.insert(words, quote(word))
 				end
 				return jouet.warn(
-					`Run \`jouet test --cmd -- {table.concat(words, " ")}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
+					`Run \`{table.concat(env)}jouet test --cmd -- {table.concat(words, " ")}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
 				)
 			end
 		end

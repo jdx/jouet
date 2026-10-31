@@ -37,6 +37,7 @@ fires = [
   "python3 -m pytest -x 2>&1 | sed -n '1,40p'",
   "npx vitest run 2>&1 | head -50",
   "make 2>&1 | tail",
+  "RUST_LOG=debug cargo test --manifest-path $DIR/Cargo.toml 2>&1 | tail",
 ]
 quiet = [
   # Left to `scoped-lint`.
