@@ -1,12 +1,12 @@
 //! `jouet rule list|test|schema|types|new|promote|log`.
 
 use super::Output;
+use crate::cli::{
+    RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
+};
 use crate::rules;
 use crate::sources::{self, Kind, Set};
 use crate::wind::{self, Paths, Status, replay, rulefile};
-use crate::{
-    RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
-};
 use jouet_output::exit::Exit;
 use jouet_rules::{Call, Engine, Origin, Rule, Source, State};
 use serde::Serialize;

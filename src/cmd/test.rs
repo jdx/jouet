@@ -4,8 +4,8 @@
 //! (`crate::testlog`) for an agent.
 
 use super::Output;
-use crate::TestArgs;
 use crate::affected::{self, Decision, Plan, Suite};
+use crate::cli::TestArgs;
 use crate::testlog::{self, Digest};
 use jouet_output::display::Mode;
 use jouet_output::exit::Exit;

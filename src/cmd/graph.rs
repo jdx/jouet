@@ -1,7 +1,7 @@
 //! `jouet graph`: the code graph in `jouet_graph`.
 
 use super::Output;
-use crate::{
+use crate::cli::{
     GraphAffectedArgs, GraphArgs, GraphCmd, GraphExploreArgs, GraphIndexArgs, GraphSymbolsArgs,
     GraphTraverseArgs,
 };

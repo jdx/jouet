@@ -2,11 +2,11 @@
 //! against their registries and OSV.
 
 use super::Output;
+use crate::cli::{DepsArgs, DepsAuditArgs, DepsCmd, DepsInfoArgs};
 use crate::deps::osv::{self, Advisory, Query};
 use crate::deps::registry::{self, Facts};
 use crate::deps::{Http, ecosystem, registry_name, same_name};
 use crate::docs::{self, Lang, Locked};
-use crate::{DepsArgs, DepsAuditArgs, DepsCmd, DepsInfoArgs};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;

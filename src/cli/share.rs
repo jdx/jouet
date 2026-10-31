@@ -1,0 +1,31 @@
+use usage_rs::Args;
+
+/// Propose a proven rule, a missing primitive, or a fix to jouet itself to its maintainers
+///
+/// Builds a proposal and prints the exact text, with paths, repository
+/// names, hostnames and emails replaced, and a diff of what that changed.
+/// Nothing is posted without --yes, which a person must approve: it posts
+/// with your GitHub login, a bug as an Issue on jdx/jouet and anything else
+/// as a Discussion in its "Rules & ideas" category. A rule is shared only
+/// once it passes its tests, has denied for a week and fired often with few
+/// overrides. --idea also covers what sessions show about jouet itself:
+/// crashes, exit codes outside its table, malformed JSON, usage errors,
+/// output agents abandon, built-in rules overridden again and again, slow
+/// hooks, and scripts written in many sessions. At most three posts a week.
+#[derive(Args)]
+pub(crate) struct ShareArgs {
+    /// The rule to share; with --idea, the idea's key (default: the most recorded)
+    pub(crate) name: Option<String>,
+    /// Share an idea: a missing primitive, or something sessions show about jouet itself
+    #[usage(long)]
+    pub(crate) idea: bool,
+    /// List the ideas ready to share, with their keys
+    #[usage(long)]
+    pub(crate) list: bool,
+    /// Post it; without this, only show what would be posted
+    #[usage(long)]
+    pub(crate) yes: bool,
+    /// Hide WORD as well, such as an internal tool's name. Repeatable
+    #[usage(long, value_name = "WORD")]
+    pub(crate) redact: Vec<String>,
+}

@@ -1,7 +1,7 @@
 //! `jouet audit`.
 
 use super::Output;
-use crate::AuditArgs;
+use crate::cli::AuditArgs;
 use jouet_audit::{
     Analyzer, CategoryReport, ClaudeCode, Codex, Filter, HarnessReport, Reader, Report, ScanStats,
 };

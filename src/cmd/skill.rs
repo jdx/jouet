@@ -2,7 +2,7 @@
 //! the flags to `jouet agent-help`, so it never has to be updated by hand.
 
 use super::Output;
-use crate::SkillArgs;
+use crate::cli::SkillArgs;
 use crate::guide;
 use jouet_output::exit::Exit;
 use std::fmt::Write as _;

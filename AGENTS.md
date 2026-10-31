@@ -55,7 +55,7 @@ MSRV in `Cargo.toml`'s `rust-version`. Windows runs only clippy and the Pester t
 ## Crates
 
 The repository is a Cargo workspace. The `jouet` package at the root is the binary: the usage-rs
-CLI declaration in `src/main.rs`, the command glue in `src/cmd/`, the config file, the git
+CLI declaration in `src/cli/` (the root and the subcommand enum in `mod.rs`, one module of argument types per command; `src/main.rs` only dispatches), the command glue in `src/cmd/`, the config file, the git
 helpers, the setup, hook, ledger and agent-guide code, and the test selection behind `jouet test
 --affected` (`src/affected/`: the changed set, the fallbacks, and one adapter per test runner). The rest lives in library crates under
 `crates/`:

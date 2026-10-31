@@ -2,7 +2,7 @@
 //! `jouet read --map`, Aider's repository map on the code graph.
 
 use super::Output;
-use crate::ReadArgs;
+use crate::cli::ReadArgs;
 use crate::entire::{self, Entire, Origin};
 use jouet_graph::{DEFAULT_BUDGET, MapOptions, UNFOCUSED_MULTIPLIER};
 use jouet_output::exit::Exit;

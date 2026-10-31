@@ -2,7 +2,7 @@
 
 use super::Output;
 use super::scope::{How, Scope};
-use crate::SearchArgs;
+use crate::cli::SearchArgs;
 use jouet_output::exit::Exit;
 use jouet_search::memory::Memory;
 use jouet_search::search::{self, Budget, Error, Options};

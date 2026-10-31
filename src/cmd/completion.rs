@@ -2,7 +2,8 @@
 //! CLI definition as the parser, so it cannot drift from the commands.
 
 use super::Output;
-use crate::{CompletionArgs, Jouet};
+use crate::Jouet;
+use crate::cli::CompletionArgs;
 use jouet_output::exit::Exit;
 use usage_rs::complete::Shell;
 

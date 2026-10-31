@@ -9,7 +9,7 @@
 //! reported on stderr. Exit code 2, which harnesses read as "block", is
 //! never used.
 
-use crate::HookArgs;
+use crate::cli::HookArgs;
 use crate::cmd;
 use crate::fnox;
 use crate::guide;

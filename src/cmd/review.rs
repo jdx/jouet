@@ -1,7 +1,7 @@
 //! `jouet review-package`.
 
 use super::Output;
-use crate::ReviewPackageArgs;
+use crate::cli::ReviewPackageArgs;
 use jouet_git::Git;
 use jouet_git::review::{self, DEFAULT_CONTEXT, Package};
 use jouet_output::exit::Exit;

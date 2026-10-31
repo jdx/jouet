@@ -3,8 +3,9 @@
 
 use super::Output;
 use super::entire::{self, Wanted};
+use crate::cli::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs};
 use crate::config::Config;
-use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git};
+use crate::git;
 use jouet_github::entire::Change;
 use jouet_github::host::{self, Feature, Host};
 use jouet_github::pr::target::{self, Arg, Repo, Target};

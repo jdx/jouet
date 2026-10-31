@@ -1,7 +1,7 @@
 //! `jouet pr status`, and the `--settle` default `pr land` shares with it.
 
 use super::Output;
-use crate::{PrArgs, PrCmd, StatusArgs};
+use crate::cli::{PrArgs, PrCmd, StatusArgs};
 use jouet_github::Client;
 use jouet_github::pr::select::DEFAULT_SETTLE;
 pub(crate) use jouet_github::pr::select::{Report, Selection, fetch, lookups};

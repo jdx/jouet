@@ -2,7 +2,7 @@
 
 use super::Output;
 use super::secrets::{self, CommitScan, Fnox};
-use crate::CommitArgs;
+use crate::cli::CommitArgs;
 use crate::config::Config;
 use crate::fnox;
 use jouet_git::Git;

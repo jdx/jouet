@@ -1,7 +1,7 @@
 //! `jouet job`: one-off background work. The runner is jouet-wait's.
 
 use super::Output;
-use crate::{JobArgs, JobCmd, JobLogsArgs, JobStartArgs, JobStopArgs};
+use crate::cli::{JobArgs, JobCmd, JobLogsArgs, JobStartArgs, JobStopArgs};
 use jouet_output::exit::Exit;
 use jouet_output::time::{self, parse_duration};
 use jouet_wait::Reporter;
