@@ -9,10 +9,12 @@
 
 pub mod checks;
 pub mod ci;
+pub mod daemon;
 pub mod job;
 mod joblog;
 pub mod local;
 mod os;
+pub mod pitchfork;
 pub mod pr;
 pub mod remote;
 mod report;
