@@ -1,6 +1,7 @@
 //! The last test, lint and build runs of an agent session, as `jouet
-//! setup`'s hooks record them in `$XDG_STATE_HOME/jouet/sessions/ID.json`:
-//! `{"runs": {"test": {"command": "cargo test", "exit_code": 0}}}`.
+//! setup`'s hooks record them in `$XDG_STATE_HOME/jouet/sessions/ID.json`,
+//! by the work tree each ran in:
+//! `{"trees": {"/src/app": {"runs": {"test": {"command": "cargo test", "exit_code": 0}}}}}`.
 //!
 //! Reading is best effort: no session ID, no file, or a file in a shape
 //! this build does not know all mean nothing was recorded.
@@ -19,6 +20,12 @@ pub struct CheckRun {
 
 #[derive(Deserialize)]
 struct State {
+    #[serde(default)]
+    trees: BTreeMap<String, Tree>,
+}
+
+#[derive(Deserialize)]
+struct Tree {
     #[serde(default)]
     runs: BTreeMap<String, Run>,
 }
@@ -48,12 +55,17 @@ fn path(dir: &Path, id: &str) -> Option<PathBuf> {
     (!safe.is_empty()).then(|| dir.join(format!("{safe}.json")))
 }
 
-/// The session's latest run of each kind of check, or `None` when nothing
-/// was recorded.
-pub fn last_checks(dir: &Path, id: &str) -> Option<Vec<CheckRun>> {
+/// The session's latest run of each kind of check in the work tree at
+/// `worktree`, or `None` when nothing was recorded there.
+pub fn last_checks(dir: &Path, id: &str, worktree: &Path) -> Option<Vec<CheckRun>> {
     let bytes = std::fs::read(path(dir, id)?).ok()?;
-    let state: State = serde_json::from_slice(&bytes).ok()?;
-    let runs: Vec<CheckRun> = state
+    let mut state: State = serde_json::from_slice(&bytes).ok()?;
+    // Keyed as the hooks key it: the root with symlinks resolved.
+    let root = worktree
+        .canonicalize()
+        .unwrap_or_else(|_| worktree.to_path_buf());
+    let tree = state.trees.remove(root.to_string_lossy().as_ref())?;
+    let runs: Vec<CheckRun> = tree
         .runs
         .into_iter()
         .map(|(kind, run)| CheckRun {
@@ -74,10 +86,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("abc-123.json"),
-            r#"{"runs":{"test":{"command":"cargo test","exit_code":101},"lint":{"command":"mise run lint","exit_code":0}}}"#,
+            r#"{"trees":{"/src/app":{"runs":{"test":{"command":"cargo test","exit_code":101},"lint":{"command":"mise run lint","exit_code":0}}},"/src/other":{"runs":{"build":{"command":"cargo build","exit_code":0}}}}}"#,
         )
         .unwrap();
-        let runs = last_checks(dir.path(), "abc-123").unwrap();
+        let app = Path::new("/src/app");
+        let runs = last_checks(dir.path(), "abc-123", app).unwrap();
         assert_eq!(
             runs,
             [
@@ -93,11 +106,20 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(last_checks(dir.path(), "other"), None);
-        assert_eq!(last_checks(dir.path(), "../../etc"), None);
+        // Another work tree's runs are not this one's.
+        assert_eq!(
+            last_checks(dir.path(), "abc-123", Path::new("/src/elsewhere")),
+            None
+        );
+        assert_eq!(last_checks(dir.path(), "other", app), None);
+        assert_eq!(last_checks(dir.path(), "../../etc", app), None);
         std::fs::write(dir.path().join("bad.json"), "not json").unwrap();
-        assert_eq!(last_checks(dir.path(), "bad"), None);
-        std::fs::write(dir.path().join("empty.json"), r#"{"runs":{}}"#).unwrap();
-        assert_eq!(last_checks(dir.path(), "empty"), None);
+        assert_eq!(last_checks(dir.path(), "bad", app), None);
+        std::fs::write(
+            dir.path().join("empty.json"),
+            r#"{"trees":{"/src/app":{"runs":{}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(last_checks(dir.path(), "empty", app), None);
     }
 }

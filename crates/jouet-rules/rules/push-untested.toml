@@ -27,6 +27,8 @@ fires = [
   "git push -u origin feat/verify",
   "git -C ../repo push --force-with-lease",
   "cargo test -p x && git push",
+  # A push after a `cd` asks about the work tree it went to.
+  "cd ~/src/app && git push",
   "gh pr create --fill",
 ]
 quiet = [
@@ -38,4 +40,6 @@ quiet = [
   "echo 'git push'",
   "gh pr view",
   "gh pr create --help",
+  # After a `cd` it cannot follow, the work tree is unknown.
+  "cd \"$DIR\" && git push",
 ]

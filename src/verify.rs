@@ -10,7 +10,9 @@
 //! each command's exit code to a hook as it happens (PostToolUse on success,
 //! PostToolUseFailure with `Exit code N`), and those records are kept, with
 //! the tree each run saw ([`jouet_rules::tree`]), in a small per-session
-//! state file. Codex sends no exit code to hooks, so its commands are read
+//! state file. They are kept by the work tree each run ran in, after any `cd`
+//! before it, so a session that works in another repository is judged by the
+//! runs it made there. Codex sends no exit code to hooks, so its commands are read
 //! from the end of the session transcript when it stops, and run through the
 //! same rules then; their trees are unknown.
 //!
@@ -66,9 +68,19 @@ impl Run {
     }
 }
 
-/// A session's checks.
+/// A session's checks, kept by work tree: a run counts for the repository
+/// it ran in, which need not be the one the session started in.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct State {
+    /// By the root of the work tree the runs ran in (see [`root_of`]); ""
+    /// for runs outside a repository.
+    #[serde(default)]
+    pub trees: BTreeMap<String, Checks>,
+}
+
+/// The checks run in one work tree.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Checks {
     /// The newest run of each kind.
     #[serde(default)]
     pub runs: BTreeMap<Kind, Run>,
@@ -112,6 +124,74 @@ impl Run {
 }
 
 impl State {
+    /// Adds runs that ran in the work tree at `root`, against `tree`.
+    pub(crate) fn record(
+        &mut self,
+        root: &str,
+        records: impl IntoIterator<Item = Record>,
+        tree: Option<&str>,
+    ) {
+        self.trees
+            .entry(root.to_string())
+            .or_default()
+            .record(records, tree);
+    }
+
+    /// The checks run in the work tree at `root`.
+    pub(crate) fn checks(&self, root: &str) -> Option<&Checks> {
+        self.trees.get(root)
+    }
+
+    /// Why stopping should wait, in any work tree the session ran checks
+    /// in: `home`, the session's own, first, then the others, each named.
+    /// `tree` gives a root's work tree now, and `hk_repo` whether it has an
+    /// hk config.
+    pub(crate) fn block_reason(
+        &self,
+        home: &str,
+        tree: impl Fn(&str) -> Option<String>,
+        hk_repo: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        let own = self.trees.get_key_value(home);
+        let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
+        own.into_iter().chain(others).find_map(|(root, checks)| {
+            let reason = checks.block_reason(|| tree(root), hk_repo(root))?;
+            Some(if root == home || root.is_empty() {
+                reason
+            } else {
+                format!("In {root}: {reason}")
+            })
+        })
+    }
+
+    pub(crate) fn load(path: &Path) -> Self {
+        std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir)?;
+        let mut file = tempfile::NamedTempFile::new_in(dir)?;
+        serde_json::to_writer(&mut file, self)?;
+        file.persist(path).map_err(|e| e.error)?;
+        Ok(())
+    }
+}
+
+/// The root of the work tree `dir` is in, as [`State`] keys it: the nearest
+/// directory with a `.git`, from `dir` with symlinks and `..` resolved; ""
+/// outside a repository.
+pub(crate) fn root_of(dir: &Path) -> String {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    jouet_output::paths::work_tree(&dir)
+        .map(|root| root.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+impl Checks {
     /// Adds runs that ran against `tree`.
     pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>, tree: Option<&str>) {
         for record in records {
@@ -234,22 +314,6 @@ impl State {
             failed.command,
             failed.exit_code
         ))
-    }
-
-    pub(crate) fn load(path: &Path) -> Self {
-        std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
-        let dir = path.parent().unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir)?;
-        let mut file = tempfile::NamedTempFile::new_in(dir)?;
-        serde_json::to_writer(&mut file, self)?;
-        file.persist(path).map_err(|e| e.error)?;
-        Ok(())
     }
 }
 
@@ -378,6 +442,7 @@ mod tests {
             command: command.into(),
             exit_code,
             full: scope == "full",
+            dir: None,
             selector: (scope != "full").then(|| scope.to_string()),
         }
     }
@@ -387,13 +452,13 @@ mod tests {
     }
 
     /// The reason to block with the work tree at `tree`.
-    fn reason(state: &State, tree: &str) -> Option<String> {
+    fn reason(state: &Checks, tree: &str) -> Option<String> {
         state.block_reason(|| Some(tree.to_string()), false)
     }
 
     #[test]
     fn blocks_while_the_last_run_failed() {
-        let mut state = State::default();
+        let mut state = Checks::default();
         state.record([test("cargo test", 101, "full")], Some("t1"));
         let why = reason(&state, "t1").unwrap();
         assert!(why.starts_with("The last test run failed"), "{why}");
@@ -404,7 +469,7 @@ mod tests {
 
     #[test]
     fn a_partial_pass_does_not_clear_a_failed_full_run() {
-        let mut state = State::default();
+        let mut state = Checks::default();
         state.record([test("cargo test --workspace", 101, "full")], Some("t1"));
         state.record(
             [test("cargo test -p jouet-edit", 0, "-p jouet-edit")],
@@ -419,7 +484,7 @@ mod tests {
 
     #[test]
     fn a_partial_pass_clears_only_a_failure_of_the_same_selection() {
-        let mut state = State::default();
+        let mut state = Checks::default();
         state.record([test("cargo test --workspace", 0, "full")], Some("t1"));
         state.record([test("cargo test -p a", 101, "-p a")], Some("t1"));
         state.record([test("cargo test -p b", 0, "-p b")], Some("t1"));
@@ -446,7 +511,7 @@ mod tests {
 
     #[test]
     fn only_partial_test_runs_since_the_tree_changed_block() {
-        let mut state = State::default();
+        let mut state = Checks::default();
         state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
         let why = reason(&state, "t1").unwrap();
         assert!(why.starts_with("Only part of the test suite"), "{why}");
@@ -462,14 +527,14 @@ mod tests {
         // An unknown tree (a Codex session) is not the same tree.
         assert!(state.block_reason(|| None, false).is_some());
         // A partial lint or build run is not asked about.
-        let mut lint = State::default();
+        let mut lint = Checks::default();
         lint.record([record(Kind::Lint, "cargo clippy -p a", 0, "-p a")], None);
         assert_eq!(lint.block_reason(|| None, false), None);
     }
 
     #[test]
     fn files_changed_after_a_passing_hk_check_block_in_an_hk_repo() {
-        let mut state = State::default();
+        let mut state = Checks::default();
         let lint = |command: &str, code: i32, scope: &str| record(Kind::Lint, command, code, scope);
         state.record(
             [lint("jouet diag check --changed", 0, "changed files")],
@@ -508,15 +573,55 @@ mod tests {
     }
 
     #[test]
+    fn each_work_tree_is_judged_by_its_own_runs() {
+        let mut state = State::default();
+        let tree = |root: &str| Some(if root == "/other" { "o1" } else { "h1" }.to_string());
+        // A full pass in another repository, then part of its suite.
+        state.record(
+            "/other",
+            [test("cargo test --workspace", 0, "full")],
+            Some("o1"),
+        );
+        state.record(
+            "/other",
+            [test("bats test/edit.bats", 0, "test/edit.bats")],
+            Some("o1"),
+        );
+        assert_eq!(state.block_reason("/home", tree, |_| false), None);
+        // Only part of the suite in the session's own tree blocks, unnamed.
+        state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("h1"));
+        let why = state.block_reason("/home", tree, |_| false).unwrap();
+        assert!(why.starts_with("Only part of the test suite"), "{why}");
+        // A failure in another tree blocks, and names it.
+        state.record(
+            "/home",
+            [test("cargo test --workspace", 0, "full")],
+            Some("h1"),
+        );
+        assert_eq!(state.block_reason("/home", tree, |_| false), None);
+        state.record(
+            "/other",
+            [test("cargo test --workspace", 101, "full")],
+            Some("o1"),
+        );
+        let why = state.block_reason("/home", tree, |_| false).unwrap();
+        assert!(
+            why.starts_with("In /other: The last test run failed"),
+            "{why}"
+        );
+    }
+
+    #[test]
     fn state_round_trips_through_its_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.json");
         let mut state = State::default();
         state.record(
+            "/r",
             [record(Kind::Lint, "cargo clippy --workspace", 101, "full")],
             Some("t1"),
         );
-        state.record([test("cargo test -p a", 0, "-p a")], None);
+        state.record("", [test("cargo test -p a", 0, "-p a")], None);
         state.save(&path).unwrap();
         assert_eq!(State::load(&path), state);
         assert_eq!(
@@ -536,7 +641,7 @@ mod tests {
                 std::thread::spawn(move || {
                     for i in 0..40 {
                         let run = record(kind, &format!("run {i}"), code, "full");
-                        update(&path, |s| s.record([run], None)).unwrap();
+                        update(&path, |s| s.record("/r", [run], None)).unwrap();
                     }
                 })
             })
@@ -545,8 +650,9 @@ mod tests {
             thread.join().unwrap();
         }
         let state = State::load(&path);
-        assert_eq!(state.runs.len(), 3, "{state:?}");
-        assert_eq!(state.runs[&Kind::Test].exit_code, 101);
+        let runs = &state.trees["/r"].runs;
+        assert_eq!(runs.len(), 3, "{state:?}");
+        assert_eq!(runs[&Kind::Test].exit_code, 101);
     }
 
     #[test]
