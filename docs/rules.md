@@ -14,29 +14,31 @@ The rule format is new and may change between releases. `jouet rule schema` alwa
 
 ```output
 $ jouet rule list
-sleep-poll         enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
-review-threads     enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
-python-edit        enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
-git-add-all        enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
-git-stash          enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
-no-verify          enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
-force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
-print-secrets      enabled  deny    builtin  builtin  2026-10-31  Printing secret values puts them in the transcript, which leaves the machine with every turn and outlives the session.
-secret-files       enabled  deny    builtin  builtin  2026-10-31  Reading a plaintext secrets file puts every value in it in the transcript, which leaves the machine with every turn and outlives the session.
-push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
-scoped-lint        enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
-affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
-pitchfork-start    enabled  deny    builtin  builtin  2026-10-31  Starting by hand a server the project's pitchfork config declares runs a second copy beside pitchfork's, without its ready check, log or restarts; `pitchfork start` runs the declared one.
-pitchfork-stop     enabled  deny    builtin  builtin  2026-10-31  Killing a daemon pitchfork runs, by its port or its command line, looks to pitchfork like a crash and skips its graceful stop; `pitchfork stop` or `restart` does it by name.
-pitchfork-logs     enabled  warn    builtin  builtin  2026-10-31  Following a daemon's log with `pitchfork logs --follow` never returns to the agent; `-n` prints the end of it and returns.
-job-start          enabled  deny    builtin  builtin  2026-10-31  A server or a build started with `&` or nohup has no ready check, no log to ask for and no name to stop it by, so the agent polls it; `jouet job start` gives it all three.
-job-ready          enabled  deny    builtin  builtin  2026-10-31  Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies.
-job-logs           enabled  warn    builtin  builtin  2026-10-31  Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name.
-job-stop           enabled  warn    builtin  builtin  2026-10-31  Killing a server by its port or its command line can hit the wrong process, or leave its children running; `jouet job stop` stops a job's whole process group by name.
-checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
-reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
-large-read         enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
-unbudgeted-search  enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
+sleep-poll          enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+review-threads      enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
+python-edit         enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
+git-add-all         enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
+git-stash           enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
+no-verify           enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
+force-push          enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+reset-to-remote     enabled  warn    builtin  builtin  2026-10-31  Resetting a branch to its remote copy (`git checkout -B X origin/X`) drops the local commits the remote lacks, such as fixes not yet pushed; a merge keeps them.
+rebase-merged-base  enabled  warn    builtin  builtin  2026-10-31  After a stacked PR's prerequisite merges, often squashed, rebasing the layer above onto the trunk replays commits the trunk already has in another form, conflicts, and needs a force push; merging the trunk in does not.
+print-secrets       enabled  deny    builtin  builtin  2026-10-31  Printing secret values puts them in the transcript, which leaves the machine with every turn and outlives the session.
+secret-files        enabled  deny    builtin  builtin  2026-10-31  Reading a plaintext secrets file puts every value in it in the transcript, which leaves the machine with every turn and outlives the session.
+push-untested       enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
+scoped-lint         enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
+affected-tests      enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
+pitchfork-start     enabled  deny    builtin  builtin  2026-10-31  Starting by hand a server the project's pitchfork config declares runs a second copy beside pitchfork's, without its ready check, log or restarts; `pitchfork start` runs the declared one.
+pitchfork-stop      enabled  deny    builtin  builtin  2026-10-31  Killing a daemon pitchfork runs, by its port or its command line, looks to pitchfork like a crash and skips its graceful stop; `pitchfork stop` or `restart` does it by name.
+pitchfork-logs      enabled  warn    builtin  builtin  2026-10-31  Following a daemon's log with `pitchfork logs --follow` never returns to the agent; `-n` prints the end of it and returns.
+job-start           enabled  deny    builtin  builtin  2026-10-31  A server or a build started with `&` or nohup has no ready check, no log to ask for and no name to stop it by, so the agent polls it; `jouet job start` gives it all three.
+job-ready           enabled  deny    builtin  builtin  2026-10-31  Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies.
+job-logs            enabled  warn    builtin  builtin  2026-10-31  Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name.
+job-stop            enabled  warn    builtin  builtin  2026-10-31  Killing a server by its port or its command line can hit the wrong process, or leave its children running; `jouet job stop` stops a job's whole process group by name.
+checks              enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
+reread              enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
+large-read          enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
+unbudgeted-search   enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
 ```
 
 The columns are: name, state, mode, scope, author, created, and why.
@@ -236,31 +238,33 @@ jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expecte
 
 ```output
 $ jouet rule test --all
-ok    sleep-poll         12 examples passed
-ok    review-threads     7 examples passed
-ok    python-edit        7 examples passed
-ok    git-add-all        14 examples passed
-ok    git-stash          25 examples passed
-ok    no-verify          14 examples passed
-ok    force-push         12 examples passed
-ok    print-secrets      44 examples passed
-ok    secret-files       25 examples passed
-ok    push-untested      13 examples passed
-ok    scoped-lint        21 examples passed
-ok    affected-tests     22 examples passed
-ok    pitchfork-start    8 examples passed
-ok    pitchfork-stop     9 examples passed
-ok    pitchfork-logs     7 examples passed
-ok    job-start          26 examples passed
-ok    job-ready          12 examples passed
-ok    job-logs           11 examples passed
-ok    job-stop           15 examples passed
-ok    checks             66 examples passed
-ok    reread             12 examples passed
-ok    large-read         11 examples passed
-ok    unbudgeted-search  23 examples passed
-FAIL  no-rm-rf           it has no `quiet` examples: near misses it must leave alone
-23 of 24 rules passed their examples
+ok    sleep-poll          12 examples passed
+ok    review-threads      7 examples passed
+ok    python-edit         7 examples passed
+ok    git-add-all         14 examples passed
+ok    git-stash           25 examples passed
+ok    no-verify           14 examples passed
+ok    force-push          12 examples passed
+ok    reset-to-remote     14 examples passed
+ok    rebase-merged-base  12 examples passed
+ok    print-secrets       44 examples passed
+ok    secret-files        25 examples passed
+ok    push-untested       13 examples passed
+ok    scoped-lint         21 examples passed
+ok    affected-tests      22 examples passed
+ok    pitchfork-start     8 examples passed
+ok    pitchfork-stop      9 examples passed
+ok    pitchfork-logs      7 examples passed
+ok    job-start           26 examples passed
+ok    job-ready           12 examples passed
+ok    job-logs            11 examples passed
+ok    job-stop            15 examples passed
+ok    checks              66 examples passed
+ok    reread              12 examples passed
+ok    large-read          11 examples passed
+ok    unbudgeted-search   23 examples passed
+FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
+25 of 26 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -287,7 +291,7 @@ stays quiet on (near misses):
 
 ## Scripts
 
-Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Three built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Three built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too. `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop, and `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged.
 
 ```toml
 [[rule]]
@@ -357,6 +361,8 @@ A script can also ask about jouet's state. The probes only read, and each return
 | `jouet.ci.last_run(kind?, scope?)` | The newest `test`, `lint` or `build` run the hooks recorded in their ledger, of any scope or only `"full"` or `"partial"` ones: its `kind`, `ok`, `scope`, the `tree` it ran against, `exit_code`, command `shape` and time. `nil` when there is no ledger yet |
 | `jouet.git.state()` | The branch, its upstream, `ahead` and `behind`, and whether the work tree is `dirty`, from plain `git` |
 | `jouet.git.tree()` | A hash of the content of every tracked file in the work tree, staged or not: the `tree` a recorded run carries. A commit with the same content hashes the same |
+| `jouet.git.ahead(branch, of)` | How many commits on the local `branch` are not in `of`: what moving the branch to `of` would drop; `nil` when there is no such local branch |
+| `jouet.stack.layer()` | The current branch's place in a gh-stack stack: its `branch`, `parent` (the layer below, or the trunk), `trunk`, and `parent_merged`, true when the layer below was submitted as a PR and its remote branch is gone |
 | `jouet.cargo.workspace(dir?)` | The Cargo workspace around a directory: its `root`, the `package` a plain cargo command there builds, every member's name in `members`, and whether it sets `default_members` |
 | `jouet.pitchfork.daemons()` | The daemons the project's pitchfork config declares, from `pitchfork.toml`, `pitchfork.local.toml` and their `.config/` forms from the filesystem root down to the call's directory, a nearer file winning: each one's `name`, its `run` command as one line, the `ports` it is said to listen on (`port`, `expected_port`, `ready_port`, and `--port N` or `-p N` in `run`), and its `file`. Read from the files, without running pitchfork; `nil` when none declares any |
 | `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |

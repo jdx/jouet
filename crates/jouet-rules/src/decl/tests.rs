@@ -143,6 +143,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "read_lines",
             "scope",
             "seen",
+            "stack",
             "tool"
         ]
     );

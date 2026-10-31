@@ -1,0 +1,46 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "reset-to-remote"
+why = "Resetting a branch to its remote copy (`git checkout -B X origin/X`) drops the local commits the remote lacks, such as fixes not yet pushed; a merge keeps them."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+# The matcher finds a command that points a branch somewhere else; the
+# script asks git how many of the branch's commits that would drop.
+script = "reset-to-remote.luau"
+
+[[rule.match]]
+command = ["git checkout", "git switch"]
+flags = ["-B", "-C", "--force-create"]
+
+[[rule.match]]
+command = "git branch"
+flags = ["-f", "--force"]
+
+[[rule.match]]
+command = "git reset"
+flags = ["--hard", "--keep"]
+
+[rule.examples]
+fires = [
+  { command = "git checkout -B layer origin/layer", git = { ahead = 2 } },
+  { command = "git switch -C feat/x origin/feat/x", git = { ahead = 1 } },
+  { command = "git branch -f feat/x origin/feat/x", git = { ahead = 3 } },
+  { command = "git reset --hard origin/feat/x", git = { ahead = 1, branch = "feat/x" } },
+  { command = "git fetch && git checkout -B b origin/b", git = { ahead = 1 } },
+]
+quiet = [
+  # Nothing local would be lost.
+  { command = "git checkout -B layer origin/layer", git = { ahead = 0 } },
+  # No local branch of that name, or git cannot say.
+  "git checkout -B layer origin/layer",
+  # Without a start point the branch is reset to HEAD, which it is about to check out.
+  { command = "git checkout -B layer", git = { ahead = 2 } },
+  "git checkout layer",
+  "git switch -c new origin/new",
+  "git reset --soft HEAD^",
+  "git reset --hard",
+  "git branch -d old",
+  "echo 'git checkout -B a origin/a'",
+]

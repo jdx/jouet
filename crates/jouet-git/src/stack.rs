@@ -434,7 +434,8 @@ pub fn gh_stack(git: &Git, branch: &str) -> Option<GhStack> {
     })
 }
 
-fn parse_gh_stack(text: &str, branch: &str) -> Option<GhStack> {
+/// The stack holding `branch` in the text of a `gh-stack` file.
+pub fn parse_gh_stack(text: &str, branch: &str) -> Option<GhStack> {
     let file: GhStackFile = serde_json::from_str(text).ok()?;
     let entry = file
         .stacks
