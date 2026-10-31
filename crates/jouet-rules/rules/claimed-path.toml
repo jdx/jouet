@@ -1,0 +1,48 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "claimed-path"
+why = "Two sessions changing the same files on one machine overwrite or commit each other's work; `jouet claim` says who is working where."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["claim"]
+# The matcher finds an edit or a commit; the script asks `jouet claim`'s
+# store whether another live session claims what it touches.
+script = "claimed-path.luau"
+
+[[rule.match]]
+tool = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
+
+[[rule.match]]
+command = "git commit"
+unless_flags = ["-h", "--help", "--dry-run"]
+
+[[rule.match]]
+command = ["jouet commit", "jouet edit replace"]
+unless_flags = ["-h", "--help", "--dry-run"]
+
+[rule.examples]
+fires = [
+  { tool = "Edit", path = "src/cmd/claim.rs", session = "mine", claims = [{ pattern = "src/cmd/", session = "theirs", worktree = "/work/other", branch = "feat/x", note = "reworking the commands" }] },
+  { tool = "Write", path = "./docs/claim.md", session = "mine", claims = [{ pattern = "docs/*.md", session = "theirs" }] },
+  { command = "git commit -m 'fix' src/cmd/claim.rs", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  { command = "git commit -am wip -- src/", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  { command = "jouet commit src/cmd -m 'feat: x'", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  { command = "jouet edit replace src/main.rs --old a --new b", claims = [{ pattern = "src/main.rs", session = "theirs" }] },
+]
+quiet = [
+  # The session's own claim.
+  { tool = "Edit", path = "src/cmd/claim.rs", session = "mine", claims = [{ pattern = "src/cmd/", session = "mine" }] },
+  # Claimed paths elsewhere.
+  { tool = "Edit", path = "src/main.rs", session = "mine", claims = [{ pattern = "src/cmd/", session = "theirs" }] },
+  { command = "git commit -m 'src/cmd/claim.rs' README.md", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  { command = "git commit -F src/cmd/claim.rs README.md", session = "mine", claims = [{ pattern = "src/cmd/claim.rs", session = "theirs" }] },
+  # No claims, or no answer from the store.
+  { tool = "Edit", path = "src/cmd/claim.rs", session = "mine", claims = [] },
+  { tool = "Edit", path = "src/cmd/claim.rs" },
+  "git commit -m wip",
+  "git commit --dry-run src/cmd/claim.rs",
+  "git status",
+  { tool = "Read", path = "src/cmd/claim.rs", claims = [{ pattern = "src/cmd/", session = "theirs" }] },
+]

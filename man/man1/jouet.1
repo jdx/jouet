@@ -24,6 +24,15 @@ Print version
 \fBaudit\fR
 Report where coding\-agent sessions spend tokens and time
 .TP
+\fBclaim\fR
+Claim paths for this session, so other sessions are warned off them
+.TP
+\fBclaim ls\fR
+List the live claims in this repository, every session's
+.TP
+\fBclaim release\fR
+Release this session's claims
+.TP
 \fBcommit\fR
 Commit only the named paths, with trailers
 .TP
@@ -308,6 +317,61 @@ Show one redacted example command per shape and pattern
 .TP
 \fB\-h, \-\-help\fR
 Print help
+.SH "JOUET CLAIM"
+Claim paths for this session, so other sessions are warned off them
+
+A claim is advisory: it blocks nothing. It tells other agent sessions on this machine that this session works on these paths, and jouet's hooks warn a session that edits or commits a path another live session claims, naming that session and its worktree. Every worktree of a repository shares its claims. PATH is a file, a directory (covering everything under it) or a glob (`*`, `**`, `?`). A claim lasts \-\-for (default 2h), and lapses early when its worktree is removed or its agent exits. Claiming a path again renews it. Refuses (exit 1) when another live session claims an overlapping path, naming it; exits 4 outside an agent session (set JOUET_SESSION_ID to claim from elsewhere).
+.PP
+\fBUsage:\fR jouet claim [OPTIONS] [<PATHS>] ... [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-for\fR \fI<DUR>\fR
+How long the claim lasts (default 2h)
+.TP
+\fB\-\-note\fR \fI<TEXT>\fR
+What the session is doing there, shown to the others
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+The files, directories or globs to claim
+.SH "JOUET CLAIM LS"
+List the live claims in this repository, every session's
+
+Claims that expired, or whose worktree or agent is gone, are removed first; \-\-all lists them before they go.
+.PP
+\fBUsage:\fR jouet claim ls [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-all\fR
+Also list the claims that no longer hold
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET CLAIM RELEASE"
+Release this session's claims
+
+Releases the claims on the paths given, or all of this session's claims in this repository. Another session's claim is never released: it lapses on its own.
+.PP
+\fBUsage:\fR jouet claim release [OPTIONS] [<PATHS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+The claimed paths to release; all of this session's when none
 .SH "JOUET COMMIT"
 Commit only the named paths, with trailers
 
