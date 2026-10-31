@@ -129,6 +129,9 @@ Re\-run a command until it exits with the expected code
 \fBwait job\fR
 Wait for a `jouet job` to end, or to be ready
 .TP
+\fBwait daemon\fR
+Wait for a pitchfork daemon to be ready, or to stop
+.TP
 \fBjob\fR
 Run one\-off background work, such as a build or a server for one check
 .TP
@@ -1264,6 +1267,38 @@ Print help
 .TP
 \fB<ID>\fR
 The job's ID
+.SH "JOUET WAIT DAEMON"
+Wait for a pitchfork daemon to be ready, or to stop
+
+For a project's long\-running services, the daemons pitchfork runs (one\-off work is `wait job`'s). Reads `pitchfork status ID \-\-json` in this directory, so a short ID resolves in this project's namespace. Ready is `running` and, when there is a port to try (\-\-port, or the port pitchfork says the daemon binds) or a URL (\-\-http), answering there: pitchfork's JSON does not say whether its own ready check passed. \-\-until stopped waits until the daemon no longer runs. A daemon that errors or fails ends the wait with exit 1; then, and on a timeout, the end of its log is shown and the whole log is saved. Exits 3 when pitchfork has no such daemon and 4 when pitchfork is not installed.
+.PP
+\fBUsage:\fR jouet wait daemon [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-until\fR \fI<CONDITION>\fR
+`ready` (the default) or `stopped`
+.TP
+\fB\-\-port\fR \fI<N>\fR
+Ready once localhost's port N accepts connections
+.TP
+\fB\-\-http\fR \fI<URL>\fR
+Ready once URL answers with a 2xx status
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of its log to show on failure or timeout (default 60; 0 shows all of it)
+.TP
+\fB\-\-no\-logs\fR
+Do not read its log
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The daemon's ID: `api`, or `namespace/api`
 .SH "JOUET JOB"
 Run one\-off background work, such as a build or a server for one check
 

@@ -1,5 +1,5 @@
 ---
-description: Block until CI finishes, a PR is ready, or a file, log line, port, URL, process, command or background job is, instead of sleep-polling.
+description: Block until CI finishes, a PR is ready, or a file, log line, port, URL, process, command, background job or pitchfork daemon is, instead of sleep-polling.
 ---
 
 # jouet wait
@@ -22,6 +22,7 @@ Two traps catch those loops when they wait on CI. `gh run view --log-failed` ref
 | A process to exit | `jouet wait pid 4242` |
 | A command to succeed | `jouet wait cmd -- pg_isready -h localhost` |
 | A `jouet job` to end, or to be ready | `jouet wait job test` |
+| A [pitchfork](https://pitchfork.jdx.dev) daemon to be ready, or to stop | `jouet wait daemon api` |
 
 Every subject takes `--timeout` (default `30m`) and exits `124` when it runs out, so running the same command again keeps waiting.
 
@@ -39,6 +40,7 @@ jouet wait http URL      [--status CODE] [--contains REGEX]
 jouet wait pid PID
 jouet wait cmd [--expect-exit N] -- CMD...
 jouet wait job ID       [--until exited|ready] [--port N | --http URL] [--log-lines N] [--no-logs]
+jouet wait daemon ID    [--until ready|stopped] [--port N | --http URL] [--log-lines N] [--no-logs]
 
 common: --timeout DUR (default 30m)  --interval DUR (default 10s, backs off to 60s)
         --json | --jsonl  --quiet
@@ -134,6 +136,40 @@ Every condition except `closed` counts a merged PR as met and a PR closed withou
 
 These subjects stay deliberately small. Starting and supervising long-running services, with their ready checks, is [pitchfork](https://pitchfork.jdx.dev)'s job; one-off background work is [`jouet job`](/commands/job)'s.
 
+## `wait daemon`
+
+`wait daemon ID` is for a project's long-running services, the daemons [pitchfork](https://pitchfork.jdx.dev) runs; one-off work is `wait job`'s. It waits until a daemon is ready, or with `--until stopped` until it no longer runs. It reads `pitchfork status ID --json` in the current directory, so a short ID such as `api` resolves in this project's namespace; `namespace/api` names one from anywhere.
+
+```output
+$ jouet wait daemon web --http http://127.0.0.1:28932/ --timeout 30s --interval 1s
+[0s] daemon web: stopped
+[1s] daemon web: running, http http://127.0.0.1:28932/ unreachable: io: Connection refused (os error 111)
+[2s] daemon web: running, http http://127.0.0.1:28932/ status 200
+MET daemon web: running, http http://127.0.0.1:28932/ status 200 (2s)
+```
+
+- **Ready.** pitchfork's JSON does not say whether its own ready check has passed: a daemon is `running` as soon as its process starts. So ready is `running` and, when there is somewhere to ask, answering there: `--port N` (localhost's port accepts connections), `--http URL` (a 2xx answer), or else the port pitchfork says the daemon binds, when it says one. A oneshot daemon that has `completed` counts as ready.
+- **Failure.** A daemon that is `errored` or `failed` ends the wait at once with exit `1` and `FAILED`, even while it would otherwise keep waiting. Then, and on a timeout, jouet prints the end of the daemon's log, cut like `wait ci`'s excerpts: its last `--log-lines` lines (default `60`; `0` keeps all of it), plus earlier lines matching `error|FAILED|panicked|assert` with two lines of context, with every gap marked. pitchfork keeps logs in a database rather than in files, so jouet saves a copy to `<log dir>/wait-daemon-<id>-<time>-<pid>.log` and prints its path. `--no-logs` skips this.
+- **Exit codes.** `3` when pitchfork has no daemon by that ID, `4` when pitchfork is not installed.
+
+```output
+$ jouet wait daemon api --log-lines 8
+[0s] daemon api: errored (exit code 1)
+FAILED daemon api: errored (exit code 1) after 0s
+  ... 197 lines skipped
+  request 198 ok
+  request 199 ok
+  request 200 ok
+  Error: listen EADDRINUSE: address already in use :::3000
+  at Server.listen
+  at main
+
+  Node.js v22.11.0
+  full log: ~/.local/state/jouet/logs/wait-daemon-myproj-api-1793408181687-1915723.log
+```
+
+`pitchfork run` and `pitchfork start` already wait for their own ready check before they return. `wait daemon` is for a daemon something else started or restarted: a file watcher, `pitchfork restart` in the background, another session, or the supervisor at boot.
+
 ## Timing
 
 The first check is immediate. After that, the time between checks starts at `--interval` and grows by half again after each check that saw no change, up to 60 seconds (or `--interval`, if that is longer). It drops back to `--interval` when the state changes. No wait runs past `--timeout`, and there is one last check at it, so `--timeout 0` checks exactly once.
@@ -151,7 +187,7 @@ MET log app.log: matched (4s)
 ```
 
 - **Progress.** For a person at a terminal, one status line on stderr is redrawn every second. For agents, pipes and CI, each change of state is one line on stderr, so a backgrounded wait's log grows only when something happens.
-- **Result.** For the local subjects and `wait pr`, the first word is `MET` or `TIMEOUT` (`wait pr` and `wait job` also have `FAILED`). A timeout says how many checks ran. `wait ci` and `wait run` use the words described above.
+- **Result.** For the local subjects and `wait pr`, the first word is `MET` or `TIMEOUT` (`wait pr`, `wait job` and `wait daemon` also have `FAILED`). A timeout says how many checks ran. `wait ci` and `wait run` use the words described above.
 - **`--json`** prints one document. For the local subjects, it holds `subject`, `target`, `result` (`met`, `failed` or `timeout`), the last `state`, `elapsed_s` and `checks`, plus the subject's own fields: `line`, `status`, `exit_code`, `output`, `output_truncated` and `log_path`. Empty fields are left out.
 - **`--jsonl`** prints one `{"event":"state",...}` line for each change of state (and, for the GitHub subjects, their own events), then the result document tagged `"event":"result"`. Under Claude Code's Monitor tool, each line becomes a notification.
 - **`--quiet`** prints no progress and no text result, only the exit code. JSON is still printed when it is asked for.
@@ -161,9 +197,9 @@ MET log app.log: matched (4s)
 | Code | Meaning |
 |---|---|
 | `0` | The condition was met |
-| `1` | It can no longer be met: a check failed, no checks appeared, the PR was closed, changes were requested, the job exited with an error |
+| `1` | It can no longer be met: a check failed, no checks appeared, the PR was closed, changes were requested, the job exited with an error, the daemon errored |
 | `2` | Bad arguments, such as an invalid duration or regex |
-| `3` | The PR, run or job does not exist, or `wait cmd`'s program does not |
-| `4` | The PR is conflicted, so no `pull_request` CI will run |
+| `3` | The PR, run, job or pitchfork daemon does not exist, or `wait cmd`'s program does not |
+| `4` | The PR is conflicted, so no `pull_request` CI will run, or `wait daemon` found no pitchfork |
 | `5` | Authentication, network or rate-limit failure talking to GitHub |
 | `124` | Still waiting at `--timeout`; run the same command again to keep waiting |

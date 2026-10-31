@@ -420,6 +420,8 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
             .rules()
             .iter()
             .filter(|r| r.state == jouet_rules::State::Enabled && r.event == Event::PreToolUse)
+            // A rule about project files not here never fires here.
+            .filter(|r| engine.in_use_here(r))
             .map(|r| r.name.as_str())
             .collect()
     } else {

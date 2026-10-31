@@ -22,6 +22,7 @@ A handoff holds **facts only**. What the work is, what was tried and what to do 
 - the session's last test, lint and build runs, as `jouet setup`'s hooks record them;
 - background processes running in the worktree, each with a command to attach to it;
 - the worktree's [`jouet job`](/commands/job)s, running or ended, each with how to read its log;
+- the worktree's [pitchfork](https://pitchfork.jdx.dev) daemons that are running, starting, stopping or failed, from `pitchfork list --project --json`, listed apart from the jobs;
 - what could not be gathered, and why: no GitHub remote, no session ID, `--no-pr`.
 
 The last runs come from the session named by `--session`, else `JOUET_SESSION_ID`, else Claude Code's `CLAUDE_CODE_SESSION_ID`. Without them the handoff still works and says so.
@@ -32,7 +33,9 @@ Background processes are listed on Linux only, and the list is a heuristic. It i
 - are not jouet's own ancestors or siblings (the agent, its shell, the rest of jouet's pipeline);
 - are not in use at a terminal: an interactive shell, or whatever runs in a terminal's foreground, such as an editor.
 
-A child whose parent is also listed is folded into it. A process whose stdout goes to a file is attached with `tail -f FILE`; any other with `jouet wait pid PID`. A running job's processes are listed once, as the job.
+A child whose parent is also listed is folded into it. A process whose stdout goes to a file is attached with `tail -f FILE`; any other with `jouet wait pid PID`. A running job's processes, and a pitchfork daemon's, are listed once, as the job or the daemon.
+
+pitchfork daemons are listed when pitchfork is installed, from the namespace of the worktree's `pitchfork.toml`, which pitchfork derives from the worktree's directory unless the file sets one. Daemons in `global` are left out: that is where pitchfork puts daemons started outside a project, and nothing says which checkout they belong to. Each comes with `pitchfork logs ID -n 50` to read its log, and `jouet wait daemon ID` when it is running.
 
 ```text
 # Handoff: feat/git-recipes
@@ -72,6 +75,9 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 | `untracked` | untracked files appeared or went away |
 | `process_exited` | a recorded process is no longer running |
 | `job_ended` | a job that was running has exited, been stopped, or is gone |
+| `daemon_stopped`, `daemon_failed` | a pitchfork daemon that was running is stopped, or errored or failed |
+| `daemon_gone`, `daemon_restarted` | pitchfork no longer knows a daemon that was running, or it runs with another PID |
+| `daemons_unknown` | the handoff recorded daemons, and pitchfork could not be asked about them |
 
 ```text
 ## Drift since 2026-10-30T18:02:51Z (2h ago)
@@ -80,10 +86,10 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 - `uncommitted`: src/handoff.rs no longer has changes
 ```
 
-When the handoff recorded jobs, pickup also lists each one as it is now, under `## Jobs now`: still running, exited with its code, stopped, or gone.
+When the handoff recorded jobs or daemons, pickup also lists each one as it is now, under `## Jobs now` and `## pitchfork daemons now`: still running, or how it ended.
 
 pickup exits 0 when nothing has drifted and 1 when something has. It does not fetch the PR again; run [`jouet pr status`](/commands/pr-status) for its current state. A missing handoff is exit 3, and a file that is not a handoff is exit 4.
 
 ## JSON
 
-`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty), `jobs` (each recorded job's `id` and its state `then` and `now`) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.
+`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty), `jobs` (each recorded job's `id` and its state `then` and `now`), `daemons` (the same for each daemon, with pitchfork's `error`) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.

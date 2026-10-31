@@ -1,0 +1,39 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "pitchfork-stop"
+why = "Killing a daemon pitchfork runs, by its port or its command line, looks to pitchfork like a crash and skips its graceful stop; `pitchfork stop` or `restart` does it by name."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+requires = { files = ["pitchfork.toml", "pitchfork.local.toml", ".config/pitchfork.toml", ".config/pitchfork.local.toml"] }
+# The matchers find a kill by port or by command line; the script asks the
+# project's pitchfork config whether it is one of its daemons.
+script = "pitchfork-stop.luau"
+
+[[rule.match]]
+command = "kill"
+with = { command = "lsof" }
+
+[[rule.match]]
+command = "xargs"
+args = "kill"
+with = { command = "lsof" }
+
+[[rule.match]]
+command = ["pkill", "killall", "fuser", "kill-port", "npx kill-port"]
+
+[rule.examples]
+fires = [
+  { command = "kill $(lsof -ti :3000)", action = "warn" },
+  "lsof -ti:5173 | xargs kill -9",
+  "pkill -f 'npm run dev'",
+  "fuser -k 3000/tcp",
+  "npx kill-port 3000",
+]
+quiet = [
+  "kill 1234",
+  "lsof -i :3000",
+  "pitchfork stop web",
+  "echo 'pkill -f vite'",
+]

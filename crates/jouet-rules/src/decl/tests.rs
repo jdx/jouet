@@ -95,7 +95,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
         keys("Rule"),
         [
             "author", "created", "examples", "match", "message", "mode", "name", "needs", "on",
-            "scope", "script", "suggest", "why"
+            "requires", "scope", "script", "suggest", "why"
         ]
     );
     assert_eq!(
@@ -155,7 +155,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
     assert_eq!(required, ["name", "why"]);
     assert!(!schema.to_string().contains("null"), "TOML has no null");
     // Every key has a description, which editors show.
-    for def in ["Rule", "Matcher", "ExampleCall"] {
+    for def in ["Rule", "Requires", "Matcher", "ExampleCall"] {
         for (key, value) in defs[def]["properties"].as_object().unwrap() {
             assert!(
                 value.get("description").is_some(),

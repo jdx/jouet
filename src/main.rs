@@ -792,6 +792,8 @@ pub enum WaitCmd {
     Cmd(WaitCmdArgs),
     /// Wait for a `jouet job` to end, or to be ready
     Job(WaitJobArgs),
+    /// Wait for a pitchfork daemon to be ready, or to stop
+    Daemon(WaitDaemonArgs),
 }
 
 /// Wait for a PR's checks, and show why any failed
@@ -992,6 +994,40 @@ pub struct WaitJobArgs {
     #[usage(long, value_name = "N")]
     log_lines: Option<usize>,
     /// Do not show its log
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Wait for a pitchfork daemon to be ready, or to stop
+///
+/// For a project's long-running services, the daemons pitchfork runs (one-off
+/// work is `wait job`'s). Reads `pitchfork status ID --json` in this
+/// directory, so a short ID resolves in this project's namespace. Ready is
+/// `running` and, when there is a port to try (--port, or the port pitchfork
+/// says the daemon binds) or a URL (--http), answering there: pitchfork's
+/// JSON does not say whether its own ready check passed. --until stopped
+/// waits until the daemon no longer runs. A daemon that errors or fails ends
+/// the wait with exit 1; then, and on a timeout, the end of its log is shown
+/// and the whole log is saved. Exits 3 when pitchfork has no such daemon and
+/// 4 when pitchfork is not installed.
+#[derive(Args)]
+pub struct WaitDaemonArgs {
+    /// The daemon's ID: `api`, or `namespace/api`
+    id: String,
+    /// `ready` (the default) or `stopped`
+    #[usage(long, value_name = "CONDITION")]
+    until: Option<String>,
+    /// Ready once localhost's port N accepts connections
+    #[usage(long, value_name = "N")]
+    port: Option<u16>,
+    /// Ready once URL answers with a 2xx status
+    #[usage(long, value_name = "URL")]
+    http: Option<String>,
+    /// Lines of its log to show on failure or timeout (default 60; 0 shows
+    /// all of it)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not read its log
     #[usage(long)]
     no_logs: bool,
 }

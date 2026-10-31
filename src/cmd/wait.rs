@@ -2,8 +2,8 @@
 
 use super::Output;
 use crate::{
-    WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitFileArgs, WaitHttpArgs, WaitJobArgs,
-    WaitLogArgs, WaitPidArgs, WaitPrArgs, WaitRunArgs,
+    WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitDaemonArgs, WaitFileArgs, WaitHttpArgs,
+    WaitJobArgs, WaitLogArgs, WaitPidArgs, WaitPrArgs, WaitRunArgs,
 };
 use jouet_github::Client;
 use jouet_github::pr::target::{self, Arg, Repo, Target};
@@ -11,6 +11,7 @@ use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_wait::checks::Selection;
 use jouet_wait::ci::{self, CiWait};
+use jouet_wait::daemon::{self, Answer, DaemonWait};
 use jouet_wait::job;
 use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
 use jouet_wait::pr::{PrWait, Until};
@@ -73,11 +74,43 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
         WaitCmd::Http(a) => local(http(a), &timing, reporter),
         WaitCmd::Pid(a) => local(pid(&a), &timing, reporter),
         WaitCmd::Cmd(a) => local(command(a, &timing), &timing, reporter),
+        WaitCmd::Daemon(a) => local(daemon_wait(a), &timing, reporter),
         WaitCmd::Job(a) => match job_wait(a) {
             Ok(subject) => local(Ok(subject), &timing, reporter),
             Err((exit, message)) => reporter(String::new()).fail(&Stop { exit, message }),
         },
     }
+}
+
+/// `wait daemon ID`.
+fn daemon_wait(a: WaitDaemonArgs) -> Result<Box<dyn Subject>, String> {
+    let until = match a.until.as_deref() {
+        None => daemon::Until::Ready,
+        Some(name) => daemon::Until::parse(name)
+            .ok_or_else(|| format!("--until must be ready or stopped, not `{name}`"))?,
+    };
+    let given: Option<Box<dyn Subject>> = match (a.port, a.http) {
+        (Some(_), Some(_)) => return Err("give --port or --http, not both".into()),
+        (Some(port), None) => Some(Box::new(PortWait::parse(&port.to_string(), false)?)),
+        (None, Some(url)) => Some(http(WaitHttpArgs {
+            url,
+            status: None,
+            contains: None,
+        })?),
+        (None, None) => None,
+    };
+    if given.is_some() && until == daemon::Until::Stopped {
+        return Err(
+            "--port and --http are ready checks: leave them out with --until stopped".into(),
+        );
+    }
+    let answer = given.map_or(Answer::Inferred, Answer::Given);
+    Ok(Box::new(DaemonWait::new(
+        a.id,
+        until,
+        answer,
+        log_lines(a.log_lines, a.no_logs)?,
+    )))
 }
 
 /// `wait job ID`: exit 3 when this work tree has no such job.

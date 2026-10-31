@@ -49,6 +49,7 @@
 - [`jouet wait pid <PID>`](/cli/wait/pid.md)
 - [`jouet wait cmd [--expect-exit <N>] [-- CMD]…`](/cli/wait/cmd.md)
 - [`jouet wait job [FLAGS] <ID>`](/cli/wait/job.md)
+- [`jouet wait daemon [FLAGS] <ID>`](/cli/wait/daemon.md)
 - [`jouet job <SUBCOMMAND>`](/cli/job.md)
 - [`jouet job start [FLAGS] <ID> [-- CMD]…`](/cli/job/start.md)
 - [`jouet job ls`](/cli/job/ls.md)

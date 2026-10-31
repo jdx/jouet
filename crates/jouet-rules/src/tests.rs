@@ -1283,3 +1283,115 @@ fn job_start_names_the_job_and_its_ready_check() {
         "jouet job start build -- npm run build"
     );
 }
+
+/// A user rule that denies `serve`, only where `marker.toml` is.
+fn requiring() -> Source {
+    toml_user(
+        "needs-file",
+        r#"[[rule]]
+name = "needs-file"
+why = "a test rule"
+mode = "deny"
+message = "use the tool"
+requires = { files = ["marker.toml", ".config/marker.toml"] }
+[rule.match]
+command = "serve"
+[rule.examples]
+fires = ["serve"]
+quiet = ["ls"]
+"#,
+    )
+}
+
+#[test]
+fn a_rule_that_requires_a_file_runs_only_where_it_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    let sub = project.join("src");
+    std::fs::create_dir_all(&sub).unwrap();
+    let engine = engine(vec![requiring()]);
+    engine.set_probes(Probes::new(Some(sub.clone()), None, false));
+    assert!(engine.evaluate(&bash("serve")).deny.is_none());
+    assert!(!engine.in_use_here(engine.rule("needs-file").unwrap()));
+    std::fs::create_dir_all(project.join(".config")).unwrap();
+    std::fs::write(project.join(".config/marker.toml"), "").unwrap();
+    assert!(engine.evaluate(&bash("serve")).deny.is_some());
+    assert!(engine.in_use_here(engine.rule("needs-file").unwrap()));
+    // The call's own directory wins over the probes'.
+    let elsewhere = Call {
+        cwd: Some(tmp.path().display().to_string()),
+        ..bash("serve")
+    };
+    assert!(engine.evaluate(&elsewhere).deny.is_none());
+    // Its examples still run as if the file were there.
+    let rule = engine.rule("needs-file").unwrap();
+    assert!(engine.examples(rule).unwrap().iter().all(|e| e.ok));
+}
+
+#[test]
+fn requires_names_files_within_a_directory() {
+    for (requires, want) in [
+        ("{}", "names the `files`"),
+        (r#"{ files = ["../x.toml"] }"#, "paths within a directory"),
+        (r#"{ files = ["/etc/x.toml"] }"#, "paths within a directory"),
+    ] {
+        let code = format!(
+            "[[rule]]\nname = \"r\"\nwhy = \"w\"\nmessage = \"m\"\nrequires = {requires}\nmatch = {{ command = \"x\" }}\n"
+        );
+        let engine = engine(vec![toml_user("r", &code)]);
+        match &engine.rule("r").unwrap().state {
+            State::Broken(e) => assert!(e.contains(want), "{e}"),
+            other => panic!("{requires}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_daemon_the_project_declares_goes_to_pitchfork_and_anything_else_to_jouet_job() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("pitchfork.toml"),
+        "[daemons.web]\nrun = \"npm run dev\"\nport = 5173\n\n[daemons.api]\nrun = \"cd api && exec uvicorn app:app --port 8000\"\n",
+    )
+    .unwrap();
+    let engine = engine(builtin());
+    engine.set_probes(Probes::new(Some(tmp.path().to_path_buf()), None, false));
+    let denied = |command: &str| {
+        let d = engine.evaluate(&bash(command)).deny;
+        d.map(|d| (d.rule, d.message.unwrap_or_default()))
+    };
+    let (rule, message) = denied("npm run dev -- --host &").unwrap();
+    assert_eq!(rule, "pitchfork-start");
+    assert!(message.starts_with("`npm run dev -- --host` is the `web` daemon in pitchfork.toml: run `pitchfork start web` instead."), "{message}");
+    let (rule, message) = denied("vite --port 5173").unwrap();
+    assert_eq!(rule, "pitchfork-start");
+    assert!(
+        message.contains("listens on port 5173, the `web` daemon's"),
+        "{message}"
+    );
+    assert_eq!(
+        denied("uvicorn app:app --port 8000").unwrap().0,
+        "pitchfork-start"
+    );
+    // Not a declared daemon: a job.
+    assert_eq!(
+        denied("python3 -m http.server 9000 &").unwrap().0,
+        "job-start"
+    );
+    assert_eq!(denied("npm run build"), None);
+
+    let (rule, message) = denied("kill $(lsof -ti :8000)").unwrap();
+    assert_eq!(rule, "pitchfork-stop");
+    assert!(
+        message.starts_with("Port 8000 is the `api` daemon's: run `pitchfork stop api` instead"),
+        "{message}"
+    );
+    assert_eq!(
+        denied("pkill -f 'npm run dev'").unwrap().0,
+        "pitchfork-stop"
+    );
+    // Not a declared daemon's: job-stop's warning, no denial.
+    let outcome = engine.evaluate(&bash("pkill -f vite"));
+    assert!(outcome.deny.is_none());
+    assert_eq!(outcome.warnings[0].rule, "job-stop");
+}
