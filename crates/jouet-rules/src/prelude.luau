@@ -100,3 +100,40 @@ function jouet.gh(command): { string }?
 	end
 	return table.move(command.argv, 2, #command.argv, 1, {})
 end
+
+-- Whether a path starts at the home directory: `~`, `~/x`, `$HOME/x`.
+local function from_home(path: string): boolean
+	for _, prefix in { "~", "$HOME", "${HOME}" } do
+		local rest = string.sub(path, #prefix + 1)
+		if string.sub(path, 1, #prefix) == prefix and (rest == "" or string.sub(rest, 1, 1) == "/") then
+			return true
+		end
+	end
+	return false
+end
+
+-- Where each command runs after the top-level `cd`s before it, by its index
+-- in `commands`: nil in the call's own directory; a path relative to it,
+-- absolute, or under the home directory, as `jouet.record` takes it; or
+-- false after a `cd` that cannot be followed (`cd`, `cd -`, `cd $DIR`).
+function jouet.dirs(commands): { [number]: string | false }
+	local out: { [number]: string | false } = {}
+	local dir: string | false | nil = nil
+	for i, command in commands do
+		out[i] = dir
+		if command.program == "cd" and not command.nested then
+			local to = command.argv[2]
+			if dir == false or not to or to == "-" then
+				dir = false
+			elseif from_home(to) or string.sub(to, 1, 1) == "/" then
+				dir = to
+			elseif string.find(to, "^[~$]") then
+				-- `~user` and `$DIR`.
+				dir = false
+			else
+				dir = if dir then `{dir}/{to}` else to
+			end
+		end
+	end
+	return out
+end

@@ -557,42 +557,12 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	return nil, unknown
 end
 
--- Whether a path starts at the home directory: `~`, `~/x`, `$HOME/x`.
-local function from_home(path: string): boolean
-	for _, prefix in { "~", "$HOME", "${HOME}" } do
-		local rest = string.sub(path, #prefix + 1)
-		if string.sub(path, 1, #prefix) == prefix and (rest == "" or string.sub(rest, 1, 1) == "/") then
-			return true
-		end
-	end
-	return false
-end
-
--- Where `cd DIR` leaves the commands after it: a path relative to the
--- call's directory, absolute, or under the home directory; false when it
--- cannot be followed (`cd`, `cd -`, `cd $DIR`).
-local function cd(dir: string | false | nil, command: JouetCommand): string | false | nil
-	local to = command.argv[2]
-	if dir == false or not to or to == "-" then
-		return false
-	end
-	if from_home(to) or string.sub(to, 1, 1) == "/" then
-		return to
-	end
-	-- `~user` and `$DIR`.
-	if string.find(to, "^[~$]") then
-		return false
-	end
-	return if dir then `{dir}/{to}` else to
-end
-
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
-		local dir: string | false | nil = nil
-		for _, command in call.commands do
-			if command.program == "cd" and not command.nested then
-				dir = cd(dir, command)
-			else
+		local dirs = jouet.dirs(call.commands)
+		for i, command in call.commands do
+			if command.program ~= "cd" or command.nested then
+				local dir = dirs[i]
 				local kind, scope = classify(command, dir)
 				-- After a `cd` it cannot follow, the run is in a work tree
 				-- the rule cannot name, so it is not recorded against this one.

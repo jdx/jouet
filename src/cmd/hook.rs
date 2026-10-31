@@ -192,12 +192,12 @@ fn handle(
             if call.exit_code == Some(0) {
                 remember(&call, log.session);
             }
-            let (records, tree) = if hooks.verify {
+            let (records, ran) = if hooks.verify {
                 record(payload, &call)
             } else {
                 (Vec::new(), None)
             };
-            log.post_tool_use(payload, &call, &records, tree);
+            log.post_tool_use(payload, &call, &records, ran);
             // A run of a mise task jouet added, for `jouet unwind`.
             if settings.wind.enabled
                 && let (Some(command), Some(cwd)) = (call.command.as_deref(), call.cwd.as_deref())
@@ -473,14 +473,13 @@ impl Log<'_> {
         ledger::append(dir, &entry);
     }
 
-    fn post_tool_use(
-        &self,
-        payload: &Value,
-        call: &Call,
-        records: &[Record],
-        tree: Option<String>,
-    ) {
+    fn post_tool_use(&self, payload: &Value, call: &Call, records: &[Record], ran: Option<Ran>) {
         let mut entry = self.entry("post-tool-use");
+        // A run after a `cd` belongs to the repository it went to.
+        let (tree, repo) = ran.map_or((None, None), |r| (r.tree, r.repo));
+        if repo.is_some() {
+            entry.repo = repo;
+        }
         entry.tool = Some(call.tool.clone());
         entry.shape = call.command.as_deref().map(ledger::shape);
         entry.exit_code = call.exit_code;
@@ -617,10 +616,17 @@ fn respond(outcome: &Outcome) -> Option<Value> {
     }))
 }
 
+/// Where a call's recorded runs ran, for the ledger: the first work tree
+/// they ran in, hashed, and that repository's key.
+struct Ran {
+    tree: Option<String>,
+    repo: Option<String>,
+}
+
 /// Runs the post-tool-use rules on a finished Bash command and keeps what
-/// they record in the session's state file, with the tree the command ran
-/// against, which is also returned.
-fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<String>) {
+/// they record in the session's state file, each with the tree it ran
+/// against; returns them and where the first ran.
+fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
     // A background command has not finished when this hook runs.
     let background = payload
         .get("tool_input")
@@ -663,6 +669,9 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<String>) {
             (dir, root, tree)
         })
         .collect();
+    let repo = (!trees[0].1.is_empty())
+        .then(|| jouet_output::paths::repo_key(Path::new(&trees[0].1)))
+        .flatten();
     let _ = verify::update(&path, |state| {
         for (dir, root, tree) in &trees {
             let here = records.iter().filter(|r| r.dir.as_deref() == *dir).cloned();
@@ -670,7 +679,7 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<String>) {
         }
     });
     let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
-    (records, tree)
+    (records, Some(Ran { tree, repo }))
 }
 
 /// The directory the session's commands start in.
