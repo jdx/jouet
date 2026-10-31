@@ -130,6 +130,53 @@ EOF
 	assert_line '    +    println!("hello");'
 }
 
+@test "a search holding the start of a line says which line holds it" {
+	# shellcheck disable=SC2016 # the backticks are Markdown, not command substitution
+	printf '# Notes\n- **Docs.** `docs/benchmarks.md` now recommends hyperfine.\n' >NOTES.md
+
+	run --separate-stderr jouet edit <<'EOF'
+=== NOTES.md
+<<<<<<< SEARCH
+- **Docs.** `docs/benchmarks.md` now recommends
+=======
+- **Docs.** `docs/benchmarks.md` recommends
+>>>>>>> REPLACE
+EOF
+
+	assert_failure 4
+	# shellcheck disable=SC2016 # the backticks are jouet's output, not command substitution
+	assert_line '  edit 1: no match as whole lines; the text occurs inside line 2 (SEARCH blocks hold whole lines, or use `jouet edit replace` for text inside a line)'
+	assert_content NOTES.md $'# Notes\n- **Docs.** `docs/benchmarks.md` now recommends hyperfine.\n'
+
+	run --separate-stderr jouet edit --json <<'EOF'
+=== NOTES.md
+<<<<<<< SEARCH
+- **Docs.** `docs/benchmarks.md` now recommends
+=======
+x
+>>>>>>> REPLACE
+EOF
+
+	assert_failure 4
+	assert_equal "$(jq -c '.files[0].edits[0].near_miss' <<<"$output")" '{"kind":"inside_line","lines":[2]}'
+}
+
+@test "a search with other indentation says the whitespace differs" {
+	printf 'fn main() {\n\tprintln!("hello");\n}\n' >main.rs
+
+	run --separate-stderr jouet edit <<'EOF'
+=== main.rs
+<<<<<<< SEARCH
+    println!("hello");
+=======
+    println!("bye");
+>>>>>>> REPLACE
+EOF
+
+	assert_failure 4
+	assert_line "  edit 1: no match; the text matches at line 2 once indentation and trailing whitespace are ignored (copy the file's whitespace exactly)"
+}
+
 @test "a Codex patch adds, updates, moves and deletes files" {
 	printf 'fn a() {\n    1\n}\n' >a.rs
 	printf 'old\n' >old.rs

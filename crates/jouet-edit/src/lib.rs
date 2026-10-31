@@ -98,6 +98,31 @@ pub struct EditReport {
     /// was and what it is now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignatureChange>,
+    /// For a whole-line edit that matched nothing: where its text comes
+    /// close, but not as whole lines or not with the same whitespace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub near_miss: Option<NearMiss>,
+}
+
+/// Where the text of a whole-line edit that matched nothing does occur.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum NearMiss {
+    /// The text occurs, but starts or ends inside a line: the search held
+    /// part of a line.
+    InsideLine {
+        /// 1-based line where each occurrence starts.
+        lines: Vec<usize>,
+        /// The text spans more than one line.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        multiline: bool,
+    },
+    /// The lines match once leading and trailing whitespace is ignored:
+    /// indentation, tabs for spaces, or trailing spaces differ.
+    Whitespace {
+        /// 1-based line where each such match starts.
+        lines: Vec<usize>,
+    },
 }
 
 /// A symbol edit that changed a definition's first line, its signature in
@@ -675,6 +700,7 @@ fn edit_report(index: usize) -> EditReport {
         candidates: Vec::new(),
         message: None,
         signature: None,
+        near_miss: None,
     }
 }
 
@@ -890,6 +916,10 @@ fn apply_edit(
                 };
                 if found.is_empty() {
                     report.closest = closest(&work, &old);
+                    if *line_aligned {
+                        report.near_miss = whitespace_only(&work, &old)
+                            .or_else(|| inside_line(&work, &old, newline));
+                    }
                 }
                 return (text.to_string(), report);
             }
@@ -939,6 +969,7 @@ fn apply_edit(
                 };
                 if found.is_empty() {
                     report.closest = closest(&work, &old);
+                    report.near_miss = whitespace_only(&work, &old);
                 }
                 return (text.to_string(), report);
             }
@@ -1048,6 +1079,42 @@ fn find_anchor(text: &str, anchor: &str, from: usize) -> Option<usize> {
         .find(|(line, _)| *line == anchor)
         .or_else(|| lines().find(|(line, _)| line.trim() == anchor.trim()))
         .map(|(_, end)| end)
+}
+
+/// Where a whole-line search's text occurs in `text` without its final
+/// newline, which can only be inside a line, since as whole lines it would
+/// have matched.
+fn inside_line(text: &str, needle: &str, newline: &str) -> Option<NearMiss> {
+    let core = needle.strip_suffix(newline).unwrap_or(needle);
+    if core.trim().is_empty() {
+        return None;
+    }
+    let mut lines: Vec<usize> = find_all(text, core, false, 0)
+        .into_iter()
+        .map(|p| line_of(text, p))
+        .collect();
+    lines.dedup();
+    (!lines.is_empty()).then(|| NearMiss::InsideLine {
+        lines,
+        multiline: core.contains('\n'),
+    })
+}
+
+/// Where `needle`'s lines all match `text`'s once each line's leading and
+/// trailing whitespace is ignored.
+fn whitespace_only(text: &str, needle: &str) -> Option<NearMiss> {
+    let want: Vec<&str> = needle.lines().map(str::trim).collect();
+    if want.iter().all(|l| l.is_empty()) {
+        return None;
+    }
+    let have: Vec<&str> = text.lines().map(str::trim).collect();
+    let lines: Vec<usize> = have
+        .windows(want.len())
+        .enumerate()
+        .filter(|(_, window)| *window == want.as_slice())
+        .map(|(i, _)| i + 1)
+        .collect();
+    (!lines.is_empty()).then_some(NearMiss::Whitespace { lines })
 }
 
 /// The region of `text` most like `needle`, compared line by line. Windows

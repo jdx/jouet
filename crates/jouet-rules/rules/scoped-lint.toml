@@ -7,8 +7,10 @@ scope = "builtin"
 author = "builtin"
 created = "2026-10-30"
 needs = ["diag", "check"]
-suggest = "jouet diag check --changed"
-message = "It checks only the files you changed, through the project's hk checks, and prints one line per finding (`jouet diag delta` shows only what your edit introduced). Run the full lint once before you finish."
+# The matcher finds a lint of the whole project; the script stays quiet
+# when the work tree has nothing uncommitted (a check of a merge, a pull or
+# a checkout), since there is no change to iterate on.
+script = "scoped-lint.luau"
 
 # `cargo clippy` cut short with head or tail: the findings that matter may
 # be the ones cut off.
@@ -37,8 +39,12 @@ fires = [
   "pnpm exec eslint ./",
   "mise run lint",
   "cd crate && mise run lint",
+  { command = "cargo clippy --workspace 2>&1 | head -20", git = { dirty = true } },
 ]
 quiet = [
+  { command = "cargo clippy --workspace --all-targets -- -D warnings 2>&1 | head -20", git = { dirty = false } },
+  { command = "mise run lint", git = { dirty = false } },
+  { command = "npx eslint .", git = { dirty = false } },
   "cargo clippy -p jouet-diag 2>&1 | head",
   "cargo clippy --workspace -- -D warnings",
   "cargo clippy --fix --allow-dirty | tail",
