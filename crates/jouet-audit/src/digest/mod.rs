@@ -245,6 +245,14 @@ const SHORT_COMMAND: usize = 24;
 /// How much of a prompt, a correction or an error is kept.
 const EXCERPT: usize = 160;
 
+impl Digest {
+    /// Every file the session read, relative to its directory or with the
+    /// home directory as `~`.
+    pub fn files_read(&self) -> impl Iterator<Item = &str> {
+        self.reads.keys().map(String::as_str)
+    }
+}
+
 /// Digests one transcript read with [`Filter::detail`](crate::Filter::detail).
 pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Options<'_>) -> Digest {
     let t = transcript;

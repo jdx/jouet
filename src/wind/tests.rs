@@ -30,6 +30,7 @@ fn settings() -> WindSettings {
         review: false,
         review_every: 5,
         review_corrections: 2,
+        memories: true,
         gitleaks: None,
     }
 }

@@ -134,7 +134,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent; `jouet unwind` proposes retiring a rule of yours that is noisy or keeps getting overridden",
+            "a winding note at session start names a drafted rule, a proposal or a stale memory: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent; `jouet unwind` proposes retiring a rule of yours that is noisy or keeps getting overridden",
         ),
     ),
     (
@@ -525,7 +525,7 @@ const USAGE: &[Usage] = &[
                 "a prompt and digest for a subagent to review a session",
             ),
         ],
-        more: "adopt, digest, propose and their filters",
+        more: "adopt, digest, propose, memories and their filters",
     },
     Usage {
         command: "claim",

@@ -103,6 +103,7 @@
 - [`jouet wind digest [FLAGS] [SESSION]`](/cli/wind/digest.md)
 - [`jouet wind review [FLAGS] [SESSION]`](/cli/wind/review.md)
 - [`jouet wind propose [FILE]`](/cli/wind/propose.md)
+- [`jouet wind memories [--record]`](/cli/wind/memories.md)
 - [`jouet unwind [--apply]`](/cli/unwind.md)
 - [`jouet task <SUBCOMMAND>`](/cli/task.md)
 - [`jouet task propose [--since <TIME>] [--harness <HARNESS>]`](/cli/task/propose.md)
