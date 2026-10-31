@@ -457,9 +457,21 @@ local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 	return "test", if #picks == 0 then FULL else partial(table.concat(picks, " "))
 end
 
+-- Options that list or explain rather than run: `pytest --collect-only`,
+-- `cargo test -- --list`, `--help`. A run with one runs no tests.
+local INSPECT = set({
+	"--help", "-h", "--version", "-V", "--list", "--collect-only", "--co", "--listTests",
+	"--list-tests",
+})
+
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
+	for _, arg in args do
+		if INSPECT[arg] then
+			return nil, partial(nil)
+		end
+	end
 	-- `cargo +nightly test`: the toolchain comes first.
 	if args[1] and string.sub(args[1], 1, 1) == "+" then
 		table.remove(args, 1)
