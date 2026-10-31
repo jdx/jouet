@@ -14,16 +14,19 @@ The rule format is new and may change between releases. `jouet rule schema` alwa
 
 ```output
 $ jouet rule list
-sleep-poll      enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
-review-threads  enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
-python-edit     enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
-git-add-all     enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
-git-stash       enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
-no-verify       enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
-force-push      enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
-push-untested   enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
-affected-tests  enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
-checks          enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
+sleep-poll         enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+review-threads     enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
+python-edit        enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
+git-add-all        enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
+git-stash          enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
+no-verify          enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
+force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
+affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
+checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
+reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
+large-read         enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
+unbudgeted-search  enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
 ```
 
 The columns are: name, state, mode, scope, author, created, and why.
@@ -101,7 +104,7 @@ A rule's keys:
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool` and `paths` is about a command, and needs `command`.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `input`, `unless_input`, `seen` and `min_read_lines` is about a command, and needs `command`.
 
 | Key | Matches |
 |---|---|
@@ -115,9 +118,14 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `max_args` | It has at most this many arguments: `max_args = 0` for a bare `git stash pop`. |
 | `text` | Regular expressions that must each match one of its words after the program, or one of its here-documents. `\|` gives alternatives within one. |
 | `with` | Another command in the same call matches this too, as in `sleep 60 && gh pr checks`. It takes the command keys. |
+| `unless_with` | No other command in the same call matches this, as in `rg TODO \| head`. It takes the command keys. |
 | `via` | The wrapper it ran through, such as `rtk`, `sudo` or `mise`. |
 | `tool` | The harness's tool name, such as `Edit`. Without it, a matcher with `command` matches any tool that runs a command. |
 | `paths` | For a file tool, the path it reads or writes. A pattern without a `/` matches the file name; one with a `/` matches the path from the working directory, where `*` stays within a directory and `**` crosses them. |
+| `input` | The tool's input has these fields with these values, such as `input = { output_mode = "content" }` for Claude Code's Grep. A value that is not a string matches as its JSON text; `*` and `?` are wildcards. |
+| `unless_input` | The tool's input has none of these fields, such as `head_limit`. |
+| `seen` | Whether the session was already shown everything the call reads, every line, in files unchanged since. The hook works it out from what the session read (Claude Code's Read tool, shell calls made only of `cat`, `head`, `tail`, `sed -n` and `nl`) and what `jouet search` showed it. Any other call is unseen. |
+| `min_read_lines` | The call puts at least this many lines of files in the context: Claude Code's Read (up to 2,000 lines without a `limit`), or a shell read with `cat`, `head`, `tail`, `sed -n` or `nl`. The hook counts them. |
 
 For example, the built-in `force-push` rule:
 
@@ -143,7 +151,7 @@ The command is read the way a shell reads it, so a rule never has to pick apart 
 - **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` match too.**
 - **Wrappers are looked through:** `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --` are skipped, `via` records them, and the program is the basename of what runs.
 
-`setup` sends the hook shell commands only, so for now a `tool` or `paths` matcher fires under `jouet rule test`, and in a hook for whatever other tools a harness is set up to send.
+`setup` sends Claude Code's hooks shell commands and its Read and Grep tools, and Codex's shell commands only. A `tool` or `paths` matcher for another tool fires under `jouet rule test`, and in a hook for whatever other tools a harness is set up to send.
 
 ### Examples
 
@@ -169,6 +177,9 @@ fires = [
 | `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
 | `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
 | `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
+| `input` | The tool's input, for a tool other than `Bash`: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`. |
+| `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
+| `read_lines` | How many lines of files the call reads, as the hook would count them. |
 
 Every rule needs at least one example of each kind:
 
@@ -205,18 +216,21 @@ jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expecte
 
 ```output
 $ jouet rule test --all
-ok    sleep-poll      12 examples passed
-ok    review-threads  7 examples passed
-ok    python-edit     7 examples passed
-ok    git-add-all     14 examples passed
-ok    git-stash       25 examples passed
-ok    no-verify       14 examples passed
-ok    force-push      12 examples passed
-ok    push-untested   13 examples passed
-ok    affected-tests  22 examples passed
-ok    checks          50 examples passed
-FAIL  no-rm-rf        it has no `quiet` examples: near misses it must leave alone
-10 of 11 rules passed their examples
+ok    sleep-poll         12 examples passed
+ok    review-threads     7 examples passed
+ok    python-edit        7 examples passed
+ok    git-add-all        14 examples passed
+ok    git-stash          25 examples passed
+ok    no-verify          14 examples passed
+ok    force-push         12 examples passed
+ok    push-untested      13 examples passed
+ok    affected-tests     22 examples passed
+ok    checks             50 examples passed
+ok    reread             12 examples passed
+ok    large-read         11 examples passed
+ok    unbudgeted-search  23 examples passed
+FAIL  no-rm-rf           it has no `quiet` examples: near misses it must leave alone
+13 of 14 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:

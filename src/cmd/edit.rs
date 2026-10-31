@@ -3,10 +3,14 @@
 use super::Output;
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
-use jouet_edit::{self as edit, EditStatus, FileStatus, Options, Report};
+use jouet_edit::{
+    self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
+};
 use jouet_output::exit::Exit;
+use jouet_search::symbols::{self, SelectError, Selector};
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
+use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     let spec = match &args.cmd {
@@ -38,11 +42,15 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     let options = Options {
         expect_hashes,
         diff: args.diff,
+        symbols: Some(&TreeSitter),
     };
     let mut plan = match edit::plan(&spec, &options) {
         Ok(plan) => plan,
         Err(e) => return out.error(Exit::Failed, &format!("reading files: {e}")),
     };
+    if plan.report.ok() {
+        plan.report.callers = callers(&plan.report);
+    }
     if !plan.report.ok() {
         let exit = if plan.report.only_missing_files() {
             Exit::NotFound
@@ -110,6 +118,109 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     }
     print_report(out, &plan.report);
     exit
+}
+
+/// Finds definitions for symbol edits with tree-sitter.
+#[derive(Debug)]
+struct TreeSitter;
+
+impl edit::Symbols for TreeSitter {
+    fn locate(&self, path: &Path, text: &str, selector: &str) -> Result<Vec<Span>, SymbolError> {
+        let selector = Selector::parse(selector).map_err(|e| match e {
+            SelectError::Invalid(message) => SymbolError::Invalid(message),
+            SelectError::Unsupported | SelectError::NotFound => SymbolError::Unsupported,
+        })?;
+        let describe = |l: &symbols::Located| {
+            format!(
+                "{} {} ({}-{})",
+                l.def.kind,
+                l.qualified(),
+                l.def.start,
+                l.def.end
+            )
+        };
+        match symbols::select(path, text.as_bytes(), &selector) {
+            Ok(found) => Ok(found
+                .iter()
+                .map(|l| Span {
+                    start: l.start_byte,
+                    end: l.end_byte,
+                    line: l.def.line as usize,
+                    describe: describe(l),
+                })
+                .collect()),
+            Err(SelectError::NotFound) => Err(SymbolError::NotFound(
+                symbols::outline(path, text.as_bytes())
+                    .unwrap_or_default()
+                    .iter()
+                    .map(describe)
+                    .collect(),
+            )),
+            Err(SelectError::Invalid(message)) => Err(SymbolError::Invalid(message)),
+            Err(SelectError::Unsupported) => Err(SymbolError::Unsupported),
+        }
+    }
+
+    fn syntax_errors(&self, path: &Path, text: &str) -> Option<usize> {
+        symbols::syntax_errors(path, text.as_bytes())
+    }
+}
+
+/// How many references to a changed signature are listed.
+const CALLERS_SHOWN: usize = 10;
+
+/// For each definition whose signature a symbol edit changed, the
+/// references to its name in files the edit does not change. Names are
+/// matched by text, so some may be another definition's.
+fn callers(report: &Report) -> Vec<Callers> {
+    let changed: Vec<&edit::SignatureChange> = report
+        .files
+        .iter()
+        .flat_map(|f| &f.edits)
+        .filter_map(|e| e.signature.as_ref())
+        .collect();
+    if changed.is_empty() {
+        return Vec::new();
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = crate::git::toplevel().unwrap_or_else(|| cwd.clone());
+    let touched: Vec<PathBuf> = report
+        .files
+        .iter()
+        .filter_map(|f| std::fs::canonicalize(&f.path).ok())
+        .collect();
+    let cache = jouet_output::paths::cache_dir().map(|d| d.join("tags"));
+    let mut out = Vec::new();
+    for change in changed {
+        let mut references: Vec<Reference> =
+            jouet_search::map::references(&root, &change.name, cache.as_deref())
+                .into_iter()
+                .filter(|(rel, _)| {
+                    std::fs::canonicalize(root.join(rel)).is_ok_and(|p| !touched.contains(&p))
+                })
+                .map(|(rel, line)| {
+                    let full = root.join(&rel);
+                    let shown = full
+                        .strip_prefix(&cwd)
+                        .map_or(full.clone(), Path::to_path_buf);
+                    Reference {
+                        path: shown.to_string_lossy().into_owned(),
+                        line: line as usize,
+                    }
+                })
+                .collect();
+        if references.is_empty() {
+            continue;
+        }
+        let more = references.len().saturating_sub(CALLERS_SHOWN);
+        references.truncate(CALLERS_SHOWN);
+        out.push(Callers {
+            symbol: change.name.clone(),
+            references,
+            more,
+        });
+    }
+    out
 }
 
 fn read_spec(args: &EditArgs) -> Result<Spec, String> {
@@ -225,7 +336,16 @@ fn edit_problem(e: &edit::EditReport) -> String {
     };
     match e.status {
         EditStatus::Ok => "ok".into(),
-        EditStatus::NoMatch => "no match".into(),
+        EditStatus::NoMatch => match &e.symbol {
+            Some(symbol) => format!("no definition matches `{symbol}`"),
+            None => "no match".into(),
+        },
+        EditStatus::TooManyMatches if e.symbol.is_some() => format!(
+            "{} definitions match `{}`, at lines {}; add a kind or a scope, such as `fn download` or `Vfox::download`",
+            e.found,
+            e.symbol.as_deref().unwrap_or(""),
+            lines()
+        ),
         EditStatus::TooManyMatches => format!(
             "{} matches, expected {expected}, at lines {}",
             e.found,
@@ -239,6 +359,14 @@ fn edit_problem(e: &edit::EditReport) -> String {
         EditStatus::AnchorNotFound => {
             format!("anchor not found: {}", e.anchor.as_deref().unwrap_or(""))
         }
+        EditStatus::Unsupported => format!(
+            "cannot edit `{}` by symbol",
+            e.symbol.as_deref().unwrap_or("")
+        ),
+        EditStatus::DoesNotParse => format!(
+            "the new `{}` does not parse",
+            e.symbol.as_deref().unwrap_or("")
+        ),
     }
 }
 
@@ -270,6 +398,20 @@ fn render(report: &Report) -> String {
         }
         for e in f.edits.iter().filter(|e| e.status != EditStatus::Ok) {
             let _ = writeln!(s, "  edit {}: {}", e.index + 1, edit_problem(e));
+            if let Some(message) = &e.message {
+                let _ = writeln!(s, "    {message}");
+            }
+            if !e.candidates.is_empty() {
+                let what = if e.status == EditStatus::NoMatch {
+                    "the file defines"
+                } else {
+                    "it matches"
+                };
+                let _ = writeln!(s, "    {what}:");
+                for c in &e.candidates {
+                    let _ = writeln!(s, "      {c}");
+                }
+            }
             if let Some(c) = &e.closest {
                 let _ = writeln!(
                     s,
@@ -304,6 +446,25 @@ fn render(report: &Report) -> String {
         let _ = writeln!(s, "  full log: {}", check.log_path);
         if check.reverted {
             s.push_str("  every edited file was restored\n");
+        }
+    }
+    for c in &report.callers {
+        let total = c.references.len() + c.more;
+        let _ = writeln!(
+            s,
+            "warning: the signature of {} changed; {total} {} to it in files this edit does not change may need updating:",
+            c.symbol,
+            if total == 1 {
+                "reference"
+            } else {
+                "references"
+            }
+        );
+        for r in &c.references {
+            let _ = writeln!(s, "  {}:{}", r.path, r.line);
+        }
+        if c.more > 0 {
+            let _ = writeln!(s, "  ... {} more", c.more);
         }
     }
     let total = report.files.len();
