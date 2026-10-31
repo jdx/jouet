@@ -1,0 +1,66 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "affected-tests"
+why = "Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["test"]
+# The matcher finds a run of a whole suite; the script asks whether jouet
+# can select tests in this repository, and whether the last test run was
+# also a whole suite, a few minutes ago: the agent is iterating.
+script = "affected-tests.luau"
+
+# A runner with no paths or name filters, and not selecting already.
+[[rule.match]]
+command = ["vitest run", "jest", "pytest"]
+max_args = 0
+value_flags = [
+  "-n", "--numprocesses", "-p", "-c", "--maxfail", "--tb", "--durations",
+  "--reporter", "--maxWorkers", "-w", "--pool", "--color",
+]
+unless_flags = [
+  "-k", "-m", "--lf", "--last-failed", "--sw", "--stepwise", "--testmon",
+  "-t", "--testNamePattern", "-o", "--onlyChanged", "--changed",
+  "--changedSince", "--findRelatedTests", "--related", "--shard",
+  "--project", "--watch", "--help", "-h",
+]
+
+# The repository's test task, run whole.
+[[rule.match]]
+command = [
+  "npm test", "npm t", "npm run test", "pnpm test", "pnpm run test",
+  "yarn test", "yarn run test", "bun run test", "mise run test",
+  "mise r test", "jouet test",
+]
+max_args = 0
+unless_flags = ["--affected", "--dry-run", "--help", "-h"]
+
+[rule.examples]
+fires = [
+  "pytest",
+  "pytest -x -n 4",
+  "vitest run",
+  "jest --ci",
+  "npm test",
+  "pnpm run test",
+  "mise run test",
+  "jouet test",
+  "cd web && npm test",
+]
+quiet = [
+  "jouet test --affected",
+  "jouet test --affected --dry-run",
+  "pytest tests/test_ops.py",
+  "pytest -k slow",
+  "pytest --lf",
+  "pytest --testmon",
+  "vitest run src/sum.test.ts",
+  "vitest run --changed main",
+  "jest --findRelatedTests src/a.js",
+  "npm test -- src/a.test.js",
+  "mise run test:e2e",
+  "cargo test",
+  "npm install",
+]

@@ -45,6 +45,10 @@ pub(crate) fn run(args: &SkillArgs, out: &Output) -> Exit {
 /// The skill file. Claude Code and Codex read the same `SKILL.md` shape; the
 /// AGENTS.md snippet is the body under a heading, for harnesses without
 /// skills.
+/// Commands that work as a pair, which the skill describes in one line to
+/// stay within its budget.
+const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+
 pub(crate) fn render(format: Format) -> String {
     let commands = guide::agent_commands();
     let mut body = String::new();
@@ -53,7 +57,26 @@ pub(crate) fn render(format: Format) -> String {
     );
     body.push_str("When to reach for it:\n\n");
     for (meta, when) in &commands {
-        let _ = writeln!(body, "- `jouet {}`: {when}.", meta.cmd.name);
+        let name = meta.cmd.name;
+        if PAIRED.iter().any(|(_, second)| *second == name) {
+            continue;
+        }
+        let partner = PAIRED
+            .iter()
+            .find(|(first, _)| *first == name)
+            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
+        match partner {
+            Some((other, other_when)) => {
+                let _ = writeln!(
+                    body,
+                    "- `jouet {name}` and `jouet {}`: {when}; {other_when}.",
+                    other.cmd.name
+                );
+            }
+            None => {
+                let _ = writeln!(body, "- `jouet {name}`: {when}.");
+            }
+        }
     }
     body.push_str(
         "\nHow:\n\n\
@@ -123,6 +146,10 @@ mod tests {
         );
         assert!(skill.contains("`jouet agent-help`"), "{skill}");
         assert!(skill.contains("- `jouet edit`: "), "{skill}");
+        assert!(
+            skill.contains("- `jouet handoff` and `jouet pickup`: ending a session"),
+            "{skill}"
+        );
         // The cap is a budget to defend, not a ceiling to fill.
         assert!(skill.lines().count() <= 30, "{skill}");
         // Flags belong to agent-help.
