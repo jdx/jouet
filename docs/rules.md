@@ -20,28 +20,29 @@ scoped-lint         enabled  warn    builtin  builtin  2026-10-30  While iterati
 …
 ```
 
-The columns are: name, state, mode, scope, author, created, and why.
+The columns are: name, state, mode, scope, author, created, and why. For a rule from outside, the scope says whether its source runs: `repo:trusted`, `repo:changed` or `repo:untrusted`; `plugin:NAME`, or `plugin:NAME:mismatch`; and `enforced`, or `enforced:writable` when its group or others can write the system directory (see [Plugins and trust](/plugins)). `--json` gives the same as `trust` and `plugin` fields.
 
 ## Where rules come from
 
 | Source | Directory | Runs | Mode unless the rule says |
 |---|---|---|---|
 | Built in | embedded in the binary | always | deny |
+| [Enforced](/plugins#enforced-rules-and-routines) | `/etc/jouet/rules/*.toml` (`$JOUET_SYSTEM_DIR`), and the system's plugins | always, unless its group or others can write it; your settings cannot turn them off | deny |
 | Yours | `~/.config/jouet/rules/*.toml` (`$XDG_CONFIG_HOME/jouet/rules`) | always | warn |
-| A repository's | `.jouet/rules/*.toml` at the repository root | once trusted with `jouet rule trust` | deny |
+| [A plugin](/plugins#plugins) you pin | its `rules/`, named `PLUGIN/NAME` | once fetched as pinned | deny |
+| A repository's | `.jouet/rules/*.toml` at the repository root, and its plugins | once [trusted](/plugins#trusting-a-repository) with `jouet trust` | deny |
 
-A file can hold any number of `[[rule]]` tables, and every rule has a `name` of its own.
+A file can hold any number of `[[rule]]` tables, and every rule has a `name` of its own. Rules load in the order of the table, and a name already taken is refused, so neither your rules nor a repository's can take the place of an enforced one. [Plugins and trust](/plugins) covers where rules from outside come from, how they are pinned and trusted, and what that does not protect against.
 
 Rules of yours and a repository's **only add decisions**. jouet enforces this, so a rule written in a hurry, by you or an agent, cannot weaken the safety it already has:
 
 - **No replacing.** A rule with the name of a built-in rule is refused (`jouet rule list` shows it as broken), and the built-in rule keeps running.
 - **No overruling.** Rules run built-in rules first, and the first denial wins. A script's `jouet.allow()` decides nothing for any other rule.
 - **No locking out.** A denial of a command that only runs `jouet` becomes a warning, so a bad rule never stops you running `jouet rule list` or `jouet setup --uninstall` to fix it.
+- **Examples first.** A rule from outside runs only once it passes its examples of both kinds.
 - **The sandbox.** It holds for every script (see below).
 
-A repository's rules can deny commands and put text in front of the agent, so they only run once you trust them. `jouet rule trust` records a hash of every rule file and script in `.jouet/rules`. Adding or changing one makes the directory untrusted again, and `jouet rule list` says so. `jouet rule untrust` withdraws trust.
-
-To turn rules off without deleting them, list them in `~/.config/jouet/config.toml`, or in `JOUET_RULES_DISABLE` (comma-separated):
+To turn rules off without deleting them, list them in `~/.config/jouet/config.toml`, or in `JOUET_RULES_DISABLE` (comma-separated). This does not turn off an [enforced](/plugins#enforced-rules-and-routines) rule:
 
 ```toml
 [rules]
@@ -216,7 +217,7 @@ $ jouet rule test ./no-rm-rf.toml
 jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`
 ```
 
-`jouet rule test --all` runs every rule's examples: built in, yours, and this repository's, trusted or not.
+`jouet rule test --all` runs every rule's examples: built in, the system's, yours, the plugins', and this repository's, trusted or not.
 
 ```output
 $ jouet rule test --all
@@ -362,3 +363,4 @@ Each script runs in a sandboxed Luau VM:
 - **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget for its own work, 200 ms for the [probes](#probes) it waits on, and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
 - **Failing open.** A rule that does not load, or a script that does not compile, throws, runs out of budget or returns something unexpected, says nothing. jouet reports it and carries on with the other rules.
 - **Compiled-script cache.** Compiled scripts are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.
+- **Every source alike.** A script from a repository, a plugin or the system directory runs in the same sandbox and budgets as a built-in one.

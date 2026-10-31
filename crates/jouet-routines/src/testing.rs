@@ -35,7 +35,7 @@
 //!   and `requests` requests that must have been made, each as text found
 //!   in `METHOD PATH BODY` or `jouet COMMAND`.
 
-use crate::routine::{Catalog, Origin, Routine};
+use crate::routine::{Catalog, Routine};
 use crate::runtime::{self, Options, Outcome};
 use crate::world::{Github, Host, Recorded, StepOutput, World};
 use serde::Serialize;
@@ -312,10 +312,9 @@ fn fixture(routine: &Routine, named: &Value) -> Result<Value, String> {
             .map(|(_, text)| (*text).to_string())
             .ok_or_else(|| format!("no built-in fixture `{path}`"))?,
         Some(dir) => {
-            if matches!(routine.origin, Origin::Repo(_) | Origin::User(_))
-                && std::path::Path::new(path)
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            if std::path::Path::new(path)
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
             {
                 return Err(format!(
                     "the fixture `{path}` must be inside {}",
@@ -549,6 +548,7 @@ fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routine::Origin;
 
     #[test]
     fn every_built_in_routine_passes_its_examples() {

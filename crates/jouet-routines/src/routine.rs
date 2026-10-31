@@ -46,23 +46,32 @@ pub enum Origin {
     Builtin,
     User(PathBuf),
     Repo(PathBuf),
+    /// A file in an installed plugin.
+    Plugin(PathBuf),
+    /// A file in the system directory, or a plugin it pins.
+    Enforced(PathBuf),
 }
 
 impl Origin {
-    pub fn describe(&self) -> String {
+    /// The file it came from; none for a built-in routine.
+    pub fn path(&self) -> Option<&Path> {
         match self {
-            Self::Builtin => "builtin".into(),
-            Self::User(path) | Self::Repo(path) => path.display().to_string(),
+            Self::Builtin => None,
+            Self::User(path) | Self::Repo(path) | Self::Plugin(path) | Self::Enforced(path) => {
+                Some(path)
+            }
         }
+    }
+
+    pub fn describe(&self) -> String {
+        self.path()
+            .map_or_else(|| "builtin".into(), |path| path.display().to_string())
     }
 
     /// The directory a routine's fixtures are read from; None for a
     /// built-in, whose fixtures are embedded.
     pub fn dir(&self) -> Option<&Path> {
-        match self {
-            Self::Builtin => None,
-            Self::User(path) | Self::Repo(path) => path.parent(),
-        }
+        self.path().and_then(Path::parent)
     }
 }
 
@@ -180,9 +189,11 @@ impl Routine {
                 self.name
             ));
         }
-        let valid_name = !self.name.is_empty()
-            && self
-                .name
+        // A plugin's routine is named `plugin/file`; the plugin's name is
+        // checked when it is added.
+        let file = self.name.rsplit('/').next().unwrap_or_default();
+        let valid_name = !file.is_empty()
+            && file
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
         if !valid_name {
@@ -410,23 +421,28 @@ pub fn builtin() -> Vec<Source> {
         .collect()
 }
 
-/// Every routine source: built in, then the `*.luau` files in the user's
-/// directory, then a repository's, which run only when `repo_trusted`.
-/// Files that cannot be read are reported, not fatal.
-pub fn discover(
-    user_dir: Option<&Path>,
-    repo_dir: Option<&Path>,
-    repo_trusted: bool,
-) -> (Vec<Source>, Vec<String>) {
+/// A directory of routines to load, after the built-in ones.
+pub struct RoutineDir {
+    pub dir: PathBuf,
+    /// What its files' routines are: `Origin::User`, `Origin::Repo`, ...
+    pub origin: fn(PathBuf) -> Origin,
+    /// False to list its routines without running them.
+    pub trusted: bool,
+    /// A plugin's name, which its routines' names start with:
+    /// `joue acme/deploy`, so a plugin never takes another routine's name.
+    pub namespace: Option<String>,
+}
+
+/// Every routine source: built in, then the `*.luau` files of each
+/// directory in order. Files that cannot be read are reported, not fatal.
+pub fn discover(dirs: &[RoutineDir]) -> (Vec<Source>, Vec<String>) {
     let mut sources = builtin();
     let mut errors = Vec::new();
-    let dirs = [(user_dir, false), (repo_dir, true)];
-    for (dir, repo) in dirs {
-        let Some(dir) = dir else { continue };
-        let files = match luau_files(dir) {
+    for dir in dirs {
+        let files = match luau_files(&dir.dir) {
             Ok(files) => files,
             Err(e) => {
-                errors.push(format!("reading {}: {e}", dir.display()));
+                errors.push(format!("reading {}: {e}", dir.dir.display()));
                 continue;
             }
         };
@@ -438,19 +454,18 @@ pub fn discover(
                     continue;
                 }
             };
-            let name = path
+            let stem = path
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
             sources.push(Source {
-                name,
-                origin: if repo {
-                    Origin::Repo(path)
-                } else {
-                    Origin::User(path)
+                name: match &dir.namespace {
+                    Some(namespace) => format!("{namespace}/{stem}"),
+                    None => stem,
                 },
+                origin: (dir.origin)(path),
                 code,
-                trusted: !repo || repo_trusted,
+                trusted: dir.trusted,
             });
         }
     }

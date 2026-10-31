@@ -16,7 +16,6 @@ joue NAME --help           what it takes, from its usage spec
 joue --list                every routine, where it comes from and what it reaches
 joue test [NAME]           run routines' examples against recorded responses
 joue types                 the Luau type definitions of the primitives
-joue --trust | --untrust   trust this repository's .jouet/routines
 ```
 
 ```console
@@ -94,10 +93,12 @@ What it returns is its result:
 | Source | Directory | Runs |
 |---|---|---|
 | Built in | embedded in the binary | always |
+| [Enforced](/plugins#enforced-rules-and-routines) | `/etc/jouet/routines/*.luau` (`$JOUET_SYSTEM_DIR`), and the system's plugins | always, unless its group or others can write it |
 | Yours | `~/.config/jouet/routines/*.luau` (`$XDG_CONFIG_HOME/jouet/routines`) | always |
-| A repository's | `.jouet/routines/*.luau` at the repository root | once trusted with `joue --trust` |
+| [A plugin](/plugins#plugins) you pin | its `routines/`, run as `joue PLUGIN/NAME` | once fetched as pinned |
+| A repository's | `.jouet/routines/*.luau` at the repository root, and its plugins | once [trusted](/plugins#trusting-a-repository) with `jouet trust`, with its rules |
 
-A routine's name is its file name without `.luau`, in lowercase words joined by dashes. As with [rules](/rules#where-rules-come-from), a routine cannot take a built-in one's name. A repository's routines are trusted by a hash of their files, so adding or changing one needs trusting again.
+A routine's name is its file name without `.luau`, in lowercase words joined by dashes; a plugin's routines are named after it, as `acme/deploy`. As with [rules](/rules#where-rules-come-from), a routine cannot take a built-in one's name. A repository's routines are trusted together with its rules, by a hash of their files, so adding or changing one needs trusting again. A routine from outside runs in the same sandbox and with the same capabilities checks as yours. [Plugins and trust](/plugins) covers the rest.
 
 ## Primitives
 

@@ -238,7 +238,7 @@ Run a workflow's jobs here with jactionlint, and show why any failed
 Say whether each failed job is flaky, infrastructure or real, and rerun only a flake
 .TP
 \fBrule\fR
-List, test and trust the rules jouet's hooks run
+List and test the rules jouet's hooks run
 .TP
 \fBrule list\fR
 List every rule, where it comes from and whether it runs
@@ -252,12 +252,6 @@ Print the JSON schema of rule files
 \fBrule types\fR
 Print the Luau type definitions of the jouet module, for rule scripts
 .TP
-\fBrule trust\fR
-Trust this repository's .jouet/rules as they are now
-.TP
-\fBrule untrust\fR
-Stop trusting this repository's .jouet/rules
-.TP
 \fBrule new\fR
 Write a new rule of yours, in warn mode, from a template or a winding note
 .TP
@@ -269,6 +263,27 @@ Show every change made to your rules, and why
 .TP
 \fBrule gap\fR
 Record something a rule could not express, for `jouet share \-\-idea`
+.TP
+\fBtrust\fR
+Trust this repository's rules, routines and plugins as they are now
+.TP
+\fBuntrust\fR
+Stop trusting this repository's rules, routines and plugins
+.TP
+\fBplugin\fR
+Add, remove, list and fetch plugins: rules and routines pinned by commit
+.TP
+\fBplugin add\fR
+Fetch a plugin, run its rules' examples and pin it
+.TP
+\fBplugin rm\fR
+Unpin a plugin
+.TP
+\fBplugin ls\fR
+List every pinned plugin and whether it is kept as pinned
+.TP
+\fBplugin sync\fR
+Fetch every pinned plugin that is missing or does not match its pin
 .TP
 \fBrun\fR
 Run a routine: a Luau program on jouet's primitives (also `joue`)
@@ -2315,9 +2330,9 @@ Print help
 \fB<TARGET>\fR
 The PR: a number, URL, OWNER/REPO#N or branch, or an Actions run or job URL. Defaults to the current branch's PR
 .SH "JOUET RULE"
-List, test and trust the rules jouet's hooks run
+List and test the rules jouet's hooks run
 
-Rules are `[[rule]]` tables in TOML files: built in, in ~/.config/jouet/rules, and in a repository's .jouet/rules once it is trusted. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
+Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforced: your settings cannot turn them off), in ~/.config/jouet/rules, in a repository's .jouet/rules once it is trusted (`jouet trust`), and in plugins. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
 .PP
 \fBUsage:\fR jouet rule [OPTIONS] <COMMAND>
 .PP
@@ -2384,26 +2399,6 @@ Print help
 Print the Luau type definitions of the jouet module, for rule scripts
 .PP
 \fBUsage:\fR jouet rule types [OPTIONS]
-.PP
-\fBOptions:\fR
-.PP
-.TP
-\fB\-h, \-\-help\fR
-Print help
-.SH "JOUET RULE TRUST"
-Trust this repository's .jouet/rules as they are now
-.PP
-\fBUsage:\fR jouet rule trust [OPTIONS]
-.PP
-\fBOptions:\fR
-.PP
-.TP
-\fB\-h, \-\-help\fR
-Print help
-.SH "JOUET RULE UNTRUST"
-Stop trusting this repository's .jouet/rules
-.PP
-\fBUsage:\fR jouet rule untrust [OPTIONS]
 .PP
 \fBOptions:\fR
 .PP
@@ -2494,10 +2489,119 @@ Print help
 .TP
 \fB<TEXT>\fR
 What you wanted a rule to do, and what was missing
+.SH "JOUET TRUST"
+Trust this repository's rules, routines and plugins as they are now
+
+Covers .jouet/rules, .jouet/routines and the plugins .jouet/plugins.toml pins, together. Prints the rules, fetches the pinned plugins, and runs every rule's examples; trusts nothing (exit 1) if one fails, lacks either kind or does not load. Trust is kept against a hash of every file in them: a change on a pull or another branch needs trusting again, and going back to files trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless \-\-yes is given, and the built\-in `trust` rule denies it to an agent.
+.PP
+\fBUsage:\fR jouet trust [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-yes\fR
+Trust without a terminal, for a script or CI run by the user
+.TP
+\fB\-\-list\fR
+List every directory trusted, and whether this repository is
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET UNTRUST"
+Stop trusting this repository's rules, routines and plugins
+.PP
+\fBUsage:\fR jouet untrust [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PLUGIN"
+Add, remove, list and fetch plugins: rules and routines pinned by commit
+
+A plugin is a git repository, or a directory, with a jouet\-plugin.toml (its name, description and the oldest jouet it works with) and rules/, routines/ or both. Its rules and routines are named after it: `acme/no\-prod\-db`, `joue acme/deploy`. `add` pins a git plugin at a full commit and the hash of every file it ships, in ~/.config/jouet/plugins.toml, or with \-\-repo in this repository's .jouet/plugins.toml (which then needs trusting again). Every hook checks the kept files against the hash, and never fetches; `sync` fetches the pins missing or changed. /etc/jouet/plugins.toml and /etc/jouet/plugins/ hold enforced plugins.
+.PP
+\fBUsage:\fR jouet plugin [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PLUGIN ADD"
+Fetch a plugin, run its rules' examples and pin it
+
+SOURCE is a git URL, or a directory. A git plugin is pinned at the full commit \-\-rev names (default: the remote's HEAD), and `git rev\-parse` checks the commit fetched is that one. A directory is copied and pinned by the hash of its files; give \-\-rev to fetch it as a git repository. Its name is the one its jouet\-plugin.toml gives. Every rule must pass its examples of both kinds, or nothing is pinned (exit 1). Like trusting, it needs a terminal or \-\-yes, and an agent is denied it.
+.PP
+\fBUsage:\fR jouet plugin add [OPTIONS] <SOURCE>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-rev\fR \fI<REV>\fR
+The commit, tag or branch to pin, resolved to a full commit
+.TP
+\fB\-\-dir\fR \fI<DIR>\fR
+The plugin's directory within the source, when it is not the root
+.TP
+\fB\-\-repo\fR
+Pin it in this repository's .jouet/plugins.toml rather than yours
+.TP
+\fB\-\-yes\fR
+Pin it without a terminal, for a script or CI run by the user
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SOURCE>\fR
+A git URL, or a directory
+.SH "JOUET PLUGIN RM"
+Unpin a plugin
+.PP
+\fBUsage:\fR jouet plugin rm [OPTIONS] <NAME>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-repo\fR
+Unpin it from this repository's .jouet/plugins.toml rather than yours
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<NAME>\fR
+The plugin's name
+.SH "JOUET PLUGIN LS"
+List every pinned plugin and whether it is kept as pinned
+.PP
+\fBUsage:\fR jouet plugin ls [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET PLUGIN SYNC"
+Fetch every pinned plugin that is missing or does not match its pin
+
+Only the pins of sets that run: yours, the system's, and this repository's once trusted. Each fetch must give the pinned commit and hash, or it fails (exit 5).
+.PP
+\fBUsage:\fR jouet plugin sync [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET RUN"
 Run a routine: a Luau program on jouet's primitives (also `joue`)
 
-Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in ~/.config/jouet/routines, and in a repository's .jouet/routines once it is trusted with \-\-trust. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
+Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are built in (land, pr\-next, ship\-check, sweep), in /etc/jouet/routines, in ~/.config/jouet/routines, in a repository's .jouet/routines once it is trusted (`jouet trust`), and in plugins, named after the plugin: `joue acme/deploy`. Each declares its arguments, so `joue NAME \-\-help` says what it takes, and the capabilities it reaches; anything else is refused (exit 4). A routine that writes acts only with \-\-yes: without it every write is previewed, and joue exits 4 (0 with \-\-dry\-run).
 .PP
 \fBUsage:\fR jouet run [OPTIONS] [COMMAND]
 .PP
@@ -2506,12 +2610,6 @@ Routines are Luau programs, where rules are TOML configuration. `joue NAME [ARGS
 .TP
 \fB\-\-list\fR
 List every routine, where it comes from and what it reaches
-.TP
-\fB\-\-trust\fR
-Trust this repository's .jouet/routines as they are now
-.TP
-\fB\-\-untrust\fR
-Stop trusting this repository's .jouet/routines
 .TP
 \fB\-h, \-\-help\fR
 Print help

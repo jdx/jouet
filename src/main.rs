@@ -17,12 +17,14 @@ mod guide;
 mod harness;
 mod ledger;
 mod mise;
+mod plugins;
 mod reads;
 mod redact;
 mod rules;
 mod settings;
 mod setup;
 mod share;
+mod sources;
 mod spec;
 mod testlog;
 mod verify;
@@ -104,8 +106,14 @@ enum Cmd {
     Job(JobArgs),
     /// Run GitHub Actions jobs here, or say whether a failure on GitHub is flaky
     Ci(CiArgs),
-    /// List, test and trust the rules jouet's hooks run
+    /// List and test the rules jouet's hooks run
     Rule(RuleArgs),
+    /// Trust this repository's rules, routines and plugins as they are now
+    Trust(TrustArgs),
+    /// Stop trusting this repository's rules, routines and plugins
+    Untrust(UntrustArgs),
+    /// Add, remove, list and fetch plugins: rules and routines pinned by commit
+    Plugin(PluginArgs),
     /// Run a routine: a Luau program on jouet's primitives (also `joue`)
     Run(RunArgs),
     /// Notice costly patterns in the hook ledger and whole sessions, and propose fixes
@@ -2112,13 +2120,14 @@ pub struct CiRunArgs {
     args: Vec<String>,
 }
 
-/// List, test and trust the rules jouet's hooks run
+/// List and test the rules jouet's hooks run
 ///
-/// Rules are `[[rule]]` tables in TOML files: built in, in
-/// ~/.config/jouet/rules, and in a repository's .jouet/rules once it is
-/// trusted. `jouet rule schema` prints their JSON schema; a rule with logic
-/// a matcher cannot express names a Luau `script`, written against the API
-/// `jouet rule types` prints.
+/// Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules
+/// (enforced: your settings cannot turn them off), in
+/// ~/.config/jouet/rules, in a repository's .jouet/rules once it is
+/// trusted (`jouet trust`), and in plugins. `jouet rule schema` prints
+/// their JSON schema; a rule with logic a matcher cannot express names a
+/// Luau `script`, written against the API `jouet rule types` prints.
 #[derive(Args)]
 pub struct RuleArgs {
     #[usage(subcommand)]
@@ -2135,10 +2144,6 @@ pub enum RuleCmd {
     Schema(RuleSchemaArgs),
     /// Print the Luau type definitions of the jouet module, for rule scripts
     Types(RuleTypesArgs),
-    /// Trust this repository's .jouet/rules as they are now
-    Trust(RuleTrustArgs),
-    /// Stop trusting this repository's .jouet/rules
-    Untrust(RuleTrustArgs),
     /// Write a new rule of yours, in warn mode, from a template or a winding note
     New(RuleNewArgs),
     /// Switch a rule of yours from warn to deny
@@ -2153,8 +2158,10 @@ pub enum RuleCmd {
 ///
 /// Routines are Luau programs, where rules are TOML configuration.
 /// `joue NAME [ARGS]` is the same as `jouet run NAME [ARGS]`. Routines are
-/// built in (land, pr-next, ship-check, sweep), in ~/.config/jouet/routines,
-/// and in a repository's .jouet/routines once it is trusted with --trust.
+/// built in (land, pr-next, ship-check, sweep), in /etc/jouet/routines, in
+/// ~/.config/jouet/routines, in a repository's .jouet/routines once it is
+/// trusted (`jouet trust`), and in plugins, named after the plugin:
+/// `joue acme/deploy`.
 /// Each declares its arguments, so `joue NAME --help` says what it takes,
 /// and the capabilities it reaches; anything else is refused (exit 4). A
 /// routine that writes acts only with --yes: without it every write is
@@ -2164,12 +2171,6 @@ pub(crate) struct RunArgs {
     /// List every routine, where it comes from and what it reaches
     #[usage(long)]
     list: bool,
-    /// Trust this repository's .jouet/routines as they are now
-    #[usage(long, conflicts = "--untrust")]
-    trust: bool,
-    /// Stop trusting this repository's .jouet/routines
-    #[usage(long)]
-    untrust: bool,
     #[usage(subcommand)]
     cmd: Option<RunCmd>,
 }
@@ -2247,9 +2248,107 @@ pub struct RuleSchemaArgs {}
 #[derive(Args)]
 pub struct RuleTypesArgs {}
 
-/// Trust or stop trusting this repository's .jouet/rules
+/// Trust this repository's rules, routines and plugins as they are now
+///
+/// Covers .jouet/rules, .jouet/routines and the plugins .jouet/plugins.toml
+/// pins, together. Prints the rules, fetches the pinned plugins, and runs
+/// every rule's examples; trusts nothing (exit 1) if one fails, lacks
+/// either kind or does not load. Trust is kept against a hash of every file
+/// in them: a change on a pull or another branch needs trusting again, and
+/// going back to files trusted before does not. Trusting is the user's
+/// decision: without a terminal it is refused (exit 4) unless --yes is
+/// given, and the built-in `trust` rule denies it to an agent.
 #[derive(Args)]
-pub struct RuleTrustArgs {}
+pub struct TrustArgs {
+    /// Trust without a terminal, for a script or CI run by the user
+    #[usage(long)]
+    yes: bool,
+    /// List every directory trusted, and whether this repository is
+    #[usage(long)]
+    list: bool,
+}
+
+/// Stop trusting this repository's rules, routines and plugins
+#[derive(Args)]
+pub struct UntrustArgs {}
+
+/// Add, remove, list and fetch plugins: rules and routines pinned by commit
+///
+/// A plugin is a git repository, or a directory, with a jouet-plugin.toml
+/// (its name, description and the oldest jouet it works with) and rules/,
+/// routines/ or both. Its rules and routines are named after it:
+/// `acme/no-prod-db`, `joue acme/deploy`. `add` pins a git plugin at a full
+/// commit and the hash of every file it ships, in ~/.config/jouet/plugins.toml,
+/// or with --repo in this repository's .jouet/plugins.toml (which then
+/// needs trusting again). Every hook checks the kept files against the
+/// hash, and never fetches; `sync` fetches the pins missing or changed.
+/// /etc/jouet/plugins.toml and /etc/jouet/plugins/ hold enforced plugins.
+#[derive(Args)]
+pub struct PluginArgs {
+    #[usage(subcommand)]
+    cmd: PluginCmd,
+}
+
+#[derive(Subcommands)]
+pub enum PluginCmd {
+    /// Fetch a plugin, run its rules' examples and pin it
+    Add(PluginAddArgs),
+    /// Unpin a plugin
+    Rm(PluginRmArgs),
+    /// List every pinned plugin and whether it is kept as pinned
+    Ls(PluginLsArgs),
+    /// Fetch every pinned plugin that is missing or does not match its pin
+    Sync(PluginSyncArgs),
+}
+
+/// Fetch a plugin, run its rules' examples and pin it
+///
+/// SOURCE is a git URL, or a directory. A git plugin is pinned at the full
+/// commit --rev names (default: the remote's HEAD), and `git rev-parse`
+/// checks the commit fetched is that one. A directory is copied and pinned
+/// by the hash of its files; give --rev to fetch it as a git repository.
+/// Its name is the one its jouet-plugin.toml gives. Every rule must pass
+/// its examples of both kinds, or nothing is pinned (exit 1). Like
+/// trusting, it needs a terminal or --yes, and an agent is denied it.
+#[derive(Args)]
+pub struct PluginAddArgs {
+    /// A git URL, or a directory
+    source: String,
+    /// The commit, tag or branch to pin, resolved to a full commit
+    #[usage(long, value_name = "REV")]
+    rev: Option<String>,
+    /// The plugin's directory within the source, when it is not the root
+    #[usage(long, value_name = "DIR")]
+    dir: Option<String>,
+    /// Pin it in this repository's .jouet/plugins.toml rather than yours
+    #[usage(long)]
+    repo: bool,
+    /// Pin it without a terminal, for a script or CI run by the user
+    #[usage(long)]
+    yes: bool,
+}
+
+/// Unpin a plugin
+#[derive(Args)]
+pub struct PluginRmArgs {
+    /// The plugin's name
+    name: String,
+    /// Unpin it from this repository's .jouet/plugins.toml rather than yours
+    #[usage(long)]
+    repo: bool,
+}
+
+/// List every pinned plugin and whether it is kept as pinned
+#[derive(Args)]
+pub struct PluginLsArgs {}
+
+/// Fetch every pinned plugin that is missing or does not match its pin
+///
+/// Only the pins of sets that run: yours, the system's, and this
+/// repository's once trusted. Each fetch must give the pinned commit and
+/// hash, or it fails (exit 5).
+#[derive(Args)]
+pub struct PluginSyncArgs {}
 
 /// Write a new rule of yours, in warn mode, from a template or a winding note
 ///
@@ -2875,6 +2974,9 @@ fn main() -> ExitCode {
         Cmd::Job(args) => cmd::job::run(args, &out),
         Cmd::Ci(args) => cmd::ci::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
+        Cmd::Trust(args) => cmd::trust::trust(&args, &out),
+        Cmd::Untrust(_) => cmd::trust::untrust(&out),
+        Cmd::Plugin(args) => cmd::plugin::run(&args, &out),
         Cmd::Run(args) => return cmd::run::run(args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),

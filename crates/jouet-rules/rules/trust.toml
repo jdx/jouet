@@ -1,0 +1,43 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "trust"
+why = "A repository's rules put text in front of the agent and its routines run commands, so an agent that could trust them could be talked into trusting them; trusting a repository and adding a plugin are the user's decisions."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+message = "Trusting a repository's rules and routines, and adding a plugin, is the user's decision; ask them to run `jouet trust` (or `jouet plugin add`) in a terminal. `--yes` is for scripts and CI the user runs, not for an agent."
+
+[[rule.match]]
+command = "jouet trust"
+unless_flags = ["--list", "--help", "-h"]
+
+[[rule.match]]
+command = "jouet plugin add"
+unless_flags = ["--help", "-h"]
+
+[rule.examples]
+fires = [
+  "jouet trust",
+  "jouet trust --yes",
+  "cd repo && jouet trust --yes",
+  "jouet plugin add https://github.com/acme/jouet-plugin --yes",
+  "jouet plugin add ../team-plugin --repo --yes",
+  "mise x -- jouet trust --yes",
+  "/usr/local/bin/jouet trust --yes",
+  "jouet --json trust --yes",
+  "bash -c 'jouet trust --yes'",
+]
+quiet = [
+  "jouet trust --list",
+  "jouet trust --help",
+  "jouet untrust",
+  "jouet rule list",
+  "jouet plugin ls",
+  "jouet plugin sync",
+  "jouet plugin rm acme",
+  "jouet plugin add --help",
+  "joue --list",
+  "echo 'jouet trust --yes'",
+  "git commit -m 'jouet trust --yes'",
+]

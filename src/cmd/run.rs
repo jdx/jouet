@@ -2,13 +2,12 @@
 //! that runs jouet's own commands for them by running this binary again.
 
 use super::Output;
-use crate::rules;
+use crate::sources::{self, Kind, Set};
 use crate::{RunArgs, RunCmd, RunTestArgs};
 use jouet_output::exit::Exit;
-use jouet_routines::routine::{self, Catalog, Routine, State};
+use jouet_routines::routine::{Catalog, Origin, Routine, RoutineDir, State};
 use jouet_routines::world::Github;
 use jouet_routines::{ArgError, Host, Options, StepOutput, World, testing};
-use jouet_rules::Trust;
 use serde::Serialize;
 use std::ffi::OsString;
 use std::fmt::Write as _;
@@ -24,10 +23,7 @@ pub(crate) fn run(args: RunArgs, out: &Output) -> ExitCode {
                 .into();
         }
     };
-    if args.trust || args.untrust {
-        return trust(&cwd, args.trust, out).into();
-    }
-    let (catalog, notes) = catalog(&cwd);
+    let (catalog, notes, sets) = catalog(&cwd);
     match args.cmd {
         Some(RunCmd::External(words)) if !args.list => run_words(&catalog, &cwd, &words, out),
         Some(RunCmd::Test(test)) => run_tests(&catalog, &test, out).into(),
@@ -38,35 +34,42 @@ pub(crate) fn run(args: RunArgs, out: &Output) -> ExitCode {
         _ => {
             let mut catalog = catalog;
             catalog.check();
-            list(&catalog, &notes, out).into()
+            list(&catalog, &notes, &sets, out).into()
         }
     }
 }
 
-/// Every routine, and notes on what could not be read or is not trusted.
-fn catalog(cwd: &Path) -> (Catalog, Vec<String>) {
-    let store = rules::trust_store();
-    let repo_dir = rules::repo_routine_dir(cwd);
-    let trust = repo_dir.as_deref().map(|dir| store.check(dir));
-    let (sources, mut notes) = routine::discover(
-        rules::user_routine_dir().as_deref(),
-        repo_dir.as_deref(),
-        trust == Some(Trust::Trusted),
-    );
-    if let (Some(dir), Some(trust)) = (&repo_dir, trust) {
-        let why = match trust {
-            Trust::Trusted => None,
-            Trust::Untrusted => Some("is not trusted"),
-            Trust::Changed => Some("changed since it was trusted"),
-        };
-        if let Some(why) = why {
-            notes.push(format!(
-                "{} {why}, so its routines do not run; review them, then run `joue --trust`",
-                dir.display()
-            ));
-        }
+/// What a set's routines are.
+fn origin(set: &Set) -> fn(PathBuf) -> Origin {
+    match set.kind {
+        _ if set.enforced() => Origin::Enforced,
+        Kind::User => Origin::User,
+        Kind::Repo => Origin::Repo,
+        Kind::Plugin | Kind::System => Origin::Plugin,
     }
-    (Catalog::new(sources), notes)
+}
+
+/// Every routine, notes on what could not be read or is not trusted, and
+/// the sets they come from.
+fn catalog(cwd: &Path) -> (Catalog, Vec<String>, Vec<Set>) {
+    let mut digests = sources::digests();
+    let mut notes = Vec::new();
+    let sets = sources::sets(cwd, None, &mut digests, &mut notes);
+    digests.save();
+    let dirs: Vec<RoutineDir> = sets
+        .iter()
+        .filter(|s| s.loads() && s.routines_dir().is_dir())
+        .map(|s| RoutineDir {
+            dir: s.routines_dir(),
+            origin: origin(s),
+            trusted: s.status.runs(),
+            namespace: s.namespace(),
+        })
+        .collect();
+    let (routine_sources, errors) = jouet_routines::routine::discover(&dirs);
+    notes.extend(errors);
+    notes.extend(sources::notes(&sets));
+    (Catalog::new(routine_sources), notes, sets)
 }
 
 /// Whether `word` names a routine, for `jouet`'s "did you mean `joue`".
@@ -84,7 +87,7 @@ fn run_words(catalog: &Catalog, cwd: &Path, words: &[OsString], out: &Output) ->
         .map(|w| w.to_string_lossy().into_owned())
         .collect();
     let Some((name, rest)) = words.split_first() else {
-        return list(catalog, &[], out).into();
+        return list(catalog, &[], &[], out).into();
     };
     let Some(routine) = catalog.get(name) else {
         return unknown(catalog, &words, out).into();
@@ -208,6 +211,17 @@ struct Listed<'a> {
     name: &'a str,
     state: &'a State,
     source: String,
+    /// For a routine from outside: whether its set runs, as `jouet rule
+    /// list` says it for rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trust: Option<&'static str>,
+    /// The plugin it comes from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plugin: Option<&'a str>,
+    /// Where it comes from, with the plugin and trust state: `repo:trusted`,
+    /// `plugin:acme`, `enforced`.
+    #[serde(skip)]
+    scope: Option<String>,
     about: &'a str,
     capabilities: &'a [jouet_routines::Capability],
 }
@@ -219,17 +233,27 @@ struct List<'a> {
     notes: &'a [String],
 }
 
-fn list(catalog: &Catalog, notes: &[String], out: &Output) -> Exit {
+fn list(catalog: &Catalog, notes: &[String], sets: &[Set], out: &Output) -> Exit {
     let listed = List {
         routines: catalog
             .routines()
             .iter()
-            .map(|r| Listed {
-                name: &r.name,
-                state: &r.state,
-                source: r.origin.describe(),
-                about: &r.about,
-                capabilities: &r.capabilities,
+            .map(|r| {
+                let set = r
+                    .origin
+                    .path()
+                    .and_then(|p| sets.iter().find(|s| s.holds(p)))
+                    .filter(|s| s.kind != Kind::User);
+                Listed {
+                    name: &r.name,
+                    state: &r.state,
+                    source: r.origin.describe(),
+                    trust: set.map(|s| s.status.name()),
+                    plugin: set.and_then(|s| s.name.as_deref()),
+                    scope: set.map(Set::scope),
+                    about: &r.about,
+                    capabilities: &r.capabilities,
+                }
             })
             .collect(),
         notes,
@@ -253,8 +277,14 @@ fn list(catalog: &Catalog, notes: &[String], out: &Output) -> Exit {
                 let caps: Vec<&str> = r.capabilities.iter().map(|c| c.name()).collect();
                 let _ = writeln!(s, "{:<width$}  reaches {}", "", caps.join(", "));
             }
-            if r.source != "builtin" {
-                let _ = writeln!(s, "{:<width$}  from {}", "", r.source);
+            match (&r.scope, r.source.as_str()) {
+                (Some(scope), source) => {
+                    let _ = writeln!(s, "{:<width$}  from {source} ({scope})", "");
+                }
+                (None, "builtin") => {}
+                (None, source) => {
+                    let _ = writeln!(s, "{:<width$}  from {source}", "");
+                }
             }
         }
         for note in notes {
@@ -343,54 +373,6 @@ fn run_tests(catalog: &Catalog, args: &RunTestArgs, out: &Output) -> Exit {
         },
     );
     if ok { Exit::Ok } else { Exit::Failed }
-}
-
-#[derive(Serialize)]
-struct Trusted {
-    dir: String,
-    trusted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    routines: Option<usize>,
-}
-
-fn trust(cwd: &Path, trust: bool, out: &Output) -> Exit {
-    let Some(dir) = rules::repo_routine_dir(cwd) else {
-        return out.error(
-            Exit::NotFound,
-            "no .jouet/routines directory at the root of this repository",
-        );
-    };
-    let mut store = rules::trust_store();
-    let result = if trust {
-        store.trust(&dir).map(|()| true)
-    } else {
-        store.untrust(&dir)
-    };
-    let changed = match result {
-        Ok(changed) => changed,
-        Err(e) => {
-            return out.error(
-                Exit::Failed,
-                &format!("updating trust for {}: {e}", dir.display()),
-            );
-        }
-    };
-    let count = routine::luau_files(&dir).map(|f| f.len()).ok();
-    let report = Trusted {
-        dir: dir.display().to_string(),
-        trusted: trust,
-        routines: if trust { count } else { None },
-    };
-    out.result(&report, || match (trust, changed) {
-        (true, _) => format!(
-            "trusted {} ({} routines); a change to any of them needs trusting again\n",
-            report.dir,
-            count.unwrap_or(0)
-        ),
-        (false, true) => format!("no longer trusting {}\n", report.dir),
-        (false, false) => format!("{} was not trusted\n", report.dir),
-    });
-    Exit::Ok
 }
 
 /// Runs jouet's own commands for a routine, by running this binary with

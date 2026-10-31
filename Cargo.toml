@@ -58,7 +58,7 @@ sha2 = "0.11"
 similar = "3"
 tempfile = "3"
 tokio-postgres-rustls = "0.14"
-toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+toml = { version = "1", default-features = false, features = ["display", "parse", "serde"] }
 # tree-sitter and the grammars jouet-search and jouet-graph compile in. The
 # grammars depend only on tree-sitter-language, so any of their versions
 # works with this tree-sitter; ast-grep-core must share it, since tree-sitter

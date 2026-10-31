@@ -19,6 +19,7 @@ use crate::reads;
 use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
+use crate::sources::Status;
 use crate::verify::{self, State};
 use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
@@ -148,10 +149,11 @@ fn handle(
     match event {
         "session-start" => {
             log.append(log.entry("session-start"));
-            let engine = load(payload).filter(|_| hooks.prime)?;
-            let primer = session_start(&engine, hooks.steer, hooks.verify);
+            let loaded = load_all(payload).filter(|_| hooks.prime)?;
+            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify);
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
             let mut notes = wind_notes(settings, log.session, log.repo.as_deref(), cwd);
+            notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
                 fnox::under_proxy(),
@@ -519,6 +521,11 @@ impl Log<'_> {
 
 /// The rules for the session's directory, or for this process's.
 fn load(payload: &Value) -> Option<Engine> {
+    load_all(payload).map(|loaded| loaded.engine)
+}
+
+/// The rules, and the sets they come from.
+fn load_all(payload: &Value) -> Option<rules::Loaded> {
     let cwd = payload
         .get("cwd")
         .and_then(Value::as_str)
@@ -528,7 +535,54 @@ fn load(payload: &Value) -> Option<Engine> {
     for error in &loaded.errors {
         eprintln!("jouet: {error}");
     }
-    Some(loaded.engine)
+    Some(loaded)
+}
+
+/// One line on rules and routines here that do not run until the user
+/// trusts them or fetches them. It never asks the agent to trust them: the
+/// rules are the ones that would be steering it.
+fn untrusted_note(loaded: &rules::Loaded) -> Option<String> {
+    let mut untrusted = Vec::new();
+    let mut unfetched = Vec::new();
+    for set in &loaded.sets {
+        match set.status {
+            Status::Untrusted | Status::Changed => {
+                let rules = loaded
+                    .engine
+                    .rules()
+                    .iter()
+                    .filter(|r| r.origin.path().is_some_and(|p| set.holds(p)))
+                    .count();
+                let routines = jouet_routines::routine::luau_files(&set.routines_dir())
+                    .map_or(0, |files| files.len());
+                let changed = if set.status == Status::Changed {
+                    ", changed since they were trusted"
+                } else {
+                    ""
+                };
+                untrusted.push(format!(
+                    "{rules} rules and {routines} routines in {}{changed}",
+                    set.root.display()
+                ));
+            }
+            Status::Missing | Status::Mismatch => unfetched.push(set.label()),
+            _ => {}
+        }
+    }
+    let mut parts = Vec::new();
+    if !untrusted.is_empty() {
+        parts.push(format!(
+            "this repository's rules and routines are not trusted, so they do not run ({}); trusting them is the user's decision, in their own terminal (`jouet trust`), not yours",
+            untrusted.join("; ")
+        ));
+    }
+    if !unfetched.is_empty() {
+        parts.push(format!(
+            "{} not fetched as pinned; `jouet plugin sync` fetches it",
+            unfetched.join(", ")
+        ));
+    }
+    (!parts.is_empty()).then(|| format!("jouet: {}.", parts.join("; ")))
 }
 
 fn evaluate(engine: &Engine, call: &Call) -> Outcome {
