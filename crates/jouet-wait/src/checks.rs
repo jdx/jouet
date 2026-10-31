@@ -118,11 +118,11 @@ impl Check {
         }
     }
 
-    /// A failed Entire Gates check that only repeats other failures: failed
-    /// checks, or a branch behind or conflicting with its base. It does not
-    /// count as a failure of its own.
+    /// A failed Entire Gates check that only repeats other failures (failed
+    /// checks, or a branch behind or conflicting with its base) or waits for
+    /// an approval on the trail. It does not count as a failure of CI.
     pub(crate) fn derived(&self) -> bool {
-        self.state.failed() && self.entire.as_ref().is_some_and(Gates::derived)
+        self.state.failed() && self.entire.as_ref().is_some_and(Gates::not_ci)
     }
 
     /// An entry of `GET /repos/{o}/{r}/commits/{sha}/check-runs`. Actions
@@ -481,6 +481,15 @@ mod tests {
         );
         assert_eq!(
             verdict(&[behind, Check::new("test".into(), State::Pass)], false),
+            Verdict::Success
+        );
+        // An approval still to come on the trail is not a CI failure either.
+        let approval = entire_gates(
+            "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Approvals**: failed — No reviewers have approved this trail",
+        );
+        assert!(approval.derived());
+        assert_eq!(
+            verdict(&[approval, Check::new("test".into(), State::Pass)], false),
             Verdict::Success
         );
     }

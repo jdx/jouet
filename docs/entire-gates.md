@@ -7,6 +7,7 @@
 | Checks | Another check failed | Treats it as derived: the failed checks are the cause, and are reported instead |
 | Findings | Findings on the trail are open | Lists them, with their location, and names the first one to fix |
 | Up to date | The branch is behind its base, or conflicts with it | Treats it as derived: reports `behind_base` with the command that merges the base |
+| Approvals | The trail needs an approval it does not have yet | Reports it as `entire_gates`, a wait. `wait ci` and `ci explain` do not count it as a CI failure |
 
 Entire sits beside the forge rather than inside it. Trail numbers are not pull request numbers, and a finding's lifecycle is Entire's own: resolving a finding leaves every GitHub review thread as it was, and resolving a thread leaves the findings.
 

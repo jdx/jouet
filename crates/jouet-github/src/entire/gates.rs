@@ -12,8 +12,9 @@
 //!
 //! Two of the gates only repeat what is already known elsewhere: `checks`
 //! fails because another check failed, and `up_to_date` because the branch
-//! is behind its base or conflicts with it. Only `findings` (and any gate
-//! jouet does not know) is a failure of its own.
+//! is behind its base or conflicts with it. `approvals` waits on a person,
+//! not on CI. Only `findings` (and any gate jouet does not know) is a
+//! failure of its own.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub const CHECK: &str = "Entire Gates";
 
 /// Gates whose failure repeats something already reported elsewhere.
 const DERIVED: [&str; 2] = ["checks", "up_to_date"];
+/// Gates that wait on a reviewer: an approval on the trail.
+const REVIEW: [&str; 1] = ["approvals"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gate {
@@ -104,9 +107,21 @@ impl Gates {
     /// whose summary names no failing gate is not derived: there is nothing
     /// to point at instead.
     pub fn derived(&self) -> bool {
+        self.only(&[&DERIVED])
+    }
+
+    /// Whether the check failed for nothing CI did: derived gates, or an
+    /// approval on the trail still to come. A wait for CI does not count it.
+    pub fn not_ci(&self) -> bool {
+        self.only(&[&DERIVED, &REVIEW])
+    }
+
+    fn only(&self, groups: &[&[&str]]) -> bool {
         self.failed()
             && self.failing().next().is_some()
-            && self.failing().all(|g| DERIVED.contains(&g.gate.as_str()))
+            && self
+                .failing()
+                .all(|g| groups.iter().any(|group| group.contains(&g.gate.as_str())))
     }
 
     /// Whether the summary was read: a failed check names its failing
@@ -220,6 +235,27 @@ mod tests {
         let checks = Gates::parse("COMPLETED", Some("FAILURE"), None, Some(CHECKS), None);
         assert_eq!(checks.trail, Some(1176));
         assert!(checks.derived());
+        let approval = Gates::parse(
+            "completed",
+            Some("failure"),
+            None,
+            Some(
+                "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Approvals**: failed — No reviewers have approved this trail",
+            ),
+            None,
+        );
+        assert!(!approval.derived(), "nothing else reports it");
+        assert!(approval.not_ci());
+        assert!(
+            !Gates::parse(
+                "completed",
+                Some("failure"),
+                None,
+                Some(CHECKS_AND_FINDINGS),
+                None
+            )
+            .not_ci()
+        );
         let behind = Gates::parse("completed", Some("failure"), None, Some(UP_TO_DATE), None);
         assert!(behind.fails("up_to_date"));
         assert!(behind.derived());
