@@ -105,7 +105,8 @@ EOF
 
 	assert_failure 4
 	assert_line "not written a.txt  1 edit  +1 -1"
-	assert_line "  edit 1: 3 matches, expected 2, at lines 1, 2, 3; set \`<<<<<<< SEARCH count=3\` or \`count=all\` to replace every match, or give more surrounding text to match fewer"
+	assert_line "  edit 1: 3 matches, expected 2, at lines 1, 2, 3"
+	assert_line "    set \`<<<<<<< SEARCH count=3\` or \`count=all\` to replace every match, or give more surrounding text to match fewer"
 	assert_line "0 of 2 files written"
 	assert_content a.txt $'one\n'
 	assert_content b.txt $'two\ntwo\ntwo\n'
@@ -322,11 +323,13 @@ EOF
 
 	run --separate-stderr jouet edit replace a.txt --old a --new b
 	assert_failure 4
-	assert_line "  edit 1: 3 matches, expected 1, at lines 1, 1, 1; set \`--count 3\` or \`--all\` to replace every match, or give more surrounding text to match fewer"
+	assert_line "  edit 1: 3 matches, expected 1, at lines 1, 1, 1"
+	assert_line "    set \`--count 3\` or \`--all\` to replace every match, or give more surrounding text to match fewer"
 
-	run --separate-stderr jouet edit replace a.txt --old a --new b --count 4
+	run --separate-stderr jouet edit replace a.txt --old a --new b --count 4 --json
 	assert_failure 4
-	assert_line "  edit 1: 3 matches, expected 4, at lines 1, 1, 1; set \`--count 3\` or \`--all\` to replace every match"
+	assert_equal "$(jq -r '.files[0].edits[0].message' <<<"$output")" \
+		"set \`--count 3\` or \`--all\` to replace every match"
 
 	run --separate-stderr jouet edit replace a.txt --old a --new b --count 2
 	assert_failure 4
@@ -345,7 +348,8 @@ EOF
 
 	run --separate-stderr jouet edit <<<'[{"path": "b.txt", "old": "x", "new": "y", "count": 3}]'
 	assert_failure 4
-	assert_line "  edit 1: 2 matches, expected 3, at lines 1, 2; set \`\"count\": 2\` or \`\"count\": \"all\"\` to replace every match"
+	assert_line "  edit 1: 2 matches, expected 3, at lines 1, 2"
+	assert_line "    set \`\"count\": 2\` or \`\"count\": \"all\"\` to replace every match"
 
 	run --separate-stderr jouet edit <<'EOF'
 *** Begin Patch
@@ -357,6 +361,7 @@ EOF
 EOF
 	assert_failure 4
 	assert_line "  edit 1: 2 matches, expected 1, at lines 1, 2"
+	refute_output --partial "count"
 	assert_content b.txt $'x\nx\n'
 }
 

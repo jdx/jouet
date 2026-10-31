@@ -20,7 +20,7 @@ jouet edit hash PATH...
 - **All or nothing.** Every edit in every file is applied in memory first. If any edit fails, no file is written and the output says so: `0 of 2 files written`. Each file is written to a temporary file beside it and renamed into place, keeping its permissions, and if a write fails part way, the files already written are restored.
 - **In order.** Edits to one file apply in the order given, and each one sees the result of the one before. Two spellings of the same file, such as `a.rs` and `sub/../a.rs` or its absolute path, are the same file.
 - **Exact.** Search text matches exactly, whitespace included. In a file with CRLF line endings, line breaks in the search and replacement text are treated as CRLF.
-- **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When the text does occur, but inside a line or only with other indentation, it says so and where. When it matches too often, it lists the line of every match, so you can add context or set a count, and it names the count to set in the form you used (`--count N` or `--all`, `count=N` after `SEARCH`, or a JSON `count`).
+- **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When the text does occur, but inside a line or only with other indentation, it says so and where. When it matches too often, it lists the line of every match, so you can add context or set a count, and it names the count to set in the form you used (`--count N` or `--all`, `count=N` after `SEARCH`, or a JSON `count`), also as the edit's `message` in `--json`.
 - **Every problem at once.** A failed edit does not stop the others from being checked, so one run reports everything wrong with a spec.
 
 ## Spec formats
@@ -305,7 +305,8 @@ Too many matches list where they are:
 
 ```output
 failed      src/main.rs  1 edit
-  edit 1: 2 matches, expected 1, at lines 2, 3; set `<<<<<<< SEARCH count=2` or `count=all` to replace every match, or give more surrounding text to match fewer
+  edit 1: 2 matches, expected 1, at lines 2, 3
+    set `<<<<<<< SEARCH count=2` or `count=all` to replace every match, or give more surrounding text to match fewer
 0 of 1 file written
 ```
 

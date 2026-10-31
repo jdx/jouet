@@ -99,12 +99,15 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         } else {
             Exit::Precondition
         };
-        print_report(out, &plan.report, None, None, scoped.as_ref(), counts);
+        if let Some(syntax) = counts {
+            name_counts(&mut plan.report, syntax);
+        }
+        print_report(out, &plan.report, None, None, scoped.as_ref());
         return exit;
     }
     if args.dry_run {
         plan.report.dry_run = true;
-        print_report(out, &plan.report, None, None, scoped.as_ref(), None);
+        print_report(out, &plan.report, None, None, scoped.as_ref());
         return Exit::Ok;
     }
     let settings = crate::settings::Settings::load();
@@ -248,7 +251,6 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         fixed.as_ref(),
         diagnosed.as_ref(),
         scoped.as_ref(),
-        None,
     );
     // Keep the code graph in step with what was written (or restored), when
     // the repository has one, as the post-tool-use hook does for file tools.
@@ -730,7 +732,6 @@ fn print_report(
     fix: Option<&diag::fix::Fixed>,
     diag: Option<&DiagOutcome>,
     scope: Option<&scope::Report>,
-    counts: Option<CountSyntax>,
 ) {
     let doc = EditOutput {
         report,
@@ -740,7 +741,7 @@ fn print_report(
     };
     out.result(&doc, || {
         let mut text = scope.map(scope::render).unwrap_or_default();
-        text.push_str(&render(report, counts));
+        text.push_str(&render(report));
         if let Some(line) = fix.and_then(diag::fix::Fixed::summary) {
             let _ = writeln!(text, "{line}");
         }
@@ -817,7 +818,22 @@ impl CountSyntax {
     }
 }
 
-fn edit_problem(e: &edit::EditReport, counts: Option<CountSyntax>) -> String {
+/// Says, as each edit's `message`, which count accepts the matches an edit
+/// found when they were too many or too few, so the fix needs no lookup.
+fn name_counts(report: &mut Report, syntax: CountSyntax) {
+    for e in report.files.iter_mut().flat_map(|f| &mut f.edits) {
+        let too_many = match e.status {
+            EditStatus::TooManyMatches => true,
+            EditStatus::TooFewMatches => false,
+            _ => continue,
+        };
+        if e.symbol.is_none() && e.message.is_none() {
+            e.message = Some(syntax.hint(e.found, too_many));
+        }
+    }
+}
+
+fn edit_problem(e: &edit::EditReport) -> String {
     let expected = match e.expected {
         Count::Exactly(n) => n.to_string(),
         Count::All => "at least 1".into(),
@@ -855,18 +871,11 @@ fn edit_problem(e: &edit::EditReport, counts: Option<CountSyntax>) -> String {
             e.symbol.as_deref().unwrap_or(""),
             lines()
         ),
-        EditStatus::TooManyMatches | EditStatus::TooFewMatches => {
-            let mut s = format!(
-                "{} matches, expected {expected}, at lines {}",
-                e.found,
-                lines()
-            );
-            if let Some(syntax) = counts {
-                let too_many = e.status == EditStatus::TooManyMatches;
-                let _ = write!(s, "; {}", syntax.hint(e.found, too_many));
-            }
-            s
-        }
+        EditStatus::TooManyMatches | EditStatus::TooFewMatches => format!(
+            "{} matches, expected {expected}, at lines {}",
+            e.found,
+            lines()
+        ),
         EditStatus::AnchorNotFound => {
             format!("anchor not found: {}", e.anchor.as_deref().unwrap_or(""))
         }
@@ -898,7 +907,7 @@ fn line_list(lines: &[usize]) -> String {
 
 /// The text form of a report: one line per file, then the problems under it,
 /// then a summary line.
-fn render(report: &Report, counts: Option<CountSyntax>) -> String {
+fn render(report: &Report) -> String {
     let mut s = String::new();
     let width = report.files.iter().map(|f| f.path.len()).max().unwrap_or(0);
     for f in &report.files {
@@ -923,7 +932,7 @@ fn render(report: &Report, counts: Option<CountSyntax>) -> String {
             let _ = writeln!(s, "  {}", err.message);
         }
         for e in f.edits.iter().filter(|e| e.status != EditStatus::Ok) {
-            let _ = writeln!(s, "  edit {}: {}", e.index + 1, edit_problem(e, counts));
+            let _ = writeln!(s, "  edit {}: {}", e.index + 1, edit_problem(e));
             if let Some(message) = &e.message {
                 let _ = writeln!(s, "    {message}");
             }
