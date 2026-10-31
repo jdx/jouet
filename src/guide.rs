@@ -66,6 +66,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "test",
+        Some(
+            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push",
+        ),
+    ),
+    (
         "rule",
         Some(
             "writing or checking a jouet rule, the TOML matchers behind jouet's hooks (`jouet rule schema`): write its `fires` and `quiet` examples first, and `jouet rule test` runs them before it is enabled",
@@ -100,6 +106,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
 /// prints (a proposal's note, the review prompt), so the overview leaves
 /// them out. `jouet agent-help COMMAND` still lists them.
 const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
+
+/// Subcommands for a person's decision, not an agent's, which the overview
+/// leaves out as it leaves out `jouet setup`: trusting a repository's rules.
+/// `jouet agent-help COMMAND` still lists them.
+const PEOPLE: &[(&str, &str)] = &[("rule", "trust"), ("rule", "untrust")];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -163,11 +174,19 @@ pub(crate) fn overview() -> String {
         // the overview stays inside its line budget.
         let _ = writeln!(out, "jouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
-        let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
-        let listed = meta
+        let usage = synopsis(&format!("jouet {name}"), meta);
+        let listed: Vec<_> = meta
             .subcommands
             .iter()
-            .filter(|s| !s.hide && !PROMPTED.contains(&(name, s.cmd.name)));
+            .filter(|s| {
+                let at = (name, s.cmd.name);
+                !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
+            })
+            .collect();
+        // A bare `jouet pr` above its subcommands says nothing.
+        if listed.is_empty() || usage != format!("jouet {name}") {
+            let _ = writeln!(out, "  {usage}");
+        }
         for sub in listed {
             let path = format!("jouet {name} {}", sub.cmd.name);
             let _ = writeln!(
