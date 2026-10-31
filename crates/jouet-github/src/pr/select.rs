@@ -2,8 +2,10 @@
 //! turned into lookups and fetched. `jouet pr status`, `jouet pr next` and
 //! the routines' `github.prs` share it, so they always select the same PRs.
 
+use super::entire;
 use super::status::{self, Fetched, Incomplete, Lookup, PrStatus};
 use super::target::{self, Arg, Repo, Target};
+use crate::entire::Availability;
 use crate::forge::{self, Forge};
 use crate::{Client, host};
 use jouet_output::exit::Exit;
@@ -56,6 +58,10 @@ pub struct Report {
     pub not_found: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub incomplete: Vec<Incomplete>,
+    /// Whether the `entire` CLI could be asked, when some PR's Entire
+    /// Gates check failed on findings or an out-of-date branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entire: Option<Availability>,
 }
 
 /// Fetches the PRs the lookups name, waits up to `settle` for unknown
@@ -67,11 +73,13 @@ pub fn fetch(
 ) -> Result<Report, String> {
     let mut fetched = host::fetch(client, lookups)?;
     settle_each(client, &mut fetched.prs, settle)?;
+    let entire = entire::add(&mut fetched.prs);
     let now = time::now();
     Ok(Report {
         prs: fetched.prs.into_iter().map(|p| p.finish(now)).collect(),
         not_found: fetched.not_found,
         incomplete: fetched.incomplete,
+        entire,
     })
 }
 

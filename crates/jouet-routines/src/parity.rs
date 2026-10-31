@@ -45,8 +45,19 @@ fn edited(mut pr: Value, edit: impl FnOnce(&mut Value)) -> Value {
     pr
 }
 
+/// A failed Entire Gates check on the head, with this summary. The
+/// findings gate is left passing, so the `entire` CLI is never asked.
+fn gates(mut pr: Value, summary: &str) -> Value {
+    pr["commits"]["nodes"][0]["commit"]["checkSuites"] = json!({ "nodes": [{ "checkRuns": { "nodes": [{
+        "status": "COMPLETED", "conclusion": "FAILURE",
+        "detailsUrl": "https://entire.io/gh/jdx/mise/trails/424",
+        "title": "1 blocking gate not passing", "summary": summary,
+    }] } }] });
+    pr
+}
+
 /// Every state `pr next` can reach, but a failing check (whose names a
-/// follow-up query fetches).
+/// follow-up query fetches) and open Entire findings (which `entire` lists).
 fn variants() -> Vec<(&'static str, Value)> {
     let base = || green(recorded("l3"));
     let no_checks = |pushed: &str| {
@@ -117,6 +128,27 @@ fn variants() -> Vec<(&'static str, Value)> {
                 pr["autoMergeRequest"] = json!({ "enabledAt": "2026-10-30T00:00:00Z" })
             }),
         ),
+        (
+            "entire gate jouet does not know",
+            gates(
+                base(),
+                "- ❌ **Approvals**: failed — No reviewers have approved this trail\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)",
+            ),
+        ),
+        (
+            "entire behind",
+            gates(
+                base(),
+                "- ❌ **Up to date**: failed — 3 commits behind · Merge conflicts\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)",
+            ),
+        ),
+        (
+            "entire repeating the checks",
+            gates(
+                base(),
+                "- ❌ **Checks**: failed — CI checks have not passed\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)",
+            ),
+        ),
         ("checks registering", no_checks("2099-01-01T00:00:00Z")),
         ("checks missing", no_checks("2020-01-01T00:00:00Z")),
     ]
@@ -184,6 +216,7 @@ fn the_routine_decides_as_the_rust_pr_next_does() {
         }
         seen.insert(rust["action"].as_str().unwrap().to_string());
     }
-    // Every action but checks_failing was reached.
-    assert_eq!(seen.len(), 13, "{seen:?}");
+    // Every action but checks_failing and entire_findings was reached: their
+    // details come from a follow-up query and the `entire` CLI.
+    assert_eq!(seen.len(), 14, "{seen:?}");
 }

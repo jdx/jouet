@@ -1,0 +1,110 @@
+{
+  "counts": {
+    "Open": 2,
+    "OpenHigh": 0,
+    "OpenMedium": 2,
+    "OpenLow": 0,
+    "Resolved": 6,
+    "Dismissed": 3,
+    "Stale": 9
+  },
+  "findings": [
+    {
+      "id": "01M4C997EAAK13R52CVH7GYY7M",
+      "trailId": "01M44ZC8TXNNDCPGJX6A40BDNE",
+      "repositoryId": "01KWHDK2EKTJT9BA4KSDQCWRA5",
+      "reviewId": "01M4C997DQQ574E7N58WQE7KDF",
+      "codeVersionId": "01M4C8Q5FBSW30V7ZM9YFWZ8H8",
+      "actorId": "agent:trail-review",
+      "title": null,
+      "body": "Identical `rm -rf \"${MISE_DATA_DIR}/installs/tiny/1\"* 2>/dev/null || true` pattern as test_deps_tool_install: only deletes the compat symlink under the now-default identity layout, leaving the catalog-tracked install intact, so this regression test for the monorepo task install-order bug (discussions/9445) no longer reliably exercises the \"tool not yet installed\" path it's meant to guard.",
+      "severity": "medium",
+      "confidence": 0.75,
+      "status": "open",
+      "statusReason": null,
+      "staleOutcome": "current",
+      "staleCheckedAt": null,
+      "staleCheckedCodeVersionId": null,
+      "clientId": "cef187610e140c3fb5c22389aad6cd98",
+      "clientIdHash": "3fc52474696c85eca23f806516b27a51631421a42bffc080496abc96b60417d0",
+      "createdAt": "2026-10-07T22:55:55.337Z",
+      "updatedAt": "2026-10-07T22:55:55.337Z",
+      "location": {
+        "id": "01M4C997EABAEMBSPYEY576BN5",
+        "reviewCommentId": "01M4C997EAAK13R52CVH7GYY7M",
+        "codeVersionId": "01M4C8Q5FBSW30V7ZM9YFWZ8H8",
+        "granularity": "line",
+        "filePath": "e2e/tasks/test_task_monorepo_deps_tool_install",
+        "startLine": 44,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "rm -rf \"${MISE_DATA_DIR}/installs/tiny/1\"* 2>/dev/null || true",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M4C997EAFP7C1872H1WQS349"
+    },
+    {
+      "id": "01M4C997DZH5KQRP31NW93NQHR",
+      "trailId": "01M44ZC8TXNNDCPGJX6A40BDNE",
+      "repositoryId": "01KWHDK2EKTJT9BA4KSDQCWRA5",
+      "reviewId": "01M4C997DQQ574E7N58WQE7KDF",
+      "codeVersionId": "01M4C8Q5FBSW30V7ZM9YFWZ8H8",
+      "actorId": "agent:trail-review",
+      "title": null,
+      "body": "`rm -rf \"${MISE_DATA_DIR}/installs/tiny/1\"* 2>/dev/null || true` only removes the compat symlink under the now-default identity layout; the real install + receipt survive, so resolver::locate() (catalog-first) still reports tiny@1 installed. This defeats the test's premise that tiny is uninstalled, undermining its dry-run assertions that tiny@1 needs installing. Same anti-pattern was fixed elsewhere in this branch via `mise uninstall`, but this file was missed.",
+      "severity": "medium",
+      "confidence": 0.78,
+      "status": "open",
+      "statusReason": null,
+      "staleOutcome": "current",
+      "staleCheckedAt": null,
+      "staleCheckedCodeVersionId": null,
+      "clientId": "0c9f0d5de8a217dc112640a6b4a1d9ab",
+      "clientIdHash": "1c763a23a73de6afb12871da91e1e24053a7ac01189159ac78edf0467592a568",
+      "createdAt": "2026-10-07T22:55:55.325Z",
+      "updatedAt": "2026-10-07T22:55:55.325Z",
+      "location": {
+        "id": "01M4C997DZFQ89XZXH18VS0CG2",
+        "reviewCommentId": "01M4C997DZH5KQRP31NW93NQHR",
+        "codeVersionId": "01M4C8Q5FBSW30V7ZM9YFWZ8H8",
+        "granularity": "line",
+        "filePath": "e2e/cli/test_deps_tool_install",
+        "startLine": 21,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "rm -rf \"${MISE_DATA_DIR}/installs/tiny/1\"* 2>/dev/null || true",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M4C997DZM7FNBBY63YR7XD39"
+    }
+  ],
+  "has_more": false,
+  "trail": {
+    "id": "01M44ZC8TXNNDCPGJX6A40BDNE",
+    "number": 424,
+    "url": "https://entire.com/gh/jdx/mise/trails/424",
+    "branch": "claude/project-thread-htk77e-5-experimental",
+    "originalBranch": "claude/project-thread-htk77e-5-experimental",
+    "base": "main",
+    "title": "claude/project thread htk77e 5 experimental",
+    "status": "open",
+    "author": {
+      "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "login": "jdx"
+    },
+    "assignees": [
+      "jdx"
+    ],
+    "createdAt": "2026-10-05T02:48:08.284Z",
+    "updatedAt": "2026-10-07T22:55:55.337Z",
+    "unresolvedCount": 2,
+    "bodyDocument": {
+      "textSnapshot": "Problem: The identity install layout—which names installations by their identity (backend, version, platform) rather than installs/<tool>/<version>—was opt-in even with experimental = true, requiring explicit install_layout = \"identity\" configuration. Users experimenting with other experimental features had to separately opt into the identity layout.\nSolution: Make the identity layout the default behavior when experimental = true. Users who want to keep the legacy layout while using other experimental features can now set install_layout = \"legacy\" to opt out.\nThe branch updates the resolver logic so:\nexperimental = true with no layout setting → uses identity layout\ninstall_layout = \"legacy\" → uses legacy layout (explicitly opts out, even with experimental enabled)\nexperimental = false → always uses legacy layout, regardless of layout setting\nUnit tests still default to legacy to avoid side effects during test runs\nDocumentation and tests updated to reflect the new default, with legacy behavior explicitly enabled where needed. The feature still requires experimental = true; it cannot be used with stable settings.",
+      "etag": "W/\"2026-10-05T02:49:00.821896Z\""
+    }
+  }
+}

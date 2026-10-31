@@ -139,6 +139,8 @@ impl GitLab {
             unresolved_threads: u32::try_from(unresolved).unwrap_or(u32::MAX),
             auto_merge: mr["merge_when_pipeline_succeeds"].as_bool() == Some(true)
                 || mr["auto_merge_enabled"].as_bool() == Some(true),
+            // Entire Gates is a GitHub check run.
+            entire: None,
             attention: Vec::new(),
         }))
     }

@@ -15,6 +15,7 @@
 //! [`Client::get`] sends `If-None-Match` when given an ETag, so an unchanged
 //! poll comes back as a 304 that costs nothing against the rate limit.
 
+pub mod entire;
 pub mod forge;
 pub mod forgejo;
 pub mod gitlab;

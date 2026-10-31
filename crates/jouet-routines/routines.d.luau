@@ -43,7 +43,7 @@ declare github: {
 		search: string?,
 		repo: { string }?,
 		settle: number?,
-	}?) -> { prs: { Json }, not_found: { string }?, incomplete: { Json }? },
+	}?) -> { prs: { Json }, not_found: { string }?, incomplete: { Json }?, entire: Json? },
 	-- github.write
 	mutate: (query: string, variables: { [string]: Json }?) -> Json,
 	request: (method: string, path: string, body: Json?) -> { status: number, body: Json },

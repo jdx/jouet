@@ -5,7 +5,7 @@
 
 Say the one thing each PR needs next, and the command for it
 
-Works through a fixed order and stops at the first state that applies: merged, closed, draft, conflict, mergeable_unknown, behind_base, checks_failing, checks_pending, changes_requested, unresolved_threads, awaiting_approval, blocked, auto_merge, ready_to_merge. The states come from the same data and attention codes as `pr status`. Exits 0 when nothing is left to do, 10 when the agent must act and 20 when waiting on someone or something else; with several PRs, 10 wins over 20. These two codes are outside the shared table on purpose.
+Works through a fixed order and stops at the first state that applies: merged, closed, draft, conflict, mergeable_unknown, behind_base, checks_failing, checks_pending, changes_requested, unresolved_threads, entire_findings, entire_gates, awaiting_approval, blocked, auto_merge, ready_to_merge. The states come from the same data and attention codes as `pr status`. Exits 0 when nothing is left to do, 10 when the agent must act and 20 when waiting on someone or something else; with several PRs, 10 wins over 20. These two codes are outside the shared table on purpose.
 
 ## Arguments
 - **`[PRS]…`** — PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the current branch's PR

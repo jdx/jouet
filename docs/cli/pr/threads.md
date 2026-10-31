@@ -7,6 +7,8 @@ List, reply to and resolve review threads
 
 Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links (`#note_` on GitLab, `#issuecomment-` on Forgejo). Forgejo cannot resolve threads through its API, so resolving there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
 
+When the `entire` CLI is on PATH and logged in, the open findings on the PR's Entire trail follow the threads, each addressed as `entire:ID`. They are Entire's, not GitHub's: resolving a finding leaves the threads as they were. A stale finding counts as outdated and an agent's as a bot's. Without the CLI, `--json` says why under `entire`.
+
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
 

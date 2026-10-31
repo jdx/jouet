@@ -1,0 +1,161 @@
+{
+  "number": 424,
+  "trail_id": "01M44ZC8TXNNDCPGJX6A40BDNE",
+  "url": "https://entire.com/gh/jdx/mise/trails/424",
+  "branch": "claude/project-thread-htk77e-5-experimental",
+  "original_branch": "claude/project-thread-htk77e-5-experimental",
+  "base": "main",
+  "title": "claude/project thread htk77e 5 experimental",
+  "body": "Problem: The identity install layout—which names installations by their identity (backend, version, platform) rather than installs/<tool>/<version>—was opt-in even with experimental = true, requiring explicit install_layout = \"identity\" configuration. Users experimenting with other experimental features had to separately opt into the identity layout.\nSolution: Make the identity layout the default behavior when experimental = true. Users who want to keep the legacy layout while using other experimental features can now set install_layout = \"legacy\" to opt out.\nThe branch updates the resolver logic so:\nexperimental = true with no layout setting → uses identity layout\ninstall_layout = \"legacy\" → uses legacy layout (explicitly opts out, even with experimental enabled)\nexperimental = false → always uses legacy layout, regardless of layout setting\nUnit tests still default to legacy to avoid side effects during test runs\nDocumentation and tests updated to reflect the new default, with legacy behavior explicitly enabled where needed. The feature still requires experimental = true; it cannot be used with stable settings.",
+  "status": "open",
+  "author": {
+    "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "login": "jdx"
+  },
+  "assignees": [
+    "jdx"
+  ],
+  "labels": [],
+  "created_at": "2026-10-05T02:48:08.284Z",
+  "updated_at": "2026-10-07T22:55:55.337Z",
+  "merged_at": null,
+  "mergeability": {
+    "head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+    "mergeable": false,
+    "conflict_status": "conflicting",
+    "checks": {
+      "availability": "available"
+    },
+    "gates": [
+      {
+        "id": "",
+        "gate_definition_id": "01M07N12XWXEMKD64XSCJVR1CT",
+        "gate_key": "approvals",
+        "gate_type": "approvals",
+        "blocking": false,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": "No reviewers have approved this trail",
+        "head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "evaluated_at_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "approved": 0,
+          "changes_requested": false,
+          "config": {
+            "version": 1,
+            "min_reviewers": 1,
+            "allow_self_approval": false,
+            "dismiss_stale_approvals_on_push": false
+          },
+          "required": 1,
+          "self_excluded": false,
+          "stale_dismissed": 0,
+          "total": 0
+        },
+        "created_at": "2026-10-31T16:26:05.380217172Z",
+        "completed_at": "2026-10-31T16:26:05.380217172Z"
+      },
+      {
+        "id": "",
+        "gate_definition_id": "01M07N12YHDK7CZ5ADWTQDKCZD",
+        "gate_key": "checks",
+        "gate_type": "checks",
+        "blocking": true,
+        "status": "failed",
+        "state": "evaluated",
+        "outcome": "failed",
+        "rationale": "CI checks have not passed",
+        "head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "evaluated_at_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "state": "failure",
+          "total_count": 45,
+          "checks": [],
+          "config": {
+            "version": 1,
+            "required_checks": [],
+            "require_all_success": true
+          }
+        },
+        "created_at": "2026-10-31T16:26:05.380255031Z",
+        "completed_at": "2026-10-31T16:26:05.380255031Z"
+      },
+      {
+        "id": "01M4C997FFEJZS4KNQHB47CZRK",
+        "gate_definition_id": "01M07N12YD8JK342VTYA944TSA",
+        "gate_key": "findings",
+        "gate_type": "findings",
+        "blocking": true,
+        "status": "failed",
+        "state": "evaluated",
+        "outcome": "failed",
+        "rationale": "Unresolved findings: 2 medium severity",
+        "head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "evaluated_at_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "stale_reason": null,
+        "finding_count": 2,
+        "reviewers": [],
+        "runner_ids": [
+          "trail-review"
+        ],
+        "value": {
+          "config": {
+            "version": 1,
+            "agent_findings_min_severity": "medium"
+          },
+          "reviewed_head": true,
+          "agent_findings": {
+            "low": 0,
+            "high": 0,
+            "medium": 2,
+            "unspecified": 0
+          },
+          "review_in_flight": false,
+          "reviewer_configured": true,
+          "review_grace_expired": false,
+          "agent_blocking_findings": 2
+        },
+        "created_at": "2026-10-07T22:55:55.375999Z",
+        "completed_at": "2026-10-07T22:55:55.375999Z"
+      },
+      {
+        "id": "01M68WJ7AJ4B5JRQYMEE71772B",
+        "gate_definition_id": "01M07N12YNZVKDBWR165PM46AF",
+        "gate_key": "up_to_date",
+        "gate_type": "up_to_date",
+        "blocking": false,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": "747 commits behind",
+        "head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "evaluated_at_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "config": {
+            "version": 1,
+            "allow_behind_if_mergeable": false
+          },
+          "behind_by": 747,
+          "compare_status": "diverged",
+          "comparison_status": "available",
+          "resolved_head_sha": "a674e652548d34d75f72266d3014f1f5f5f726e8"
+        },
+        "created_at": "2026-10-31T11:47:18.998025Z",
+        "completed_at": "2026-10-31T11:47:18.998025Z"
+      }
+    ]
+  }
+}

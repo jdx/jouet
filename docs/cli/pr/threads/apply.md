@@ -7,6 +7,8 @@ Reply to and resolve many threads from a JSON list
 
 The list holds {"id": N, "reply": "...", "resolve": true} entries. Every entry is checked before anything is posted. Re-running the same list after a failure is safe: resolved threads and replies already posted are skipped.
 
+An entry for an Entire finding has its handle as the ID, {"id": "entire:ID", "reply": "...", "resolve": true}, with "dismiss": true to dismiss it (which needs a reply) or "unresolve": true to reopen it. Its reply is the reason recorded on Entire.
+
 ## Arguments
 - **`[ARGS]…`** — `-` to read the list from stdin, and optionally the PR
 

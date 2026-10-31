@@ -11,6 +11,7 @@
 
 use super::target::{Repo, Target};
 use crate::Client;
+use crate::entire::{Brief, CHECK, Gate, Gates};
 use crate::forge::Forge;
 use crate::host::Host;
 use jouet_output::time;
@@ -40,6 +41,11 @@ const PR_FRAGMENT: &str = "fragment pr on PullRequest {
     nodes { commit { committedDate statusCheckRollup { id contexts {
       checkRunCountsByState { state count }
       statusContextCountsByState { state count }
+    } }
+    checkSuites(last: 1, filterBy: {checkName: \"Entire Gates\"}) { nodes {
+      checkRuns(last: 1, filterBy: {checkName: \"Entire Gates\"}) {
+        nodes { status conclusion detailsUrl title summary }
+      }
     } } } }
   }
 }
@@ -248,6 +254,24 @@ struct RawCommitNode {
 struct RawCommit {
     committed_date: String,
     status_check_rollup: Option<RawRollup>,
+    check_suites: Option<Nodes<RawSuite>>,
+}
+
+/// A check suite holding the Entire Gates check.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawSuite {
+    check_runs: Nodes<RawGatesRun>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawGatesRun {
+    status: String,
+    conclusion: Option<String>,
+    details_url: Option<String>,
+    title: Option<String>,
+    summary: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -408,6 +432,11 @@ impl Fetched {
         self.contexts_after = next_cursor(contexts.page_info)
             .filter(|_| !named_all)
             .map(Some);
+    }
+
+    /// The PR as fetched so far, for adding what Entire says.
+    pub(crate) fn status_mut(&mut self) -> &mut PrStatus {
+        &mut self.status
     }
 
     pub fn finish(self, now: i64) -> PrStatus {
@@ -619,6 +648,20 @@ pub(crate) fn read_pr(value: &Value) -> Result<Fetched, String> {
     .into_iter()
     .flatten()
     .max_by_key(|t| time::parse_utc(t));
+    let gates = commit
+        .as_ref()
+        .and_then(|c| c.check_suites.as_ref())
+        .and_then(|s| s.nodes.last())
+        .and_then(|s| s.check_runs.nodes.last())
+        .map(|r| {
+            Gates::parse(
+                &r.status,
+                r.conclusion.as_deref(),
+                r.title.as_deref(),
+                r.summary.as_deref(),
+                r.details_url.as_deref(),
+            )
+        });
     let mut fetched = Fetched {
         id: raw.id,
         status: PrStatus {
@@ -640,6 +683,7 @@ pub(crate) fn read_pr(value: &Value) -> Result<Fetched, String> {
             review: raw.review_decision.map(|r| r.to_ascii_lowercase()),
             unresolved_threads: 0,
             auto_merge: raw.auto_merge_request.is_some_and(|a| !a.is_null()),
+            entire: gates.map(EntireStatus::from),
             attention: Vec::new(),
         },
         threads_after: None,
@@ -756,8 +800,67 @@ pub struct PrStatus {
     pub unresolved_threads: u32,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub auto_merge: bool,
+    /// The Entire Gates check on the head, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entire: Option<EntireStatus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub attention: Vec<Attention>,
+}
+
+/// What Entire says about a PR: its gates, from the check, and when the
+/// findings gate fails and the `entire` CLI could be asked, the open
+/// findings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EntireStatus {
+    #[serde(flatten)]
+    pub gates: Gates,
+    /// The open, current findings, read when the findings gate fails.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<Brief>,
+    /// Entire listed more findings than it let jouet read.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub findings_incomplete: bool,
+    /// Why `entire` could not say more, when it was asked and failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl From<Gates> for EntireStatus {
+    fn from(gates: Gates) -> Self {
+        Self {
+            gates,
+            findings: Vec::new(),
+            findings_incomplete: false,
+            error: None,
+        }
+    }
+}
+
+impl EntireStatus {
+    /// The next thing to fix: the first open finding with its handle and
+    /// location, or the gate's own reason when none could be read.
+    pub fn findings_message(&self) -> String {
+        let Some(first) = self.findings.first() else {
+            return format!("Entire Gates: {}", self.gates.failing_text());
+        };
+        let mut s = format!(
+            "Fix Entire finding [{}] at {}",
+            first.handle, first.location
+        );
+        if let Some(severity) = &first.severity {
+            let _ = write!(s, " ({severity})");
+        }
+        let _ = write!(s, ": {}", first.title);
+        let more = self.findings.len() - 1;
+        if more > 0 || self.findings_incomplete {
+            let _ = write!(
+                s,
+                "; {more}{} more open",
+                if self.findings_incomplete { "+" } else { "" }
+            );
+        }
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -818,14 +921,22 @@ fn attention(pr: &PrStatus, now: i64) -> Vec<Attention> {
         };
         add("conflict", message);
     }
-    if pr.checks.fail > 0 {
+    // A failing Entire Gates check is reported by its gates below, not as a
+    // failing check of its own.
+    let entire = pr.entire.as_ref().filter(|e| e.gates.failed());
+    let gates_failing = u32::from(entire.is_some() && pr.checks.failing.iter().any(|c| c == CHECK));
+    let failing: Vec<&str> = pr
+        .checks
+        .failing
+        .iter()
+        .map(String::as_str)
+        .filter(|c| entire.is_none() || *c != CHECK)
+        .collect();
+    let fail = pr.checks.fail.saturating_sub(gates_failing);
+    if fail > 0 {
         add(
             "checks_failing",
-            format!(
-                "{} failing: {}",
-                pr.checks.fail,
-                pr.checks.failing.join(", ")
-            ),
+            format!("{fail} failing: {}", failing.join(", ")),
         );
     }
     if pr.checks.total() == 0
@@ -851,10 +962,44 @@ fn attention(pr: &PrStatus, now: i64) -> Vec<Attention> {
             format!("{n} unresolved review threads"),
         ),
     }
+    if let Some(e) = entire {
+        if e.gates.fails("findings") {
+            add("entire_findings", e.findings_message());
+        }
+        let known = ["checks", "findings", "up_to_date"];
+        let other: Vec<&Gate> = e
+            .gates
+            .failing()
+            .filter(|g| !known.contains(&g.gate.as_str()))
+            .collect();
+        if !other.is_empty() || e.gates.failing().next().is_none() {
+            add(
+                "entire_gates",
+                format!("Entire Gates: {}", e.gates.failing_text()),
+            );
+        }
+    }
     if pr.merge_state == "behind" {
         add(
             "behind_base",
             format!("Behind {}; update the branch before it can merge", pr.base),
+        );
+    } else if let Some(e) = entire.filter(|e| e.gates.fails("up_to_date"))
+        && pr.mergeable != Mergeability::Conflicting
+    {
+        // Entire may want the branch current where GitHub does not.
+        let reason = e
+            .gates
+            .failing()
+            .find(|g| g.gate == "up_to_date")
+            .and_then(|g| g.reason.clone())
+            .unwrap_or_else(|| "not up to date".into());
+        add(
+            "behind_base",
+            format!(
+                "Entire Gates: {reason}; update the branch from {} before it can merge",
+                pr.base
+            ),
         );
     }
     if pr.state == State::Draft {

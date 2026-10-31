@@ -7,14 +7,17 @@ Reply to a thread
 
 `{sha}` in the reply becomes the short HEAD SHA, and is refused unless HEAD is on the PR's branch on GitHub. The configured reply footer is appended. A reply that is already the thread's last comment from you is not posted again.
 
+For an Entire finding (`entire:ID`), the reply is the reason recorded on Entire, so it needs --resolve or --dismiss.
+
 ## Arguments
-- **`<ID>`** — The thread's ID
+- **`<ID>`** — The thread's ID, or an Entire finding's handle (`entire:ID`)
 - **`[PR]`** — The PR. Defaults to the current branch's PR
 
 ## Flags
 - **`--body <TEXT>`** — The reply
 - **`--body-file <FILE>`** — Read the reply from FILE (`-` is stdin)
 - **`--resolve`** — Resolve the thread after replying
+- **`--dismiss`** — Dismiss the Entire finding instead of resolving it, with the reply as the reason
 - **`--ignore-resolved`** — Leave a thread that is already resolved alone; without this, a reply still goes into it
 - **`--dry-run`** — Check everything and show what would be posted, posting nothing
 - **`-h --help`** — Print help
