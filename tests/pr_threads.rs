@@ -215,6 +215,7 @@ fn writes(fake: &Fake) -> Vec<String> {
 }
 
 const CODE_NODE: &str = "PRRT_kwDOIvux3s6wlNzt";
+const RESOLVED_NODE: &str = "PRRT_kwDOIvux3s6vruPA";
 
 fn node_of(fake_pr: &str, id: &str) -> String {
     let pr: Value = serde_json::from_str(fake_pr).unwrap();
@@ -543,7 +544,7 @@ fn the_config_footer_and_a_dry_run() {
 }
 
 #[test]
-fn bad_ids_and_resolved_threads_post_nothing() {
+fn bad_ids_post_nothing_and_resolved_threads_still_take_replies() {
     let fake = github(Script::default());
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
@@ -557,33 +558,42 @@ fn bad_ids_and_resolved_threads_post_nothing() {
     let out = run(&["resolve", OPEN_CODE, "1", "#14922"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     assert_eq!(json(&out)["error"]["code"], json!("not_found"));
-    let out = run(&["resolve", OPEN_CODE, RESOLVED, "#14922"]);
-    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
-    let error = &json(&out)["error"];
-    assert_eq!(error["code"], json!("precondition"));
-    assert!(
-        error["hint"]
-            .as_str()
-            .unwrap()
-            .contains("--ignore-resolved")
-    );
-    let out = run(&["reply", RESOLVED, "#14922", "--body", "late"]);
-    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
     assert!(writes(&fake).is_empty(), "{:?}", writes(&fake));
 
-    let out = run(&[
-        "resolve",
-        OPEN_CODE,
-        RESOLVED,
-        "#14922",
-        "--ignore-resolved",
-    ]);
+    // Resolving a thread that is already resolved does nothing.
+    let out = run(&["resolve", OPEN_CODE, RESOLVED, "#14922"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(
         json(&out)["results"][1]["skipped"],
         json!("already resolved")
     );
     assert_eq!(writes(&fake), [format!("resolveReviewThread {CODE_NODE}")]);
+
+    // A reply goes into a resolved thread, which stays resolved: a review
+    // bot often resolves its own thread after a push.
+    let out = run(&["reply", RESOLVED, "#14922", "--body", "fixed", "--resolve"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(json(&out)["results"][0]["already_resolved"], json!(true));
+    assert_eq!(
+        writes(&fake)[1..],
+        [format!("addPullRequestReviewThreadReply {RESOLVED_NODE}")]
+    );
+
+    // --ignore-resolved leaves it alone.
+    let out = run(&[
+        "reply",
+        RESOLVED,
+        "#14922",
+        "--body",
+        "again",
+        "--ignore-resolved",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(
+        json(&out)["results"][0]["skipped"],
+        json!("already resolved")
+    );
+    assert_eq!(writes(&fake).len(), 2, "{:?}", writes(&fake));
 }
 
 #[test]

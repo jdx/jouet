@@ -2421,7 +2421,7 @@ pub struct ReplyArgs {
     /// Resolve the thread after replying
     #[usage(long)]
     resolve: bool,
-    /// Skip a thread that is already resolved instead of failing
+    /// Leave a thread that is already resolved alone; without this, a reply still goes into it
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would be posted, posting nothing
@@ -2440,7 +2440,7 @@ pub struct ResolveArgs {
     /// Reply with TEXT before resolving each thread
     #[usage(long, value_name = "TEXT")]
     reply: Option<String>,
-    /// Skip threads that are already resolved instead of failing
+    /// Leave threads that are already resolved alone; without this, replies still go into them
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would happen, changing nothing
@@ -2473,7 +2473,7 @@ pub struct ApplyArgs {
     /// Read the list from FILE (`-` is stdin)
     #[usage(long, value_name = "FILE")]
     file: Option<String>,
-    /// Skip threads that are already resolved instead of failing
+    /// Leave threads that are already resolved alone; without this, replies still go into them
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would be posted, posting nothing
