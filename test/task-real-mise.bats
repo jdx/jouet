@@ -3,15 +3,12 @@
 # `jouet task` against a real mise, not task.bats' fake: opt in by naming the
 # binaries, which CI does not, so CI stays hermetic and every test here skips.
 #
-#   JOUET_REAL_MISE=/path/to/mise   a mise newer than 2026.10.24, or a build
-#                                   of mise's main from after jdx/mise#15213
+#   JOUET_REAL_MISE=/path/to/mise   mise 2026.10.25 or later
 #   JOUET_OLD_MISE=/path/to/mise    optional: mise 2026.10.24, to be refused
 #
-#   git -C ~/src/mise fetch origin
-#   git -C ~/src/mise worktree add --detach /tmp/mise-main origin/main
-#   (cd /tmp/mise-main && cargo build) && cp /tmp/mise-main/target/debug/mise /tmp/mise-new
+#   gh release download v2026.10.25 -R jdx/mise -p 'mise-v2026.10.25-linux-x64' -O /tmp/mise-new
 #   gh release download v2026.10.24 -R jdx/mise -p 'mise-v2026.10.24-linux-x64' -O /tmp/mise-old
-#   chmod +x /tmp/mise-old
+#   chmod +x /tmp/mise-new /tmp/mise-old
 #   JOUET_REAL_MISE=/tmp/mise-new JOUET_OLD_MISE=/tmp/mise-old test/bats/bin/bats test/task-real-mise.bats
 #
 # mise runs with its own HOME, data, config, state and cache directories
@@ -21,7 +18,7 @@
 setup() {
 	load "test_helper/common_setup"
 	_common_setup
-	[[ -x ${JOUET_REAL_MISE:-} ]] || skip "set JOUET_REAL_MISE to a mise newer than 2026.10.24"
+	[[ -x ${JOUET_REAL_MISE:-} ]] || skip "set JOUET_REAL_MISE to mise 2026.10.25 or later"
 	unset XDG_CONFIG_HOME XDG_CACHE_HOME JOUET_WIND JOUET_HOOKS JOUET_HOOKS_PRIME CLAUDE_CONFIG_DIR CODEX_HOME
 	local name
 	for name in $(compgen -e | grep '^MISE_'); do
@@ -174,6 +171,6 @@ checked"
 
 	run jouet task apply t1 --file local
 	assert_failure 4
-	assert_line --index 0 "jouet: this needs a mise newer than 2026.10.24, the first with \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
+	assert_line --index 0 "jouet: this needs mise 2026.10.25 or later, the first with \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
 	[[ ! -e mise.local.toml ]]
 }

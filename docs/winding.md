@@ -48,7 +48,7 @@ Winding is new. The patterns it notices, and its thresholds, will change between
 
 Many commands an agent retypes belong in the project's task runner, where people can run them too. The ledger notices a repeated sequence by its shape, and the next session start in that repository names it. The ledger never keeps the command itself, so [`jouet task propose`](/commands/task) reads the repository's session transcripts and drafts the task: its name, `run`, description, `depends` and `sources` where they can be inferred, and the evidence. It also suggests `mise.local.toml` (personal, not committed) or `mise.toml` (shared, committed), and says why.
 
-Which file is always the user's choice. A pending task's line at session start tells the agent to ask the user at a natural pause, giving jouet's suggestion. `jouet task apply ID` refuses until it is given `--file local` or `--file shared`. It then writes the task through `mise tasks add`. jouet never edits a mise config file itself, and applying needs a mise newer than 2026.10.24. `jouet unwind` later proposes removing a task jouet added that nobody runs.
+Which file is always the user's choice. A pending task's line at session start tells the agent to ask the user at a natural pause, giving jouet's suggestion. `jouet task apply ID` refuses until it is given `--file local` or `--file shared`. It then writes the task through `mise tasks add`. jouet never edits a mise config file itself, and applying needs mise 2026.10.25 or later. `jouet unwind` later proposes removing a task jouet added that nobody runs.
 
 ## Replaying shapes
 
