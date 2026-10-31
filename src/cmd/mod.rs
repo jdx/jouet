@@ -7,6 +7,7 @@ pub(crate) mod ci;
 pub(crate) mod claim;
 pub(crate) mod commit;
 pub(crate) mod completion;
+pub(crate) mod db;
 pub(crate) mod deps;
 pub(crate) mod diag;
 pub(crate) mod docs;

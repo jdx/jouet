@@ -36,6 +36,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "db",
+        Some(
+            "looking at a SQLite or Postgres database: `jouet db schema [TABLE]` lists its tables with columns, keys and indexes, and `jouet db query SQL` runs one read-only query, with rows cut to --limit and a count of the rest, instead of `sqlite3` or `psql` printing whole tables. The database is --url, DATABASE_URL, or DATABASE_URL in the project's fnox config; a write is refused (exit 4) even with write rights, and a host other than this machine needs --remote",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -249,6 +255,24 @@ const USAGE: &[Usage] = &[
             ("jouet deps audit", "every locked version against OSV"),
         ],
         more: "--ecosystem, --refresh and what each check reads",
+    },
+    Usage {
+        command: "db",
+        lines: &[
+            (
+                "jouet db schema [TABLE]",
+                "tables with columns, keys and indexes; one table with its row count",
+            ),
+            (
+                "jouet db query <SQL> --limit 20",
+                "one read-only statement, rows cut to the limit with a count of the rest",
+            ),
+            (
+                "jouet db query <SQL> --url app.db",
+                "a SQLite file or a Postgres URL, else DATABASE_URL or fnox's",
+            ),
+        ],
+        more: "--width, --budget, --timeout, --remote and how reads are enforced",
     },
     Usage {
         command: "edit",
@@ -651,7 +675,7 @@ fn when(name: &str) -> Option<&'static str> {
 pub(crate) const GROUPED: &[&[&str]] = &[
     &["commit", "secrets"],
     &["handoff", "pickup"],
-    &["read", "docs", "deps"],
+    &["read", "docs", "deps", "db"],
     &["wait", "http"],
 ];
 
@@ -832,7 +856,7 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     let commands = agent_commands();
     let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
-    // A group is one entry, as in the overview: `read/docs/deps`.
+    // A group is one entry, as in the overview: `read/docs/deps/db`.
     let names: Vec<String> = commands
         .iter()
         .map(|(m, _)| m.cmd.name)

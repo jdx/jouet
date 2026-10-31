@@ -37,6 +37,9 @@ libc = "0.2"
 memchr = "2"
 mise-agent-env = "2026"
 mlua = { version = "0.12", features = ["luau"] }
+# `jouet db`: a synchronous Postgres client, with TLS through rustls (ring
+# and the system's root certificates, as below), never webpki-roots.
+postgres = "0.19"
 regex = "1"
 # TLS trusts the system's root certificates, with ring for crypto. ureq's
 # default bundles webpki-roots, and its platform verifier pulls in
@@ -54,6 +57,7 @@ serde_json_path = "0.7"
 sha2 = "0.11"
 similar = "3"
 tempfile = "3"
+tokio-postgres-rustls = "0.14"
 toml = { version = "1", default-features = false, features = ["display", "parse", "serde"] }
 # tree-sitter and the grammars jouet-search and jouet-graph compile in. The
 # grammars depend only on tree-sitter-language, so any of their versions
@@ -117,13 +121,18 @@ jouet-search.workspace = true
 jouet-secrets.workspace = true
 jouet-wait.workspace = true
 mise-agent-env.workspace = true
+postgres.workspace = true
 regex.workspace = true
+rusqlite.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
 serde.workspace = true
 # Keeps the key order of the harness settings files `setup` rewrites.
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha2.workspace = true
 similar.workspace = true
 tempfile.workspace = true
+tokio-postgres-rustls.workspace = true
 toml.workspace = true
 ureq.workspace = true
 # Not used by name: it turns on usage-config's `toml` feature behind usage-rs's
@@ -155,6 +164,5 @@ strip = true
 debug = 1
 
 [dev-dependencies]
-rusqlite.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
