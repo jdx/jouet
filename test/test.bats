@@ -38,8 +38,14 @@ locked() {
 	shift
 	until mkdir "$lock" 2>/dev/null; do
 		holder=$(cat "$lock/pid" 2>/dev/null)
-		if [[ -n $holder ]] && ! kill -0 "$holder" 2>/dev/null; then
-			rm -rf "$lock"
+		# One waiter at a time takes over a lock whose holder is gone, and
+		# reads the holder again first: another may have taken it over and
+		# locked it anew already.
+		if [[ -n $holder ]] && ! kill -0 "$holder" 2>/dev/null && mkdir "$lock.takeover" 2>/dev/null; then
+			if [[ $(cat "$lock/pid" 2>/dev/null) == "$holder" ]]; then
+				rm -rf "$lock"
+			fi
+			rmdir "$lock.takeover"
 			continue
 		fi
 		((i++ < 6000)) || return 1
@@ -488,6 +494,31 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	ran 'set -o pipefail; jouet test --cmd -- pytest 2>&1 | head -3' 0
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- pytest",0]'
+}
+
+@test "the fixture lock lets one install run at a time, past a stale lock" {
+	local fixture="$BATS_TEST_TMPDIR/fixture" log="$BATS_TEST_TMPDIR/held"
+	# A lock a killed run left: its holder is gone.
+	sh -c 'exit 0' &
+	local dead=$!
+	wait "$dead"
+	mkdir "$fixture.lock"
+	echo "$dead" >"$fixture.lock/pid"
+	hold() {
+		echo "start $1" >>"$log"
+		sleep 0.3
+		echo "end $1" >>"$log"
+	}
+	locked "$fixture" hold a &
+	locked "$fixture" hold b &
+	locked "$fixture" hold c &
+	wait
+
+	# Each install ran, and each ended before the next started.
+	run awk 'NR % 2 == 1 { if ($1 != "start") bad = 1; who = $2 } NR % 2 == 0 { if ($1 != "end" || $2 != who) bad = 1 } END { exit bad || NR != 6 }' "$log"
+	assert_success
+	assert [ ! -e "$fixture.lock" ]
+	assert [ ! -e "$fixture.lock.takeover" ]
 }
 
 @test "jouet test records its own run, so a piped one still counts" {
