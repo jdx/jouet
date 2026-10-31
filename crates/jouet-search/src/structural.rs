@@ -66,11 +66,39 @@ pub struct FileMatches {
     pub matches: Vec<Match>,
 }
 
+/// Narrows a pattern's matches file by file, as the code graph's scoping
+/// does in the binary. It sees every file of the language, matched or not.
+pub trait Filter: Sync + std::fmt::Debug {
+    /// The matches in `path` to keep, of all those the pattern found there.
+    fn keep(
+        &self,
+        structural: &Structural,
+        path: &std::path::Path,
+        source: &str,
+        matches: Vec<Match>,
+    ) -> Vec<Match>;
+}
+
+/// Whether `name` occurs in `text` as a whole identifier.
+pub fn mentions(text: &str, name: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    !name.is_empty()
+        && text.match_indices(name).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(ident)
+                && !text[at + name.len()..].chars().next().is_some_and(ident)
+        })
+}
+
 impl Structural {
     /// The files under `paths` in the pattern's language that it matches,
     /// in path order, as `.gitignore` and hidden files allow, and how many
-    /// files of the language were read.
-    pub fn search_files(&self, paths: &[std::path::PathBuf]) -> (Vec<FileMatches>, usize) {
+    /// files of the language were read. A `filter` narrows each file's
+    /// matches.
+    pub fn search_files(
+        &self,
+        paths: &[std::path::PathBuf],
+        filter: Option<&dyn Filter>,
+    ) -> (Vec<FileMatches>, usize) {
         let mut found = Vec::new();
         let mut read = 0;
         let Some((first, rest)) = paths.split_first() else {
@@ -89,7 +117,10 @@ impl Structural {
                 continue;
             };
             read += 1;
-            let matches = self.find(&source);
+            let mut matches = self.find(&source);
+            if let Some(filter) = filter {
+                matches = filter.keep(self, path, &source, matches);
+            }
             if !matches.is_empty() {
                 found.push(FileMatches {
                     path: path.strip_prefix(".").unwrap_or(path).to_path_buf(),
@@ -265,6 +296,40 @@ mod imp {
                 })
                 .collect()
         }
+
+        /// Where `name` is written inside a macro, which neither a pattern
+        /// nor the code graph parses as code: a Rust macro's token tree, or
+        /// the body of a C or C++ `#define`.
+        pub fn in_macros(&self, source: &str, name: &str) -> Vec<Match> {
+            let root = self.grammar.ast_grep(source);
+            let mut out = Vec::new();
+            for node in root.root().dfs() {
+                let hit = match node.kind().as_ref() {
+                    "identifier" => {
+                        node.text() == name
+                            && node.parent().is_some_and(|p| p.kind() == "token_tree")
+                    }
+                    "preproc_arg" => super::mentions(&node.text(), name),
+                    _ => false,
+                };
+                if !hit {
+                    continue;
+                }
+                let range = node.range();
+                let line_start = source[..range.start].rfind('\n').map_or(0, |i| i + 1);
+                let line_end = source[range.start..]
+                    .find('\n')
+                    .map_or(source.len(), |i| range.start + i);
+                out.push(Match {
+                    start: range.start,
+                    end: range.end,
+                    line: u32::try_from(node.start_pos().line() + 1).unwrap_or(u32::MAX),
+                    text: source[line_start..line_end].trim().to_string(),
+                    replacement: None,
+                });
+            }
+            out
+        }
     }
 
     /// Whether `()`, `[]` and `{}` pair up outside quoted strings.
@@ -356,6 +421,10 @@ mod imp {
         }
 
         pub fn find(&self, _: &str) -> Vec<Match> {
+            Vec::new()
+        }
+
+        pub fn in_macros(&self, _: &str, _: &str) -> Vec<Match> {
             Vec::new()
         }
     }

@@ -3,7 +3,7 @@
 //! markers, and matches the session has already been shown collapsed.
 
 use crate::memory::{self, Memory, Stamp};
-use crate::structural::Structural;
+use crate::structural::{Filter, Structural};
 use crate::symbols;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::sinks::Lossy;
@@ -43,6 +43,8 @@ pub struct Options {
     /// Match the pattern as code in this language, with ast-grep, rather
     /// than as a regular expression.
     pub structural: Option<String>,
+    /// Narrows a structural pattern's matches, file by file.
+    pub filter: Option<std::sync::Arc<dyn Filter>>,
 }
 
 /// Byte budgets for the output; `0` is no limit.
@@ -159,6 +161,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
         ),
     };
     let structural = structural.as_ref();
+    let filter = options.filter.as_deref();
     let paths = if options.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -233,7 +236,11 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
             let mut kept = 0usize;
             let result = match (structural, &matcher) {
                 (Some(structural), _) => std::fs::read_to_string(path).map(|source| {
-                    for m in structural.find(&source) {
+                    let mut matches = structural.find(&source);
+                    if let Some(filter) = filter {
+                        matches = filter.keep(structural, path, &source, matches);
+                    }
+                    for m in matches {
                         note.add(&mut collected, &mut key, &mut kept, m.line, &m.text);
                     }
                 }),
