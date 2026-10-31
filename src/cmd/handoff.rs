@@ -1,6 +1,7 @@
 //! `jouet handoff` and `jouet pickup`.
 
 use super::Output;
+use crate::entire::{Entire, Recap};
 use crate::{HandoffArgs, PickupArgs};
 use jouet_git::Git;
 use jouet_git::handoff::{
@@ -197,6 +198,10 @@ struct PickupReport<'a> {
     /// The pitchfork daemons the handoff recorded, as they are now.
     #[serde(skip_serializing_if = "<[DaemonNow]>::is_empty")]
     daemons: &'a [DaemonNow],
+    /// Where the repository has Entire: the sessions with checkpoints on
+    /// this branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entire: Option<&'a Recap>,
     handoff: &'a Handoff,
 }
 
@@ -241,12 +246,20 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
             }),
         }
     }
+    let recap = std::env::current_dir()
+        .ok()
+        .and_then(|dir| Entire::here(&dir))
+        .map(|entire| {
+            let current = super::sessions::current_session();
+            entire.recap(current.as_deref(), time::parse_utc(&h.created_at))
+        });
     let report = PickupReport {
         path,
         accurate: drift.is_empty(),
         drift: &drift,
         jobs: &jobs,
         daemons: &daemons,
+        entire: recap.as_ref(),
         handoff: &h,
     };
     out.result(&report, || {
@@ -269,6 +282,9 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
                 };
                 let _ = writeln!(s, "- `{}`: {now}, was {}", d.id, d.then);
             }
+        }
+        if let Some(recap) = &recap {
+            s.push_str(&recap.markdown());
         }
         if drift.is_empty() {
             let _ = writeln!(

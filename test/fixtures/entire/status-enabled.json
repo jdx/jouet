@@ -1,0 +1,1 @@
+{"enabled":true,"agents":["Claude Code","Codex"],"active_sessions":[],"agent_help":"entire agent-help","hooks_outdated":["claude-code"],"checkpoint_sync_remote":"origin","checkpoint_sync_remote_source":"default","unpushed_checkpoints":1}

@@ -5,6 +5,7 @@
 use super::Output;
 use super::audit::parse_since;
 use crate::SessionsArgs;
+use crate::entire::{self, Entire};
 use crate::ledger::redact_id;
 use jouet_audit::redact;
 use jouet_audit::sessions::{self, Session};
@@ -26,18 +27,81 @@ pub(crate) fn run(args: &SessionsArgs, out: &Output) -> Exit {
         Ok(secs) => secs,
         Err(e) => return out.error(Exit::Usage, &format!("--since: {e}")),
     };
-    let found = sessions::recent(
+    let mut found = sessions::recent(
         ClaudeCode::from_env().as_ref(),
         Codex::from_env().as_ref(),
         since.saturating_mul(1000),
     );
-    let report = report(found, now, current_session().as_deref(), args.all);
+    let mut notes = Vec::new();
+    let tracked = match std::env::current_dir().ok().and_then(|d| Entire::here(&d)) {
+        Some(entire) => entire.sessions().unwrap_or_else(|e| {
+            notes.push(e);
+            Vec::new()
+        }),
+        None => Vec::new(),
+    };
+    let only_entire = only_in_entire(&tracked, &found, since);
+    found.extend(only_entire.iter().cloned());
+    let mut report = report(found, now, current_session().as_deref(), args.all);
+    attach_entire(&mut report, &tracked, &only_entire);
+    report.notes = notes;
     out.result(&report, || text(&report));
     Exit::Ok
 }
 
+/// The sessions Entire tracks in this repository that no transcript jouet
+/// read accounts for, active since `since`, as sessions to list: an agent
+/// jouet does not read, or a transcript kept elsewhere. Entire records the
+/// directory the agent started in, which can be the main checkout for a
+/// session working in a worktree, so a session jouet found keeps its own.
+fn only_in_entire(tracked: &[entire::Session], found: &[Session], since: i64) -> Vec<Session> {
+    let now = time::now();
+    tracked
+        .iter()
+        .filter(|t| !found.iter().any(|f| f.id == t.session_id))
+        .filter_map(|t| {
+            let last = time::parse_time(t.last_active.as_deref()?, now).ok()?;
+            (last >= since).then(|| Session {
+                harness: harness_of(&t.agent),
+                id: t.session_id.clone(),
+                cwd: t.worktree_path.clone(),
+                branch: None,
+                modified_ms: last.saturating_mul(1000),
+                transcript: PathBuf::new(),
+            })
+        })
+        .collect()
+}
+
+/// The harness name jouet uses for an agent as Entire names it.
+fn harness_of(agent: &str) -> &'static str {
+    match agent.to_ascii_lowercase().as_str() {
+        "claude code" => "claude",
+        "codex" => "codex",
+        "cursor" => "cursor",
+        "opencode" => "opencode",
+        "gemini cli" => "gemini",
+        "pi" => "pi",
+        _ => "agent",
+    }
+}
+
+/// Adds what Entire records to the rows of the sessions it tracks.
+fn attach_entire(report: &mut Report, tracked: &[entire::Session], only: &[Session]) {
+    for row in &mut report.sessions {
+        let Some(t) = tracked.iter().find(|t| redact_id(&t.session_id) == row.id) else {
+            continue;
+        };
+        row.entire = Some(EntireRow {
+            status: t.status.clone(),
+            checkpoints: t.checkpoints,
+            only: only.iter().any(|s| s.id == t.session_id),
+        });
+    }
+}
+
 /// The session jouet runs in, so its row can say so.
-fn current_session() -> Option<String> {
+pub(crate) fn current_session() -> Option<String> {
     [
         "JOUET_SESSION_ID",
         "CLAUDE_CODE_SESSION_ID",
@@ -56,6 +120,26 @@ struct Report {
     /// Idle sessions in the window that are not listed (without --all).
     #[serde(skip_serializing_if = "is_zero")]
     idle_not_listed: usize,
+    /// Why Entire's sessions could not be read.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
+}
+
+/// What Entire records of a session, where this repository has Entire.
+#[derive(Serialize)]
+struct EntireRow {
+    /// `active`, `idle` or `ended`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    status: String,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    checkpoints: u64,
+    /// Only Entire knows the session: jouet read no transcript of it.
+    #[serde(skip_serializing_if = "is_false")]
+    only: bool,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize)]
@@ -83,6 +167,8 @@ struct Row {
     /// The directory it worked in no longer exists.
     #[serde(skip_serializing_if = "is_false")]
     gone: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entire: Option<EntireRow>,
     /// For grouping only: the work tree, unredacted.
     #[serde(skip)]
     root: Option<PathBuf>,
@@ -153,6 +239,7 @@ fn report(found: Vec<Session>, now: i64, current: Option<&str>, all: bool) -> Re
         idle_not_listed: before - rows.len(),
         sessions: rows,
         warnings,
+        notes: Vec::new(),
     }
 }
 
@@ -181,6 +268,7 @@ fn row(s: Session, now: i64, current: Option<&str>, home: Option<&Path>) -> Row 
         idle_secs: idle,
         live: idle <= LIVE_SECS,
         gone,
+        entire: None,
         root,
     }
 }
@@ -207,6 +295,10 @@ fn key(r: &Row) -> String {
 /// A session as text names it: its harness and the start of its ID.
 fn name(r: &Row) -> String {
     format!("{} {}", r.harness, short(&r.id))
+}
+
+fn checkpoints(n: u64) -> String {
+    format!("{n} checkpoint{}", if n == 1 { "" } else { "s" })
 }
 
 fn short(id: &str) -> &str {
@@ -237,6 +329,15 @@ fn text(report: &Report) -> String {
         } else if let Some(branch) = &r.branch {
             let _ = write!(line, "  [{branch}]");
         }
+        match &r.entire {
+            Some(e) if e.only => {
+                let _ = write!(line, "  (only in Entire, {})", checkpoints(e.checkpoints));
+            }
+            Some(e) if e.checkpoints > 0 => {
+                let _ = write!(line, "  (Entire: {})", checkpoints(e.checkpoints));
+            }
+            _ => {}
+        }
         let _ = writeln!(s, "{}", line.trim_end());
     }
     if report.sessions.iter().any(|r| r.current) {
@@ -247,6 +348,9 @@ fn text(report: &Report) -> String {
         for w in &report.warnings {
             let _ = writeln!(s, "warning: {}", w.message);
         }
+    }
+    for note in &report.notes {
+        let _ = writeln!(s, "note: {note}");
     }
     if report.idle_not_listed > 0 {
         let _ = writeln!(

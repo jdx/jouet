@@ -35,6 +35,7 @@ Examples:
 - **`--range <A:B>`** — Print lines A to B: `A:B`, `A:` or `:B`
 - **`--max-lines <N>`** — The most lines of code to print (default 400; 0 is no limit)
 - **`--again`** — Print lines this session was already shown, too
+- **`--why`** — With --symbol or --range, say where the lines came from, by `entire why`: the agent session, checkpoint and prompt that wrote them, or the commits people made them in. Needs Entire enabled in the repository. Off by default because `entire why` takes from tens of milliseconds to two minutes where the history is long ([entire] why_timeout_ms)
 - **`--map`** — Print a map of the repository's most important definitions, from the code graph
 - **`--budget <TOKENS>`** — The map's size in tokens, estimated at 4 bytes each
 - **`--focus <FILE|NAME>`** — For the map: a file you are working on, or an identifier you care about. Repeatable

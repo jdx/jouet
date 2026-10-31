@@ -8,7 +8,7 @@ description: Exact, checked, all-or-nothing text edits across files, from search
 
 ```text
 jouet edit [--spec FILE] [--format blocks|patch|json] [--dry-run] [--diff]
-           [--check CMD] [--diag] [--revert-on-fail] [--expect-hash PATH=SHA256]...
+           [--check CMD] [--diag] [--revert-on-fail] [--why] [--expect-hash PATH=SHA256]...
 jouet edit replace PATH... (--old TEXT --new TEXT)... [--count N | --all]
 jouet edit hash PATH...
 ```
@@ -268,6 +268,19 @@ When the files were checked at exactly their current contents before, by `jouet 
 
 With `[edit] fix_after = true` in the [config file](/setup#settings), the project's hk fixers format the written files first, so a formatting-only finding never fails the edit; see [formatting after edits](/commands/diag#formatting-after-edits).
 
+## Lines an earlier session wrote, with `--why`
+
+In a repository with [Entire](https://entire.io), `--why` looks up the lines the edit removes or replaces with `entire why FILE --json`, and warns about those an agent session other than this one wrote, with the checkpoint and the start of the prompt behind them. Use it with `--dry-run` to see that before anything is written. It only warns: the edit is written as without it.
+
+```text
+$ jouet edit replace test/proxy_mcp.bats --old '|| true)' --new '|| :)' --dry-run --why
+ok          test/proxy_mcp.bats  1 edit  +1 -1
+dry run: 1 file would be written
+warning: this edit changes a line of test/proxy_mcp.bats that an earlier session wrote: 1 line (149) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "why did this fail https://github.com/jdx/fnox/pull/1087#issuecomment-6520951953". Check that the change is intended (`entire why test/proxy_mcp.bats:149`)
+```
+
+This session is `JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; its own lines are not warned about. `--why` is off by default because `entire why` can take a minute in a repository with a long history (see [`jouet read --why`](/commands/read#where-lines-came-from-with-why)). It looks at the first 10 files the edit changes, each bounded by `[entire] why_timeout_ms`, and stops at the first that times out. Failures are `note:` lines, never errors.
+
 ## Guard against stale reads with `--expect-hash`
 
 An agent that read a file a while ago may be editing a version that has since changed. `jouet edit hash` prints SHA-256 hashes to pass back later:
@@ -339,6 +352,8 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
 | `diag` | The `--diag` result: `status` (`clean`, `introduced`, `refused` or `unavailable`), the `new` findings, `new_failed_steps`, and the `kept` and `fixed` counts |
 | `fix` | What `[edit] fix_after` did: `status`, the `formatted` files, `failed_steps` |
+| `earlier_sessions` | With `--why`: the changed lines earlier agent sessions wrote, one entry per file and checkpoint: `path`, `lines`, `checkpoint_id`, `session_id`, `agent`, `commit` and `prompt` |
+| `notes` | With `--why`: why some lines could not be looked up |
 
 `jouet edit hash --json` prints `{"files":[{"path":"…","sha256":"…"}]}`.
 

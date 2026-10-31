@@ -239,6 +239,11 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 
 [wind]
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
+
+[entire]
+enabled = true         # JOUET_ENTIRE: read Entire where it is set up (pickup, sessions, --why)
+timeout_ms = 5000      # JOUET_ENTIRE_TIMEOUT_MS: each `entire` call for status, sessions and checkpoints
+why_timeout_ms = 15000 # JOUET_ENTIRE_WHY_TIMEOUT_MS: each `entire why` for --why
 ```
 
 An organisation's [enforced rules](/plugins#enforced-rules-and-routines) in `/etc/jouet` (`JOUET_SYSTEM_DIR`) are not turned off by `disable`. Turning the hooks off still turns them off: they are policy over configuration, not a sandbox.
