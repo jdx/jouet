@@ -68,4 +68,4 @@ jouet: deprecated [wait-poll]: `--poll` is now `--interval` (removed in jouet 2.
 - The note names the release it is removed in.
 - The [changelog](https://github.com/jdx/jouet/blob/main/CHANGELOG.md) lists the deprecation when it starts, and lists the removal as a breaking change when it happens.
 
-After 1.0, something deprecated is removed in the first major release at least 12 months after the release that started warning. Before 1.0 the warning still comes first where keeping the old form is cheap, and 12 months is the aim rather than a rule.
+After 1.0, something deprecated is removed in the first major release at least 12 months after the release that started warning. Before 1.0, it is removed in the next minor release, so a deprecation started in 0.3.x goes in 0.4.0. 12 months is a target there, not a floor, and the warning still comes first wherever keeping the old form is cheap.

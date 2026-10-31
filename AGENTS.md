@@ -199,7 +199,7 @@ the daily auto-merge of the release PR.
   breaking (`docs/stability.md`). Keep the old form working where you can, with
   `jouet_output::deprecated_at!(warn_at, remove_at, id, message)`, and give temporary code
   `jouet_output::remove_by!(version, id)`. `remove_at` is the first major release at least 12
-  months after `warn_at`; see CONTRIBUTING.md.
+  months after `warn_at`, or before 1.0 the next minor release; see CONTRIBUTING.md.
 - Renaming `.github/workflows/release-plz.yml` breaks crates.io publishing until the trusted
   publisher is updated, because the OIDC claim names the workflow file.
 - Published crates carry source and licence only. Each crate's `Cargo.toml` lists what it ships
