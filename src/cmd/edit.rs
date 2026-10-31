@@ -32,9 +32,13 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         );
     }
     let mut scoped = None;
+    let mut counts = None;
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
-        Some(EditCmd::Replace(replace)) => replace_spec(replace),
+        Some(EditCmd::Replace(replace)) => {
+            counts = Some(CountSyntax::Flags);
+            replace_spec(replace)
+        }
         None if args.pattern.is_some() => match pattern_spec(&args) {
             Ok((spec, scope)) => {
                 if let Some(scope) = scope {
@@ -47,7 +51,14 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             }
             Err((exit, message)) => return out.error(exit, &message),
         },
-        None => read_spec(&args),
+        None => read_spec(&args).map(|(spec, format)| {
+            counts = match format {
+                Format::Blocks => Some(CountSyntax::Block),
+                Format::Json => Some(CountSyntax::Json),
+                Format::Patch => None,
+            };
+            spec
+        }),
     };
     let spec = match spec {
         Ok(spec) => spec,
@@ -88,6 +99,9 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         } else {
             Exit::Precondition
         };
+        if let Some(syntax) = counts {
+            name_counts(&mut plan.report, syntax);
+        }
         print_report(out, &plan.report, None, None, scoped.as_ref());
         return exit;
     }
@@ -593,7 +607,7 @@ fn graph_callers(
 /// graph up to date for its file.
 const CALLER_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
-fn read_spec(args: &EditArgs) -> Result<Spec, String> {
+fn read_spec(args: &EditArgs) -> Result<(Spec, Format), String> {
     let text = match args.spec.as_deref() {
         Some("-") | None => {
             if args.spec.is_none() && std::io::stdin().is_terminal() {
@@ -614,7 +628,8 @@ fn read_spec(args: &EditArgs) -> Result<Spec, String> {
             "could not tell the spec's format from its first line; start with `=== PATH`, `*** Begin Patch` or `[`, or pass --format",
         )?,
     };
-    spec::parse(&text, format).map_err(|e| e.to_string())
+    let spec = spec::parse(&text, format).map_err(|e| e.to_string())?;
+    Ok((spec, format))
 }
 
 fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
@@ -773,6 +788,51 @@ fn status_word(status: FileStatus) -> &'static str {
     }
 }
 
+/// How the input that gave the edits sets a match count, for the hint on a
+/// count that did not match. A patch or a structural pattern has no count.
+#[derive(Clone, Copy)]
+enum CountSyntax {
+    Flags,
+    Block,
+    Json,
+}
+
+impl CountSyntax {
+    fn hint(self, found: usize, too_many: bool) -> String {
+        let (n, all) = match self {
+            Self::Flags => (format!("`--count {found}`"), "`--all`".to_string()),
+            Self::Block => (
+                format!("`<<<<<<< SEARCH count={found}`"),
+                "`count=all`".to_string(),
+            ),
+            Self::Json => (
+                format!("`\"count\": {found}`"),
+                "`\"count\": \"all\"`".to_string(),
+            ),
+        };
+        let mut hint = format!("set {n} or {all} to replace every match");
+        if too_many {
+            hint.push_str(", or give more surrounding text to match fewer");
+        }
+        hint
+    }
+}
+
+/// Says, as each edit's `message`, which count accepts the matches an edit
+/// found when they were too many or too few, so the fix needs no lookup.
+fn name_counts(report: &mut Report, syntax: CountSyntax) {
+    for e in report.files.iter_mut().flat_map(|f| &mut f.edits) {
+        let too_many = match e.status {
+            EditStatus::TooManyMatches => true,
+            EditStatus::TooFewMatches => false,
+            _ => continue,
+        };
+        if e.symbol.is_none() && e.message.is_none() {
+            e.message = Some(syntax.hint(e.found, too_many));
+        }
+    }
+}
+
 fn edit_problem(e: &edit::EditReport) -> String {
     let expected = match e.expected {
         Count::Exactly(n) => n.to_string(),
@@ -811,12 +871,7 @@ fn edit_problem(e: &edit::EditReport) -> String {
             e.symbol.as_deref().unwrap_or(""),
             lines()
         ),
-        EditStatus::TooManyMatches => format!(
-            "{} matches, expected {expected}, at lines {}",
-            e.found,
-            lines()
-        ),
-        EditStatus::TooFewMatches => format!(
+        EditStatus::TooManyMatches | EditStatus::TooFewMatches => format!(
             "{} matches, expected {expected}, at lines {}",
             e.found,
             lines()

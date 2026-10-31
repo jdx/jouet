@@ -106,6 +106,7 @@ EOF
 	assert_failure 4
 	assert_line "not written a.txt  1 edit  +1 -1"
 	assert_line "  edit 1: 3 matches, expected 2, at lines 1, 2, 3"
+	assert_line "    set \`<<<<<<< SEARCH count=3\` or \`count=all\` to replace every match, or give more surrounding text to match fewer"
 	assert_line "0 of 2 files written"
 	assert_content a.txt $'one\n'
 	assert_content b.txt $'two\ntwo\ntwo\n'
@@ -323,6 +324,12 @@ EOF
 	run --separate-stderr jouet edit replace a.txt --old a --new b
 	assert_failure 4
 	assert_line "  edit 1: 3 matches, expected 1, at lines 1, 1, 1"
+	assert_line "    set \`--count 3\` or \`--all\` to replace every match, or give more surrounding text to match fewer"
+
+	run --separate-stderr jouet edit replace a.txt --old a --new b --count 4 --json
+	assert_failure 4
+	assert_equal "$(jq -r '.files[0].edits[0].message' <<<"$output")" \
+		"set \`--count 3\` or \`--all\` to replace every match"
 
 	run --separate-stderr jouet edit replace a.txt --old a --new b --count 2
 	assert_failure 4
@@ -334,6 +341,28 @@ EOF
 	run --separate-stderr jouet edit replace a.txt --old b --new c --all
 	assert_success
 	assert_content a.txt $'c c c\n'
+}
+
+@test "a count that does not match is named in the spec's own form, and a patch has none" {
+	printf 'x\nx\n' >b.txt
+
+	run --separate-stderr jouet edit <<<'[{"path": "b.txt", "old": "x", "new": "y", "count": 3}]'
+	assert_failure 4
+	assert_line "  edit 1: 2 matches, expected 3, at lines 1, 2"
+	assert_line "    set \`\"count\": 2\` or \`\"count\": \"all\"\` to replace every match"
+
+	run --separate-stderr jouet edit <<'EOF'
+*** Begin Patch
+*** Update File: b.txt
+@@
+-x
++y
+*** End Patch
+EOF
+	assert_failure 4
+	assert_line "  edit 1: 2 matches, expected 1, at lines 1, 2"
+	refute_output --partial "count"
+	assert_content b.txt $'x\nx\n'
 }
 
 @test "edit replace takes several files and pairs, and writes none unless all match" {

@@ -91,7 +91,8 @@ pub struct EditReport {
     /// one that matched several, each of them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<String>,
-    /// Why a symbol edit was refused, when the status alone does not say.
+    /// Why a symbol edit was refused, when the status alone does not say, or
+    /// for a count that did not match, the count that accepts what was found.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// For a symbol edit that changed the definition's first line: what it
