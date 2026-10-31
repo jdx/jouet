@@ -119,6 +119,7 @@ fires = [
   "cargo test --workspace > test.log 2>&1 &",
   "nohup pytest -x > pytest.out &",
   { command = "npm run dev", input = { run_in_background = true }, action = "warn" },
+  { command = "npm run dev 2>&1 | tee dev.log", input = { run_in_background = true }, action = "warn" },
 ]
 quiet = [
   "npm run dev",

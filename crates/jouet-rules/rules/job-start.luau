@@ -45,8 +45,18 @@ local PORT_FLAGS: { [string]: boolean } = {
 
 local PACKAGE_MANAGERS: { [string]: boolean } = { npm = true, pnpm = true, yarn = true, bun = true }
 local RUNNERS: { [string]: boolean } = { npx = true, bunx = true, pnpx = true }
--- Programs that are not the server, when several run in the background.
-local NOT_SERVERS: { [string]: boolean } = { sleep = true, cd = true, wait = true, tail = true, cat = true }
+-- Programs that are not the server, when several run in the background, or
+-- that only read a server's output through a pipe.
+local NOT_SERVERS: { [string]: boolean } = {
+	sleep = true,
+	cd = true,
+	wait = true,
+	tail = true,
+	cat = true,
+	tee = true,
+	head = true,
+	grep = true,
+}
 
 local LOCAL_HOSTS = { "localhost", "127%.0%.0%.1", "0%.0%.0%.0", "%[::1%]" }
 

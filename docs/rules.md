@@ -243,7 +243,7 @@ ok    secret-files       25 examples passed
 ok    push-untested      13 examples passed
 ok    scoped-lint        17 examples passed
 ok    affected-tests     22 examples passed
-ok    job-start          25 examples passed
+ok    job-start          26 examples passed
 ok    job-ready          12 examples passed
 ok    job-logs           11 examples passed
 ok    job-stop           15 examples passed
