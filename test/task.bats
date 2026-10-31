@@ -5,7 +5,7 @@
 # through mise, the session start naming what was noticed, and `jouet
 # unwind` proposing to remove a task nobody runs. A fake `mise` records its
 # arguments in $MISE_LOG and answers `--version`, `tasks ls --json` (from
-# $MISE_TASKS) and `tasks add|set|rm --json` the way a mise newer than 2026.10.24
+# $MISE_TASKS) and `tasks add|set|rm --json` the way mise 2026.10.25 or later
 # does.
 
 setup() {
@@ -165,7 +165,7 @@ ran() {
 	rm "$BATS_TEST_TMPDIR/bin/mise"
 	PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet task propose
 	assert_failure 4
-	assert_equal "$stderr" "jouet: reading the project's tasks, to propose none it has: mise is not installed; jouet writes tasks through a mise newer than 2026.10.24"
+	assert_equal "$stderr" "jouet: reading the project's tasks, to propose none it has: mise is not installed; jouet writes tasks through mise 2026.10.25 or later"
 }
 
 @test "apply asks for the user's choice of file, needs a recent mise, and writes through mise" {
@@ -184,7 +184,7 @@ ran() {
 
 	FAKE_MISE_VERSION=2026.10.24 run jouet task apply t1 --file local
 	assert_failure 4
-	assert_line --index 0 "jouet: this needs a mise newer than 2026.10.24, the first with \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
+	assert_line --index 0 "jouet: this needs mise 2026.10.25 or later, the first with \`mise tasks set\` and \`rm\` and their JSON; the mise on PATH is 2026.10.24"
 	assert_equal "$(tail -1 "$MISE_LOG")" '["tasks","set","--help"]'
 
 	run --separate-stderr jouet task apply t1 --file local --json

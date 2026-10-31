@@ -1781,7 +1781,7 @@ pub struct UnwindArgs {
 /// sequences too, and a session start then names them. `jouet task apply ID
 /// --file local|shared` adds the task through `mise tasks add`, never by
 /// editing TOML; which file is the user's choice, so ask them first. Applying
-/// needs a mise newer than 2026.10.24.
+/// needs mise 2026.10.25 or later.
 #[derive(Args)]
 pub struct TaskArgs {
     #[usage(subcommand)]
@@ -1820,7 +1820,7 @@ pub struct TaskProposeArgs {
 /// repository's shared config for mise.toml, and prints the JSON mise
 /// returns. Without --file it refuses (exit 4) and says which file jouet
 /// suggests: ask the user, then pass their choice. A mise older than
-/// 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes,
+/// 2026.10.25 is refused (exit 4). A command with shell syntax (`&&`, pipes,
 /// quotes) is written as `sh -c '...'`, since mise quotes each word of a
 /// task's command.
 #[derive(Args)]
