@@ -46,6 +46,7 @@ Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 - **`--check <CMD>`** — Run CMD through the shell after writing
 - **`--diag`** — Fail if the edit introduced diagnostics: the edited files are checked through hk (`jouet diag`) before and after writing, and only new findings count
 - **`--revert-on-fail`** — Restore every edited file if --check or --diag fails
+- **`--why`** — Warn when the edit changes lines an earlier agent session wrote, by `entire why`: the session, checkpoint and prompt behind them, so `--dry-run --why` shows it before anything is written. It warns and does not refuse. Needs Entire enabled in the repository; off by default because `entire why` can take a minute where the history is long. Looks at the first 10 files
 - **`--expect-hash <PATH=SHA256>`** — Refuse unless PATH's contents have this SHA-256 hash. Repeatable
 
 ## Flags

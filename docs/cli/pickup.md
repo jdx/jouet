@@ -5,7 +5,7 @@
 
 Print a handoff and check that it still holds
 
-Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it with the checkout: the branch, HEAD, the upstream, an operation in progress, uncommitted and untracked files, and whether its background processes still run. Exits 0 when nothing has drifted and 1 when something has. The PR is not fetched again: run `jouet pr status` for its current state.
+Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it with the checkout: the branch, HEAD, the upstream, an operation in progress, uncommitted and untracked files, and whether its background processes still run. Exits 0 when nothing has drifted and 1 when something has. The PR is not fetched again: run `jouet pr status` for its current state. Where the repository has Entire (`entire` on PATH, the repository enabled, a working login), it also lists the earlier sessions with checkpoints on this branch: the last checkpoint of each and the files it touched, and the `entire` commands that show more.
 
 ## Arguments
 - **`[FILE]`** — The handoff to read (`-` is stdin)

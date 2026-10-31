@@ -52,6 +52,20 @@ By default only live sessions are listed, and a line says how many idle ones wer
 
 Paths show the home directory as `~`, and anything that looks like a credential in a path or branch is replaced with `<redacted>`, as `jouet audit` redacts its examples.
 
+## Entire
+
+Where the repository in the current directory has [Entire](https://entire.io) (`entire` on `PATH`, the repository enabled and a working login), `jouet sessions` adds the sessions Entire tracks there, from `entire session list --json`, matched to the ones it found by session ID:
+
+- a session jouet found keeps its own directory and branch, and gets `(Entire: N checkpoints)`;
+- a session only Entire knows, such as an agent jouet does not read (Cursor, OpenCode) or a transcript kept elsewhere, is listed from Entire's record, active within `--since`, with `(only in Entire, N checkpoints)`. Entire records the directory the agent started in, which can be the main checkout for a session that works in a worktree.
+
+```text
+ live  claude  ac87ea0b   37s ago  ~/src/jouet/.claude/worktrees/secrets-scan-89969a  [claude/secrets-scan]  (Entire: 1 checkpoint)
+ live  claude  1246445f    3m ago  ~/src/jouet/.claude/worktrees/db-d424f4  [claude/db-d424f4]  (Entire: 3 checkpoints)
+```
+
+Entire is per repository, so only the current repository's sessions are added. A call that fails or times out is a note; `JOUET_ENTIRE=false` turns it off.
+
 ## Warnings
 
 - **`shared_worktree`:** two or more live sessions last worked in the same worktree. One of them should move to a worktree of its own.
@@ -86,7 +100,7 @@ Paths show the home directory as `~`, and anything that looks like a credential 
 }
 ```
 
-`live`, `current` (the session jouet runs in) and `gone` are present only when true.
+`live`, `current` (the session jouet runs in) and `gone` are present only when true. A session Entire tracks has `entire`: its `status` (`active`, `idle` or `ended`), `checkpoints`, and `only: true` when only Entire knows it. `notes` says why Entire could not be read.
 
 ## Exit codes
 
