@@ -32,9 +32,13 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         );
     }
     let mut scoped = None;
+    let mut counts = None;
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
-        Some(EditCmd::Replace(replace)) => replace_spec(replace),
+        Some(EditCmd::Replace(replace)) => {
+            counts = Some(CountSyntax::Flags);
+            replace_spec(replace)
+        }
         None if args.pattern.is_some() => match pattern_spec(&args) {
             Ok((spec, scope)) => {
                 if let Some(scope) = scope {
@@ -47,7 +51,14 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             }
             Err((exit, message)) => return out.error(exit, &message),
         },
-        None => read_spec(&args),
+        None => read_spec(&args).map(|(spec, format)| {
+            counts = match format {
+                Format::Blocks => Some(CountSyntax::Block),
+                Format::Json => Some(CountSyntax::Json),
+                Format::Patch => None,
+            };
+            spec
+        }),
     };
     let spec = match spec {
         Ok(spec) => spec,
@@ -88,12 +99,12 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         } else {
             Exit::Precondition
         };
-        print_report(out, &plan.report, None, None, scoped.as_ref());
+        print_report(out, &plan.report, None, None, scoped.as_ref(), counts);
         return exit;
     }
     if args.dry_run {
         plan.report.dry_run = true;
-        print_report(out, &plan.report, None, None, scoped.as_ref());
+        print_report(out, &plan.report, None, None, scoped.as_ref(), None);
         return Exit::Ok;
     }
     let settings = crate::settings::Settings::load();
@@ -237,6 +248,7 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         fixed.as_ref(),
         diagnosed.as_ref(),
         scoped.as_ref(),
+        None,
     );
     // Keep the code graph in step with what was written (or restored), when
     // the repository has one, as the post-tool-use hook does for file tools.
@@ -593,7 +605,7 @@ fn graph_callers(
 /// graph up to date for its file.
 const CALLER_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
-fn read_spec(args: &EditArgs) -> Result<Spec, String> {
+fn read_spec(args: &EditArgs) -> Result<(Spec, Format), String> {
     let text = match args.spec.as_deref() {
         Some("-") | None => {
             if args.spec.is_none() && std::io::stdin().is_terminal() {
@@ -614,7 +626,8 @@ fn read_spec(args: &EditArgs) -> Result<Spec, String> {
             "could not tell the spec's format from its first line; start with `=== PATH`, `*** Begin Patch` or `[`, or pass --format",
         )?,
     };
-    spec::parse(&text, format).map_err(|e| e.to_string())
+    let spec = spec::parse(&text, format).map_err(|e| e.to_string())?;
+    Ok((spec, format))
 }
 
 fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
@@ -717,6 +730,7 @@ fn print_report(
     fix: Option<&diag::fix::Fixed>,
     diag: Option<&DiagOutcome>,
     scope: Option<&scope::Report>,
+    counts: Option<CountSyntax>,
 ) {
     let doc = EditOutput {
         report,
@@ -726,7 +740,7 @@ fn print_report(
     };
     out.result(&doc, || {
         let mut text = scope.map(scope::render).unwrap_or_default();
-        text.push_str(&render(report));
+        text.push_str(&render(report, counts));
         if let Some(line) = fix.and_then(diag::fix::Fixed::summary) {
             let _ = writeln!(text, "{line}");
         }
@@ -773,7 +787,37 @@ fn status_word(status: FileStatus) -> &'static str {
     }
 }
 
-fn edit_problem(e: &edit::EditReport) -> String {
+/// How the input that gave the edits sets a match count, for the hint on a
+/// count that did not match. A patch or a structural pattern has no count.
+#[derive(Clone, Copy)]
+enum CountSyntax {
+    Flags,
+    Block,
+    Json,
+}
+
+impl CountSyntax {
+    fn hint(self, found: usize, too_many: bool) -> String {
+        let (n, all) = match self {
+            Self::Flags => (format!("`--count {found}`"), "`--all`".to_string()),
+            Self::Block => (
+                format!("`<<<<<<< SEARCH count={found}`"),
+                "`count=all`".to_string(),
+            ),
+            Self::Json => (
+                format!("`\"count\": {found}`"),
+                "`\"count\": \"all\"`".to_string(),
+            ),
+        };
+        let mut hint = format!("set {n} or {all} to replace every match");
+        if too_many {
+            hint.push_str(", or give more surrounding text to match fewer");
+        }
+        hint
+    }
+}
+
+fn edit_problem(e: &edit::EditReport, counts: Option<CountSyntax>) -> String {
     let expected = match e.expected {
         Count::Exactly(n) => n.to_string(),
         Count::All => "at least 1".into(),
@@ -811,16 +855,18 @@ fn edit_problem(e: &edit::EditReport) -> String {
             e.symbol.as_deref().unwrap_or(""),
             lines()
         ),
-        EditStatus::TooManyMatches => format!(
-            "{} matches, expected {expected}, at lines {}",
-            e.found,
-            lines()
-        ),
-        EditStatus::TooFewMatches => format!(
-            "{} matches, expected {expected}, at lines {}",
-            e.found,
-            lines()
-        ),
+        EditStatus::TooManyMatches | EditStatus::TooFewMatches => {
+            let mut s = format!(
+                "{} matches, expected {expected}, at lines {}",
+                e.found,
+                lines()
+            );
+            if let Some(syntax) = counts {
+                let too_many = e.status == EditStatus::TooManyMatches;
+                let _ = write!(s, "; {}", syntax.hint(e.found, too_many));
+            }
+            s
+        }
         EditStatus::AnchorNotFound => {
             format!("anchor not found: {}", e.anchor.as_deref().unwrap_or(""))
         }
@@ -852,7 +898,7 @@ fn line_list(lines: &[usize]) -> String {
 
 /// The text form of a report: one line per file, then the problems under it,
 /// then a summary line.
-fn render(report: &Report) -> String {
+fn render(report: &Report, counts: Option<CountSyntax>) -> String {
     let mut s = String::new();
     let width = report.files.iter().map(|f| f.path.len()).max().unwrap_or(0);
     for f in &report.files {
@@ -877,7 +923,7 @@ fn render(report: &Report) -> String {
             let _ = writeln!(s, "  {}", err.message);
         }
         for e in f.edits.iter().filter(|e| e.status != EditStatus::Ok) {
-            let _ = writeln!(s, "  edit {}: {}", e.index + 1, edit_problem(e));
+            let _ = writeln!(s, "  edit {}: {}", e.index + 1, edit_problem(e, counts));
             if let Some(message) = &e.message {
                 let _ = writeln!(s, "    {message}");
             }
