@@ -51,16 +51,21 @@ teardown() {
 	assert_output "web had already been stopped"
 }
 
+# The live processes in process group $1, from a `ps` every Unix has.
+group() {
+	ps -A -o pid=,pgid=,stat= | awk -v g="$1" '$2 == g && $3 !~ /^Z/'
+}
+
 @test "stop takes the whole process group, children included" {
 	jouet job start tree -- sh -c 'sleep 30 & sleep 30 & wait' >/dev/null
 	local pgid
 	pgid=$(jouet job ls --json | jq -r '.[0].pid')
-	[[ $(ps -o pid= -g "$pgid" | wc -l) -ge 3 ]]
+	[[ $(group "$pgid" | wc -l) -ge 3 ]]
 
 	run --separate-stderr jouet job stop tree
 	assert_success
 
-	run ps -o pid= -g "$pgid"
+	run group "$pgid"
 	assert_output ""
 }
 
