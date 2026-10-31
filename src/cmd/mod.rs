@@ -20,6 +20,7 @@ pub(crate) mod review;
 pub(crate) mod rule;
 pub(crate) mod run;
 pub(crate) mod search;
+pub(crate) mod sessions;
 pub(crate) mod setup;
 pub(crate) mod share;
 pub(crate) mod skill;

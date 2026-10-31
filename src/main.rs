@@ -63,6 +63,8 @@ enum Cmd {
     Handoff(HandoffArgs),
     /// Print a handoff and check that it still holds
     Pickup(PickupArgs),
+    /// Show which agent sessions are working where on this machine
+    Sessions(SessionsArgs),
     /// Show what jouet saved: measured from its ledger, estimated from your history
     Stats(StatsArgs),
     /// Inspect pull requests
@@ -240,6 +242,31 @@ pub struct HandoffArgs {
 pub struct PickupArgs {
     /// The handoff to read (`-` is stdin)
     file: Option<String>,
+}
+
+/// Show which agent sessions are working where on this machine
+///
+/// Reads Claude Code's transcripts (~/.claude/projects, or
+/// $CLAUDE_CONFIG_DIR) and Codex's rollouts (~/.codex/sessions, or
+/// $CODEX_HOME) written within --since (default 24h). For each session it
+/// shows the harness, the directory it last worked in, that directory's
+/// work tree and checked-out branch, and when its transcript was last
+/// written. A session is live when its transcript was written in the last
+/// 15 minutes. Only the end of each transcript is read, never what the
+/// session said, and nothing is written. Warns about two live sessions in
+/// one work tree, which commit each other's uncommitted work, and about a
+/// live session whose directory is gone. Lists live sessions; --all also
+/// lists idle ones, marking those whose directory is gone. Exits 0 whether
+/// or not there are warnings.
+#[derive(Args)]
+pub struct SessionsArgs {
+    /// Only sessions active since TIME: a duration ago such as 24h or 7d, a
+    /// date such as 2026-10-01, or RFC 3339 (default 24h)
+    #[usage(long, value_name = "TIME")]
+    since: Option<String>,
+    /// List idle sessions too, not only live ones
+    #[usage(long)]
+    all: bool,
 }
 
 /// Report where coding-agent sessions spend tokens and time
@@ -1921,6 +1948,7 @@ fn main() -> ExitCode {
         Cmd::Graph(args) => cmd::graph::run(&args, &out),
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
+        Cmd::Sessions(args) => cmd::sessions::run(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),

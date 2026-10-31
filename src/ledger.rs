@@ -831,7 +831,7 @@ fn redact(word: &str) -> String {
 }
 
 /// Session ids are opaque, but keep them short and printable.
-fn redact_id(id: &str) -> String {
+pub(crate) fn redact_id(id: &str) -> String {
     id.chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
         .take(128)
