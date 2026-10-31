@@ -607,7 +607,7 @@ pub fn select<'a>(pr: &'a PrThreads, f: &Filter) -> Vec<&'a Thread> {
 /// when the findings are fetched.
 pub fn keeps_finding(f: &Filter, finding: &crate::entire::Finding) -> bool {
     let outdated = f.outdated.is_none_or(|o| o == finding.stale);
-    let author = f.authors.is_empty() || f.authors.iter().any(|a| a == &finding.author);
+    let author = f.authors.is_empty() || f.authors.iter().any(|a| same_login(a, &finding.author));
     let bots = f
         .bots
         .is_none_or(|b| b == finding.author.starts_with("agent:"));

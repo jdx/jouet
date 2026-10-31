@@ -2354,8 +2354,10 @@ pub struct ShareArgs {
 /// The ledger holds only command shapes. `jouet wind digest` and `jouet wind
 /// review` read whole sessions: the user's corrections, abandoned
 /// approaches, waits and repeated exploration. A review's proposals (mise
-/// tasks, rules, routines, AGENTS.md or memory notes) are recorded with
-/// `jouet wind propose` and shown like the ledger's notes.
+/// tasks, rules, routines, AGENTS.md or memory notes, or changes to the
+/// memories agents already keep) are recorded with `jouet wind propose` and
+/// shown like the ledger's notes. `jouet wind memories` notices memories
+/// whose workaround looks fixed.
 #[derive(Args)]
 pub struct WindArgs {
     #[usage(subcommand)]
@@ -2368,7 +2370,7 @@ pub enum WindCmd {
     Show(WindNoteArgs),
     /// Drop a note, a proposal or a suggested review, so it is never shown again
     Dismiss(WindNoteArgs),
-    /// Mark a review's proposal as applied
+    /// Mark a review's proposal or a memory note as dealt with
     Adopt(WindNoteArgs),
     /// Digest whole sessions: corrections, failures, waits, re-reads
     Digest(WindDigestArgs),
@@ -2376,13 +2378,15 @@ pub enum WindCmd {
     Review(WindDigestArgs),
     /// Record what a review proposed, to show at the next session start
     Propose(WindProposeArgs),
+    /// Check your agents' memories for workarounds whose bug looks fixed
+    Memories(WindMemoriesArgs),
 }
 
 /// Show or drop a winding note
 #[derive(Args)]
 pub struct WindNoteArgs {
-    /// The id of a note (n3), a proposal (p2), a suggested review (r1) or a
-    /// mise task (t1)
+    /// The id of a note (n3), a proposal (p2), a suggested review (r1), a
+    /// mise task (t1) or a memory note (m1)
     id: String,
 }
 
@@ -2416,6 +2420,26 @@ pub struct WindDigestArgs {
     /// Tokens per session's digest, about (default 4000)
     #[usage(long, value_name = "N")]
     budget: Option<usize>,
+}
+
+/// Check your agents' memories for workarounds whose bug looks fixed
+///
+/// Reads Claude Code's memories (~/.claude/projects/*/memory/*.md and
+/// ~/.claude/CLAUDE.md), ~/.codex/AGENTS.md and Codex's consolidated
+/// memories, and checks what each one depends on: a PR or issue it says it
+/// waits on (merged or closed now?), a merge it says is not released yet
+/// (in a release now?), a `jouet` command or flag it names (still there?),
+/// and a built-in rule it says to get past (a jouet bug, not a memory).
+/// It lists what it finds, and asks GitHub, with the token `jouet pr`
+/// uses. It never changes a memory. The stop hook runs it with --record
+/// once a day in the background; the next session starts in the memory's
+/// project then show each note in one line. Off with JOUET_WIND_MEMORIES=0.
+#[derive(Args)]
+pub struct WindMemoriesArgs {
+    /// Also record what it finds as notes, two a day at most, to show at
+    /// session starts
+    #[usage(long)]
+    record: bool,
 }
 
 /// Record what a review proposed, to show at the next session start

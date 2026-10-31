@@ -49,7 +49,7 @@ pub(crate) fn add(prs: &mut [Fetched]) -> Option<Availability> {
 }
 
 fn fill(entire: &Entire, pr: &mut PrStatus) {
-    // With its host: `pr.repo` alone would name a GitHub repository.
+    // With its host, so a PR off github.com is not looked up as `gh/...`.
     let Some(repo) = pr.repository() else {
         return;
     };

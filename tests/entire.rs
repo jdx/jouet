@@ -391,3 +391,34 @@ fn a_summary_jouet_cannot_read_is_not_guessed_at() {
             == "Entire Gates: 2 blocking gates not passing (jouet could not read the check's summary)"));
     assert!(attention.iter().all(|a| a["code"] != "entire_findings"));
 }
+
+#[test]
+fn a_bad_handle_stops_a_mixed_resolve_before_any_thread_is_written() {
+    let fake = github(Edit::default());
+    let dir = tempfile::tempdir().unwrap();
+    // 4385981140 is an open thread on jdx/mise#14922; the handle names no
+    // finding on the trail.
+    let args = [
+        "pr",
+        "threads",
+        "resolve",
+        "4385981140",
+        "entire:01ZZZZZZZZ",
+        "jdx/mise#14922",
+        "--reply",
+        "Fixed",
+    ];
+    let out = jouet(&fake, dir.path(), true, &[], &args);
+    assert_eq!(out.status.code(), Some(3), "{}", stdout(&out));
+    assert_eq!(
+        stderr(&out),
+        "jouet: no finding entire:01ZZZZZZZZ on Entire trail #424; nothing was changed\n"
+    );
+    let writes: Vec<String> = fake
+        .requests()
+        .iter()
+        .map(|r| query(r).to_string())
+        .filter(|q| q.contains("mutation"))
+        .collect();
+    assert_eq!(writes, Vec::<String>::new(), "nothing was posted to GitHub");
+}
