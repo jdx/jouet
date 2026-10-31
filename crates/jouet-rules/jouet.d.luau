@@ -19,7 +19,8 @@
 -- into a `[[rule]]` table.
 --
 -- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
--- `jouet.cargo`, `jouet.test`, `jouet.pitchfork`, `jouet.repo`, `jouet.env`)
+-- `jouet.cargo`, `jouet.test`, `jouet.pitchfork`, `jouet.secrets`, `jouet.repo`,
+-- `jouet.env`)
 -- only read. Each is cached for the rest of the hook call, and runs inside
 -- the caller's budget.
 -- Most return `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)`
@@ -51,6 +52,10 @@ export type JouetCommand = {
 	env: { string },
 	-- Inside `$(...)` or a script passed to `sh -c`.
 	nested: boolean,
+	-- One of the rule's `[rule.match]` tables matched this command: the
+	-- reason the script runs. Always false for a rule without matchers and
+	-- in `jouet.parse`.
+	matched: boolean,
 	-- The exit status this command is known to have had (post-tool-use only):
 	-- a failure belongs to the last pipeline, success to the final `&&` chain.
 	status: number?,
@@ -111,6 +116,9 @@ export type JouetExample = string | {
 	session: string?,
 	-- The claims `jouet.claims.held()` finds; without them it has no answer.
 	claims: { { pattern: string, session: string, worktree: string?, branch: string?, note: string? } }?,
+	-- What `jouet.secrets.scan()` finds, for any scope; without it, it has
+	-- no answer.
+	secrets: { { rule: string, path: string, line: number, commit: string? } }?,
 }
 
 export type JouetRule = {
@@ -222,6 +230,24 @@ export type JouetCargoWorkspace = {
 }
 
 -- A live claim `jouet claim` keeps, covering a path a call touches.
+-- A secret gitleaks' rules found. The secret itself is never given.
+export type JouetSecretFinding = {
+	-- The gitleaks rule, such as "github-pat".
+	rule: string,
+	description: string,
+	-- Relative to the repository's root.
+	path: string,
+	-- 1-based; absent for a rule that matches the file's name alone.
+	line: number?,
+	-- The commit that adds it, for an "outgoing" scan.
+	commit: string?,
+	-- The match with the secret cut to its first characters.
+	redacted: string,
+	-- What .gitleaksignore takes to pass over it: PATH:RULE:LINE, after
+	-- COMMIT: for a commit's finding.
+	fingerprint: string,
+}
+
 export type JouetClaim = {
 	-- The path the claim covers, relative to the repository's root.
 	path: string,
@@ -384,11 +410,15 @@ declare jouet: {
 		-- none declares any.
 		daemons: () -> ({ JouetPitchforkDaemon }?, string?),
 	},
-	stack: {
-		-- The current branch's layer in the gh-stack stack holding it, from
-		-- gh-stack's metadata and the remote-tracking branches; nil when
-		-- gh-stack does not track it.
-		layer: () -> (JouetStackLayer?, string?),
+	secrets: {
+		-- What gitleaks' rules (with the repository's .gitleaks.toml and
+		-- .gitleaksignore) find in the lines a commit or push would add:
+		-- "staged" (the default: the index against HEAD), "tracked" (every
+		-- tracked change, as `git commit -a` takes) or "outgoing" (each
+		-- commit not on any remote). `paths`, which a `git add` in the same
+		-- call is about to stage, are scanned too. nil and a reason when the
+		-- diff is over 1 MiB or the scan runs out of budget.
+		scan: (scope: string?, paths: { string }?) -> ({ JouetSecretFinding }?, string?),
 	},
 	stack: {
 		-- The current branch's layer in the gh-stack stack holding it, from

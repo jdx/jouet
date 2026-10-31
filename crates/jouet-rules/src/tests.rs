@@ -592,6 +592,7 @@ return {
             git_branch: None,
             git_ahead: None,
             stack: None,
+            secrets: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
@@ -1345,6 +1346,32 @@ fn job_start_names_the_job_and_its_ready_check() {
         message.starts_with("Run `jouet job start dev -- npm run dev`"),
         "{message}"
     );
+    // Nor is a command the matchers did not find, run after it.
+    let then = Call {
+        input: Some(serde_json::json!({ "run_in_background": true })),
+        ..bash("cd web && npm run dev; echo started; ls -la")
+    };
+    let message = engine.evaluate(&then).warnings.remove(0).message.unwrap();
+    assert!(
+        message.starts_with("Run `jouet job start dev -- npm run dev`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_script_sees_which_commands_its_matchers_matched() {
+    let code =
+        "[[rule]]\nname = \"m\"\nwhy = \"w\"\nscript = \"m.luau\"\nmatch = { command = \"b\" }\n";
+    let script = "return { check = function(call)\n  local out = {}\n  for _, c in call.commands do\n    if c.matched then table.insert(out, c.text) end\n  end\n  return jouet.deny(table.concat(out, \",\"))\nend }";
+    let engine = engine(vec![toml_user("m", code).with_script("m.luau", script)]);
+    let matched = |command: &str| {
+        let outcome = engine.evaluate(&bash(command));
+        let d = outcome.deny.or(outcome.warnings.into_iter().next());
+        d.and_then(|d| d.message)
+    };
+    assert_eq!(matched("a; b 1; c && b 2").as_deref(), Some("b 1,b 2"));
+    assert_eq!(matched("echo $(b) | c").as_deref(), Some("b"));
+    assert_eq!(matched("a; c"), None);
 }
 
 /// A user rule that denies `serve`, only where `marker.toml` is.
@@ -1389,6 +1416,18 @@ fn a_rule_that_requires_a_file_runs_only_where_it_is() {
     // Its examples still run as if the file were there.
     let rule = engine.rule("needs-file").unwrap();
     assert!(engine.examples(rule).unwrap().iter().all(|e| e.ok));
+}
+
+#[test]
+fn primer_false_keeps_a_rule_out_of_the_primer_but_it_still_denies() {
+    let code = "[[rule]]\nname = \"on-content\"\nwhy = \"w\"\nmode = \"deny\"\nmessage = \"m\"\nprimer = false\nmatch = { command = \"serve\" }\n[rule.examples]\nfires = [\"serve\"]\nquiet = [\"ls\"]\n";
+    let user = engine(vec![toml_user("on-content", code)]);
+    assert!(!user.rule("on-content").unwrap().primer);
+    assert!(user.evaluate(&bash("serve")).deny.is_some());
+    // Omitted, a rule is in the primer; the built-in one about content is not.
+    let builtin = engine(builtin());
+    assert!(builtin.rule("git-stash").unwrap().primer);
+    assert!(!builtin.rule("committed-secrets").unwrap().primer);
 }
 
 #[test]

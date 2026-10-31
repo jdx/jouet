@@ -12,7 +12,47 @@ pub(crate) fn any(matchers: &[Matcher], call: &Call, commands: &[shell::Command]
     matchers.iter().any(|m| matches(m, call, commands))
 }
 
+/// Which of `commands` the matchers matched: each command a matcher's
+/// `command` names, when the matcher's other conditions hold.
+pub(crate) fn matched(matchers: &[Matcher], call: &Call, commands: &[shell::Command]) -> Vec<bool> {
+    let mut out = vec![false; commands.len()];
+    for m in matchers
+        .iter()
+        .filter(|m| !m.command.is_empty() && conditions(m, call))
+    {
+        for (i, hit) in out.iter_mut().enumerate() {
+            *hit = *hit || matches_at(m, i, call, commands);
+        }
+    }
+    out
+}
+
 fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
+    if !conditions(m, call) {
+        return false;
+    }
+    if m.command.is_empty() {
+        return true;
+    }
+    (0..commands.len()).any(|i| matches_at(m, i, call, commands))
+}
+
+/// Whether the command at `i` is one the matcher's `command` names, with its
+/// `with` and `unless_with` met by the call's other commands.
+fn matches_at(m: &Matcher, i: usize, call: &Call, commands: &[shell::Command]) -> bool {
+    let other = |with: &Matcher| {
+        commands
+            .iter()
+            .enumerate()
+            .any(|(j, other)| j != i && command(with, other, call))
+    };
+    command(m, &commands[i], call)
+        && m.with.as_deref().is_none_or(other)
+        && !m.unless_with.as_deref().is_some_and(other)
+}
+
+/// Whether the call meets everything the matcher asks besides its `command`.
+fn conditions(m: &Matcher, call: &Call) -> bool {
     if !m.tool.is_empty() && !m.tool.iter().any(|g| glob::matches(&g.0, &call.tool)) {
         return false;
     }
@@ -62,20 +102,7 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
     {
         return false;
     }
-    if m.command.is_empty() {
-        return true;
-    }
-    commands.iter().enumerate().any(|(i, c)| {
-        let other = |with: &Matcher| {
-            commands
-                .iter()
-                .enumerate()
-                .any(|(j, other)| j != i && command(with, other, call))
-        };
-        command(m, c, call)
-            && m.with.as_deref().is_none_or(other)
-            && !m.unless_with.as_deref().is_some_and(other)
-    })
+    true
 }
 
 /// Whether the tool's input has the fields `input` names, with matching

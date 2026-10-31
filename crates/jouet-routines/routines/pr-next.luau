@@ -19,6 +19,9 @@
 
 type Pr = {
 	repo: string,
+	-- `gitlab` or `forgejo`, with the host, for a PR not on GitHub.
+	forge: string?,
+	host: string?,
 	number: number,
 	title: string,
 	url: string,
@@ -62,9 +65,14 @@ local function attention(pr: Pr, code: string): string?
 	return nil
 end
 
+-- The forge's name in messages.
+local FORGE = { gitlab = "GitLab", forgejo = "Forgejo" }
+
 -- The first state that applies: (action, reason, command).
 local function decide(pr: Pr): (string, string, string?)
-	local name = `{pr.repo}#{pr.number}`
+	local qualified = if pr.host then `{pr.host}/{pr.repo}` else pr.repo
+	local name = `{qualified}#{pr.number}`
+	local forge = FORGE[pr.forge or ""] or "GitHub"
 	local update = `git fetch origin {pr.base} && git merge origin/{pr.base}`
 	if pr.state == "merged" then
 		return "merged", "Merged", nil
@@ -73,6 +81,12 @@ local function decide(pr: Pr): (string, string, string?)
 	end
 	local reason = attention(pr, "draft")
 	if reason then
+		if pr.forge == "gitlab" then
+			return "draft", reason, `glab mr update {pr.number} --ready -R {qualified}`
+		elseif pr.forge == "forgejo" then
+			-- A Forgejo draft is a `WIP:` title, which no command clears.
+			return "draft", reason, nil
+		end
 		return "draft", reason, `gh pr ready {pr.number} --repo {pr.repo}`
 	end
 	reason = attention(pr, "conflict")
@@ -115,20 +129,27 @@ local function decide(pr: Pr): (string, string, string?)
 	end
 	if pr.merge_state == "unknown" then
 		return "mergeable_unknown",
-			"GitHub has not finished computing the merge state; run again shortly",
+			`{forge} has not finished computing the merge state; run again shortly`,
 			`jouet wait pr {name} --until mergeable`
 	end
 	if not MERGEABLE[pr.merge_state] then
+		local why = if pr.forge then "" else " by branch protection or a ruleset"
 		return "blocked",
-			`GitHub reports the merge as {pr.merge_state} by branch protection or a ruleset`,
+			`{forge} reports the merge as {pr.merge_state}{why}`,
 			`jouet wait pr {name} --until any-change`
 	end
 	if pr.auto_merge then
-		return "auto_merge", "Auto-merge is enabled; GitHub will merge it", `jouet wait pr {name} --until merged`
+		return "auto_merge", `Auto-merge is enabled; {forge} will merge it`, `jouet wait pr {name} --until merged`
 	end
 	local ran = if total == 0 then "No checks ran" else `Checks pass ({checks.pass or 0}/{total})`
 	local review = if pr.review == "approved" then "approved" else "no review required"
-	return "ready_to_merge", `{ran}, {review}, no unresolved threads`, `jouet pr land {name}`
+	local land = `jouet pr land {name}`
+	if pr.forge == "gitlab" then
+		land = `glab mr merge {pr.number} -R {qualified}`
+	elseif pr.forge == "forgejo" then
+		land = `tea pulls merge {pr.number} --repo {pr.repo}`
+	end
+	return "ready_to_merge", `{ran}, {review}, no unresolved threads`, land
 end
 
 local function pad(text: string, width: number): string
@@ -221,6 +242,7 @@ return {
 				entries,
 				joue.object({
 					repo = pr.repo,
+					host = pr.host,
 					number = pr.number,
 					title = pr.title,
 					url = pr.url,
@@ -228,7 +250,7 @@ return {
 					kind = kind,
 					reason = reason,
 					command = command,
-				}, { "repo", "number", "title", "url", "action", "kind", "reason", "command" })
+				}, { "repo", "host", "number", "title", "url", "action", "kind", "reason", "command" })
 			)
 		end
 		local report = joue.object({

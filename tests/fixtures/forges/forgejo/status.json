@@ -1,0 +1,86 @@
+{
+  "state": "failure",
+  "total_count": 16,
+  "statuses": [
+    {
+      "context": "issue-labels / cascade (pull_request_target)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212529/jobs/0"
+    },
+    {
+      "context": "issue-labels / release-notes (pull_request_target)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212530/jobs/0"
+    },
+    {
+      "context": "requirements / merge-conditions (pull_request)",
+      "status": "failure",
+      "target_url": "/forgejo/forgejo/actions/runs/212531/jobs/0"
+    },
+    {
+      "context": "testing / semgrep/ci (pull_request)",
+      "status": "success",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/12"
+    },
+    {
+      "context": "testing / frontend-checks (pull_request)",
+      "status": "success",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/1"
+    },
+    {
+      "context": "testing / backend-checks (pull_request)",
+      "status": "failure",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/0"
+    },
+    {
+      "context": "testing / test-pgsql (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/8"
+    },
+    {
+      "context": "testing / test-unit (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/2"
+    },
+    {
+      "context": "testing / test-e2e (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/3"
+    },
+    {
+      "context": "testing / test-sqlite (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/9"
+    },
+    {
+      "context": "testing / test-mysql (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/7"
+    },
+    {
+      "context": "testing / test-remote-cacher (valkey) (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/5"
+    },
+    {
+      "context": "testing / coverage (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/10"
+    },
+    {
+      "context": "testing / test-remote-cacher (redis) (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/4"
+    },
+    {
+      "context": "testing / test-remote-cacher (garnet) (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/6"
+    },
+    {
+      "context": "testing / security-check (pull_request)",
+      "status": "skipped",
+      "target_url": "/forgejo/forgejo/actions/runs/212532/jobs/11"
+    }
+  ]
+}

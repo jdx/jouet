@@ -1,0 +1,139 @@
+[
+  {
+    "id": 26828831,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": {
+      "login": "ApolloFops"
+    },
+    "user": {
+      "login": "oliverpool"
+    },
+    "created_at": "2026-10-30T09:20:20+01:00",
+    "body": "suggestion: make a `GetProviderFromGothic` helper instead and put the rest of the OIDC logic in `buildOIDCEndSessionURL`\r\n\r\n```go\r\nfunc GetProviderFromGothic(providerName string) (goth.Provider, bool) {\r\n\tgothRWMutex.Lock()\r\n\tdefer gothRWMutex.Unlock()\r\n\r\n\tp, ok := goth.GetProviders()[providerName]\r\n\treturn p, ok\r\n}\r\n```\r\n\r\n(this function should be used `generateCodeChallenge`, which is currently racy)",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26828831",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26853581,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-30T15:36:35+01:00",
+    "body": "Yep, that makes total sense! I'll go ahead and do that. (by the way, that `defer` keyword is super cool!! I've never worked in Go before so I'm kinda fascinated by it lol)",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26853581",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26854094,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-30T15:46:39+01:00",
+    "body": "Although actually, now that I think about it some more, we want to keep this mutex locked until we're done with the provider, no? Otherwise, if something is actively using the provider which this helper returns and then another thread goes and modifies the provider, it could cause a race condition.\n\ngenerateCodeChallenge does definitely need to lock the mutex though, although that might be better in another PR, since it's not really related to the functionality in this one. I can go ahead and create an issue for that.",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26854094",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26859449,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": null,
+    "user": {
+      "login": "oliverpool"
+    },
+    "created_at": "2026-10-30T17:12:23+01:00",
+    "body": "> another thread goes and modifies the provider\r\n\r\nThis shouldn't happen, so I think no need to hold the lock here. The provider should be readonly (or threadsafe).",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26859449",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26864042,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-30T18:54:31+01:00",
+    "body": "> This shouldn't happen, so I think no need to hold the lock here. The provider should be readonly (or threadsafe).\r\n\r\nAlright, I'll put it in a helper like you suggested. If anything does happen it should be very, very rare, since this read should finish pretty much immediately anyway.",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26864042",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26875862,
+    "path": "services/auth/source/oauth2/providers.go",
+    "position": 169,
+    "original_position": 0,
+    "commit_id": "7222851466f8294f51916318e0831313621b0471",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-31T00:12:56+01:00",
+    "body": "Went ahead and moved that into the helper like you suggested.",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26875862",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26828843,
+    "path": "routers/web/auth/oauth.go",
+    "position": 1672,
+    "original_position": 0,
+    "commit_id": "eac6a8688a1298d4a942b768517e7c3153c1b5c4",
+    "resolver": null,
+    "user": {
+      "login": "oliverpool"
+    },
+    "created_at": "2026-10-30T09:21:42+01:00",
+    "body": "question: shouldn't this be `setting.AppSubURL + \"/\"` instead of `setting.AppURL`?",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26828843",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26853101,
+    "path": "routers/web/auth/oauth.go",
+    "position": 1672,
+    "original_position": 0,
+    "commit_id": "eac6a8688a1298d4a942b768517e7c3153c1b5c4",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-30T15:26:56+01:00",
+    "body": "Yep, that's probably the case! In the original patch it was some Gitea helper function so I just set it to what I found lol, but yeah looks like AppSubURL is what I should be using here. Thanks for pointing that out!",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26853101",
+    "pull_request_review_id": 2267390
+  },
+  {
+    "id": 26876891,
+    "path": "routers/web/auth/oauth.go",
+    "position": 1672,
+    "original_position": 0,
+    "commit_id": "eac6a8688a1298d4a942b768517e7c3153c1b5c4",
+    "resolver": null,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "created_at": "2026-10-31T00:37:11+01:00",
+    "body": "Actually, I don't think AppSubURL is what we need here. I believe to comply with the OIDC RP-initiated logout spec, we need to include the full URL here, including the protocol and hostname.\r\n\r\n> \r\n> post_logout_redirect_uri\r\n>     OPTIONAL. URI to which the RP is requesting that the End-User's User Agent be redirected after a logout has been performed. This URI SHOULD use the https scheme and MAY contain port, path, and query parameter components; however, it MAY use the http scheme, provided that the Client Type is confidential, as defined in Section 2.1 of OAuth 2.0 [RFC6749], and provided the OP allows the use of http RP URIs. The URI MAY use an alternate scheme, such as one that is intended to identify a callback into a native application. The value MUST have been previously registered with the OP, either using the post_logout_redirect_uris Registration parameter or via another mechanism. An id_token_hint is also RECOMMENDED when this parameter is included. \r\n\r\n(from https://openid.net/specs/openid-connect-rpinitiated-1_0.html#RPLogout)\r\n\r\nNot sure if setting.AppURL on its own includes the sub URL as well or not, but I'm going to just leave it as AppURL for now.",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26876891",
+    "pull_request_review_id": 2267390
+  }
+]

@@ -25,6 +25,7 @@ pub(crate) mod rule;
 pub(crate) mod run;
 pub(crate) mod scope;
 pub(crate) mod search;
+pub(crate) mod secrets;
 pub(crate) mod sessions;
 pub(crate) mod setup;
 pub(crate) mod share;

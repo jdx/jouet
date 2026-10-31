@@ -144,3 +144,24 @@ run = [
     "mkdir -p man/man1",
     "target/debug/jouet __usage_spec__ | grep -v '^version ' | usage generate manpage --file - --out-file man/man1/jouet.1",
 ]
+
+# The secret scanner's rules are gitleaks' own config, vendored unchanged with
+# its licence. `mise run secrets:update` takes the latest release's;
+# `mise run secrets:update v8.30.1` a given one. Review the diff, and run the
+# tests: one checks that every rule compiles.
+[tasks."secrets:update"]
+description = "Vendor gitleaks' detection rules and licence into crates/jouet-secrets/gitleaks"
+usage = 'arg "[tag]" help="A gitleaks release tag; the latest when omitted"'
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+tag="${usage_tag:-}"
+if [ -z "$tag" ]; then
+  tag=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name)
+fi
+dir=crates/jouet-secrets/gitleaks
+curl -fsSL -o "$dir/gitleaks.toml" "https://raw.githubusercontent.com/gitleaks/gitleaks/$tag/config/gitleaks.toml"
+curl -fsSL -o "$dir/LICENSE" "https://raw.githubusercontent.com/gitleaks/gitleaks/$tag/LICENSE"
+printf '%s\n' "$tag" >"$dir/VERSION"
+echo "gitleaks rules: $tag ($(grep -c '^\[\[rules\]\]' "$dir/gitleaks.toml") rules)"
+'''

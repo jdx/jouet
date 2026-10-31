@@ -120,6 +120,7 @@ fires = [
   "nohup pytest -x > pytest.out &",
   { command = "npm run dev", input = { run_in_background = true }, action = "warn" },
   { command = "npm run dev 2>&1 | tee dev.log", input = { run_in_background = true }, action = "warn" },
+  { command = "cd web && npm run dev; echo started", input = { run_in_background = true }, action = "warn" },
 ]
 quiet = [
   "npm run dev",
@@ -133,4 +134,7 @@ quiet = [
   "echo 'npm run dev &'",
   { command = "npm run build", input = { run_in_background = true } },
   { command = "cargo test", input = { run_in_background = true } },
+  # In the harness's background, the build is what runs, not the command after it.
+  { command = "cd ~/src/app && cargo build --release -q > build.log 2>&1; echo \"build=$?\"; ls -la target/release/app", input = { run_in_background = true } },
+  { command = "(cargo clippy -- -D warnings; cargo test -q; echo \"done=$?\") > checks.log 2>&1", input = { run_in_background = true } },
 ]

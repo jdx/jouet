@@ -9,10 +9,9 @@
 //! is not posted again.
 
 use super::{PrThreads, Thread, same_login};
-use crate::Client;
+use crate::host::Host;
 use jouet_output::exit::Exit;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::json;
 
 /// What to do to one thread.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -109,8 +108,6 @@ pub struct Outcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<String>,
     #[serde(skip)]
-    node_id: String,
-    #[serde(skip)]
     post: Option<String>,
     #[serde(skip)]
     resolve: bool,
@@ -128,6 +125,11 @@ impl Outcome {
     /// Whether this will post a reply that names `{sha}`.
     pub fn posts_sha(&self) -> bool {
         self.uses_sha && self.post.is_some()
+    }
+
+    /// Whether this will resolve or unresolve the thread.
+    pub fn changes_resolution(&self) -> bool {
+        self.skipped.is_none() && (self.resolve || self.unresolve)
     }
 }
 
@@ -179,7 +181,6 @@ pub fn plan(entries: &[Entry], pr: &PrThreads, o: &Options) -> Result<Vec<Outcom
         let t = find(e.id).expect("unknown IDs were rejected");
         let mut out = Outcome {
             id: e.id,
-            node_id: t.node_id.clone(),
             ..Outcome::default()
         };
         if let Some(reply) = &e.reply {
@@ -256,16 +257,9 @@ pub fn dry_run(outcomes: &mut [Outcome]) {
     }
 }
 
-const REPLY: &str = "mutation($id: ID!, $body: String!) {
-  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { url } }
-}";
-const RESOLVE: &str =
-    "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }";
-const UNRESOLVE: &str = "mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }";
-
-/// Carries out the plan, stopping at the first failure. Returns whether
-/// every write succeeded.
-pub fn execute(client: &mut Client, outcomes: &mut [Outcome]) -> bool {
+/// Carries out the plan through the PR's host, stopping at the first
+/// failure. Returns whether every write succeeded.
+pub fn execute(host: &mut dyn Host, pr: &PrThreads, outcomes: &mut [Outcome]) -> bool {
     let mut ok = true;
     for o in outcomes {
         if o.skipped.is_some() {
@@ -275,7 +269,7 @@ pub fn execute(client: &mut Client, outcomes: &mut [Outcome]) -> bool {
             o.failed = Some("not attempted after an earlier failure".into());
             continue;
         }
-        if let Err(e) = apply(client, o) {
+        if let Err(e) = apply(host, pr, o) {
             o.failed = Some(e);
             ok = false;
         }
@@ -283,36 +277,23 @@ pub fn execute(client: &mut Client, outcomes: &mut [Outcome]) -> bool {
     ok
 }
 
-fn apply(client: &mut Client, o: &mut Outcome) -> Result<(), String> {
+fn apply(host: &mut dyn Host, pr: &PrThreads, o: &mut Outcome) -> Result<(), String> {
+    let thread = pr
+        .threads
+        .iter()
+        .find(|t| t.id == o.id)
+        .ok_or("the thread is gone")?;
     if let Some(body) = o.post.take() {
-        let data = client.mutate(REPLY, &json!({ "id": o.node_id, "body": body }))?;
-        let url = data["addPullRequestReviewThreadReply"]["comment"]["url"]
-            .as_str()
-            .ok_or("GitHub did not post the reply")?;
+        o.url = Some(host.reply(pr, thread, &body)?);
         o.replied = true;
-        o.url = Some(url.to_string());
     }
-    for (wanted, query, resolved) in [(o.resolve, RESOLVE, true), (o.unresolve, UNRESOLVE, false)] {
-        if !wanted {
-            continue;
-        }
-        let data = client.mutate(query, &json!({ "id": o.node_id }))?;
-        let field = if resolved {
-            "resolveReviewThread"
-        } else {
-            "unresolveReviewThread"
-        };
-        if data[field]["thread"]["isResolved"].as_bool() != Some(resolved) {
-            return Err(format!(
-                "GitHub did not {} the thread",
-                &field[..field.len() - "ReviewThread".len()]
-            ));
-        }
-        if resolved {
-            o.resolved = true;
-        } else {
-            o.unresolved = true;
-        }
+    if o.resolve {
+        host.set_resolved(pr, thread, true)?;
+        o.resolved = true;
+    }
+    if o.unresolve {
+        host.set_resolved(pr, thread, false)?;
+        o.unresolved = true;
     }
     Ok(())
 }

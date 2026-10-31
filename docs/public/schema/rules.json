@@ -61,6 +61,10 @@
           "description": "The project files the rule is about, such as `pitchfork.toml`: it\nonly runs where one of them is in the call's directory or a\ndirectory above it. Its examples run as if one were.",
           "$ref": "#/$defs/Requires"
         },
+        "primer": {
+          "description": "Whether the session-start primer names a `deny` rule, so the agent\navoids the call it denies; `true` if omitted. `false` for a rule\nthat denies on what a call would change rather than on how it looks,\nwhich naming saves no call.",
+          "type": "boolean"
+        },
         "message": {
           "description": "What the agent is told when the rule matches. Required unless a\n`script` decides.",
           "type": "string"
@@ -440,6 +444,13 @@
         "stack": {
           "description": "Where `jouet.stack.layer()` places the current branch in a stack;\nomitted, it has no answer.",
           "$ref": "#/$defs/ExampleStack"
+        },
+        "secrets": {
+          "description": "What `jouet.secrets.scan()` finds, for any scope; omitted, it has no\nanswer.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExampleSecret"
+          }
         }
       },
       "additionalProperties": false
@@ -559,6 +570,35 @@
       "required": [
         "branch",
         "parent"
+      ]
+    },
+    "ExampleSecret": {
+      "description": "A secret `jouet.secrets.scan()` finds in an example's diff.",
+      "type": "object",
+      "properties": {
+        "rule": {
+          "description": "The gitleaks rule, such as `github-pat`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Relative to the repository's root.",
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "commit": {
+          "description": "The commit that adds it, for an outgoing scan.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rule",
+        "path",
+        "line"
       ]
     }
   }

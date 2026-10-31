@@ -76,7 +76,7 @@ pub fn parse_utc(s: &str) -> Option<i64> {
 
 /// Seconds since the Unix epoch for an RFC 3339 timestamp with a `Z` or
 /// `±HH:MM` offset.
-pub(crate) fn parse_rfc3339(s: &str) -> Option<i64> {
+pub fn parse_rfc3339(s: &str) -> Option<i64> {
     if let Some(utc) = s.strip_suffix(['Z', 'z']) {
         return parse_utc(&format!("{utc}Z"));
     }

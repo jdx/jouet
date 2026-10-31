@@ -224,18 +224,19 @@ local function shell_words(argv: { string }): string
 	return table.concat(out, " ")
 end
 
--- The command the call starts in the background: one followed by `&`
--- that is not a sleep or a tail, else (when the harness backgrounds the whole
--- call) its last command that is not a `cd`.
+-- The command the call starts in the background, of those the matchers
+-- found: one followed by `&` that is not a sleep or a tail, else (when the
+-- harness backgrounds the whole call) the last of them. Any other command,
+-- such as the `ls` or `echo` after a build, is not what was started.
 local function server(commands: { JouetCommand }): (JouetCommand?, boolean)
 	for _, c in commands do
-		if c.op == "background" and not c.nested and not NOT_SERVERS[c.program or ""] then
+		if c.matched and c.op == "background" and not c.nested and not NOT_SERVERS[c.program or ""] then
 			return c, true
 		end
 	end
 	local last: JouetCommand? = nil
 	for _, c in commands do
-		if not c.nested and not NOT_SERVERS[c.program or ""] then
+		if c.matched and not NOT_SERVERS[c.program or ""] then
 			last = c
 		end
 	end

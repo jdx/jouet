@@ -26,7 +26,7 @@ not found: jdx/mise#99999999
 
 ## Choosing pull requests
 
-- **A pull request** can be given as a number, a URL, `owner/repo#123` or a branch name. With none given, it is the pull request for the current branch. For a branch, an open pull request wins over a closed one.
+- **A pull request** can be given as a number, a URL, `owner/repo#123` or a branch name. A GitLab merge request or a Forgejo pull request names its host, as in `gitlab.com/group/project!12`; see [GitLab and Forgejo](/forges). With none given, it is the pull request for the current branch. For a branch, an open pull request wins over a closed one.
 - **`--mine`** adds the open pull requests authored by the token's user.
 - **`--search QUERY`** adds the results of a [GitHub search](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests). `is:pr` is added for you.
 - **The repository** comes from `--repo`, which can be repeated, or else from the git remotes, picked in the order gh uses: a remote set with `gh repo set-default`, then `upstream`, `github`, `origin`. `--mine` and `--search` cover every `--repo`, or this checkout's repository, unless the query names its own `repo:`, `org:` or `user:`.

@@ -1,0 +1,15 @@
+[
+  {
+    "id": 2267390,
+    "state": "COMMENT",
+    "comments_count": 9,
+    "user": {
+      "login": "oliverpool"
+    },
+    "body": "Hi, this looks good from a quick glance!\r\n\r\nI have left some minor comments.\r\n\r\nRegarding the test, I suggest you take a look at `TestSignInOauthCallbackSyncSSHKeys` (runnable locally with `make test-sqlite#TestSignInOauthCallbackSyncSSHKeys`), which calls `setupMockOIDCServer` to set the `.well-known/openid-configuration`",
+    "submitted_at": "2026-10-30T09:20:20+01:00",
+    "dismissed": false,
+    "stale": true,
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26829014"
+  }
+]

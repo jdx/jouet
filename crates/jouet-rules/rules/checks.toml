@@ -23,6 +23,7 @@ command = [
 fires = [
   { command = "cargo test --all-targets", exit_code = 101, kind = "test" },
   { command = "cd crate && cargo test", exit_code = 101, kind = "test" },
+  { command = "export PATH=\"$HOME/.cargo/bin:$PATH\" && jouet test --cmd -- cargo +stable test --workspace -j2", exit_code = 1, kind = "test", scope = "full" },
   { command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
   { command = "cargo clippy -- -D warnings", exit_code = 101, kind = "lint" },
   { command = "cargo fmt --check", exit_code = 1, kind = "lint" },

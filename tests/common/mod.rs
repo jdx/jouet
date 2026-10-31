@@ -1,5 +1,5 @@
-//! A local fake GitHub for the subprocess tests, so nothing they run talks
-//! to the real API.
+//! A local fake GitHub (or GitLab, or Forgejo) for the subprocess tests, so
+//! nothing they run talks to the real API.
 
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -58,7 +58,14 @@ pub(crate) fn serve(respond: impl Fn(&Request, usize) -> (u16, String) + Send + 
                 let (name, value) = line.split_once(':').unwrap_or_default();
                 let value = value.trim();
                 match name.to_ascii_lowercase().as_str() {
-                    "authorization" => token = value.trim_start_matches("bearer ").into(),
+                    // GitHub's `bearer`, GitLab's `Bearer`, Forgejo's `token`.
+                    "authorization" => {
+                        token = ["bearer ", "Bearer ", "token "]
+                            .iter()
+                            .find_map(|p| value.strip_prefix(p))
+                            .unwrap_or(value)
+                            .into();
+                    }
                     "content-length" => length = value.parse().unwrap(),
                     _ => {}
                 }
