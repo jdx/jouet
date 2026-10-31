@@ -129,6 +129,7 @@ fn post_tool_use_rules_record_checks() {
             exit_code: 101,
             full: false,
             selector: Some("-p jouet".into()),
+            dir: Some("crate".into()),
         }]
     );
 }
@@ -1309,6 +1310,59 @@ fn job_start_names_the_job_and_its_ready_check() {
         message.starts_with("Run `jouet job start dev -- npm run dev`"),
         "{message}"
     );
+}
+
+#[test]
+fn a_dir_resolves_from_the_base_or_the_home_directory() {
+    let base = Path::new("/work");
+    assert_eq!(resolve_dir(base, "crate"), Path::new("/work/crate"));
+    assert_eq!(resolve_dir(base, "/src/app"), Path::new("/src/app"));
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        assert_eq!(resolve_dir(base, "~"), home);
+        assert_eq!(resolve_dir(base, "~/src/app"), home.join("src/app"));
+        assert_eq!(resolve_dir(base, "$HOME/src/app"), home.join("src/app"));
+        assert_eq!(resolve_dir(base, "${HOME}/src"), home.join("src"));
+    }
+    // `~user` and `$HOMEDIR` are not the home directory.
+    assert_eq!(resolve_dir(base, "~bob/x"), Path::new("/work/~bob/x"));
+    assert_eq!(
+        resolve_dir(base, "$HOMEDIR/x"),
+        Path::new("/work/$HOMEDIR/x")
+    );
+}
+
+#[test]
+fn a_run_after_a_cd_records_where_it_ran() {
+    let engine = engine(builtin());
+    let dirs = |command: &str| {
+        let call = Call {
+            event: Some(Event::PostToolUse),
+            exit_code: Some(0),
+            ..bash(command)
+        };
+        let outcome = engine.evaluate(&call);
+        outcome
+            .records
+            .into_iter()
+            .map(|r| r.dir)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(dirs("cargo test --workspace"), [None]);
+    assert_eq!(
+        dirs("cd a && cd b && cargo test --workspace"),
+        [Some("a/b".into())]
+    );
+    assert_eq!(
+        dirs("cd ~/src/app && cargo test --workspace"),
+        [Some("~/src/app".into())]
+    );
+    assert_eq!(
+        dirs("cd \"$HOME/src/app\" && cargo test --workspace"),
+        [Some("$HOME/src/app".into())]
+    );
+    // Where `cd` cannot be followed, nothing is recorded.
+    let none: [Option<String>; 0] = [];
+    assert_eq!(dirs("cd \"$DIR\" && cargo test --workspace"), none);
 }
 
 #[test]

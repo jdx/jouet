@@ -522,6 +522,26 @@ pub struct Record {
     /// when the rule said.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
+    /// Where the command ran, when a `cd` before it moved it: relative to
+    /// the call's directory, absolute, or under `~`. None for the call's own
+    /// directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+}
+
+/// `dir` as a path from `base`: `~`, `~/x`, `$HOME/x` and `${HOME}/x` are
+/// under the home directory, an absolute path is itself, and anything else
+/// is relative to `base`.
+pub fn resolve_dir(base: &Path, dir: &str) -> PathBuf {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let under_home = ["~", "$HOME", "${HOME}"].iter().find_map(|prefix| {
+        let rest = dir.strip_prefix(prefix)?;
+        (rest.is_empty() || rest.starts_with('/')).then_some(rest.trim_start_matches('/'))
+    });
+    match (under_home, home()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => base.join(dir),
+    }
 }
 
 impl Record {
@@ -1665,9 +1685,10 @@ fn install_module(
         "record",
         lua.create_function(
             move |_,
-                  (kind, command, scope, selector): (
+                  (kind, command, scope, selector, dir): (
                 String,
                 Table,
+                Option<String>,
                 Option<String>,
                 Option<String>,
             )| {
@@ -1696,6 +1717,7 @@ fn install_module(
                         exit_code: status,
                         full,
                         selector: selector.filter(|s| !full && !s.is_empty()),
+                        dir: dir.filter(|d| !d.is_empty() && d != "."),
                     });
                 }
                 Ok(())

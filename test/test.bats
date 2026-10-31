@@ -281,7 +281,7 @@ ran() {
 	printf 'def shout(s):\n    return s\n' >src/calc/fmt.py
 	ran 'jouet test --affected' 0
 
-	run --separate-stderr jq -c '.runs.test | [.command, .full, .selector]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .full, .selector]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --affected",false,"--affected"]'
 	stop=$(jq -cn --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}')
 	run --separate-stderr jouet hook claude stop <<<"$stop"
@@ -443,7 +443,7 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 
 	ran 'jouet test --cmd -- cargo build' 1
-	run --separate-stderr jq -c '.runs.build | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.build | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- cargo build",1]'
 }
 
@@ -452,22 +452,22 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	ran 'pytest' 1
 	# Six tests could have failed here: without pipefail the 0 is head's.
 	ran 'jouet test --cmd -- pytest 2>&1 | head -3' 0
-	run --separate-stderr jq -c '.runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["pytest",1]'
 
 	# With pipefail, the 0 is the tests' own.
 	ran 'set -o pipefail; jouet test --cmd -- pytest 2>&1 | head -3' 0
-	run --separate-stderr jq -c '.runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
 @test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
 	ran 'jouet test --cmd -- python3 -m unittest' 0
-	run --separate-stderr jq -c '.runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- python3 -m unittest",true]'
 
 	# A command the rule does not know records nothing, as when run directly.
 	ran 'jouet test --cmd -- ./run-tests.sh' 0
-	run --separate-stderr jq -c '.runs.test.command' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	run --separate-stderr jq -c '.trees[].runs.test.command' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '"jouet test --cmd -- python3 -m unittest"'
 }

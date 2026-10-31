@@ -46,7 +46,9 @@ fires = [
   { command = "cargo test --workspace --test cli", exit_code = 0, kind = "test", scope = "partial --test cli" },
   { command = "cargo nextest run --workspace -E 'test(conflict)'", exit_code = 0, kind = "test", scope = "partial -E test(conflict)" },
   { command = "cargo test --workspace -- --test-threads 1", exit_code = 0, kind = "test", scope = "full" },
-  { command = "cd ~/elsewhere && cargo test --workspace", exit_code = 0, kind = "test", scope = "partial" },
+  # After a `cd`, a run counts for the work tree it went to.
+  { command = "cd ~/elsewhere && cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
+  { command = "cd \"$HOME/src/app\" && jouet test --cmd -- cargo test -q --workspace", exit_code = 0, kind = "test", scope = "full" },
   { command = "mise run test", exit_code = 0, kind = "test", scope = "full" },
   { command = "mise run test:e2e edit", exit_code = 0, kind = "test", scope = "partial test:e2e edit" },
   { command = "npm test", exit_code = 0, kind = "test", scope = "full" },
@@ -103,6 +105,9 @@ quiet = [
   { command = "jouet test --cmd -- cargo test --workspace 2>&1 | head -3", exit_code = 0 },
   { command = "cargo test || true", exit_code = 0 },
   { command = "cargo test &", exit_code = 0 },
+  # A `cd` the rule cannot follow leaves the work tree unknown.
+  { command = "cd \"$DIR\" && cargo test --workspace", exit_code = 0 },
+  { command = "cd - && cargo test --workspace", exit_code = 0 },
   # Nothing ran: a dry run, a usage error, no runner found, another command.
   { command = "jouet test --affected --dry-run", exit_code = 0 },
   { command = "jouet test --since main", exit_code = 2 },
