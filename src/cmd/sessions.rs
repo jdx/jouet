@@ -159,11 +159,16 @@ fn report(found: Vec<Session>, now: i64, current: Option<&str>, all: bool) -> Re
 fn row(s: Session, now: i64, current: Option<&str>, home: Option<&Path>) -> Row {
     let last = s.modified_ms / 1000;
     let idle = (now - last).max(0);
-    let root = s
-        .cwd
-        .as_deref()
-        .and_then(|c| paths::work_tree(Path::new(c)));
     let gone = s.cwd.as_deref().is_some_and(|c| !Path::new(c).exists());
+    // The lookup walks up from the directory, so a removed worktree inside
+    // another checkout would resolve to that checkout.
+    let root = if gone {
+        None
+    } else {
+        s.cwd
+            .as_deref()
+            .and_then(|c| paths::work_tree(Path::new(c)))
+    };
     let branch = root.as_deref().and_then(sessions::head_branch).or(s.branch);
     Row {
         harness: s.harness,
@@ -309,6 +314,31 @@ mod tests {
         );
         assert_eq!(all.sessions.len(), 1);
         assert!(all.warnings.is_empty());
+    }
+
+    #[test]
+    fn a_removed_worktree_inside_a_checkout_is_not_that_checkout() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(main.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let removed = main.join(".claude/worktrees/feat-x");
+        let now = 2_000_000_000;
+        let r = report(
+            vec![
+                session("aaaaaaaa-1", &main, 60, now),
+                session("bbbbbbbb-2", &removed, 120, now),
+            ],
+            now,
+            None,
+            false,
+        );
+        let codes: Vec<&str> = r.warnings.iter().map(|w| w.code).collect();
+        assert_eq!(codes, ["worktree_gone"]);
+        let gone = &r.sessions[1];
+        assert!(gone.gone);
+        assert_eq!(gone.worktree, None);
+        assert_eq!(gone.branch.as_deref(), Some("from/transcript"));
     }
 
     #[test]
