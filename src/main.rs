@@ -691,6 +691,18 @@ pub enum GraphCmd {
     Index(GraphIndexArgs),
     /// Show where the graph lives and what it holds
     Status(GraphStatusArgs),
+    /// Find symbols by name, qualified name or words
+    Symbols(GraphSymbolsArgs),
+    /// List what calls, constructs or names a symbol
+    Callers(GraphTraverseArgs),
+    /// List what a symbol calls, constructs or names
+    Callees(GraphTraverseArgs),
+    /// List everything a change to a symbol could break
+    Impact(GraphTraverseArgs),
+    /// Find the code that answers a question, with its source and neighbours
+    Explore(GraphExploreArgs),
+    /// List the test files that depend on changed files
+    Affected(GraphAffectedArgs),
 }
 
 /// Build the graph, or bring it up to date
@@ -711,6 +723,92 @@ pub struct GraphIndexArgs {
 /// edges and references it holds. Does not index.
 #[derive(Args)]
 pub struct GraphStatusArgs {}
+
+/// Find symbols by name, qualified name or words
+///
+/// An exact name comes first, then a qualified name (`Client::push`,
+/// `Client.push`), then symbols whose name, docstring or signature has
+/// every word (`retry backoff`; `processPayment` has the words `process`
+/// and `payment`). With no QUERY, lists every symbol under --path. Each
+/// line is `path:line kind qualified-name`, and the ID after `#` names the
+/// symbol to other graph commands.
+#[derive(Args)]
+pub struct GraphSymbolsArgs {
+    /// A name, a qualified name, or words
+    query: Option<String>,
+    /// Only symbols of this kind: function, method, class, struct, …
+    #[usage(long, value_name = "KIND")]
+    kind: Option<String>,
+    /// Only symbols in this file or directory
+    #[usage(long, value_name = "PATH")]
+    path: Option<String>,
+    /// The most bytes to print (default 6000; 0 is no limit)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// Which page of a longer answer to print (default 1)
+    #[usage(long, value_name = "N")]
+    page: Option<usize>,
+}
+
+/// A symbol's callers, callees or impact
+///
+/// SYMBOL is a name, a qualified name (`Client::push`), `PATH#NAME`,
+/// `PATH:LINE` (the innermost symbol there) or an ID from `jouet graph
+/// symbols`. A name that several symbols share answers for each of them.
+/// callers and callees follow calls, constructions and references; impact
+/// follows every edge but containment, from the symbol and everything it
+/// contains, and groups the answer by file.
+#[derive(Args)]
+pub struct GraphTraverseArgs {
+    /// The symbol
+    symbol: String,
+    /// How many hops to follow (default 1, and 3 for impact)
+    #[usage(long, value_name = "N")]
+    depth: Option<u32>,
+    /// The most bytes to print (default 6000; 0 is no limit)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// Which page of a longer answer to print (default 1)
+    #[usage(long, value_name = "N")]
+    page: Option<usize>,
+}
+
+/// Find the code that answers a question, with its source and neighbours
+///
+/// Ranks symbols by how well their names (split into words), qualified
+/// names, docstrings and signatures match the question, puts tests after
+/// the code they test unless the question is about tests, and prints each
+/// with its signature, docstring, callers, callees and the start of its
+/// source. The answer is paged rather than printed whole: a dense answer
+/// stays in the agent's context for the rest of the session.
+#[derive(Args)]
+pub struct GraphExploreArgs {
+    /// The question, or the names you know (`retry backoff for webhooks`)
+    query: Vec<String>,
+    /// The most bytes to print (default 6000; 0 is no limit)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// The most bytes of one symbol's source (default 1200; 0 for none)
+    #[usage(long, value_name = "BYTES")]
+    source_budget: Option<usize>,
+    /// Which page of a longer answer to print (default 1)
+    #[usage(long, value_name = "N")]
+    page: Option<usize>,
+}
+
+/// List the test files that depend on changed files
+///
+/// Follows the graph backwards from each FILE, through imports, calls,
+/// references and inheritance, to every test file that reaches it, and
+/// shows the chain that does. A FILE the graph cannot speak for (not
+/// indexed, or in a language jouet does not extract) is listed as unknown,
+/// and the exit code is 1: run the whole suite. A fallback for languages
+/// without a native tool; `jouet test --affected` prefers the native one.
+#[derive(Args)]
+pub struct GraphAffectedArgs {
+    /// The changed files
+    files: Vec<String>,
+}
 
 /// List, test and trust the rules jouet's hooks run
 ///

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 /// Bumped whenever the schema or extraction changes what is stored: a
 /// database written by another version is rebuilt from scratch.
-pub(crate) const SCHEMA_VERSION: &str = "1";
+pub(crate) const SCHEMA_VERSION: &str = "3";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     kind TEXT NOT NULL,
     name TEXT NOT NULL,
     qualified_name TEXT NOT NULL,
+    -- The name's words (`processPayment` → `process payment`), so full-text
+    -- search finds a symbol by any word of it.
+    words TEXT NOT NULL DEFAULT '',
     file_path TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
     language TEXT NOT NULL,
     start_line INTEGER NOT NULL,
@@ -65,7 +68,10 @@ CREATE TABLE IF NOT EXISTS edges (
     metadata TEXT,
     line INTEGER,
     col INTEGER,
-    provenance TEXT
+    provenance TEXT,
+    -- The reference linking resolved into this edge; NULL for an edge
+    -- extraction found within one file.
+    ref_id INTEGER REFERENCES refs(id) ON DELETE CASCADE
 );
 
 -- Every reference extraction found, kept after linking resolves it, so a
@@ -78,7 +84,12 @@ CREATE TABLE IF NOT EXISTS refs (
     kind TEXT NOT NULL,
     line INTEGER NOT NULL,
     col INTEGER NOT NULL,
-    candidates TEXT
+    candidates TEXT,
+    -- 0 pending, 1 linked, 2 failed (see link.rs).
+    status INTEGER NOT NULL DEFAULT 0,
+    -- The name's last segment, written when linking fails, so a re-indexed
+    -- file that defines it can retry the reference.
+    tail TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
@@ -89,11 +100,22 @@ CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON edges(target, kind);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity
   ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1));
 CREATE INDEX IF NOT EXISTS idx_refs_from_node ON refs(from_node);
+CREATE INDEX IF NOT EXISTS idx_refs_pending ON refs(status) WHERE status = 0;
+CREATE INDEX IF NOT EXISTS idx_refs_failed_tail ON refs(tail) WHERE status = 2;
+CREATE INDEX IF NOT EXISTS idx_edges_ref ON edges(ref_id) WHERE ref_id IS NOT NULL;
+
+-- A linked edge whose target went away (its file was re-indexed or
+-- deleted) puts its reference back to be linked again.
+CREATE TRIGGER IF NOT EXISTS edges_ref_ad AFTER DELETE ON edges
+WHEN OLD.ref_id IS NOT NULL BEGIN
+    UPDATE refs SET status = 0 WHERE id = OLD.ref_id;
+END;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     id,
     name,
     qualified_name,
+    words,
     docstring,
     signature,
     content='nodes',
@@ -101,13 +123,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 );
 
 CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-    INSERT INTO nodes_fts(rowid, id, name, qualified_name, docstring, signature)
-    VALUES (NEW.nid, NEW.id, NEW.name, NEW.qualified_name, NEW.docstring, NEW.signature);
+    INSERT INTO nodes_fts(rowid, id, name, qualified_name, words, docstring, signature)
+    VALUES (NEW.nid, NEW.id, NEW.name, NEW.qualified_name, NEW.words, NEW.docstring, NEW.signature);
 END;
 
 CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-    INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, docstring, signature)
-    VALUES ('delete', OLD.nid, OLD.id, OLD.name, OLD.qualified_name, OLD.docstring, OLD.signature);
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, words, docstring, signature)
+    VALUES ('delete', OLD.nid, OLD.id, OLD.name, OLD.qualified_name, OLD.words, OLD.docstring, OLD.signature);
 END;
 "#;
 
@@ -333,8 +355,8 @@ pub(crate) fn write_file(tx: &Transaction, update: &FileUpdate) -> Result<(), Er
     let mut node = tx.prepare_cached(
         "INSERT INTO nodes(id, kind, name, qualified_name, file_path, language,
              start_line, end_line, start_column, end_column, docstring, signature, visibility,
-             is_exported, is_async, is_static, is_abstract, decorators, type_parameters, return_type)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             is_exported, is_async, is_static, is_abstract, decorators, type_parameters, return_type, words)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
          ON CONFLICT(id) DO NOTHING",
     )?;
     let mut existing = tx.prepare_cached("SELECT nid FROM nodes WHERE id = ?1")?;
@@ -363,6 +385,7 @@ pub(crate) fn write_file(tx: &Transaction, update: &FileUpdate) -> Result<(), Er
             json_list(&n.decorators),
             json_list(&n.type_parameters),
             n.return_type,
+            crate::query::words(&n.name),
         ])?;
         nids.push(if inserted == 1 {
             tx.last_insert_rowid()

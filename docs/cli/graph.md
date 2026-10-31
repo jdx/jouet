@@ -12,5 +12,11 @@ The graph is built with tree-sitter from Rust, Python, TypeScript and JavaScript
 
 ## Subcommands
 
+- [`jouet graph affected [FILES]…`](/cli/graph/affected.md)
+- [`jouet graph callees [FLAGS] <SYMBOL>`](/cli/graph/callees.md)
+- [`jouet graph callers [FLAGS] <SYMBOL>`](/cli/graph/callers.md)
+- [`jouet graph explore [FLAGS] [QUERY]…`](/cli/graph/explore.md)
+- [`jouet graph impact [FLAGS] <SYMBOL>`](/cli/graph/impact.md)
 - [`jouet graph index [--full]`](/cli/graph/index.md)
 - [`jouet graph status`](/cli/graph/status.md)
+- [`jouet graph symbols [FLAGS] [QUERY]`](/cli/graph/symbols.md)
