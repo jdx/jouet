@@ -97,6 +97,11 @@ declare jouet: {
 		explore: (args: { [any]: any }?) -> Ran,
 		affected: (args: { [any]: any }?) -> Ran,
 	},
+	-- fs.read: a dependency's API at the locked version (`jouet docs`), from
+	-- its installed sources; { pkg, symbol?, lang?, budget?, private? }
+	docs: {
+		lookup: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

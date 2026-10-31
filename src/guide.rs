@@ -24,6 +24,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "docs",
+        Some(
+            "using a dependency's API: `jouet docs PKG` outlines it and `jouet docs PKG SYMBOL` prints one definition's signature, doc and source, at the version the project's lockfile names (Rust, TypeScript, Python, Go), instead of guessing from memory or reading the cargo registry, node_modules or site-packages by hand",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -219,7 +225,7 @@ fn when(name: &str) -> Option<&'static str> {
 
 /// Commands that work as a pair, which the overview and the skill describe
 /// in one entry to stay within their budgets.
-pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup"), ("read", "docs")];
 
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in

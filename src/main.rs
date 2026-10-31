@@ -7,6 +7,7 @@ mod ci;
 mod cmd;
 mod config;
 mod diag;
+mod docs;
 mod fnox;
 mod git;
 mod guide;
@@ -74,6 +75,8 @@ enum Cmd {
     Pr(PrArgs),
     /// Read a file by its outline, a symbol or a range, or the repository's map
     Read(ReadArgs),
+    /// Look up a dependency's API at the version the project locked
+    Docs(DocsArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
     /// Check a stack of PRs: does each layer really contain the one below
@@ -871,6 +874,75 @@ pub struct ReadArgs {
     /// about. Repeatable
     #[usage(long, var, value_name = "FILE|NAME")]
     focus: Vec<String>,
+}
+
+/// Look up a dependency's API at the version the project locked
+///
+/// Answers from the sources already installed for the project, at the
+/// version its lockfile names, rather than from memory or a hosted index of
+/// some other version. PKG's version comes from the nearest lockfile, from
+/// the current directory up to the repository's root: Cargo.lock;
+/// package-lock.json, pnpm-lock.yaml, yarn.lock or bun.lock; uv.lock,
+/// poetry.lock or the virtualenv's metadata; go.mod. Its sources are read
+/// where the package manager installed them: the cargo registry
+/// ($CARGO_HOME) or a vendor directory, node_modules (its .d.ts files, else
+/// @types/PKG, else its JavaScript), the virtualenv's site-packages
+/// ($VIRTUAL_ENV, .venv or venv; a .pyi stub before its .py), the Go module
+/// cache ($GOMODCACHE) or vendor/. Nothing is downloaded: a package that is
+/// locked but not installed exits 4 with the command that installs it.
+///
+/// Without SYMBOL, an outline of the public API: each definition's path,
+/// kind and signature with the first sentence of its doc, the package's
+/// root first, cut to --budget with a marker naming what was left out. With
+/// a module's path as SYMBOL, that module's outline.
+///
+/// With SYMBOL, each definition it names: the version and the file:line it
+/// came from, its signature, its doc comment, the start of its source, and
+/// for a type its methods, fields or variants. SYMBOL is a path from the
+/// package's root, with or without its name (`Agent::get`,
+/// `ureq::Agent::get`, `requests.Session.get`), else the end of one
+/// (`get`). Several matches are each shown, shortest path first, up to
+/// three, then listed.
+///
+/// Public means: for Rust, plain `pub` items reachable from the crate root
+/// through `pub mod`s and `pub use`s (followed through the crate, never
+/// into another one), without #[doc(hidden)]; for TypeScript, exported
+/// declarations; for Python, names without a leading `_`, or those in
+/// `__all__`, with re-exports followed; for Go, capitalised names.
+/// --private includes the rest.
+///
+/// The index of each package version is built once, from the code graph's
+/// parsers, and cached under jouet's cache directory.
+///
+/// Exits 3 for a package no lockfile names or a symbol it does not define,
+/// and 4 for one that is locked but not installed.
+///
+/// Examples:
+///   jouet docs ureq
+///   jouet docs ureq Agent::get
+///   jouet docs reqwest blocking
+///   jouet docs zod ZodType
+///   jouet docs click Context.invoke
+///   jouet docs github.com/spf13/cobra Command.Execute
+#[derive(Args)]
+pub struct DocsArgs {
+    /// The package: a crate, an npm package, a Python distribution or
+    /// import name, or a Go package path; PKG@VERSION picks one of several
+    /// locked versions
+    package: String,
+    /// The definition or module to show (default: the package's outline)
+    symbol: Option<String>,
+    /// The ecosystem, when PKG is in more than one lockfile here: rust, ts,
+    /// python or go
+    #[usage(long, value_name = "LANG")]
+    lang: Option<String>,
+    /// The outline's size in tokens, estimated at 4 bytes each (default
+    /// 2048)
+    #[usage(long, value_name = "TOKENS")]
+    budget: Option<usize>,
+    /// Include private definitions too
+    #[usage(long)]
+    private: bool,
 }
 
 /// Block until a condition holds, then print one summary
@@ -2263,6 +2335,7 @@ fn main() -> ExitCode {
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),
+        Cmd::Docs(args) => cmd::docs::run(&args, &out),
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Test(args) => cmd::test::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
