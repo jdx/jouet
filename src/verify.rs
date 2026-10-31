@@ -105,10 +105,10 @@ pub(crate) struct Checks {
     /// What the stop hook last blocked for, until a run is recorded here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raised: Option<Raised>,
-    /// A `jouet test` run still going here, as it marked itself when it
-    /// started, until it records its result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub running: Option<Running>,
+    /// The `jouet test` runs still going here, as each marked itself when
+    /// it started, until it records its result: runs can overlap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub running: Vec<Running>,
 }
 
 /// A `jouet test` run in progress.
@@ -231,15 +231,16 @@ impl State {
 
     /// Marks a `jouet test` run as going in the work tree at `root`.
     pub(crate) fn start_run(&mut self, root: &str, running: Running) {
-        self.trees.entry(root.to_string()).or_default().running = Some(running);
+        let runs = &mut self.trees.entry(root.to_string()).or_default().running;
+        // Marks whose process is gone are dropped as new ones come.
+        runs.retain(|r| r.pid != running.pid && r.alive());
+        runs.push(running);
     }
 
     /// Clears the mark the run with process `pid` left in `root`.
     pub(crate) fn end_run(&mut self, root: &str, pid: u32) {
-        if let Some(checks) = self.trees.get_mut(root)
-            && checks.running.as_ref().is_some_and(|r| r.pid == pid)
-        {
-            checks.running = None;
+        if let Some(checks) = self.trees.get_mut(root) {
+            checks.running.retain(|r| r.pid != pid);
         }
     }
 
@@ -354,7 +355,7 @@ impl Checks {
     pub(crate) fn reasons(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Vec<String> {
         // While a test run is still going, its result decides; the agent
         // waiting for it is not finishing on a stale one.
-        let testing = self.running.as_ref().is_some_and(Running::alive);
+        let testing = self.running.iter().any(Running::alive);
         let mut reasons = self.failure_reasons(&tree, testing);
         if !testing {
             reasons.extend(self.partial_test_reason(&tree));
@@ -669,6 +670,7 @@ mod tests {
         state.start_run(&root, Running { pid, command });
         let why = block(&state).unwrap();
         assert!(why.contains("lint run"), "{why}");
+        state.end_run(&root, pid);
         // A run whose process is gone holds nothing back.
         let mut child = std::process::Command::new("true").spawn().unwrap();
         let gone = child.id();
@@ -682,7 +684,25 @@ mod tests {
         );
         assert!(block(&state).unwrap().contains("test run"));
         state.end_run(&root, gone);
-        assert_eq!(state.trees[&root].running, None);
+        assert!(state.trees[&root].running.is_empty());
+        // Of two overlapping runs, the one still going holds back tests
+        // after the other has ended.
+        state.start_run(
+            &root,
+            Running {
+                pid,
+                command: "jouet test".into(),
+            },
+        );
+        state.start_run(
+            &root,
+            Running {
+                pid: gone,
+                command: "jouet test --cmd".into(),
+            },
+        );
+        state.end_run(&root, gone);
+        assert!(block(&state).unwrap().contains("lint run"));
     }
 
     #[test]

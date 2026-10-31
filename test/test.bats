@@ -30,17 +30,25 @@ need() {
 # Runs the rest of its arguments holding the lock for directory $1, so tests
 # run in parallel install a fixture once rather than over each other and
 # leave it half written. `mkdir` is the lock, which macOS has and `flock` is
-# not; after ten minutes it goes ahead, past a lock a killed run left.
+# not. The holder writes its process ID in it: a lock whose holder is gone,
+# such as a killed run, is taken over, and after ten minutes of waiting on a
+# live one this fails rather than install beside it.
 locked() {
-	local lock="$1.lock" i=0 status
+	local lock="$1.lock" i=0 status holder
 	shift
 	until mkdir "$lock" 2>/dev/null; do
-		((i++ < 6000)) || break
+		holder=$(cat "$lock/pid" 2>/dev/null)
+		if [[ -n $holder ]] && ! kill -0 "$holder" 2>/dev/null; then
+			rm -rf "$lock"
+			continue
+		fi
+		((i++ < 6000)) || return 1
 		sleep 0.1
 	done
+	echo "$$" >"$lock/pid"
 	"$@"
 	status=$?
-	rmdir "$lock" 2>/dev/null
+	rm -rf "$lock"
 	return "$status"
 }
 
