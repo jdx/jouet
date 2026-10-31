@@ -398,10 +398,17 @@ impl Checks {
     }
 
     fn failure_reason(&self, kind: Kind, failed: &Run) -> String {
+        // A full suite that fails on tests the change did not touch is the
+        // costly case: point at the check that settles it.
+        let baseline = if kind == Kind::Test && failed.full {
+            " If the failures are not from your change, `jouet test --baseline` runs the failed suite at the merge base too, and passes when each failure fails there as well."
+        } else {
+            ""
+        };
         let last = self.runs.get(&kind);
         if last == Some(failed) {
             return format!(
-                "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
+                "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass.{baseline} [jouet: verify]",
                 kind.name(),
                 failed.command,
                 failed.exit_code
@@ -417,7 +424,7 @@ impl Checks {
             )
         };
         format!(
-            "A {} run failed (`{}` exited {}), and the runs since{since} do not cover it: {clear}. Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
+            "A {} run failed (`{}` exited {}), and the runs since{since} do not cover it: {clear}. Fix it and run it again before you finish, or say plainly why it cannot pass.{baseline} [jouet: verify]",
             kind.name(),
             failed.command,
             failed.exit_code

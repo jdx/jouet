@@ -171,6 +171,20 @@ These slot into the same adapter trait and are follow-ups:
 
 `jouet test` without `--affected` runs the repository's test task, found at the repository root: a mise `test` task (`mise run test`), which jouet asks mise about (`mise tasks info test`), so includes, globs and file tasks count as mise reads them, and reads from the config files when mise cannot answer; a package.json `test` script (with the package manager its lockfile names, and not `npm init`'s placeholder that only fails); `Cargo.toml` (`cargo test --workspace`), a justfile or Makefile `test` target, or `go.mod` (`go test ./...`). Without one, it runs the whole suite of each adapter found. Words after `--` are passed on (after a `--` of its own for `npm test`).
 
+### Failures that were there before: `--baseline`
+
+A full suite can fail for reasons the change has nothing to do with: a test that needs a tool this machine lacks, or one already broken on the default branch. Fixing the environment to make it pass costs far more than the change did. `jouet test --baseline` settles it instead:
+
+```console
+$ jouet test --baseline
+unittest: failed (exit 1) in 0.1s: 1 failed, 1 passed
+FAIL test_env (test_a.T.test_env)
+  …
+baseline: the failure also fails at main (302afa77cd40), so none is from this change; counted as passing: test_env (test_a.T.test_env)
+```
+
+When the run fails, it runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch (`--since REF` names another), and compares the failures by name. If every one also fails there, the run passes (exit 0), and it names them; the stop gate and `push-untested` count it as a passing full run. A failure the merge base does not have still fails it (exit 1), listed as new. The worktree is removed afterwards. It needs a runner whose failures jouet recognises by name, costs one more run of the failed suites, and cannot be combined with `--affected`, whose tests depend on the changes.
+
 ### mise tasks
 
 If your project runs its tests through mise, keep `test` as the full suite, and add an optional task for the affected run:

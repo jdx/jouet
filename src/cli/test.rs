@@ -33,6 +33,13 @@ use usage_rs::Args;
 /// vitest and TAP (bats); for any other output, a failing run shows the end
 /// of it.
 ///
+/// With --baseline, a failing run is run again in a temporary worktree of
+/// the merge base with the upstream or default branch (or --since REF). If
+/// every test that failed also fails there, the failures were there before
+/// the change, from the environment or an earlier commit, and the run passes,
+/// naming them; any new failure still fails it. It needs the output to name
+/// its failures, and costs one more run of the failed suites.
+///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
 /// no runner is found or installed.
 #[derive(Args)]
@@ -53,6 +60,10 @@ pub(crate) struct TestArgs {
     /// Run the words after `--` as the command, instead of the test task
     #[usage(long)]
     pub(crate) cmd: bool,
+    /// When the run fails, run it again at the merge base (with --since,
+    /// of REF) and pass it if every failure also fails there
+    #[usage(long)]
+    pub(crate) baseline: bool,
     /// Bytes of failure text to show (default 4000; 0 shows every failure
     /// whole)
     #[usage(long, value_name = "BYTES")]

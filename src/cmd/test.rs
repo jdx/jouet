@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
+mod baseline;
+
 /// How many selected tests the text output explains before counting the
 /// rest; the runner lists what it runs anyway.
 const TESTS_SHOWN: usize = 20;
@@ -34,6 +36,9 @@ struct Report {
     suites: Vec<SuiteReport>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     dry_run: bool,
+    /// With `--baseline`, a failing run's failures at the merge base.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<baseline::Baseline>,
     ok: bool,
 }
 
@@ -89,7 +94,13 @@ struct Job {
 }
 
 pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
-    if !args.affected && (args.since.is_some() || args.adapter.is_some()) {
+    if args.baseline && args.affected {
+        return out.error(
+            Exit::Usage,
+            "--baseline reruns a whole run's failures at the merge base; the tests --affected picks depend on the changes, so it cannot",
+        );
+    }
+    if !args.affected && (args.adapter.is_some() || (args.since.is_some() && !args.baseline)) {
         return out.error_with_hint(
             Exit::Usage,
             "--since and --adapter select tests, so they need --affected",
@@ -132,6 +143,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let stream = !out.json && out.mode == Mode::Human;
     let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
+    // What each failed suite's output names, for --baseline.
+    let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>)> = Vec::new();
     if !args.dry_run {
         for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
@@ -144,17 +157,50 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.duration_ms = Some(ms);
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
-            suite.digest = Some(testlog::digest(
-                &String::from_utf8_lossy(&output),
-                code != 0,
-                budget,
-            ));
+            let output = String::from_utf8_lossy(&output);
+            suite.digest = Some(testlog::digest(&output, code != 0, budget));
+            if args.baseline && code != 0 {
+                failed.push((job, baseline::failure_names(&output)));
+            }
             let suite_exit = (job.exit)(code);
             if suite_exit == Exit::Failed || exit == Exit::Ok {
                 exit = suite_exit;
             }
             if !out.json {
                 emit(&outcome(suite, stream));
+            }
+        }
+    }
+    if args.baseline && exit == Exit::Failed {
+        let root = cwd
+            .ancestors()
+            .find(|d| d.join(".git").exists())
+            .unwrap_or(&cwd)
+            .to_path_buf();
+        let named: Option<Vec<_>> = failed
+            .into_iter()
+            .map(|(job, names)| names.map(|names| (job, names)))
+            .collect();
+        let found = match named {
+            None => Err("the output names no failing test, so there is nothing to compare at the merge base".to_string()),
+            Some(named) => baseline::compare(&root, args.since.as_deref(), &named),
+        };
+        match found {
+            Ok(found) => {
+                if !out.json {
+                    emit(&found.text());
+                }
+                if found.none_new() {
+                    exit = Exit::Ok;
+                }
+                report.baseline = Some(found);
+            }
+            Err(e) => {
+                if out.json {
+                    eprintln!("jouet: baseline: {e}");
+                } else {
+                    emit(&format!("baseline: {e}\n"));
+                }
             }
         }
     }
@@ -441,6 +487,7 @@ fn report_of(
         changed,
         suites,
         dry_run,
+        baseline: None,
         ok: true,
     }
 }
