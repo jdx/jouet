@@ -557,31 +557,18 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	return nil, unknown
 end
 
--- Where `cd DIR` leaves the commands after it: a path relative to the
--- call's directory, or false when it cannot be followed (`cd`, `cd -`,
--- `cd ~/x`, `cd $DIR`).
-local function cd(dir: string | false | nil, command: JouetCommand): string | false | nil
-	local to = command.argv[2]
-	if dir == false or not to or to == "-" or string.find(to, "^[~$]") then
-		return false
-	end
-	if string.sub(to, 1, 1) == "/" or not dir then
-		return to
-	end
-	return `{dir}/{to}`
-end
-
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
-		local dir: string | false | nil = nil
-		for _, command in call.commands do
-			if command.program == "cd" and not command.nested then
-				dir = cd(dir, command)
-			else
+		local dirs = jouet.dirs(call.commands)
+		for i, command in call.commands do
+			if command.program ~= "cd" or command.nested then
+				local dir = dirs[i]
 				local kind, scope = classify(command, dir)
-				if kind then
+				-- After a `cd` it cannot follow, the run is in a work tree
+				-- the rule cannot name, so it is not recorded against this one.
+				if kind and dir ~= false then
 					-- Ignored when the command's own exit status is unknown.
-					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector)
+					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector, dir or nil)
 				end
 			end
 		end

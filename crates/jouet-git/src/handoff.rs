@@ -305,10 +305,10 @@ pub fn collect(git: &Git, opts: &Options) -> Result<Handoff, Error> {
     let mut h = git_facts(git, &top)?;
     h.created_at = time::format_utc(time::now());
     match &opts.session {
-        Some((dir, id)) => match session::last_checks(dir, id) {
+        Some((dir, id)) => match session::last_checks(dir, id, &top) {
             Some(runs) => h.checks = runs,
             None => h.notes.push(format!(
-                "checks: none recorded for session {id} (jouet setup's hooks record them)"
+                "checks: none recorded for session {id} in this worktree (jouet setup's hooks record them)"
             )),
         },
         None => h
