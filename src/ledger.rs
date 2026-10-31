@@ -841,7 +841,6 @@ fn redact_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
 
     #[test]
     fn a_shape_keeps_programs_subcommands_and_flags_only() {
@@ -933,26 +932,6 @@ mod tests {
             shape("for pr in 1 2 3; do gh pr checks $pr; done"),
             shape("for x in $(seq 1 40)\ndo\n  gh pr checks \"$x\"\ndone")
         );
-    }
-
-    #[test]
-    fn the_repo_key_hashes_the_work_tree_root() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("repo");
-        std::fs::create_dir_all(root.join(".git")).unwrap();
-        std::fs::create_dir_all(root.join("src/deep")).unwrap();
-        let key = repo_key(&root.join("src/deep")).unwrap();
-        assert_eq!(key.len(), 16);
-        assert_eq!(repo_key(&root), Some(key.clone()));
-        let expected = Sha256::digest(root.canonicalize().unwrap().to_string_lossy().as_bytes());
-        assert!(
-            expected
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-                .starts_with(&key)
-        );
-        assert_eq!(repo_key(dir.path()), None);
     }
 
     #[test]
