@@ -28,3 +28,34 @@ setup() {
 	run --separate-stderr jouet agent-help frobnicate
 	assert_failure 3
 }
+
+@test "agent-help COMMAND prints its usage, and --full the whole guide" {
+	run --separate-stderr jouet agent-help edit
+	assert_success
+	assert_output --partial 'usage:'
+	assert_output --partial 'jouet edit replace <PATHS>... --old TEXT --new TEXT  # '
+	assert_output --partial "more: \`jouet agent-help edit --full\` ("
+	refute_output --partial '--expect-hash PATH=SHA256  '
+	assert [ "${#output}" -le 1600 ]
+
+	run --separate-stderr jouet agent-help edit --full
+	assert_success
+	assert_output --partial '--- details ---'
+	assert_output --partial '--expect-hash PATH=SHA256  '
+	refute_output --partial "more: \`jouet agent-help edit --full\`"
+
+	# One document with both.
+	run --separate-stderr jouet agent-help edit --json
+	assert_success
+	assert [ "$(jq -r '.usage | contains("agent-help edit --full")' <<<"$output")" = true ]
+	assert [ "$(jq -r '.text | contains("--- details ---")' <<<"$output")" = true ]
+}
+
+@test "agent-help for a subcommand prints its whole guide" {
+	run --separate-stderr jouet agent-help pr threads
+	assert_success
+	assert_output --partial 'jouet pr threads reply <ID>'
+	run --separate-stderr jouet agent-help pr threads --json
+	assert_success
+	assert [ "$(jq -r 'has("usage")' <<<"$output")" = false ]
+}

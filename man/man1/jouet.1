@@ -2539,12 +2539,15 @@ The rule to share; with \-\-idea, the idea's key (default: the most recorded)
 .SH "JOUET AGENT-HELP"
 Print a short usage guide written for agents
 
-When to reach for each command, its key flags, the exit codes and the output modes, generated from this binary's own CLI definition.
+When to reach for each command, its key flags, the exit codes and the output modes, generated from this binary's own CLI definition. With a command, prints the invocations agents use, each with what it does, and what \-\-full adds: every subcommand and flag, and the details. With \-\-json, `text` is always the whole guide and `usage` the short one.
 .PP
 \fBUsage:\fR jouet agent\-help [OPTIONS] [<COMMAND>] ...
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-full\fR
+Print the command's whole guide: every subcommand and flag, and the details
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2552,7 +2555,7 @@ Print help
 .PP
 .TP
 \fB<COMMAND>\fR
-A command to describe in full, such as `edit`
+A command to describe, such as `edit`
 .SH "JOUET SKILL"
 Print jouet's agent skill
 

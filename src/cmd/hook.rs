@@ -908,7 +908,10 @@ mod tests {
             "{context}"
         );
         // Every built-in deny rule, not a sample, fits the primer's budget.
-        assert!(context.len() <= 1200, "{} bytes:\n{context}", context.len());
+        // It grew from 1200 to fit `jouet test`'s usage: about 40 tokens a
+        // request, where the `agent-help test` and `commit` lookups it saves
+        // printed 5.9 kB once each.
+        assert!(context.len() <= 1400, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call.
         assert!(!context.contains("large-read"), "{context}");
         assert!(!context.contains("checks"), "{context}");
