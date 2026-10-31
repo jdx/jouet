@@ -166,16 +166,12 @@ pub enum SymbolError {
     NotFound(Vec<String>),
 }
 
-/// A definition whose signature changed, and references to its name in
-/// files the edit did not touch.
+/// A definition whose signature changed, and its callers in the code graph
+/// in files the edit did not touch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Callers {
     pub symbol: String,
     pub references: Vec<Reference>,
-    /// The references are the definition's callers in the code graph,
-    /// resolved to it; otherwise they are its name, matched by text.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub resolved: bool,
     /// References left out of the list.
     #[serde(skip_serializing_if = "is_zero")]
     pub more: usize,

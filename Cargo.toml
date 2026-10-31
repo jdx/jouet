@@ -35,7 +35,6 @@ libc = "0.2"
 memchr = "2"
 mise-agent-env = "2026"
 mlua = { version = "0.12", features = ["luau"] }
-petgraph = { version = "0.8", default-features = false, features = ["std"] }
 regex = "1"
 # TLS trusts the system's root certificates, with ring for crypto. ureq's
 # default bundles webpki-roots, and its platform verifier pulls in
@@ -65,7 +64,6 @@ tree-sitter-javascript = "0.25"
 tree-sitter-python = "0.25"
 tree-sitter-ruby = "0.23"
 tree-sitter-rust = "0.24"
-tree-sitter-tags = "0.27"
 tree-sitter-typescript = "0.23"
 zstd = "0.14"
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls-no-provider"] }
