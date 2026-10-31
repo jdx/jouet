@@ -22,9 +22,9 @@
 //! `cargo test --workspace`.
 //!
 //! A reason is raised once per state: after a block, the tree's checks keep
-//! the reason and the tree, and a later stop with the same reason at the
-//! same tree, and no run recorded since, is let through. The agent has
-//! already answered it.
+//! the reasons raised and the tree, and a later stop at the same tree, with
+//! no run recorded since, raises only a reason not raised yet, or is let
+//! through. The agent has already answered the others.
 
 use jouet_rules::{Kind, Record};
 use serde::{Deserialize, Serialize};
@@ -103,10 +103,11 @@ pub(crate) struct Checks {
     pub raised: Option<Raised>,
 }
 
-/// A reason the stop hook blocked with, and the tree it saw then.
+/// The reasons the stop hook blocked with, and the tree it saw then.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Raised {
-    pub reason: String,
+    /// Every reason raised at `tree`, in the order they were.
+    pub reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<String>,
 }
@@ -171,7 +172,7 @@ impl State {
 
     /// Why stopping should wait, in any work tree the session ran checks
     /// in: `home`, the session's own, first, then the others, each named.
-    /// A tree whose reason was already raised, with nothing changed since,
+    /// A tree whose reasons were all raised, with nothing changed since,
     /// is passed over (see [`Checks::block`]). `tree` gives a root's work
     /// tree now, and `hk_repo` whether it has an hk config.
     pub(crate) fn block(
@@ -184,10 +185,11 @@ impl State {
         let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
         own.into_iter().chain(others).find_map(|(root, checks)| {
             let raised = checks.block(|| tree(root), hk_repo(root))?;
+            let reason = raised.reasons.last()?;
             let reason = if root == home || root.is_empty() {
-                raised.reason.clone()
+                reason.clone()
             } else {
-                format!("In {root}: {}", raised.reason)
+                format!("In {root}: {reason}")
             };
             Some(Block {
                 root: root.clone(),
@@ -269,39 +271,42 @@ impl Checks {
         })
     }
 
-    /// Why stopping should wait, as [`Checks::block_reason`] says, with the
-    /// tree now; or None when the stop hook already blocked for that reason
-    /// at that tree and no run has been recorded since, so the agent has
-    /// answered it once. An unknown tree is never the same tree.
+    /// The first reason to stop waiting, as [`Checks::reasons`] lists them,
+    /// that the stop hook has not already blocked for at the tree now, with
+    /// it added to those it has; None when every reason has been raised at
+    /// this tree with no run recorded since, so the agent has answered each
+    /// once. An unknown tree is never the same tree.
     pub(crate) fn block(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Option<Raised> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(&tree).clone();
-        let raised = Raised {
-            reason: self.block_reason(now, hk_repo)?,
-            tree: now(),
+        let reasons = self.reasons(now, hk_repo);
+        let tree = now();
+        let mut raised = match &self.raised {
+            Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
+            _ => Vec::new(),
         };
-        if raised.tree.is_some() && self.raised.as_ref() == Some(&raised) {
-            return None;
-        }
-        Some(raised)
+        let reason = reasons.into_iter().find(|r| !raised.contains(r))?;
+        raised.push(reason);
+        Some(Raised {
+            reasons: raised,
+            tree,
+        })
     }
 
-    /// Why stopping should wait: a failure nothing has cleared, a test
-    /// suite that has only partly run since the tree changed, or, in a
-    /// repository with an hk config (`hk_repo`), files changed since the
-    /// last hk check passed. `tree` gives the work tree now; it is only
-    /// asked for when one of the last two could apply.
-    pub(crate) fn block_reason(
-        &self,
-        tree: impl Fn() -> Option<String>,
-        hk_repo: bool,
-    ) -> Option<String> {
-        if let Some(reason) = self.failure_reason() {
-            return Some(reason);
-        }
-        if let Some(reason) = self.partial_test_reason(&tree) {
-            return Some(reason);
-        }
+    /// Every reason stopping should wait, the first to raise first: each
+    /// failure nothing has cleared, a test suite that has only partly run
+    /// since the tree changed, and, in a repository with an hk config
+    /// (`hk_repo`), files changed since the last hk check passed. `tree`
+    /// gives the work tree now; it is only asked for when one of the last
+    /// two could apply.
+    pub(crate) fn reasons(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Vec<String> {
+        let mut reasons = self.failure_reasons();
+        reasons.extend(self.partial_test_reason(&tree));
+        reasons.extend(self.hk_reason(&tree, hk_repo));
+        reasons
+    }
+
+    fn hk_reason(&self, tree: &impl Fn() -> Option<String>, hk_repo: bool) -> Option<String> {
         let hk = self.hk.as_ref().filter(|_| hk_repo)?;
         if !hk.passed() || hk.tree.is_none() {
             return None;
@@ -344,18 +349,29 @@ impl Checks {
         ))
     }
 
-    fn failure_reason(&self) -> Option<String> {
-        let (kind, failures) = self.failures.iter().find(|(_, f)| !f.is_empty())?;
-        // A full failure first: it says the most.
-        let failed = failures.iter().rev().find(|f| f.full).or(failures.last())?;
-        let last = self.runs.get(kind);
+    /// A reason for each failure nothing has cleared, by kind, and within a
+    /// kind full failures first, as they say the most, newest first.
+    fn failure_reasons(&self) -> Vec<String> {
+        self.failures
+            .iter()
+            .flat_map(|(kind, failures)| {
+                let full = failures.iter().rev().filter(|f| f.full);
+                let partial = failures.iter().rev().filter(|f| !f.full);
+                full.chain(partial)
+                    .map(|failed| self.failure_reason(*kind, failed))
+            })
+            .collect()
+    }
+
+    fn failure_reason(&self, kind: Kind, failed: &Run) -> String {
+        let last = self.runs.get(&kind);
         if last == Some(failed) {
-            return Some(format!(
+            return format!(
                 "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
                 kind.name(),
                 failed.command,
                 failed.exit_code
-            ));
+            );
         }
         let since = last.map_or(String::new(), |l| format!(" (`{}`)", l.command));
         let clear = if failed.full {
@@ -366,12 +382,12 @@ impl Checks {
                 kind.name()
             )
         };
-        Some(format!(
+        format!(
             "A {} run failed (`{}` exited {}), and the runs since{since} do not cover it: {clear}. Fix it and run it again before you finish, or say plainly why it cannot pass. [jouet: verify]",
             kind.name(),
             failed.command,
             failed.exit_code
-        ))
+        )
     }
 }
 
@@ -507,6 +523,13 @@ mod tests {
 
     fn test(command: &str, exit_code: i32, scope: &str) -> Record {
         record(Kind::Test, command, exit_code, scope)
+    }
+
+    impl Checks {
+        /// The first reason to block with, raised or not.
+        fn block_reason(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Option<String> {
+            self.reasons(tree, hk_repo).into_iter().next()
+        }
     }
 
     /// The reason to block with the work tree at `tree`.
@@ -686,7 +709,7 @@ mod tests {
         let mut state = Checks::default();
         state.record([test("cargo test --workspace", 101, "full")], Some("t1"));
         let raised = state.block(|| Some("t1".into()), false).unwrap();
-        assert!(raised.reason.starts_with("The last test run failed"));
+        assert!(raised.reasons[0].starts_with("The last test run failed"));
         assert_eq!(raised.tree.as_deref(), Some("t1"));
         state.raised = Some(raised.clone());
         // The same failure at the same tree: the agent has answered it.
@@ -719,6 +742,41 @@ mod tests {
     }
 
     #[test]
+    fn each_unresolved_reason_in_a_tree_is_raised_once() {
+        let mut state = Checks::default();
+        let lint = |command: &str, code: i32, scope: &str| record(Kind::Lint, command, code, scope);
+        state.record(
+            [
+                test("cargo test --workspace", 101, "full"),
+                test("cargo test -p a", 101, "-p a"),
+                lint("cargo clippy --workspace", 1, "full"),
+            ],
+            Some("t1"),
+        );
+        let now = || Some("t1".to_string());
+        let mut seen = Vec::new();
+        while let Some(raised) = state.block(now, false) {
+            seen.push(raised.reasons.last().unwrap().clone());
+            assert_eq!(raised.reasons, seen);
+            state.raised = Some(raised);
+        }
+        // Each failure once, the full test failure before the partial one.
+        assert_eq!(seen.len(), 3, "{seen:?}");
+        assert!(
+            seen[0].contains("`cargo test --workspace` exited 101"),
+            "{seen:?}"
+        );
+        assert!(seen[1].contains("`cargo test -p a` exited 101"), "{seen:?}");
+        assert!(
+            seen[2].contains("`cargo clippy --workspace` exited 1"),
+            "{seen:?}"
+        );
+        // At another tree, the first is raised again.
+        let raised = state.block(|| Some("t2".into()), false).unwrap();
+        assert_eq!(raised.reasons, &seen[..1]);
+    }
+
+    #[test]
     fn a_tree_whose_reason_was_raised_gives_way_to_the_next() {
         let mut state = State::default();
         let tree = |root: &str| Some(if root == "/other" { "o1" } else { "h1" }.to_string());
@@ -740,7 +798,7 @@ mod tests {
         assert_eq!(block.root, "/other");
         assert!(block.reason.starts_with("In /other: "), "{block:?}");
         // The raised reason is kept without the tree's name.
-        assert!(block.raised.reason.starts_with("The last test run failed"));
+        assert!(block.raised.reasons[0].starts_with("The last test run failed"));
         state.raise(&block);
         assert_eq!(state.block("/home", tree, |_| false), None);
     }
