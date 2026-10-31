@@ -73,6 +73,10 @@ pub struct PrThreads {
     pub(crate) threads: Vec<Thread>,
     /// Review summaries and conversation comments, oldest first.
     pub(crate) others: Vec<Thread>,
+    /// Comments left out because GitHub sent neither their ID nor a URL that
+    /// holds it. A thread whose first comment is one of them is left out
+    /// whole, since that comment's ID is the thread's handle.
+    pub unreadable: usize,
 }
 
 /// Which side of the diff a thread's lines are on.
@@ -226,7 +230,8 @@ struct RawThread {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawComment {
-    full_database_id: String,
+    /// Nullable in GitHub's schema; the URL holds the same ID.
+    full_database_id: Option<String>,
     url: String,
     created_at: String,
     body: String,
@@ -323,7 +328,7 @@ impl Pages {
                 "reviewThreads" => {
                     let page: Page<RawThread> = parse(entry, "review threads")?;
                     self.threads = page.page_info.next();
-                    self.add_threads(pr, page.nodes, bots)?;
+                    self.add_threads(pr, page.nodes, bots);
                 }
                 _ => {
                     let page: Page<RawComment> = parse(entry, "comments")?;
@@ -334,7 +339,7 @@ impl Pages {
                         self.comments = page.page_info.next();
                         Kind::Comment
                     };
-                    add_others(pr, kind, page.nodes, bots)?;
+                    add_others(pr, kind, page.nodes, bots);
                 }
             }
         }
@@ -347,7 +352,10 @@ impl Pages {
             let data = client.graphql(&q, &json!({ "id": thread.node_id, "c": after }))?;
             let page: Page<RawComment> = parse(&data["node"]["comments"], "thread comments")?;
             for raw in page.nodes {
-                thread.comments.push(comment(raw)?);
+                match comment(raw) {
+                    Some(c) => thread.comments.push(c),
+                    None => pr.unreadable += 1,
+                }
             }
             if let Some(next) = page.page_info.next() {
                 self.thread_comments.push((i, next));
@@ -356,26 +364,29 @@ impl Pages {
         Ok(())
     }
 
-    fn add_threads(
-        &mut self,
-        pr: &mut PrThreads,
-        raw: Vec<RawThread>,
-        bots: &[String],
-    ) -> Result<(), String> {
+    fn add_threads(&mut self, pr: &mut PrThreads, raw: Vec<RawThread>, bots: &[String]) {
         for raw in raw {
+            let total = raw.comments.nodes.len();
+            let mut nodes = raw.comments.nodes.into_iter();
+            // A thread whose comments were all deleted has no handle.
+            let Some(first) = nodes.next() else {
+                continue;
+            };
+            let Some(first) = comment(first) else {
+                pr.unreadable += total;
+                continue;
+            };
+            let mut comments = vec![first];
+            for raw in nodes {
+                match comment(raw) {
+                    Some(c) => comments.push(c),
+                    None => pr.unreadable += 1,
+                }
+            }
             if let Some(next) = raw.comments.page_info.next() {
                 self.thread_comments.push((pr.threads.len(), next));
             }
-            let comments = raw
-                .comments
-                .nodes
-                .into_iter()
-                .map(comment)
-                .collect::<Result<Vec<_>, _>>()?;
-            // A thread whose comments were all deleted has no handle.
-            let Some(first) = comments.first() else {
-                continue;
-            };
+            let first = &comments[0];
             pr.threads.push(Thread {
                 id: first.id,
                 node_id: raw.id,
@@ -400,7 +411,6 @@ impl Pages {
                 context: None,
             });
         }
-        Ok(())
     }
 }
 
@@ -431,34 +441,33 @@ fn read(
             .to_string(),
         threads: Vec::new(),
         others: Vec::new(),
+        unreadable: 0,
     };
     pages.threads = raw.review_threads.page_info.next();
-    pages.add_threads(&mut pr, raw.review_threads.nodes, bots)?;
+    pages.add_threads(&mut pr, raw.review_threads.nodes, bots);
     if let Some(reviews) = raw.reviews {
         pages.reviews = reviews.page_info.next();
-        add_others(&mut pr, Kind::Review, reviews.nodes, bots)?;
+        add_others(&mut pr, Kind::Review, reviews.nodes, bots);
     }
     if let Some(comments) = raw.comments {
         pages.comments = comments.page_info.next();
-        add_others(&mut pr, Kind::Comment, comments.nodes, bots)?;
+        add_others(&mut pr, Kind::Comment, comments.nodes, bots);
     }
     Ok(Some(pr))
 }
 
 /// Adds review summaries or conversation comments; reviews with no summary
 /// (a bare batch of line comments) are left out.
-fn add_others(
-    pr: &mut PrThreads,
-    kind: Kind,
-    raw: Vec<RawComment>,
-    bots: &[String],
-) -> Result<(), String> {
+fn add_others(pr: &mut PrThreads, kind: Kind, raw: Vec<RawComment>, bots: &[String]) {
     for raw in raw {
         if raw.body.trim().is_empty() {
             continue;
         }
         let state = raw.state.as_deref().map(str::to_ascii_lowercase);
-        let c = comment(raw)?;
+        let Some(c) = comment(raw) else {
+            pr.unreadable += 1;
+            continue;
+        };
         pr.others.push(Thread {
             id: c.id,
             node_id: String::new(),
@@ -478,16 +487,16 @@ fn add_others(
             context: None,
         });
     }
-    Ok(())
 }
 
-fn comment(raw: RawComment) -> Result<Comment, String> {
-    let id = raw.full_database_id.parse().map_err(|_| {
-        format!(
-            "GitHub sent a comment ID jouet could not read: {}",
-            raw.full_database_id
-        )
-    })?;
+/// A comment, or `None` when GitHub sent no ID jouet can read, in
+/// `fullDatabaseId` or in the URL.
+fn comment(raw: RawComment) -> Option<Comment> {
+    let id = raw
+        .full_database_id
+        .as_deref()
+        .and_then(|id| id.parse().ok())
+        .or_else(|| url_id(&raw.url))?;
     let author = match raw.author {
         // GraphQL names an app `coderabbitai`; REST and the web UI say
         // `coderabbitai[bot]`, which is what people filter by.
@@ -497,7 +506,7 @@ fn comment(raw: RawComment) -> Result<Comment, String> {
         Some(a) => a.login,
         None => "ghost".into(),
     };
-    Ok(Comment {
+    Some(Comment {
         id,
         author,
         created: time::parse_utc(&raw.created_at).unwrap_or(0),
@@ -507,6 +516,16 @@ fn comment(raw: RawComment) -> Result<Comment, String> {
         suggestion: None,
         url: raw.url,
     })
+}
+
+/// The database ID at the end of a comment's URL: `#discussion_r55500`,
+/// `#issuecomment-66601` or `#pullrequestreview-4401`.
+fn url_id(url: &str) -> Option<u64> {
+    let (_, fragment) = url.rsplit_once('#')?;
+    fragment
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .parse()
+        .ok()
 }
 
 fn is_bot(login: &str, bots: &[String]) -> bool {

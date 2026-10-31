@@ -52,6 +52,8 @@ struct Jouet {
 enum Cmd {
     /// Report where coding-agent sessions spend tokens and time
     Audit(AuditArgs),
+    /// Claim paths for this session, so other sessions are warned off them
+    Claim(ClaimArgs),
     /// Commit only the named paths, with trailers
     Commit(CommitArgs),
     /// Report the errors and warnings in files you changed, through hk
@@ -378,9 +380,19 @@ pub struct StatsArgs {
 /// - REPL is text with the pattern's `$X` filled in; the rest is copied as
 ///   written, and indentation follows the match.
 ///
+/// `--callers-of PATH#SYMBOL` rewrites only the calls the code graph
+/// attributes to that definition, so `load($$$A)` leaves other functions
+/// named `load` alone; write the pattern for the whole call (`$F($P)`,
+/// `$R.load($$$A)`). `--impact PATH#SYMBOL` rewrites only inside it and the
+/// code depending on it. Matches the graph cannot attribute (dynamic
+/// dispatch, macros, files it has not read) are listed as unresolved and
+/// left alone, and so are its calls the pattern missed. The report lists
+/// each rewrite and the test files that depend on them; --dry-run first.
+///
 /// Examples:
 ///   jouet edit --pattern '$C.get($URL).send()?' --rewrite '$C.get($URL).timeout(TIMEOUT).send()?' --lang rust src/
 ///   jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app/ --check 'python -m pytest -q' --revert-on-fail
+///   jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, None)' --lang rust --callers-of src/config.rs#load
 ///
 /// Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 #[derive(Args)]
@@ -418,6 +430,14 @@ pub struct EditArgs {
     /// go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --pattern, rewrite only the calls the code graph attributes to
+    /// this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --pattern, rewrite only inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
     /// With --pattern, the files and directories to rewrite (default .)
     paths: Vec<String>,
     /// Refuse unless PATH's contents have this SHA-256 hash. Repeatable
@@ -716,6 +736,7 @@ pub struct LandArgs {
 ///   jouet search --structural --lang rust '$X.unwrap()'
 ///   jouet search --structural --lang go 'if err != nil { return $$$ }'
 ///   jouet search --structural --lang typescript 'useEffect($FN, [])'
+///   jouet search --structural --lang rust '$F($$$A)' --callers-of src/config.rs#load
 
 #[derive(Args)]
 pub struct SearchArgs {
@@ -758,6 +779,14 @@ pub struct SearchArgs {
     /// typescript, tsx, go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --structural, only the calls the code graph attributes to this
+    /// symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --structural, only matches inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
 }
 
 /// Read a file by its outline, a symbol or a range
@@ -1065,6 +1094,63 @@ pub struct WaitJobArgs {
     /// Do not show its log
     #[usage(long)]
     no_logs: bool,
+}
+
+/// Claim paths for this session, so other sessions are warned off them
+///
+/// A claim is advisory: it blocks nothing. It tells other agent sessions on
+/// this machine that this session works on these paths, and jouet's hooks
+/// warn a session that edits or commits a path another live session claims,
+/// naming that session and its worktree. Every worktree of a repository
+/// shares its claims. PATH is a file, a directory (covering everything
+/// under it) or a glob (`*`, `**`, `?`). A claim lasts --for (default 2h),
+/// and lapses early when its worktree is removed or its agent exits.
+/// Claiming a path again renews it. Refuses (exit 1) when another live
+/// session claims an overlapping path, naming it; exits 4 outside an agent
+/// session (set JOUET_SESSION_ID to claim from elsewhere).
+#[derive(Args)]
+#[usage(args_conflicts_with_subcommands)]
+pub struct ClaimArgs {
+    #[usage(subcommand)]
+    cmd: Option<ClaimCmd>,
+    /// The files, directories or globs to claim
+    paths: Vec<String>,
+    /// How long the claim lasts (default 2h)
+    #[usage(long = "for", value_name = "DUR")]
+    duration: Option<String>,
+    /// What the session is doing there, shown to the others
+    #[usage(long, value_name = "TEXT")]
+    note: Option<String>,
+}
+
+#[derive(Subcommands)]
+pub enum ClaimCmd {
+    /// List the live claims in this repository, every session's
+    Ls(ClaimLsArgs),
+    /// Release this session's claims
+    Release(ClaimReleaseArgs),
+}
+
+/// List the live claims in this repository, every session's
+///
+/// Claims that expired, or whose worktree or agent is gone, are removed
+/// first; --all lists them before they go.
+#[derive(Args)]
+pub struct ClaimLsArgs {
+    /// Also list the claims that no longer hold
+    #[usage(long)]
+    all: bool,
+}
+
+/// Release this session's claims
+///
+/// Releases the claims on the paths given, or all of this session's claims
+/// in this repository. Another session's claim is never released: it lapses
+/// on its own.
+#[derive(Args)]
+pub struct ClaimReleaseArgs {
+    /// The claimed paths to release; all of this session's when none
+    paths: Vec<String>,
 }
 
 /// Check a stack of PRs: does each layer really contain the one below
@@ -2128,6 +2214,7 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
+        Cmd::Claim(args) => cmd::claim::run(args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
         Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),

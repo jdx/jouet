@@ -375,9 +375,31 @@ pub(crate) struct CaseTable {
     /// What `jouet.git.state()` reports for the work tree; omitted, it has
     /// no answer, as for any probe in an example.
     pub git: Option<GitCase>,
+    /// The agent session making the call, as the hook payload's
+    /// `session_id`; omitted, it has none.
+    pub session: Option<String>,
+    /// The claims `jouet.claims.held()` finds in the repository; omitted,
+    /// it has no answer, as for any probe in an example.
+    pub claims: Option<Vec<ClaimCase>>,
     /// Where `jouet.stack.layer()` places the current branch in a stack;
     /// omitted, it has no answer.
     pub stack: Option<StackCase>,
+}
+
+/// A claim in an example's repository, as `jouet claim` would keep it.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExampleClaim")]
+pub(crate) struct ClaimCase {
+    /// What is claimed, relative to the repository's root: a file, a
+    /// directory ending in `/`, or a glob.
+    pub pattern: String,
+    /// The claiming session's ID.
+    pub session: String,
+    /// The worktree it works in; `/elsewhere` if omitted.
+    pub worktree: Option<String>,
+    pub branch: Option<String>,
+    pub note: Option<String>,
 }
 
 /// An example's work tree, as `jouet.git.state()` would report it.
@@ -440,7 +462,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox`, `git` or `stack`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox`, `git`, `session`, `claims` or `stack`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

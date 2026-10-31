@@ -73,6 +73,25 @@ pub struct AffectedTest {
     pub via: Vec<PathBuf>,
 }
 
+/// A place the graph records a use of a name, a call, a construction or a
+/// reference, and the definitions it was linked to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Site {
+    /// Relative to the work tree, with `/` separators.
+    pub path: String,
+    /// 1-based.
+    pub line: u32,
+    /// 0-based, in UTF-16 code units from the start of the line: where the
+    /// call or construction expression starts. `None` when not recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub col: Option<u32>,
+    /// `calls`, `instantiates` or `references`.
+    pub kind: String,
+    /// The IDs of the definitions linking attributed it to: none when it
+    /// could not be attributed, more than one when it stayed ambiguous.
+    pub targets: Vec<String>,
+}
+
 /// Edge kinds that are a use of their target, as callers count them.
 const CALL_KINDS: &str = "('calls', 'instantiates', 'references')";
 
@@ -435,6 +454,71 @@ impl Graph {
             i += 1;
         }
         self.reach(&start, DEPENDENCY_KINDS, true, depth)
+    }
+
+    /// Every use of `name` the graph recorded, in file and line order: the
+    /// calls, constructions and references linked to any definition of
+    /// that name, and those written with it as their last segment (`foo`,
+    /// `a.foo`, `m::foo`) that linking could not attribute. One entry per
+    /// place, with every definition linked there.
+    pub fn uses_of(&self, name: &str) -> Result<Vec<Site>, Error> {
+        let mut by_place: std::collections::BTreeMap<
+            (String, u32, Option<u32>, String),
+            Vec<String>,
+        > = std::collections::BTreeMap::new();
+        let mut linked = self.conn.prepare_cached(&format!(
+            "SELECT s.file_path, e.line, e.col, e.kind, t.id FROM edges e
+             JOIN nodes t ON t.nid = e.target JOIN nodes s ON s.nid = e.source
+             WHERE t.name = ?1 AND e.kind IN {CALL_KINDS} AND e.line IS NOT NULL"
+        ))?;
+        for row in linked.query_map([name], |r| {
+            Ok((
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
+                r.get::<_, String>(4)?,
+            ))
+        })? {
+            let (place, target) = row?;
+            by_place.entry(place).or_default().push(target);
+        }
+        let mut unlinked = self.conn.prepare_cached(
+            "SELECT n.file_path, r.line, r.col, r.kind FROM refs r JOIN nodes n ON n.nid = r.from_node
+             WHERE r.status = ?1 AND r.tail = ?2 AND r.kind IN ('calls', 'instantiates', 'function_ref')",
+        )?;
+        for row in unlinked.query_map(params![crate::link::FAILED, name], |r| {
+            let kind: String = r.get(3)?;
+            let kind = if kind == "function_ref" {
+                "references".to_string()
+            } else {
+                kind
+            };
+            Ok((r.get(0)?, r.get(1)?, Some(r.get(2)?), kind))
+        })? {
+            by_place.entry(row?).or_default();
+        }
+        Ok(by_place
+            .into_iter()
+            .map(|((path, line, col, kind), mut targets)| {
+                targets.sort();
+                targets.dedup();
+                Site {
+                    path,
+                    line,
+                    col,
+                    kind,
+                    targets,
+                }
+            })
+            .collect())
+    }
+
+    /// The files the graph read and found the symbols of, relative to the
+    /// work tree: not those it could not walk.
+    pub fn files(&self) -> Result<Vec<String>, Error> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT path FROM files WHERE error IS NULL ORDER BY path")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// The symbols most relevant to a question, best first, with their

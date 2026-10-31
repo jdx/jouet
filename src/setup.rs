@@ -68,7 +68,11 @@ impl Harness {
         match self {
             Self::Claude => &[
                 ("SessionStart", None, "session-start"),
-                ("PreToolUse", Some("Bash|Read|Grep"), "pre-tool-use"),
+                (
+                    "PreToolUse",
+                    Some("Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit"),
+                    "pre-tool-use",
+                ),
                 ("PostToolUse", Some("Bash|Read"), "post-tool-use"),
                 ("PostToolUseFailure", Some("Bash"), "post-tool-use-failure"),
                 // Formats edited files with `[edit] fix_after`; a no-op
@@ -510,7 +514,7 @@ mod tests {
         ]
       },
       {
-        "matcher": "Bash|Read|Grep",
+        "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -757,7 +761,7 @@ mod tests {
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Grep",
+        "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",

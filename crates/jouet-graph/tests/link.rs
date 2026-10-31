@@ -258,3 +258,42 @@ fn affected_follows_dependents_to_tests_and_flags_unknown_files() {
     );
     assert_eq!(a.unknown, [PathBuf::from("README.md")]);
 }
+
+#[test]
+fn uses_of_a_name_say_which_definition_each_means_and_where_the_call_starts() {
+    let repo = Repo::new(&[
+        ("src/config.rs", "pub fn load() {}\n"),
+        ("src/cache.rs", "pub fn load() {}\n"),
+        (
+            "src/lib.rs",
+            "mod cache;\nmod config;\n\nfn start(r: &dyn Fn()) {\n    config::load();\n    let _ = cache::load();\n    r.load();\n}\n",
+        ),
+        ("app/a.py", "def load():\n    pass\n"),
+        (
+            "app/b.py",
+            "from .a import load\n\n\ndef run(x):\n    load()\n    x.load()\n",
+        ),
+    ]);
+    let config = repo.id("src/config.rs#load");
+    let cache = repo.id("src/cache.rs#load");
+    let python = repo.id("app/a.py#load");
+    let sites: Vec<(String, u32, Option<u32>, Vec<String>)> = repo
+        .graph
+        .uses_of("load")
+        .unwrap()
+        .into_iter()
+        .map(|s| (s.path, s.line, s.col, s.targets))
+        .collect();
+    assert_eq!(
+        sites,
+        [
+            ("app/b.py".into(), 5, Some(4), vec![python]),
+            ("app/b.py".into(), 6, Some(4), vec![]),
+            ("src/lib.rs".into(), 5, Some(4), vec![config]),
+            ("src/lib.rs".into(), 6, Some(12), vec![cache]),
+            ("src/lib.rs".into(), 7, Some(4), vec![]),
+        ]
+    );
+    let files = repo.graph.files().unwrap();
+    assert!(files.contains(&"src/lib.rs".to_string()), "{files:?}");
+}

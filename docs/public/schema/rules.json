@@ -400,6 +400,17 @@
           "description": "What `jouet.git.state()` reports for the work tree; omitted, it has\nno answer, as for any probe in an example.",
           "$ref": "#/$defs/ExampleGit"
         },
+        "session": {
+          "description": "The agent session making the call, as the hook payload's\n`session_id`; omitted, it has none.",
+          "type": "string"
+        },
+        "claims": {
+          "description": "The claims `jouet.claims.held()` finds in the repository; omitted,\nit has no answer, as for any probe in an example.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExampleClaim"
+          }
+        },
         "stack": {
           "description": "Where `jouet.stack.layer()` places the current branch in a stack;\nomitted, it has no answer.",
           "$ref": "#/$defs/ExampleStack"
@@ -466,6 +477,35 @@
         }
       },
       "additionalProperties": false
+    },
+    "ExampleClaim": {
+      "description": "A claim in an example's repository, as `jouet claim` would keep it.",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "description": "What is claimed, relative to the repository's root: a file, a\ndirectory ending in `/`, or a glob.",
+          "type": "string"
+        },
+        "session": {
+          "description": "The claiming session's ID.",
+          "type": "string"
+        },
+        "worktree": {
+          "description": "The worktree it works in; `/elsewhere` if omitted.",
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "session"
+      ]
     },
     "ExampleStack": {
       "description": "An example's place in a stack, as `jouet.stack.layer()` would report it.",
