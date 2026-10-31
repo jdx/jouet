@@ -775,14 +775,16 @@ fn decision(r: &Record) -> ledger::Decision {
 
 /// How many files the work tree tracks, for a search a `min_tracked_files`
 /// matcher could be about: the Grep tool, or a command running grep or rg.
-/// Other calls do not pay for `git ls-files`.
+/// Other calls do not pay for `git ls-files`. After a `cd`, the search runs
+/// somewhere else, so the count is unknown and the matcher holds.
 fn tracked_files(call: &Call) -> Option<u32> {
-    let search = call.tool == "Grep"
-        || call.command.as_deref().is_some_and(|c| {
-            c.split(|ch: char| !ch.is_ascii_alphanumeric())
-                .any(|word| word == "grep" || word == "rg")
-        });
-    if !search {
+    let words: Vec<&str> = call
+        .command
+        .as_deref()
+        .map(|c| c.split(|ch: char| !ch.is_ascii_alphanumeric()).collect())
+        .unwrap_or_default();
+    let search = call.tool == "Grep" || words.iter().any(|w| *w == "grep" || *w == "rg");
+    if !search || words.iter().any(|w| *w == "cd" || *w == "pushd") {
         return None;
     }
     let cwd = call.cwd.as_deref().map(Path::new);
@@ -1070,6 +1072,35 @@ mod tests {
                 .get("permissionDecision")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn tracked_files_are_counted_only_for_a_search_where_it_runs() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.path().join("a.rs"), "fn a() {}\n").unwrap();
+        git(&["add", "a.rs"]);
+        let call = |command: &str| Call {
+            tool: "Bash".into(),
+            command: Some(command.into()),
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            ..Call::default()
+        };
+        assert_eq!(tracked_files(&call("rg TODO")), Some(1));
+        // Not a search: git is not asked.
+        assert_eq!(tracked_files(&call("ls -la")), None);
+        // After a `cd`, the search runs somewhere else.
+        assert_eq!(tracked_files(&call("cd .. && rg TODO")), None);
     }
 
     #[test]

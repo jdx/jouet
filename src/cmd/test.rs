@@ -126,7 +126,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     };
     // The agent wrote the command it gave, so only a dry run repeats it.
     if !out.json && (!args.cmd || args.dry_run) {
-        print!("{}", text(&report));
+        emit(&text(&report));
     }
     // A person watches the run; an agent reads what it said, once it ends.
     let stream = !out.json && out.mode == Mode::Human;
@@ -154,7 +154,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 exit = suite_exit;
             }
             if !out.json {
-                print!("{}", outcome(suite, stream));
+                emit(&outcome(suite, stream));
             }
         }
     }
@@ -167,11 +167,22 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     if out.json {
         out.result(&report, String::new);
     } else if args.affected && !args.dry_run && jobs.iter().any(Option::is_some) {
-        println!(
-            "This was a partial run. Run the full suite (`jouet test`) before you finish or push."
+        emit(
+            "This was a partial run. Run the full suite (`jouet test`) before you finish or push.\n",
         );
     }
     exit
+}
+
+/// Writes `text` to stdout, ignoring a closed pipe: in `jouet test | head
+/// -1`, head may exit after the first line, and the run still has to finish
+/// and record its result. `print!` would panic there instead.
+fn emit(text: &str) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush());
 }
 
 /// How this `jouet test` was called, as a shell command: what the rules

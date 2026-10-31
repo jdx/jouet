@@ -476,6 +476,13 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	assert_output '["s9",1,"record:test","full"]'
 
+	# Plain `jouet test` prints its plan first, so head exits before the run
+	# ends; the run still finishes and records its result.
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s11 jouet test 2>&1 | head -1; echo "jouet=${PIPESTATUS[0]}"'
+	assert_line 'jouet=1'
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s11.json"
+	assert_output '["jouet test",1]'
+
 	# A dry run ran nothing, so it records nothing.
 	run bash -c 'CLAUDE_CODE_SESSION_ID=s10 jouet test --cmd --dry-run -- python3 -m unittest'
 	assert [ ! -e "$XDG_STATE_HOME/jouet/sessions/s10.json" ]
