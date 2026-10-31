@@ -133,6 +133,10 @@ default = ["grammars"]
 # them, `jouet search` is plain search and `jouet read --map` is unavailable.
 grammars = ["jouet-search/grammars"]
 
+[target.'cfg(unix)'.dependencies]
+# Asks hk to stop its own steps (SIGTERM) when a check runs past its time.
+libc.workspace = true
+
 [profile.release]
 lto = true
 codegen-units = 1
