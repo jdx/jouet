@@ -28,7 +28,7 @@ setup() {
 	assert_line 'struct demo_http::ClientBuilder (src/client/builder.rs:2, 1 member): Builds a [`Client`](super::Client).'
 	assert_line 'struct demo_http::Client (src/client.rs:7, 2 members): Sends requests and keeps connections open between them.'
 	assert_line '  pub fn get(url: &str) -> Result<String, Error>'
-	assert_line 'reexport demo_http::Url (src/lib.rs:12)'
+	assert_line 'reexport demo_http::Url (src/lib.rs:12): re-exported from url 2.5.4'
 	assert_line 'module demo_http::blocking (src/lib.rs:7): A client that waits for each response.'
 	# pub(crate), #[doc(hidden)], #[cfg(test)] and pub items of a private
 	# module are not API.
@@ -64,11 +64,26 @@ setup() {
 	assert_success
 	assert_line --regexp '^struct demo_http::Client  .*/src/client\.rs:7-9$'
 	assert_line '  Sends requests and keeps connections open between them.'
+	# Its derives, and its impls in other files.
+	assert_line 'implements: Clone, Debug, Default'
 	assert_line 'members:'
 	assert_line '  pub fn new() -> Self  // A client with the default settings.'
 	assert_line '  pub fn get(&self, url: &str) -> Result<String, crate::Error>  // Sends a GET request to `url`.'
 	refute_output --partial private_helper
 	refute_output --partial test_only
+}
+
+@test "a re-export of another crate says where it leads, at the version it depends on" {
+	cd rust
+	run --separate-stderr jouet docs demo-http Url
+	assert_success
+	assert_line 'pub use url::Url;'
+	# Cargo.lock locks url 1.7.2 too; demo-http depends on 2.5.4.
+	assert_line 're-exported from url 2.5.4: `jouet docs url Url`'
+	run --separate-stderr jouet docs demo-http ClientBuilder
+	assert_success
+	assert_line 'implements: From<u64>'
+	refute_output --partial 'fn from'
 }
 
 @test "a module's path prints that module's outline" {

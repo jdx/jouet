@@ -898,15 +898,17 @@ pub struct ReadArgs {
 ///
 /// With SYMBOL, each definition it names: the version and the file:line it
 /// came from, its signature, its doc comment, the start of its source, and
-/// for a type its methods, fields or variants. SYMBOL is a path from the
+/// for a type its methods, fields or variants (and for a Rust type the
+/// traits it derives and implements). SYMBOL is a path from the
 /// package's root, with or without its name (`Agent::get`,
 /// `ureq::Agent::get`, `requests.Session.get`), else the end of one
 /// (`get`). Several matches are each shown, shortest path first, up to
 /// three, then listed.
 ///
 /// Public means: for Rust, plain `pub` items reachable from the crate root
-/// through `pub mod`s and `pub use`s (followed through the crate, never
-/// into another one), without #[doc(hidden)]; for TypeScript, exported
+/// through `pub mod`s and `pub use`s (followed through the crate; one into
+/// another crate names it, at the version the lockfile has), without
+/// #[doc(hidden)]; for TypeScript, exported
 /// declarations; for Python, names without a leading `_`, or those in
 /// `__all__`, with re-exports followed; for Go, capitalised names.
 /// --private includes the rest.

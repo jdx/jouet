@@ -70,6 +70,7 @@ pub(super) fn build(pkg: &Package) -> Result<Index, String> {
         modules: vec![Module::new(vec![lib_name.clone()], true)],
         items: Vec::new(),
         pending: Vec::new(),
+        impls: Vec::new(),
         loaded: Vec::new(),
     };
     let lib = builder.by_rel[&lib_path];
@@ -140,6 +141,8 @@ struct Scan {
     /// Blocks under `#[cfg(test)]` (a `mod tests { }`, an `impl`), as
     /// 0-based lines: nothing in them is API.
     tests: Vec<(usize, usize)>,
+    /// Trait impls: (0-based line, trait, the type's name).
+    impls: Vec<(usize, String, String)>,
 }
 
 impl Scan {
@@ -161,6 +164,7 @@ fn scan(lines: &[&str]) -> Scan {
         mods: Vec::new(),
         uses: Vec::new(),
         tests: Vec::new(),
+        impls: Vec::new(),
     };
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
@@ -175,6 +179,17 @@ fn scan(lines: &[&str]) -> Scan {
             if opens.is_some() && code.find(';').is_none_or(|semi| Some(semi) > opens) {
                 out.tests.push((i, block_end(lines, item)));
             }
+        }
+        let unsafe_free = trimmed.strip_prefix("unsafe ").unwrap_or(trimmed);
+        if (unsafe_free.starts_with("impl<") || unsafe_free.starts_with("impl "))
+            && let Some((name, ty)) = trait_impl(&text::header(
+                lines,
+                i + 1,
+                lines.len().min(i + 12),
+                Cut::Body,
+            ))
+        {
+            out.impls.push((i, name, ty));
         }
         if let Some(c) = module.captures(line) {
             let (doc, attrs) = text::doc_above(lines, i + 1, Style::Rust);
@@ -417,6 +432,9 @@ struct Builder<'a> {
     modules: Vec<Module>,
     items: Vec<Item>,
     pending: Vec<Pending>,
+    /// Trait impls waiting for their type: (trait, type's name, module,
+    /// source).
+    impls: Vec<(String, String, usize, usize)>,
     /// Sources already loaded as a module, against a file declared twice.
     loaded: Vec<usize>,
 }
@@ -483,6 +501,12 @@ impl Builder<'_> {
             }
         }
         self.load_items(file, &scopes, &scan);
+        for (line, name, ty) in &scan.impls {
+            if !scan.in_tests(*line) {
+                let (_, m, _) = innermost(&scopes, *line).clone();
+                self.impls.push((name.clone(), ty.clone(), m, file));
+            }
+        }
         for (line, statement) in &scan.uses {
             if scan.in_tests(*line) {
                 continue;
@@ -556,9 +580,14 @@ impl Builder<'_> {
             item.signature = text::header(&lines, start, node.end_line as usize, cut)
                 .trim_end_matches(',')
                 .to_string();
+            // The extractor's docstring, when there is a doc comment: a plain
+            // `// SAFETY:` or licence comment above an item is not its doc.
             item.doc = doc
-                .or_else(|| node.docstring.clone())
+                .map(|own| node.docstring.clone().unwrap_or(own))
                 .map(|d| visible_doc(&d));
+            if TYPE_KINDS.contains(&node.kind) {
+                item.implements = derives(&attrs);
+            }
             let hidden = attrs.contains("doc(hidden)");
             item.public = !hidden && is_pub(&item.signature);
             let mut home = self.modules[m].path.clone();
@@ -649,20 +678,9 @@ impl Builder<'_> {
             })
             .collect();
         for (idx, owner, m, file) in std::mem::take(&mut self.pending) {
-            let rel = &self.sources[file].rel;
-            let named: Vec<usize> = types
-                .iter()
-                .copied()
-                .filter(|&t| self.items[t].name == owner)
-                .collect();
-            let found = self.modules[m]
-                .defs
-                .get(&owner)
-                .copied()
-                .filter(|t| named.contains(t))
-                .or_else(|| named.iter().copied().find(|&t| &self.items[t].file == rel))
-                .or_else(|| (named.len() == 1).then(|| named[0]));
-            let Some(found) = found else { continue };
+            let Some(found) = self.owner(&types, &owner, m, file) else {
+                continue;
+            };
             let owner_kind = self.items[found].kind.clone();
             let item = &mut self.items[idx];
             item.owner = Some(found);
@@ -671,7 +689,124 @@ impl Builder<'_> {
                 item.public = true;
             }
         }
+        for (name, ty, m, file) in std::mem::take(&mut self.impls) {
+            if let Some(found) = self.owner(&types, &ty, m, file)
+                && !self.items[found].implements.contains(&name)
+            {
+                self.items[found].implements.push(name);
+            }
+        }
     }
+
+    /// The type named `name` that a method or impl in module `m` of source
+    /// `file` belongs to: the one in that module, else in that file, else
+    /// the only one in the crate.
+    fn owner(&self, types: &[usize], name: &str, m: usize, file: usize) -> Option<usize> {
+        let rel = &self.sources[file].rel;
+        let named: Vec<usize> = types
+            .iter()
+            .copied()
+            .filter(|&t| self.items[t].name == name)
+            .collect();
+        self.modules[m]
+            .defs
+            .get(name)
+            .copied()
+            .filter(|t| named.contains(t))
+            .or_else(|| named.iter().copied().find(|&t| &self.items[t].file == rel))
+            .or_else(|| (named.len() == 1).then(|| named[0]))
+    }
+}
+
+/// The traits `#[derive(..)]` attributes name, also inside `cfg_attr`.
+fn derives(attrs: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (at, _) in attrs.match_indices("derive(") {
+        let list = &attrs[at + "derive(".len()..];
+        let list = &list[..list.find(')').unwrap_or(list.len())];
+        for name in list.split(',') {
+            let name = name.trim().rsplit("::").next().unwrap_or("").to_string();
+            if !name.is_empty() && !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
+/// The trait and the type's name of an `impl Trait for Type` header:
+/// `impl<T: Read> io::Read for Body<T>` is `("Read", "Body")`. `None` for
+/// an inherent impl or a blanket one (`impl<T> Trait for T` names no type
+/// of the crate, and its type is not found later).
+fn trait_impl(header: &str) -> Option<(String, String)> {
+    let text = header.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = text.strip_prefix("unsafe ").unwrap_or(&text);
+    let rest = text.strip_prefix("impl")?;
+    let rest = skip_generics(rest.trim_start());
+    let (name, ty) = split_top(rest, " for ")?;
+    let ty = split_top(ty, " where ").map_or(ty, |(t, _)| t);
+    let name = last_segment(name.trim());
+    let ty = ty.trim().trim_start_matches('&').trim_start();
+    // `&'a mut T`: past the lifetime, then `mut` or `dyn`.
+    let ty = match ty.strip_prefix('\'') {
+        Some(lifetime) => lifetime.split_once(' ').map_or("", |(_, t)| t),
+        None => ty,
+    };
+    let ty = ty.trim_start_matches("mut ").trim_start_matches("dyn ");
+    let ty = ty.split('<').next().unwrap_or(ty);
+    let ty = ty.rsplit("::").next().unwrap_or(ty).trim();
+    (!name.is_empty() && !ty.is_empty() && ty.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        .then(|| (name, ty.to_string()))
+}
+
+/// `text` after a leading `<...>`, brackets nested.
+fn skip_generics(text: &str) -> &str {
+    if !text.starts_with('<') {
+        return text;
+    }
+    let mut depth = 0;
+    let mut prev = ' ';
+    for (at, c) in text.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' if prev != '-' => {
+                depth -= 1;
+                if depth == 0 {
+                    return text[at + 1..].trim_start();
+                }
+            }
+            _ => {}
+        }
+        prev = c;
+    }
+    ""
+}
+
+/// `text` split at the first `sep` outside `<...>` and `(...)`.
+fn split_top<'a>(text: &'a str, sep: &str) -> Option<(&'a str, &'a str)> {
+    let mut depth = 0i32;
+    let mut prev = ' ';
+    for (at, c) in text.char_indices() {
+        match c {
+            '<' | '(' | '[' => depth += 1,
+            '>' if prev != '-' => depth -= 1,
+            ')' | ']' => depth -= 1,
+            _ if depth == 0 && text[at..].starts_with(sep) => {
+                return Some((&text[..at], &text[at + sep.len()..]));
+            }
+            _ => {}
+        }
+        prev = c;
+    }
+    None
+}
+
+/// A path's last segment, with its generic arguments: `fmt::Display` is
+/// `Display`, `std::convert::From<Config>` is `From<Config>`.
+fn last_segment(path: &str) -> String {
+    let head = path.find('<').map_or(path, |at| &path[..at]);
+    let start = head.rfind("::").map_or(0, |at| at + 2);
+    path[start..].to_string()
 }
 
 /// The scope whose body holds line `line` (0-based), innermost first.
@@ -792,6 +927,37 @@ mod tests {
             .map(|n| (n.name.clone(), n.start_line))
             .collect();
         assert_eq!(found, [("spawn".to_string(), 3), ("File".to_string(), 6)]);
+    }
+
+    #[test]
+    fn trait_impls_name_the_trait_and_the_type() {
+        let pair = |h: &str| trait_impl(h).map(|(t, ty)| format!("{t} for {ty}"));
+        assert_eq!(
+            pair("impl Clone for Agent").as_deref(),
+            Some("Clone for Agent")
+        );
+        assert_eq!(
+            pair("impl<T: Read> io::Read for Body<T>").as_deref(),
+            Some("Read for Body")
+        );
+        assert_eq!(
+            pair("impl<'a, F: Fn() -> u8> From<Vec<F>> for &'a mut Pool<'a>\nwhere\n    F: Send")
+                .as_deref(),
+            Some("From<Vec<F>> for Pool")
+        );
+        assert_eq!(
+            pair("unsafe impl Send for Agent").as_deref(),
+            Some("Send for Agent")
+        );
+        assert_eq!(pair("impl Agent"), None);
+        assert_eq!(pair("impl<T> Agent<T>"), None);
+        assert_eq!(pair("impl<T> Show for [T]"), None);
+        assert_eq!(
+            derives(
+                "#[derive(Clone, Debug)] #[cfg_attr(feature = \"serde\", derive(serde::Serialize))]"
+            ),
+            ["Clone", "Debug", "Serialize"]
+        );
     }
 
     #[test]

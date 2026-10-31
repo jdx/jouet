@@ -36,7 +36,7 @@ The outline is cut to `--budget` tokens (2048 by default, estimated at 4 bytes e
 
 ## One definition
 
-With a symbol, it prints each definition the symbol names: where it is, its signature, its doc comment, the start of its body, and for a type its methods, fields or variants.
+With a symbol, it prints each definition the symbol names: where it is, its signature, its doc comment, the start of its body, and for a type its methods, fields or variants. A Rust type also gets one line naming the traits it derives and implements, such as `implements: Clone, From<Config>, Debug` for ureq's `Agent`; the methods of those impls are left out.
 
 ```output
 $ jouet docs ureq Agent::get
@@ -72,14 +72,14 @@ The nearest lockfile from the current directory up to the repository's root deci
 
 ## What public means
 
-- **Rust:** items declared plain `pub` (not `pub(crate)`), without `#[doc(hidden)]` or `#[cfg(test)]`, that a path of `pub mod`s and `pub use`s reaches from the crate root. Re-exports are followed through any number of the crate's own modules, so `reqwest::Client` resolves to `src/async_impl/client.rs`, but never into another crate: those are listed as `reexport`. Modules and re-exports are read from the source text, so ones declared inside macros (`cfg_if!`) count, and every `#[cfg]` is taken as enabled. A type's members are its inherent `pub` methods, a trait's methods and an enum's variants.
+- **Rust:** items declared plain `pub` (not `pub(crate)`), without `#[doc(hidden)]` or `#[cfg(test)]`, that a path of `pub mod`s and `pub use`s reaches from the crate root. Re-exports are followed through any number of the crate's own modules, so `reqwest::Client` resolves to `src/async_impl/client.rs`, but never into another crate. Those are listed as `reexport`, naming the crate at the version the lockfile has for it (the one the re-exporting crate depends on) and the lookup that reads it there: ``re-exported from http 1.5.0: `jouet docs http Method` ``. Modules and re-exports are read from the source text, so ones declared inside macros (`cfg_if!`) count, and every `#[cfg]` is taken as enabled. A type's members are its inherent `pub` methods, a trait's methods and an enum's variants.
 - **TypeScript:** exported declarations, and the members of exported classes and interfaces that are not `private` or `protected`.
 - **Python:** modules and names without a leading `_`, or the names in a module's `__all__` when it has one; a package's `from .x import Y` re-exports `Y`. A class's members are its public methods and `__init__`.
 - **Go:** capitalised names in the package's directory, without `_test.go` files.
 
 `--private` includes everything else, each under the path where it is defined.
 
-Doc comments are read from the source: Rust's `///` above any attributes (lines rustdoc hides from an example are left out), JSDoc's `/** */`, Python docstrings and Go's `//` comments.
+Doc comments come from the code graph's extractor: Rust's `///` right above an item, past its attributes (lines rustdoc hides from an example are left out), JSDoc's `/** */`, Python docstrings and Go's `//` comments. A Rust item with only a plain `//` comment above it has no doc.
 
 ## Caching
 
@@ -113,7 +113,7 @@ Each package version is parsed once, with the tree-sitter grammars `jouet read` 
 }
 ```
 
-An outline has `items` (each with `kind`, `path`, `signature`, `summary`, `file`, `line` and `members`, the number of members) and `more_items`. A match beyond the first three is in `more_matches`, and any beyond those are counted in `unlisted_matches`.
+An outline has `items` (each with `kind`, `path`, `signature`, `summary`, `file`, `line` and `members`, the number of members) and `more_items`. A Rust type's match has `implements`, and a re-export of another package `reexported_from`, with its `package`, `version` and `lookup`. A match beyond the first three is in `more_matches`, and any beyond those are counted in `unlisted_matches`.
 
 ## In a routine
 

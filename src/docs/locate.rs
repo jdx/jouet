@@ -4,6 +4,7 @@
 //! with the command that installs it.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// A package ecosystem, by the language its API is read in.
@@ -188,6 +189,57 @@ fn choose(
         ));
     }
     Ok(chosen)
+}
+
+/// A package name compared across spellings: `serde-core`, `serde_core`,
+/// `Typing.Extensions`.
+pub(crate) fn name_key(name: &str) -> String {
+    name.to_ascii_lowercase().replace(['-', '.'], "_")
+}
+
+/// The other packages `from`'s lockfile locks, by [`name_key`]: (name,
+/// version). For Rust, the version `from` itself depends on wins over the
+/// newest. Where a re-export of another package leads.
+pub(crate) fn neighbours(from: &Package) -> HashMap<String, (String, String)> {
+    let mut out: HashMap<String, (String, String)> = HashMap::new();
+    let Ok(text) = std::fs::read_to_string(&from.lockfile) else {
+        return out;
+    };
+    match from.lang {
+        Lang::Rust => {
+            let Ok(lock) = toml::from_str::<CargoLock>(&text) else {
+                return out;
+            };
+            let mut sorted: Vec<&CargoPackage> = lock.package.iter().collect();
+            sorted.sort_by_key(|p| version_key(&p.version));
+            for p in sorted {
+                out.insert(name_key(&p.name), (p.name.clone(), p.version.clone()));
+            }
+            if let Some(own) = lock
+                .package
+                .iter()
+                .find(|p| p.name == from.name && p.version == from.version)
+            {
+                for dep in &own.dependencies {
+                    let mut words = dep.split(' ');
+                    if let (Some(name), Some(version)) = (words.next(), words.next()) {
+                        out.insert(name_key(name), (name.to_string(), version.to_string()));
+                    }
+                }
+            }
+        }
+        Lang::Python => {
+            if let Ok(lock) = toml::from_str::<PyLock>(&text) {
+                for p in lock.package {
+                    if let Some(version) = p.version {
+                        out.insert(name_key(&p.name), (p.name, version));
+                    }
+                }
+            }
+        }
+        Lang::Ts | Lang::Go => {}
+    }
+    out
 }
 
 // --- Rust -----------------------------------------------------------------

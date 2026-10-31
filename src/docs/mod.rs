@@ -21,7 +21,7 @@ mod rust;
 mod space;
 mod text;
 
-pub(crate) use locate::{Lang, Missing, Package, locate};
+pub(crate) use locate::{Lang, Missing, Package, locate, name_key, neighbours};
 pub(crate) use text::summary;
 
 use jouet_graph::extract::Node;
@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 
 /// Bumped when the index changes shape or meaning, so a cached one is
 /// rebuilt.
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 /// A source file larger than this is left out of the index: generated code.
 const MAX_FILE_BYTES: u64 = 2 << 20;
@@ -57,6 +57,9 @@ pub(crate) struct Item {
     pub(crate) doc: Option<String>,
     /// For a method, field or variant: the definition it belongs to.
     pub(crate) owner: Option<usize>,
+    /// For a Rust type: the traits it derives and implements.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) implements: Vec<String>,
     /// Where the definition is when no public path reaches it.
     #[serde(skip)]
     home: String,
@@ -75,6 +78,7 @@ impl Item {
             signature: String::new(),
             doc: None,
             owner: None,
+            implements: Vec::new(),
             home: String::new(),
         }
     }

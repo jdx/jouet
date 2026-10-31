@@ -10,3 +10,9 @@ impl ClientBuilder {
         self
     }
 }
+
+impl From<u64> for ClientBuilder {
+    fn from(timeout: u64) -> Self {
+        ClientBuilder { timeout }
+    }
+}

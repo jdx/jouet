@@ -14,8 +14,21 @@ dependencies = [
 name = "demo-http"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "url 2.5.4",
+]
 
 [[package]]
 name = "demo-json"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "url"
+version = "1.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "url"
+version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

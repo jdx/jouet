@@ -5,6 +5,7 @@ use crate::DocsArgs;
 use crate::docs::{self, Index, Item, Lang, Missing, Package, summary};
 use jouet_output::exit::Exit;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -87,11 +88,36 @@ struct Match {
     more_lines: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     members: Vec<Member>,
-    /// For a re-export of another package's definition: the lookup that
-    /// reads it there.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    implements: Vec<String>,
+    /// For a re-export of another package's definition: where it leads.
     #[serde(skip_serializing_if = "Option::is_none")]
-    see: Option<String>,
+    reexported_from: Option<Origin>,
 }
+
+/// Another package a re-export leads to.
+#[derive(Serialize)]
+struct Origin {
+    package: String,
+    /// As this project's lockfile locks it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    /// The lookup that reads the definition there.
+    lookup: String,
+}
+
+impl Origin {
+    /// `http 1.3.1`
+    fn label(&self) -> String {
+        match &self.version {
+            Some(v) => format!("{} {v}", self.package),
+            None => self.package.clone(),
+        }
+    }
+}
+
+/// The packages of the lockfile, for [`Origin`]s.
+type Neighbours = HashMap<String, (String, String)>;
 
 #[derive(Serialize)]
 struct Member {
@@ -159,9 +185,11 @@ pub(crate) fn run(args: &DocsArgs, out: &Output) -> Exit {
         unlisted_matches: 0,
     };
     let budget = args.budget.unwrap_or(BUDGET).saturating_mul(4);
+    let neighbours = docs::neighbours(&pkg);
     let Some(symbol) = args.symbol.as_deref() else {
         report.summary = index.doc.as_deref().map(summary);
-        (report.items, report.more_items) = outline(&index, args.private, None, budget);
+        (report.items, report.more_items) =
+            outline(&index, args.private, None, budget, &neighbours);
         out.result(&report, || render(&report, &pkg));
         return Exit::Ok;
     };
@@ -180,13 +208,18 @@ pub(crate) fn run(args: &DocsArgs, out: &Output) -> Exit {
             args.private,
             item.paths.first().map(String::as_str),
             budget,
+            &neighbours,
         );
-        report.matches.push(full(&index, *one, &pkg, args.private));
+        report
+            .matches
+            .push(full(&index, *one, &pkg, args.private, &neighbours));
         out.result(&report, || render(&report, &pkg));
         return Exit::Ok;
     }
     for &i in found.iter().take(SHOWN) {
-        report.matches.push(full(&index, i, &pkg, args.private));
+        report
+            .matches
+            .push(full(&index, i, &pkg, args.private, &neighbours));
     }
     for &i in found.iter().skip(SHOWN).take(LISTED) {
         let item = &index.items[i];
@@ -257,6 +290,7 @@ fn outline(
     private: bool,
     within: Option<&str>,
     budget: usize,
+    neighbours: &Neighbours,
 ) -> (Vec<Entry>, usize) {
     let all = docs::outline(index, private, within);
     let mut used = 0;
@@ -267,7 +301,14 @@ fn outline(
             kind: item.kind.clone(),
             path: item.paths.first().cloned().unwrap_or_default(),
             signature: one_line(&item.signature),
-            summary: item.doc.as_deref().map(summary).filter(|s| !s.is_empty()),
+            summary: item
+                .doc
+                .as_deref()
+                .map(summary)
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    origin(item, neighbours).map(|o| format!("re-exported from {}", o.label()))
+                }),
             file: item.file.clone(),
             line: item.line,
             members: docs::members(index, i, private).len(),
@@ -283,7 +324,7 @@ fn outline(
     (entries, more)
 }
 
-fn full(index: &Index, i: usize, pkg: &Package, private: bool) -> Match {
+fn full(index: &Index, i: usize, pkg: &Package, private: bool, neighbours: &Neighbours) -> Match {
     let item = &index.items[i];
     let file = pkg.api_root.join(&item.file);
     let members = docs::members(index, i, private);
@@ -296,9 +337,8 @@ fn full(index: &Index, i: usize, pkg: &Package, private: bool) -> Match {
             body(&file, item, pkg.lang)
         };
     Match {
-        see: (item.kind == "reexport")
-            .then(|| elsewhere(&item.signature))
-            .flatten(),
+        reexported_from: origin(item, neighbours),
+        implements: item.implements.clone(),
         kind: item.kind.clone(),
         path: item.paths.first().cloned().unwrap_or_default(),
         also: item.paths.iter().skip(1).cloned().collect(),
@@ -327,9 +367,28 @@ fn full(index: &Index, i: usize, pkg: &Package, private: bool) -> Match {
     }
 }
 
-/// `jouet docs serde_core Serialize` for `pub use serde_core::Serialize;`,
-/// and `jouet docs typing Any` for `from typing import Any`.
-fn elsewhere(declaration: &str) -> Option<String> {
+/// Where a re-export of another package leads, with that package's locked
+/// version.
+fn origin(item: &Item, neighbours: &Neighbours) -> Option<Origin> {
+    if item.kind != "reexport" {
+        return None;
+    }
+    let (package, symbol) = elsewhere(&item.signature)?;
+    let (package, version) = match neighbours.get(&docs::name_key(&package)) {
+        Some((name, version)) => (name.clone(), Some(version.clone())),
+        None => (package, None),
+    };
+    Some(Origin {
+        lookup: format!("jouet docs {package} {symbol}"),
+        package,
+        version,
+    })
+}
+
+/// The package and the symbol a re-export names: `("serde_core",
+/// "Serialize")` for `pub use serde_core::Serialize;`, `("typing", "Any")`
+/// for `from typing import Any`.
+fn elsewhere(declaration: &str) -> Option<(String, String)> {
     let (package, symbol) = if let Some(rest) = declaration.strip_prefix("from ") {
         let (module, name) = rest.split_once(" import ")?;
         (
@@ -342,7 +401,7 @@ fn elsewhere(declaration: &str) -> Option<String> {
         let (package, symbol) = path.split_once("::")?;
         (package.to_string(), symbol.to_string())
     };
-    Some(format!("jouet docs {package} {symbol}"))
+    Some((package, symbol))
 }
 
 fn cap_doc(doc: &str) -> String {
@@ -482,8 +541,16 @@ fn render(r: &Report, pkg: &Package) -> String {
             let _ = writeln!(text, "also: {}", m.also.join(", "));
         }
         let _ = writeln!(text, "{}", m.signature);
-        if let Some(see) = &m.see {
-            let _ = writeln!(text, "defined in another package: `{see}` reads it there");
+        if !m.implements.is_empty() {
+            let _ = writeln!(text, "implements: {}", m.implements.join(", "));
+        }
+        if let Some(origin) = &m.reexported_from {
+            let _ = writeln!(
+                text,
+                "re-exported from {}: `{}`",
+                origin.label(),
+                origin.lookup
+            );
         }
         if let Some(doc) = &m.doc {
             text.push('\n');
