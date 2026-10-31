@@ -81,7 +81,8 @@ writes() {
 	assert_equal "$(jq -r '.unresolved_threads' <<<"$pr")" "1"
 	assert_equal "$(jq -c '.checks' <<<"$pr")" '{"pass":1}'
 	# No other repository was asked about, and nothing was written.
-	run grep -c -v -- "--repo $REPO\$\|^auth status" "$BATS_TEST_TMPDIR/entire.log"
+	# -E: macOS grep has no \| in a basic regex.
+	run grep -c -v -E -e "--repo $REPO\$|^auth status" "$BATS_TEST_TMPDIR/entire.log"
 	assert_output 0
 	assert_equal "$(writes)" ""
 }
