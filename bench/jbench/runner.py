@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import arms as arms_mod
+from . import credentials
 from . import tasks as tasks_mod
 from .fake_github import FakeGitHub
 from .harness import HARNESSES, Harness
@@ -243,11 +244,24 @@ def execute(
         cmd = harness.command(harness.binary, task.prompt, opts, workdir)
         timeout_s = min(task.timeout_s, opts["timeout_s"]) if opts.get("timeout_s") else task.timeout_s
         config_dir = Path(env[harness.config_dir_env])
-        agent = run_agent(
-            harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"), keep / "agent.jsonl"
-        )
+        lent = credentials.lend(arms_mod.credential_files(harness), config_dir)
+        try:
+            agent = run_agent(
+                harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"), keep / "agent.jsonl"
+            )
+        finally:
+            # Before anything else can fail: a refresh the run made is the
+            # user's only working login.
+            notes = credentials.give_back(lent)
         usage = harness.usage(agent["lines"], config_dir)
-        return {"env": env, "setup": setup, "agent": agent, "usage": usage, "config_dir": config_dir}
+        return {
+            "env": env,
+            "setup": setup,
+            "agent": agent,
+            "usage": usage,
+            "config_dir": config_dir,
+            "credentials": notes,
+        }
 
     if fixture is not None:
         with FakeGitHub(fixture, keep / "github-requests.jsonl") as fake:
@@ -280,6 +294,7 @@ def execute(
         "ledger": ledger(env) if arm.jouet else None,
         "github": github,
         "setup": ran["setup"],
+        "credentials": ran["credentials"],
     }
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
@@ -287,6 +302,26 @@ def execute(
     if not opts.get("keep_work"):
         shutil.rmtree(run_dir, ignore_errors=True)
     return record
+
+
+def snapshot(jouet_bin: Path, work_root: Path) -> Path:
+    """A copy of the jouet under test that the whole suite runs.
+
+    `target/debug/jouet` can be a link into a shared build cache (mbx's), and
+    a build in another checkout during a suite that runs for hours can clean
+    it up. A copy also pins what is measured: rebuilding mid-suite does not
+    change the binary later runs use."""
+    copy = work_root / "jouet-under-test" / "jouet"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(jouet_bin.resolve(), copy)
+    copy.chmod(0o755)
+    return copy
+
+
+def auth_failed(record: dict[str, Any]) -> bool:
+    """Whether a run failed before the model answered, for lack of a login."""
+    u = record.get("usage") or {}
+    return bool(u.get("is_error")) and not u.get("input_tokens") and "authenticat" in str(u.get("result") or "").lower()
 
 
 def copy_transcripts(config_dir: Path, dest: Path) -> None:
@@ -302,6 +337,7 @@ def copy_transcripts(config_dir: Path, dest: Path) -> None:
 def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: Any) -> list[dict[str, Any]]:
     budget = Budget(opts.get("max_total_tokens"))
     work_root = Path(tempfile.mkdtemp(prefix="jouet-bench-"))
+    opts = {**opts, "jouet_bin": snapshot(opts["jouet_bin"], work_root)}
     records = []
     results_path = out_dir / "runs.jsonl"
     try:
@@ -336,6 +372,13 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 + (f"  stopped: {record['stopped']}" if record.get("stopped") else "")
                 + (f"  error: {record['error']}" if record.get("error") else "")
             )
+            for note in record.get("credentials") or []:
+                log(f"    credentials: {note}")
+            if auth_failed(record):
+                # Every later run of this harness would fail the same way,
+                # and record a failure that says nothing about jouet.
+                log(f"stopping: {p.harness} could not authenticate ({u.get('result')}); log in again and rerun")
+                break
     finally:
         if not opts.get("keep_work"):
             shutil.rmtree(work_root, ignore_errors=True)

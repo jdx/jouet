@@ -98,6 +98,10 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/affected-tests.luau"),
     ),
     ("job-start.luau", include_str!("../rules/job-start.luau")),
+    (
+        "scoped-lint.luau",
+        include_str!("../rules/scoped-lint.luau"),
+    ),
     ("checks.luau", include_str!("../rules/checks.luau")),
 ];
 

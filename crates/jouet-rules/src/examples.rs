@@ -86,6 +86,9 @@ pub struct Case {
     pub read_lines: Option<u32>,
     /// The fnox project the call runs in, if any.
     pub fnox: Option<crate::Fnox>,
+    /// Whether `jouet.git.state()` reports a dirty work tree; None when it
+    /// has no answer, as for every other probe in an example.
+    pub git_dirty: Option<bool>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -108,6 +111,10 @@ pub struct Example {
     /// The call runs in a project that uses fnox.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub fnox: bool,
+    /// The work tree the example gives `jouet.git.state()`: `clean` or
+    /// `dirty`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tree: Option<&'static str>,
     /// `fires`, `fires deny`, `fires record test` or `quiet`.
     pub expected: String,
     /// `deny`, `warn`, `record test`, `quiet` or `error: ...`.
@@ -144,6 +151,9 @@ impl Example {
         }
         if self.fnox {
             extra.push("fnox project".into());
+        }
+        if let Some(tree) = self.tree {
+            extra.push(format!("{tree} tree"));
         }
         if !extra.is_empty() {
             if !text.is_empty() {
@@ -242,6 +252,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         seen: None,
         read_lines: None,
         fnox: None,
+        git_dirty: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -385,6 +396,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
             secrets: f.secrets.clone(),
             files: f.files.clone(),
         }),
+        git_dirty: t.git.as_ref().map(|g| g.dirty),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -461,6 +473,9 @@ impl Engine {
             };
             // Each example is a call of its own: probes are asked afresh.
             self.new_call();
+            if let Some(dirty) = case.git_dirty {
+                self.stub_git_state(dirty);
+            }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
                 Ok((decision, records)) => {
@@ -489,6 +504,7 @@ impl Engine {
                 seen: case.seen == Some(true),
                 read_lines: case.read_lines,
                 fnox: case.fnox.is_some(),
+                tree: case.git_dirty.map(|d| if d { "dirty" } else { "clean" }),
                 expected: match &case.scope {
                     Some(scope) => format!("{} {scope}", case.expect.text()),
                     None => case.expect.text(),
@@ -500,6 +516,25 @@ impl Engine {
             });
         }
         out
+    }
+
+    /// Gives `jouet.git.state()` an example's answer for this call: a clean
+    /// work tree, or one with a changed file. Only a script asks, so a VM
+    /// that cannot start has nobody to answer.
+    fn stub_git_state(&self, dirty: bool) {
+        if let Ok(vm) = self.vm() {
+            let state = serde_json::json!({
+                "detached": false,
+                "dirty": dirty,
+                "changed": u32::from(dirty),
+                "untracked": 0,
+                "conflicted": 0,
+            });
+            vm.shared
+                .cache
+                .borrow_mut()
+                .insert("git".into(), Ok(Some(state)));
+        }
     }
 
     /// Whether a rule has examples of both kinds and passes every one: what

@@ -9,6 +9,7 @@ description: Search code like rg, with the matches grouped by the function they 
 ```text
 jouet search PATTERN [PATH]... [-F] [-i] [-w] [-g GLOB]... [--hidden] [-l]
              [--budget BYTES] [--file-budget BYTES] [--again]
+             [--structural --lang LANG]
 ```
 
 The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. Every flag is listed in the [CLI reference](/cli/search).
@@ -46,6 +47,19 @@ jouet embeds ripgrep's own libraries (`ignore`, `grep-searcher` and `grep-regex`
   A file that changed is new again. `--again` shows everything anyway.
 
 Each file's definitions are cached by its size and modification time in `$XDG_CACHE_HOME/jouet/defs/`, since parsing a large file takes tens of milliseconds and an agent searches the same files again and again. Long lines are cut at 200 bytes, with the number of bytes left out. `-l` lists the matching files with their counts instead of the lines.
+
+## Structural search
+
+`--structural --lang LANG` matches the pattern as code, with [ast-grep](https://ast-grep.github.io)'s matcher, instead of as a regular expression. `$X` matches one node and `$$$X` any number, and only files in that language are searched. The results are grouped, budgeted and remembered like any search:
+
+```output
+$ jouet search --structural --lang rust '$X.unwrap()'
+src/lib.rs
+  function load (1-6)
+    2: std::fs::read_to_string(path).unwrap()
+```
+
+Quote the pattern in single quotes, or the shell expands `$X`. [`jouet edit --pattern`](/commands/edit#structural-rewrites) rewrites what a pattern matches, and lists the rules for writing patterns.
 
 ## Sessions
 

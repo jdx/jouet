@@ -180,6 +180,29 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	git -C repo -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm init
+	lint() {
+		jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd, tool_name: "Bash",
+			tool_input: {command: "cargo clippy --workspace -- -D warnings 2>&1 | head -20"}}' |
+			jouet hook claude pre-tool-use
+	}
+
+	# Freshly merged or checked out: nothing to iterate on.
+	run --separate-stderr lint
+	assert_success
+	assert_output ""
+
+	echo 'fn main() { todo!() }' >repo/main.rs
+	run --separate-stderr lint
+	assert_success
+	assert_output --partial 'jouet diag check --changed'
+	assert_output --partial '[jouet rule: scoped-lint]'
+}
+
 @test "stop for codex reads exit codes from the transcript and always prints JSON" {
 	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["/bin/zsh","-lc","cargo clippy -- -D warnings"],"exit_code":101}}}' >rollout.jsonl
 

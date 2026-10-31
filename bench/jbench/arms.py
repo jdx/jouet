@@ -4,9 +4,10 @@ Every run starts from nothing: its own `HOME`, harness config directory
 (`CLAUDE_CONFIG_DIR` or `CODEX_HOME`), XDG directories, `TMPDIR` and a
 `bin/` directory that is the front of a short `PATH`. Nothing reads or
 writes the user's own `~/.claude`, `~/.codex` or jouet state; the one
-exception is the harness's credentials file, which is linked (not copied,
-so a token refresh lands where the harness will look next time) unless an
-API key is passed in the environment instead.
+exception is the harness's credentials file, which a run gets a copy of
+unless an API key or token is passed in the environment instead. A token
+the run refreshes is written back afterwards (see `credentials`), so the
+user stays logged in.
 
 The arms differ only in what `bin/` holds and what the config directory
 says:
@@ -156,17 +157,18 @@ def build(
         "GIT_TERMINAL_PROMPT": "0",
         "DISABLE_AUTOUPDATER": "1",
     }
-    linked = False
     for key in harness.auth_env:
         if os.environ.get(key):
             env[key] = os.environ[key]
-            linked = True
-    if not linked:
-        for name in harness.auth_files:
-            source = user_config_dir(harness) / name
-            if source.exists():
-                (config_dir / name).symlink_to(source)
     return env
+
+
+def credential_files(harness: Harness) -> list[Path]:
+    """The user's credentials files a run needs a copy of: none when an API
+    key or token in the environment authenticates it."""
+    if any(os.environ.get(key) for key in harness.auth_env):
+        return []
+    return [user_config_dir(harness) / name for name in harness.auth_files]
 
 
 def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path) -> dict[str, Any]:

@@ -195,6 +195,7 @@ fires = [
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
 | `read_lines` | How many lines of files the call reads, as the hook would count them. |
 | `fnox` | The call runs in a fnox project whose config defines these names: `fnox = {}`, or `fnox = { secrets = ["STRIPE_KEY"], files = ["secrets.env"] }`. Omitted, it does not. |
+| `git` | What `jouet.git.state()` reports for a script: `git = { dirty = false }` for a work tree with nothing uncommitted, `true` for one with changes. Omitted, the probe has no answer, as every other probe in an example. |
 
 Every rule needs at least one example of each kind:
 
@@ -241,7 +242,7 @@ ok    force-push         12 examples passed
 ok    print-secrets      44 examples passed
 ok    secret-files       25 examples passed
 ok    push-untested      13 examples passed
-ok    scoped-lint        17 examples passed
+ok    scoped-lint        21 examples passed
 ok    affected-tests     22 examples passed
 ok    job-start          26 examples passed
 ok    job-ready          12 examples passed
