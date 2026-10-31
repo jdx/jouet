@@ -3,6 +3,7 @@
 //! Early development: commands land one at a time.
 
 mod affected;
+mod ci;
 mod cmd;
 mod config;
 mod git;
@@ -70,6 +71,8 @@ enum Cmd {
     Test(TestArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
+    /// Run GitHub Actions jobs on this machine
+    Ci(CiArgs),
     /// List, test and trust the rules jouet's hooks run
     Rule(RuleArgs),
     /// Run a routine: a Luau program on jouet's primitives (also `joue`)
@@ -862,6 +865,55 @@ pub struct WaitCmdArgs {
     command: Vec<String>,
 }
 
+/// Run GitHub Actions jobs on this machine
+#[derive(Args)]
+pub struct CiArgs {
+    #[usage(subcommand)]
+    cmd: CiCmd,
+}
+
+#[derive(Subcommands)]
+pub enum CiCmd {
+    /// Run a workflow's jobs here with jactionlint, and show why any failed
+    Run(CiRunArgs),
+}
+
+/// Run a workflow's jobs here with jactionlint, and show why any failed
+///
+/// Runs `jactionlint run`, which needs no container engine: each job runs in
+/// a copy of the checkout, in the OS sandbox, with a throwaway home and no
+/// secrets unless given. Prints one line for the run, then each failed step
+/// with the end of its output (cut like `wait ci`'s log excerpts) and the
+/// jobs that were skipped and why; the whole transcript is kept in a log.
+/// WORKFLOW is a file of .github/workflows (the extension is optional), a
+/// path, or a workflow's `name:`. --check takes a check's name as `wait ci`
+/// prints it and runs the job behind it. Arguments after `--` go to
+/// `jactionlint run` as they are, such as `--secret NAME=VALUE`. It shows
+/// what happens on this machine, not whether GitHub will pass: jobs for
+/// another OS are skipped. Exits 1 when a job failed, 3 when no workflow or
+/// job matches, 4 when jactionlint is missing or the run could not start.
+#[derive(Args)]
+pub struct CiRunArgs {
+    /// The workflow. Needed when the repository has several and no --check
+    /// is given
+    workflow: Option<String>,
+    /// Run only this job and the jobs it needs. Repeatable
+    #[usage(short = 'j', long, value_name = "ID")]
+    job: Vec<String>,
+    /// Run the job behind this check name, such as `unit (ubuntu-latest)`
+    #[usage(long, value_name = "NAME")]
+    check: Option<String>,
+    /// The event that triggers the workflow (default push)
+    #[usage(short = 'e', long, value_name = "EVENT")]
+    event: Option<String>,
+    /// Lines of each failed step to show (default 60; 0 shows all of it)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Arguments for `jactionlint run`, after `--`
+    #[usage(double_dash = "required", value_name = "ARGS")]
+    args: Vec<String>,
+}
+
 /// List, test and trust the rules jouet's hooks run
 ///
 /// Rules are `[[rule]]` tables in TOML files: built in, in
@@ -1456,6 +1508,7 @@ fn main() -> ExitCode {
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Test(args) => cmd::test::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
+        Cmd::Ci(args) => cmd::ci::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::Run(args) => return cmd::run::run(args, &out),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),

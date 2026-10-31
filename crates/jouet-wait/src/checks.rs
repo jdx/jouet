@@ -88,6 +88,10 @@ pub(crate) struct Check {
     pub(crate) log_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub(crate) log_path: Option<String>,
+    /// The command that runs this job on this machine, for a failed
+    /// Actions job when jactionlint is installed.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) local: Option<String>,
 }
 
 impl Check {
@@ -105,6 +109,7 @@ impl Check {
             log_excerpt: Vec::new(),
             log_truncated: false,
             log_path: None,
+            local: None,
         }
     }
 
@@ -294,8 +299,42 @@ pub(crate) fn failure_blocks(checks: &[Check]) -> String {
         if let Some(path) = &c.log_path {
             let _ = writeln!(out, "  full log: {path}");
         }
+        if let Some(local) = &c.local {
+            let _ = writeln!(out, "  locally: {local}");
+        }
     }
     out
+}
+
+/// Fills in, for each failed Actions job, the `jouet ci run` command that
+/// runs it on this machine. `workflow` names the workflow of a job that
+/// does not know its own.
+pub(crate) fn suggest_local(checks: &mut [Check], workflow: Option<&str>) {
+    for c in checks
+        .iter_mut()
+        .filter(|c| c.state.failed() && c.job_id.is_some())
+    {
+        let mut cmd = String::from("jouet ci run");
+        if let Some(workflow) = c.workflow.as_deref().or(workflow) {
+            cmd.push(' ');
+            cmd.push_str(&shell_quote(workflow));
+        }
+        cmd.push_str(" --check ");
+        cmd.push_str(&shell_quote(&c.name));
+        c.local = Some(cmd);
+    }
+}
+
+/// `s` as one shell word: as it is when that is safe, else single-quoted.
+fn shell_quote(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_./:@%+=,".contains(&b));
+    if plain {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
 }
 
 #[cfg(test)]
@@ -360,5 +399,31 @@ mod tests {
         assert!(!required.selects(&c));
         c.required = true;
         assert!(required.selects(&c));
+    }
+
+    #[test]
+    fn a_failed_actions_job_gets_a_local_command() {
+        let mut failed = Check::new("unit (ubuntu-latest, 1.23)".into(), State::Fail);
+        failed.job_id = Some(7);
+        let mut named = Check::new("lint".into(), State::Fail);
+        named.job_id = Some(8);
+        named.workflow = Some("CI".into());
+        let mut external = Check::new("codecov/patch".into(), State::Fail);
+        external.job_id = None;
+        let mut passed = Check::new("build".into(), State::Pass);
+        passed.job_id = Some(9);
+        let mut checks = vec![failed, named, external, passed];
+        suggest_local(&mut checks, Some("Run's workflow"));
+        assert_eq!(
+            checks[0].local.as_deref(),
+            Some("jouet ci run 'Run'\\''s workflow' --check 'unit (ubuntu-latest, 1.23)'")
+        );
+        assert_eq!(
+            checks[1].local.as_deref(),
+            Some("jouet ci run CI --check lint")
+        );
+        assert_eq!(checks[2].local, None, "not an Actions job");
+        assert_eq!(checks[3].local, None, "it passed");
+        assert!(failure_blocks(&checks).contains("  locally: jouet ci run CI --check lint\n"));
     }
 }

@@ -80,6 +80,7 @@ export default defineConfig({
           { text: "jouet search", link: "/commands/search" },
           { text: "jouet read", link: "/commands/read" },
           { text: "jouet wait", link: "/commands/wait" },
+          { text: "jouet ci run", link: "/commands/ci" },
           { text: "jouet pr status", link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
@@ -152,6 +153,12 @@ export default defineConfig({
                   { text: "pid", link: "/cli/wait/pid" },
                   { text: "cmd", link: "/cli/wait/cmd" },
                 ],
+              },
+              {
+                text: "ci",
+                link: "/cli/ci/",
+                collapsed: true,
+                items: [{ text: "run", link: "/cli/ci/run" }],
               },
               {
                 text: "rule",

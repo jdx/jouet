@@ -47,12 +47,15 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
             }),
             Err(message) => out.error(Exit::Usage, &message),
         },
-        WaitCmd::Run(a) => match run_args(&a) {
-            Ok((repo, id, lines)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
-                Ok(RunWait::new(repo, id, lines))
-            }),
-            Err(message) => out.error(Exit::Usage, &message),
-        },
+        WaitCmd::Run(a) => {
+            match run_args(&a) {
+                Ok((repo, id, lines)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
+                    Ok(RunWait::new(repo, id, lines)
+                        .local_runner(crate::guide::on_path("jactionlint")))
+                }),
+                Err(message) => out.error(Exit::Usage, &message),
+            }
+        }
         WaitCmd::Pr(a) => match pr_args(&a) {
             Ok((t, until)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
                 Ok(PrWait::new(t, until, confirm_conflict))
@@ -174,6 +177,7 @@ fn ci_wait(
         log_lines: log_lines(a.log_lines, a.no_logs)?,
         appear_timeout,
         confirm_conflict,
+        local_runner: crate::guide::on_path("jactionlint"),
     };
     Ok((
         target(a.pr.as_deref(), a.repo.as_deref())?,
