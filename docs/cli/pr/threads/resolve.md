@@ -12,6 +12,6 @@ Every ID is checked before any thread is resolved. A PR given after the IDs must
 
 ## Flags
 - **`--reply <TEXT>`** — Reply with TEXT before resolving each thread
-- **`--ignore-resolved`** — Skip threads that are already resolved instead of failing
+- **`--ignore-resolved`** — Leave threads that are already resolved alone; without this, replies still go into them
 - **`--dry-run`** — Check everything and show what would happen, changing nothing
 - **`-h --help`** — Print help

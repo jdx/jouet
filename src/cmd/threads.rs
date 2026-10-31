@@ -466,7 +466,7 @@ fn reply(args: &ThreadsArgs, a: &ReplyArgs, out: &Output) -> Result<Exit, Stop> 
         unresolve: false,
     }];
     let pr = a.pr.as_deref().or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, false, a.dry_run, out)
+    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
 }
 
 fn resolve(args: &ThreadsArgs, a: &ResolveArgs, out: &Output) -> Result<Exit, Stop> {
@@ -487,7 +487,7 @@ fn resolve(args: &ThreadsArgs, a: &ResolveArgs, out: &Output) -> Result<Exit, St
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, false, a.dry_run, out)
+    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
 }
 
 fn unresolve(args: &ThreadsArgs, a: &UnresolveArgs, out: &Output) -> Result<Exit, Stop> {
@@ -502,7 +502,7 @@ fn unresolve(args: &ThreadsArgs, a: &UnresolveArgs, out: &Output) -> Result<Exit
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());
-    write_threads(args, pr, &entries, false, false, a.dry_run, out)
+    write_threads(args, pr, &entries, false, a.dry_run, out)
 }
 
 fn apply(args: &ThreadsArgs, a: &ApplyArgs, out: &Output) -> Result<Exit, Stop> {
@@ -529,7 +529,7 @@ fn apply(args: &ThreadsArgs, a: &ApplyArgs, out: &Output) -> Result<Exit, Stop> 
     };
     let entries = write::parse_apply(&text).map_err(|e| Stop::new(Exit::Usage, e))?;
     let pr = prs.first().map(|s| s.as_str()).or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, true, a.dry_run, out)
+    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
 }
 
 fn id(s: &str) -> Result<u64, Stop> {
@@ -596,7 +596,6 @@ fn write_threads(
     pr: Option<&str>,
     entries: &[Entry],
     ignore_resolved: bool,
-    retry_safe: bool,
     dry_run: bool,
     out: &Output,
 ) -> Result<Exit, Stop> {
@@ -611,7 +610,6 @@ fn write_threads(
         footer: config.reply_footer(),
         sha: if uses_sha { git::short_head() } else { None },
         ignore_resolved,
-        retry_safe,
     };
     let mut results =
         write::plan(entries, &pr, &options).map_err(|e| Stop(e.exit, e.message, e.hint))?;
@@ -705,6 +703,9 @@ fn render_written(w: &Written) -> String {
             ]
         };
         done.extend(words.iter().filter(|(on, _)| *on).map(|(_, w)| *w));
+        if o.already_resolved {
+            done.push("thread already resolved");
+        }
         s.push_str(&done.join(", "));
         if let Some(e) = &o.failed {
             failed = true;
