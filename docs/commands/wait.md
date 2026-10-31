@@ -93,14 +93,14 @@ FAIL release  step "Require auto-merge on the release PR"  required
 - **Base branch moved.** When new commits on the base branch touch files this PR changes, a `base_touched` event names the files. The wait keeps going. (GitHub only so far.)
 - **GitLab and Forgejo.** On GitLab the checks are the head's commit statuses, which hold its pipeline jobs: a job allowed to fail counts as skipped, every other job is required, and a failed job's trace is excerpted like an Actions log. On Forgejo the checks are the head's commit statuses, where Forgejo Actions reports; its API has no job logs, so a failed check keeps its URL. `--json` adds `host` for a PR on either. See [GitLab and Forgejo](/forges).
 
-The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CONFLICT` or `NO_CHECKS`. `--json` prints `repo`, `pr`, `head_sha`, `head_changed`, `result` (`success`, `failure`, `timeout`, `conflict` or `no_checks`), `elapsed_s`, `counts` and `checks`; failed checks also carry `failed_step`, `log_excerpt`, `log_truncated`, `log_path` and, with jactionlint installed, `local`. The Entire Gates check carries its gates under `entire`, and `counts.derived` counts it when it only repeats other failures.
+The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CONFLICT` or `NO_CHECKS`. `--json` prints `repo`, `pr`, `head_sha`, `head_changed`, `result` (`success`, `failure`, `timeout`, `conflict` or `no_checks`), `elapsed_s`, `counts` and `checks`; failed checks also carry `failed_step`, `log_excerpt`, `log_truncated`, `log_path` and, with jactionlint installed, `local`. The Entire Gates check carries its gates under `entire`, and `counts.derived` counts it when it is not a failure of CI. `--jsonl` adds `check_registered`, `check_completed`, `head_changed`, `base_touched` and `rate_limited` events.
 
 ### Entire Gates
 
 An [Entire Gates](/entire-gates) check that fails only because other checks failed, because the branch is behind or conflicting with its base, or because the trail still waits for an approval, is derived: it is not a failure of CI. It does not end the wait, so a rerun of the real failures is waited for rather than cut short by the old gate result. It is counted as `derived`, gets no `FAIL` block, and a closing line points at the real cause:
 
 ```text
-FAIL jdx/mise#15220 @ abaf9ac  52 pass, 1 fail, 31 skipped, 0 pending, 1 derived  (1s)
+FAIL jdx/mise#15220 @ e96d4ee  52 pass, 1 fail, 31 skipped, 0 pending, 1 derived  (3s)
 
 FAIL release  step "Require auto-merge on the release PR"  required
   ...
@@ -109,7 +109,7 @@ Entire Gates fails for nothing CI did: checks: CI checks have not passed
   the failed checks above are the cause
 ```
 
-A branch that is not up to date gets the command that merges its base. An Entire Gates check failing on open findings is a failure, with its gates in the `FAIL` block and a line pointing at `jouet pr threads PR`, which lists them. `--jsonl` adds `check_registered`, `check_completed`, `head_changed`, `base_touched` and `rate_limited` events.
+A branch that is not up to date gets the command that merges its base. An Entire Gates check failing on open findings is a failure, with its gates in the `FAIL` block and a line pointing at `jouet pr threads PR`, which lists them.
 
 ### Polling cost and shared state
 

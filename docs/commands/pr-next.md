@@ -50,7 +50,7 @@ The states are checked in a fixed order, and the first that applies is the answe
 
 The data and the reasons come from the same query and [attention codes](/commands/pr-status#attention) as `jouet pr status`, so the two commands never disagree. `--settle` waits for an unknown mergeable state the same way.
 
-Two choices are deliberate:
+Three choices are deliberate:
 
 - **Updating is a merge.** Both `conflict` and `behind_base` suggest merging the base into the branch, never a rebase and force-push.
 - **Entire Gates is not a check of its own.** A failing Entire Gates check is never `checks_failing`: its checks gate repeats the other checks, its up-to-date gate is `behind_base`, and its findings gate is `entire_findings`.

@@ -818,6 +818,11 @@ fn write_threads(
             w
         })
         .collect();
+    // Every handle is matched before anything is posted, threads included.
+    let plan = match &entire {
+        Some(entire) => Some(entire::plan(entire, &repo, &branch, &wanted)?),
+        None => None,
+    };
     let mut ok = match (&pr, host.as_mut()) {
         _ if dry_run => {
             write::dry_run(&mut results);
@@ -827,10 +832,10 @@ fn write_threads(
         _ => true,
     };
     let mut changed = None;
-    if let Some(entire) = &entire
+    if let (Some(entire), Some(plan)) = (&entire, &plan)
         && ok
     {
-        let (written, done) = entire::write(entire, &repo, &branch, &wanted, dry_run)?;
+        let (written, done) = entire::write(entire, &repo, plan, dry_run);
         ok = done;
         changed = Some(written);
     }

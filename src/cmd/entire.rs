@@ -319,17 +319,22 @@ pub(super) fn require(probe: Probe) -> Result<Entire, Stop> {
     })
 }
 
-/// Applies the changes to findings on the trail of `branch`: every handle
-/// is matched first, then each change is made in order, stopping at the
-/// first that fails. A finding already closed (or, to reopen, open) is left
-/// alone.
-pub(super) fn write(
+/// The changes asked of findings on one trail, each handle matched to one
+/// finding.
+pub(super) struct Plan {
+    trail: u64,
+    steps: Vec<(Wanted, Finding)>,
+}
+
+/// Matches every handle to one finding on the trail of `branch`, changing
+/// nothing, so a bad handle stops a call before anything is posted
+/// anywhere, GitHub threads included.
+pub(super) fn plan(
     entire: &Entire,
     repo: &Repo,
     branch: &str,
     wanted: &[Wanted],
-    dry_run: bool,
-) -> Result<(Written, bool), Stop> {
+) -> Result<Plan, Stop> {
     let remote = |e: String| Stop::new(Exit::Remote, e);
     let trail = entire
         .trail(repo, None, branch)
@@ -372,11 +377,20 @@ pub(super) fn write(
                 ));
             }
         };
-        planned.push((w, finding));
+        planned.push((w.clone(), finding.clone()));
     }
+    Ok(Plan {
+        trail: trail.number,
+        steps: planned,
+    })
+}
+
+/// Makes the planned changes in order, stopping at the first that fails. A
+/// finding already closed (or, to reopen, open) is left alone.
+pub(super) fn write(entire: &Entire, repo: &Repo, plan: &Plan, dry_run: bool) -> (Written, bool) {
     let mut results = Vec::new();
     let mut ok = true;
-    for (w, finding) in planned {
+    for (w, finding) in &plan.steps {
         // Resolved or dismissed, a finding no longer blocks: either is left
         // alone by a resolve or a dismiss, as a resolved thread is.
         let already = match w.change {
@@ -402,7 +416,7 @@ pub(super) fn write(
             if dry_run {
                 let args = entire::change_args(
                     repo,
-                    trail.number,
+                    plan.trail,
                     &finding.id,
                     w.change,
                     w.message.as_deref(),
@@ -411,7 +425,7 @@ pub(super) fn write(
                 outcome.command = Some(format!("entire {}", words.join(" ")));
             } else if let Err(e) = entire.change(
                 repo,
-                trail.number,
+                plan.trail,
                 &finding.id,
                 w.change,
                 w.message.as_deref(),
@@ -429,13 +443,13 @@ pub(super) fn write(
         }
         results.push(outcome);
     }
-    Ok((
+    (
         Written {
-            trail: trail.number,
+            trail: plan.trail,
             results,
         },
         ok,
-    ))
+    )
 }
 
 /// One line per finding changed, and a line saying GitHub threads were not
