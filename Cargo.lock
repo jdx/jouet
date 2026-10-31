@@ -419,6 +419,7 @@ dependencies = [
  "jouet-rules",
  "jouet-search",
  "jouet-wait",
+ "libc",
  "mise-agent-env",
  "regex",
  "serde",

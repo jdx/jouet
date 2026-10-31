@@ -59,8 +59,17 @@ mise run lint-fix
 mise run ci
 ```
 
-[hk](https://hk.jdx.dev) runs the same rustfmt and Clippy checks from `hk.pkl`,
-plus jactionlint on the workflows: `mise x hk -- hk check --all` to verify,
+`mise run lint` includes `lint:deps`, which runs
+[cargo-shear](https://github.com/Boshen/cargo-shear) and fails on a dependency
+no code uses, including one left in `[workspace.dependencies]`, and on a `.rs`
+file no crate compiles. `cargo-shear --fix` removes unused dependencies. If one
+is needed though no code names it (it is there only to turn on a feature, for
+example), add it to `ignored` under the crate's
+`[package.metadata.cargo-shear]` with a comment saying why; test fixtures go in
+`ignored-paths`.
+
+[hk](https://hk.jdx.dev) runs the same rustfmt, Clippy and cargo-shear checks
+from `hk.pkl`, plus jactionlint on the workflows: `mise x hk -- hk check --all` to verify,
 `mise x hk -- hk fix` to fix, or `mise x hk -- hk install --mise` to run them on
 commit.
 
