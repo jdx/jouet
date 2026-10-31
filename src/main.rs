@@ -2,6 +2,7 @@
 //!
 //! Early development: commands land one at a time.
 
+mod affected;
 mod cmd;
 mod config;
 mod git;
@@ -67,6 +68,8 @@ enum Cmd {
     ReviewPackage(ReviewPackageArgs),
     /// Search files like rg, within a budget, grouped by symbol
     Search(SearchArgs),
+    /// Run the test suite, or only the tests a change affects
+    Test(TestArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
     /// List, test and trust the rules jouet's hooks run
@@ -128,6 +131,43 @@ pub struct CommitArgs {
     /// Refused: jouet commit always runs hooks
     #[usage(long, hide)]
     no_verify: bool,
+}
+
+/// Run the test suite, or only the tests a change affects
+///
+/// Without --affected, runs the repository's test task as the full suite: a
+/// mise `test` task, a package.json `test` script, Cargo.toml (`cargo test
+/// --workspace`), a justfile or Makefile `test` target or go.mod, else the
+/// whole suite of each test runner found. With --affected, runs only the
+/// tests that the changes since the merge base with --since (default: the
+/// upstream, else the default branch), uncommitted and untracked files
+/// included, affect. Adapters delegate to each runner's own selection:
+/// vitest's and jest's module graphs, pytest-testmon when it is installed,
+/// else a static import graph. The whole suite runs instead when a
+/// lockfile, tool versions, CI, the test configuration, a conftest or setup
+/// file, or a file no adapter can trace changed; nothing runs for docs
+/// only. Each test is listed with the chain of imports that picked it, and
+/// the command. Affected runs count as partial: the full suite still has to
+/// pass before you finish or push. Words after `--` go to the runner. Exits
+/// 1 when tests fail, 2 for a usage error (the runner's too), 4 when no
+/// runner is found or installed.
+#[derive(Args)]
+pub struct TestArgs {
+    /// Run only the tests the changes affect
+    #[usage(long)]
+    affected: bool,
+    /// Measure changes from the merge base with REF (default: the upstream,
+    /// else the default branch)
+    #[usage(long, value_name = "REF")]
+    since: Option<String>,
+    /// Use only this adapter: vitest, jest or pytest
+    #[usage(long, value_name = "NAME")]
+    adapter: Option<String>,
+    /// Print what would run and why, running nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// Arguments for the test runner, after `--`
+    extra: Vec<String>,
 }
 
 /// Write one file for reviewing a range of commits
@@ -1557,6 +1597,7 @@ fn main() -> ExitCode {
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),
         Cmd::Search(args) => cmd::search::run(&args, &out),
+        Cmd::Test(args) => cmd::test::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::Run(args) => return cmd::run::run(args, &out),
