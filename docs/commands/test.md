@@ -1,15 +1,16 @@
 ---
-description: Run the full test suite, or only the tests a change affects, chosen by each ecosystem's own tool and explained test by test.
+description: Run the full test suite, only the tests a change affects, or any test or build command, and get each failure with its error and a log of the whole output.
 ---
 
 # jouet test
 
 `jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It is one command for every ecosystem: adapters hand the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data), or to jouet's code graph where there is none, and jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
 
-`jouet test` without `--affected` runs the full suite.
+`jouet test` without `--affected` runs the full suite, and `jouet test --cmd -- CMD` runs any other test, e2e or build command. Every run keeps its whole output in a log and prints, for an agent, [only what it needs](#what-a-run-prints): one line when it passes, each failure with its error when it fails.
 
 ```text
-jouet test [--affected] [--since REF] [--adapter NAME] [--dry-run] [-- ARGS...]
+jouet test [--affected] [--since REF] [--adapter NAME] [--dry-run] [--budget BYTES] [-- ARGS...]
+jouet test --cmd [--budget BYTES] -- CMD...
 ```
 
 ```sh
@@ -20,12 +21,58 @@ vitest (vitest's module graph): 2 test files
   test/sum.test.js: imports src/sum.js (changed)
   ignored: README.md (documentation)
   run: node_modules/.bin/vitest run --changed 1a2b3c4d5e6f
-...vitest's own output...
-vitest: passed in 1.2s
+vitest: passed in 1.2s: 5 passed (full log: ~/.local/state/jouet/logs/test-1793449700864-936641-0.log)
 This was a partial run. Run the full suite (`jouet test`) before you finish or push.
 ```
 
 `--dry-run` prints the same explanation and runs nothing. The text lists the first 20 tests with their reasons and counts the rest; `--json` lists them all. Words after `--` go to the test runner. The flags are listed in the [CLI reference](/cli/test).
+
+## What a run prints
+
+An agent that runs a suite and cuts its output with `head`, `tail` or `grep` often cuts off the failure it needed, and runs the whole suite again with another filter. `jouet test` runs it once:
+
+- **The whole output goes to a log**, stdout and stderr together, under jouet's log directory (`$JOUET_LOG_DIR`, else `~/.local/state/jouet/logs`), kept for a week. Its path is printed on every run: read more from it with `grep` or `jouet read` rather than running the tests again.
+- **A pass is one line**, with the counts the runner printed.
+- **A failure shows each failing test** by name, with the lines that explain it: the assertion or panic, the diff, the compiler error with its code frame. A long one keeps its first and last lines and the error and diff lines between. Failures are shown in the order the output has them until `--budget` bytes (default 4000; `0` for no limit), then only their names, then a count, so nothing is left out without saying so.
+
+```sh
+$ jouet test --cmd -- cargo test
+cmd: failed (exit 101) in 0.1s: 3 failed, 40 passed
+FAIL tests::adds_negative_numbers
+  checking negatives
+
+  thread 'tests::adds_negative_numbers' (936708) panicked at src/lib.rs:9:74:
+  assertion `left == right` failed: sum of negatives
+    left: -5
+   right: -6
+FAIL tests::parses_padded_input
+  thread 'tests::parses_padded_input' (936709) panicked at src/lib.rs:10:64:
+  parse failed: Err("invalid digit found in string")
+FAIL tests::unwraps_none
+  thread 'tests::unwraps_none' (936750) panicked at src/lib.rs:11:62:
+  a value was configured
+full log: ~/.local/state/jouet/logs/test-1793449700778-936641-0.log
+```
+
+Failures are recognised, by their lines rather than by the command, in the output of cargo test and nextest, rustc (errors by file and line; warnings are counted), tsc, go test and go build, pytest, unittest, jest, vitest and TAP, which bats prints. One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
+
+This is for agents, and for plain display (pipes, redirects, CI). A person at a terminal sees the output as it runs, then the line with the counts and the log's path. `--json` puts the counts and failures in the document (see [JSON](#json)).
+
+## Any command: `--cmd`
+
+`jouet test --cmd -- CMD` runs CMD, directly rather than through a shell, in the current directory, with the same log and digest: one test, an e2e suite, a build.
+
+```sh
+$ jouet test --cmd -- cargo build
+cmd: failed (exit 101) in 0.1s
+FAIL src/lib.rs:1:45: error[E0425]: cannot find value `undefined_var` in this scope
+    |
+  1 | pub fn add(a: i32, b: i32) -> i32 { a + b + undefined_var }
+    |                                             ^^^^^^^^^^^^^ not found in this scope
+full log: ~/.local/state/jouet/logs/test-1793449979466-951516-0.log
+```
+
+The built-in `piped-test-output` rule warns (it never denies) when an agent pipes a test, build or e2e run into `head`, `tail`, `grep`, `rg` or `sed -n`, or writes its output to a file and greps that file in the same call, and suggests the `jouet test --cmd` command for it. It leaves lints to the `scoped-lint` rule, and stays quiet for `--help` and `--list`, and for output written to a file the call does not read back. With `jouet setup`'s hooks, `jouet test --cmd -- CMD` is recorded as a run of CMD: `jouet test --cmd -- cargo build` is a build, and `jouet test --cmd -- cargo test --workspace` a full test run.
 
 ## The safety model
 
@@ -141,15 +188,15 @@ run = "jouet test --affected"
 | Code | Meaning |
 |---|---|
 | `0` | the tests passed, or nothing needed to run |
-| `1` | the tests failed (the runner exited non-zero) |
-| `2` | a usage error: `--since` or `--adapter` without `--affected`, an unknown adapter or ref, or pytest's or unittest's own usage error |
-| `4` | no adapter or test task was found, the runner is not installed, or not in a git repository |
+| `1` | the tests failed (the runner exited non-zero), or the `--cmd` command exited non-zero |
+| `2` | a usage error: `--since` or `--adapter` without `--affected`, `--cmd` without a command or with `--affected`, an unknown adapter or ref, or pytest's or unittest's own usage error |
+| `4` | no adapter or test task was found, the runner or the `--cmd` program is not installed, or not in a git repository |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.
 
 ## JSON
 
-`--json` prints one document after the runs, and sends the runners' output to stderr:
+`--json` prints one document after the runs; the runners' output goes only to each suite's `log`:
 
 ```json
 {
@@ -170,13 +217,30 @@ With several adapters, every suite runs, and the exit is `1` if any failed.
         { "path": "src/sum.js", "status": "modified", "effect": "source" }
       ],
       "command": ["node_modules/.bin/vitest", "run", "--changed", "1a2b3c4d5e6f"],
-      "exit_code": 0,
-      "duration_ms": 1204
+      "exit_code": 1,
+      "duration_ms": 1204,
+      "log": "/home/me/.local/state/jouet/logs/test-1793449700778-936641-0.log",
+      "passed": 4,
+      "failed": 1,
+      "failures": [
+        {
+          "name": "test/calc.test.js [ test/calc.test.js ]",
+          "lines": [
+            "Error: Cannot find module './missing.js' imported from /work/test/calc.test.js",
+            " ❯ test/calc.test.js:1:1",
+            "      1| import { nope } from './missing.js'",
+            "       | ^",
+            "      2|"
+          ]
+        }
+      ]
     }
   ],
-  "ok": true
+  "ok": false
 }
 ```
+
+After a run, each suite has its `log` and what jouet read in it: `passed`, `failed` and `skipped`, summed over every summary line the runner printed, and `warnings` (rustc's); `failures`, each with its `name` and `lines`, as many as fit `--budget`; `more_failures`, the names of those after; and `failures_omitted`, how many did not fit even by name. A count of `0` is left out, as are empty lists. With `--cmd`, the one suite's `adapter` is `cmd`.
 
 `decision` is `affected`, `full` or `nothing`, with a `reason` for the last two. `via` is the chain of imports from a changed file to the test; it is absent when the runner picked a test through something jouet's own scan does not follow (a path alias, a package), and a `note` says how many. `env` lists variables jouet set for the command, such as `COVERAGE_CORE`.
 

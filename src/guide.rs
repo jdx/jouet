@@ -92,7 +92,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "test",
         Some(
-            "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`; for anything else it exits 4, so run the project's own command",
+            "running tests or a build: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push (a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`). `jouet test --cmd -- CMD` runs any other test, e2e or build command. Each prints one line when it passes, or each failure with its error within --budget bytes, and saves the whole output to a log it names: read that instead of piping the run through head, tail or grep, or running it again",
         ),
     ),
     (

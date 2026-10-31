@@ -28,6 +28,7 @@ secret-files        enabled  deny    builtin  builtin  2026-10-31  Reading a pla
 push-untested       enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
 scoped-lint         enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
 affected-tests      enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
+piped-test-output   enabled  warn    builtin  builtin  2026-10-31  Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget.
 pitchfork-start     enabled  deny    builtin  builtin  2026-10-31  Starting by hand a server the project's pitchfork config declares runs a second copy beside pitchfork's, without its ready check, log or restarts; `pitchfork start` runs the declared one.
 pitchfork-stop      enabled  deny    builtin  builtin  2026-10-31  Killing a daemon pitchfork runs, by its port or its command line, looks to pitchfork like a crash and skips its graceful stop; `pitchfork stop` or `restart` does it by name.
 pitchfork-logs      enabled  warn    builtin  builtin  2026-10-31  Following a daemon's log with `pitchfork logs --follow` never returns to the agent; `-n` prints the end of it and returns.
@@ -253,6 +254,7 @@ ok    secret-files        25 examples passed
 ok    push-untested       13 examples passed
 ok    scoped-lint         21 examples passed
 ok    affected-tests      22 examples passed
+ok    piped-test-output   33 examples passed
 ok    pitchfork-start     8 examples passed
 ok    pitchfork-stop      9 examples passed
 ok    pitchfork-logs      7 examples passed
@@ -260,13 +262,13 @@ ok    job-start           26 examples passed
 ok    job-ready           12 examples passed
 ok    job-logs            11 examples passed
 ok    job-stop            15 examples passed
-ok    claimed-path        16 examples passed
-ok    checks              66 examples passed
+ok    claimed-path        18 examples passed
+ok    checks              74 examples passed
 ok    reread              12 examples passed
 ok    large-read          11 examples passed
 ok    unbudgeted-search   23 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
-26 of 27 rules passed their examples
+27 of 28 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
@@ -293,7 +295,7 @@ stays quiet on (near misses):
 
 ## Scripts
 
-Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Several built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too. `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop, and `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged. `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
+Most rules are a command shape and a message, and a matcher says that in a few lines. When a rule needs logic, such as comparing numbers, reading a task name or asking jouet's state, it names a Luau script beside its file. Several built-in rules do: `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them; `push-untested` matches a push, then asks the ledger and git whether a full test run passed at this tree; `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too. `piped-test-output` matches a test or build runner in a call that also runs `head`, `tail` or `grep`, then follows the pipeline, and the file the output went to, to see whether it is that run's output being cut. `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop, and `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged. `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
 
 ```toml
 [[rule]]

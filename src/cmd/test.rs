@@ -1,16 +1,22 @@
 //! `jouet test`: the full suite, or with `--affected` only the tests a
-//! change affects, explained.
+//! change affects, explained, or with `--cmd` any test or build command.
+//! Each run's output goes to a log, and what it says is digested
+//! (`crate::testlog`) for an agent.
 
 use super::Output;
 use crate::TestArgs;
 use crate::affected::{self, Decision, Plan, Suite};
+use crate::testlog::{self, Digest};
+use jouet_output::display::Mode;
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::fs::File;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 /// How many selected tests the text output explains before counting the
 /// rest; the runner lists what it runs anyway.
@@ -57,6 +63,11 @@ struct SuiteReport {
     exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     duration_ms: Option<u64>,
+    /// The run's whole output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log: Option<String>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    digest: Option<Digest>,
 }
 
 #[derive(Serialize)]
@@ -85,11 +96,26 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             Some("jouet test --affected --since main"),
         );
     }
+    if args.cmd && args.affected {
+        return out.error(
+            Exit::Usage,
+            "--cmd runs the command given, so it cannot also select the affected tests",
+        );
+    }
+    if args.cmd && args.extra.is_empty() {
+        return out.error_with_hint(
+            Exit::Usage,
+            "--cmd needs the command after `--`",
+            Some("jouet test --cmd -- cargo test -p mycrate"),
+        );
+    }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => return out.error(Exit::Failed, &format!("reading the current directory: {e}")),
     };
-    let planned = if args.affected {
+    let planned = if args.cmd {
+        Ok(given(&cwd, args))
+    } else if args.affected {
         affected(&cwd, args)
     } else {
         full(&cwd, args)
@@ -98,25 +124,37 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         Ok(planned) => planned,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
-    if !out.json {
+    // The agent wrote the command it gave, so only a dry run repeats it.
+    if !out.json && (!args.cmd || args.dry_run) {
         print!("{}", text(&report));
     }
+    // A person watches the run; an agent reads what it said, once it ends.
+    let stream = !out.json && out.mode == Mode::Human;
+    let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
     if !args.dry_run {
-        for (suite, job) in report.suites.iter_mut().zip(&jobs) {
+        for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
-            let code = match execute(job, out.json) {
-                Ok(code) => code,
+            let log = log_path(i);
+            let (code, ms) = match execute(job, &log, stream) {
+                Ok(ran) => ran,
                 Err(e) => return out.error(Exit::Precondition, &e),
             };
-            suite.exit_code = Some(code.0);
-            suite.duration_ms = Some(code.1);
-            let suite_exit = (job.exit)(code.0);
+            suite.exit_code = Some(code);
+            suite.duration_ms = Some(ms);
+            suite.log = Some(log.display().to_string());
+            let output = std::fs::read(&log).unwrap_or_default();
+            suite.digest = Some(testlog::digest(
+                &String::from_utf8_lossy(&output),
+                code != 0,
+                budget,
+            ));
+            let suite_exit = (job.exit)(code);
             if suite_exit == Exit::Failed || exit == Exit::Ok {
                 exit = suite_exit;
             }
             if !out.json {
-                println!("{}", outcome(suite));
+                print!("{}", outcome(suite, stream));
             }
         }
     }
@@ -131,25 +169,131 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     exit
 }
 
-/// Runs a job with the terminal's output, or with its stdout sent to
-/// stderr when stdout holds the JSON document. Its exit code (1 when a
-/// signal ended it) and how long it took.
-fn execute(job: &Job, json: bool) -> Result<(i32, u64), String> {
+/// A new log for the `i`th suite of this run. The first also removes the
+/// test logs older than [`LOG_KEPT`].
+fn log_path(i: usize) -> PathBuf {
+    let dir = jouet_output::paths::log_dir();
+    if i == 0 {
+        prune_logs(&dir);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    dir.join(format!("test-{stamp}-{}-{i}.log", std::process::id()))
+}
+
+/// How long a test run's log is kept: runs come often, and a log can be
+/// large.
+const LOG_KEPT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+fn prune_logs(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > LOG_KEPT);
+        if old && name.starts_with("test-") && name.ends_with(".log") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Runs a job with its stdout and stderr in `log`, copied to stdout as it
+/// runs when `stream`. Its exit code (1 when a signal ended it) and how long
+/// it took.
+fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
+    let saving = |e: std::io::Error| format!("saving the output to {}: {e}", log.display());
+    if let Some(dir) = log.parent() {
+        std::fs::create_dir_all(dir).map_err(saving)?;
+    }
+    let file = File::create(log).map_err(saving)?;
     let mut command = Command::new(&job.argv[0]);
     command
         .args(&job.argv[1..])
         .envs(job.env.iter().map(|(k, v)| (k, v)))
         .current_dir(&job.dir)
-        .stdin(Stdio::null());
-    if json {
-        command.stdout(std::io::stderr());
-    }
+        .stdin(Stdio::null())
+        .stdout(file.try_clone().map_err(saving)?)
+        .stderr(file);
     let started = Instant::now();
-    let status = command
-        .status()
+    let mut child = command
+        .spawn()
         .map_err(|e| format!("running {}: {e}", job.argv[0]))?;
+    let status = if stream {
+        follow(&mut child, log)
+    } else {
+        child.wait()
+    }
+    .map_err(|e| format!("running {}: {e}", job.argv[0]))?;
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     Ok((status.code().unwrap_or(1), ms))
+}
+
+/// Copies what the child writes to its log onto stdout until it exits.
+fn follow(child: &mut Child, log: &Path) -> std::io::Result<ExitStatus> {
+    let mut reader = File::open(log)?;
+    let mut stdout = std::io::stdout();
+    let mut buf = [0u8; 8192];
+    loop {
+        let status = child.try_wait()?;
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            stdout.write_all(&buf[..n])?;
+        }
+        stdout.flush()?;
+        if let Some(status) = status {
+            return Ok(status);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// `jouet test --cmd -- CMD`: the command given, here.
+fn given(cwd: &Path, args: &TestArgs) -> (Report, Vec<Option<Job>>) {
+    let root = cwd
+        .ancestors()
+        .find(|d| d.join(".git").exists())
+        .unwrap_or(cwd);
+    let dir = match cwd.strip_prefix(root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => rel.to_string_lossy().replace('\\', "/"),
+        _ => ".".into(),
+    };
+    let report = SuiteReport {
+        adapter: "cmd".into(),
+        precision: None,
+        dir,
+        decision: "full",
+        reason: Some("the command given".into()),
+        tests: Vec::new(),
+        files: Vec::new(),
+        note: None,
+        command: Some(args.extra.clone()),
+        env: BTreeMap::new(),
+        exit_code: None,
+        duration_ms: None,
+        log: None,
+        digest: None,
+    };
+    let job = Job {
+        argv: args.extra.clone(),
+        env: Vec::new(),
+        dir: cwd.to_path_buf(),
+        exit: Box::new(|code| if code == 0 { Exit::Ok } else { Exit::Failed }),
+    };
+    (
+        report_of(false, None, None, vec![report], args.dry_run),
+        vec![Some(job)],
+    )
 }
 
 /// `jouet test`: the repository's test task, or the whole suite of each
@@ -183,6 +327,8 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             env: BTreeMap::new(),
             exit_code: None,
             duration_ms: None,
+            log: None,
+            digest: None,
         };
         let job = Job {
             argv,
@@ -316,6 +462,8 @@ fn suite_report(suite: &Suite) -> SuiteReport {
         env: suite.adapter.env().into_iter().collect(),
         exit_code: None,
         duration_ms: None,
+        log: None,
+        digest: None,
     }
 }
 
@@ -438,12 +586,70 @@ fn text(report: &Report) -> String {
     s
 }
 
-/// How a suite's run ended, in a line.
-fn outcome(suite: &SuiteReport) -> String {
+/// How a suite's run ended: a line with its counts and its log, and for an
+/// agent (`!streamed`) the failures it found, cut to the budget.
+fn outcome(suite: &SuiteReport, streamed: bool) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
-    match suite.exit_code {
+    let mut s = match suite.exit_code {
         Some(0) => format!("{}: passed in {secs:.1}s", suite.adapter),
         Some(code) => format!("{}: failed (exit {code}) in {secs:.1}s", suite.adapter),
-        None => format!("{}: did not run", suite.adapter),
+        None => return format!("{}: did not run\n", suite.adapter),
+    };
+    let log = suite.log.as_deref().unwrap_or("");
+    let Some(digest) = &suite.digest else {
+        return s + "\n";
+    };
+    let counts = counts(digest);
+    if !counts.is_empty() {
+        let _ = write!(s, ": {counts}");
     }
+    if streamed || suite.exit_code == Some(0) {
+        let _ = writeln!(s, " (full log: {log})");
+        return s;
+    }
+    s.push('\n');
+    for failure in &digest.failures {
+        let _ = writeln!(s, "FAIL {}", failure.name);
+        for line in &failure.lines {
+            if line.is_empty() {
+                s.push('\n');
+            } else {
+                let _ = writeln!(s, "  {line}");
+            }
+        }
+    }
+    let more = digest.more_failures.len() as u64 + digest.failures_omitted;
+    if more > 0 {
+        let what = if more == 1 { "failure" } else { "failures" };
+        let _ = write!(s, "... {more} more {what}");
+        if !digest.more_failures.is_empty() {
+            let _ = write!(s, ": {}", digest.more_failures.join(", "));
+            if digest.failures_omitted > 0 {
+                let _ = write!(s, ", and {} more", digest.failures_omitted);
+            }
+        }
+        s.push('\n');
+    }
+    let _ = writeln!(s, "full log: {log}");
+    s
+}
+
+/// `3 failed, 40 passed, 1 skipped, 2 warnings`, leaving out what is 0.
+fn counts(digest: &Digest) -> String {
+    let warnings = if digest.warnings == 1 {
+        "warning"
+    } else {
+        "warnings"
+    };
+    [
+        (digest.failed, "failed"),
+        (digest.passed, "passed"),
+        (digest.skipped, "skipped"),
+        (digest.warnings, warnings),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, what)| format!("{n} {what}"))
+    .collect::<Vec<_>>()
+    .join(", ")
 }

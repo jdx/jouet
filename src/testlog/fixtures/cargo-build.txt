@@ -1,0 +1,23 @@
+   Compiling demo v0.1.0 (/work)
+error[E0425]: cannot find value `undefined_var` in this scope
+ --> src/lib.rs:1:61
+  |
+1 | pub fn add(a: i32, b: i32) -> i32 { let unused = 1; a + b + undefined_var }
+  |                                                             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0308]: mismatched types
+ --> src/lib.rs:2:23
+  |
+2 | fn dead() -> String { 5 }
+  |              ------   ^ expected `String`, found integer
+  |              |
+  |              expected `String` because of return type
+  |
+help: try using a conversion method
+  |
+2 | fn dead() -> String { 5.to_string() }
+  |                        ++++++++++++
+
+Some errors have detailed explanations: E0308, E0425.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `demo` (lib) due to 2 previous errors

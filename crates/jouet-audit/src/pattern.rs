@@ -73,7 +73,7 @@ impl Pattern {
                 "`jouet wait` blocks until the condition holds, in one call (built-in rule `sleep-poll`)"
             }
             Self::HeadOnTestOutput => {
-                "run tests once with the full log saved, and read the failures from it; mbx's agent display prints only failures"
+                "`jouet test --cmd -- CMD` runs it once with the full log saved and prints each failure within a budget (built-in rule `piped-test-output`)"
             }
             Self::StaleTokenPrefix => {
                 "fix the token in the environment once, or have the session start without it"

@@ -107,7 +107,9 @@ vitest (vitest's module graph): 2 test files
 	assert_failure 1
 	assert_line 'vitest (vitest'"'"'s module graph): 1 test file'
 	assert_line '  test/fmt.test.js: imports src/fmt.js (changed)'
-	assert_line --regexp '^vitest: failed \(exit 1\) in [0-9.]+s$'
+	assert_line --regexp '^vitest: failed \(exit 1\) in [0-9.]+s: 1 failed(, [0-9]+ passed)?$'
+	assert_line --regexp '^FAIL test/fmt.test.js > '
+	assert_line --regexp '^full log: .+\.log$'
 	assert_line "This was a partial run. Run the full suite (\`jouet test\`) before you finish or push."
 	assert_output --partial '1 failed'
 
@@ -124,8 +126,10 @@ vitest (vitest's module graph): 2 test files
 
 	run --separate-stderr jouet test --affected --json -- --ci
 	assert_success
-	# The runner's output went to stderr, so stdout holds only the document.
-	assert_equal "$(grep -c '^Tests:' <<<"$stderr")" 1
+	# The runner's output went to the log, so stdout holds only the document.
+	assert_equal "$stderr" ""
+	log="$(jq -r '.suites[0].log' <<<"$output")"
+	assert_equal "$(grep -c '^Tests:' "$log")" 1
 	run jq -c '[.suites[0].adapter, .suites[0].tests, .suites[0].command[1]]' <<<"$output"
 	assert_output '["jest",[{"path":"test/calc.test.js","via":["src/sum.js","src/calc.js","test/calc.test.js"]},{"path":"test/sum.test.js","via":["src/sum.js","test/sum.test.js"]}],"--ci"]'
 }
@@ -141,7 +145,7 @@ vitest (vitest's module graph): 2 test files
 	assert_line '  tests/test_arith.py: imports src/calc/core/arith.py (changed)'
 	assert_line '  tests/test_ops.py: imports src/calc/ops.py → src/calc/core/arith.py (changed)'
 	assert_line --partial '2 passed'
-	assert_line --regexp '^pytest: passed in [0-9.]+s$'
+	assert_line --regexp '^pytest: passed in [0-9.]+s: 2 passed \(full log: .+\.log\)$'
 
 	printf '\n# shared\n' >>tests/conftest.py
 	run --separate-stderr jouet test --affected --dry-run
@@ -204,7 +208,8 @@ vitest (vitest's module graph): 2 test files
 
 	run --separate-stderr jouet test --json
 	assert_success
-	assert_equal "$(grep -c '^the whole suite$' <<<"$stderr")" 1
+	log="$(jq -r '.suites[0].log' <<<"$output")"
+	assert_equal "$(grep -c '^the whole suite$' "$log")" 1
 	run jq -c '[.affected, .suites[0].decision, .suites[0].command, .suites[0].exit_code]' <<<"$output"
 	assert_output '[false,"full",["mise","run","test"],0]'
 }
@@ -229,7 +234,7 @@ vitest (vitest's module graph): 2 test files
 	assert_line "unittest: the full suite (the runner's own, as there is no test task)"
 	# tests/ is not a package, so discovery has to start there.
 	assert_line '  run: python3 -m unittest discover -s tests'
-	assert_stderr --partial 'Ran 2 tests'
+	assert_line --regexp '^unittest: passed in [0-9.]+s: 2 passed \(full log: .+\)$'
 
 	# A different size from the original: Python's bytecode cache checks the
 	# source's size and its mtime in whole seconds.
@@ -239,8 +244,8 @@ vitest (vitest's module graph): 2 test files
 	assert_line --partial 'unittest (a static import graph (best-effort'
 	assert_line '  tests/test_arith.py: imports calc/arith.py (changed)'
 	refute_line --partial 'tests/test_strings.py'
-	assert_stderr --partial 'Ran 1 test'
-	assert_line --regexp '^unittest: failed \(exit 1\) in [0-9.]+s$'
+	assert_line --regexp '^unittest: failed \(exit 1\) in [0-9.]+s: 1 failed$'
+	assert_line --regexp '^FAIL test_add '
 }
 
 @test "usage errors and missing runners exit 2 and 4" {
@@ -304,4 +309,111 @@ ran() {
 	ran 'jouet test --affected' 0
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
 	assert_output ""
+}
+
+# A script that prints a TAP run, as bats does: N tests, the ones in FAILING
+# failing with two comment lines each, exiting 1 when any failed.
+tap_script() {
+	local n=$1 failing=$2
+	{
+		printf '#!/bin/sh\necho 1..%s\n' "$n"
+		for i in $(seq 1 "$n"); do
+			if [[ " $failing " == *" $i "* ]]; then
+				printf 'echo "not ok %s case %s"\necho "# (in test file t.bats, line %s)"\necho "#   expected %s, got 0"\n' "$i" "$i" "$i" "$i"
+			else
+				printf 'echo "ok %s case %s"\n' "$i" "$i"
+			fi
+		done
+		[[ -n $failing ]] && printf 'exit 1\n'
+	} >run-tests
+	chmod +x run-tests
+}
+
+@test "--cmd runs the command given, and a pass is one line with the log's path" {
+	tap_script 3 ""
+
+	run --separate-stderr jouet test --cmd -- ./run-tests
+
+	assert_success
+	assert_output --regexp '^cmd: passed in [0-9.]+s: 3 passed \(full log: .+\.log\)$'
+	assert_equal "${#lines[@]}" 1
+	assert_equal "$stderr" ""
+	log="${output##*full log: }"
+	log="${log%)}"
+	assert_equal "$(cat "$log")" "$(./run-tests)"
+}
+
+@test "a failing run shows each failure up to the budget, then names the rest" {
+	tap_script 6 "2 3 4 5 6"
+
+	run --separate-stderr jouet test --cmd --budget 150 -- ./run-tests
+
+	assert_failure 1
+	assert_line --index 0 --regexp '^cmd: failed \(exit 1\) in [0-9.]+s: 5 failed, 1 passed$'
+	assert_line --index 1 'FAIL case 2'
+	assert_line --index 2 '  (in test file t.bats, line 2)'
+	assert_line --index 3 '    expected 2, got 0'
+	assert_line --index 4 'FAIL case 3'
+	assert_line --index 7 '... 3 more failures: case 4, case 5, case 6'
+	assert_line --index 8 --regexp '^full log: .+\.log$'
+
+	run --separate-stderr jouet test --cmd --budget 150 --json -- ./run-tests
+	assert_failure 1
+	run jq -c '.suites[0] | [.adapter, .exit_code, .passed, .failed, [.failures[].name], .failures[0].lines, .more_failures, (.log | test("\\.log$"))]' <<<"$output"
+	assert_output '["cmd",1,1,5,["case 2","case 3"],["(in test file t.bats, line 2)","  expected 2, got 0"],["case 4","case 5","case 6"],true]'
+}
+
+@test "output no failure is recognised in ends the failing run's digest" {
+	# shellcheck disable=SC2016 # the script expands $i, not this shell
+	printf '#!/bin/sh\nfor i in $(seq 1 40); do echo "step $i"; done\necho "linker died"\nexit 2\n' >build
+	chmod +x build
+
+	run --separate-stderr jouet test --cmd -- ./build
+
+	assert_failure 1
+	assert_line 'FAIL no failure recognised; the end of the output'
+	assert_line '  ... 21 lines skipped'
+	assert_line '  linker died'
+}
+
+@test "--cmd needs a command, cannot select, and a missing program exits 4" {
+	run --separate-stderr jouet test --cmd
+	assert_failure 2
+	assert_equal "$stderr" "jouet: --cmd needs the command after \`--\`
+hint: jouet test --cmd -- cargo test -p mycrate"
+
+	run --separate-stderr jouet test --cmd --affected -- true
+	assert_failure 2
+
+	run --separate-stderr jouet test --cmd -- no-such-program-here
+	assert_failure 4
+	assert_stderr --partial 'running no-such-program-here'
+}
+
+@test "a person at a terminal sees the output as it runs" {
+	tap_script 2 ""
+
+	run in_tty jouet test --cmd -- ./run-tests
+
+	assert_success
+	assert_output --partial 'ok 2 case 2'
+	assert_output --regexp 'cmd: passed in [0-9.]+s: 2 passed \(full log: '
+}
+
+@test "the hooks steer a cut test run to --cmd, and record a --cmd build as a build" {
+	payload() {
+		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
+	}
+
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test -q -p app 2>&1 | grep -E 'panicked|FAILED' | head -20")"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial "Run \`jouet test --cmd -- cargo test -q -p app\` instead of cutting its output with grep."
+	assert_output --partial '[jouet rule: piped-test-output]'
+
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
+	assert_output ""
+
+	ran 'jouet test --cmd -- cargo build' 1
+	run --separate-stderr jq -c '.runs.build | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '["jouet test --cmd -- cargo build",1]'
 }

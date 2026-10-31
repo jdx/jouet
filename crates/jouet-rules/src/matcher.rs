@@ -219,7 +219,7 @@ fn command(m: &Matcher, c: &shell::Command, call: &Call) -> bool {
     {
         return false;
     }
-    let prints = !c.stdout_redirected && !c.captured && c.op != Some(shell::Op::Pipe);
+    let prints = c.stdout_to.is_none() && !c.captured && c.op != Some(shell::Op::Pipe);
     if m.prints.is_some_and(|want| prints != want) {
         return false;
     }

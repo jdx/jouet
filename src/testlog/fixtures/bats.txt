@@ -1,0 +1,10 @@
+1..4
+ok 1 adds
+not ok 2 greets
+# (in test file t.bats, line 5)
+#   `[ "$output" = "hello there" ]' failed
+ok 3 skips # skip not yet
+not ok 4 fails with output
+# (in test file t.bats, line 10)
+#   `false' failed
+# some diagnostic

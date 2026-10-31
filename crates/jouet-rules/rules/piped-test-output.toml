@@ -1,0 +1,63 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "piped-test-output"
+why = "Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["test"]
+# The matcher finds a test or build runner in a call that also runs a
+# program that cuts output; the script checks that it cuts that run's own
+# output, through a pipe or a file the call writes and reads back.
+script = "piped-test-output.luau"
+
+[rule.match]
+command = [
+  "cargo", "mbx", "cross", "go", "pytest", "python", "python3", "vitest", "jest",
+  "npx", "bunx", "bats", "rspec", "tsc", "npm", "pnpm", "yarn", "bun", "mise",
+  "make", "just", "task", "dotnet", "gradle", "gradlew", "mvn",
+]
+with = { command = ["head", "tail", "grep", "egrep", "fgrep", "rg", "sed"] }
+
+[rule.examples]
+fires = [
+  "cargo build 2>&1 | grep -E '^(error|warning)' -A8 | head -30",
+  "cargo build -q 2>&1 | tail -40",
+  "cargo test -q -p jouet-rules job_start 2>&1 | grep -E 'test result|panicked' -A4 | head -6",
+  "cd ~/src/app && cargo test --workspace --all-targets 2>&1 | grep -E 'FAILED|panicked' | head",
+  "cargo nextest run 2>&1 | tee out.log | tail -5",
+  "cargo test 2>&1 | tee /tmp/t.log; grep -n panicked /tmp/t.log",
+  "test/bats/bin/bats test/pitchfork.bats 2>&1 | grep -vE '^ok' | head -40",
+  "timeout 900 mise run test > /tmp/test.log 2>&1; grep -E 'not ok|FAILED' /tmp/test.log",
+  "mise run test:e2e > $S/e2e.log 2>&1; tail -30 $S/e2e.log",
+  "go test ./internal/sandbox 2>&1 | tail -2",
+  "npm test 2>&1 | tail -20",
+  "pnpm run build | grep error",
+  "python3 -m pytest -x 2>&1 | sed -n '1,40p'",
+  "npx vitest run 2>&1 | head -50",
+  "make 2>&1 | tail",
+]
+quiet = [
+  # Left to `scoped-lint`.
+  "cargo clippy --workspace 2>&1 | head -50",
+  "mise run lint 2>&1 | tail",
+  # Output kept whole, in a file not read back, or not cut.
+  "cargo test > /tmp/test.log 2>&1",
+  "cargo test > /tmp/test.log 2>&1; grep -n add src/lib.rs",
+  "cargo test 2>&1 | tee out.log",
+  "cargo build 2>&1 | wc -l",
+  "cargo test 2>&1 | sed 's/^/  /'",
+  "cargo test; grep -rn TODO src",
+  "sed -n '1,20p' src/lib.rs && cargo test",
+  # Not a test or a build, or only asking about one.
+  "cargo test --help | head",
+  "cargo test -- --list | grep parse",
+  "pytest --collect-only -q | tail -3",
+  "cargo run --bin demo | head",
+  "npm install 2>&1 | tail -3",
+  "go vet ./... | head",
+  "git log --oneline | head",
+  "echo 'cargo test | head'",
+  "jouet test --cmd -- cargo test",
+]

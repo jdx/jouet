@@ -36,7 +36,7 @@ Transcript: <fixtures>/claude/projects/-work-app/d1d1d1d1-0000-4000-8000-0000000
 
 ## Patterns jouet audit knows
 - sleep_poll (3 calls): `jouet wait` blocks until the condition holds, in one call (built-in rule `sleep-poll`)
-- head_on_test_output (2 calls): run tests once with the full log saved, and read the failures from it; mbx's agent display prints only failures
+- head_on_test_output (2 calls): `jouet test --cmd -- CMD` runs it once with the full log saved and prints each failure within a budget (built-in rule `piped-test-output`)
 - repeated_failure (1 calls): read why it failed before running it again; `jouet wait cmd` for a deliberate retry
 
 ## Timeline (4 phases)

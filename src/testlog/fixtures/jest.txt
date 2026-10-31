@@ -1,0 +1,44 @@
+FAIL test/calc.test.js
+  ● add › adds
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 4
+    Received: 5
+
+    [0m [90m 1 |[39m [36mconst[39m add [33m=[39m (a[33m,[39m b) [33m=>[39m a [33m+[39m b [33m+[39m [35m1[39m
+     [90m 2 |[39m describe([32m'add'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 3 |[39m   test([32m'adds'[39m[33m,[39m () [33m=>[39m { expect(add([35m2[39m[33m,[39m [35m2[39m))[33m.[39mtoBe([35m4[39m) })
+     [90m   |[39m                                          [31m[1m^[22m[39m
+     [90m 4 |[39m   test([32m'ok'[39m[33m,[39m () [33m=>[39m { expect([35m1[39m)[33m.[39mtoBe([35m1[39m) })
+     [90m 5 |[39m   test([32m'objects'[39m[33m,[39m () [33m=>[39m { expect({ a[33m:[39m [35m1[39m })[33m.[39mtoEqual({ a[33m:[39m [35m2[39m }) })
+     [90m 6 |[39m })[0m
+
+      at Object.toBe (test/calc.test.js:3:42)
+
+  ● add › objects
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "a": 2,
+    +   "a": 1,
+      }
+
+    [0m [90m 3 |[39m   test([32m'adds'[39m[33m,[39m () [33m=>[39m { expect(add([35m2[39m[33m,[39m [35m2[39m))[33m.[39mtoBe([35m4[39m) })
+     [90m 4 |[39m   test([32m'ok'[39m[33m,[39m () [33m=>[39m { expect([35m1[39m)[33m.[39mtoBe([35m1[39m) })
+    [31m[1m>[22m[39m[90m 5 |[39m   test([32m'objects'[39m[33m,[39m () [33m=>[39m { expect({ a[33m:[39m [35m1[39m })[33m.[39mtoEqual({ a[33m:[39m [35m2[39m }) })
+     [90m   |[39m                                            [31m[1m^[22m[39m
+     [90m 6 |[39m })
+     [90m 7 |[39m[0m
+
+      at Object.toEqual (test/calc.test.js:5:44)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 1 passed, 3 total
+Snapshots:   0 total
+Time:        0.179 s
+Ran all test suites.
