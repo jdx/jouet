@@ -75,6 +75,7 @@ commit refused: gitleaks' rules found a secret in what would be committed; nothi
   slack-bot-token   config/app.toml:2  xoxb****
   aws-access-token  src/aws.rs:1       AKIA****
   remove the secret and read it from the environment instead; for a false positive, commit again with --allow-secret RULE:PATH:LINE for each, or add `gitleaks:allow` to its line
+  or, to pass over it for good, add to .gitleaksignore: config/app.toml:slack-bot-token:2 src/aws.rs:aws-access-token:1
 (exit 1)
 ```
 
@@ -87,6 +88,7 @@ The `committed-secrets` [hook rule](/setup#steering-rules) runs the same scan wi
 - **`git commit`**: the staged lines, every tracked change for `git commit -a`, and the paths a `git add` earlier in the same command names (`git add a.rs && git commit -m x`), as they are in the work tree.
 - **`git push`**: the lines each commit not on any remote adds.
 - **Deny or warn.** It denies, naming each finding; when only gitleaks' generic rule matched, it warns instead, since that rule is the one most often wrong.
+- **The way out.** For a false positive, the message gives each exit ready to paste: a `gitleaks:allow` comment on the line, the finding's `.gitleaksignore` line, or (for a commit) the `jouet commit --allow-secret RULE:PATH:LINE` that lets it through. It shows only the redacted match, never the secret.
 - **Large diffs.** A diff over 1 MiB is not scanned, and the rule stays quiet.
 
 `jouet commit` is not checked by the rule, since it scans for itself.

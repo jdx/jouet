@@ -94,6 +94,21 @@ local function list(findings: { JouetSecretFinding }): string
 	return table.concat(parts, "; ")
 end
 
+-- Each listed finding's `.gitleaksignore` line, and its `--allow-secret`
+-- argument (RULE:PATH:LINE), ready to paste.
+local function exits(findings: { JouetSecretFinding }): (string, string)
+	local ignores: { string } = {}
+	local allows: { string } = {}
+	for i, f in findings do
+		if i > LISTED then
+			break
+		end
+		table.insert(ignores, `\`{f.fingerprint}\``)
+		table.insert(allows, `--allow-secret {f.rule}:{f.path}:{f.line or 0}`)
+	end
+	return table.concat(ignores, ", "), table.concat(allows, " ")
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		local scope, paths = what(call)
@@ -111,11 +126,12 @@ local rule: JouetRule = {
 			end
 		end
 		local n = if #findings == 1 then "a secret" else `{#findings} secrets`
+		local ignores, allows = exits(findings)
 		local message
 		if scope == "outgoing" then
-			message = `These commits, not on any remote yet, add {n} gitleaks' rules recognise: {list(findings)}. Once pushed, a secret is in the history of every copy: take it out of the commits that add it (amend, or rebase them), and rotate it if it is real. {LIST_OUTGOING} lists them all; a false positive goes in .gitleaksignore as COMMIT:PATH:RULE:LINE.`
+			message = `These commits, not on any remote yet, add {n} gitleaks' rules recognise: {list(findings)}. Once pushed, a secret is in the history of every copy: take it out of the commits that add it (amend, or rebase them), and rotate it if it is real. {LIST_OUTGOING} lists them all. If one is a false positive, add its line to .gitleaksignore: {ignores}.`
 		else
-			message = `This commit would add {n} gitleaks' rules recognise: {list(findings)}. Take it out and read it from the environment instead (in a fnox project, \`fnox exec -- CMD\`). \`jouet secrets scan --staged\` lists them all. For a false positive, commit with \`jouet commit PATHS -m MSG --allow-secret RULE:PATH:LINE\`, or put \`gitleaks:allow\` on its line.`
+			message = `This commit would add {n} gitleaks' rules recognise: {list(findings)}. Take it out and read it from the environment instead (in a fnox project, \`fnox exec -- CMD\`). \`jouet secrets scan --staged\` lists them all. If one is a false positive: put a \`gitleaks:allow\` comment on its line; or add its line to .gitleaksignore: {ignores}; or commit with \`jouet commit PATHS -m MSG {allows}\`.`
 		end
 		if specific then
 			return jouet.deny(message)

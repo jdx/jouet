@@ -182,6 +182,16 @@ fn render(report: &Report) -> String {
             s.push_str(
                 "  remove the secret and read it from the environment instead; for a false positive, commit again with --allow-secret RULE:PATH:LINE for each, or add `gitleaks:allow` to its line\n",
             );
+            let ignores: Vec<String> = scan
+                .findings
+                .iter()
+                .filter_map(|f| Some(format!("{}:{}:{}", f.path, f.rule.as_ref()?, f.line)))
+                .collect();
+            let _ = writeln!(
+                s,
+                "  or, to pass over it for good, add to .gitleaksignore: {}",
+                ignores.join(" ")
+            );
         }
         return s;
     }

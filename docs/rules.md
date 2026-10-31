@@ -118,6 +118,7 @@ A rule's keys:
 | `examples` | `fires` and `quiet`, the calls it must fire on and leave alone. |
 | `script` | A Luau file beside this one, for logic a matcher cannot express. See [Scripts](#scripts). |
 | `on` | `pre-tool-use` (the default), or `post-tool-use` for a script that records checks. |
+| `primer` | `false` keeps a `deny` rule out of the session-start primer, which names the deny rules so the agent avoids the calls they deny. For a rule that denies on what a call would change, not on how it looks, such as `committed-secrets`, naming it saves no call. |
 
 ### Matching a command
 
@@ -377,6 +378,7 @@ A script can also ask about jouet's state. The probes only read, and each return
 | `jouet.stack.layer()` | The current branch's place in a gh-stack stack: its `branch`, `parent` (the layer below, or the trunk), `trunk`, and `parent_merged`, true when the layer below was submitted as a PR and its remote branch is gone |
 | `jouet.cargo.workspace(dir?)` | The Cargo workspace around a directory: its `root`, the `package` a plain cargo command there builds, every member's name in `members`, and whether it sets `default_members` |
 | `jouet.pitchfork.daemons()` | The daemons the project's pitchfork config declares, from `pitchfork.toml`, `pitchfork.local.toml` and their `.config/` forms from the filesystem root down to the call's directory, a nearer file winning: each one's `name`, its `run` command as one line, the `ports` it is said to listen on (`port`, `expected_port`, `ready_port`, and `--port N` or `-p N` in `run`), and its `file`. Read from the files, without running pitchfork; `nil` when none declares any |
+| `jouet.secrets.scan(scope?, paths?)` | What [gitleaks' rules](/commands/secrets) find in the lines a commit or push would add: `"staged"` (the default), `"tracked"` (what `git commit -a` takes) or `"outgoing"` (each commit not on any remote), and the `paths`, which a `git add` in the same call is about to stage. Each finding has its `rule`, `path`, `line`, `commit` for an outgoing scan, `redacted` match and `fingerprint`; never the secret. `nil` and the reason for a diff over 1 MiB. An example's `secrets = [{ rule, path, line }]` answers it |
 | `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |
 | `jouet.env(name)` | An environment variable on a short allowlist, such as `CI` or `JOUET_*`. A name with `TOKEN`, `SECRET`, `PASSWORD` or `KEY` in it is never on it. |
 

@@ -193,6 +193,7 @@ fake_token() {
 	assert_failure 1
 	assert_line --index 0 "commit refused: gitleaks' rules found a secret in what would be committed; nothing was committed and nothing was left staged"
 	assert_line --index 1 "  github-pat  src/gh.rs:2  ghp_****"
+	assert_line --index 3 "  or, to pass over it for good, add to .gitleaksignore: src/gh.rs:github-pat:2"
 	refute_output --partial Zq3XvB7m
 	assert_equal "$(git rev-list --count HEAD)" 1
 	assert_equal "$(git status --porcelain --untracked-files=all)" " M a.txt

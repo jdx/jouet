@@ -172,6 +172,7 @@ hook() {
 	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
 	assert_line --index 0 deny
 	assert_line --index 1 --partial "This commit would add a secret gitleaks' rules recognise: github-pat at a.txt:1 (ghp_****)."
+	assert_line --index 1 --partial "If one is a false positive: put a \`gitleaks:allow\` comment on its line; or add its line to .gitleaksignore: \`a.txt:github-pat:1\`; or commit with \`jouet commit PATHS -m MSG --allow-secret github-pat:a.txt:1\`."
 	refute_output --partial Zq3XvB7m
 
 	git reset -q
@@ -203,6 +204,7 @@ hook() {
 	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
 	assert_line --index 0 deny
 	assert_line --index 1 --partial "These commits, not on any remote yet, add a secret gitleaks' rules recognise: aws-access-token at $(git rev-parse --short=12 HEAD) k.txt:1 (AKIA****)."
+	assert_line --index 1 --partial "add its line to .gitleaksignore: \`$(git rev-parse HEAD):k.txt:aws-access-token:1\`."
 
 	run --separate-stderr hook "git push --dry-run"
 	assert_output ""
