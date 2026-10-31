@@ -31,6 +31,7 @@ fn run_local(a: &CiRunArgs, out: &Output) -> Exit {
         extra: a.args.clone(),
         log_lines: a.log_lines.unwrap_or(DEFAULT_LOG_LINES),
         live: out.mode == Mode::Human && !out.json,
+        secrets_from_fnox: a.secrets_from.as_deref() == Some("fnox"),
         log_dir: jouet_output::paths::log_dir(),
     };
     match ci::run(&req, &cwd) {
@@ -64,6 +65,22 @@ fn render(r: &Report) -> String {
     );
     for w in &r.warnings {
         let _ = writeln!(s, "  warning: {w}");
+    }
+    if let Some(given) = &r.secrets {
+        let mut parts = Vec::new();
+        for (word, names) in [
+            ("given", &given.given),
+            ("missing", &given.missing),
+            ("multi-line, not given", &given.multiline),
+        ] {
+            if !names.is_empty() {
+                parts.push(format!("{word} {}", names.join(", ")));
+            }
+        }
+        if parts.is_empty() {
+            parts.push("the jobs read none".into());
+        }
+        let _ = writeln!(s, "  secrets from {}: {}", given.from, parts.join("; "));
     }
     for job in r
         .jobs

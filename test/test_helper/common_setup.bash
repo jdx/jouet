@@ -100,15 +100,35 @@ commit_file() {
 # GIT_INDEX_FILE), reports those holding FAKE_FNOX_VALUE as the secret
 # FAKE_FNOX_NAME in fnox's JSON, and exits 1 when it found any. With
 # FAKE_FNOX_ERROR set it fails as fnox does when it cannot resolve the
-# secrets: a miette error on stderr, nothing on stdout, exit 1. Those are
-# read from $BATS_TEST_TMPDIR/fnox.env, a file of NAME=VALUE lines.
+# secrets: a miette error on stderr, nothing on stdout, exit 1. For `fnox
+# export --format json NAME...` it prints FAKE_FNOX_VAL_<NAME> for each
+# name that has one, as JSON text, and fails as fnox does on a name listed
+# in FAKE_FNOX_UNDEFINED. Those are read from $BATS_TEST_TMPDIR/fnox.env, a
+# file of NAME=VALUE lines.
 fake_fnox() {
 	cat >"$BATS_TEST_TMPDIR/bin/fnox" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >>"$BATS_TEST_TMPDIR/fnox.log"
-[ "$1 $2 $3" = "scan --values --staged" ] || exit 0
 # shellcheck disable=SC1091
 [ -f "$BATS_TEST_TMPDIR/fnox.env" ] && . "$BATS_TEST_TMPDIR/fnox.env"
+if [ "$1 $2 $3" = "export --format json" ]; then
+	shift 3
+	out=""
+	for name in "$@"; do
+		case " ${FAKE_FNOX_UNDEFINED:-} " in *" $name "*)
+			printf "Error: fnox::secret_not_found\n\n  \303\227 Secret '%s' not found in profile 'default'\n\n" "$name" >&2
+			exit 1
+			;;
+		esac
+		eval "value=\${FAKE_FNOX_VAL_$name:-}"
+		# shellcheck disable=SC2154 # set by the eval
+		[ -n "$value" ] && out="$out${out:+,}
+    \"$name\": \"$value\""
+	done
+	printf '{\n  "secrets": {%s\n  }\n}\n' "$out"
+	exit 0
+fi
+[ "$1 $2 $3" = "scan --values --staged" ] || exit 0
 if [ -n "${FAKE_FNOX_ERROR:-}" ]; then
 	printf 'Error: fnox::config::error\n\n  \303\227 Configuration error: %s\n\n' "$FAKE_FNOX_ERROR" >&2
 	exit 1

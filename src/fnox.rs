@@ -312,7 +312,7 @@ fn notes(stderr: &str) -> Vec<String> {
 
 /// The gist of a failed scan: the error miette marks with `×` (its wrapped
 /// lines joined), else fnox's first line of stderr that is not a warning.
-fn failure(stderr: &str, code: Option<i32>) -> String {
+pub(crate) fn failure(stderr: &str, code: Option<i32>) -> String {
     let lines: Vec<&str> = stderr
         .lines()
         .map(str::trim)
