@@ -27,6 +27,7 @@ fn settings() -> WindSettings {
         review: true,
         review_every: 3,
         review_corrections: 2,
+        memories: true,
         gitleaks: None,
     }
 }
@@ -140,6 +141,7 @@ fn proposals_are_checked_limited_and_shown() {
         ]}"#,
         ),
         NOW,
+        &[],
     )
     .unwrap();
     assert_eq!(out.recorded, ["p1", "p2", "p3"]);
@@ -177,6 +179,7 @@ fn proposals_are_checked_limited_and_shown() {
         &f.paths,
         reply(r#"{"proposals": [{"kind": "task", "title": "add a RELEASE:CHECK task", "why": "x", "draft": "x"}, {"kind": "memory", "title": "New", "why": "x", "draft": "x"}]}"#),
         NOW,
+        &[],
     )
     .unwrap();
     let reasons: Vec<&str> = again.skipped.iter().map(|s| s.reason.as_str()).collect();
@@ -213,6 +216,7 @@ fn a_reviewed_session_leaves_the_queue() {
         &f.paths,
         reply(r#"{"session": "aaaaaaaa", "proposals": [{"kind": "nothing"}]}"#),
         NOW,
+        &[],
     )
     .unwrap();
     let state = State::load(&f.paths.state);
@@ -227,6 +231,8 @@ fn the_prompt_names_every_kind_and_the_reply_it_reads() {
         "\"rule\"",
         "\"agents_md\"",
         "\"memory\"",
+        "\"memory_update\"",
+        "\"memory_delete\"",
         "\"nothing\"",
     ] {
         assert!(PROMPT.contains(kind), "{kind}");
@@ -235,5 +241,49 @@ fn the_prompt_names_every_kind_and_the_reply_it_reads() {
     let start = PROMPT.find("{\"session\"").unwrap();
     let end = PROMPT[start..].find("\n]}").unwrap() + start + 3;
     let example: Reply = serde_json::from_str(&PROMPT[start..end]).unwrap();
-    assert!(problem(&example.proposals[0]).is_none());
+    assert!(problem(&example.proposals[0], &[]).is_none());
+}
+
+#[test]
+fn memory_changes_name_a_listed_memory_once() {
+    let f = fixture();
+    let targets = ["~/.claude/projects/-work-app/memory/mbx-gc.md".to_string()];
+    let out = record(
+        &f.paths,
+        reply(
+            r#"{"session": "s1", "proposals": [
+            {"kind": "memory_delete", "title": "Drop the mbx GC workaround", "why": "cargo worked plainly (L40).", "evidence": ["L40"], "target": "~/.claude/projects/-work-app/memory/mbx-gc.md", "draft": "mbx 1.30 keeps the target."},
+            {"kind": "memory_update", "title": "No target", "why": "x", "draft": "x"},
+            {"kind": "memory_update", "title": "Unknown target", "why": "x", "target": "~/elsewhere.md", "draft": "x"}
+        ]}"#,
+        ),
+        NOW,
+        &targets,
+    )
+    .unwrap();
+    assert_eq!(out.recorded, ["p1"]);
+    let reasons: Vec<&str> = out.skipped.iter().map(|s| s.reason.as_str()).collect();
+    assert_eq!(
+        reasons,
+        [
+            "an update to a memory needs a target: the memory's path",
+            "`~/elsewhere.md` is not one of the memories the review listed"
+        ]
+    );
+    // Another title for the same memory is the same proposal.
+    let again = record(
+        &f.paths,
+        reply(
+            r#"{"proposals": [{"kind": "memory_delete", "title": "Delete it", "why": "x", "target": "~/.claude/projects/-work-app/memory/mbx-gc.md", "draft": "x"}]}"#,
+        ),
+        NOW,
+        &targets,
+    )
+    .unwrap();
+    assert_eq!(again.skipped[0].reason, "already proposed");
+    let lines = lines_for_session(&f.paths, "s9", None, 2, NOW);
+    assert_eq!(
+        lines[0],
+        "jouet wind review proposed deleting a memory `~/.claude/projects/-work-app/memory/mbx-gc.md` (p1): Drop the mbx GC workaround. `jouet wind show p1` for why and the draft; ask the user, then delete the memory and its line in the index (MEMORY.md); then `jouet wind adopt p1`, or `jouet wind dismiss p1` to drop it."
+    );
 }
