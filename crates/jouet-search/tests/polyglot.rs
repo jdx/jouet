@@ -448,3 +448,111 @@ fn cached_definitions_give_the_same_groups_and_follow_changes() {
         "second"
     );
 }
+
+fn outline(path: &str) -> Vec<String> {
+    let path = Path::new(FIXTURE).join(path);
+    let source = std::fs::read(&path).unwrap();
+    symbols::outline(&path, &source)
+        .unwrap()
+        .into_iter()
+        .map(|l| format!("{} {}", l.def.kind, l.qualified()))
+        .collect()
+}
+
+#[test]
+fn an_outline_names_each_definition_with_its_scope() {
+    assert_eq!(
+        outline("src/lib.rs"),
+        [
+            "class Downloader",
+            "method Downloader::new",
+            "method Downloader::download",
+            "function join_url",
+            "function fetch_bytes"
+        ]
+    );
+    assert_eq!(
+        outline("app/client.py"),
+        [
+            "class Client",
+            "function Client.__init__",
+            "function Client.fetch",
+            "function _request"
+        ]
+    );
+    assert_eq!(
+        outline("go/server.go"),
+        [
+            "type Server",
+            "function NewServer",
+            "method Server.Serve",
+            "function listen"
+        ]
+    );
+    assert_eq!(
+        outline("ruby/app.rb"),
+        [
+            "module Shop",
+            "class Shop.Cart",
+            "method Shop.Cart.initialize",
+            "method Shop.Cart.add",
+            "method Shop.Cart.total"
+        ]
+    );
+    assert_eq!(
+        outline("java/App.java"),
+        [
+            "class App",
+            "method App.main",
+            "class Greeter",
+            "method Greeter.greet"
+        ]
+    );
+}
+
+#[test]
+fn a_selector_picks_definitions_by_name_kind_and_scope() {
+    let path = Path::new(FIXTURE).join("web/api.ts");
+    let source = std::fs::read(&path).unwrap();
+    let names = |selector: &str| {
+        symbols::select(&path, &source, &symbols::Selector::parse(selector).unwrap())
+            .map(|found| found.iter().map(|l| l.def.line).collect::<Vec<_>>())
+    };
+    assert_eq!(names("request"), Ok(vec![2, 8]));
+    assert_eq!(names("Session.request"), Ok(vec![8]));
+    assert_eq!(names("fn fetchText"), Ok(vec![13]));
+    assert_eq!(names("class Session"), Ok(vec![5]));
+    assert_eq!(names("class request"), Err(symbols::SelectError::NotFound));
+    assert_eq!(
+        names("Missing.request"),
+        Err(symbols::SelectError::NotFound)
+    );
+    assert!(matches!(
+        symbols::Selector::parse("widget request"),
+        Err(symbols::SelectError::Invalid(_))
+    ));
+    let rust = Path::new(FIXTURE).join("src/lib.rs");
+    let source = std::fs::read(&rust).unwrap();
+    let found = symbols::select(
+        &rust,
+        &source,
+        &symbols::Selector::parse("Downloader::download").unwrap(),
+    )
+    .unwrap();
+    let text = std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+    assert!(
+        text.starts_with("pub fn download(") && text.ends_with('}'),
+        "{text}"
+    );
+}
+
+#[test]
+fn syntax_errors_are_counted() {
+    let path = Path::new("x.rs");
+    assert_eq!(symbols::syntax_errors(path, b"fn a() {}\n"), Some(0));
+    assert!(symbols::syntax_errors(path, b"fn a() {\n").unwrap() > 0);
+    assert_eq!(
+        symbols::syntax_errors(Path::new("x.txt"), b"anything"),
+        None
+    );
+}

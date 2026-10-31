@@ -73,6 +73,129 @@ pub fn definitions(path: &Path, source: &[u8]) -> Option<Vec<Def>> {
     imp::definitions(path, source)
 }
 
+/// A definition with where it sits: its byte span and the names it is
+/// nested in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Located {
+    pub def: Def,
+    /// The byte range of the whole definition.
+    pub start_byte: usize,
+    pub end_byte: usize,
+    /// The names it is nested in, outermost first: a class, a module, or
+    /// the type of a Rust `impl` block.
+    pub scope: Vec<String>,
+    /// How the language joins a scope to a name: `::` or `.`.
+    pub separator: &'static str,
+}
+
+impl Located {
+    /// The name with its scope, as a selector names it: `Vfox::download`.
+    pub fn qualified(&self) -> String {
+        let mut parts = self.scope.clone();
+        parts.push(self.def.name.clone());
+        parts.join(self.separator)
+    }
+}
+
+/// Every definition in the file with its span and scope, in source order,
+/// or `None` when the language is not supported or it cannot be parsed.
+pub fn outline(path: &Path, source: &[u8]) -> Option<Vec<Located>> {
+    imp::outline(path, source)
+}
+
+/// Why a selector names no single definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectError {
+    /// jouet cannot read definitions from this file.
+    Unsupported,
+    /// The selector is malformed, such as an unknown kind.
+    Invalid(String),
+    /// Nothing matches.
+    NotFound,
+}
+
+/// A selector: `NAME`, `KIND NAME`, or either with a scope, such as `fn
+/// download`, `Vfox::download` or `class Shop.Cart`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selector {
+    kinds: Option<&'static [&'static str]>,
+    path: Vec<String>,
+}
+
+impl Selector {
+    pub fn parse(text: &str) -> Result<Self, SelectError> {
+        let text = text.trim();
+        let (kinds, name) = match text.split_once(char::is_whitespace) {
+            Some((kind, name)) => (Some(kinds(kind)?), name.trim()),
+            None => (None, text),
+        };
+        let path: Vec<String> = name
+            .split("::")
+            .flat_map(|part| part.split('.'))
+            .map(str::to_string)
+            .collect();
+        if path
+            .iter()
+            .any(|p| p.is_empty() || p.contains(char::is_whitespace))
+        {
+            return Err(SelectError::Invalid(format!(
+                "`{text}` is not a symbol: give a name, such as `download`, `fn download` or `Vfox::download`"
+            )));
+        }
+        Ok(Self { kinds, path })
+    }
+
+    fn matches(&self, found: &Located) -> bool {
+        let (name, scope) = self
+            .path
+            .split_last()
+            .expect("parse keeps one part at least");
+        found.def.name == *name
+            && found.scope.ends_with(scope)
+            && self
+                .kinds
+                .is_none_or(|kinds| kinds.contains(&found.def.kind.as_str()))
+    }
+}
+
+/// The kinds a selector's kind word stands for.
+fn kinds(word: &str) -> Result<&'static [&'static str], SelectError> {
+    Ok(match word {
+        "fn" | "func" | "function" | "def" | "method" => &["function", "method"],
+        "struct" | "class" | "enum" | "union" => &["class", "type"],
+        "type" => &["type", "class", "interface"],
+        "trait" | "interface" | "protocol" => &["interface"],
+        "mod" | "module" | "namespace" => &["module"],
+        "macro" => &["macro"],
+        "const" | "constant" => &["constant"],
+        other => {
+            return Err(SelectError::Invalid(format!(
+                "unknown kind `{other}`: use fn, struct, class, enum, type, trait, interface, mod, module, macro or const"
+            )));
+        }
+    })
+}
+
+/// The definitions a selector names.
+pub fn select(
+    path: &Path,
+    source: &[u8],
+    selector: &Selector,
+) -> Result<Vec<Located>, SelectError> {
+    let all = outline(path, source).ok_or(SelectError::Unsupported)?;
+    let found: Vec<Located> = all.into_iter().filter(|l| selector.matches(l)).collect();
+    if found.is_empty() {
+        return Err(SelectError::NotFound);
+    }
+    Ok(found)
+}
+
+/// How many syntax errors tree-sitter finds in the file, or `None` when the
+/// language is not supported.
+pub fn syntax_errors(path: &Path, source: &[u8]) -> Option<usize> {
+    imp::syntax_errors(path, source)
+}
+
 /// The names of the languages this build supports.
 pub fn languages() -> &'static [&'static str] {
     imp::LANGUAGES
@@ -136,12 +259,12 @@ fn line_text(source: &[u8], starts: &[usize], line: u32) -> String {
 
 #[cfg(feature = "grammars")]
 mod imp {
-    use super::{Def, FileSymbols, Ref, line_of, line_starts, line_text};
+    use super::{Def, FileSymbols, Located, Ref, line_of, line_starts, line_text};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::sync::OnceLock;
-    use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
+    use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
     use tree_sitter_tags::{TagsConfiguration, TagsContext};
 
     pub(super) const LANGUAGES: &[&str] = &[
@@ -327,19 +450,31 @@ mod imp {
         static PARSER: RefCell<Parser> = RefCell::new(Parser::new());
     }
 
-    pub(super) fn definitions(path: &Path, source: &[u8]) -> Option<Vec<Def>> {
-        let lang = language(path)?;
-        let query = definitions_query(lang)?;
-        let tree = PARSER.with_borrow_mut(|parser| {
+    fn parse_tree(lang: Lang, source: &[u8]) -> Option<Tree> {
+        PARSER.with_borrow_mut(|parser| {
             parser.set_language(&source_language(lang)).ok()?;
             parser.parse(source, None)
-        })?;
+        })
+    }
+
+    pub(super) fn definitions(path: &Path, source: &[u8]) -> Option<Vec<Def>> {
+        outline(path, source).map(|all| all.into_iter().map(|l| l.def).collect())
+    }
+
+    pub(super) fn outline(path: &Path, source: &[u8]) -> Option<Vec<Located>> {
+        let lang = language(path)?;
+        let query = definitions_query(lang)?;
+        let tree = parse_tree(lang, source)?;
         let names = query.capture_names();
         let starts = line_starts(source);
+        let separator = match lang {
+            Lang::Rust | Lang::Cpp => "::",
+            _ => ".",
+        };
         let mut cursor = QueryCursor::new();
         // One definition per node: the earliest pattern's, as
         // tree-sitter-tags picks it.
-        let mut found: BTreeMap<(usize, usize), (usize, Def)> = BTreeMap::new();
+        let mut found: BTreeMap<(usize, usize), (usize, Located)> = BTreeMap::new();
         let mut matches = cursor.matches(query, tree.root_node(), source);
         while let Some(m) = matches.next() {
             let mut def = None;
@@ -373,20 +508,88 @@ mod imp {
                 key,
                 (
                     m.pattern_index,
-                    Def {
-                        name: text.to_string(),
-                        kind: kind.to_string(),
-                        line,
-                        start: line_of(&starts, range.start),
-                        end: line_of(&starts, end),
-                        text: line_text(source, &starts, line),
+                    Located {
+                        def: Def {
+                            name: text.to_string(),
+                            kind: kind.to_string(),
+                            line,
+                            start: line_of(&starts, range.start),
+                            end: line_of(&starts, end),
+                            text: line_text(source, &starts, line),
+                        },
+                        start_byte: range.start,
+                        end_byte: range.end,
+                        scope: scope(node, source),
+                        separator,
                     },
                 ),
             );
         }
-        let mut defs: Vec<Def> = found.into_values().map(|(_, def)| def).collect();
-        defs.sort_by_key(|d| (d.start, d.line));
-        Some(defs)
+        let mut all: Vec<Located> = found.into_values().map(|(_, l)| l).collect();
+        all.sort_by_key(|l| (l.def.start, l.def.line));
+        Some(all)
+    }
+
+    /// The names a definition is nested in, outermost first: each enclosing
+    /// node's `name`, and the type of a Rust `impl` block.
+    fn scope(node: Node, source: &[u8]) -> Vec<String> {
+        let mut scope = Vec::new();
+        let mut parent = node.parent();
+        while let Some(p) = parent {
+            let name = match p.kind() {
+                "impl_item" => p.child_by_field_name("type"),
+                _ => p.child_by_field_name("name"),
+            };
+            if let Some(text) = name.and_then(|n| n.utf8_text(source).ok()) {
+                // `Vfox<T>` is `Vfox`; a qualified C++ name keeps its last part.
+                let text = text.split('<').next().unwrap_or(text);
+                let text = text.rsplit("::").next().unwrap_or(text).trim();
+                if !text.is_empty() && !text.contains(char::is_whitespace) {
+                    scope.push(text.to_string());
+                }
+            }
+            parent = p.parent();
+        }
+        scope.reverse();
+        // A Go method's scope is its receiver's type: `(s *Server) Serve`.
+        if node.kind() == "method_declaration"
+            && let Some(receiver) = node.child_by_field_name("receiver")
+            && let Some(name) = first_of_kind(receiver, "type_identifier")
+            && let Ok(text) = name.utf8_text(source)
+        {
+            scope.push(text.to_string());
+        }
+        scope
+    }
+
+    fn first_of_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .find_map(|child| first_of_kind(child, kind))
+    }
+
+    pub(super) fn syntax_errors(path: &Path, source: &[u8]) -> Option<usize> {
+        let tree = parse_tree(language(path)?, source)?;
+        let mut count = 0;
+        let mut cursor = tree.walk();
+        'walk: loop {
+            let node = cursor.node();
+            if node.is_error() || node.is_missing() {
+                count += 1;
+            }
+            if node.has_error() && cursor.goto_first_child() {
+                continue;
+            }
+            while !cursor.goto_next_sibling() {
+                if !cursor.goto_parent() {
+                    break 'walk;
+                }
+            }
+        }
+        Some(count)
     }
 
     pub(super) fn parse(path: &Path, source: &[u8]) -> Option<FileSymbols> {
@@ -442,6 +645,14 @@ mod imp {
     }
 
     pub(super) fn definitions(_: &Path, _: &[u8]) -> Option<Vec<super::Def>> {
+        None
+    }
+
+    pub(super) fn outline(_: &Path, _: &[u8]) -> Option<Vec<super::Located>> {
+        None
+    }
+
+    pub(super) fn syntax_errors(_: &Path, _: &[u8]) -> Option<usize> {
         None
     }
 }

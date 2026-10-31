@@ -107,6 +107,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "flags",
             "input",
             "max_args",
+            "min_read_lines",
             "paths",
             "seen",
             "text",
@@ -130,6 +131,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "input",
             "kind",
             "path",
+            "read_lines",
             "scope",
             "seen",
             "tool"

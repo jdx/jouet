@@ -24,6 +24,7 @@ force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force 
 push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
 checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
+large-read         enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
 unbudgeted-search  enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
 ```
 
@@ -102,7 +103,7 @@ A rule's keys:
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `input`, `unless_input` and `seen` is about a command, and needs `command`.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `input`, `unless_input`, `seen` and `min_read_lines` is about a command, and needs `command`.
 
 | Key | Matches |
 |---|---|
@@ -123,6 +124,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `input` | The tool's input has these fields with these values, such as `input = { output_mode = "content" }` for Claude Code's Grep. A value that is not a string matches as its JSON text; `*` and `?` are wildcards. |
 | `unless_input` | The tool's input has none of these fields, such as `head_limit`. |
 | `seen` | Whether the session was already shown everything the call reads, every line, in files unchanged since. The hook works it out from what the session read (Claude Code's Read tool, shell calls made only of `cat`, `head`, `tail`, `sed -n` and `nl`) and what `jouet search` showed it. Any other call is unseen. |
+| `min_read_lines` | The call puts at least this many lines of files in the context: Claude Code's Read (up to 2,000 lines without a `limit`), or a shell read with `cat`, `head`, `tail`, `sed -n` or `nl`. The hook counts them. |
 
 For example, the built-in `force-push` rule:
 
@@ -176,6 +178,7 @@ fires = [
 | `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
 | `input` | The tool's input, for a tool other than `Bash`: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`. |
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
+| `read_lines` | How many lines of files the call reads, as the hook would count them. |
 
 Every rule needs at least one example of each kind:
 

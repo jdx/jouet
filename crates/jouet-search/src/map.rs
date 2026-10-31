@@ -249,6 +249,34 @@ fn scan(root: &Path, cache: Option<&Path>) -> (BTreeMap<String, Tags>, usize) {
     (tags, reused)
 }
 
+/// Where `name` is referred to under `root`, as paths relative to it and
+/// 1-based lines, in path order. The cached tags say which files mention
+/// it; only those are read again for the lines.
+pub fn references(root: &Path, name: &str, cache: Option<&Path>) -> Vec<(String, u32)> {
+    let (tags, _) = scan(root, cache);
+    let mut found = Vec::new();
+    for (rel, file) in &tags {
+        if !file.refs.iter().any(|(n, _)| n == name) {
+            continue;
+        }
+        let path = root.join(rel);
+        let Some(symbols) = std::fs::read(&path)
+            .ok()
+            .and_then(|source| symbols::parse(&path, &source))
+        else {
+            continue;
+        };
+        found.extend(
+            symbols
+                .refs
+                .iter()
+                .filter(|r| r.name == name)
+                .map(|r| (rel.clone(), r.line)),
+        );
+    }
+    found
+}
+
 fn write_cache(file: &Path, doc: &CacheFile) -> std::io::Result<()> {
     let dir = file.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;

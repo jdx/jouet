@@ -542,6 +542,7 @@ return {
             scope: None,
             input: None,
             seen: None,
+            read_lines: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
