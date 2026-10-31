@@ -10,7 +10,6 @@
 //! asked in parallel.
 
 use super::status::{Fetched, PrStatus, State};
-use super::target::Repo;
 use crate::entire::{Availability, Brief, Entire};
 
 fn wanted(pr: &PrStatus) -> bool {
@@ -50,7 +49,8 @@ pub(crate) fn add(prs: &mut [Fetched]) -> Option<Availability> {
 }
 
 fn fill(entire: &Entire, pr: &mut PrStatus) {
-    let Some(repo) = Repo::parse(&pr.repo) else {
+    // With its host, so a PR off github.com is not looked up as `gh/...`.
+    let Some(repo) = pr.repository() else {
         return;
     };
     let name = format!("{}#{}", pr.repo, pr.number);
