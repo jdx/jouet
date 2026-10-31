@@ -9,6 +9,7 @@
 
 pub mod checks;
 pub mod ci;
+pub mod job;
 mod joblog;
 pub mod local;
 mod os;
@@ -35,6 +36,8 @@ pub(crate) const MAX_INTERVAL: Duration = Duration::from_secs(60);
 pub struct Observation {
     /// Whether the condition holds.
     pub(crate) met: bool,
+    /// Whether it never will: the wait ends at once, answering no.
+    pub(crate) failed: bool,
     /// A short description of what was seen, such as `refused` or `exit 1`.
     /// A change in it is an event.
     pub(crate) state: String,
@@ -45,6 +48,7 @@ impl Observation {
     pub(crate) fn pending(state: impl Into<String>) -> Self {
         Self {
             met: false,
+            failed: false,
             state: state.into(),
             detail: Detail::default(),
         }
@@ -70,19 +74,23 @@ pub struct Stop {
 }
 
 pub trait Subject {
-    /// The subcommand: `file`, `log`, `port`, `http`, `pid` or `cmd`.
+    /// The subcommand: `file`, `log`, `port`, `http`, `pid`, `cmd` or
+    /// `job`.
     fn name(&self) -> &'static str;
     /// What is being waited on, such as a path or an address.
     fn target(&self) -> String;
     /// Looks once. A check that can block (running a command, an HTTP
     /// request) gives up at `deadline`.
     fn check(&mut self, deadline: Instant) -> Result<Observation, Stop>;
+    /// The wait timed out: a last chance to say why, such as the end of a
+    /// log, in `detail`.
+    fn timed_out(&mut self, _detail: &mut Detail) {}
 }
 
 /// What a subject found, beyond its state. Every field is optional, so each
 /// subject fills in only its own.
 #[derive(Debug, Default, Serialize)]
-pub(crate) struct Detail {
+pub struct Detail {
     /// The line that matched `--match` or `--contains`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) line: Option<String>,
@@ -114,7 +122,7 @@ fn is_false(b: &bool) -> bool {
 pub struct Outcome {
     pub(crate) subject: &'static str,
     pub(crate) target: String,
-    /// `met` or `timeout`.
+    /// `met`, `failed` or `timeout`.
     pub(crate) result: &'static str,
     /// The state at the last check.
     pub(crate) state: String,
@@ -126,10 +134,10 @@ pub struct Outcome {
 
 impl Outcome {
     pub(crate) fn exit(&self) -> Exit {
-        if self.result == "met" {
-            Exit::Ok
-        } else {
-            Exit::Timeout
+        match self.result {
+            "met" => Exit::Ok,
+            "failed" => Exit::Failed,
+            _ => Exit::Timeout,
         }
     }
 }
@@ -169,15 +177,24 @@ pub fn run(
             last_state = Some(obs.state.clone());
         }
         let now = Instant::now();
-        if obs.met || now >= deadline {
+        if obs.met || obs.failed || now >= deadline {
+            let result = match (obs.met, obs.failed) {
+                (true, _) => "met",
+                (false, true) => "failed",
+                (false, false) => "timeout",
+            };
+            let mut detail = obs.detail;
+            if result == "timeout" {
+                subject.timed_out(&mut detail);
+            }
             return Ok(Outcome {
                 subject: subject.name(),
                 target: subject.target(),
-                result: if obs.met { "met" } else { "timeout" },
+                result,
                 state: obs.state,
                 elapsed_s: start.elapsed().as_secs(),
                 checks,
-                detail: obs.detail,
+                detail,
             });
         }
         reporter.pause(interval.min(deadline - now), start, &obs.state);

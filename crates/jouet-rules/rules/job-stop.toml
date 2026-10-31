@@ -1,0 +1,60 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "job-stop"
+why = "Killing a server by its port or its command line can hit the wrong process, or leave its children running; `jouet job stop` stops a job's whole process group by name."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["job", "stop"]
+suggest = "jouet job stop ID"
+message = "If the server is a job, it stops the job's whole process group, gracefully and then by force, and keeps its log; `jouet job ls` names the jobs here. One started some other way can be started as a job next time (`jouet job start ID -- CMD`), so it can be stopped by name."
+
+# `kill $(lsof -ti :3000)` and `lsof -ti :3000 | xargs kill`.
+[[rule.match]]
+command = "kill"
+with = { command = "lsof" }
+
+[[rule.match]]
+command = "xargs"
+args = "kill"
+with = { command = "lsof" }
+
+# Killing a dev server by its command line.
+[[rule.match]]
+command = ["pkill", "killall"]
+value_flags = ["-u", "-U", "-g", "-G", "-P", "-s", "-t", "--signal"]
+args = [
+  "*dev*", "*serve*", "*server*", "node", "vite*", "next*", "nodemon*",
+  "uvicorn*", "gunicorn*", "*http.server*", "*runserver*", "rails*", "puma*",
+  "webpack*", "*watch*",
+]
+
+# Killing whatever holds a port.
+[[rule.match]]
+command = "fuser"
+flags = "-k"
+
+[[rule.match]]
+command = ["kill-port", "npx kill-port"]
+
+[rule.examples]
+fires = [
+  "kill $(lsof -ti :3000)",
+  "kill -9 $(lsof -t -i:8000)",
+  "lsof -ti:5173 | xargs kill -9",
+  "pkill -f 'npm run dev'",
+  "pkill -f vite",
+  "pkill -9 -f 'python3 -m http.server'",
+  "killall node",
+  "fuser -k 3000/tcp",
+  "npx kill-port 3000",
+]
+quiet = [
+  "kill 1234",
+  "lsof -i :3000",
+  "pkill -f pytest",
+  "pkill -f 'cargo test'",
+  "jouet job stop dev",
+  "echo 'pkill -f vite'",
+]

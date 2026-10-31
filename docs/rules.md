@@ -24,6 +24,10 @@ force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force 
 push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
 scoped-lint        enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
 affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
+job-start          enabled  deny    builtin  builtin  2026-10-31  A server or a build started with `&` or nohup has no ready check, no log to ask for and no name to stop it by, so the agent polls it; `jouet job start` gives it all three.
+job-ready          enabled  deny    builtin  builtin  2026-10-31  Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies.
+job-logs           enabled  warn    builtin  builtin  2026-10-31  Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name.
+job-stop           enabled  warn    builtin  builtin  2026-10-31  Killing a server by its port or its command line can hit the wrong process, or leave its children running; `jouet job stop` stops a job's whole process group by name.
 checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
 large-read         enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
@@ -117,6 +121,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `args` | One of its arguments (the words after its subcommands that are not options or their values) matches one of these wildcard patterns: `args = [".", ":/"]`, or `"+?*"` for a `+` refspec. |
 | `unless_args` | None of its arguments matches. |
 | `max_args` | It has at most this many arguments: `max_args = 0` for a bare `git stash pop`. |
+| `background` | It runs in the background: `&` follows it, or the harness runs the whole call in the background (Claude Code's `run_in_background`). `background = true` for `npm run dev &`. |
 | `text` | Regular expressions that must each match one of its words after the program, or one of its here-documents. `\|` gives alternatives within one. |
 | `with` | Another command in the same call matches this too, as in `sleep 60 && gh pr checks`. It takes the command keys. |
 | `unless_with` | No other command in the same call matches this, as in `rg TODO \| head`. It takes the command keys. |
@@ -178,7 +183,7 @@ fires = [
 | `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
 | `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
 | `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
-| `input` | The tool's input, for a tool other than `Bash`: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`. |
+| `input` | The tool's input: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`, or `{ command = "npm run dev", input = { run_in_background = true } }` for a `Bash` call. |
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
 | `read_lines` | How many lines of files the call reads, as the hook would count them. |
 
@@ -210,7 +215,7 @@ no-rm-rf: 5 of 6 examples passed
 
 ```output
 $ jouet rule test ./no-rm-rf.toml
-jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `text`, `with`
+jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`
 ```
 
 `jouet rule test --all` runs every rule's examples: built in, yours, and this repository's, trusted or not.
@@ -225,13 +230,18 @@ ok    git-stash          25 examples passed
 ok    no-verify          14 examples passed
 ok    force-push         12 examples passed
 ok    push-untested      13 examples passed
+ok    scoped-lint        17 examples passed
 ok    affected-tests     22 examples passed
-ok    checks             50 examples passed
+ok    job-start          25 examples passed
+ok    job-ready          12 examples passed
+ok    job-logs           11 examples passed
+ok    job-stop           15 examples passed
+ok    checks             66 examples passed
 ok    reread             12 examples passed
 ok    large-read         11 examples passed
 ok    unbudgeted-search  23 examples passed
 FAIL  no-rm-rf           it has no `quiet` examples: near misses it must leave alone
-13 of 14 rules passed their examples
+18 of 19 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:

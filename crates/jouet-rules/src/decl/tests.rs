@@ -102,6 +102,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
         keys("Matcher"),
         [
             "args",
+            "background",
             "command",
             "exact_flags",
             "flags",

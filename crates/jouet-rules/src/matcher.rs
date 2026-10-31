@@ -40,14 +40,15 @@ fn matches(m: &Matcher, call: &Call, commands: &[shell::Command]) -> bool {
     if m.command.is_empty() {
         return true;
     }
+    let background = in_background(call);
     commands.iter().enumerate().any(|(i, c)| {
         let other = |with: &Matcher| {
             commands
                 .iter()
                 .enumerate()
-                .any(|(j, other)| j != i && command(with, other))
+                .any(|(j, other)| j != i && command(with, other, background))
         };
-        command(m, c)
+        command(m, c, background)
             && m.with.as_deref().is_none_or(other)
             && !m.unless_with.as_deref().is_some_and(other)
     })
@@ -70,6 +71,16 @@ fn input(m: &Matcher, call: &Call) -> bool {
     }) && !m.unless_input.iter().any(|name| field(name).is_some())
 }
 
+/// Whether the harness runs the whole call in the background, as Claude
+/// Code's Bash tool does with `run_in_background`.
+fn in_background(call: &Call) -> bool {
+    call.input
+        .as_ref()
+        .and_then(|i| i.get("run_in_background"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
 /// The path from the working directory, when it is inside it.
 fn relative<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
     cwd.map(|cwd| cwd.trim_end_matches(['/', '\\']))
@@ -79,8 +90,9 @@ fn relative<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
         .unwrap_or(path)
 }
 
-/// Whether one command matches the matcher's command keys.
-fn command(m: &Matcher, c: &shell::Command) -> bool {
+/// Whether one command matches the matcher's command keys. `background`
+/// says the harness runs the whole call in the background.
+fn command(m: &Matcher, c: &shell::Command, background: bool) -> bool {
     let argv = c.argv();
     let Some((first, args)) = argv.split_first() else {
         return false;
@@ -126,6 +138,12 @@ fn command(m: &Matcher, c: &shell::Command) -> bool {
         return false;
     }
     if m.max_args.is_some_and(|max| words.args.len() > max) {
+        return false;
+    }
+    if m.background.is_some_and(|want| {
+        let backgrounded = background || c.op == Some(shell::Op::Background);
+        backgrounded != want
+    }) {
         return false;
     }
     m.text.iter().all(|pattern| {

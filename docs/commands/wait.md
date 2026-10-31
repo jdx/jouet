@@ -1,5 +1,5 @@
 ---
-description: Block until CI finishes, a PR is ready, or a file, log line, port, URL, process or command is, instead of sleep-polling.
+description: Block until CI finishes, a PR is ready, or a file, log line, port, URL, process, command or background job is, instead of sleep-polling.
 ---
 
 # jouet wait
@@ -21,6 +21,7 @@ Two traps catch those loops when they wait on CI. `gh run view --log-failed` ref
 | A file to appear, or to contain a line | `jouet wait file out/done.txt --contains ok` |
 | A process to exit | `jouet wait pid 4242` |
 | A command to succeed | `jouet wait cmd -- pg_isready -h localhost` |
+| A `jouet job` to end, or to be ready | `jouet wait job test` |
 
 Every subject takes `--timeout` (default `30m`) and exits `124` when it runs out, so running the same command again keeps waiting.
 
@@ -37,6 +38,7 @@ jouet wait port ADDR     [--closed]
 jouet wait http URL      [--status CODE] [--contains REGEX]
 jouet wait pid PID
 jouet wait cmd [--expect-exit N] -- CMD...
+jouet wait job ID       [--until exited|ready] [--port N | --http URL] [--log-lines N] [--no-logs]
 
 common: --timeout DUR (default 30m)  --interval DUR (default 10s, backs off to 60s)
         --json | --jsonl  --quiet
@@ -128,8 +130,9 @@ Every condition except `closed` counts a merged PR as met and a PR closed withou
 - **`wait http URL`** waits until a GET of the URL answers with a 2xx status, or exactly `--status CODE`. With `--contains REGEX`, a line of the body must match too, and that line is printed. Redirects are followed unless `--status` asks for a 3xx.
 - **`wait pid PID`** waits until the process exits. The process does not have to be jouet's child.
 - **`wait cmd -- CMD...`** runs the command, directly rather than through a shell, every interval until it exits with `--expect-exit` (default `0`). It prints the last run's exit code and its last 20 output lines, and saves the full output of the last run under the log directory. A run still going at the timeout is stopped, though every run gets at least one interval, so `--timeout 0` runs the command once.
+- **`wait job ID`** waits until a [`jouet job`](/commands/job) ends, exit `0` when it exited 0 or was stopped and `1`, with the end of its log, when it exited with another code; or with `--until ready`, until its ready check passes. See [`jouet job`](/commands/job#wait-job).
 
-These subjects stay deliberately small. Starting and supervising long-running services, with their ready checks, is [pitchfork](https://pitchfork.jdx.dev)'s job.
+These subjects stay deliberately small. Starting and supervising long-running services, with their ready checks, is [pitchfork](https://pitchfork.jdx.dev)'s job; one-off background work is [`jouet job`](/commands/job)'s.
 
 ## Timing
 
@@ -148,8 +151,8 @@ MET log app.log: matched (4s)
 ```
 
 - **Progress.** For a person at a terminal, one status line on stderr is redrawn every second. For agents, pipes and CI, each change of state is one line on stderr, so a backgrounded wait's log grows only when something happens.
-- **Result.** For the local subjects and `wait pr`, the first word is `MET` or `TIMEOUT` (`wait pr` also has `FAILED`). A timeout says how many checks ran. `wait ci` and `wait run` use the words described above.
-- **`--json`** prints one document. For the local subjects, it holds `subject`, `target`, `result` (`met` or `timeout`), the last `state`, `elapsed_s` and `checks`, plus the subject's own fields: `line`, `status`, `exit_code`, `output`, `output_truncated` and `log_path`. Empty fields are left out.
+- **Result.** For the local subjects and `wait pr`, the first word is `MET` or `TIMEOUT` (`wait pr` and `wait job` also have `FAILED`). A timeout says how many checks ran. `wait ci` and `wait run` use the words described above.
+- **`--json`** prints one document. For the local subjects, it holds `subject`, `target`, `result` (`met`, `failed` or `timeout`), the last `state`, `elapsed_s` and `checks`, plus the subject's own fields: `line`, `status`, `exit_code`, `output`, `output_truncated` and `log_path`. Empty fields are left out.
 - **`--jsonl`** prints one `{"event":"state",...}` line for each change of state (and, for the GitHub subjects, their own events), then the result document tagged `"event":"result"`. Under Claude Code's Monitor tool, each line becomes a notification.
 - **`--quiet`** prints no progress and no text result, only the exit code. JSON is still printed when it is asked for.
 
@@ -158,9 +161,9 @@ MET log app.log: matched (4s)
 | Code | Meaning |
 |---|---|
 | `0` | The condition was met |
-| `1` | It can no longer be met: a check failed, no checks appeared, the PR was closed, changes were requested |
+| `1` | It can no longer be met: a check failed, no checks appeared, the PR was closed, changes were requested, the job exited with an error |
 | `2` | Bad arguments, such as an invalid duration or regex |
-| `3` | The PR or run does not exist, or `wait cmd`'s program does not |
+| `3` | The PR, run or job does not exist, or `wait cmd`'s program does not |
 | `4` | The PR is conflicted, so no `pull_request` CI will run |
 | `5` | Authentication, network or rate-limit failure talking to GitHub |
 | `124` | Still waiting at `--timeout`; run the same command again to keep waiting |

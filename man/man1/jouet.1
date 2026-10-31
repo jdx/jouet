@@ -126,6 +126,24 @@ Wait for a process to exit
 \fBwait cmd\fR
 Re\-run a command until it exits with the expected code
 .TP
+\fBwait job\fR
+Wait for a `jouet job` to end, or to be ready
+.TP
+\fBjob\fR
+Run one\-off background work, such as a build or a server for one check
+.TP
+\fBjob start\fR
+Start a command in the background and return once it is ready
+.TP
+\fBjob ls\fR
+List this work tree's jobs: running, exited, stopped or gone
+.TP
+\fBjob logs\fR
+Print the end of a job's log
+.TP
+\fBjob stop\fR
+Stop jobs: SIGTERM to the whole process group, then SIGKILL
+.TP
 \fBci\fR
 Run GitHub Actions jobs on this machine
 .TP
@@ -451,7 +469,7 @@ Files to hash
 .SH "JOUET HANDOFF"
 Record the facts about this checkout for the next session
 
-Gathers the branch, its upstream and ahead/behind counts, HEAD, an operation in progress, uncommitted and untracked files, the branch's PR and its `pr status` attention codes, the session's last test, lint and build runs (recorded by `jouet setup`'s hooks) and background processes running in the worktree (Linux). Writes them as markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless \-o names a file (`.json` writes JSON; `\-` is stdout). Facts only: what the work is and what to do next is the agent's to add.
+Gathers the branch, its upstream and ahead/behind counts, HEAD, an operation in progress, uncommitted and untracked files, the branch's PR and its `pr status` attention codes, the session's last test, lint and build runs (recorded by `jouet setup`'s hooks), background processes running in the worktree (Linux), and its `jouet job`s. Writes them as markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless \-o names a file (`.json` writes JSON; `\-` is stdout). Facts only: what the work is and what to do next is the agent's to add.
 .PP
 \fBUsage:\fR jouet handoff [OPTIONS]
 .PP
@@ -1214,6 +1232,135 @@ Print help
 .TP
 \fB<CMD>\fR
 The command and its arguments, after `\-\-`
+.SH "JOUET WAIT JOB"
+Wait for a `jouet job` to end, or to be ready
+
+\-\-until exited (the default) is met when the job exits 0 or `jouet job stop` stopped it, and fails (exit 1) when it exits with another code. \-\-until ready is met while it runs and its ready check passes: \-\-port or \-\-http, else the one it was started with. A job that ends before it is ready fails. On a failure or a timeout, the end of its log is shown. Exits 3 when this work tree has no such job.
+.PP
+\fBUsage:\fR jouet wait job [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-until\fR \fI<CONDITION>\fR
+`exited` (the default) or `ready`
+.TP
+\fB\-\-port\fR \fI<N>\fR
+Ready once localhost's port N accepts connections
+.TP
+\fB\-\-http\fR \fI<URL>\fR
+Ready once URL answers with a 2xx status
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of its log to show on failure or timeout (default 60; 0 shows all of it)
+.TP
+\fB\-\-no\-logs\fR
+Do not show its log
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The job's ID
+.SH "JOUET JOB"
+Run one\-off background work, such as a build or a server for one check
+
+A job is a command running in the background, detached in a process group of its own, with its output in one log. Jobs belong to the work tree they were started in. No daemon runs: each job is a file under jouet's state directory. Unix only; on Windows, start and stop exit 4.
+.PP
+\fBUsage:\fR jouet job [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET JOB START"
+Start a command in the background and return once it is ready
+
+Runs CMD (directly, not through a shell) in this directory, with stdin closed and stdout and stderr in the job's log. With \-\-port, \-\-http or \-\-output, waits up to \-\-timeout (default 60s) for the job to be ready and fails (exit 1) with the end of its log if it exits first; a job still not ready at the timeout keeps running (exit 124). Without one, it returns at once, unless the command fails straight away. Refuses (exit 4) while a job of the same ID runs, unless \-\-replace stops it first.
+.PP
+\fBUsage:\fR jouet job start [OPTIONS] <ID> [<CMD>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-port\fR \fI<N>\fR
+Ready once localhost's port N accepts connections
+.TP
+\fB\-\-http\fR \fI<URL>\fR
+Ready once URL answers with a 2xx status
+.TP
+\fB\-o, \-\-output\fR \fI<REGEX>\fR
+Ready once a line of the job's log matches REGEX
+.TP
+\fB\-\-timeout\fR \fI<DUR>\fR
+How long to wait for the ready check (default 60s)
+.TP
+\fB\-\-replace\fR
+Stop a running job of the same ID first
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The job's ID: letters, digits, `_`, `.` and `\-`
+.TP
+\fB<CMD>\fR
+The command and its arguments, after `\-\-`
+.SH "JOUET JOB LS"
+List this work tree's jobs: running, exited, stopped or gone
+
+`gone` is a job that is no longer running with nothing recorded about how it ended. Jobs that ended more than a week ago are removed.
+.PP
+\fBUsage:\fR jouet job ls [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET JOB LOGS"
+Print the end of a job's log
+.PP
+\fBUsage:\fR jouet job logs [OPTIONS] <ID>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-n, \-\-lines\fR \fI<N>\fR
+Lines to print (default 50; 0 prints all of it)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<ID>\fR
+The job's ID
+.SH "JOUET JOB STOP"
+Stop jobs: SIGTERM to the whole process group, then SIGKILL
+
+A job that has already ended is left as it is.
+.PP
+\fBUsage:\fR jouet job stop [OPTIONS] [<IDS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-grace\fR \fI<DUR>\fR
+How long to wait after SIGTERM before SIGKILL (default 5s)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<IDS>\fR
+The jobs' IDs
 .SH "JOUET CI"
 Run GitHub Actions jobs on this machine
 .PP

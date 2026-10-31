@@ -9,7 +9,6 @@
 
 use jouet_rules::shell::{self, Op};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -89,16 +88,7 @@ impl Entry {
     }
 }
 
-/// The work tree containing `cwd`, as the first 16 hex characters of the
-/// SHA-256 of its root: the nearest directory with a `.git`, with symlinks
-/// resolved, which is what `git rev-parse --show-toplevel` prints. Read from
-/// the filesystem, because a hook cannot afford to start git.
-pub(crate) fn repo_key(cwd: &Path) -> Option<String> {
-    let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
-    let root = root.canonicalize().ok()?;
-    let digest = Sha256::digest(root.to_string_lossy().as_bytes());
-    Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
-}
+pub(crate) use jouet_output::paths::repo_key;
 
 /// Records what running hk's fixers on edited files did, unless the ledger
 /// is turned off. `tool` is the harness tool that edited, or None for `jouet
@@ -851,6 +841,7 @@ fn redact_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn a_shape_keeps_programs_subcommands_and_flags_only() {

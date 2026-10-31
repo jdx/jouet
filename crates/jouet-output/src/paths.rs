@@ -5,7 +5,8 @@
 //! decisions, which another user could plant in a shared temp directory, so
 //! without a home they are simply absent.
 
-use std::path::PathBuf;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 /// `$JOUET_LOG_DIR`, else `<state dir>/logs`, else a directory under the
 /// system temp dir.
@@ -53,4 +54,21 @@ pub fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
+}
+
+/// The work tree containing `cwd`, as the first 16 hex characters of the
+/// SHA-256 of its root: the nearest directory with a `.git`, with symlinks
+/// resolved, which is what `git rev-parse --show-toplevel` prints. Read from
+/// the filesystem, because a hook cannot afford to start git.
+pub fn repo_key(cwd: &Path) -> Option<String> {
+    let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
+    dir_key(root)
+}
+
+/// A directory, as the first 16 hex characters of the SHA-256 of its path
+/// with symlinks resolved.
+pub fn dir_key(dir: &Path) -> Option<String> {
+    let dir = dir.canonicalize().ok()?;
+    let digest = Sha256::digest(dir.to_string_lossy().as_bytes());
+    Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
 }

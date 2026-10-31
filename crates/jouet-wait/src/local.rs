@@ -76,6 +76,7 @@ impl Subject for FileWait {
         Ok(match first_match(re, &String::from_utf8_lossy(&bytes)) {
             Some(line) => Observation {
                 met: true,
+                failed: false,
                 state: "matched".into(),
                 detail: Detail {
                     line: Some(line),
@@ -193,6 +194,7 @@ impl Subject for LogWait {
         Ok(match self.read_new(&mut file) {
             Ok(Some(line)) => Observation {
                 met: true,
+                failed: false,
                 state: "matched".into(),
                 detail: Detail {
                     line: Some(line),
@@ -365,6 +367,7 @@ impl Subject for HttpWait {
         if !self.status_ok(status) {
             return Ok(Observation {
                 met: false,
+                failed: false,
                 state: format!("status {status}"),
                 detail,
             });
@@ -372,6 +375,7 @@ impl Subject for HttpWait {
         let Some(re) = &self.contains else {
             return Ok(Observation {
                 met: true,
+                failed: false,
                 state: format!("status {status}"),
                 detail,
             });
@@ -386,6 +390,7 @@ impl Subject for HttpWait {
             Err(e) => {
                 return Ok(Observation {
                     met: false,
+                    failed: false,
                     state: format!("status {status}, unreadable body: {e}"),
                     detail,
                 });
@@ -394,6 +399,7 @@ impl Subject for HttpWait {
         Ok(match first_match(re, &String::from_utf8_lossy(&body)) {
             Some(line) => Observation {
                 met: true,
+                failed: false,
                 state: format!("status {status}, matched"),
                 detail: Detail {
                     line: Some(line),
@@ -402,6 +408,7 @@ impl Subject for HttpWait {
             },
             None => Observation {
                 met: false,
+                failed: false,
                 state: format!("status {status}, no match"),
                 detail,
             },
@@ -515,6 +522,7 @@ impl Subject for CmdWait {
         };
         Ok(Observation {
             met: code == Some(self.expect_exit),
+            failed: false,
             state,
             detail: Detail {
                 exit_code: code,

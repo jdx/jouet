@@ -1,0 +1,42 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "job-logs"
+why = "Following a log never returns to the agent, and reading a nohup log depends on where it was redirected; a job's log is one command away by its name."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["job", "logs"]
+suggest = "jouet job logs ID -n 50"
+message = "It prints the end of a job's log and returns, where following a log never does. Start the work as a job (`jouet job start ID -- CMD`) so its log is one command away; to wait for a line in a log of your own, `jouet wait log FILE --match REGEX`."
+
+# Following a log file: it never returns.
+[[rule.match]]
+command = "tail"
+flags = ["-f", "-F", "--follow"]
+value_flags = ["-n", "-c", "--lines", "--bytes", "-s", "--sleep-interval", "--pid"]
+args = ["*.log", "*.out"]
+unless_args = ["/var/log/*"]
+
+# nohup's own log.
+[[rule.match]]
+command = ["cat", "tail", "head", "less"]
+args = ["nohup.out", "*/nohup.out"]
+value_flags = ["-n", "-c", "--lines", "--bytes"]
+
+[rule.examples]
+fires = [
+  "tail -f server.log",
+  "tail -n 100 -F /tmp/dev.log",
+  "cd web && tail -f logs/vite.out",
+  "cat nohup.out",
+  "tail -50 nohup.out",
+]
+quiet = [
+  "tail -n 50 server.log",
+  "tail -f /var/log/syslog.log",
+  "cat build.log",
+  "jouet job logs dev -n 50",
+  "less README.md",
+  "echo 'tail -f server.log'",
+]

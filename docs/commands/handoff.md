@@ -21,6 +21,7 @@ A handoff holds **facts only**. What the work is, what was tried and what to do 
 - the branch's PR (the open one, else the newest) and its [`pr status`](/commands/pr-status) attention codes;
 - the session's last test, lint and build runs, as `jouet setup`'s hooks record them;
 - background processes running in the worktree, each with a command to attach to it;
+- the worktree's [`jouet job`](/commands/job)s, running or ended, each with how to read its log;
 - what could not be gathered, and why: no GitHub remote, no session ID, `--no-pr`.
 
 The last runs come from the session named by `--session`, else `JOUET_SESSION_ID`, else Claude Code's `CLAUDE_CODE_SESSION_ID`. Without them the handoff still works and says so.
@@ -31,7 +32,7 @@ Background processes are listed on Linux only, and the list is a heuristic. It i
 - are not jouet's own ancestors or siblings (the agent, its shell, the rest of jouet's pipeline);
 - are not in use at a terminal: an interactive shell, or whatever runs in a terminal's foreground, such as an editor.
 
-A child whose parent is also listed is folded into it. A process whose stdout goes to a file is attached with `tail -f FILE`; any other with `jouet wait pid PID`.
+A child whose parent is also listed is folded into it. A process whose stdout goes to a file is attached with `tail -f FILE`; any other with `jouet wait pid PID`. A running job's processes are listed once, as the job.
 
 ```text
 # Handoff: feat/git-recipes
@@ -70,6 +71,7 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 | `uncommitted` | uncommitted files changed state, or their staged or unstaged changes differ |
 | `untracked` | untracked files appeared or went away |
 | `process_exited` | a recorded process is no longer running |
+| `job_ended` | a job that was running has exited, been stopped, or is gone |
 
 ```text
 ## Drift since 2026-10-30T18:02:51Z (2h ago)
@@ -78,8 +80,10 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 - `uncommitted`: src/handoff.rs no longer has changes
 ```
 
+When the handoff recorded jobs, pickup also lists each one as it is now, under `## Jobs now`: still running, exited with its code, stopped, or gone.
+
 pickup exits 0 when nothing has drifted and 1 when something has. It does not fetch the PR again; run [`jouet pr status`](/commands/pr-status) for its current state. A missing handoff is exit 3, and a file that is not a handoff is exit 4.
 
 ## JSON
 
-`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.
+`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty), `jobs` (each recorded job's `id` and its state `then` and `now`) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.

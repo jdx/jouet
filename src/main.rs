@@ -74,6 +74,8 @@ enum Cmd {
     Test(TestArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
+    /// Run one-off background work, such as a build or a server for one check
+    Job(JobArgs),
     /// Run GitHub Actions jobs on this machine
     Ci(CiArgs),
     /// List, test and trust the rules jouet's hooks run
@@ -201,11 +203,11 @@ pub struct ReviewPackageArgs {
 /// Gathers the branch, its upstream and ahead/behind counts, HEAD, an
 /// operation in progress, uncommitted and untracked files, the branch's PR
 /// and its `pr status` attention codes, the session's last test, lint and
-/// build runs (recorded by `jouet setup`'s hooks) and background processes
-/// running in the worktree (Linux). Writes them as markdown with the data
-/// embedded, to `<git dir>/jouet/handoff.md` unless -o names a file (`.json`
-/// writes JSON; `-` is stdout). Facts only: what the work is and what to do
-/// next is the agent's to add.
+/// build runs (recorded by `jouet setup`'s hooks), background processes
+/// running in the worktree (Linux), and its `jouet job`s. Writes them as
+/// markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless
+/// -o names a file (`.json` writes JSON; `-` is stdout). Facts only: what
+/// the work is and what to do next is the agent's to add.
 #[derive(Args)]
 pub struct HandoffArgs {
     /// Write the handoff to FILE (`-` is stdout)
@@ -784,6 +786,8 @@ pub enum WaitCmd {
     Pid(WaitPidArgs),
     /// Re-run a command until it exits with the expected code
     Cmd(WaitCmdArgs),
+    /// Wait for a `jouet job` to end, or to be ready
+    Job(WaitJobArgs),
 }
 
 /// Wait for a PR's checks, and show why any failed
@@ -956,6 +960,122 @@ pub struct WaitCmdArgs {
     /// The command and its arguments, after `--`
     #[usage(double_dash = "required", value_name = "CMD")]
     command: Vec<String>,
+}
+
+/// Wait for a `jouet job` to end, or to be ready
+///
+/// --until exited (the default) is met when the job exits 0 or `jouet job
+/// stop` stopped it, and fails (exit 1) when it exits with another code.
+/// --until ready is met while it runs and its ready check passes: --port or
+/// --http, else the one it was started with. A job that ends before it is
+/// ready fails. On a failure or a timeout, the end of its log is shown.
+/// Exits 3 when this work tree has no such job.
+#[derive(Args)]
+pub struct WaitJobArgs {
+    /// The job's ID
+    id: String,
+    /// `exited` (the default) or `ready`
+    #[usage(long, value_name = "CONDITION")]
+    until: Option<String>,
+    /// Ready once localhost's port N accepts connections
+    #[usage(long, value_name = "N")]
+    port: Option<u16>,
+    /// Ready once URL answers with a 2xx status
+    #[usage(long, value_name = "URL")]
+    http: Option<String>,
+    /// Lines of its log to show on failure or timeout (default 60; 0 shows
+    /// all of it)
+    #[usage(long, value_name = "N")]
+    log_lines: Option<usize>,
+    /// Do not show its log
+    #[usage(long)]
+    no_logs: bool,
+}
+
+/// Run one-off background work, such as a build or a server for one check
+///
+/// A job is a command running in the background, detached in a process
+/// group of its own, with its output in one log. Jobs belong to the work
+/// tree they were started in. No daemon runs: each job is a file under
+/// jouet's state directory. Unix only; on Windows, start and stop exit 4.
+#[derive(Args)]
+pub struct JobArgs {
+    #[usage(subcommand)]
+    cmd: JobCmd,
+}
+
+#[derive(Subcommands)]
+pub enum JobCmd {
+    /// Start a command in the background and return once it is ready
+    Start(JobStartArgs),
+    /// List this work tree's jobs: running, exited, stopped or gone
+    Ls(JobLsArgs),
+    /// Print the end of a job's log
+    Logs(JobLogsArgs),
+    /// Stop jobs: SIGTERM to the whole process group, then SIGKILL
+    Stop(JobStopArgs),
+}
+
+/// Start a command in the background and return once it is ready
+///
+/// Runs CMD (directly, not through a shell) in this directory, with stdin
+/// closed and stdout and stderr in the job's log. With --port, --http or
+/// --output, waits up to --timeout (default 60s) for the job to be ready and
+/// fails (exit 1) with the end of its log if it exits first; a job still not
+/// ready at the timeout keeps running (exit 124). Without one, it returns at
+/// once, unless the command fails straight away. Refuses (exit 4) while a
+/// job of the same ID runs, unless --replace stops it first.
+#[derive(Args)]
+pub struct JobStartArgs {
+    /// The job's ID: letters, digits, `_`, `.` and `-`
+    id: String,
+    /// Ready once localhost's port N accepts connections
+    #[usage(long, value_name = "N")]
+    port: Option<u16>,
+    /// Ready once URL answers with a 2xx status
+    #[usage(long, value_name = "URL")]
+    http: Option<String>,
+    /// Ready once a line of the job's log matches REGEX
+    #[usage(short = 'o', long, value_name = "REGEX")]
+    output: Option<String>,
+    /// How long to wait for the ready check (default 60s)
+    #[usage(long, value_name = "DUR")]
+    timeout: Option<String>,
+    /// Stop a running job of the same ID first
+    #[usage(long)]
+    replace: bool,
+    /// The command and its arguments, after `--`
+    #[usage(double_dash = "required", value_name = "CMD")]
+    command: Vec<String>,
+}
+
+/// List this work tree's jobs: running, exited, stopped or gone
+///
+/// `gone` is a job that is no longer running with nothing recorded about
+/// how it ended. Jobs that ended more than a week ago are removed.
+#[derive(Args)]
+pub struct JobLsArgs {}
+
+/// Print the end of a job's log
+#[derive(Args)]
+pub struct JobLogsArgs {
+    /// The job's ID
+    id: String,
+    /// Lines to print (default 50; 0 prints all of it)
+    #[usage(short = 'n', long, value_name = "N")]
+    lines: Option<usize>,
+}
+
+/// Stop jobs: SIGTERM to the whole process group, then SIGKILL
+///
+/// A job that has already ended is left as it is.
+#[derive(Args)]
+pub struct JobStopArgs {
+    /// The jobs' IDs
+    ids: Vec<String>,
+    /// How long to wait after SIGTERM before SIGKILL (default 5s)
+    #[usage(long, value_name = "DUR")]
+    grace: Option<String>,
 }
 
 /// Run GitHub Actions jobs on this machine
@@ -1607,6 +1727,7 @@ fn main() -> ExitCode {
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Test(args) => cmd::test::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
+        Cmd::Job(args) => cmd::job::run(args, &out),
         Cmd::Ci(args) => cmd::ci::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
         Cmd::Run(args) => return cmd::run::run(args, &out),

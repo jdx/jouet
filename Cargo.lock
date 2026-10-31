@@ -509,6 +509,7 @@ dependencies = [
  "mise-agent-env",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
