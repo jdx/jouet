@@ -23,7 +23,8 @@ pub enum Capability {
     /// Writing edits.
     #[serde(rename = "fs.write")]
     FsWrite,
-    /// Waits on ports and URLs.
+    /// Waits on ports and URLs, HTTP requests of any method, and package
+    /// lookups.
     #[serde(rename = "net")]
     Net,
     /// The hooks' ledger.

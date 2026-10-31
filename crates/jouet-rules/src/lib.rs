@@ -112,6 +112,7 @@ const BUILTIN: &[(&str, &str)] = &[
         "unbudgeted-search",
         include_str!("../rules/unbudgeted-search.toml"),
     ),
+    ("curl-json", include_str!("../rules/curl-json.toml")),
 ];
 
 /// The scripts built-in rules name.
@@ -1647,6 +1648,17 @@ fn install_module(
         "parse",
         lua.create_function(|lua, (script, exit_code): (String, Option<i32>)| {
             commands_table(lua, &script, exit_code)
+        })?,
+    )?;
+    jouet.set(
+        "unwrap",
+        lua.create_function(|_, words: Vec<String>| {
+            let command = shell::Command {
+                words,
+                ..shell::Command::default()
+            };
+            let via: Vec<String> = command.via().into_iter().map(String::from).collect();
+            Ok((command.argv().to_vec(), via))
         })?,
     )?;
     let has = has_command.clone();

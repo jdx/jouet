@@ -15,6 +15,7 @@ pub(crate) mod entire;
 pub(crate) mod graph;
 pub(crate) mod handoff;
 pub(crate) mod hook;
+pub(crate) mod http;
 pub(crate) mod job;
 pub(crate) mod land;
 pub(crate) mod next;

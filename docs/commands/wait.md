@@ -36,7 +36,7 @@ jouet wait pr [PR]       --until mergeable|merged|closed|approved|checks-registe
 jouet wait file PATH     [--contains REGEX] [--gone]
 jouet wait log PATH      --match REGEX [--from-start]
 jouet wait port ADDR     [--closed]
-jouet wait http URL      [--status CODE] [--contains REGEX]
+jouet wait http URL      [--status CODE] [--contains REGEX] [--expect ASSERTION]...
 jouet wait pid PID
 jouet wait cmd [--expect-exit N] -- CMD...
 jouet wait job ID       [--until exited|ready] [--port N | --http URL] [--log-lines N] [--no-logs]
@@ -145,7 +145,7 @@ Every condition except `closed` counts a merged PR as met and a PR closed withou
 - **`wait file PATH`** waits until the path exists. With `--contains REGEX`, it waits until a line of the file matches and prints that line. With `--gone`, it waits until nothing exists at the path.
 - **`wait log PATH --match REGEX`** follows the file like `tail -F`, and prints the first appended line that matches. It starts at the current end of the file, so lines already there do not count unless `--from-start` is given. A file that does not exist yet is waited for and then read from its start. When the file is rotated (the path now names a different file) or truncated, it is read again from its start. A line still being written is matched too.
 - **`wait port ADDR`** waits until a TCP connection to `ADDR` succeeds, or with `--closed` until every address it resolves to refuses connections. A timeout or an unreachable network says nothing about the port, so it keeps the wait going. `ADDR` is `host:port`, `[v6]:port`, or just a port, which means localhost.
-- **`wait http URL`** waits until a GET of the URL answers with a 2xx status, or exactly `--status CODE`. With `--contains REGEX`, a line of the body must match too, and that line is printed. Redirects are followed unless `--status` asks for a 3xx.
+- **`wait http URL`** waits until a GET of the URL answers with a 2xx status, or exactly `--status CODE`. With `--contains REGEX`, a line of the body must match too, and that line is printed. With `--expect`, every assertion must hold too; they are the ones [`jouet http`](/commands/http#assertions) takes, such as `--expect 'jsonpath $.ready == true'`, and the state line names the one that fails. Redirects are followed unless `--status` asks for a 3xx.
 - **`wait pid PID`** waits until the process exits. The process does not have to be jouet's child.
 - **`wait cmd -- CMD...`** runs the command, directly rather than through a shell, every interval until it exits with `--expect-exit` (default `0`). It prints the last run's exit code and its last 20 output lines, and saves the full output of the last run under the log directory. A run still going at the timeout is stopped, though every run gets at least one interval, so `--timeout 0` runs the command once.
 - **`wait job ID`** waits until a [`jouet job`](/commands/job) ends, exit `0` when it exited 0 or was stopped and `1`, with the end of its log, when it exited with another code; or with `--until ready`, until its ready check passes. See [`jouet job`](/commands/job#wait-job).
