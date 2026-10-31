@@ -39,7 +39,12 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
             verify::prune_sessions();
         }
         let settings = Settings::load();
-        let output = handle(harness, event, &payload, &settings);
+        let hk: Vec<String> = args
+            .hk
+            .as_deref()
+            .map(|c| c.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default();
+        let output = handle(harness, event, &payload, &settings, &hk);
         record_slow(harness, event, &payload, &settings, started.elapsed());
         output
     });
@@ -79,8 +84,15 @@ fn record_slow(
     ledger::append(&dir, &entry);
 }
 
-/// The hook's stdout for one event, or `None` to print nothing.
-fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -> Option<Value> {
+/// The hook's stdout for one event, or `None` to print nothing. `hk_stop`
+/// is the hk stop hook a merged `stop` runs too.
+fn handle(
+    harness: Harness,
+    event: &str,
+    payload: &Value,
+    settings: &Settings,
+    hk_stop: &[String],
+) -> Option<Value> {
     let hooks = &settings.hooks;
     if !hooks.enabled {
         return None;
@@ -129,9 +141,29 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             }
             None
         }
+        "post-edit" => {
+            if !settings.edit.fix_after {
+                return None;
+            }
+            let (fixed, root) = fix_after_edit(payload, settings)?;
+            crate::ledger::record_fix(
+                &root,
+                log.session,
+                harness.name(),
+                payload.get("tool_name").and_then(Value::as_str),
+                &fixed,
+            );
+            let line = fixed.summary()?;
+            Some(json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": format!("jouet: {line}"),
+                }
+            }))
+        }
         "stop" => {
-            let output = if hooks.verify {
-                stop(harness, payload)
+            let output = if hooks.verify || !hk_stop.is_empty() {
+                stop(harness, payload, hooks.verify, hk_stop)
             } else {
                 None
             };
@@ -495,26 +527,112 @@ fn session_state_path(payload: &Value) -> Option<PathBuf> {
     verify::state_path(payload.get("session_id")?.as_str()?)
 }
 
-fn stop(harness: Harness, payload: &Value) -> Option<Value> {
+/// The stop gate: jouet's verify and, when setup merged it, hk's own stop
+/// hook, as one decision. hk is not run when the session's last hk check
+/// passed at the tree as it is now.
+fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> Option<Value> {
     // Block at most once in a row: after one nudge, the agent's answer
     // stands, so a check that cannot pass never traps it.
     if payload.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
         return None;
     }
     let state = match harness {
-        Harness::Claude => State::load(&session_state_path(payload)?),
-        Harness::Codex => {
-            let transcript = payload.get("transcript_path")?.as_str()?;
-            let commands = verify::codex_commands(transcript.as_ref());
-            if commands.is_empty() {
-                return None;
-            }
-            let engine = load(payload)?;
-            codex_state(&engine, commands)
-        }
+        Harness::Claude => session_state_path(payload).map(|p| State::load(&p)),
+        Harness::Codex => payload
+            .get("transcript_path")
+            .and_then(Value::as_str)
+            .map(|t| verify::codex_commands(t.as_ref()))
+            .filter(|commands| !commands.is_empty())
+            .and_then(|commands| Some(codex_state(&load(payload)?, commands))),
+    }
+    .unwrap_or_default();
+    let tree = std::cell::OnceCell::new();
+    let now = || tree.get_or_init(|| work_tree(payload)).clone();
+    let root = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .and_then(|cwd| Path::new(cwd).ancestors().find(|d| d.join(".git").exists()))
+        .map(Path::to_path_buf);
+    let hk_repo = root.as_deref().and_then(crate::diag::hk_config).is_some();
+    let jouet = if verify {
+        state.block_reason(now, hk_repo)
+    } else {
+        None
     };
-    let reason = state.block_reason(|| work_tree(payload))?;
+    let hk = if hk_stop.is_empty() || state.hk_passed_at(now) {
+        None
+    } else {
+        run_hk_stop(hk_stop, payload)
+    };
+    let reason = match (jouet, hk) {
+        (None, None) => return None,
+        (Some(one), None) => one,
+        (None, Some(hk)) => format!("{hk} [hk]"),
+        (Some(jouet), Some(hk)) => format!("{jouet}\n\nhk check: {hk} [hk]"),
+    };
     Some(json!({ "decision": "block", "reason": reason }))
+}
+
+/// Runs hk's stop hook with this hook's payload and returns the reason it
+/// blocks with, if it does. Fails open: an hk that cannot run says nothing.
+fn run_hk_stop(argv: &[String], payload: &Value) -> Option<String> {
+    let (program, args) = argv.split_first()?;
+    let dir = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write as _;
+        let _ = stdin.write_all(payload.to_string().as_bytes());
+    }
+    let out = child.wait_with_output().ok()?;
+    let value: Value = serde_json::from_slice(&out.stdout).ok()?;
+    (value.get("decision").and_then(Value::as_str) == Some("block"))
+        .then(|| {
+            value
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .flatten()
+}
+
+/// Runs hk's fixers on the file an Edit or Write call changed, within
+/// `[edit] fix_timeout_ms`. None outside a repository with an hk config.
+fn fix_after_edit(
+    payload: &Value,
+    settings: &Settings,
+) -> Option<(crate::diag::fix::Fixed, PathBuf)> {
+    let input = payload.get("tool_input")?;
+    let file = input
+        .get("file_path")
+        .or_else(|| input.get("notebook_path"))
+        .and_then(Value::as_str)?;
+    let cwd = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let path = cwd.join(file);
+    let root = path
+        .ancestors()
+        .skip(1)
+        .find(|d| d.join(".git").exists())?
+        .to_path_buf();
+    crate::diag::hk_config(&root)?;
+    let root = root.canonicalize().unwrap_or(root);
+    let path = path.canonicalize().ok()?;
+    let rel = crate::diag::relative(&root, &path.to_string_lossy());
+    let steps = settings.edit.fix_steps.clone().unwrap_or_default();
+    let timeout = Duration::from_millis(settings.edit.fix_timeout_ms);
+    Some((crate::diag::fix::run(&root, &[rel], &steps, timeout), root))
 }
 
 /// Runs a Codex session's finished commands through the post-tool-use
@@ -632,7 +750,7 @@ mod tests {
             &engine,
             vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
         );
-        assert!(failing.block_reason(|| None).is_some());
+        assert!(failing.block_reason(|| None, false).is_some());
         let fixed = codex_state(
             &engine,
             vec![
@@ -640,7 +758,7 @@ mod tests {
                 ("cargo test --workspace".into(), 0),
             ],
         );
-        assert_eq!(fixed.block_reason(|| None), None);
+        assert_eq!(fixed.block_reason(|| None, false), None);
         // A partial pass leaves the full failure standing.
         let partial = codex_state(
             &engine,
@@ -649,7 +767,7 @@ mod tests {
                 ("cargo test -p jouet --lib".into(), 0),
             ],
         );
-        let why = partial.block_reason(|| None).unwrap();
+        let why = partial.block_reason(|| None, false).unwrap();
         assert!(why.contains("only a full test run clears it"), "{why}");
     }
 

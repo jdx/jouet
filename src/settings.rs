@@ -9,6 +9,9 @@
 //! [hooks]
 //! verify = false
 //!
+//! [edit]
+//! fix_after = true
+//!
 //! [stats]
 //! summary = "plain"
 //!
@@ -24,6 +27,8 @@ pub(crate) struct Settings {
     pub rules: RuleSettings,
     #[usage(flatten)]
     pub hooks: HookSettings,
+    #[usage(flatten)]
+    pub edit: EditSettings,
     #[usage(flatten)]
     pub stats: StatsSettings,
     #[usage(flatten)]
@@ -95,6 +100,21 @@ pub(crate) struct HookSettings {
     /// Milliseconds a tool hook may take before the ledger records it as slow; session start and stop get ten times this
     #[usage(env = "JOUET_HOOKS_BUDGET_MS", default = 500)]
     pub budget_ms: u64,
+}
+
+/// What happens after a file is edited.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "edit")]
+pub(crate) struct EditSettings {
+    /// Format the files `jouet edit` writes, and those the harness's Edit and Write tools change, with `hk run fix --safe` when the repository has an hk config
+    #[usage(env = "JOUET_EDIT_FIX_AFTER", default = false)]
+    pub fix_after: bool,
+    /// Milliseconds the fix after an edit may take before it is stopped
+    #[usage(env = "JOUET_EDIT_FIX_TIMEOUT_MS", default = 8000)]
+    pub fix_timeout_ms: u64,
+    /// Only these hk steps format after an edit, such as cargo-fmt; every fix step when unset
+    #[usage(env = "JOUET_EDIT_FIX_STEPS", merge = "union", parse = "list_by_comma")]
+    pub fix_steps: Option<Vec<String>>,
 }
 
 /// What `jouet stats` prints.
@@ -223,6 +243,26 @@ mod tests {
         assert_eq!(s.hooks.budget_ms, 500);
         let s = Settings::load_from(&env(&[("JOUET_SHARE_CONTRIBUTE", "1")]), None);
         assert!(s.share.contribute);
+    }
+
+    #[test]
+    fn fixing_after_edits_is_off_until_turned_on() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(!s.edit.fix_after);
+        assert_eq!((s.edit.fix_timeout_ms, s.edit.fix_steps), (8000, None));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[edit]\nfix_after = true\nfix_steps = [\"cargo-fmt\"]\n",
+        )
+        .unwrap();
+        let s = Settings::load_from(&env(&[]), Some(path));
+        assert!(s.edit.fix_after);
+        assert_eq!(
+            s.edit.fix_steps.as_deref(),
+            Some(&["cargo-fmt".to_string()][..])
+        );
     }
 
     #[test]

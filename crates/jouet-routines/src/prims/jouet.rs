@@ -7,6 +7,9 @@
 //!   `wait.pid{pid}`: `jouet wait`'s engine.
 //! - `jouet.pr_status`, `jouet.pr_next`, `jouet.pr_threads`, and the writes
 //!   `jouet.pr_reply`, `jouet.pr_resolve` and `jouet.pr_land`.
+//! - `jouet.diag_check` and `jouet.diag_delta`, the project's hk checks on
+//!   files (`fs.read`), and `jouet.diag_fix`, its fixers (`fs.write`): hk's
+//!   `--safe` refuses any whose effect is unknown or destructive.
 //! - `jouet.code.symbols{query}`, `jouet.code.callers{symbol}`,
 //!   `jouet.code.callees{symbol}`, `jouet.code.impact{symbol}`,
 //!   `jouet.code.explore{query}` and `jouet.code.affected{files}`: the code
@@ -22,7 +25,7 @@
 
 use super::primitive;
 use crate::Fail;
-use crate::capability::Capability::{self, FsRead, GithubRead, GithubWrite, Net};
+use crate::capability::Capability::{self, FsRead, FsWrite, GithubRead, GithubWrite, Net};
 use crate::runtime::{Ctx, to_lua};
 use crate::world::StepOutput;
 use jouet_output::exit::Exit;
@@ -65,6 +68,7 @@ pub struct Command {
 }
 
 const WAIT: &[(&str, Flag)] = &[("timeout", Val), ("interval", Val), ("quiet", Switch)];
+const DIAG: &[(&str, Flag)] = &[("changed", Switch), ("max", Val)];
 const PR_LIST: &[(&str, Flag)] = &[
     ("mine", Switch),
     ("search", Val),
@@ -235,6 +239,33 @@ pub const COMMANDS: &[Command] = &[
         &[("files", true)],
         &[],
     ),
+    read(
+        "jouet",
+        "diag_check",
+        &["diag", "check"],
+        FsRead,
+        &[("files", true)],
+        &[DIAG],
+    ),
+    read(
+        "jouet",
+        "diag_delta",
+        &["diag", "delta"],
+        FsRead,
+        &[("files", true)],
+        &[DIAG],
+    ),
+    Command {
+        writes: true,
+        ..read(
+            "jouet",
+            "diag_fix",
+            &["diag", "fix"],
+            FsWrite,
+            &[("files", true)],
+            &[&[("changed", Switch), ("step", Repeat)]],
+        )
+    },
     read(
         "wait",
         "ci",
