@@ -140,8 +140,15 @@ impl EntireForge {
         let n = doc["number"].as_u64().unwrap_or_default().to_string();
         let sel = entire::selector(repo);
         let approvals = self.read(&["trail", "approvals", &n, "--json", "--repo", &sel])?;
-        let required = gate(doc, "approvals")
-            .is_some_and(|g| g["blocking"] == true && g["status"] != "passed");
+        let approvals_gate = gate(doc, "approvals");
+        // The gate says changes were asked for even when the decision that
+        // asked is gone from the list, as a dismissed one would be.
+        if approvals_gate.is_some_and(|g| g["value"]["changes_requested"] == true) {
+            return Ok(Some("changes_requested".into()));
+        }
+        let required = approvals_gate.is_some_and(|g| {
+            g["blocking"] == true && !matches!(g["status"].as_str(), Some("passed" | "skipped"))
+        });
         Ok(decision(&approvals["approvals"], required))
     }
 
