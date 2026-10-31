@@ -12,6 +12,6 @@ The list holds {"id": N, "reply": "...", "resolve": true} entries. Every entry i
 
 ## Flags
 - **`--file <FILE>`** — Read the list from FILE (`-` is stdin)
-- **`--ignore-resolved`** — Skip threads that are already resolved instead of failing
+- **`--ignore-resolved`** — Leave threads that are already resolved alone; without this, replies still go into them
 - **`--dry-run`** — Check everything and show what would be posted, posting nothing
 - **`-h --help`** — Print help

@@ -114,6 +114,12 @@ declare jouet: {
 	secrets: {
 		scan: (args: { [any]: any }?) -> Ran,
 	},
+	-- net: one HTTP request (`jouet http`), any method; { method, url,
+	-- header?, json_body?, data?, select?, expect?, budget?, headers?,
+	-- no_follow?, timeout? }
+	http: {
+		request: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

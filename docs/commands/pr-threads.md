@@ -81,11 +81,11 @@ JSON
 
 `apply` takes a JSON list of `{"id", "reply", "resolve"}` entries from `--file` or stdin, so a whole review sweep is posted in one call. `reply`, `resolve` and `unresolve` do the same for threads named on the command line. A pull request given after the IDs of `resolve` or `unresolve` must not be a bare number, which would read as a thread ID: write it as `#123`.
 
-- **Validate first, then write.** Every ID is checked before anything is posted. An unknown ID, or a thread that is already resolved, fails the whole call and posts nothing. `--ignore-resolved` skips resolved threads instead.
+- **Validate first, then write.** Every ID is checked before anything is posted. An unknown ID fails the whole call and posts nothing. A thread someone already resolved, often a review bot after a push, still takes your reply and stays resolved; resolving it again does nothing. `--ignore-resolved` leaves resolved threads alone instead.
 - **`{sha}`** in a reply becomes the short SHA of HEAD. jouet refuses it unless HEAD is on the pull request's branch on GitHub, so a reply never names a commit reviewers cannot see.
 - **Footer.** `JOUET_REPLY_FOOTER`, or `reply_footer` in `~/.config/jouet/config.toml` (under `$XDG_CONFIG_HOME` when that is set), is appended to every reply after a blank line. An empty `JOUET_REPLY_FOOTER` turns it off.
 - **Empty replies** are a usage error, never an empty comment.
-- **Retries never double-post.** A reply whose exact text is already the thread's last comment from you is not posted again, and `apply` treats a thread that is already resolved as done, so re-running the same file after a failure only does what is left.
+- **Retries never double-post.** A reply whose exact text is already the thread's last comment from you is not posted again, and a thread that is already resolved is not resolved again, so re-running the same file after a failure only does what is left.
 - **A failure stops the batch.** The output lists what was posted and what was not attempted, and the exit code is 5. Writes are never retried automatically, because a failed response can follow a write that succeeded.
 - **`--dry-run`** checks everything and prints each reply exactly as it would be posted.
 
@@ -144,5 +144,5 @@ Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per threa
 | `1` | With `--fail-if-unresolved`, a listed thread is unresolved |
 | `2` | Bad arguments, an empty reply, or a malformed `apply` list |
 | `3` | The pull request, a thread ID, or the `@SHA` commit does not exist |
-| `4` | Nothing was posted: a thread is already resolved, or `{sha}` names a commit that is not on the pull request's branch |
+| `4` | Nothing was posted: `{sha}` names a commit that is not on the pull request's branch |
 | `5` | Authentication, network or rate-limit failure, including a batch stopped part way |

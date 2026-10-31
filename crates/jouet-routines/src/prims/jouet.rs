@@ -23,6 +23,9 @@
 //! - `jouet.secrets.scan{paths}`: gitleaks' rules over files, or with
 //!   `staged` or `diff = REF` the lines the index or commits add (`jouet
 //!   secrets scan`); exit 1 and the findings, redacted, when it finds any.
+//! - `jouet.http.request{method, url}`: one HTTP request (`jouet http`), with
+//!   `header`, `json_body` or `data`, `select`, `expect`, `budget` and
+//!   `timeout`. Any method is sent, so `net` lets a routine POST.
 //!
 //! Each takes a table: positional arguments in order (or by name), flags by
 //! name with `_` for `-`. Each returns `{ ok, exit_code, json, error,
@@ -282,6 +285,26 @@ pub const COMMANDS: &[Command] = &[
         &[("paths", true)],
         &[&[("staged", Switch), ("diff", Val)]],
     ),
+    // `jouet.http`: one HTTP request, its status and the JSON paths asked
+    // for, with assertions.
+    read(
+        "jouet.http",
+        "request",
+        &["http"],
+        Net,
+        &[("method", false), ("url", false)],
+        &[&[
+            ("header", Repeat),
+            ("json_body", Val),
+            ("data", Val),
+            ("select", Repeat),
+            ("expect", Repeat),
+            ("budget", Val),
+            ("headers", Switch),
+            ("no_follow", Switch),
+            ("timeout", Val),
+        ]],
+    ),
     read(
         "jouet",
         "diag_check",
@@ -379,7 +402,10 @@ pub const COMMANDS: &[Command] = &[
         &["wait", "http"],
         Net,
         &[("url", false)],
-        &[WAIT, &[("status", Val), ("contains", Val)]],
+        &[
+            WAIT,
+            &[("status", Val), ("contains", Val), ("expect", Repeat)],
+        ],
     ),
     Command {
         capability: None,
@@ -572,6 +598,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     let docs = lua.create_table()?;
     let deps = lua.create_table()?;
     let secrets = lua.create_table()?;
+    let http = lua.create_table()?;
     for command in COMMANDS {
         let name = command.name();
         let f = primitive(
@@ -611,6 +638,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
             "jouet.docs" => docs.set(command.key, f)?,
             "jouet.deps" => deps.set(command.key, f)?,
             "jouet.secrets" => secrets.set(command.key, f)?,
+            "jouet.http" => http.set(command.key, f)?,
             _ => jouet.set(command.key, f)?,
         }
     }
@@ -618,6 +646,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     jouet.set("docs", docs)?;
     jouet.set("deps", deps)?;
     jouet.set("secrets", secrets)?;
+    jouet.set("http", http)?;
     globals.set("wait", wait)?;
     globals.set("jouet", jouet)?;
     Ok(())

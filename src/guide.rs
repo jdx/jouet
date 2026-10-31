@@ -54,6 +54,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "http",
+        Some(
+            "calling an HTTP API or checking an endpoint: `jouet http GET URL --select '$.items[*].id'` prints the status and only those JSONPath values, `--expect 'jsonpath $.ok == true'` exits 1 when a value is wrong, and a long body is cut to --budget, instead of curl piped into jq or python. Put credentials in `${NAME}` (from the environment, or `fnox exec -- jouet http ...`), never inline",
+        ),
+    ),
+    (
         "job",
         Some(
             "running a build, a test suite, a long script or a server for one check in the background: `jouet job start ID --port N -- CMD` returns once it is ready, `jouet wait job ID` blocks until it ends, instead of `&`, nohup, sleep-and-curl loops and pkill",
@@ -305,6 +311,28 @@ const USAGE: &[Usage] = &[
             ),
         ],
         more: "every condition and flag: run, pid, cmd, daemon, --required, --check, --log-lines",
+    },
+    Usage {
+        command: "http",
+        lines: &[
+            (
+                "jouet http GET <URL> --select '$.items[*].id'",
+                "the status and only the values at those JSONPaths (repeatable)",
+            ),
+            (
+                "jouet http GET <URL> --expect status=200 --expect 'jsonpath $.ok == true'",
+                "hurl-style checks; exit 1 names the one that failed",
+            ),
+            (
+                "jouet http POST <URL> --json-body @FILE",
+                "send JSON (or --data TEXT|@FILE|@-); --header NAME:VALUE",
+            ),
+            (
+                "jouet http GET <URL> --header 'Authorization: Bearer ${TOKEN}'",
+                "credentials by name from the environment (or `fnox exec -- jouet http ...`), redacted from output",
+            ),
+        ],
+        more: "every predicate, --budget, --headers, --no-follow, --timeout and what is redacted",
     },
     Usage {
         command: "job",
@@ -624,6 +652,7 @@ pub(crate) const GROUPED: &[&[&str]] = &[
     &["commit", "secrets"],
     &["handoff", "pickup"],
     &["read", "docs", "deps"],
+    &["wait", "http"],
 ];
 
 /// The group `name` belongs to, if any.
@@ -653,7 +682,7 @@ pub(crate) fn overview() -> String {
             .filter_map(|other| commands.iter().find(|(m, _)| m.cmd.name == *other))
             .collect();
         if !others.is_empty() {
-            let mut names = format!("jouet {name}");
+            let mut names = head(name, meta);
             let mut abouts = meta.about.unwrap_or("").to_string();
             let mut whens = (*when).to_string();
             for (other, other_when) in others {
@@ -665,24 +694,7 @@ pub(crate) fn overview() -> String {
             let _ = writeln!(out, "  when: {whens}");
             continue;
         }
-        let subs: Vec<&str> = meta
-            .subcommands
-            .iter()
-            .filter(|s| {
-                let at = (name, s.cmd.name);
-                !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
-            })
-            .map(|s| s.cmd.name)
-            .collect();
-        let head = if subs.is_empty() {
-            format!("jouet {name}")
-        } else if meta.subcommand_required() {
-            format!("jouet {name} <{}>", subs.join("|"))
-        } else {
-            // The family also runs on its own.
-            format!("jouet {name} [{}]", subs.join("|"))
-        };
-        let _ = writeln!(out, "{head}: {}", meta.about.unwrap_or(""));
+        let _ = writeln!(out, "{}: {}", head(name, meta), meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
     }
     out.push('\n');
@@ -694,6 +706,27 @@ pub(crate) fn overview() -> String {
         "Details: `jouet agent-help COMMAND` for its subcommands and flags, `jouet COMMAND --help`.\n",
     );
     out
+}
+
+/// `jouet NAME` and its subcommands by name, as the overview lists it.
+fn head(name: &str, meta: &CommandMeta<'_>) -> String {
+    let subs: Vec<&str> = meta
+        .subcommands
+        .iter()
+        .filter(|s| {
+            let at = (name, s.cmd.name);
+            !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
+        })
+        .map(|s| s.cmd.name)
+        .collect();
+    if subs.is_empty() {
+        format!("jouet {name}")
+    } else if meta.subcommand_required() {
+        format!("jouet {name} <{}>", subs.join("|"))
+    } else {
+        // The family also runs on its own.
+        format!("jouet {name} [{}]", subs.join("|"))
+    }
 }
 
 /// The guide for one command: what `jouet agent-help COMMAND` prints. A
@@ -831,7 +864,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     if let ([commit, edit, reply], [suite, affected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let _ = writeln!(
             out,
-            "Test with `{suite}` (the full suite), `{affected}` (what your changes affect) or `{cmd}` (any other test or build). Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "Test with `{suite}` (the full suite), `{affected}` (what your changes affect) or `{cmd}` (any other test or build). Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
