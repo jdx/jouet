@@ -7,7 +7,7 @@ Notice costly patterns in the hook ledger and whole sessions, and propose fixes
 
 Reads the ledger jouet's hooks keep from where it last stopped. When a command keeps failing across sessions, or agents keep sleeping instead of waiting, it drafts a rule in warn mode and keeps a note of it, which the next session start shows (two at most). The hooks run it on their own; running it by hand reads the ledger now. Off with JOUET_WIND=0.
 
-The ledger holds only command shapes. `jouet wind digest` and `jouet wind review` read whole sessions: the user's corrections, abandoned approaches, waits and repeated exploration. A review's proposals (mise tasks, rules, routines, AGENTS.md or memory notes) are recorded with `jouet wind propose` and shown like the ledger's notes.
+The ledger holds only command shapes. `jouet wind digest` and `jouet wind review` read whole sessions: the user's corrections, abandoned approaches, waits and repeated exploration. A review's proposals (mise tasks, rules, routines, AGENTS.md or memory notes, or changes to the memories agents already keep) are recorded with `jouet wind propose` and shown like the ledger's notes. `jouet wind memories` notices memories whose workaround looks fixed.
 
 ## Flags
 - **`-h --help`** — Print help
@@ -17,6 +17,7 @@ The ledger holds only command shapes. `jouet wind digest` and `jouet wind review
 - [`jouet wind adopt <ID>`](/cli/wind/adopt.md)
 - [`jouet wind digest [FLAGS] [SESSION]`](/cli/wind/digest.md)
 - [`jouet wind dismiss <ID>`](/cli/wind/dismiss.md)
+- [`jouet wind memories [--record]`](/cli/wind/memories.md)
 - [`jouet wind propose [FILE]`](/cli/wind/propose.md)
 - [`jouet wind review [FLAGS] [SESSION]`](/cli/wind/review.md)
 - [`jouet wind show <ID>`](/cli/wind/show.md)

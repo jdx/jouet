@@ -4,7 +4,7 @@
 use super::Output;
 use crate::settings::Settings;
 use crate::wind::{self, Paths, Status, stats, unwind as retire};
-use crate::{UnwindArgs, WindArgs, WindCmd, WindDigestArgs, WindProposeArgs};
+use crate::{UnwindArgs, WindArgs, WindCmd, WindDigestArgs, WindMemoriesArgs, WindProposeArgs};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -40,6 +40,7 @@ pub(crate) fn run(args: &WindArgs, out: &Output) -> Exit {
         Some(WindCmd::Digest(args)) => sessions(args, false, out),
         Some(WindCmd::Review(args)) => sessions(args, true, out),
         Some(WindCmd::Propose(args)) => propose(&paths, args, out),
+        Some(WindCmd::Memories(args)) => memories(&paths, args, out),
     }
 }
 
@@ -60,6 +61,9 @@ struct WindReport<'a> {
     /// Sequences a mise task may replace, and tasks drafted for them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tasks: Vec<&'a wind::tasks::Proposal>,
+    /// Memories that look stale.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    memories: Vec<&'a wind::memories::MemoryNote>,
 }
 
 #[derive(Serialize)]
@@ -110,6 +114,12 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
             .iter()
             .filter(|p| p.status == Status::Pending)
             .collect(),
+        memories: state
+            .memories
+            .notes
+            .iter()
+            .filter(|n| n.status == Status::Pending)
+            .collect(),
     };
     out.result(&doc, || {
         let mut text = format!("read {} ledger entries", report.read);
@@ -146,6 +156,9 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
                     );
                 }
             }
+        }
+        for n in &doc.memories {
+            let _ = writeln!(text, "{}  memory  `{}` {}", n.id, n.memory, n.found);
         }
         for q in &doc.reviews {
             let _ = writeln!(
@@ -218,6 +231,20 @@ fn show(paths: &Paths, id: &str, out: &Output) -> Exit {
         });
         return Exit::Ok;
     }
+    if let Some(n) = state.memories.note(id) {
+        out.result(n, || {
+            format!(
+                "{} ({}): memory `{}` {}\npath: {}\nwhen it is dealt with: jouet wind adopt {}\n",
+                n.id,
+                n.status.name(),
+                n.memory,
+                n.found,
+                n.path,
+                n.id
+            )
+        });
+        return Exit::Ok;
+    }
     if let Some(q) = state.reviews.queued(id) {
         out.result(q, || {
             format!(
@@ -257,7 +284,8 @@ fn show(paths: &Paths, id: &str, out: &Output) -> Exit {
     Exit::Ok
 }
 
-/// Marks a review's proposal as applied, so it is not shown again.
+/// Marks a review's proposal or a memory note as dealt with, so it is not
+/// shown again.
 fn adopt(paths: &Paths, id: &str, out: &Output) -> Exit {
     let state = wind::State::load(&paths.state);
     if state.note(id).is_some() {
@@ -276,7 +304,7 @@ fn adopt(paths: &Paths, id: &str, out: &Output) -> Exit {
             ),
         );
     }
-    if state.reviews.proposal(id).is_none() {
+    if state.reviews.proposal(id).is_none() && state.memories.note(id).is_none() {
         return out.error(Exit::NotFound, &format!("no proposal `{id}`"));
     }
     if !wind::set_status(paths, id, Status::Adopted) {
@@ -300,6 +328,9 @@ struct DigestReport<'a> {
     /// digested.
     #[serde(skip_serializing_if = "is_zero")]
     left_out: usize,
+    /// For a review, the memories its sessions' agent reads.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    memories: Vec<wind::memories::Shown>,
 }
 
 fn is_empty_across(a: &&jouet_audit::digest::Across) -> bool {
@@ -364,12 +395,18 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
     }
     let budget = args.budget.unwrap_or(BUDGET).max(200);
     let across = jouet_audit::digest::across(&digests);
+    let memories = if prompt {
+        review_memories(&digests, &redactor)
+    } else {
+        Vec::new()
+    };
     let report = DigestReport {
         prompt: prompt.then(|| wind::review::prompt(Settings::load().share.contribute)),
         redaction: redactor.describe(),
         digests: &digests,
         across: &across,
         left_out,
+        memories,
     };
     out.result(&report, || {
         let mut text = String::new();
@@ -395,9 +432,191 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
                 "… {left_out} older sessions since then left out; narrow --since or name one"
             );
         }
+        text.push_str(&wind::memories::render(&report.memories));
         text
     });
     Exit::Ok
+}
+
+#[derive(Serialize)]
+struct MemoriesReport {
+    /// Memories read, and the Claude Code projects they belong to.
+    memories: usize,
+    projects: usize,
+    /// PRs and issues asked about this time; the rest were known.
+    asked: usize,
+    /// Why GitHub was not asked, when it could not be.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    github: Option<String>,
+    findings: Vec<wind::memories::Finding>,
+    /// Findings recorded as notes this run, with --record.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    recorded: Vec<String>,
+}
+
+/// The built-in rules' names, which a memory may say to get past.
+fn builtin_rules(paths: &Paths) -> Vec<String> {
+    wind::user_engine(&paths.rules)
+        .rules()
+        .iter()
+        .filter(|r| r.scope == jouet_rules::Scope::Builtin)
+        .map(|r| r.name.clone())
+        .collect()
+}
+
+/// `jouet wind memories`: what in the agents' memories looks stale.
+fn memories(paths: &Paths, args: &WindMemoriesArgs, out: &Output) -> Exit {
+    use wind::memories::{self as m, Kind};
+    let settings = Settings::load();
+    if !settings.wind.enabled || !settings.wind.memories {
+        return out.error(
+            Exit::Precondition,
+            "memory upkeep is off; turn it on with `[wind] memories = true` (and `enabled`), or unset JOUET_WIND_MEMORIES and JOUET_WIND",
+        );
+    }
+    let all = m::discover(&m::Roots::from_env());
+    let checked = m::extract(&all, &builtin_rules(paths));
+    let now = wind::now();
+    let known = wind::State::load(&paths.state).memories.lookups;
+    let wanted = m::to_look_up(&checked, &known, now);
+    let mut github = None;
+    let fresh = if wanted.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        let mut client = jouet_github::Client::from_env();
+        m::look_up(&mut client, &wanted, &known, now).unwrap_or_else(|e| {
+            github = Some(e);
+            std::collections::BTreeMap::new()
+        })
+    };
+    let mut lookups = known;
+    lookups.extend(fresh.clone());
+    let found = m::findings(&checked, &lookups, &|words| crate::spec::unknown_in(words));
+    // A memory that works around jouet is a report for its maintainers,
+    // when the user contributes.
+    let mut ideas = std::collections::BTreeMap::new();
+    if args.record
+        && settings.share.contribute
+        && let Some(gaps) = crate::share::gaps_path()
+    {
+        let redactor = wind::session::Redactor::new(settings.wind.gitleaks.as_deref());
+        for f in found.iter().filter(|f| f.kind == Kind::Jouet) {
+            let sentence = checked
+                .iter()
+                .filter(|c| c.memory.path.to_string_lossy() == f.path)
+                .flat_map(|c| &c.claims.overrides)
+                .find(|o| o.0 == f.about)
+                .map(|o| redactor.redact(&o.1))
+                .unwrap_or_default();
+            let title = format!(
+                "A saved memory works around the built-in rule `{}`",
+                f.about
+            );
+            let body = format!(
+                "An agent saved a memory to get past `{}`, so the rule may misfire: \"{sentence}\"",
+                f.about
+            );
+            if let Ok(key) = crate::share::record_review(&gaps, &title, &body, now) {
+                ideas.insert(f.path.clone(), key);
+            }
+        }
+    }
+    let referenced: std::collections::BTreeSet<&str> = checked
+        .iter()
+        .flat_map(|c| c.claims.references.iter().map(|r| r.key.as_str()))
+        .collect();
+    let recorded = wind::update(&paths.state, |state| {
+        state.memories.lookups.extend(fresh);
+        state
+            .memories
+            .lookups
+            .retain(|key, _| referenced.contains(key.as_str()));
+        if args.record {
+            m::record(state, &found, &ideas, now)
+        } else {
+            Vec::new()
+        }
+    })
+    .unwrap_or_default();
+    let report = MemoriesReport {
+        memories: all.len(),
+        projects: all
+            .iter()
+            .filter_map(|m| m.project.as_deref())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        asked: wanted.len(),
+        github,
+        findings: found,
+        recorded,
+    };
+    out.result(&report, || {
+        let mut text = format!(
+            "read {} memories ({} projects); asked GitHub about {} references\n",
+            report.memories, report.projects, report.asked
+        );
+        if let Some(e) = &report.github {
+            let _ = writeln!(text, "GitHub was not asked: {e}");
+        }
+        if report.findings.is_empty() {
+            text.push_str("nothing looks stale\n");
+        }
+        for f in &report.findings {
+            let _ = writeln!(
+                text,
+                "{}  {}\n  {}",
+                f.memory,
+                m::tilde(std::path::Path::new(&f.path)),
+                f.found
+            );
+        }
+        if !report.recorded.is_empty() {
+            let _ = writeln!(
+                text,
+                "recorded {}; the next session starts in their projects show them",
+                report.recorded.join(", ")
+            );
+        }
+        text
+    });
+    Exit::Ok
+}
+
+/// The memories a review of `digests` shows: their projects' and the
+/// global ones, whole when a session read one or a memory note names it.
+fn review_memories(
+    digests: &[jouet_audit::digest::Digest],
+    redactor: &wind::session::Redactor,
+) -> Vec<wind::memories::Shown> {
+    use wind::memories as m;
+    let settings = Settings::load();
+    if !settings.wind.memories {
+        return Vec::new();
+    }
+    let home = jouet_audit::home();
+    let expand = |p: &str| match (p.strip_prefix("~/"), &home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => std::path::PathBuf::from(p),
+    };
+    let projects: Vec<std::path::PathBuf> = digests
+        .iter()
+        .filter_map(|d| d.project.as_deref().map(expand))
+        .collect();
+    let all = m::discover(&m::Roots::from_env());
+    let ours = m::for_projects(&all, &projects);
+    let read: std::collections::BTreeSet<String> = digests
+        .iter()
+        .flat_map(jouet_audit::digest::Digest::files_read)
+        .map(str::to_string)
+        .collect();
+    let noted: std::collections::BTreeSet<String> = Paths::locate()
+        .map(|p| wind::State::load(&p.state).memories.notes)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n.status == Status::Pending)
+        .map(|n| n.path)
+        .collect();
+    m::for_review(&ours, &read, &noted, &|text| redactor.redact(text))
 }
 
 /// `jouet wind propose`: records a review's reply.
@@ -439,7 +658,11 @@ fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
             );
         }
     };
-    let recorded = match wind::review::record(paths, reply, crate::wind::now()) {
+    let targets: Vec<String> = wind::memories::discover(&wind::memories::Roots::from_env())
+        .iter()
+        .map(wind::memories::Memory::display)
+        .collect();
+    let recorded = match wind::review::record(paths, reply, crate::wind::now(), &targets) {
         Ok(recorded) => recorded,
         Err(e) => return out.error(Exit::Failed, &format!("writing the winding state: {e}")),
     };

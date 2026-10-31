@@ -8,6 +8,7 @@ After `jouet setup`, jouet improves itself the way agents keep memories. It work
 
 - **The ledger.** Its hooks keep a [ledger](/setup#the-ledger) of command shapes on this machine, cheaply and all the time. When the same costly pattern keeps showing up there, jouet drafts a [rule](/rules) against it, and the next session start shows a one-line note about it.
 - **Session review.** Now and then, an agent reads a digest of a whole session: what the user corrected, approaches tried and abandoned, waits, exploration repeated. It proposes mise tasks, rules, routines, or AGENTS.md and memory notes, which surface the same way. See [Reviewing whole sessions](#reviewing-whole-sessions).
+- **Memory upkeep.** Once a day, jouet reads the memories agents keep and checks the claims they depend on, such as a PR a workaround waits on. When one has changed, the next session start in that project says the memory may be stale. See [Keeping memories current](#keeping-memories-current).
 
 The agent, or you, decides whether to adopt what either layer proposes. Nothing leaves the machine, and every change to a rule is logged.
 
@@ -136,6 +137,8 @@ The prompt asks the reviewer for causes, not symptoms, and for at most three pro
 - **`rule`:** a rule that steers the agent's own tool calls, such as pointing a long command at the task that replaces it. Always warn mode, in user scope, like a rule the ledger drafts.
 - **`agents_md`:** a line or two for the project's AGENTS.md: knowledge every agent in the repository needs. Always asked first.
 - **`memory`:** a note for the harness's memory: this user's preference, across projects.
+- **`memory_update`:** a new text for a memory the agent already keeps, when the session contradicts it: the bug it works around did not happen, or the user corrected a step it prescribes. `target` names the memory by its path, as the review lists it.
+- **`memory_delete`:** deleting a memory that is wrong or no longer needed, with `target` and the reason as its draft. A memory that works around jouet itself is a jouet bug, not a memory: the review proposes deleting it, and with `contribute` on, the bug as a `jouet` proposal too.
 - **`jouet`:** a change to jouet itself, for its maintainers. Offered only with `[share] contribute` on. It is not a pending proposal: `jouet wind propose` records it as an idea for [`jouet share`](#what-sessions-show-about-jouet), which drafts it and posts only with the user's yes.
 - **`nothing`:** most sessions need nothing, and the prompt says so.
 
@@ -151,7 +154,7 @@ jouet wind: session d1d1d1d1 (2h ago, this repository) had 3 user corrections, 2
 
 Proposals share the ledger notes' guardrails:
 
-- At most two lines per session start, the ledger's notes first, then mise tasks for the repository, then suggested reviews, then proposals. A line shown to three sessions without being acted on lapses.
+- At most two lines per session start, the ledger's notes first, then mise tasks for the repository, then notes about this project's memories, then suggested reviews, then proposals. A line shown to three sessions without being acted on lapses.
 - At most three proposals per review and three a day. One with the same kind and title as an earlier proposal is skipped.
 - A proposal that looks like it holds a secret is refused, as is one without a title, a why and a draft, with an unknown scope, or with evidence that is not a span.
 - Nothing is applied by jouet. Rules start in warn mode in your rules; anything for the project (`mise.toml`, AGENTS.md, a repository rule) needs the user's yes, and a repository's rules change through a reviewed PR.
@@ -170,6 +173,54 @@ Reading is local, and a digest goes only where you pipe it: to a subagent in the
 
 Building one reads the transcript once. Over 1,759 Claude Code and 989 Codex transcripts on one machine (a median of 1 MB, the largest 42 MB), a digest took 8 ms at the median and 0.6 s at most, and came to about 1,000 tokens at the median and 3,700 at the 99th percentile, within the default budget of 4,000. That is also what the stop hook spends, with `[wind] review` on, at most every ten minutes per session.
 
+## Keeping memories current
+
+Agents save memories, and many of them work around a bug: "until #886 is released, run cargo through `mise x`". The bug gets fixed, and later sessions keep applying the workaround. Wind reads those memories and checks, without a model, whether what each one depends on still holds.
+
+### Which memories
+
+- Claude Code's: each project's notes in `~/.claude/projects/*/memory/*.md` (not the `MEMORY.md` index), and `~/.claude/CLAUDE.md`.
+- Codex's: `~/.codex/AGENTS.md`, and the memories Codex consolidates in `~/.codex/memories/` (`MEMORY.md` and `memory_summary.md`). `memories_1.sqlite` is left out: it holds the extractions Codex itself consolidates and prunes.
+- `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` move them, as they do for the harnesses.
+
+A Claude Code memory belongs to a project. A session in that project's checkout, a directory in it, or a worktree added from it sees notes about the project's memories. The global files' notes go to every session.
+
+### What is checked
+
+A memory's text is read in sentences. Its claims are the ones a workaround depends on:
+
+| Claim | Read from | Stale when |
+| --- | --- | --- |
+| A PR or issue it waits on | `owner/name#12`, a GitHub URL, or `#12` beside "pending", "waits on", "blocked on", "until … merges", "when to drop this", or "#12 is still open" | it is merged or closed |
+| A release it waits for | a merged PR beside "isn't in a release yet", "not released", "predates it", "once … ships" or "waits for the next release" | the repository's latest release has the merge |
+| A jouet command or flag | `` `jouet …` `` in a code span | this jouet has no such command or flag |
+| A built-in rule to get past | a rule's name in a code span, in a sentence that says to override or bypass it, or that it fires wrongly | always: that is a jouet bug |
+
+Only a difference between what a memory says and what is true counts. "Fixed in jdx/mise#13193" is history, and is never raised. A memory that records a PR as merged anywhere is taken at its word. A bare `#12` belongs to the repository named just before it, else to the only one the memory names, else (when it names none) to the project's `origin`; when that is unclear, it is left out.
+
+```text
+$ jouet wind memories
+read 42 memories (3 projects); asked GitHub about 5 references
+tool-cache-workaround  ~/.claude/projects/-home-me-src-app/memory/tool-cache-workaround.md
+  waits for a release with acme/tool#886, and v1.30.0 (2026-11-02) has it
+```
+
+GitHub is asked through GraphQL, with the token `jouet pr` uses, in batches of up to 80 references, and a release through one comparison of its tag with the merge. Answers that cannot change (merged, closed, released) are kept in the winding state and never asked again; an open PR is asked again after 20 hours. Without a token or a network, the GitHub claims are skipped and the rest is still checked.
+
+### Notes at session start
+
+The stop hook starts `jouet wind memories --record` in the background, at most once a day, since it waits on GitHub. What it finds becomes a memory note (`m1`), under the same limits as the ledger's notes: two new a day, two lines per session start, shown to three sessions at most. A finding already noted, whatever became of the note, is not noted again.
+
+```text
+jouet wind: memory `tool-cache-workaround` waits for a release with acme/tool#886, and v1.30.0 (2026-11-02) has it: the bug it works around may be fixed. At a natural pause, check whether it still happens, then ask the user before updating or deleting the memory. `jouet wind show m1` for its path; `jouet wind adopt m1` once done, `jouet wind dismiss m1` to drop it.
+```
+
+jouet never changes a memory. The agent that sees the note checks whether the bug is gone, and asks the user before it updates or deletes anything. A memory that works around a built-in rule is reported as a jouet bug: the note says to tell the user, and with `[share] contribute` on it also names the idea `jouet share --idea` drafts.
+
+### In a review
+
+`jouet wind review` lists the memories the reviewed sessions' agent reads: their projects' and the global ones, after the digests. Each line gives a memory's path, name and description; the memories a session read, and those with a pending note, are shown whole (three at most, redacted like the digest). The reviewer can propose a [`memory_update` or `memory_delete`](#what-a-proposal-can-be) naming one, and `jouet wind propose` refuses a `target` that is not one of them.
+
 ## Settings
 
 ```toml
@@ -180,6 +231,7 @@ promote_after = 20      # JOUET_WIND_PROMOTE_AFTER: firings, with no overrides, 
 review = false          # JOUET_WIND_REVIEW: digest sessions at stop, suggest reviewing one
 review_every = 5        # JOUET_WIND_REVIEW_EVERY: sessions, at least, between two suggestions
 review_corrections = 2  # JOUET_WIND_REVIEW_CORRECTIONS: corrections that make a session worth it
+memories = true         # JOUET_WIND_MEMORIES: check saved memories once a day
 gitleaks = "~/src/gitleaks/config/gitleaks.toml"  # JOUET_WIND_GITLEAKS: also redact with these rules
 
 [share]

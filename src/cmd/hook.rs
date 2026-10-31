@@ -151,7 +151,8 @@ fn handle(
             log.append(log.entry("session-start"));
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let primer = session_start(&loaded.engine, hooks.steer, hooks.verify);
-            let mut notes = wind_notes(settings, log.session, log.repo.as_deref());
+            let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
+            let mut notes = wind_notes(settings, log.session, log.repo.as_deref(), cwd);
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
@@ -263,7 +264,15 @@ fn handle(
             if settings.wind.enabled
                 && let Some(paths) = wind::Paths::locate()
             {
-                wind::run(&paths, &settings.wind, crate::wind::now(), false);
+                let now = crate::wind::now();
+                wind::run(&paths, &settings.wind, now, false);
+                // GitHub is asked in the background, at most once a day.
+                if settings.wind.memories
+                    && wind::memories::Roots::from_env().any()
+                    && wind::memories::due(&paths, now)
+                {
+                    wind::memories::spawn_check();
+                }
                 if settings.wind.review {
                     review_on_stop(&paths, settings, harness, payload, log.repo.clone());
                 }
@@ -321,9 +330,14 @@ fn remember(call: &Call, session: Option<&str>) {
 
 /// Winds, then picks the notes to show a starting session: at most
 /// [`wind::MAX_PER_START`], one line each. The ledger's notes come first,
-/// then mise tasks proposed for this repository, then sessions worth a
-/// review and what reviews proposed.
-fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) -> Vec<String> {
+/// then mise tasks proposed for this repository, then stale memories of
+/// this project, then sessions worth a review and what reviews proposed.
+fn wind_notes(
+    settings: &Settings,
+    session: Option<&str>,
+    repo: Option<&str>,
+    cwd: Option<&Path>,
+) -> Vec<String> {
     if !settings.wind.enabled {
         return Vec::new();
     }
@@ -339,6 +353,12 @@ fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) ->
         .collect();
     let room = wind::MAX_PER_START.saturating_sub(lines.len());
     lines.extend(wind::tasks::lines_for_session(&paths, session, repo, room));
+    if settings.wind.memories {
+        let room = wind::MAX_PER_START.saturating_sub(lines.len());
+        lines.extend(wind::memories::lines_for_session(
+            &paths, session, cwd, room,
+        ));
+    }
     let room = wind::MAX_PER_START.saturating_sub(lines.len());
     lines.extend(wind::review::lines_for_session(
         &paths, session, repo, room, now,
