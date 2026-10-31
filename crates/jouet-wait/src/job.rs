@@ -198,14 +198,20 @@ impl Store {
     /// Where the job is now: its exit file first, since a process that has
     /// exited may still be waiting to be reaped.
     pub fn state(&self, job: &Job) -> State {
-        if let Some(code) = std::fs::read_to_string(self.path(&job.id, "exit"))
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-        {
+        let exited = || {
+            std::fs::read_to_string(self.path(&job.id, "exit"))
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+        };
+        if let Some(code) = exited() {
             return State::Exited(code);
         }
         if sys::is_job(job) {
-            State::Running
+            return State::Running;
+        }
+        // It may have written its exit file and ended between the two looks.
+        if let Some(code) = exited() {
+            State::Exited(code)
         } else if job.stopped_at.is_some() {
             State::Stopped
         } else {
