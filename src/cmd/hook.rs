@@ -905,6 +905,8 @@ mod tests {
             context.contains("python-edit (use `jouet edit`)"),
             "{context}"
         );
+        // Every built-in deny rule, not a sample, fits the primer's budget.
+        assert!(context.len() <= 1200, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call.
         assert!(!context.contains("large-read"), "{context}");
         assert!(!context.contains("checks"), "{context}");

@@ -95,6 +95,14 @@ jouet looks for adapters in the current directory, then each directory above it 
 - **The whole suite for** any `conftest.py`, `pyproject.toml`, `setup.py`, `setup.cfg`, `pytest.ini`, `tox.ini`, `noxfile.py` and `.coveragerc`.
 - **Limits of the import graph:** dynamic imports (`importlib.import_module`, `__import__`), plugins and entry points, and data files are invisible to it. Over-selection is possible: a module name found under two roots selects the tests of both.
 
+### unittest
+
+- **Found by** a test file (`test*.py`) in the directory, its `tests/` or its `test/` that imports `unittest`, where pytest is not found: a pytest project runs its unittest tests through pytest.
+- **Runner:** `python -m unittest` with the Python of a `.venv` or `venv` in the project or the repository root, or `python3`. The full suite is `python3 -m unittest discover`, with `-s tests` when `tests/` is not a package, since discovery from the project would not enter it.
+- **Selection:** the same best-effort static import graph as pytest's without testmon, with unittest's `test*.py` as the test files; it runs `python3 -m unittest` on the selected files.
+- **Traces** `.py` and `.pyi`.
+- **The whole suite for** `pyproject.toml`, `setup.py` and `setup.cfg`.
+
 ### graph
 
 The fallback for languages without a native adapter, built on jouet's [code graph](/commands/graph).
@@ -134,7 +142,7 @@ run = "jouet test --affected"
 |---|---|
 | `0` | the tests passed, or nothing needed to run |
 | `1` | the tests failed (the runner exited non-zero) |
-| `2` | a usage error: `--since` or `--adapter` without `--affected`, an unknown adapter or ref, or pytest's own usage error |
+| `2` | a usage error: `--since` or `--adapter` without `--affected`, an unknown adapter or ref, or pytest's or unittest's own usage error |
 | `4` | no adapter or test task was found, the runner is not installed, or not in a git repository |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.

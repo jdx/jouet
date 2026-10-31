@@ -23,7 +23,7 @@
 - [`jouet diag delta [--changed] [--max <N>] [FILES]…`](/cli/diag/delta.md)
 - [`jouet diag fix [FLAGS] [FILES]…`](/cli/diag/fix.md)
 - [`jouet edit [FLAGS] [PATHS]… [SUBCOMMAND]`](/cli/edit.md)
-- [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
+- [`jouet edit replace [FLAGS] [PATHS]…`](/cli/edit/replace.md)
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
 - [`jouet graph <SUBCOMMAND>`](/cli/graph.md)
 - [`jouet graph index [--full]`](/cli/graph/index.md)

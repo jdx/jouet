@@ -9,7 +9,7 @@ description: Exact, checked, all-or-nothing text edits across files, from search
 ```text
 jouet edit [--spec FILE] [--format blocks|patch|json] [--dry-run] [--diff]
            [--check CMD] [--diag] [--revert-on-fail] [--expect-hash PATH=SHA256]...
-jouet edit replace PATH --old TEXT --new TEXT [--count N | --all]
+jouet edit replace PATH... (--old TEXT --new TEXT)... [--count N | --all]
 jouet edit hash PATH...
 ```
 
@@ -190,13 +190,20 @@ For specs that programs generate:
 - `symbol` replaces a whole definition, as a [symbol target](#symbol-targets) does, and takes `new` only.
 - An entry without `old` creates the file.
 
-## Edit one file from the command line
+## Edit from the command line
 
-`jouet edit replace` makes a single replacement without a spec. Like a JSON edit, `--old` matches anywhere in the file, and it must match exactly once unless `--count N` or `--all` says otherwise:
+`jouet edit replace` makes replacements without a spec. Like a JSON edit, `--old` matches anywhere in a file, and it must match exactly once in each file unless `--count N` or `--all` says otherwise:
 
 ```sh
 jouet edit replace src/main.rs --old 'let x = 1;' --new 'let x = 2;'
 jouet edit replace src/main.rs --old 'HTTP' --new 'HTTP_FETCH' --all
+```
+
+It takes several files, and `--old` and `--new` repeat: the Nth `--new` replaces the Nth `--old`, and every replacement applies to every file. A rename across files is one call, and like any edit it lands in every file or in none:
+
+```sh
+jouet edit replace shipit/config.py shipit/cli.py --old retry_limit --new max_attempts --all
+jouet edit replace app.py --old 'reverse=True)' --new ')' --old 'math.floor' --new 'math.ceil'
 ```
 
 The edit flags below work with `replace` too.
