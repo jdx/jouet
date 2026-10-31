@@ -1,7 +1,7 @@
 [package]
 name = "jouet-search"
 version = "0.0.1"
-description = "Budgeted search, symbols and a repo map behind jouet search and jouet read"
+description = "Budgeted search with session memory, grouped by definition, behind jouet search"
 keywords = ["agents", "search", "tree-sitter", "grep"]
 categories = ["development-tools", "text-processing"]
 edition.workspace = true
@@ -15,10 +15,9 @@ include = ["/src/**", "/LICENSE"]
 workspace = true
 
 [features]
-# The tree-sitter grammars: symbols in search results, and the repo map.
+# The tree-sitter grammars: the definitions search groups matches by.
 grammars = [
   "dep:tree-sitter",
-  "dep:tree-sitter-tags",
   "dep:tree-sitter-c",
   "dep:tree-sitter-cpp",
   "dep:tree-sitter-go",
@@ -35,12 +34,10 @@ grep-regex.workspace = true
 grep-searcher.workspace = true
 ignore.workspace = true
 memchr.workspace = true
-petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tree-sitter = { workspace = true, optional = true }
-tree-sitter-tags = { workspace = true, optional = true }
 tree-sitter-c = { workspace = true, optional = true }
 tree-sitter-cpp = { workspace = true, optional = true }
 tree-sitter-go = { workspace = true, optional = true }

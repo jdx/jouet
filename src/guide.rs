@@ -20,7 +20,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing; `jouet read --map` prints a repository's most important definitions to fit a token budget",
+            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing",
         ),
     ),
     (
