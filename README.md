@@ -125,7 +125,7 @@ Every command follows the same
 output that adapts to whoever is reading, `--json` that prints exactly one
 document, and one table of exit codes.
 
-`jouet setup claude` (or `codex`) installs hooks that steer an agent toward
+`jouet setup claude` (or `codex`, `cursor`, `gemini`, `copilot`) installs hooks that steer an agent toward
 these commands, deny habits such as `git add -A` and a bare
 `git stash`, and stop it finishing while its last test run failed. The rules
 behind the hooks are [TOML matchers](https://jouet.jdx.dev/rules) you can add

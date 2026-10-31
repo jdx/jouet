@@ -1,16 +1,19 @@
 //! `jouet hook HARNESS EVENT`: answers the hooks `jouet setup` installs, by
 //! running jouet's rules.
 //!
-//! The harness sends one JSON document on stdin. Every path fails open: a
-//! payload jouet cannot read, a broken config file, a rule that throws or
-//! runs out of budget, or a panic exits 0 with no decision, so an error in
-//! jouet never blocks the agent. Rule errors are reported on stderr. Exit
-//! code 2, which both harnesses read as "block", is never used.
+//! The harness sends one JSON document on stdin, which [`harness`] reads as
+//! Claude Code's and whose answer it writes in the harness's own fields.
+//! Every path fails open: a payload jouet cannot read, a broken config file,
+//! a rule that throws or runs out of budget, or a panic exits 0 with no
+//! decision, so an error in jouet never blocks the agent. Rule errors are
+//! reported on stderr. Exit code 2, which harnesses read as "block", is
+//! never used.
 
 use crate::HookArgs;
 use crate::cmd;
 use crate::fnox;
 use crate::guide;
+use crate::harness;
 use crate::ledger::{self, Entry};
 use crate::reads;
 use crate::rules;
@@ -30,12 +33,17 @@ const TREE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
     let started = std::time::Instant::now();
+    let harness = args.harness.as_deref().and_then(Harness::parse);
     let result = std::panic::catch_unwind(|| {
-        let harness = args.harness.as_deref().and_then(Harness::parse)?;
+        let harness = harness?;
         let event = args.event.as_deref()?;
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
         let payload: Value = serde_json::from_str(&input).ok()?;
+        let payload = harness::normalize(harness, event, payload);
+        if harness == Harness::Claude && cursor_runs_its_own(&payload) {
+            return None;
+        }
         if event == "session-start" {
             verify::prune_sessions();
         }
@@ -47,18 +55,48 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
             .unwrap_or_default();
         let output = handle(harness, event, &payload, &settings, &hk);
         record_slow(harness, event, &payload, &settings, started.elapsed());
-        output
+        harness::render(harness, event, output)
     });
-    match result {
-        Ok(Some(output)) => println!("{output}"),
-        // Codex reads a Stop hook's stdout as JSON, so it gets an empty
-        // object rather than nothing.
-        _ if args.event.as_deref() == Some("stop") && args.harness.as_deref() == Some("codex") => {
-            println!("{{}}");
-        }
+    match (result, harness) {
+        (Ok(Some(output)), _) => println!("{output}"),
+        // These read the hook's stdout as JSON, so they get an empty object
+        // rather than nothing: Codex at a stop, the others always.
+        (_, Some(h)) if h.wants_json() => println!("{{}}"),
+        (_, Some(Harness::Codex)) if args.event.as_deref() == Some("stop") => println!("{{}}"),
         _ => {}
     }
     jouet_output::exit::Exit::Ok
+}
+
+/// Whether this Claude Code hook is Cursor running it, which it does for
+/// the hooks in Claude Code's settings files, while jouet's own Cursor hooks
+/// are installed too: they answer instead, so a call gets one verdict.
+/// Cursor sets `CURSOR_VERSION` for its hooks; Claude Code sets `CLAUDECODE`.
+fn cursor_runs_its_own(payload: &Value) -> bool {
+    if std::env::var_os("CURSOR_VERSION").is_none() || std::env::var_os("CLAUDECODE").is_some() {
+        return false;
+    }
+    let has = |path: PathBuf| {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|doc| crate::setup::has_jouet(&doc))
+    };
+    let global = std::env::home_dir().is_some_and(|home| {
+        has(Harness::Cursor.config_path(crate::setup::Scope::Global, &home, &home))
+    });
+    let cwd = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|cwd| !cwd.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CURSOR_PROJECT_DIR").map(PathBuf::from));
+    global
+        || cwd.is_some_and(|cwd| {
+            cwd.ancestors()
+                .find(|d| d.join(".git").exists())
+                .is_some_and(|root| has(root.join(".cursor").join("hooks.json")))
+        })
 }
 
 /// Records a hook that ran over its budget, for `jouet share --idea`:
@@ -134,6 +172,19 @@ fn handle(
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);
             }
+            // A warning waits for the call's post-tool-use hook where the
+            // harness has nowhere else to put it.
+            if harness::defers_warnings(harness)
+                && let Some(outcome) = outcome.filter(|o| o.deny.is_none())
+                && !outcome.warnings.is_empty()
+            {
+                let context = output.as_ref().and_then(|o| harness::Answer::of(o).context);
+                if let (Some(path), Some(context)) = (pending_path(payload), context) {
+                    let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
+                    let _ = std::fs::write(path, context);
+                }
+                return None;
+            }
             output
         }
         "post-tool-use" | "post-tool-use-failure" => {
@@ -158,7 +209,19 @@ fn handle(
             if hooks.graph {
                 super::graph::reindex_after_tool(payload, &call);
             }
-            None
+            // A warning the pre-tool-use hook held for this call.
+            if !harness::defers_warnings(harness) {
+                return None;
+            }
+            let path = pending_path(payload)?;
+            let context = std::fs::read_to_string(&path).ok()?;
+            let _ = std::fs::remove_file(&path);
+            Some(json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": context,
+                }
+            }))
         }
         "post-edit" => {
             if !settings.edit.fix_after {
@@ -207,6 +270,30 @@ fn handle(
         }
         _ => None,
     }
+}
+
+/// Where a pre-tool-use warning waits for its call's post-tool-use hook:
+/// beside the session's state file, so files left when a call never ran go
+/// with it after a week. The call is its `tool_use_id`, or its tool and
+/// input, which a harness sends both hooks alike.
+fn pending_path(payload: &Value) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let call = match payload.get("tool_use_id").and_then(Value::as_str) {
+        Some(id) => id.to_string(),
+        None => format!(
+            "{}\n{}",
+            payload.get("tool_name")?,
+            payload.get("tool_input").unwrap_or(&Value::Null)
+        ),
+    };
+    let hash: String = Sha256::digest(call.as_bytes())
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let state = session_state_path(payload)?;
+    let stem = state.file_stem()?.to_str()?;
+    Some(state.with_file_name(format!("{stem}.warning-{hash}.txt")))
 }
 
 /// Whether the session was already shown everything the call reads, for
@@ -274,6 +361,10 @@ fn review_on_stop(
     payload: &Value,
     repo: Option<String>,
 ) {
+    // Only Claude Code's and Codex's transcripts can be read.
+    if !matches!(harness, Harness::Claude | Harness::Codex) {
+        return;
+    }
     let Some(session) = payload.get("session_id").and_then(Value::as_str) else {
         return;
     };
@@ -584,7 +675,9 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
         return as_note(note);
     }
     let state = match harness {
-        Harness::Claude => session_state_path(payload).map(|p| State::load(&p)),
+        Harness::Claude | Harness::Cursor | Harness::Gemini | Harness::Copilot => {
+            session_state_path(payload).map(|p| State::load(&p))
+        }
         Harness::Codex => payload
             .get("transcript_path")
             .and_then(Value::as_str)
@@ -908,7 +1001,10 @@ mod tests {
             "{context}"
         );
         // Every built-in deny rule, not a sample, fits the primer's budget.
-        assert!(context.len() <= 1200, "{} bytes:\n{context}", context.len());
+        // It grew from 1200 to fit `jouet test`'s usage: about 40 tokens a
+        // request, where the `agent-help test` and `commit` lookups it saves
+        // printed 5.9 kB once each.
+        assert!(context.len() <= 1400, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call.
         assert!(!context.contains("large-read"), "{context}");
         assert!(!context.contains("checks"), "{context}");
