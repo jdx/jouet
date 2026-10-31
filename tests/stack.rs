@@ -119,7 +119,12 @@ fn jouet(dir: &Path, fake: &Fake, args: &[&str]) -> Output {
         .env("JOUET_GITHUB_TOKEN", TOKEN)
         .env("JOUET_DISPLAY", "plain")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1");
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        // `stack sync` commits merges; a CI runner has no identity to infer.
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t");
     for var in ["GH_TOKEN", "GITHUB_TOKEN", "HTTPS_PROXY", "https_proxy"] {
         cmd.env_remove(var);
     }
