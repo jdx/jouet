@@ -8,6 +8,12 @@
 //! exits 0 when jouet is not on `PATH`. That command is how jouet recognises
 //! its own entries, guarded or bare: everything else is left as it is,
 //! re-running is a no-op, and uninstalling removes only those.
+//!
+//! One exception: hk's stop hook (`hk agent stop-hook`, from `hk agent
+//! hooks`) in the same file is merged into jouet's, so a stop gets one
+//! verdict rather than two blocks. jouet's stop handler then carries hk's
+//! command in `--hk` and runs it (or, without jouet on `PATH`, the guard
+//! runs hk's alone), and uninstalling puts hk's handler back as it was.
 
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -32,6 +38,9 @@ pub(crate) enum Scope {
 /// Seconds a harness waits for a hook. jouet's take milliseconds; this is the
 /// bound on a hung one, after which both harnesses carry on without it.
 const TIMEOUT: u64 = 10;
+/// Claude Code's default for a command hook, which a merged hk stop hook
+/// without a timeout of its own had.
+const HK_TIMEOUT: u64 = 600;
 
 impl Harness {
     pub(crate) fn parse(name: &str) -> Option<Self> {
@@ -62,6 +71,9 @@ impl Harness {
                 ("PreToolUse", Some("Bash|Read|Grep"), "pre-tool-use"),
                 ("PostToolUse", Some("Bash|Read"), "post-tool-use"),
                 ("PostToolUseFailure", Some("Bash"), "post-tool-use-failure"),
+                // Formats edited files with `[edit] fix_after`; a no-op
+                // without it.
+                ("PostToolUse", Some("Edit|Write|MultiEdit"), "post-edit"),
                 ("Stop", None, "stop"),
             ],
             Self::Codex => &[
@@ -109,21 +121,34 @@ impl Harness {
     /// rather than an error on every tool call. It is `sh -c` because Codex
     /// runs hooks with the login shell, which may not be a POSIX one. Claude
     /// Code runs hooks with Git Bash on Windows, where `sh` is too.
-    fn command(self, event: &str) -> String {
-        format!(
-            "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {} {event}'",
-            self.name()
-        )
+    ///
+    /// With `hk`, hk's stop hook merged into this one: jouet runs it, and
+    /// without jouet the guard runs it alone.
+    fn command(self, event: &str, hk: Option<&str>) -> String {
+        match hk {
+            None => format!(
+                "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {} {event}'",
+                self.name()
+            ),
+            Some(hk) => format!(
+                "sh -c 'command -v jouet >/dev/null 2>&1 || exec {hk}; exec jouet hook {} {event} --hk \"{hk}\"'",
+                self.name()
+            ),
+        }
     }
 
     /// The command Codex runs instead on Windows, where its hook shell is
     /// PowerShell. Claude Code has no such field.
-    fn windows_command(self, event: &str) -> Option<String> {
-        (self == Self::Codex).then(|| {
-            format!(
+    fn windows_command(self, event: &str, hk: Option<&str>) -> Option<String> {
+        (self == Self::Codex).then(|| match hk {
+            None => format!(
                 "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {} {event} }}",
                 self.name()
-            )
+            ),
+            Some(hk) => format!(
+                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {} {event} --hk \"{hk}\" }} else {{ {hk} }}",
+                self.name()
+            ),
         })
     }
 }
@@ -135,6 +160,78 @@ fn is_jouet(handler: &Value) -> bool {
         .get("command")
         .and_then(Value::as_str)
         .is_some_and(|command| runs_jouet_hook(&jouet_rules::shell::parse(command)))
+}
+
+/// hk's stop hook, as `hk agent hooks` prints it: a handler with only
+/// `type`, `command` and `timeout`, whose command is `hk agent stop-hook` and
+/// plain words. Returns the command and its timeout. Anything else is left
+/// alone rather than rewritten.
+pub(crate) fn hk_stop_hook(handler: &Value) -> Option<(String, Option<u64>)> {
+    let object = handler.as_object()?;
+    if object
+        .keys()
+        .any(|k| !matches!(k.as_str(), "type" | "command" | "timeout"))
+    {
+        return None;
+    }
+    let command = object.get("command")?.as_str()?.trim();
+    if !command
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || " -_./=:".contains(c))
+    {
+        return None;
+    }
+    let words: Vec<&str> = command.split_whitespace().collect();
+    match words.as_slice() {
+        [hk, "agent", "stop-hook", ..] if *hk == "hk" || hk.ends_with("/hk") => Some((
+            words.join(" "),
+            object.get("timeout").and_then(Value::as_u64),
+        )),
+        _ => None,
+    }
+}
+
+/// The hk stop hook a merged jouet handler carries: its `jouet hook`
+/// command's `--hk "..."`.
+fn merged_hk(handler: &Value) -> Option<String> {
+    let command = handler.get("command")?.as_str()?;
+    let (_, rest) = command.split_once(" --hk \"")?;
+    let (hk, _) = rest.split_once('"')?;
+    hk_stop_hook(&json!({ "command": hk })).map(|(hk, _)| hk)
+}
+
+/// Whether the document has hk's stop hook, merged or not: for a note when
+/// another file's would run beside jouet's.
+pub(crate) fn has_hk_stop(doc: &Value) -> bool {
+    stop_handlers(doc).any(|h| hk_stop_hook(h).is_some() || (is_jouet(h) && merged_hk(h).is_some()))
+}
+
+fn stop_handlers(doc: &Value) -> impl Iterator<Item = &Value> {
+    doc.get("hooks")
+        .and_then(|h| h.get("Stop"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|group| handlers(group).iter())
+}
+
+/// Takes hk's stop hook out of the document, leaving no empty group behind.
+fn take_hk_stop(doc: &mut Value) -> Option<(String, Option<u64>)> {
+    let groups = doc.get_mut("hooks")?.get_mut("Stop")?.as_array_mut()?;
+    for (at, group) in groups.iter_mut().enumerate() {
+        let Some(list) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if let Some(i) = list.iter().position(|h| hk_stop_hook(h).is_some()) {
+            let found = hk_stop_hook(&list.remove(i));
+            // Only the group this emptied goes; anyone else's empty group stays.
+            if list.is_empty() {
+                groups.remove(at);
+            }
+            return found;
+        }
+    }
+    None
 }
 
 fn runs_jouet_hook(script: &jouet_rules::shell::Script) -> bool {
@@ -199,6 +296,7 @@ pub(crate) fn validate(doc: &Value) -> Result<(), String> {
 pub(crate) fn install(doc: &mut Value, harness: Harness) {
     let before = doc.clone();
     uninstall(doc);
+    let hk = take_hk_stop(doc);
     let object = doc.as_object_mut().expect("validated as an object");
     let hooks = object
         .entry("hooks")
@@ -210,13 +308,20 @@ pub(crate) fn install(doc: &mut Value, harness: Harness) {
         if let Some(matcher) = matcher {
             group.insert("matcher".into(), json!(matcher));
         }
+        let merged = hk.as_ref().filter(|_| *jouet_event == "stop");
+        let hk_command = merged.map(|(command, _)| command.as_str());
         let mut handler = Map::new();
         handler.insert("type".into(), json!("command"));
-        handler.insert("command".into(), json!(harness.command(jouet_event)));
-        if let Some(command) = harness.windows_command(jouet_event) {
+        handler.insert(
+            "command".into(),
+            json!(harness.command(jouet_event, hk_command)),
+        );
+        if let Some(command) = harness.windows_command(jouet_event, hk_command) {
             handler.insert("commandWindows".into(), json!(command));
         }
-        handler.insert("timeout".into(), json!(TIMEOUT));
+        // A merged stop runs hk's check, so it gets hk's time.
+        let timeout = merged.map_or(TIMEOUT, |(_, t)| t.unwrap_or(HK_TIMEOUT).max(TIMEOUT));
+        handler.insert("timeout".into(), json!(timeout));
         group.insert("hooks".into(), json!([handler]));
         hooks
             .entry(*event)
@@ -256,7 +361,21 @@ pub(crate) fn uninstall(doc: &mut Value) {
                 return true;
             };
             let before = handlers.len();
-            handlers.retain(|h| !is_jouet(h));
+            // A merged stop hook gives hk's back.
+            *handlers = handlers
+                .drain(..)
+                .filter_map(|h| {
+                    if !is_jouet(&h) {
+                        return Some(h);
+                    }
+                    let hk = merged_hk(&h)?;
+                    let mut restored = json!({ "type": "command", "command": hk });
+                    if let Some(t) = h.get("timeout") {
+                        restored["timeout"] = t.clone();
+                    }
+                    Some(restored)
+                })
+                .collect();
             !(handlers.is_empty() && before > 0)
         });
         !(list.is_empty() && had > 0)
@@ -432,6 +551,16 @@ mod tests {
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -454,6 +583,87 @@ mod tests {
   }
 }"#
         );
+    }
+
+    /// hk's stop hook, as `hk agent hooks --target claude-code` prints it.
+    fn with_hk_stop() -> Value {
+        json!({"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "hk agent stop-hook --target claude-code --timeout 570", "timeout": 600}]},
+            {"hooks": [{"type": "command", "command": "entire hooks claude-code stop"}]}
+        ]}})
+    }
+
+    #[test]
+    fn hks_stop_hook_is_merged_into_jouets_and_given_back() {
+        let original = with_hk_stop();
+        let doc = installed(original.clone(), Harness::Claude);
+        let stops = doc["hooks"]["Stop"].as_array().unwrap();
+        // hk's group is gone; jouet's runs hk's command, with hk's time.
+        assert_eq!(stops.len(), 2, "{}", pretty(&doc));
+        assert_eq!(
+            stops[0]["hooks"][0]["command"],
+            "entire hooks claude-code stop"
+        );
+        let jouet = &stops[1]["hooks"][0];
+        assert_eq!(
+            jouet["command"],
+            "sh -c 'command -v jouet >/dev/null 2>&1 || exec hk agent stop-hook --target claude-code --timeout 570; exec jouet hook claude stop --hk \"hk agent stop-hook --target claude-code --timeout 570\"'"
+        );
+        assert_eq!(jouet["timeout"], 600);
+        assert!(has_hk_stop(&doc));
+        // Running setup again changes nothing.
+        assert_eq!(installed(doc.clone(), Harness::Claude), doc);
+        // Uninstalling gives hk's handler back, after entire's.
+        let mut removed = doc.clone();
+        uninstall(&mut removed);
+        assert_eq!(
+            removed,
+            json!({"hooks": {"Stop": [
+                {"hooks": [{"type": "command", "command": "entire hooks claude-code stop"}]},
+                {"hooks": [{"type": "command", "command": "hk agent stop-hook --target claude-code --timeout 570", "timeout": 600}]}
+            ]}})
+        );
+        assert!(!has_jouet(&removed));
+    }
+
+    #[test]
+    fn merging_hk_leaves_other_empty_stop_groups_alone() {
+        let doc = json!({"hooks": {"Stop": [
+            {"hooks": []},
+            {"hooks": [{"type": "command", "command": "hk agent stop-hook"}]}
+        ]}});
+        let doc = installed(doc, Harness::Claude);
+        let stops = doc["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stops.len(), 2, "{}", pretty(&doc));
+        assert_eq!(stops[0], json!({"hooks": []}));
+    }
+
+    #[test]
+    fn codex_gets_hk_on_windows_too_and_odd_hk_handlers_are_left_alone() {
+        let doc = json!({"hooks": {"Stop": [{"matcher": null, "hooks": [
+            {"type": "command", "command": "hk agent stop-hook --target codex", "timeout": 120}
+        ]}]}});
+        let doc = installed(doc, Harness::Codex);
+        let jouet = &doc["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(
+            jouet["commandWindows"],
+            "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex stop --hk \"hk agent stop-hook --target codex\" } else { hk agent stop-hook --target codex }"
+        );
+        assert_eq!(jouet["timeout"], 120);
+        // A handler with other keys, or a command that is more than words,
+        // is not rewritten.
+        for handler in [
+            json!({"type": "command", "command": "hk agent stop-hook", "statusMessage": "hk"}),
+            json!({"type": "command", "command": "hk agent stop-hook || true"}),
+            json!({"type": "command", "command": "hk check"}),
+        ] {
+            assert_eq!(hk_stop_hook(&handler), None, "{handler}");
+            let doc = installed(
+                json!({"hooks": {"Stop": [{"hooks": [handler.clone()]}]}}),
+                Harness::Claude,
+            );
+            assert_eq!(doc["hooks"]["Stop"][0]["hooks"][0], handler);
+        }
     }
 
     #[test]
@@ -567,6 +777,16 @@ mod tests {
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -629,10 +849,10 @@ mod tests {
         ));
         assert!(!is_jouet(&json!({"command": "jouet edit"})));
         assert!(is_jouet(
-            &json!({"command": Harness::Claude.command("stop")})
+            &json!({"command": Harness::Claude.command("stop", None)})
         ));
         assert!(is_jouet(
-            &json!({"command": Harness::Codex.command("stop")})
+            &json!({"command": Harness::Codex.command("stop", None)})
         ));
         assert!(!is_jouet(&json!({"command": "echo jouet hook"})));
         assert!(!is_jouet(

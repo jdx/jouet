@@ -66,7 +66,8 @@ If you work across many repositories or worktrees, install with `--global` inste
 | Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules, and in a fnox project, how to use its secrets. |
 | Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
 | After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
-| Stop | `Stop` | `Stop` | Blocks finishing once while a recorded check failed, or when only partial test runs followed a change. |
+| After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
+| Stop | `Stop` | `Stop` | Blocks finishing once while a recorded check failed, when only partial test runs followed a change, or when files changed after the last hk check passed. With hk's stop hook merged in, its verdict too. |
 
 Every hook reads the harness's JSON on stdin and **fails open**: input it cannot read, a broken config file, a bad `JOUET_DISPLAY`, a rule that throws or runs out of its budget, or a crash all exit 0 with no decision, so a problem in jouet never blocks the agent. Rule errors are reported on stderr. A pre-tool-use hook takes about 2 ms in a release build, starting the process included.
 
@@ -92,6 +93,7 @@ The built-in rules:
 | `push-untested` | warns (does not deny) on `git push` and `gh pr create` when no full test run has passed at the current tree | running the full suite first, or saying why it is not needed |
 | `print-secrets` | in a [fnox project](#fnox): bare `env`, `printenv`, `export -p` and `set`, `printenv NAME` and `echo $NAME` for a secret its `fnox.toml` defines; anywhere: `fnox get`, `fnox export` without `-o`, `fnox list -V` and `fnox env --json`, unless redirected, piped or captured | `fnox exec -- <command>` |
 | `secret-files` | in a fnox project: reading `.env` or `.env.*` (not `.env.example`, `.sample`, `.template` or `.dist`), and the files fnox's `plain` providers read, with Read, `cat`, `grep`, `sed -n` and similar | `fnox exec -- <command>` |
+| `scoped-lint` | warns (does not deny) on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint` | `jouet diag check --changed` while iterating, and the full lint once at the end |
 | `affected-tests` | warns (does not deny) on a whole-suite `pytest`, `jest`, `vitest run`, `npm test` or `mise run test` within 30 minutes of the last whole-suite run, in a repository where `jouet test --affected` can select | `jouet test --affected` while iterating, keeping the full run for the end |
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.
@@ -108,6 +110,7 @@ The stop hook keeps an agent from declaring success while a test, lint or build 
 - **What clears a failure.** A later full pass of the same kind, or a later pass of a partial run that selected the same thing (`cargo test -p a` failing, then `cargo test -p a` passing). A partial pass never clears a full failure: `cargo test -p a` passing after `cargo test --workspace` failed still blocks, and says only a full run clears it.
 - **Partial runs after a change.** When the newest test run is a partial pass and the tree has changed since the last full test pass (or there has been none in the session), the hook blocks once and asks for the full suite, or for a reason it is not needed. Partial runs at the tree the full suite passed at are fine. Lint and build runs are not asked about.
 - **The tree.** Each run records the tree it ran against: a hash of the content of every tracked file, staged or not, built from `git ls-files -s` and `git hash-object` (without `-w`) for files changed in the work tree, so nothing is written to the repository. Untracked and ignored files are left out, and a commit with the same content hashes the same, so committing what was tested keeps the tree. (`git stash create` gives a real tree id, but writes objects on every check.)
+- **hk.** In a repository with an hk config, a passing hk check (`hk check`, `hk run check` or `jouet diag check`) covering the changed files is remembered with its tree; if files change after it, the hook asks for another check. A failing one is a lint failure like any other. See [one stop gate](/commands/diag#one-stop-gate) for running hk's own stop hook inside jouet's.
 - **Blocking once.** The hook blocks with a one-line reason, and if the agent stops again straight away (the harness reports `stop_hook_active`), its answer stands. A check that cannot pass never traps the agent.
 - **Where runs are recorded.** Claude Code reports each command's exit code to the post-tool-use hooks, which keep each kind's newest run, newest full pass and uncleared failures in `$XDG_STATE_HOME/jouet/sessions/<session>.json`. Updates take a lock, so commands finishing at once cannot drop each other's runs, and files untouched for a week are removed. Codex sends hooks no exit code, so its stop hook reads the commands in the last 8 MiB of the session transcript instead, and runs them through the same rules. That format is Codex's own: if it changes, the hook stops blocking rather than blocking wrongly. The transcript does not say which tree each command saw, so for Codex any partial test run after a full one asks for the full suite once.
 
@@ -169,6 +172,11 @@ budget_ms = 500 # JOUET_HOOKS_BUDGET_MS: a tool hook slower than this is recorde
 
 [rules]
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule
+
+[edit]
+fix_after = false     # JOUET_EDIT_FIX_AFTER: format edited files with `hk run fix --safe`
+fix_timeout_ms = 8000 # JOUET_EDIT_FIX_TIMEOUT_MS: then the fix is stopped
+fix_steps = ["cargo-fmt"] # JOUET_EDIT_FIX_STEPS: only these hk steps (default: every fix step)
 
 [stats]
 summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line

@@ -69,6 +69,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("print-secrets", include_str!("../rules/print-secrets.toml")),
     ("secret-files", include_str!("../rules/secret-files.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
+    ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
     (
         "affected-tests",
         include_str!("../rules/affected-tests.toml"),
