@@ -51,6 +51,10 @@ export type JouetCommand = {
 	env: { string },
 	-- Inside `$(...)` or a script passed to `sh -c`.
 	nested: boolean,
+	-- One of the rule's `[rule.match]` tables matched this command: the
+	-- reason the script runs. Always false for a rule without matchers and
+	-- in `jouet.parse`.
+	matched: boolean,
 	-- The exit status this command is known to have had (post-tool-use only):
 	-- a failure belongs to the last pipeline, success to the final `&&` chain.
 	status: number?,

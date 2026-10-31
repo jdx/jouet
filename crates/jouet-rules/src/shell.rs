@@ -98,8 +98,8 @@ fn pipefail_before(commands: &[Command]) -> bool {
 ///   echo done` failing says nothing about the tests).
 /// - In a final `&&` chain, an earlier command may be the one that failed, so
 ///   a failure counts only when every command before the last pipeline is a
-///   `cd`, `pushd` or `set`: `cd crate && cargo test` counts, `cargo build && cargo
-///   test` does not.
+///   `cd`, `pushd`, `set` or `export`: `cd crate && cargo test` and `export
+///   PATH=... && cargo test` count, `cargo build && cargo test` does not.
 /// - Success belongs to every command in the final `&&` chain, because all
 ///   of them ran and succeeded, except a first pipeline that follows `||`,
 ///   which may not have run at all, and, without `pipefail`, a command whose
@@ -141,7 +141,7 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     }
     let only_cd = commands[start..pipeline]
         .iter()
-        .all(|c| matches!(c.program(), Some("cd" | "pushd" | "set")));
+        .all(|c| matches!(c.program(), Some("cd" | "pushd" | "set" | "export")));
     if !only_cd {
         return out;
     }
@@ -786,6 +786,14 @@ mod tests {
         assert_eq!(
             status_of("cd a && pushd b && cargo test", 101),
             [None, None, Some(101)]
+        );
+        // `export` sets a variable and does not fail.
+        assert_eq!(
+            status_of(
+                "export PATH=\"$HOME/.cargo/bin:$PATH\" && jouet test --cmd -- cargo test",
+                1
+            ),
+            [None, Some(1)]
         );
     }
 
