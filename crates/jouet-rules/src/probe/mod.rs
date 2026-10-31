@@ -145,13 +145,33 @@ impl Probes {
         Ok(view.map(|v| serde_json::json!({ "status": v.status, "next": v.next })))
     }
 
-    fn last_run(&self, kind: Option<&str>, scope: Option<&str>) -> Option<serde_json::Value> {
-        ledger::last_run(
-            self.ledger.as_deref()?,
-            kind,
-            scope,
-            self.repo_key.as_deref(),
-        )
+    /// `dir` from the call's directory, as a `cd` before a command names it;
+    /// without one, the call's directory.
+    fn at(&self, dir: Option<&str>) -> Option<PathBuf> {
+        match dir {
+            Some(dir) => {
+                let base = self.dir.clone().or_else(|| std::env::current_dir().ok())?;
+                Some(crate::resolve_dir(&base, dir))
+            }
+            None => self.dir.clone(),
+        }
+    }
+
+    fn last_run(
+        &self,
+        kind: Option<&str>,
+        scope: Option<&str>,
+        dir: Option<&str>,
+    ) -> Option<serde_json::Value> {
+        // Another directory's runs are keyed by its own work tree.
+        let repo = match dir {
+            Some(_) => self.at(dir).and_then(|d| {
+                let d = d.canonicalize().unwrap_or(d);
+                jouet_output::paths::repo_key(&d)
+            }),
+            None => self.repo_key.clone(),
+        };
+        ledger::last_run(self.ledger.as_deref()?, kind, scope, repo.as_deref())
     }
 }
 
@@ -246,7 +266,7 @@ pub(crate) fn install(
     ci.set(
         "last_run",
         lua.create_function(
-            move |lua, (kind, scope): (Option<String>, Option<String>)| {
+            move |lua, (kind, scope, dir): (Option<String>, Option<String>, Option<String>)| {
                 if let Some(kind) = kind.as_deref()
                     && !["test", "lint", "build"].contains(&kind)
                 {
@@ -262,12 +282,13 @@ pub(crate) fn install(
                     )));
                 }
                 let key = format!(
-                    "ci:{}:{}",
+                    "ci:{}:{}:{}",
                     kind.as_deref().unwrap_or(""),
-                    scope.as_deref().unwrap_or("")
+                    scope.as_deref().unwrap_or(""),
+                    dir.as_deref().unwrap_or("")
                 );
                 let found = cached(&s, &key, |p, _| {
-                    Ok(p.last_run(kind.as_deref(), scope.as_deref()))
+                    Ok(p.last_run(kind.as_deref(), scope.as_deref(), dir.as_deref()))
                 })?;
                 answer(lua, found)
             },
@@ -289,9 +310,11 @@ pub(crate) fn install(
     let s = shared.clone();
     git_table.set(
         "tree",
-        lua.create_function(move |lua, ()| {
-            let found = cached(&s, "tree", |p, left| {
-                crate::tree::work_tree(p.dir.as_deref(), left).map(|t| Some(t.into()))
+        lua.create_function(move |lua, dir: Option<String>| {
+            let key = format!("tree:{}", dir.as_deref().unwrap_or(""));
+            let found = cached(&s, &key, |p, left| {
+                let at = p.at(dir.as_deref());
+                crate::tree::work_tree(at.as_deref(), left).map(|t| Some(t.into()))
             })?;
             answer(lua, found)
         })?,

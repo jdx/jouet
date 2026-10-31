@@ -210,6 +210,27 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "push-untested asks about the work tree a push goes to" {
+	git init -q repo
+	git init -q other
+	echo 'fn main() {}' >other/main.rs
+	git -C other add main.rs
+	push() {
+		jq -cn --arg c "$1" --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd,
+			hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' |
+			jouet hook claude pre-tool-use | jq -r '.hookSpecificOutput.additionalContext // empty'
+	}
+
+	ran "cd $PWD/other && cargo test --workspace" 0
+	run push "cd $PWD/other && git push"
+	assert_output ""
+
+	echo 'fn main() { todo!() }' >other/main.rs
+	run push "cd $PWD/other && git push"
+	assert_output --partial 'the tree has changed since the last full test run passed'
+	assert_output --partial '[jouet rule: push-untested]'
+}
+
 @test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs

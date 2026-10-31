@@ -186,9 +186,8 @@ impl State {
 /// outside a repository.
 pub(crate) fn root_of(dir: &Path) -> String {
     let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
-    dir.ancestors()
-        .find(|d| d.join(".git").exists())
-        .map(|d| d.to_string_lossy().into_owned())
+    jouet_output::paths::work_tree(&dir)
+        .map(|root| root.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 

@@ -290,7 +290,8 @@ export type JouetGit = typeof(setmetatable(
 		-- A hash of the content of every tracked file in the work tree,
 		-- staged or not; untracked and ignored files are left out. A commit
 		-- with the same content hashes the same. The `tree` of a recorded run.
-		tree: () -> (string?, string?),
+		-- With `dir`, of the work tree there instead (as `jouet.record`'s).
+		tree: (dir: string?) -> (string?, string?),
 		-- The files a commit would take, as absolute paths: what is staged
 		-- ("staged", the default), or every changed tracked file ("tracked",
 		-- what `git commit -a` takes).
@@ -334,6 +335,12 @@ declare jouet: {
 	git: JouetGit,
 	-- A gh command's arguments after `gh`; nil when it is not gh.
 	gh: (command: JouetCommand) -> { string }?,
+	-- Where each command runs after the top-level `cd`s before it, by its
+	-- index in `commands`: nil in the call's own directory; a path relative
+	-- to it, absolute, or under `~` or `$HOME` (what `jouet.record` and the
+	-- probes take as `dir`); or false after a `cd` that cannot be followed
+	-- (`cd`, `cd -`, `cd $DIR`).
+	dirs: (commands: { JouetCommand }) -> { [number]: string | false },
 	-- The arguments before a `--` that ends the options.
 	options: (args: { string }) -> { string },
 	-- Whether a short-option cluster such as "-fu" holds `flag`, stopping at
@@ -355,9 +362,10 @@ declare jouet: {
 	ci: {
 		-- The newest recorded run of a kind ("test", "lint" or "build"; any
 		-- when nil) and scope ("full" or "partial"; any when nil) from the
-		-- hooks' ledger, passing over runs another repository recorded. nil
+		-- hooks' ledger, passing over runs another repository recorded. With
+		-- `dir` (as `jouet.record`'s), the runs of the work tree there. nil
 		-- when there is no ledger or no such run.
-		last_run: (kind: string?, scope: string?) -> (JouetLastRun?, string?),
+		last_run: (kind: string?, scope: string?, dir: string?) -> (JouetLastRun?, string?),
 	},
 	cargo: {
 		-- The Cargo workspace around `dir` (relative to the call's directory;

@@ -173,7 +173,7 @@ The stop hook keeps an agent from declaring success while a test, lint or build 
 
 The same records guard what leaves the machine:
 
-- **`git push` and `gh pr create`.** The `push-untested` rule warns when no full test run has passed at the current tree: none is recorded, the last one failed, or the tree has changed since it passed. It stays quiet in a work tree where the hooks have never recorded a check, and on `git push --dry-run` and deletions.
+- **`git push` and `gh pr create`.** The `push-untested` rule warns when no full test run has passed at the current tree: none is recorded, the last one failed, or the tree has changed since it passed. A push after a `cd` is asked about the work tree it went to. It stays quiet in a work tree where the hooks have never recorded a check, and on `git push --dry-run` and deletions.
 - **`jouet pr land`** refuses (exit `4`) unless the ledger has a full test run that passed at the tree of the pull request's head. `--skip-verify REASON` lands it anyway, and the reason is kept in the ledger. See [`jouet pr land`](/commands/pr-land#tests-before-landing).
 
 Known false positives and misses:
