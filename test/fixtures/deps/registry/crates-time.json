@@ -1,0 +1,16 @@
+{
+  "crate": {
+    "name": "time",
+    "max_stable_version": null,
+    "default_version": "0.3.55",
+    "newest_version": "0.0.0",
+    "repository": "https://github.com/time-rs/time"
+  },
+  "versions": [
+    {
+      "num": "0.3.55",
+      "license": "MIT OR Apache-2.0",
+      "yanked": false
+    }
+  ]
+}

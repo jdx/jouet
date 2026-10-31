@@ -1,0 +1,63 @@
+{
+  "id": "GHSA-p8p7-x288-28g6",
+  "summary": "Server-Side Request Forgery in Request",
+  "aliases": [
+    "CVE-2023-28155"
+  ],
+  "modified": "2026-09-10T03:49:52.915755034Z",
+  "severity": [
+    {
+      "type": "CVSS_V3",
+      "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+    }
+  ],
+  "database_specific": {
+    "severity": "MODERATE"
+  },
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "request"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {
+              "introduced": "0"
+            },
+            {
+              "last_affected": "2.88.2"
+            }
+          ]
+        }
+      ],
+      "database_specific": {
+        "informational": null
+      }
+    },
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "@cypress/request"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {
+              "introduced": "0"
+            },
+            {
+              "fixed": "3.0.0"
+            }
+          ]
+        }
+      ],
+      "database_specific": {
+        "informational": null
+      }
+    }
+  ]
+}

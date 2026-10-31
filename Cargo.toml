@@ -120,6 +120,7 @@ sha2.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 toml.workspace = true
+ureq.workspace = true
 # Not used by name: it turns on usage-config's `toml` feature behind usage-rs's
 # `config`, without which `usage_rs::config::FileLayer` does not exist.
 usage-config.workspace = true

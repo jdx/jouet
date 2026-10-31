@@ -84,6 +84,7 @@ export default defineConfig({
           { text: "jouet search", link: "/commands/search" },
           { text: "jouet read", link: "/commands/read" },
           { text: "jouet docs", link: "/commands/docs" },
+          { text: "jouet deps", link: "/commands/deps" },
           { text: "jouet graph", link: "/commands/graph" },
           { text: "jouet wait", link: "/commands/wait" },
           { text: "jouet job", link: "/commands/job" },

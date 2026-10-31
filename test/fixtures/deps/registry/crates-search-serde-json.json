@@ -1,0 +1,84 @@
+{
+  "crates": [
+    {
+      "name": "serde_json",
+      "recent_downloads": 398543767
+    },
+    {
+      "name": "core-serde-json",
+      "recent_downloads": 4
+    },
+    {
+      "name": "rsjson-lua",
+      "recent_downloads": 338
+    },
+    {
+      "name": "serde-json-core",
+      "recent_downloads": 709610
+    },
+    {
+      "name": "pink-json",
+      "recent_downloads": 623
+    },
+    {
+      "name": "serde-json-fmt",
+      "recent_downloads": 379736
+    },
+    {
+      "name": "elicit_serde_json",
+      "recent_downloads": 131
+    },
+    {
+      "name": "treelog",
+      "recent_downloads": 83831
+    },
+    {
+      "name": "serde-jsonlines",
+      "recent_downloads": 102384
+    },
+    {
+      "name": "justjson",
+      "recent_downloads": 3031
+    },
+    {
+      "name": "json-deserializer",
+      "recent_downloads": 81438
+    },
+    {
+      "name": "cirru_parser",
+      "recent_downloads": 10473
+    },
+    {
+      "name": "serde-json-core-fmt",
+      "recent_downloads": 1193
+    },
+    {
+      "name": "teloxide",
+      "recent_downloads": 509151
+    },
+    {
+      "name": "teloxide-ng",
+      "recent_downloads": 186
+    },
+    {
+      "name": "teloxide-fork",
+      "recent_downloads": 54
+    },
+    {
+      "name": "serde-json-python-formatter",
+      "recent_downloads": 117882
+    },
+    {
+      "name": "sonic-rs",
+      "recent_downloads": 3679717
+    },
+    {
+      "name": "flatten-serde-json",
+      "recent_downloads": 43448
+    },
+    {
+      "name": "value-ext",
+      "recent_downloads": 297018
+    }
+  ]
+}

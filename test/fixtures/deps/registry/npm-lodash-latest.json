@@ -1,0 +1,9 @@
+{
+  "name": "lodash",
+  "version": "4.18.1",
+  "license": "MIT",
+  "repository": {
+    "url": "git+https://github.com/lodash/lodash.git",
+    "type": "git"
+  }
+}

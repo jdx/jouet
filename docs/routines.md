@@ -120,6 +120,7 @@ A routine's name is its file name without `.luau`, in lowercase words joined by 
 | `jouet.pr_reply`, `jouet.pr_resolve`, `jouet.pr_land` | jouet's commands that post or merge, with every refusal they have by hand | `github.write` |
 | `jouet.diag_check{files, changed, max}`, `jouet.diag_delta{...}` | [`jouet diag`](/commands/diag): the project's hk checks on files, as findings, or only those an edit introduced | `fs.read` |
 | `jouet.docs.lookup{pkg, symbol, lang, budget, private}` | [`jouet docs`](/commands/docs): a dependency's outline, or one definition's signature, doc and source, at the version the project locked, from its installed sources | `fs.read` |
+| `jouet.deps.info{packages, refresh}`, `jouet.deps.audit{ecosystem, refresh}` | [`jouet deps`](/commands/deps): whether packages exist, their latest version, licence and advisories, and the locked dependencies checked against OSV | `net` |
 | `jouet.diag_fix{files, changed, step}` | The project's hk fixers on files (`hk run fix --safe`, which refuses a fixer whose effect is unknown or destructive) | `fs.write` |
 | `edit.plan(spec, opts)` | Applies a [`jouet edit`](/commands/edit) spec in memory and reports each edit | `fs.read` |
 | `edit.apply(spec, opts)` | Writes it only if every edit succeeded, all or nothing | `fs.write` |
