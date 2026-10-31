@@ -670,17 +670,34 @@ fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
 /// For `edit replace`, the flags that accept the number of matches found,
 /// so a rename refused for matching more than once is one flag away rather
 /// than a lookup.
+/// `--count` and `--all` apply to every replacement in every file, so the
+/// advice is only what would satisfy all of them: none when a file is
+/// missing or a replacement matches nothing, and no `--count` when the
+/// replacements found different numbers.
 fn name_count_flags(report: &mut Report) {
+    if report.files.iter().any(|f| f.error.is_some()) {
+        return;
+    }
+    let found: Vec<usize> = report
+        .files
+        .iter()
+        .flat_map(|f| &f.edits)
+        .map(|e| e.found)
+        .collect();
+    let advice = match found.first() {
+        _ if found.contains(&0) => return,
+        Some(&n) if found.iter().all(|&m| m == n) => {
+            format!("add --all to replace every match, or --count {n} to require exactly {n}")
+        }
+        Some(_) => "add --all to replace every match (the replacements found different numbers of matches, so no one --count fits them all)".into(),
+        None => return,
+    };
     for e in report.files.iter_mut().flat_map(|f| &mut f.edits) {
         if matches!(
             e.status,
             EditStatus::TooManyMatches | EditStatus::TooFewMatches
-        ) && e.found > 0
-        {
-            e.message = Some(format!(
-                "add --all to replace every match, or --count {} to require exactly {}",
-                e.found, e.found
-            ));
+        ) {
+            e.message = Some(advice.clone());
         }
     }
 }

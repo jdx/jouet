@@ -331,6 +331,16 @@ EOF
 	assert_equal "$(jq -r '.files[0].edits[0].message' <<<"$output")" \
 		'add --all to replace every match, or --count 3 to require exactly 3'
 
+	# The flags apply to every file, so the advice must suit them all.
+	printf 'a a\n' >c.txt
+	run --separate-stderr jouet edit replace a.txt c.txt --old a --new b
+	assert_failure 4
+	assert_line "    add --all to replace every match (the replacements found different numbers of matches, so no one --count fits them all)"
+	printf 'z\n' >d.txt
+	run --separate-stderr jouet edit replace a.txt d.txt --old a --new b
+	assert_failure 4
+	refute_output --partial -- '--all'
+
 	# A spec has no such flags, so it gets no such advice.
 	printf 'x\nx\n' >b.txt
 	run --separate-stderr jouet edit <<<$'=== b.txt\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE'
