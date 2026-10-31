@@ -73,7 +73,15 @@ fires = [
   { command = "jouet test --cmd -- cargo build", exit_code = 1, kind = "build" },
   { command = "jouet test --cmd -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --cmd -- mise run test:e2e", exit_code = 1, kind = "test", scope = "partial test:e2e" },
-  { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0, kind = "test", scope = "partial" },
+  { command = "jouet test --cmd -- python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
+  # `python -m unittest` runs every test it finds, unless tests are named.
+  { command = "python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
+  { command = "python -m unittest -v", exit_code = 1, kind = "test", scope = "full" },
+  { command = "python3 -m unittest discover -s tests -v", exit_code = 0, kind = "test", scope = "full" },
+  { command = "python3 -m unittest discover -s tests -p 'test_amounts*.py'", exit_code = 0, kind = "test", scope = "partial -p test_amounts*.py" },
+  { command = "python3 -m unittest discover tests 'test_a*.py'", exit_code = 0, kind = "test", scope = "partial test_a*.py" },
+  { command = "python3 -m unittest tests.test_amounts", exit_code = 1, kind = "test", scope = "partial tests.test_amounts" },
+  { command = "python3 -m unittest -k thousands", exit_code = 0, kind = "test", scope = "partial -k thousands" },
 ]
 quiet = [
   { command = "cargo fmt", exit_code = 0 },
@@ -96,6 +104,10 @@ quiet = [
   { command = "jouet test --since main", exit_code = 2 },
   { command = "jouet test --affected", exit_code = 4 },
   { command = "jouet test --cmd -- cargo test", exit_code = 4 },
+  # A command the rule does not know is recorded as nothing, as when run
+  # directly.
+  { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0 },
+  { command = "./run-tests.sh", exit_code = 0 },
   # `diag check` refused (no hk config) or misused: no lint ran.
   { command = "jouet diag check wordcount.py", exit_code = 4 },
   { command = "jouet --json diag check --changed", exit_code = 4 },

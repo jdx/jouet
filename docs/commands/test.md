@@ -72,7 +72,7 @@ FAIL src/lib.rs:1:45: error[E0425]: cannot find value `undefined_var` in this sc
 full log: ~/.local/state/jouet/logs/test-1793449979466-951516-0.log
 ```
 
-The built-in `piped-test-output` rule warns (it never denies) when an agent pipes a test, build or e2e run into `head`, `tail`, `grep`, `rg` or `sed -n`, or writes its output to a file and greps that file in the same call, and suggests the `jouet test --cmd` command for it. It leaves lints to the `scoped-lint` rule, and stays quiet for `--help` and `--list`, and for output written to a file the call does not read back. With `jouet setup`'s hooks, `jouet test --cmd -- CMD` is recorded as a run of CMD: `jouet test --cmd -- cargo build` is a build, and `jouet test --cmd -- cargo test --workspace` a full test run.
+The built-in `piped-test-output` rule warns (it never denies) when an agent pipes a test, build or e2e run into `head`, `tail`, `grep`, `rg` or `sed -n`, or writes its output to a file and greps that file in the same call, and suggests the `jouet test --cmd` command for it, or plain `jouet test` when the command is the whole suite (`cargo test`, `python3 -m unittest`, `pytest`, `go test ./...`, `npm test`, `mise run test`, ...). It leaves lints to the `scoped-lint` rule, and stays quiet for `--help` and `--list`, and for output written to a file the call does not read back. With `jouet setup`'s hooks, `jouet test --cmd -- CMD` is recorded as a run of CMD: `jouet test --cmd -- cargo build` is a build, and `jouet test --cmd -- cargo test --workspace` a full test run. A command jouet does not recognise, such as `./run-tests.sh`, is recorded as nothing, as it is when run directly.
 
 ## The safety model
 

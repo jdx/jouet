@@ -267,7 +267,7 @@ ok    job-ready           12 examples passed
 ok    job-logs            11 examples passed
 ok    job-stop            15 examples passed
 ok    claimed-path        18 examples passed
-ok    checks              74 examples passed
+ok    checks              83 examples passed
 ok    reread              12 examples passed
 ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed

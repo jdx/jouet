@@ -418,7 +418,23 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
 	assert_output ""
 
+	# The whole suite, cut: plain `jouet test` runs it.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'python3 -m unittest discover -v 2>&1 | tail -5')"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
+
 	ran 'jouet test --cmd -- cargo build' 1
 	run --separate-stderr jq -c '.runs.build | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- cargo build",1]'
+}
+
+@test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
+	ran 'jouet test --cmd -- python3 -m unittest' 0
+	run --separate-stderr jq -c '.runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '["jouet test --cmd -- python3 -m unittest",true]'
+
+	# A command the rule does not know records nothing, as when run directly.
+	ran 'jouet test --cmd -- ./run-tests.sh' 0
+	run --separate-stderr jq -c '.runs.test.command' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '"jouet test --cmd -- python3 -m unittest"'
 }
