@@ -3,6 +3,11 @@
 //! --json` and `pitchfork logs ID --raw`. jouet never talks to pitchfork's
 //! supervisor or its MCP server.
 //!
+//! jouet only reads, so it never starts the supervisor. `pitchfork list`
+//! otherwise starts one when none is running, and it keeps running after
+//! `jouet handoff` exits, in every repository where handoff runs. With no
+//! supervisor, no daemon is running, and the lists are empty.
+//!
 //! pitchfork runs in the directory it is given, which decides the namespace
 //! a short ID such as `api` resolves in: the nearest `pitchfork.toml`'s
 //! project, or `global` outside one.
@@ -100,6 +105,8 @@ pub enum Error {
     Missing,
     /// pitchfork knows no daemon by that ID.
     NotFound(String),
+    /// The command needs pitchfork's supervisor, and none is running.
+    NoSupervisor,
     /// Anything else, with what pitchfork said.
     Failed(String),
 }
@@ -110,16 +117,22 @@ impl Error {
             Self::Missing => {
                 "pitchfork is not installed (`mise use -g pitchfork` installs it)".into()
             }
+            Self::NoSupervisor => "pitchfork's supervisor is not running".into(),
             Self::NotFound(message) | Self::Failed(message) => message.clone(),
         }
     }
 }
 
 /// Runs pitchfork with `args` in `dir` (this process's directory when
-/// None). Its stdin is closed, so it never shows a picker.
+/// None). Its stdin is closed, so it never shows a picker, and it does not
+/// start the supervisor.
 fn run(dir: Option<&Path>, args: &[&str]) -> Result<Output, Error> {
     let mut command = Command::new(PROGRAM);
-    command.args(args).stdin(Stdio::null()).env("NO_COLOR", "1");
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .env("NO_COLOR", "1")
+        .env("PITCHFORK_SUPERVISOR_AUTO_START", "false");
     if let Some(dir) = dir {
         command.current_dir(dir);
     }
@@ -134,6 +147,9 @@ fn run(dir: Option<&Path>, args: &[&str]) -> Result<Output, Error> {
     // A mise shim with no version selected here: as good as not installed.
     if stderr.contains("No version is set for shim") {
         return Err(Error::Missing);
+    }
+    if stderr.contains("pitchfork::ipc::connection_failed") {
+        return Err(Error::NoSupervisor);
     }
     let said = said(&stderr);
     // pitchfork exits 1 for every error, so a missing daemon is told apart
@@ -177,17 +193,23 @@ pub fn status(id: &str, dir: Option<&Path>) -> Result<Daemon, Error> {
     parse(&output, "status")
 }
 
-/// Every daemon pitchfork tracks or has configured, in every namespace.
+/// Every daemon pitchfork tracks or has configured, in every namespace;
+/// none when its supervisor is not running.
 pub fn list(dir: Option<&Path>) -> Result<Vec<Daemon>, Error> {
-    let output = run(dir, &["list", "--json"])?;
-    parse(&output, "list")
+    listing(dir, &["list", "--json"], "list")
 }
 
 /// The daemons in `dir`'s namespace: its project's, or `global`'s outside
-/// a project.
+/// a project; none when its supervisor is not running.
 pub fn list_project(dir: Option<&Path>) -> Result<Vec<Daemon>, Error> {
-    let output = run(dir, &["list", "--project", "--json"])?;
-    parse(&output, "list --project")
+    listing(dir, &["list", "--project", "--json"], "list --project")
+}
+
+fn listing(dir: Option<&Path>, args: &[&str], what: &str) -> Result<Vec<Daemon>, Error> {
+    match run(dir, args) {
+        Err(Error::NoSupervisor) => Ok(Vec::new()),
+        output => parse(&output?, what),
+    }
 }
 
 /// A daemon's whole log, as plain lines.

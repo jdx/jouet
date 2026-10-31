@@ -20,8 +20,18 @@ setup() {
 # Records each call, then answers from $FAKE_PITCHFORK: status/<id> holds one
 # status JSON document per line, and each call takes the next until the
 # last; list.json and list-project.json answer `list`; logs/<id> is the log.
+# With no-supervisor present, `list` fails the way pitchfork does when its
+# supervisor is not running and it may not start one.
 printf '%s\t%s\n' "$PWD" "$*" >>"$FAKE_PITCHFORK/calls"
+printf '%s\n' "${PITCHFORK_SUPERVISOR_AUTO_START-unset}" >>"$FAKE_PITCHFORK/auto-start"
 key() { printf '%s' "${1//\//--}"; }
+if [[ $1 == list && -f $FAKE_PITCHFORK/no-supervisor ]]; then
+	echo "Error: pitchfork::ipc::connection_failed (https://pitchfork.jdx.dev/supervisor)" >&2
+	echo "" >&2
+	echo "  × failed to connect to supervisor after 5 attempts" >&2
+	echo "  help: supervisor auto-start is disabled; start it with your service manager" >&2
+	exit 1
+fi
 case "$1" in
 status)
 	f="$FAKE_PITCHFORK/status/$(key "$2")"
@@ -201,6 +211,36 @@ api_statuses() {
 	assert_failure 1
 	assert_equal "$(jq -r '.drift[].code' <<<"$output")" $'daemon_failed\ndaemon_stopped'
 	assert_equal "$(jq -c '.daemons[0]' <<<"$output")" '{"id":"myproj/api","then":"running","now":"errored","error":"exit code 1"}'
+}
+
+@test "jouet never lets pitchfork start its supervisor" {
+	init_repo
+	commit_file pitchfork.toml $'[daemons.api]\nrun = "npm run dev"\n' "init"
+	list_entry myproj/api running 4242 | jq -s . >"$FAKE_PITCHFORK/list-project.json"
+	api_statuses running
+
+	jouet handoff --no-pr >/dev/null
+	jouet pickup >/dev/null
+	jouet wait daemon api --timeout 0 >/dev/null || true
+
+	assert_equal "$(sort -u "$FAKE_PITCHFORK/auto-start")" "false"
+}
+
+@test "with no supervisor, handoff lists no daemons and pickup says they are gone" {
+	init_repo
+	commit_file pitchfork.toml $'[daemons.api]\nrun = "npm run dev"\n' "init"
+	list_entry myproj/api running 4242 | jq -s . >"$FAKE_PITCHFORK/list-project.json"
+	jouet handoff --no-pr >/dev/null
+
+	touch "$FAKE_PITCHFORK/no-supervisor"
+	run --separate-stderr jouet pickup --json
+	assert_failure 1
+	assert_equal "$(jq -r '.drift[].code' <<<"$output")" "daemon_gone"
+
+	run --separate-stderr jouet handoff --no-pr
+	assert_success
+	refute_output --partial "pitchfork daemons"
+	refute_output --partial "supervisor"
 }
 
 @test "handoff without pitchfork says nothing about daemons" {
