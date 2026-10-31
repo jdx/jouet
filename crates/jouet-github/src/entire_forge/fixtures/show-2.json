@@ -1,0 +1,115 @@
+{
+  "number": 2,
+  "trail_id": "01M69H1JDGR269HJS6JJ2XNNR8",
+  "url": "https://entire.com/et/jdx/jouet-entire-forge-test/trails/2",
+  "branch": "docs/usage",
+  "original_branch": "docs/usage",
+  "base": "main",
+  "title": "docs: say how to run it",
+  "body": "",
+  "status": "open",
+  "author": {
+    "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "login": "jdx"
+  },
+  "assignees": [
+    "jdx"
+  ],
+  "labels": [],
+  "created_at": "2026-10-31T17:45:13.392Z",
+  "updated_at": "2026-10-31T17:45:13.419Z",
+  "merged_at": null,
+  "mergeability": {
+    "head_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+    "mergeable": true,
+    "conflict_status": "clean",
+    "checks": {
+      "availability": "not_applicable",
+      "runs": []
+    },
+    "gates": [
+      {
+        "id": "",
+        "gate_definition_id": "01M69GTKM4GS3W8DTVA64ERKMX",
+        "gate_key": "approvals",
+        "gate_type": "approvals",
+        "blocking": true,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": "No reviewers have approved this trail",
+        "head_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+        "evaluated_at_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "approved": 0,
+          "changes_requested": false,
+          "config": {
+            "version": 1,
+            "min_reviewers": 1,
+            "allow_self_approval": false,
+            "dismiss_stale_approvals_on_push": false
+          },
+          "required": 1,
+          "self_excluded": false,
+          "stale_dismissed": 0,
+          "total": 0
+        },
+        "created_at": "2026-10-31T17:51:03.108067305Z",
+        "completed_at": "2026-10-31T17:51:03.108067305Z"
+      },
+      {
+        "id": "",
+        "gate_definition_id": "01M69GTKM7ZAFGP3QXPTG6DNE5",
+        "gate_key": "findings",
+        "gate_type": "findings",
+        "blocking": true,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": null,
+        "head_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+        "evaluated_at_sha": null,
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": null,
+        "created_at": "2026-10-31T17:41:25.255519Z",
+        "completed_at": null
+      },
+      {
+        "id": "01M69H1JF8TWVSBPR1MXNPBVQ2",
+        "gate_definition_id": "01M69GTKM9ZE3CT2AMGXYPH7RW",
+        "gate_key": "up_to_date",
+        "gate_type": "up_to_date",
+        "blocking": true,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": "Up to date",
+        "head_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+        "evaluated_at_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "config": {
+            "version": 1,
+            "allow_behind_if_mergeable": false
+          },
+          "behind_by": 0,
+          "compare_status": "ahead",
+          "comparison_status": "available",
+          "resolved_head_sha": "6dcac8fd90837777109f6072c4d5c8ed901d61aa"
+        },
+        "created_at": "2026-10-31T17:45:13.451334Z",
+        "completed_at": "2026-10-31T17:45:13.451334Z"
+      }
+    ]
+  }
+}

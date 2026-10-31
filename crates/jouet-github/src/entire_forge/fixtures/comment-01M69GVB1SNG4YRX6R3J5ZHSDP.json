@@ -1,0 +1,40 @@
+{
+  "discussion": {
+    "id": "01M69GVB1SNG4YRX6R3J5ZHSDP",
+    "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+    "kind": "discussion",
+    "title": "Naming",
+    "reviewCommentId": null,
+    "resolved": true,
+    "resolvedBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "resolvedAt": "2026-10-31T17:42:45.445Z",
+    "createdBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "createdAt": "2026-10-31T17:41:49.241Z",
+    "updatedAt": "2026-10-31T17:42:45.445Z",
+    "lastMessageAt": "2026-10-31T17:42:20.887Z",
+    "lastMessageAuthor": "jdx",
+    "messageCount": 2,
+    "participants": [
+      {
+        "login": "jdx"
+      }
+    ]
+  },
+  "messages": [
+    {
+      "id": "01M69GVB20RA4DXZX42CYM7GMH",
+      "author": "jdx",
+      "createdAt": "2026-10-31T17:41:49.241Z",
+      "body": "Should subtract be called sub, to match the other helpers?",
+      "replies": []
+    },
+    {
+      "id": "01M69GW9YQ85VTVH1J85R8QE42",
+      "author": "jdx",
+      "createdAt": "2026-10-31T17:42:20.887Z",
+      "body": "Keeping subtract: the other helpers are spelled out too.",
+      "replies": []
+    }
+  ],
+  "eventCursor": "6"
+}

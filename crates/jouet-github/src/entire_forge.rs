@@ -16,7 +16,7 @@
 //! it lacks the commit.
 
 use crate::entire::gates::{CHECK, Gate, Gates};
-use crate::entire::{self, Entire};
+use crate::entire::{self, Entire, Trail};
 use crate::forge::Forge;
 use crate::host::{Feature, Host};
 use crate::pr::status::{
@@ -153,50 +153,8 @@ impl EntireForge {
     }
 
     fn status(&mut self, repo: &Repo, doc: &Value) -> Result<Fetched, String> {
+        let open = matches!(doc["status"].as_str(), Some("open" | "draft"));
         let number = doc["number"].as_u64().unwrap_or_default();
-        let state = match doc["status"].as_str() {
-            Some("merged") => State::Merged,
-            Some("closed") => State::Closed,
-            Some("draft") => State::Draft,
-            _ => State::Open,
-        };
-        let m = &doc["mergeability"];
-        let (mergeable, merge_state) = match m["conflict_status"].as_str() {
-            Some("conflicting") => (Mergeability::Conflicting, "dirty"),
-            Some("clean") if state == State::Draft => (Mergeability::Mergeable, "draft"),
-            // Clean, but a gate holds it back; the gates say which.
-            Some("clean") if m["mergeable"] == false => (Mergeability::Mergeable, "blocked"),
-            Some("clean") => (Mergeability::Mergeable, "clean"),
-            _ => (Mergeability::Unknown, "unknown"),
-        };
-        let mut checks = Checks::default();
-        for run in runs(doc) {
-            let name = run["name"].as_str().unwrap_or_default().to_string();
-            if run["status"] != "completed" {
-                checks.pending += 1;
-                continue;
-            }
-            match run["conclusion"].as_str().unwrap_or_default() {
-                "success" => checks.pass += 1,
-                "skipped" | "neutral" | "stale" => checks.skipped += 1,
-                _ => {
-                    checks.fail += 1;
-                    checks.failing.push(name);
-                }
-            }
-        }
-        let gates = gates(doc);
-        if let Some(g) = &gates {
-            match g.state.as_str() {
-                "passed" => checks.pass += 1,
-                "failed" => {
-                    checks.fail += 1;
-                    checks.failing.push(CHECK.into());
-                }
-                _ => checks.pending += 1,
-            }
-        }
-        let open = matches!(state, State::Open | State::Draft);
         let unresolved = if open {
             self.discussions(repo, number)?
                 .iter()
@@ -205,33 +163,8 @@ impl EntireForge {
         } else {
             0
         };
-        let head_oid = m["head_sha"].as_str().unwrap_or_default().to_string();
-        let mut status = PrStatus {
-            repo: repo.to_string(),
-            forge: Some("entire"),
-            host: repo.host.clone(),
-            number,
-            title: text(&doc["title"]),
-            url: text(&doc["url"]),
-            state,
-            base: text(&doc["base"]),
-            head: branch(doc),
-            head_sha: head_oid.chars().take(10).collect(),
-            head_oid,
-            pushed_at: None,
-            mergeable,
-            merge_state: merge_state.into(),
-            checks,
-            review: self.review(repo, doc)?,
-            unresolved_threads: u32::try_from(unresolved).unwrap_or(u32::MAX),
-            auto_merge: false,
-            entire: gates.map(EntireStatus::from),
-            attention: Vec::new(),
-        };
-        if !open {
-            status.review = status.review.filter(|r| r != "review_required");
-        }
-        Ok(Fetched::new(status))
+        let review = self.review(repo, doc)?;
+        Ok(Fetched::new(pr_status(repo, doc, unresolved, review)))
     }
 
     /// A discussion as a thread, with every message and reply in it.
@@ -242,47 +175,130 @@ impl EntireForge {
         let shown = self.read(&[
             "trail", "comment", "show", &id, "--trail", &n, "--json", "--repo", &sel,
         ])?;
-        let url = text(&shown["discussion"]["url"]);
-        let url = if url.is_empty() { pr_url(pr) } else { url };
-        let mut comments = Vec::new();
-        for m in shown["messages"].as_array().into_iter().flatten() {
-            comments.push(comment(m, &url));
-            for r in m["replies"].as_array().into_iter().flatten() {
-                comments.push(comment(r, &url));
+        thread(pr, d, &shown, bots)
+    }
+}
+
+/// A trail as `pr status` reports it, given its unresolved discussions and
+/// review decision.
+fn pr_status(repo: &Repo, doc: &Value, unresolved: usize, review: Option<String>) -> PrStatus {
+    let number = doc["number"].as_u64().unwrap_or_default();
+    let state = match doc["status"].as_str() {
+        Some("merged") => State::Merged,
+        Some("closed") => State::Closed,
+        Some("draft") => State::Draft,
+        _ => State::Open,
+    };
+    let m = &doc["mergeability"];
+    let (mergeable, merge_state) = match m["conflict_status"].as_str() {
+        Some("conflicting") => (Mergeability::Conflicting, "dirty"),
+        Some("clean") if state == State::Draft => (Mergeability::Mergeable, "draft"),
+        // Clean, but a gate holds it back; the gates say which.
+        Some("clean") if m["mergeable"] == false => (Mergeability::Mergeable, "blocked"),
+        Some("clean") => (Mergeability::Mergeable, "clean"),
+        _ => (Mergeability::Unknown, "unknown"),
+    };
+    let mut checks = Checks::default();
+    for run in runs(doc) {
+        let name = run["name"].as_str().unwrap_or_default().to_string();
+        if run["status"] != "completed" {
+            checks.pending += 1;
+            continue;
+        }
+        match run["conclusion"].as_str().unwrap_or_default() {
+            "success" => checks.pass += 1,
+            "skipped" | "neutral" | "stale" => checks.skipped += 1,
+            _ => {
+                checks.fail += 1;
+                checks.failing.push(name);
             }
         }
-        comments.sort_by_key(|c| c.created);
-        let title = text(&d["title"]);
-        if let Some(first) = comments.first_mut()
-            && !title.is_empty()
-            && !first.body.starts_with(&title)
-        {
-            first.body = format!("{title}\n\n{}", first.body);
-        }
-        let author = comments
-            .first()
-            .map_or_else(|| text(&d["lastMessageAuthor"]), |c| c.author.clone());
-        Ok(Thread {
-            id: handle(&id).ok_or_else(|| {
-                format!("Entire sent a discussion with an ID jouet cannot read: {id}")
-            })?,
-            node_id: id,
-            kind: Kind::Thread,
-            path: None,
-            line: None,
-            start_line: None,
-            original_line: None,
-            side: Side::Right,
-            outdated: false,
-            resolved: d["resolved"] == true,
-            is_bot: threads::is_bot(&author, bots),
-            author,
-            state: None,
-            url,
-            comments,
-            context: None,
-        })
     }
+    let gates = gates(doc);
+    if let Some(g) = &gates {
+        match g.state.as_str() {
+            "passed" => checks.pass += 1,
+            "failed" => {
+                checks.fail += 1;
+                checks.failing.push(CHECK.into());
+            }
+            _ => checks.pending += 1,
+        }
+    }
+    let open = matches!(state, State::Open | State::Draft);
+    let head_oid = m["head_sha"].as_str().unwrap_or_default().to_string();
+    let mut status = PrStatus {
+        repo: repo.to_string(),
+        forge: Some("entire"),
+        host: repo.host.clone(),
+        number,
+        title: text(&doc["title"]),
+        url: text(&doc["url"]),
+        state,
+        base: text(&doc["base"]),
+        head: branch(doc),
+        head_sha: head_oid.chars().take(10).collect(),
+        head_oid,
+        pushed_at: None,
+        mergeable,
+        merge_state: merge_state.into(),
+        checks,
+        review,
+        unresolved_threads: u32::try_from(unresolved).unwrap_or(u32::MAX),
+        auto_merge: false,
+        entire: gates.map(EntireStatus::from),
+        attention: Vec::new(),
+    };
+    if !open {
+        status.review = status.review.filter(|r| r != "review_required");
+    }
+    status
+}
+
+/// Discussion `d`, as `trail comment list` lists it, made a thread from
+/// `shown`, what `trail comment show` prints for it.
+fn thread(pr: &PrThreads, d: &Value, shown: &Value, bots: &[String]) -> Result<Thread, String> {
+    let id = text(&d["id"]);
+    let url = text(&shown["discussion"]["url"]);
+    let url = if url.is_empty() { pr_url(pr) } else { url };
+    let mut comments = Vec::new();
+    for m in shown["messages"].as_array().into_iter().flatten() {
+        comments.push(comment(m, &url));
+        for r in m["replies"].as_array().into_iter().flatten() {
+            comments.push(comment(r, &url));
+        }
+    }
+    comments.sort_by_key(|c| c.created);
+    let title = text(&d["title"]);
+    if let Some(first) = comments.first_mut()
+        && !title.is_empty()
+        && !first.body.starts_with(&title)
+    {
+        first.body = format!("{title}\n\n{}", first.body);
+    }
+    let author = comments
+        .first()
+        .map_or_else(|| text(&d["lastMessageAuthor"]), |c| c.author.clone());
+    Ok(Thread {
+        id: handle(&id).ok_or_else(|| {
+            format!("Entire sent a discussion with an ID jouet cannot read: {id}")
+        })?,
+        node_id: id,
+        kind: Kind::Thread,
+        path: None,
+        line: None,
+        start_line: None,
+        original_line: None,
+        side: Side::Right,
+        outdated: false,
+        resolved: d["resolved"] == true,
+        is_bot: threads::is_bot(&author, bots),
+        author,
+        state: None,
+        url,
+        comments,
+        context: None,
+    })
 }
 
 /// `github:jdx` as Entire names a user, as the login trails show: `jdx`.
@@ -324,20 +340,16 @@ fn gate<'a>(doc: &'a Value, key: &str) -> Option<&'a Value> {
 /// been evaluated, else passed. The approvals gate is left out, since it is
 /// the review decision. `None` when the trail has no other blocking gate.
 pub fn gates(doc: &Value) -> Option<Gates> {
-    let gates: Vec<Gate> = doc["mergeability"]["gates"]
-        .as_array()?
-        .iter()
-        .filter(|g| g["blocking"] == true && g["gate_key"] != "approvals")
-        .map(|g| Gate {
-            gate: text(&g["gate_key"]),
-            status: match g["status"].as_str() {
-                Some(s @ ("passed" | "failed" | "skipped")) => s.to_string(),
-                _ => "pending".into(),
-            },
-            reason: g["rationale"]
-                .as_str()
-                .filter(|r| !r.is_empty())
-                .map(str::to_string),
+    let trail = Trail::parse(doc)?;
+    let gates: Vec<Gate> = trail
+        .gates
+        .into_iter()
+        .filter(|g| g.gate != "approvals")
+        .map(|mut g| {
+            if !matches!(g.status.as_str(), "passed" | "failed" | "skipped") {
+                g.status = "pending".into();
+            }
+            g
         })
         .collect();
     if gates.is_empty() {
@@ -354,8 +366,8 @@ pub fn gates(doc: &Value) -> Option<Gates> {
         state: state.into(),
         title: None,
         gates,
-        trail: doc["number"].as_u64(),
-        url: doc["url"].as_str().map(str::to_string),
+        trail: Some(trail.number),
+        url: Some(trail.url).filter(|u| !u.is_empty()),
     })
 }
 
@@ -619,6 +631,121 @@ impl Host for EntireForge {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const SHOW: &str = include_str!("entire_forge/fixtures/show.json");
+    const SHOW_FAILING: &str = include_str!("entire_forge/fixtures/show-failing.json");
+    const COMMENTS: &str = include_str!("entire_forge/fixtures/comment-list.json");
+    const NAMING: &str =
+        include_str!("entire_forge/fixtures/comment-01M69GVB1SNG4YRX6R3J5ZHSDP.json");
+
+    fn doc(s: &str) -> Value {
+        serde_json::from_str(s).unwrap()
+    }
+
+    fn repo() -> Repo {
+        Repo::parse("entire.com/jdx/jouet-entire-forge-test").unwrap()
+    }
+
+    #[test]
+    fn a_trail_with_no_gates_configured_is_open_and_clean() {
+        let s = pr_status(&repo(), &doc(SHOW), 1, None);
+        assert_eq!(
+            (s.number, s.state, s.forge),
+            (1, State::Open, Some("entire"))
+        );
+        assert_eq!(s.host.as_deref(), Some("entire.com"));
+        assert_eq!(s.head, "feat/subtract");
+        assert_eq!(s.head_sha, "e971859eed");
+        assert_eq!(
+            s.url,
+            "https://entire.com/et/jdx/jouet-entire-forge-test/trails/1"
+        );
+        assert_eq!(
+            (s.mergeable, s.merge_state.as_str()),
+            (Mergeability::Mergeable, "clean")
+        );
+        // Every gate is skipped, so the gates check passes; there are no runs.
+        assert_eq!((s.checks.pass, s.checks.total()), (1, 1));
+        assert!(!s.entire.as_ref().unwrap().gates.failed());
+        assert_eq!(s.unresolved_threads, 1);
+    }
+
+    #[test]
+    fn failing_gates_and_runs_are_checks_and_the_approvals_gate_is_the_review() {
+        let d = doc(SHOW_FAILING);
+        let s = pr_status(&repo(), &d, 0, None);
+        assert_eq!(s.checks.failing, ["buildkite/test", CHECK]);
+        assert_eq!((s.checks.fail, s.checks.pending), (2, 1));
+        assert_eq!(s.merge_state, "blocked");
+        let g = gates(&d).unwrap();
+        assert_eq!(g.trail, Some(1));
+        let failing: Vec<&str> = g.failing().map(|g| g.gate.as_str()).collect();
+        assert_eq!(failing, ["findings", "up_to_date"]);
+        assert!(!g.derived());
+        assert_eq!(
+            g.failing_text(),
+            "findings: Unresolved findings: 1 medium severity; up to date: 1 commit behind"
+        );
+        let approvals = gate(&d, "approvals").unwrap();
+        assert_eq!(approvals["status"], "failed");
+    }
+
+    #[test]
+    fn a_closed_trail_needs_no_review() {
+        let mut d = doc(SHOW);
+        d["status"] = "closed".into();
+        let s = pr_status(&repo(), &d, 0, Some("review_required".into()));
+        assert_eq!((s.state, s.review), (State::Closed, None));
+    }
+
+    #[test]
+    fn a_discussion_is_a_thread_with_its_title_first() {
+        let list = doc(COMMENTS);
+        let naming = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["title"] == "Naming")
+            .unwrap();
+        let pr = PrThreads {
+            repo: repo(),
+            number: 1,
+            node_id: String::new(),
+            head_ref: "feat/subtract".into(),
+            head_oid: String::new(),
+            base_oid: String::new(),
+            head_repo: None,
+            viewer: "jdx".into(),
+            threads: Vec::new(),
+            others: Vec::new(),
+            unreadable: 0,
+        };
+        let t = thread(&pr, naming, &doc(NAMING), &[]).unwrap();
+        assert_eq!(t.node_id, "01M69GVB1SNG4YRX6R3J5ZHSDP");
+        assert_eq!(Some(t.id), handle("01M69GVB1SNG4YRX6R3J5ZHSDP"));
+        assert!(t.resolved && t.path.is_none());
+        assert_eq!(t.author, "jdx");
+        assert_eq!(t.comments.len(), 2);
+        assert!(
+            t.comments[0]
+                .body
+                .starts_with("Naming\n\nShould subtract be called sub")
+        );
+        assert_eq!(
+            t.comments[1].body,
+            "Keeping subtract: the other helpers are spelled out too."
+        );
+        assert_eq!(
+            t.url,
+            "https://entire.com/et/jdx/jouet-entire-forge-test/trails/1"
+        );
+    }
+
+    #[test]
+    fn entire_names_users_by_provider_and_trails_by_login() {
+        assert_eq!(login("github:jdx"), "jdx");
+        assert_eq!(login("jdx"), "jdx");
+    }
 
     #[test]
     fn discussion_handles_are_stable_numbers() {

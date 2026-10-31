@@ -1,0 +1,46 @@
+[
+  {
+    "number": 1,
+    "trail_id": "01M69GTKJQHAD55FSC4R38FEDZ",
+    "url": "https://entire.com/et/jdx/jouet-entire-forge-test/trails/1",
+    "branch": "feat/subtract",
+    "original_branch": "feat/subtract",
+    "base": "main",
+    "title": "feat: add subtract",
+    "body": "",
+    "status": "open",
+    "author": {
+      "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "login": "jdx"
+    },
+    "assignees": [
+      "jdx"
+    ],
+    "labels": [],
+    "created_at": "2026-10-31T17:41:25.207Z",
+    "updated_at": "2026-10-31T17:50:05.647Z",
+    "merged_at": null
+  },
+  {
+    "number": 2,
+    "trail_id": "01M69H1JDGR269HJS6JJ2XNNR8",
+    "url": "https://entire.com/et/jdx/jouet-entire-forge-test/trails/2",
+    "branch": "docs/usage",
+    "original_branch": "docs/usage",
+    "base": "main",
+    "title": "docs: say how to run it",
+    "body": "",
+    "status": "open",
+    "author": {
+      "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "login": "jdx"
+    },
+    "assignees": [
+      "jdx"
+    ],
+    "labels": [],
+    "created_at": "2026-10-31T17:45:13.392Z",
+    "updated_at": "2026-10-31T17:45:13.419Z",
+    "merged_at": null
+  }
+]

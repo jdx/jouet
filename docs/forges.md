@@ -1,10 +1,10 @@
 ---
-description: Using jouet's PR and CI commands with GitLab merge requests and Forgejo or Gitea pull requests, and what each forge cannot do.
+description: Using jouet's PR and CI commands with GitLab merge requests, Forgejo or Gitea pull requests and the trails of repositories Entire hosts, and what each forge cannot do.
 ---
 
-# GitLab and Forgejo
+# GitLab, Forgejo and Entire
 
-`jouet pr status`, `pr next`, `pr threads`, `wait ci`, `wait pr` and `wait run` work with GitLab merge requests and with Forgejo and Gitea pull requests, as well as with GitHub. They print the same lines, the same JSON fields and the same exit codes on every forge. When a forge has no equivalent of something, the command exits 4 with the reason, before it sends anything.
+`jouet pr status`, `pr next`, `pr threads`, `wait ci`, `wait pr` and `wait run` work with GitLab merge requests, with Forgejo and Gitea pull requests, and with the trails of [repositories Entire hosts](#entire-hosted-repositories), as well as with GitHub. They print the same lines, the same JSON fields and the same exit codes on every forge. When a forge has no equivalent of something, the command exits 4 with the reason, before it sends anything.
 
 Support for these forges is new and has only been tested against recorded responses. Report what breaks on your server as an [issue](https://github.com/jdx/jouet/issues).
 
@@ -12,9 +12,9 @@ Support for these forges is new and has only been tested against recorded respon
 
 A repository is on GitHub unless it names a host:
 
-- **From the checkout:** the git remotes, picked in the order gh uses. A remote on github.com, gitlab.com, codeberg.org or gitea.com counts, as does one on a host named in the config. When a checkout has both a GitHub remote and a GitLab or Forgejo mirror, the GitHub remote wins.
+- **From the checkout:** the git remotes, picked in the order gh uses. A remote on github.com, gitlab.com, codeberg.org or gitea.com counts, as do an Entire `entire://` remote and one on a host named in the config. When a checkout has both a GitHub remote and a GitLab or Forgejo mirror, the GitHub remote wins.
 - **`HOST/OWNER/NAME`**, as in `--repo gitlab.com/group/sub/project` or `codeberg.org/forgejo/forgejo#15077`. On GitLab the owner is a group path and can hold slashes, so a repository is split at its last `/`.
-- **A URL:** `https://gitlab.com/group/project/-/merge_requests/12` or `https://codeberg.org/owner/repo/pulls/7`. A GitLab MR can also be written `!12`.
+- **A URL:** `https://gitlab.com/group/project/-/merge_requests/12`, `https://codeberg.org/owner/repo/pulls/7` or an Entire trail's, `https://entire.com/et/project/repo/trails/3`. A GitLab MR can also be written `!12`.
 
 ```output
 $ jouet pr status codeberg.org/forgejo/forgejo#15077
@@ -83,3 +83,50 @@ hint: reply without --resolve, or resolve it on the web
 ```
 
 Not done yet: `wait ci` on GitLab and Forgejo has no `base_touched` events, and an exhausted rate limit is retried a few times and then reported, not slept through as on GitHub.
+
+## Entire-hosted repositories
+
+A repository [Entire](https://entire.io) hosts itself (`/et/PROJECT/REPO`, cloned from `entire://CLUSTER.entire.io/et/PROJECT/REPO`) has trails instead of pull requests. jouet treats a trail as a PR: its number is the PR's number, and `entire.com/PROJECT/REPO#3` or the trail's URL names it from outside the checkout. A remote such as `entire://CLUSTER.entire.io/gh/OWNER/REPO` is a GitHub repository that Entire mirrors, and stays a GitHub repository.
+
+Support for Entire-hosted repositories is new. It has been tried against one test repository and is tested against responses recorded there.
+
+Everything is read and written through the `entire` CLI, which must be on `PATH` and logged in (`entire auth status`). jouet never handles an Entire token: `entire` finds its own login, or `ENTIRE_TOKEN`. Without the CLI, the command fails and says why. `JOUET_ENTIRE` and `JOUET_ENTIRE_TIMEOUT_MS` apply as they do for [Entire findings](/entire-gates).
+
+| jouet | Entire |
+|---|---|
+| a PR | a trail, from `entire trail show`. A branch is the trail tracking it |
+| checks | the trail's check runs (Buildkite and the like), and one **Entire Gates** check made of its blocking gates, read [as on GitHub](/entire-gates) |
+| review threads | the trail's discussions (`entire trail comment`), each with its title first. A thread's ID is a number made from the discussion's ID |
+| a reply, `--resolve` | `entire trail comment reply`, `resolve` and `unresolve` |
+| review findings | the trail's findings, after the threads, as `entire:ID`, [as on GitHub](/entire-gates) |
+| `review` | each reviewer's latest decision in `entire trail approvals`, or `review_required` while the approvals gate blocks. The approvals gate is the review, not one of the gates |
+| `merge_state` | `clean`, `dirty` on a conflict, or `blocked` while Entire says the trail cannot merge yet |
+| `--mine` | the open and draft trails of the user `entire` is logged in as |
+| `--since @SHA` | the commit's time in this clone, which can only be earlier than its push |
+
+```output
+$ jouet pr threads
+jdx/jouet-entire-forge-test#1  1 unresolved of 2 threads
+
+[1836512261783001] discussion  jdx  9m ago
+  Tests
+
+  Could subtract get a test, so the a + b slip cannot come back?
+
+Reply with `jouet pr threads reply <ID> [PR] --body TEXT`, ID being the number in brackets; add --resolve to resolve it too, or `jouet pr threads apply` takes many at once.
+
+Entire trail #1: 1 open finding
+These are Entire's, not the trail's discussions: resolving one leaves the other as it was.
+
+[entire:01M69HBX3M] main.rs:10  low  01KVXJKTKXPZN75VHNT4D041RQ  8m ago
+  main prints both results on one line with no labels; print them as add=4 subtract=2 so the output says which is which.
+```
+
+The CLI has no route to a commit's files, the merge base or the branch's commits, so `--context`, `--since @SHA` and the `{sha}` check in replies use this clone's git, and say so when it lacks the commit.
+
+What Entire's CLI cannot do exits 4 before anything is sent:
+
+- **`pr land`**: the `entire` CLI has no command that merges a trail, so `pr next` names none either, and says to merge it on entire.com.
+- **`wait run`** and **`ci explain`**: Entire gives a trail's checks, but no runs, jobs or job logs. A failed check keeps its URL.
+- **`wait ci --required`**: the CLI does not say which checks are required. Name them with `--check`.
+- **`--search`**, as on GitLab and Forgejo.

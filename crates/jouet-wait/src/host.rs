@@ -545,6 +545,35 @@ mod tests {
     }
 
     #[test]
+    fn an_entire_trail_s_runs_and_gates_are_its_checks() {
+        let doc: Value = serde_json::from_str(include_str!(
+            "../../jouet-github/src/entire_forge/fixtures/show-failing.json"
+        ))
+        .unwrap();
+        let (pr, checks) = entire_snapshot(&doc, 1);
+        assert_eq!((pr.state.as_str(), pr.mergeable), ("open", Some(true)));
+        assert_eq!(pr.head_sha, "e971859eedb817c773cf883ac85d75fbe05eb4ac");
+        let states: Vec<(&str, State)> =
+            checks.iter().map(|c| (c.name.as_str(), c.state)).collect();
+        assert_eq!(
+            states,
+            [
+                ("buildkite/test", State::Fail),
+                ("buildkite/lint", State::Pending),
+                ("Entire Gates", State::Fail),
+            ]
+        );
+        // A findings gate is a failure of its own, not one derived from the
+        // runs or the branch.
+        let gates = &checks[2];
+        assert!(!gates.derived());
+        assert_eq!(
+            gates.url.as_deref(),
+            Some("https://entire.com/et/jdx/jouet-entire-forge-test/trails/1")
+        );
+    }
+
+    #[test]
     fn gitlab_traces_lose_their_section_markers() {
         let trace = "section_start:1:prepare\r\u{1b}[0K\u{1b}[0K\u{1b}[36;1mPreparing\u{1b}[0;m\n$ cargo test\n404\nerror: boom\nsection_end:2:step_script\r\u{1b}[0K\n\u{1b}[0;m\n";
         assert_eq!(

@@ -1010,7 +1010,7 @@ Print help
 .SH "JOUET PR STATUS"
 Show where PRs stand and why any need attention
 
-Prints one line per PR, then a summary. GitHub PRs are fetched in one batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are read through their REST APIs. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, entire_findings, entire_gates, behind_base, draft and mergeable_unknown.
+Prints one line per PR, then a summary. GitHub PRs are fetched in one batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are read through their REST APIs, and trails on Entire\-hosted repositories (entire.com/PROJECT/NAME#N) through the `entire` CLI. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, entire_findings, entire_gates, behind_base, draft and mergeable_unknown.
 
 A PR with an Entire Gates check gets a line saying which gate fails and why. The check is not counted as a failing check of its own: a failed checks gate repeats the checks above, an up\-to\-date gate is behind_base, and a findings gate is entire_findings, naming the open findings when the `entire` CLI is on PATH and logged in. Without it, `\-\-json` says why under `entire`.
 .PP
@@ -1119,7 +1119,7 @@ The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's 
 .SH "JOUET PR THREADS"
 List, reply to and resolve review threads
 
-Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links (`#note_` on GitLab, `#issuecomment\-` on Forgejo). Forgejo cannot resolve threads through its API, so resolving there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
+Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links (`#note_` on GitLab, `#issuecomment\-` on Forgejo). On an Entire\-hosted trail the threads are its discussions. Forgejo cannot resolve threads through its API, so resolving there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
 
 When the `entire` CLI is on PATH and logged in, the open findings on the PR's Entire trail follow the threads, each addressed as `entire:ID`. They are Entire's, not GitHub's: resolving a finding leaves the threads as they were. A stale finding counts as outdated and an agent's as a bot's. Without the CLI, `\-\-json` says why under `entire`.
 .PP
@@ -1801,7 +1801,7 @@ Print help
 .SH "JOUET WAIT CI"
 Wait for a PR's checks, and show why any failed
 
-Follows the PR head, switching to a new head when one is pushed, unless \-\-sha pins a commit. Returns on the first failed check unless \-\-all. Skipped and neutral checks count as passing. A conflicted PR returns `conflict` (exit 4), since pull_request workflows will not run, once GitHub reports it again 10s later (right after a push it can still answer for the old head); no checks within \-\-appear\-timeout returns `no_checks` (exit 1). For each failed Actions job or GitLab job, the failed step's log is excerpted and the full log saved. On GitLab the checks are the head's pipeline jobs and commit statuses, on Forgejo its commit statuses. Waits on the same PR share their state, so they poll the forge once.
+Follows the PR head, switching to a new head when one is pushed, unless \-\-sha pins a commit. Returns on the first failed check unless \-\-all. Skipped and neutral checks count as passing. A conflicted PR returns `conflict` (exit 4), since pull_request workflows will not run, once GitHub reports it again 10s later (right after a push it can still answer for the old head); no checks within \-\-appear\-timeout returns `no_checks` (exit 1). For each failed Actions job or GitLab job, the failed step's log is excerpted and the full log saved. On GitLab the checks are the head's pipeline jobs and commit statuses, on Forgejo its commit statuses, and on an Entire\-hosted trail its check runs and gates. Waits on the same PR share their state, so they poll the forge once.
 .PP
 \fBUsage:\fR jouet wait ci [OPTIONS] [<PR>]
 .PP
@@ -1845,7 +1845,7 @@ The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's 
 .SH "JOUET WAIT RUN"
 Wait for a GitHub Actions run or a GitLab pipeline
 
-Returns when the run completes, or on its first failed job, with the failed step's log excerpted as for `wait ci`. Forgejo has no runs jouet can read, so it exits 4 there.
+Returns when the run completes, or on its first failed job, with the failed step's log excerpted as for `wait ci`. Forgejo and Entire have no runs jouet can read, so it exits 4 there.
 .PP
 \fBUsage:\fR jouet wait run [OPTIONS] <RUN>
 .PP

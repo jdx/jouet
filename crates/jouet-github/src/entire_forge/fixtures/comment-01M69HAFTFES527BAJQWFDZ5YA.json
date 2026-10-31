@@ -1,0 +1,33 @@
+{
+  "discussion": {
+    "id": "01M69HAFTFES527BAJQWFDZ5YA",
+    "trailId": "01M69GTKJQHAD55FSC4R38FEDZ",
+    "kind": "discussion",
+    "title": "Tests",
+    "reviewCommentId": null,
+    "resolved": false,
+    "resolvedBy": null,
+    "resolvedAt": null,
+    "createdBy": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "createdAt": "2026-10-31T17:50:05.647Z",
+    "updatedAt": "2026-10-31T17:50:05.647Z",
+    "lastMessageAt": "2026-10-31T17:50:05.647Z",
+    "lastMessageAuthor": "jdx",
+    "messageCount": 1,
+    "participants": [
+      {
+        "login": "jdx"
+      }
+    ]
+  },
+  "messages": [
+    {
+      "id": "01M69HAFTM23Q8CVE7V0VYBY5P",
+      "author": "jdx",
+      "createdAt": "2026-10-31T17:50:05.647Z",
+      "body": "Could subtract get a test, so the a + b slip cannot come back?",
+      "replies": []
+    }
+  ],
+  "eventCursor": "6"
+}
