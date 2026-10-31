@@ -9,7 +9,9 @@
 //! - linking (`link`) keeps the cascade of codegraph's `ReferenceResolver`
 //!   (imports, then names by scope, then a visibility gate) in a much
 //!   smaller form, without its framework routing;
-//! - the queries follow codegraph's traversal, search and test conventions.
+//! - the queries follow codegraph's traversal, search and test conventions;
+//! - the repository map ([`Graph::map`]) follows Aider's repo map
+//!   (Apache-2.0; see `NOTICE`), on the graph's edges.
 //!
 //! jouet owns the code from here on: there is no parity goal, and no MCP
 //! server, file watcher or daemon. Instead every query first runs a cheap
@@ -23,11 +25,16 @@
 pub mod extract;
 mod index;
 mod link;
+mod map;
 mod query;
 mod store;
 mod worktrees;
 
 pub use index::Refresh;
+pub use map::{
+    DEFAULT_BUDGET, MapDef, MapFile, MapOptions, RepoMap, UNFOCUSED_MULTIPLIER, Uses,
+    render as render_map,
+};
 pub use query::{Affected, AffectedTest, Explored, MAX_RESULTS, Reach, SymbolQuery, is_test_path};
 pub use worktrees::Pruned;
 
