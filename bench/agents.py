@@ -160,7 +160,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 4
 
     started = datetime.now(UTC)
-    out = args.out or runner.RESULTS_DIR / started.strftime("%Y%m%dT%H%M%SZ")
+    # Absolute: task checks run in their work trees and read state under it.
+    out = (args.out or runner.RESULTS_DIR / started.strftime("%Y%m%dT%H%M%SZ")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     meta = {
         "started": started.isoformat(timespec="seconds"),

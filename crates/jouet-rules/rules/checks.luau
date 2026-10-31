@@ -255,6 +255,45 @@ local function runner_scope(args: { string }, from: number): Scope
 	return if #picks == 0 then FULL else partial(table.concat(picks, " "))
 end
 
+-- `python -m unittest`: with no test named, or `discover` with its default
+-- pattern, it runs every test it finds. `-k` and a `discover` pattern
+-- select some; options that take a value are skipped.
+local UNITTEST_VALUE = set({ "--durations", "-s", "--start-directory", "-t", "--top-level-directory" })
+local function unittest_scope(args: { string }, from: number): Scope
+	local picks: { string } = {}
+	local positional: { string } = {}
+	local discover = args[from] == "discover"
+	local i = if discover then from + 1 else from
+	while i <= #args do
+		local arg = args[i]
+		i += 1
+		local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
+		if name == "-k" or name == "-p" or name == "--pattern" then
+			table.insert(picks, if name == arg then `{arg} {args[i] or ""}` else arg)
+			if name == arg then
+				i += 1
+			end
+		elseif UNITTEST_VALUE[name] then
+			if name == arg then
+				i += 1
+			end
+		elseif string.sub(arg, 1, 1) ~= "-" then
+			table.insert(positional, arg)
+		end
+	end
+	-- `discover START PATTERN TOP`: only a pattern selects.
+	if discover then
+		if positional[2] then
+			table.insert(picks, positional[2])
+		end
+	else
+		for _, name in positional do
+			table.insert(picks, name)
+		end
+	end
+	return if #picks == 0 then FULL else partial(table.concat(picks, " "))
+end
+
 -- hk options that take a value, that narrow what a check covers, and that
 -- print a plan or help instead of checking.
 local HK_VALUE = set({
@@ -475,7 +514,9 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		local kind, scope, given = jouet_test(args)
 		if given and #given > 0 then
 			-- `jouet test --cmd -- CMD` ran CMD: a test or a build, with its
-			-- scope, and a test when the rule does not know CMD.
+			-- scope. A command the rule does not know is recorded as nothing,
+			-- as it is when run directly: called a partial test, a passing run
+			-- of the whole suite would hold up finishing.
 			local inner: JouetCommand = {
 				words = given,
 				argv = given,
@@ -487,13 +528,15 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 				text = command.text,
 			}
 			local inner_kind, inner_scope = classify(inner, dir)
-			return inner_kind or "test", inner_scope
+			return inner_kind, inner_scope
 		end
 		return kind, scope
 	elseif program == "bats" then
 		return "test", unknown
 	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "pytest" then
 		return "test", runner_scope(args, 3)
+	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "unittest" then
+		return "test", unittest_scope(args, 3)
 	elseif program == "ruff" then
 		local kind: Kind? = if first == "check" then "lint" else nil
 		return kind, if #args == 1 or (#args == 2 and args[2] == ".") then FULL else unknown

@@ -145,6 +145,50 @@ local function cutter(commands: { JouetCommand }, i: number): JouetCommand?
 	return nil
 end
 
+-- Commands that run a project's whole test suite, which plain `jouet test`
+-- runs too, followed only by words that do not select tests.
+local SUITES: { { string } } = {
+	{ "cargo", "test" },
+	{ "cargo", "nextest", "run" },
+	{ "python", "-m", "unittest" },
+	{ "python3", "-m", "unittest" },
+	{ "python", "-m", "pytest" },
+	{ "python3", "-m", "pytest" },
+	{ "pytest" },
+	{ "go", "test", "./..." },
+	{ "npm", "test" },
+	{ "pnpm", "test" },
+	{ "yarn", "test" },
+	{ "mise", "run", "test" },
+	{ "just", "test" },
+	{ "make", "test" },
+}
+local UNSELECTIVE = set({ "-q", "--quiet", "-v", "--verbose", "--workspace", "discover" })
+
+-- Whether `command` is the whole suite: then `jouet test` is the simpler
+-- suggestion, and what it records is a full run.
+local function whole_suite(command: JouetCommand): boolean
+	local words = command.argv
+	for _, suite in SUITES do
+		local matches = #words >= #suite
+		for k, word in suite do
+			if words[k] ~= word then
+				matches = false
+				break
+			end
+		end
+		if matches then
+			for k = #suite + 1, #words do
+				if not UNSELECTIVE[words[k]] then
+					return false
+				end
+			end
+			return true
+		end
+	end
+	return false
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		for i, command in call.commands do
@@ -159,12 +203,16 @@ local rule: JouetRule = {
 				for _, text in command.env do
 					table.insert(env, assignment(text) .. " ")
 				end
-				local words = {}
-				for _, word in command.words do
-					table.insert(words, quote(word))
+				local run = "jouet test"
+				if not whole_suite(command) then
+					local words = {}
+					for _, word in command.words do
+						table.insert(words, quote(word))
+					end
+					run = `jouet test --cmd -- {table.concat(words, " ")}`
 				end
 				return jouet.warn(
-					`Run \`{table.concat(env)}jouet test --cmd -- {table.concat(words, " ")}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
+					`Run \`{table.concat(env)}{run}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
 				)
 			end
 		end
