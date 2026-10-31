@@ -145,6 +145,9 @@ fn handle(
                 (Vec::new(), None)
             };
             log.post_tool_use(payload, &call, &records, tree);
+            if hooks.graph {
+                super::graph::reindex_after_tool(payload, &call);
+            }
             None
         }
         "post-edit" => {

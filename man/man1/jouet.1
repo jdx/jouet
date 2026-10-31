@@ -48,6 +48,36 @@ Replace text in one file, given on the command line
 \fBedit hash\fR
 Print the SHA\-256 hash of files, for \-\-expect\-hash
 .TP
+\fBgraph\fR
+Query the code graph: symbols, callers, impact and affected tests
+.TP
+\fBgraph index\fR
+Build the graph, or bring it up to date
+.TP
+\fBgraph status\fR
+Show where the graph lives and what it holds
+.TP
+\fBgraph symbols\fR
+Find symbols by name, qualified name or words
+.TP
+\fBgraph callers\fR
+A symbol's callers, callees or impact
+.TP
+\fBgraph callees\fR
+A symbol's callers, callees or impact
+.TP
+\fBgraph impact\fR
+A symbol's callers, callees or impact
+.TP
+\fBgraph explore\fR
+Find the code that answers a question, with its source and neighbours
+.TP
+\fBgraph affected\fR
+List the test files that depend on changed files
+.TP
+\fBgraph prune\fR
+Delete the graphs of worktrees that no longer exist
+.TP
 \fBhandoff\fR
 Record the facts about this checkout for the next session
 .TP
@@ -466,6 +496,207 @@ Print help
 .TP
 \fB<PATHS>\fR
 Files to hash
+.SH "JOUET GRAPH"
+Query the code graph: symbols, callers, impact and affected tests
+
+The graph is built with tree\-sitter from Rust, Python, TypeScript and JavaScript, Go, Ruby, Java, C and C++ files, and kept in a database in $XDG_CACHE_HOME/jouet/graph, one per work tree: nothing is written into the repository. There is no daemon: every query first re\-indexes the files that changed since the last one, and jouet's post\-tool\-use hook re\-indexes files an agent edits. The code graph builds on codegraph's design and extraction.
+.PP
+\fBUsage:\fR jouet graph [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET GRAPH INDEX"
+Build the graph, or bring it up to date
+
+Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF\-8 are recorded without symbols. A worktree with no graph yet starts from a copy of the graph of a sibling worktree of the same repository, the one whose HEAD is nearest, so only the files that differ are extracted.
+.PP
+\fBUsage:\fR jouet graph index [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-full\fR
+Drop the graph and index everything from scratch
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET GRAPH STATUS"
+Show where the graph lives and what it holds
+
+Prints the database's path and size, and how many files, symbols, edges and references it holds. Does not index.
+.PP
+\fBUsage:\fR jouet graph status [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET GRAPH SYMBOLS"
+Find symbols by name, qualified name or words
+
+An exact name comes first, then a qualified name (`Client::push`, `Client.push`), then symbols whose name, docstring or signature has every word (`retry backoff`; `processPayment` has the words `process` and `payment`). With no QUERY, lists every symbol under \-\-path. Each line is `path:line kind qualified\-name`, and the ID after `#` names the symbol to other graph commands.
+.PP
+\fBUsage:\fR jouet graph symbols [OPTIONS] [<QUERY>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-kind\fR \fI<KIND>\fR
+Only symbols of this kind: function, method, class, struct, …
+.TP
+\fB\-\-path\fR \fI<PATH>\fR
+Only symbols in this file or directory
+.TP
+\fB\-\-budget\fR \fI<BYTES>\fR
+The most bytes to print (default 6000; 0 is no limit)
+.TP
+\fB\-\-page\fR \fI<N>\fR
+Which page of a longer answer to print (default 1)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<QUERY>\fR
+A name, a qualified name, or words
+.SH "JOUET GRAPH CALLERS"
+A symbol's callers, callees or impact
+
+SYMBOL is a name, a qualified name (`Client::push`), `PATH#NAME`, `PATH:LINE` (the innermost symbol there) or an ID from `jouet graph symbols`. A name that several symbols share answers for each of them. callers and callees follow calls, constructions and references; impact follows every edge but containment, from the symbol and everything it contains, and groups the answer by file.
+.PP
+\fBUsage:\fR jouet graph callers [OPTIONS] <SYMBOL>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-depth\fR \fI<N>\fR
+How many hops to follow (default 1, and 3 for impact)
+.TP
+\fB\-\-budget\fR \fI<BYTES>\fR
+The most bytes to print (default 6000; 0 is no limit)
+.TP
+\fB\-\-page\fR \fI<N>\fR
+Which page of a longer answer to print (default 1)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SYMBOL>\fR
+The symbol
+.SH "JOUET GRAPH CALLEES"
+A symbol's callers, callees or impact
+
+SYMBOL is a name, a qualified name (`Client::push`), `PATH#NAME`, `PATH:LINE` (the innermost symbol there) or an ID from `jouet graph symbols`. A name that several symbols share answers for each of them. callers and callees follow calls, constructions and references; impact follows every edge but containment, from the symbol and everything it contains, and groups the answer by file.
+.PP
+\fBUsage:\fR jouet graph callees [OPTIONS] <SYMBOL>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-depth\fR \fI<N>\fR
+How many hops to follow (default 1, and 3 for impact)
+.TP
+\fB\-\-budget\fR \fI<BYTES>\fR
+The most bytes to print (default 6000; 0 is no limit)
+.TP
+\fB\-\-page\fR \fI<N>\fR
+Which page of a longer answer to print (default 1)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SYMBOL>\fR
+The symbol
+.SH "JOUET GRAPH IMPACT"
+A symbol's callers, callees or impact
+
+SYMBOL is a name, a qualified name (`Client::push`), `PATH#NAME`, `PATH:LINE` (the innermost symbol there) or an ID from `jouet graph symbols`. A name that several symbols share answers for each of them. callers and callees follow calls, constructions and references; impact follows every edge but containment, from the symbol and everything it contains, and groups the answer by file.
+.PP
+\fBUsage:\fR jouet graph impact [OPTIONS] <SYMBOL>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-depth\fR \fI<N>\fR
+How many hops to follow (default 1, and 3 for impact)
+.TP
+\fB\-\-budget\fR \fI<BYTES>\fR
+The most bytes to print (default 6000; 0 is no limit)
+.TP
+\fB\-\-page\fR \fI<N>\fR
+Which page of a longer answer to print (default 1)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SYMBOL>\fR
+The symbol
+.SH "JOUET GRAPH EXPLORE"
+Find the code that answers a question, with its source and neighbours
+
+Ranks symbols by how well their names (split into words), qualified names, docstrings and signatures match the question, puts tests after the code they test unless the question is about tests, and prints each with its signature, docstring, callers, callees and the start of its source. The answer is paged rather than printed whole: a dense answer stays in the agent's context for the rest of the session.
+.PP
+\fBUsage:\fR jouet graph explore [OPTIONS] [<QUERY>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-budget\fR \fI<BYTES>\fR
+The most bytes to print (default 6000; 0 is no limit)
+.TP
+\fB\-\-source\-budget\fR \fI<BYTES>\fR
+The most bytes of one symbol's source (default 1200; 0 for none)
+.TP
+\fB\-\-page\fR \fI<N>\fR
+Which page of a longer answer to print (default 1)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<QUERY>\fR
+The question, or the names you know (`retry backoff for webhooks`)
+.SH "JOUET GRAPH AFFECTED"
+List the test files that depend on changed files
+
+Follows the graph backwards from each FILE, through imports, calls, references and inheritance, to every test file that reaches it, and shows the chain that does. A FILE the graph cannot speak for (not indexed, or in a language jouet does not extract) is listed as unknown, and the exit code is 1: run the whole suite. A fallback for languages without a native tool; `jouet test \-\-affected` prefers the native one.
+.PP
+\fBUsage:\fR jouet graph affected [OPTIONS] [<FILES>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<FILES>\fR
+The changed files
+.SH "JOUET GRAPH PRUNE"
+Delete the graphs of worktrees that no longer exist
+
+Each worktree's graph records its root. This deletes every graph in $XDG_CACHE_HOME/jouet/graph whose root is gone, and keeps one whose root exists or cannot be checked. Querying a graph also does this, at most once a day.
+.PP
+\fBUsage:\fR jouet graph prune [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET HANDOFF"
 Record the facts about this checkout for the next session
 
@@ -980,7 +1211,7 @@ Run only the tests the changes affect
 Measure changes from the merge base with REF (default: the upstream, else the default branch)
 .TP
 \fB\-\-adapter\fR \fI<NAME>\fR
-Use only this adapter: vitest, jest or pytest
+Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
 .TP
 \fB\-\-dry\-run\fR
 Print what would run and why, running nothing

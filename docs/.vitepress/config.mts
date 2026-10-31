@@ -29,6 +29,9 @@ export default defineConfig({
     "cli/pr.md": "cli/pr/index.md",
     "cli/wait.md": "cli/wait/index.md",
     "cli/rule.md": "cli/rule/index.md",
+    "cli/graph.md": "cli/graph/index.md",
+    // `jouet graph index` would otherwise take the group page's place.
+    "cli/graph/index.md": "cli/graph/index/index.md",
   },
   sitemap: {
     hostname: siteUrl,
@@ -80,6 +83,7 @@ export default defineConfig({
           { text: "jouet diag", link: "/commands/diag" },
           { text: "jouet search", link: "/commands/search" },
           { text: "jouet read", link: "/commands/read" },
+          { text: "jouet graph", link: "/commands/graph" },
           { text: "jouet wait", link: "/commands/wait" },
           { text: "jouet job", link: "/commands/job" },
           { text: "jouet ci run", link: "/commands/ci" },
@@ -123,6 +127,22 @@ export default defineConfig({
                 items: [
                   { text: "replace", link: "/cli/edit/replace" },
                   { text: "hash", link: "/cli/edit/hash" },
+                ],
+              },
+              {
+                text: "graph",
+                link: "/cli/graph/",
+                collapsed: true,
+                items: [
+                  { text: "explore", link: "/cli/graph/explore" },
+                  { text: "symbols", link: "/cli/graph/symbols" },
+                  { text: "callers", link: "/cli/graph/callers" },
+                  { text: "callees", link: "/cli/graph/callees" },
+                  { text: "impact", link: "/cli/graph/impact" },
+                  { text: "affected", link: "/cli/graph/affected" },
+                  { text: "index", link: "/cli/graph/index/" },
+                  { text: "status", link: "/cli/graph/status" },
+                  { text: "prune", link: "/cli/graph/prune" },
                 ],
               },
               { text: "handoff", link: "/cli/handoff" },
