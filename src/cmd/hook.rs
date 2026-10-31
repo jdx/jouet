@@ -898,11 +898,21 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
     };
     let hk_repo =
         |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
-    let jouet = if verify {
-        state.block_reason(&home, tree_of, hk_repo)
+    let block = if verify {
+        state.block(&home, tree_of, hk_repo)
     } else {
         None
     };
+    // Kept so the next turn's stop, at the same tree with no run since,
+    // does not raise it again. Codex's runs are read again from the
+    // transcript at each stop, so there is nothing to keep it with.
+    if let Some(block) = &block
+        && harness != Harness::Codex
+        && let Some(path) = session_state_path(payload)
+    {
+        let _ = verify::update(&path, |state| state.raise(block));
+    }
+    let jouet = block.map(|b| b.reason);
     let hk_passed = state.checks(&home).is_some_and(|c| c.hk_passed_at(now));
     let hk = if hk_stop.is_empty() || hk_passed {
         None
@@ -1165,7 +1175,7 @@ mod tests {
             &json!({}),
             vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
         );
-        assert!(failing.block_reason("", |_| None, |_| false).is_some());
+        assert!(failing.block("", |_| None, |_| false).is_some());
         let fixed = codex_state(
             &engine,
             &json!({}),
@@ -1174,7 +1184,7 @@ mod tests {
                 ("cargo test --workspace".into(), 0),
             ],
         );
-        assert_eq!(fixed.block_reason("", |_| None, |_| false), None);
+        assert_eq!(fixed.block("", |_| None, |_| false), None);
         // A partial pass leaves the full failure standing.
         let partial = codex_state(
             &engine,
@@ -1184,7 +1194,7 @@ mod tests {
                 ("cargo test -p jouet --lib".into(), 0),
             ],
         );
-        let why = partial.block_reason("", |_| None, |_| false).unwrap();
+        let why = partial.block("", |_| None, |_| false).unwrap().reason;
         assert!(why.contains("only a full test run clears it"), "{why}");
         // A refusal, such as `diag check` with no hk config, is not a
         // failed lint, and does not clear one either.
@@ -1193,7 +1203,7 @@ mod tests {
             &json!({}),
             vec![("/usr/bin/zsh -lc 'jouet diag check a.py'".into(), 4)],
         );
-        assert_eq!(refused.block_reason("", |_| None, |_| false), None);
+        assert_eq!(refused.block("", |_| None, |_| false), None);
         let still = codex_state(
             &engine,
             &json!({}),
@@ -1202,7 +1212,7 @@ mod tests {
                 ("jouet diag check a.py".into(), 4),
             ],
         );
-        assert!(still.block_reason("", |_| None, |_| false).is_some());
+        assert!(still.block("", |_| None, |_| false).is_some());
     }
 
     #[test]
