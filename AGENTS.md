@@ -3,7 +3,8 @@
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
-`jouet audit` (where your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
+`jouet search` and `jouet read --map` (budgeted search and a repository map), `jouet audit` (where
+your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
 and the git recipes `jouet commit`, `jouet review-package` and `jouet handoff`/`pickup`. It is in
 early development; the commands land one at a time.
 
@@ -62,11 +63,19 @@ helpers, and the setup, hook, ledger and agent-guide code. The rest lives in lib
   `JOUET_GITHUB_API_URL`), TLS, and the `pr` model shared by `pr status`, `pr threads` and `wait`.
 - `jouet-edit`: the edit engine behind `jouet edit`.
 - `jouet-rules`: the Luau rule engine and the built-in rules behind `jouet hook` and `jouet rule`,
-  its read-only probes (`probe/`), and the recipes `jouet run` runs (`recipe.rs`, `recipes/`).
+  and its read-only probes (`probe/`).
+- `jouet-routines`: routines, the Luau programs `joue` (`jouet run`) runs: headers and the usage
+  spec (`routine.rs`), the sandboxed runtime and `joue` module (`runtime.rs`), the primitives
+  (`prims/`), `joue test` and its fake GitHub (`testing.rs`), and the built-in routines and their
+  fixtures (`routines/`). `jouet pr next` is the `pr-next` routine.
 - `jouet-wait`: the conditions and polling behind `jouet wait`.
 - `jouet-audit`: the transcript readers (Claude Code, Codex), command shapes, redaction,
   categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
   `stats`, the ledger reader and estimates behind `jouet stats`.
+- `jouet-search`: `jouet search` (ripgrep's walker and searcher, with budgets and grouping by
+  enclosing symbol), the session memory of what an agent was shown, tree-sitter symbols for the
+  languages the `grammars` feature compiles in, and the repo map behind `jouet read --map`.
+  Without the feature (`--no-default-features`), search is plain text and there is no map.
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
   in the binary, so the crate makes no network calls.
@@ -109,15 +118,20 @@ Pester tests stay at the root, since they run the binary.
   floor (no replacing built-in rules, no locking out `jouet`) when changing the engine. A rule's
   `examples` are its tests: `cargo test` runs every built-in rule's, so add matching and near-miss
   commands with each change. A rule whose advice names a jouet command declares it in `needs`.
-  Keep `jouet.d.luau` in step with `install_module`, `prelude.luau`, the probes and
-  `recipe::COMMANDS`, and check it with `luau-lsp analyze --definitions=jouet.d.luau
-  rules/*.luau recipes/*.luau`. Whole-file `.luau` rules still load but are deprecated
-  (`LUAU_RULES_REMOVED_IN`); a test fails once jouet reaches that version.
-- **Probes and recipes:** probes only read, are cached per hook call or recipe step, and run within
-  the caller's remaining budget; the GitHub ones stay off in hooks unless `rules.network` is set.
-  A recipe reaches the world only through `jouet.cmd`, whose commands are listed in
-  `recipe::COMMANDS`: never add one that runs a shell command or trusts a repository, and mark one
-  that posts or merges `Effect::Write`, so it needs `yes = true`.
+  Keep `jouet.d.luau` in step with `install_module`, `prelude.luau` and the probes, and check it
+  with `luau-lsp analyze --definitions=jouet.d.luau rules/*.luau`. Whole-file `.luau` rules still
+  load but are deprecated (`LUAU_RULES_REMOVED_IN`); a test fails once jouet reaches that version.
+- **Probes:** probes only read, are cached per hook call, and run within the rule's remaining
+  budget; the GitHub ones stay off in hooks unless `rules.network` is set.
+- **Routines:** routines stay Luau programs, unlike rules. A routine reaches the world only through
+  the primitives in `crates/jouet-routines/src/prims/`, each refused without its capability. A
+  primitive that writes goes through `Ctx::write`, so it is previewed without `--yes`; never add
+  one that runs a shell command or trusts a repository. Keep `routines.d.luau` in step with the
+  primitives and the `joue` module. Every built-in routine carries examples with fixtures in
+  `routines/fixtures/` (listed in `testing::FIXTURES`), which `cargo test` runs, and the `pr-next`
+  routine must agree with `jouet_github::pr::next`, which `pr land` and the probes still use
+  (`parity.rs`). `joue` is a usage view of `jouet run`; `src/bin/joue.rs` is the launcher that
+  ships it as a file of its own.
 - **Tests:** the CLI surface is tested by running the built binary (`tests/cli.rs`). GitHub
   responses are to be recorded as fixtures and replayed, never fetched live in tests.
 - **End-to-end tests** run a command the way an agent does, from a shell: one bats file per

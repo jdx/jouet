@@ -28,6 +28,17 @@ pub(crate) struct Settings {
     pub stats: StatsSettings,
     #[usage(flatten)]
     pub wind: WindSettings,
+    #[usage(flatten)]
+    pub share: ShareSettings,
+}
+
+/// Contributing back to jouet, through `jouet share`.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "share")]
+pub(crate) struct ShareSettings {
+    /// Suggest, at session start, sharing what sessions show about jouet itself (crashes, confusing flags, abandoned output) with its maintainers; every post still needs the user's yes
+    #[usage(env = "JOUET_SHARE_CONTRIBUTE", default = false)]
+    pub contribute: bool,
 }
 
 /// Self-winding: the ledger the hooks keep, and the rules drafted from it.
@@ -43,6 +54,18 @@ pub(crate) struct WindSettings {
     /// Firings, with no overrides, before a rule is promoted automatically
     #[usage(env = "JOUET_WIND_PROMOTE_AFTER", default = 20)]
     pub promote_after: u64,
+    /// Digest each session at its stop hook, and suggest reviewing one with user corrections or a lot of waste at the next session start
+    #[usage(env = "JOUET_WIND_REVIEW", default = false)]
+    pub review: bool,
+    /// Sessions, at least, between two suggested reviews
+    #[usage(env = "JOUET_WIND_REVIEW_EVERY", default = 5)]
+    pub review_every: u64,
+    /// User corrections in a session that make it worth a review
+    #[usage(env = "JOUET_WIND_REVIEW_CORRECTIONS", default = 2)]
+    pub review_corrections: u64,
+    /// A gitleaks config whose rules also redact digests; ~/.config/jouet/gitleaks.toml when it exists
+    #[usage(env = "JOUET_WIND_GITLEAKS")]
+    pub gitleaks: Option<String>,
 }
 
 /// What the hooks `jouet setup` installs do.
@@ -69,6 +92,9 @@ pub(crate) struct HookSettings {
     /// repository has one
     #[usage(env = "JOUET_HOOKS_GRAPH", default = true)]
     pub graph: bool,
+    /// Milliseconds a tool hook may take before the ledger records it as slow; session start and stop get ten times this
+    #[usage(env = "JOUET_HOOKS_BUDGET_MS", default = 500)]
+    pub budget_ms: u64,
 }
 
 /// What `jouet stats` prints.
@@ -92,7 +118,7 @@ pub(crate) struct RuleSettings {
     #[usage(env = "JOUET_RULES_DISABLE", merge = "union", parse = "list_by_comma")]
     pub disable: Option<Vec<String>>,
     /// Let rules in hooks use the GitHub probes (`jouet.pr.*`); off so a
-    /// hook never waits on the network. Recipes always have them
+    /// hook never waits on the network
     #[usage(env = "JOUET_RULES_NETWORK", default = false)]
     pub network: bool,
 }
@@ -188,6 +214,30 @@ mod tests {
         assert_eq!(s.wind.promote_after, 20);
         let s = Settings::load_from(&env(&[("JOUET_WIND", "0")]), None);
         assert!(!s.wind.enabled);
+    }
+
+    #[test]
+    fn contributing_is_off_and_hooks_have_a_budget() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(!s.share.contribute);
+        assert_eq!(s.hooks.budget_ms, 500);
+        let s = Settings::load_from(&env(&[("JOUET_SHARE_CONTRIBUTE", "1")]), None);
+        assert!(s.share.contribute);
+    }
+
+    #[test]
+    fn session_review_is_off_until_turned_on() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert!(!s.wind.review);
+        assert_eq!((s.wind.review_every, s.wind.review_corrections), (5, 2));
+        assert_eq!(s.wind.gitleaks, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[wind]\nreview = true\nreview_every = 3\n").unwrap();
+        let s = Settings::load_from(&env(&[("JOUET_WIND_GITLEAKS", "/x.toml")]), Some(path));
+        assert!(s.wind.review);
+        assert_eq!(s.wind.review_every, 3);
+        assert_eq!(s.wind.gitleaks.as_deref(), Some("/x.toml"));
     }
 
     #[test]

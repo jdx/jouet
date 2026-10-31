@@ -153,6 +153,7 @@ mod tests {
         let resp = |status, body: &str| Rest {
             status,
             etag: None,
+            link: None,
             body: body.into(),
         };
         let protected = resp(

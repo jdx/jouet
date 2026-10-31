@@ -83,15 +83,16 @@ pub(crate) fn contribute(format: Format) -> String {
     let body = "Contributing to jouet is optional, and a person approves every post. Use this skill only when the user has asked for it.\n\n\
 When a contribution is worth making:\n\n\
 - A rule of yours has proven itself: it has denied for a week, fires often and is rarely overridden, and it would help other people, not only this machine or project. `jouet share NAME` checks all of this and says what is missing.\n\
-- jouet's rule API could not express a rule you wanted. jouet records it when a rule reads a `jouet` primitive that does not exist; record anything else with `jouet rule gap \"I kept doing X; there is no primitive for Y\"`. `jouet share --idea` turns recorded gaps into an idea.\n\n\
+- jouet's rule API could not express a rule you wanted. jouet records it when a rule reads a `jouet` primitive that does not exist; record anything else with `jouet rule gap \"I kept doing X; there is no primitive for Y\"`. `jouet share --idea` turns recorded gaps into an idea.\n\
+- jouet itself misbehaved or fell short: it crashed, exited with a code outside its table, printed malformed JSON, its flags kept causing usage errors, agents dropped its output for raw `gh` or `git`, a built-in rule kept being overridden, a hook ran over its time budget, or the same script was written in many sessions. jouet records these from the ledger and from session digests; `jouet share --list` shows the ones ready to share, and `jouet share --idea KEY` drafts a bug as an Issue and anything else as a Discussion.\n\n\
 How:\n\n\
 1. Run `jouet share NAME` (or `jouet share --idea`). It posts nothing: it prints the exact text, with paths, repository names, hostnames and emails replaced, and a diff of what that changed.\n\
 2. Show the user that text and the diff. Look for internal tool or project names that are still there, and add `--redact WORD` for each.\n\
-3. Post with `--yes` only after the user says yes to that exact text in this conversation. It posts to the \"Rules & ideas\" Discussions category of jdx/jouet with the user's own GitHub login, and refuses duplicates, secrets and more than three posts a week.\n\n\
+3. Post with `--yes` only after the user says yes to that exact text in this conversation. It posts with the user's own GitHub login, a bug as an Issue on jdx/jouet and anything else to its \"Rules & ideas\" Discussions category, and refuses duplicates, secrets and more than three posts a week.\n\n\
 Never post on your own initiative, never post several at once, and never reply in other Discussions or Issues on the user's behalf.\n";
     match format {
         Format::Claude | Format::Codex => format!(
-            "---\nname: jouet-contribute\ndescription: Propose a proven jouet rule, or a primitive jouet's rule API lacks, to jouet's maintainers with `jouet share`, only when the user asks and approves the exact post.\n---\n\n# Contributing to jouet\n\n{body}"
+            "---\nname: jouet-contribute\ndescription: Propose a proven jouet rule, a primitive jouet's rule API lacks, or a bug or gap in jouet itself to jouet's maintainers with `jouet share`, only when the user asks and approves the exact post.\n---\n\n# Contributing to jouet\n\n{body}"
         ),
         Format::AgentsMd => format!("## Contributing to jouet\n\n{body}"),
     }

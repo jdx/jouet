@@ -44,7 +44,8 @@ pub(crate) struct Entry {
     /// path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
-    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop` or `override`.
+    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `override`,
+    /// or `slow-hook` (a hook over its time budget; `tool` names its event).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -54,6 +55,10 @@ pub(crate) struct Entry {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// For a `slow-hook` entry: the budget the hook ran over, in
+    /// milliseconds; `duration_ms` is how long it took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_ms: Option<u64>,
     /// For a call that recorded a check: the work tree it ran against, as
     /// `jouet_rules::tree` hashes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -219,24 +224,24 @@ pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> 
 
 /// A command's shape: each top-level command's program, subcommand words and
 /// flag names, joined by its operators, with everything else a placeholder.
+///
+/// A compound command keeps its structure as well: its reserved words and
+/// brackets, and the commands in its bodies, each shaped the same way. What
+/// it holds of its own is a value too: a loop's list, a `case` word and its
+/// patterns, a function's name. `for n in 1 2 3; do gh pr view $n; done`
+/// is `for <arg> in <arg>…; do gh pr view <arg>; done`. A script with no
+/// compound command shapes as it always has.
 pub(crate) fn shape(script: &str) -> String {
+    if let Some(parts) = jouet_audit::structure(script) {
+        return compound_shape(&parts);
+    }
     let parsed = shell::parse(script);
     let mut out = String::new();
     for command in &parsed.commands {
-        let argv = command.argv();
-        let Some(program) = argv.first() else {
+        let Some(text) = command_shape(command) else {
             continue;
         };
-        let program = shell::basename(program);
-        out.push_str(&redact(program));
-        let mut state = ArgState {
-            program,
-            ..ArgState::default()
-        };
-        for arg in &argv[1..] {
-            out.push(' ');
-            out.push_str(&shape_arg(arg, &mut state));
-        }
+        out.push_str(&text);
         out.push_str(match command.op {
             Some(Op::Seq) => "; ",
             Some(Op::And) => " && ",
@@ -247,6 +252,66 @@ pub(crate) fn shape(script: &str) -> String {
         });
     }
     out.trim_end_matches("; ").trim_end().to_string()
+}
+
+/// One simple command's shape, or `None` when it runs nothing.
+fn command_shape(command: &shell::Command) -> Option<String> {
+    let argv = command.argv();
+    let program = shell::basename(argv.first()?);
+    let mut out = redact(program);
+    let mut state = ArgState {
+        program,
+        ..ArgState::default()
+    };
+    for arg in &argv[1..] {
+        out.push(' ');
+        out.push_str(&shape_arg(arg, &mut state));
+    }
+    Some(out)
+}
+
+/// The shape of a script with loops, conditionals, `case` branches,
+/// subshells, groups or functions.
+fn compound_shape(parts: &[jouet_audit::Part]) -> String {
+    use jouet_audit::Part;
+    let mut pieces: Vec<String> = Vec::new();
+    let append = |pieces: &mut Vec<String>, tail: &str| match pieces.last_mut() {
+        Some(last) => last.push_str(tail),
+        None => pieces.push(tail.trim_start().to_string()),
+    };
+    for part in parts {
+        match part {
+            Part::Command(words) => {
+                let command = shell::Command {
+                    words: words.clone(),
+                    ..shell::Command::default()
+                };
+                pieces.extend(command_shape(&command));
+            }
+            Part::Keyword(";;") => append(&mut pieces, ";;"),
+            Part::Keyword(word) => pieces.push((*word).to_string()),
+            Part::For { select, list } => {
+                let word = if *select { "select" } else { "for" };
+                pieces.push(if *list {
+                    format!("{word} <arg> in <arg>…")
+                } else {
+                    format!("{word} <arg>")
+                });
+            }
+            Part::CaseIn => pieces.push("case <arg> in".into()),
+            Part::Pattern => pieces.push("<arg>)".into()),
+            Part::Function => pieces.push("<arg>()".into()),
+            Part::Op(";") => append(&mut pieces, ";"),
+            Part::Op("&") => append(&mut pieces, " &"),
+            Part::Op("|&") => pieces.push("|".into()),
+            Part::Op(op) => pieces.push((*op).to_string()),
+        }
+    }
+    pieces
+        .join(" ")
+        .trim_end()
+        .trim_end_matches(';')
+        .to_string()
 }
 
 #[derive(Default)]
@@ -787,6 +852,47 @@ mod tests {
         ] {
             assert_eq!(shape(script), expected, "{script}");
         }
+    }
+
+    #[test]
+    fn a_compound_shape_keeps_its_structure_and_drops_its_values() {
+        for (script, expected) in [
+            (
+                "cd /repo && for f in a.json b.json c.json; do jq -c . $f | head -c 200; done",
+                "cd <arg> && for <arg> in <arg>…; do jq -c <arg> <arg> | head -c <arg>; done",
+            ),
+            (
+                "for n in 1 2\ndo\n  gh pr view $n --json title\ndone",
+                "for <arg> in <arg>…; do gh pr view <arg> --json <arg>; done",
+            ),
+            (
+                "while true; do sleep 5; done",
+                "while true; do sleep <arg>; done",
+            ),
+            (
+                "if ! cargo test; then echo failed; else echo ok; fi",
+                "if ! cargo test; then echo <arg>; else echo <arg>; fi",
+            ),
+            (
+                "case \"$e\" in\n  post-tool-use) jq . f;;\n  *) echo other;;\nesac",
+                "case <arg> in <arg>) jq <arg> <arg>;; <arg>) echo <arg>;; esac",
+            ),
+            (
+                "(cd x && make) || echo failed",
+                "( cd <arg> && make ) || echo <arg>",
+            ),
+            ("deploy_prod() { make deploy; }", "<arg>() { make <arg>; }"),
+        ] {
+            assert_eq!(shape(script), expected, "{script}");
+        }
+    }
+
+    #[test]
+    fn the_same_loop_over_other_values_has_one_shape() {
+        assert_eq!(
+            shape("for pr in 1 2 3; do gh pr checks $pr; done"),
+            shape("for x in $(seq 1 40)\ndo\n  gh pr checks \"$x\"\ndone")
+        );
     }
 
     #[test]

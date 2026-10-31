@@ -12,9 +12,21 @@ use usage_rs::spec::CommandMeta;
 /// command that is for people setting jouet up, not for agents.
 const WHEN: &[(&str, Option<&str>)] = &[
     (
+        "search",
+        Some(
+            "searching code: like rg, but grouped by the function each match is in, cut to a budget with markers for what it left out, and collapsing matches this session already saw",
+        ),
+    ),
+    (
+        "read",
+        Some(
+            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing; `jouet read --map` prints a repository's most important definitions to fit a token budget",
+        ),
+    ),
+    (
         "edit",
         Some(
-            "changing files: exact replacements that all land or none do, instead of python/sed rewrites or a string of separate edits",
+            "changing files: exact replacements, or whole definitions by name (`=== PATH#SYMBOL`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
         ),
     ),
     (
@@ -62,13 +74,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "run",
         Some(
-            "a routine you would otherwise type out step by step: `jouet run land` (pr next, wait ci, then pr land; yes=true merges), `jouet run sweep` (unresolved threads as a work list) or `jouet run ship-check` (the test task, then pr status); `jouet run --list` shows them all, `--dry-run` the steps",
+            "a job you would otherwise do step by step, written as a routine (code, where rules are TOML configuration): `joue land [PR]` (pr-next, wait for CI, then pr land), `joue sweep` (unresolved threads as a work list), `joue ship-check` (the tests, then the PR); `joue --list` lists them, `joue NAME --help` gives the args, and a routine that writes needs --yes (without it: a preview and exit 4)",
         ),
     ),
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule: `jouet wind show ID` reads it, `jouet rule new NAME --from-note ID` adopts it",
+            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent",
         ),
     ),
     (
@@ -86,6 +98,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("stats", None),
     ("completion", None),
 ];
+
+/// Subcommands an agent is told about where it needs them, in a line jouet
+/// prints (a proposal's note, the review prompt), so the overview leaves
+/// them out. `jouet agent-help COMMAND` still lists them.
+const PROMPTED: &[(&str, &str)] = &[("wind", "adopt"), ("wind", "propose")];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -140,15 +157,21 @@ fn when(name: &str) -> Option<&'static str> {
 /// The guide for the whole tool, kept under about 80 lines.
 pub(crate) fn overview() -> String {
     let mut out = format!(
-        "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n",
+        "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
         env!("CARGO_PKG_VERSION")
     );
     for (meta, when) in agent_commands() {
         let name = meta.cmd.name;
-        let _ = writeln!(out, "\njouet {name}: {}", meta.about.unwrap_or(""));
+        // No blank line between commands: each starts at the margin, and
+        // the overview stays inside its line budget.
+        let _ = writeln!(out, "jouet {name}: {}", meta.about.unwrap_or(""));
         let _ = writeln!(out, "  when: {when}");
         let _ = writeln!(out, "  {}", synopsis(&format!("jouet {name}"), meta));
-        for sub in meta.subcommands.iter().filter(|s| !s.hide) {
+        let listed = meta
+            .subcommands
+            .iter()
+            .filter(|s| !s.hide && !PROMPTED.contains(&(name, s.cmd.name)));
+        for sub in listed {
             let path = format!("jouet {name} {}", sub.cmd.name);
             let _ = writeln!(
                 out,
@@ -348,10 +371,27 @@ mod tests {
     }
 
     #[test]
+    fn subcommands_left_out_of_the_overview_exist() {
+        for (name, sub) in PROMPTED {
+            assert!(crate::spec::has_command(&[name, sub]), "{name} {sub}");
+            let guide = command(&[name]).unwrap();
+            assert!(guide.contains(&format!("jouet {name} {sub}")), "{guide}");
+            assert!(!overview().contains(&format!("jouet {name} {sub}")));
+        }
+    }
+
+    #[test]
     fn the_overview_stays_short() {
         let text = overview();
-        // The cap is a budget to defend, not a ceiling to fill.
-        assert!(text.lines().count() <= 80, "{text}");
+        // The cap is a budget to defend, not a ceiling to fill. It counts
+        // jouet's own lines: the "Also installed" lines depend on which
+        // companion tools are on this machine's PATH, so counting them made
+        // the test pass or fail by machine.
+        let own = text
+            .lines()
+            .filter(|line| !line.starts_with("Also installed:"))
+            .count();
+        assert!(own <= 80, "{own} lines:\n{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
             "{text}"

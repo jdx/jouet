@@ -19,8 +19,9 @@
 //! unexpected is reported in [`Outcome::errors`] and treated as having said
 //! nothing.
 //!
-//! Rules (and recipes) can also ask about jouet's state through read-only
-//! probes ([`probe`]), and recipes ([`recipe`]) sequence jouet's commands.
+//! Rules can also ask about jouet's state through read-only probes
+//! ([`probe`]). Routines, which compose jouet's primitives, are
+//! jouet-routines'.
 
 mod cache;
 mod decl;
@@ -30,7 +31,6 @@ mod header;
 mod json;
 mod matcher;
 pub mod probe;
-pub mod recipe;
 pub mod shell;
 pub mod tree;
 mod trust;
@@ -68,6 +68,12 @@ const BUILTIN: &[(&str, &str)] = &[
     ("force-push", include_str!("../rules/force-push.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("checks", include_str!("../rules/checks.toml")),
+    ("reread", include_str!("../rules/reread.toml")),
+    ("large-read", include_str!("../rules/large-read.toml")),
+    (
+        "unbudgeted-search",
+        include_str!("../rules/unbudgeted-search.toml"),
+    ),
 ];
 
 /// The scripts built-in rules name.
@@ -288,6 +294,13 @@ pub struct Call {
     pub cwd: Option<String>,
     /// The command's exit code, for post-tool-use.
     pub exit_code: Option<i32>,
+    /// The tool's input, as the harness sent it.
+    pub input: Option<serde_json::Value>,
+    /// Whether the session was already shown everything the call reads,
+    /// unchanged; worked out by the caller, which knows the session.
+    pub seen: Option<bool>,
+    /// How many lines of files the call reads; worked out by the caller.
+    pub read_lines: Option<u32>,
 }
 
 impl Call {
@@ -325,6 +338,9 @@ impl Call {
                 .find_map(|key| text(payload.get("tool_input").and_then(|i| i.get(*key)))),
             cwd: text(payload.get("cwd")),
             exit_code,
+            input: payload.get("tool_input").cloned(),
+            seen: None,
+            read_lines: None,
         }
     }
 }
@@ -476,10 +492,8 @@ pub(crate) struct Shared {
     budget: Budget,
     /// What the probes read; None until a caller sets them up.
     probes: RefCell<Option<Probes>>,
-    /// Probe answers for the current hook call or recipe step.
+    /// Probe answers for the current hook call.
     cache: RefCell<HashMap<String, Result<Option<serde_json::Value>, String>>>,
-    /// The recipe being run, while one is.
-    recipe: RefCell<Option<recipe::RunState>>,
 }
 
 impl Shared {
@@ -517,7 +531,6 @@ impl Vm {
             budget,
             probes: RefCell::new(None),
             cache: RefCell::new(HashMap::new()),
-            recipe: RefCell::new(None),
         });
         install_module(&lua, &shared, &has_command)?;
         let guard = shared.clone();
@@ -589,8 +602,7 @@ impl Vm {
         result.map_err(|e| first_line(&e.to_string()))
     }
 
-    /// Forgets the probes' answers: a new hook call or recipe step asks
-    /// again.
+    /// Forgets the probes' answers: a new hook call asks again.
     fn new_call(&self) {
         self.shared.cache.borrow_mut().clear();
     }
@@ -654,23 +666,16 @@ pub fn discover(
     repo_dir: Option<&Path>,
     trust: &TrustStore,
 ) -> (Vec<Source>, Vec<String>) {
-    discover_after(
-        builtin(),
-        user_dir,
-        repo_dir,
-        trust,
-        &[Format::Toml, Format::Luau],
-    )
+    discover_after(builtin(), user_dir, repo_dir, trust)
 }
 
-/// `sources`, then the files of the user's directory in one of `formats`,
-/// then a repository's (untrusted unless its directory is trusted).
+/// `sources`, then the rule files of the user's directory, then a
+/// repository's (untrusted unless its directory is trusted).
 fn discover_after(
     mut sources: Vec<Source>,
     user_dir: Option<&Path>,
     repo_dir: Option<&Path>,
     trust: &TrustStore,
-    formats: &[Format],
 ) -> (Vec<Source>, Vec<String>) {
     let mut errors = Vec::new();
     let mut add = |dir: &Path, repo: bool, trusted: bool, sources: &mut Vec<Source>| {
@@ -683,9 +688,6 @@ fn discover_after(
         };
         for path in files {
             let format = format_of(&path).unwrap_or(Format::Toml);
-            if !formats.contains(&format) {
-                continue;
-            }
             let code = match std::fs::read_to_string(&path) {
                 Ok(code) => code,
                 Err(e) => {
@@ -1116,7 +1118,7 @@ impl Engine {
     }
 
     /// Forgets the probes' answers, when a VM has started: a new hook call
-    /// or recipe step asks again.
+    /// asks again.
     fn new_call(&self) {
         if let Some(Ok(vm)) = self.vm.get() {
             vm.new_call();
@@ -1452,7 +1454,7 @@ fn read_fields(rule: &mut Rule, table: &Table) -> Result<(), String> {
     Ok(())
 }
 
-/// The `jouet` module: the Rust functions, the probes and `cmd`, then the
+/// The `jouet` module: the Rust functions and the probes, then the
 /// prelude's.
 fn install_module(
     lua: &Lua,
@@ -1465,7 +1467,6 @@ fn install_module(
     let git = lua.create_table()?;
     jouet.set("git", &git)?;
     probe::install(lua, &jouet, &git, shared)?;
-    recipe::install(lua, &jouet, shared, has_command)?;
     jouet.set(
         "parse",
         lua.create_function(|lua, (script, exit_code): (String, Option<i32>)| {

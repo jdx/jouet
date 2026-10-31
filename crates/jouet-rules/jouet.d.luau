@@ -18,16 +18,12 @@
 -- and `examples` in the table, still loads, but is deprecated: move those
 -- into a `[[rule]]` table.
 --
--- A recipe (`jouet run`) is a `.luau` file with the same `--- why:` header
--- that returns a `JouetRecipe`. It runs in the same sandbox, and also has
--- `jouet.cmd` to run jouet's own commands.
---
 -- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
--- `jouet.cargo`, `jouet.repo`, `jouet.env`) only read. Each is cached for the rest of the hook call, or of
--- the recipe step, and runs inside the caller's budget. Most return
+-- `jouet.cargo`, `jouet.repo`, `jouet.env`) only read. Each is cached for
+-- the rest of the hook call, and runs inside the caller's budget. Most return
 -- `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)` when there is
 -- nothing to report. The GitHub probes (`jouet.pr`) are off in hooks unless
--- the `rules.network` setting is on; recipes always have them.
+-- the `rules.network` setting is on.
 
 -- One simple command, after quote removal.
 export type JouetCommand = {
@@ -224,90 +220,6 @@ export type JouetRepo = {
 	repo: string?,
 }
 
--- What a `jouet.cmd` call returns.
-export type JouetResult = {
-	ok: boolean,
-	exit_code: number,
-	-- The command's JSON document; {} when it printed none, or in a dry run.
-	json: any,
-	-- The error document's message, when the command failed with one.
-	error: string?,
-	-- The command line it ran.
-	command: string,
-	-- Under `jouet run --dry-run`: nothing ran, and the result is a stand-in.
-	dry_run: boolean?,
-}
-
--- A command's arguments: its positional arguments by name or in order, and
--- its flags by name with `_` for `-` (`log_lines = 20` is `--log-lines=20`).
--- A flag that takes no value is `true` or `false`; one that repeats takes a
--- list. A command that posts or merges also needs `yes = true`, unless it is
--- given `dry_run = true`.
-export type JouetArgs = { [any]: any }
-
--- The commands a recipe can run. Nothing else is reachable: no shell, no
--- files, no `wait cmd` or `rule trust`.
-export type JouetCommands = {
-	-- jouet pr status [PRS...]: mine, search, repo, settle, fail_on_attention
-	pr_status: (args: JouetArgs?) -> JouetResult,
-	-- jouet pr next [PRS...]: mine, search, repo, settle
-	pr_next: (args: JouetArgs?) -> JouetResult,
-	-- jouet pr threads [PR]: listing only; repo, all, resolved, outdated,
-	-- no_outdated, author, bots, no_bots, since, path, include_reviews,
-	-- context, full, fail_if_unresolved
-	pr_threads: (args: JouetArgs?) -> JouetResult,
-	-- jouet pr threads reply ID [PR] (posts; needs yes): repo, body,
-	-- resolve, ignore_resolved, dry_run
-	pr_reply: (args: JouetArgs?) -> JouetResult,
-	-- jouet pr threads resolve IDS... (posts; needs yes): repo, reply,
-	-- ignore_resolved, dry_run
-	pr_resolve: (args: JouetArgs?) -> JouetResult,
-	-- jouet pr land [PR] (merges; needs yes, passed on as --yes): repo,
-	-- method, update, dry_run, timeout, interval, settle
-	pr_land: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait ci [PR]: repo, sha, required, check, ignore, all,
-	-- log_lines, no_logs, appear_timeout, and every wait's timeout,
-	-- interval and quiet
-	wait_ci: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait run RUN: repo, log_lines, no_logs
-	wait_run: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait pr [PR]: repo, until
-	wait_pr: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait file PATH: contains, gone
-	wait_file: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait log PATH: match, from_start
-	wait_log: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait port ADDR: closed
-	wait_port: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait http URL: status, contains
-	wait_http: (args: JouetArgs?) -> JouetResult,
-	-- jouet wait pid PID
-	wait_pid: (args: JouetArgs?) -> JouetResult,
-	-- The repository's test task, found by what it has: a mise `test` task,
-	-- a package.json `test` script, Cargo.toml, a justfile or Makefile
-	-- `test` target, go.mod. `json` holds `command`, `exit_code`,
-	-- `duration_ms`, `log` (the full output) and `tail` (its last lines).
-	test: () -> JouetResult,
-}
-
--- What `run` returns: nil (done), a message, or a table whose `ok`
--- (default true), `message` and `exit_code` decide how `jouet run` ends.
--- The whole table is the JSON report's `result`.
-export type JouetRecipeResult = string | {
-	ok: boolean?,
-	message: string?,
-	exit_code: number?,
-	[string]: any,
-}
-
-export type JouetRecipe = {
-	-- The arguments it takes, in a line, for `jouet run --list`.
-	usage: string?,
-	-- `args` holds the words after the recipe's name: `key=value` as
-	-- fields (`true` and `false` are booleans), the rest as args[1], ...
-	run: (args: { [any]: any }) -> JouetRecipeResult?,
-}
-
 -- `jouet.git`: called as a function it reads a git command; its `state`
 -- probe reads the work tree.
 export type JouetGit = typeof(setmetatable(
@@ -391,7 +303,4 @@ declare jouet: {
 	-- A name with TOKEN, SECRET, PASSWORD or KEY in it never is; any other
 	-- name is an error.
 	env: (name: string) -> string?,
-
-	-- Recipes only: jouet's commands. In a rule every call is an error.
-	cmd: JouetCommands,
 }

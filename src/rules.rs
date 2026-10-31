@@ -23,19 +23,19 @@ pub(crate) fn repo_dir(cwd: &Path) -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
-/// `~/.config/jouet/recipes`, when there is a home directory.
-pub(crate) fn user_recipe_dir() -> Option<PathBuf> {
-    jouet_output::paths::config_dir().map(|d| d.join("recipes"))
+/// `~/.config/jouet/routines`, when there is a home directory.
+pub(crate) fn user_routine_dir() -> Option<PathBuf> {
+    jouet_output::paths::config_dir().map(|d| d.join("routines"))
 }
 
-/// `<repository root>/.jouet/recipes`, when there is one above `cwd`.
-pub(crate) fn repo_recipe_dir(cwd: &Path) -> Option<PathBuf> {
+/// `<repository root>/.jouet/routines`, when there is one above `cwd`.
+pub(crate) fn repo_routine_dir(cwd: &Path) -> Option<PathBuf> {
     let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
-    let dir = root.join(".jouet").join("recipes");
+    let dir = root.join(".jouet").join("routines");
     dir.is_dir().then_some(dir)
 }
 
-/// What the probes read for a rule or recipe running in `cwd`: git there,
+/// What the probes read for a rule running in `cwd`: git there,
 /// and the hooks' ledger. `network` lets the GitHub probes run.
 pub(crate) fn probes(cwd: &Path, network: bool) -> Probes {
     let ledger = jouet_output::paths::state_dir().map(|d| d.join("ledger"));

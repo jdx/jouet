@@ -1,12 +1,6 @@
-//! Moving values between JSON and Luau: probe results and command output
-//! into a script, a recipe's arguments and result out of it.
+//! Moving probe results from JSON into a rule's Luau values.
 
-use mlua::{Lua, Table, Value};
-use serde_json::{Map, Number};
-
-/// How deep a Luau value may nest before it is refused, so a table that
-/// contains itself ends in an error rather than a stack overflow.
-const MAX_DEPTH: usize = 64;
+use mlua::{Lua, Value};
 
 /// A JSON value as Luau sees it: `null` is nil, arrays are sequences.
 pub(crate) fn to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<Value> {
@@ -35,84 +29,23 @@ pub(crate) fn to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<Value
     })
 }
 
-/// A Luau value as JSON. A table with only the keys `1..n` is an array, an
-/// empty table is an empty object, and any other table is an object whose
-/// keys are strings (numbers are written out). Reads are raw, so no
-/// metamethod of the script's runs.
-pub(crate) fn from_lua(value: &Value) -> Result<serde_json::Value, String> {
-    from_lua_at(value, 0)
-}
-
-fn from_lua_at(value: &Value, depth: usize) -> Result<serde_json::Value, String> {
-    if depth > MAX_DEPTH {
-        return Err("a table nests too deeply (or contains itself)".into());
-    }
-    Ok(match value {
-        Value::Nil => serde_json::Value::Null,
-        Value::Boolean(b) => serde_json::Value::Bool(*b),
-        Value::Integer(i) => serde_json::Value::from(*i),
-        Value::Number(n) => Number::from_f64(*n).map_or(serde_json::Value::Null, Into::into),
-        Value::String(s) => serde_json::Value::String(s.to_string_lossy()),
-        Value::Table(table) => table_to_json(table, depth)?,
-        other => {
-            return Err(format!(
-                "a {} cannot be turned into JSON",
-                other.type_name()
-            ));
-        }
-    })
-}
-
-fn table_to_json(table: &Table, depth: usize) -> Result<serde_json::Value, String> {
-    let len = table.raw_len();
-    let mut count = 0;
-    let mut fields = Map::new();
-    for pair in table.pairs::<Value, Value>() {
-        let (key, item) = pair.map_err(|e| e.to_string())?;
-        count += 1;
-        let key = match key {
-            Value::String(s) => s.to_string_lossy(),
-            Value::Integer(i) => i.to_string(),
-            Value::Number(n) => n.to_string(),
-            other => return Err(format!("a table key cannot be a {}", other.type_name())),
-        };
-        fields.insert(key, from_lua_at(&item, depth + 1)?);
-    }
-    if len > 0 && count == len {
-        let items = (1..=len)
-            .map(|i| {
-                let item: Value = table.raw_get(i).map_err(|e| e.to_string())?;
-                from_lua_at(&item, depth + 1)
-            })
-            .collect::<Result<_, _>>()?;
-        return Ok(serde_json::Value::Array(items));
-    }
-    Ok(serde_json::Value::Object(fields))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mlua::Table;
     use serde_json::json;
 
     #[test]
-    fn values_survive_the_round_trip() {
-        let lua = Lua::new();
-        let value = json!({
-            "n": 3, "f": 1.5, "s": "x", "b": true,
-            "list": [1, "two", {"three": 3}], "empty": {}
-        });
-        let back = from_lua(&to_lua(&lua, &value).unwrap()).unwrap();
-        assert_eq!(back, value);
-    }
-
-    #[test]
-    fn null_is_nil_and_a_table_that_contains_itself_is_refused() {
+    fn null_is_nil_and_arrays_are_sequences() {
         let lua = Lua::new();
         assert_eq!(to_lua(&lua, &json!(null)).unwrap(), Value::Nil);
-        let t: Table = lua.load("local t = {}; t.t = t; return t").eval().unwrap();
-        assert!(from_lua(&Value::Table(t)).unwrap_err().contains("deeply"));
-        let f: Value = lua.load("return function() end").eval().unwrap();
-        assert!(from_lua(&f).is_err());
+        let Value::Table(t) = to_lua(&lua, &json!({ "list": [1, "two"], "n": 1.5 })).unwrap()
+        else {
+            panic!("a table");
+        };
+        let list: Table = t.raw_get("list").unwrap();
+        assert_eq!(list.raw_len(), 2);
+        assert_eq!(list.raw_get::<String>(2).unwrap(), "two");
+        assert_eq!(t.raw_get::<f64>("n").unwrap(), 1.5);
     }
 }
