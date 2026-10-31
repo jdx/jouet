@@ -237,20 +237,10 @@ impl State {
     }
 
     pub(crate) fn load(path: &Path) -> Self {
-        let mut state: Self = std::fs::read(path)
+        std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
-        // A file from before failures were kept: its newest failed runs.
-        jouet_output::remove_by!("0.1.0", "verify-state-without-failures");
-        if state.failures.is_empty() {
-            for (kind, run) in &state.runs {
-                if !run.passed() {
-                    state.failures.insert(*kind, vec![run.clone()]);
-                }
-            }
-        }
-        state
+            .unwrap_or_default()
     }
 
     pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -515,24 +505,6 @@ mod tests {
         assert!(through_hk("jouet --json diag check --changed"));
         assert!(through_hk("jouet --display agent diag check"));
         assert!(!through_hk("jouet edit replace diag --old a --new b"));
-    }
-
-    #[test]
-    fn a_state_file_from_an_older_jouet_keeps_its_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("s.json");
-        std::fs::write(
-            &path,
-            r#"{"runs":{"test":{"command":"cargo test","exit_code":101},"lint":{"command":"cargo clippy","exit_code":0}}}"#,
-        )
-        .unwrap();
-        let state = State::load(&path);
-        assert!(!state.runs[&Kind::Test].full);
-        assert!(
-            reason(&state, "t1")
-                .unwrap()
-                .contains("`cargo test` exited 101")
-        );
     }
 
     #[test]

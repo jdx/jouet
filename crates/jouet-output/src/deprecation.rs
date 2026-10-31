@@ -1,7 +1,8 @@
 //! Deprecations, the way mise handles them: [`deprecated_at!`] warns about
 //! something on its way out and fails a debug build once jouet reaches the
 //! version it was to be removed in; [`remove_by!`] fails the build itself,
-//! for temporary code that has no path to warn from.
+//! for temporary code that has no path to warn from. Both are for after
+//! 1.0: before it, a breaking change removes the old form outright.
 //!
 //! A warning is one line on stderr, at most once per id in a process. The
 //! binary sets a [`Recorder`] that keeps each one in the hook ledger, so an
@@ -131,8 +132,8 @@ const fn digit(c: u8) -> u64 {
 /// ```ignore
 /// fn read_old_spelling() {
 ///     jouet_output::deprecated_at!(
-///         "0.0.1",
-///         "0.2.0",
+///         "1.4.0",
+///         "2.0.0",
 ///         "wait-ci-interval",
 ///         "`--poll` is now `--interval`"
 ///     );
@@ -170,7 +171,7 @@ macro_rules! deprecated_at {
 /// ```ignore
 /// fn load() {
 ///     // A state file an older jouet wrote has no `failures`.
-///     jouet_output::remove_by!("0.2.0", "state-without-failures");
+///     jouet_output::remove_by!("2.0.0", "state-without-failures");
 /// }
 /// ```
 #[macro_export]

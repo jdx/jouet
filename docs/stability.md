@@ -4,7 +4,7 @@ description: What jouet promises not to break, what it may change in any release
 
 # Stability and deprecations
 
-jouet is pre-1.0. Until 1.0, any release may break anything on this page, and some will. What changes at 1.0 is that the promise below starts to hold. Until then, jouet still follows it where that costs little, and says so plainly when it does not.
+jouet is pre-1.0. Until 1.0, any release may break anything on this page, and there are no deprecations: a breaking change removes the old flag, field or behaviour outright, with no alias or fallback. It is still marked as breaking, so the release notes say what changed. At 1.0 the promise below starts to hold, and deprecations with it.
 
 ## What jouet promises
 
@@ -57,7 +57,7 @@ jouet pr status 123 --json | jq -r '.prs[0].state // "unknown"'
 
 ## Deprecations
 
-When something covered by the promise has to change, the old form keeps working for a while and warns each time it is used. Nothing is deprecated yet; a note would look like this:
+From 1.0 on, when something covered by the promise has to change, the old form keeps working for a while and warns each time it is used. A note looks like this:
 
 ```output
 jouet: deprecated [wait-poll]: `--poll` is now `--interval` (removed in jouet 2.0.0)
@@ -68,4 +68,4 @@ jouet: deprecated [wait-poll]: `--poll` is now `--interval` (removed in jouet 2.
 - The note names the release it is removed in.
 - The [changelog](https://github.com/jdx/jouet/blob/main/CHANGELOG.md) lists the deprecation when it starts, and lists the removal as a breaking change when it happens.
 
-After 1.0, something deprecated is removed in the first major release at least 12 months after the release that started warning. Before 1.0, it is removed in the next minor release, so a deprecation started in 0.3.x goes in 0.4.0. 12 months is a target there, not a floor, and the warning still comes first wherever keeping the old form is cheap.
+Something deprecated is removed in the first major release at least 12 months after the release that started warning. Before 1.0 nothing is deprecated: the old form is removed in the release that changes it.
