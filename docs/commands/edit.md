@@ -192,7 +192,7 @@ For specs that programs generate:
 
 ## Edit from the command line
 
-`jouet edit replace` makes replacements without a spec. Like a JSON edit, `--old` matches anywhere in a file, and it must match exactly once in each file unless `--count N` or `--all` says otherwise:
+`jouet edit replace` makes replacements without a spec. Like a JSON edit, `--old` matches anywhere in a file, and it must match exactly once in each file unless `--count N` or `--all` says otherwise. A refusal for the wrong number of matches names both flags with the count it found (`add --all to replace every match, or --count 3 to require exactly 3`), in the text and as the edit's `message` in `--json`:
 
 ```sh
 jouet edit replace src/main.rs --old 'let x = 1;' --new 'let x = 2;'

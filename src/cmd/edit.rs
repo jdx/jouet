@@ -82,6 +82,9 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     if plan.report.ok() {
         plan.report.callers = callers(&plan.report);
     }
+    if matches!(args.cmd, Some(EditCmd::Replace(_))) {
+        name_count_flags(&mut plan.report);
+    }
     if !plan.report.ok() {
         let exit = if plan.report.only_missing_files() {
             Exit::NotFound
@@ -662,6 +665,24 @@ fn replace_spec(args: &ReplaceArgs) -> Result<Spec, String> {
             })
             .collect(),
     })
+}
+
+/// For `edit replace`, the flags that accept the number of matches found,
+/// so a rename refused for matching more than once is one flag away rather
+/// than a lookup.
+fn name_count_flags(report: &mut Report) {
+    for e in report.files.iter_mut().flat_map(|f| &mut f.edits) {
+        if matches!(
+            e.status,
+            EditStatus::TooManyMatches | EditStatus::TooFewMatches
+        ) && e.found > 0
+        {
+            e.message = Some(format!(
+                "add --all to replace every match, or --count {} to require exactly {}",
+                e.found, e.found
+            ));
+        }
+    }
 }
 
 fn run_hash(args: &HashArgs, out: &Output) -> Exit {

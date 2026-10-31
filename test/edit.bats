@@ -323,9 +323,19 @@ EOF
 	run --separate-stderr jouet edit replace a.txt --old a --new b
 	assert_failure 4
 	assert_line "  edit 1: 3 matches, expected 1, at lines 1, 1, 1"
+	# The refusal names the flags, so the fix needs no lookup.
+	assert_line "    add --all to replace every match, or --count 3 to require exactly 3"
 
-	run --separate-stderr jouet edit replace a.txt --old a --new b --count 2
+	run --separate-stderr jouet edit replace a.txt --old a --new b --count 2 --json
 	assert_failure 4
+	assert_equal "$(jq -r '.files[0].edits[0].message' <<<"$output")" \
+		'add --all to replace every match, or --count 3 to require exactly 3'
+
+	# A spec has no such flags, so it gets no such advice.
+	printf 'x\nx\n' >b.txt
+	run --separate-stderr jouet edit <<<$'=== b.txt\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE'
+	assert_failure 4
+	refute_output --partial -- '--all'
 
 	run --separate-stderr jouet edit replace a.txt --old a --new b --count 3
 	assert_success
