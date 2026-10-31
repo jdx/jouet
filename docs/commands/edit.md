@@ -109,6 +109,34 @@ ok          app/main.py  1 edit  +2 -2
 - **No match, no write.** A pattern that matches nothing exits 4 and says how many files of the language it read.
 - **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c` and `cpp`. Only files in that language are read.
 
+#### Scoped by the code graph
+
+A pattern such as `load($$$A)` matches every function named `load`. The [code graph](/commands/graph) knows which `load` each call means, so two flags narrow a rewrite to one symbol, given as `PATH#NAME` (or `#ID` from `jouet graph symbols`):
+
+- `--callers-of PATH#SYMBOL` rewrites only the calls the graph attributes to that symbol. A match counts when it starts where such a call starts and names the symbol, so write the pattern for the whole call, receiver included: `$F($P)` or `$R.load($$$A)`, not `load` alone.
+- `--impact PATH#SYMBOL` rewrites only inside the symbol and the code that depends on it, three hops back, as `jouet graph impact` counts them.
+
+```output
+$ jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, {})' --lang typescript --callers-of web/config.ts#load
+scope: 1 match in calls of function load (web/config.ts:1); 4 other matches left alone
+    web/app.ts:5  load("jouet.toml")  ->  load("jouet.toml", {})
+unresolved, left alone: 1 (check them by hand)
+  unlinked: the graph could not tell which definition these call
+    web/app.ts:7  registry.load("dynamic")
+tests that depend on the changed files: 1
+    web/app.test.ts
+ok          web/app.ts  1 edit  +1 -1
+dry run: 1 file would be written
+```
+
+- **Nothing the graph cannot attribute is rewritten, or dropped without a word.** A match is listed as unresolved, and left alone, when the graph recorded the call but could not tell which definition it means (`unlinked`, as with dynamic dispatch), linked it to more than one (`ambiguous`), has not read the file (`not_indexed`), or records no call starting there (`no_site`). A call written inside a macro, which neither the pattern nor the graph parses, is listed as `in_macro`.
+- **Calls the rewrite did not reach are listed too:** the symbol's calls the pattern does not match (`not_matched`), and those outside the paths given (`not_searched`).
+- **The tests to run afterwards.** The report lists each rewrite and the test files that depend on the changed files (the graph's `affected`), with `--dry-run` before anything is written, and after a write.
+- **The same refusals.** A rewrite that adds syntax errors, or a file that changed after it was matched, is refused. A scope with no match in it writes nothing and exits 4. The symbol must name exactly one definition (exit 2 lists the candidates; exit 3 when there is none).
+- **The graph stays current.** It is brought up to date before matching, and the files written are re-indexed afterwards, as after any `jouet edit`.
+
+`jouet search --structural` takes the same two flags, to see the scope before rewriting. In JSON, both commands add a `scope` object with `matched`, `skipped`, `unresolved`, `unmatched`, and for edits `changes` and `tests`.
+
 Agents often write patterns that match nothing. The rules that matter most:
 
 - **Quote patterns in single quotes.** In double quotes the shell expands `$X`, so `"$X.unwrap()"` becomes `.unwrap()`.

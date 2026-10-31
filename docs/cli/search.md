@@ -30,6 +30,7 @@ Examples:
   jouet search --structural --lang rust '$X.unwrap()'
   jouet search --structural --lang go 'if err != nil { return $$$ }'
   jouet search --structural --lang typescript 'useEffect($FN, [])'
+  jouet search --structural --lang rust '$F($$$A)' --callers-of src/config.rs#load
 
 ## Arguments
 - **`<PATTERN>`** — The regular expression to search for (a literal with -F)
@@ -47,4 +48,6 @@ Examples:
 - **`--again`** — Show matches this session was already shown, too
 - **`--structural`** — Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any number. Needs --lang
 - **`--lang <LANG>`** — The language of a --structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+- **`--callers-of <PATH#SYMBOL>`** — With --structural, only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+- **`--impact <PATH#SYMBOL>`** — With --structural, only matches inside this symbol and the code the graph says depends on it, three hops back
 - **`-h --help`** — Print help

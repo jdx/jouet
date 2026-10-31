@@ -28,9 +28,12 @@ A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found wit
 - A name used twice must match the same text twice: `$A == $A`. - REPL is text with the pattern's `$X` filled in; the rest is copied as
   written, and indentation follows the match.
 
+`--callers-of PATH#SYMBOL` rewrites only the calls the code graph attributes to that definition, so `load($$$A)` leaves other functions named `load` alone; write the pattern for the whole call (`$F($P)`, `$R.load($$$A)`). `--impact PATH#SYMBOL` rewrites only inside it and the code depending on it. Matches the graph cannot attribute (dynamic dispatch, macros, files it has not read) are listed as unresolved and left alone, and so are its calls the pattern missed. The report lists each rewrite and the test files that depend on them; --dry-run first.
+
 Examples:
   jouet edit --pattern '$C.get($URL).send()?' --rewrite '$C.get($URL).timeout(TIMEOUT).send()?' --lang rust src/
   jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app/ --check 'python -m pytest -q' --revert-on-fail
+  jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, None)' --lang rust --callers-of src/config.rs#load
 
 Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 
@@ -51,6 +54,8 @@ Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 - **`--pattern <PAT>`** — Rewrite code matching this ast-grep pattern, instead of reading a spec
 - **`--rewrite <REPL>`** — What --pattern's matches become; its `$X` are the pattern's
 - **`--lang <LANG>`** — The language of --pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+- **`--callers-of <PATH#SYMBOL>`** — With --pattern, rewrite only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+- **`--impact <PATH#SYMBOL>`** — With --pattern, rewrite only inside this symbol and the code the graph says depends on it, three hops back
 - **`-h --help`** — Print help
 
 ## Subcommands

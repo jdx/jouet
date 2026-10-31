@@ -19,6 +19,7 @@ pub(crate) mod read;
 pub(crate) mod review;
 pub(crate) mod rule;
 pub(crate) mod run;
+pub(crate) mod scope;
 pub(crate) mod search;
 pub(crate) mod setup;
 pub(crate) mod share;

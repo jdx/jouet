@@ -346,9 +346,19 @@ pub struct StatsArgs {
 /// - REPL is text with the pattern's `$X` filled in; the rest is copied as
 ///   written, and indentation follows the match.
 ///
+/// `--callers-of PATH#SYMBOL` rewrites only the calls the code graph
+/// attributes to that definition, so `load($$$A)` leaves other functions
+/// named `load` alone; write the pattern for the whole call (`$F($P)`,
+/// `$R.load($$$A)`). `--impact PATH#SYMBOL` rewrites only inside it and the
+/// code depending on it. Matches the graph cannot attribute (dynamic
+/// dispatch, macros, files it has not read) are listed as unresolved and
+/// left alone, and so are its calls the pattern missed. The report lists
+/// each rewrite and the test files that depend on them; --dry-run first.
+///
 /// Examples:
 ///   jouet edit --pattern '$C.get($URL).send()?' --rewrite '$C.get($URL).timeout(TIMEOUT).send()?' --lang rust src/
 ///   jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app/ --check 'python -m pytest -q' --revert-on-fail
+///   jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, None)' --lang rust --callers-of src/config.rs#load
 ///
 /// Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 #[derive(Args)]
@@ -386,6 +396,14 @@ pub struct EditArgs {
     /// go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --pattern, rewrite only the calls the code graph attributes to
+    /// this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --pattern, rewrite only inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
     /// With --pattern, the files and directories to rewrite (default .)
     paths: Vec<String>,
     /// Refuse unless PATH's contents have this SHA-256 hash. Repeatable
@@ -684,6 +702,7 @@ pub struct LandArgs {
 ///   jouet search --structural --lang rust '$X.unwrap()'
 ///   jouet search --structural --lang go 'if err != nil { return $$$ }'
 ///   jouet search --structural --lang typescript 'useEffect($FN, [])'
+///   jouet search --structural --lang rust '$F($$$A)' --callers-of src/config.rs#load
 
 #[derive(Args)]
 pub struct SearchArgs {
@@ -726,6 +745,14 @@ pub struct SearchArgs {
     /// typescript, tsx, go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --structural, only the calls the code graph attributes to this
+    /// symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --structural, only matches inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
 }
 
 /// Read a file by its outline, a symbol or a range

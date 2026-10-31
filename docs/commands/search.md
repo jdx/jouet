@@ -9,7 +9,7 @@ description: Search code like rg, with the matches grouped by the function they 
 ```text
 jouet search PATTERN [PATH]... [-F] [-i] [-w] [-g GLOB]... [--hidden] [-l]
              [--budget BYTES] [--file-budget BYTES] [--again]
-             [--structural --lang LANG]
+             [--structural --lang LANG [--callers-of PATH#SYMBOL | --impact PATH#SYMBOL]]
 ```
 
 The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. Every flag is listed in the [CLI reference](/cli/search).
@@ -60,6 +60,8 @@ src/lib.rs
 ```
 
 Quote the pattern in single quotes, or the shell expands `$X`. [`jouet edit --pattern`](/commands/edit#structural-rewrites) rewrites what a pattern matches, and lists the rules for writing patterns.
+
+`--callers-of PATH#SYMBOL` keeps only the matches at calls the [code graph](/commands/graph) attributes to that symbol, so a pattern like `load($$$A)` leaves other functions named `load` out. `--impact PATH#SYMBOL` keeps the matches inside the symbol and the code that depends on it. After the matches comes what the graph made of the rest: the matches it cannot attribute, and the symbol's calls the pattern did not match, as [scoped rewrites](/commands/edit#scoped-by-the-code-graph) list them.
 
 ## Sessions
 

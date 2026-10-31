@@ -2,6 +2,7 @@
 
 use super::Output;
 use super::diag as diag_cmd;
+use super::scope::{self, How, Scope};
 use crate::diag::{self, Status, delta};
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
@@ -10,7 +11,7 @@ use jouet_edit::{
     SymbolError,
 };
 use jouet_output::exit::Exit;
-use jouet_search::structural::Structural;
+use jouet_search::structural::{FileMatches, Structural};
 use jouet_search::symbols::{self, SelectError, Selector};
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -19,18 +20,31 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     if args.pattern.is_none()
-        && (!args.paths.is_empty() || args.rewrite.is_some() || args.lang.is_some())
+        && (!args.paths.is_empty()
+            || args.rewrite.is_some()
+            || args.lang.is_some()
+            || args.callers_of.is_some()
+            || args.impact.is_some())
     {
         return out.error(
             Exit::Usage,
-            "paths, --rewrite and --lang go with --pattern; a spec names its own files",
+            "paths, --rewrite, --lang, --callers-of and --impact go with --pattern; a spec names its own files",
         );
     }
+    let mut scoped = None;
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
         Some(EditCmd::Replace(replace)) => replace_spec(replace),
         None if args.pattern.is_some() => match pattern_spec(&args) {
-            Ok(spec) => Ok(spec),
+            Ok((spec, scope)) => {
+                if let Some(scope) = scope {
+                    if spec.ops.is_empty() {
+                        return nothing_in_scope(out, &scope);
+                    }
+                    scoped = Some(scope);
+                }
+                Ok(spec)
+            }
             Err((exit, message)) => return out.error(exit, &message),
         },
         None => read_spec(&args),
@@ -74,12 +88,12 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         } else {
             Exit::Precondition
         };
-        print_report(out, &plan.report, None, None);
+        print_report(out, &plan.report, None, None, scoped.as_ref());
         return exit;
     }
     if args.dry_run {
         plan.report.dry_run = true;
-        print_report(out, &plan.report, None, None);
+        print_report(out, &plan.report, None, None, scoped.as_ref());
         return Exit::Ok;
     }
     let settings = crate::settings::Settings::load();
@@ -217,7 +231,13 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             f.status = FileStatus::Reverted;
         }
     }
-    print_report(out, &plan.report, fixed.as_ref(), diagnosed.as_ref());
+    print_report(
+        out,
+        &plan.report,
+        fixed.as_ref(),
+        diagnosed.as_ref(),
+        scoped.as_ref(),
+    );
     // Keep the code graph in step with what was written (or restored), when
     // the repository has one, as the post-tool-use hook does for file tools.
     if let Ok(cwd) = std::env::current_dir() {
@@ -411,8 +431,10 @@ fn callers(report: &Report) -> Vec<Callers> {
 }
 
 /// `--pattern`, `--rewrite` and `--lang`: every match of the pattern under
-/// the paths, rewritten, as one edit per file.
-fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
+/// the paths, rewritten, as one edit per file. With `--callers-of` or
+/// `--impact`, only the matches the code graph puts in scope, and what it
+/// made of the rest; no edits then means nothing was in scope.
+fn pattern_spec(args: &EditArgs) -> Result<(Spec, Option<scope::Report>), (Exit, String)> {
     let usage = |m: &str| (Exit::Usage, m.to_string());
     let pattern = args.pattern.as_deref().unwrap_or_default();
     let (Some(rewrite), Some(lang)) = (args.rewrite.as_deref(), args.lang.as_deref()) else {
@@ -423,6 +445,8 @@ fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
             "--pattern rewrites code itself; it takes no --spec or --format",
         ));
     }
+    let how = How::from_flags(args.callers_of.as_deref(), args.impact.as_deref())
+        .map_err(|m| usage(&m))?;
     let structural =
         Structural::new(pattern, lang, Some(rewrite)).map_err(|e| usage(&e.to_string()))?;
     let paths: Vec<PathBuf> = if args.paths.is_empty() {
@@ -436,7 +460,25 @@ fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
             format!("{}: no such file or directory", missing.display()),
         ));
     }
-    let (files, read) = structural.search_files(&paths);
+    let scoped = how
+        .map(|(how, symbol)| Scope::open(how, symbol))
+        .transpose()?;
+    let (files, read) = structural.search_files(
+        &paths,
+        scoped
+            .as_ref()
+            .map(|(_, s)| s as &dyn jouet_search::structural::Filter),
+    );
+    let report = scoped.map(|(graph, scope)| {
+        let mut report = scope.finish();
+        if !files.is_empty() {
+            report.tests = affected(&graph, &files);
+        }
+        report
+    });
+    if files.is_empty() && report.is_some() {
+        return Ok((Spec { ops: Vec::new() }, report));
+    }
     if files.is_empty() {
         return Err((
             Exit::Precondition,
@@ -461,7 +503,52 @@ fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
             move_to: None,
         })
         .collect();
-    Ok(Spec { ops })
+    Ok((Spec { ops }, report))
+}
+
+/// The test files that depend on the files a scoped rewrite changes, with
+/// paths relative to the current directory like the rest of the report.
+fn affected(graph: &jouet_graph::Graph, files: &[FileMatches]) -> Option<jouet_graph::Affected> {
+    let cwd = std::env::current_dir().ok()?.canonicalize().ok()?;
+    let changed: Vec<PathBuf> = files.iter().map(|f| cwd.join(&f.path)).collect();
+    let mut affected = graph.affected_tests(&changed).ok()?;
+    let shown = |p: &Path| {
+        let full = graph.root().join(p);
+        full.strip_prefix(&cwd)
+            .map_or(full.clone(), Path::to_path_buf)
+    };
+    for t in &mut affected.tests {
+        t.path = shown(&t.path);
+        for v in &mut t.via {
+            *v = shown(v);
+        }
+    }
+    for u in &mut affected.unknown {
+        *u = u.strip_prefix(&cwd).map_or(u.clone(), Path::to_path_buf);
+    }
+    Some(affected)
+}
+
+/// A scoped rewrite none of whose matches was in scope: what the graph
+/// made of them, and exit 4, since nothing was written.
+fn nothing_in_scope(out: &Output, scope: &scope::Report) -> Exit {
+    #[derive(Serialize)]
+    struct Nothing<'a> {
+        files_written: usize,
+        scope: &'a scope::Report,
+    }
+    out.result(
+        &Nothing {
+            files_written: 0,
+            scope,
+        },
+        || {
+            let mut text = scope::render(scope);
+            text.push_str("nothing was written: no match of the pattern is in scope\n");
+            text
+        },
+    );
+    Exit::Precondition
 }
 
 /// The callers the code graph has for the definition a symbol edit
@@ -598,6 +685,10 @@ struct EditOutput<'a> {
     fix: Option<&'a diag::fix::Fixed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     diag: Option<&'a DiagOutcome>,
+    /// What `--callers-of` or `--impact` kept, left alone and could not
+    /// resolve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<&'a scope::Report>,
 }
 
 fn print_report(
@@ -605,10 +696,17 @@ fn print_report(
     report: &Report,
     fix: Option<&diag::fix::Fixed>,
     diag: Option<&DiagOutcome>,
+    scope: Option<&scope::Report>,
 ) {
-    let doc = EditOutput { report, fix, diag };
+    let doc = EditOutput {
+        report,
+        fix,
+        diag,
+        scope,
+    };
     out.result(&doc, || {
-        let mut text = render(report);
+        let mut text = scope.map(scope::render).unwrap_or_default();
+        text.push_str(&render(report));
         if let Some(line) = fix.and_then(diag::fix::Fixed::summary) {
             let _ = writeln!(text, "{line}");
         }
