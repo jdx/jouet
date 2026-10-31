@@ -4,10 +4,10 @@ jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions)
 (one-off background work, without a daemon), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
-`jouet search` (budgeted search with session memory), `jouet audit` (where your agent sessions
-spend tokens and time), `jouet stats` (what jouet saved), `jouet test --affected` (only the tests a
-change affects), and the git recipes `jouet commit`, `jouet review-package` and
-`jouet handoff`/`pickup`. It is in
+`jouet search` (budgeted search with session memory), `jouet read --map` (a repository map),
+`jouet audit` (where your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
+`jouet test --affected` (only the tests a change affects), and the git recipes `jouet commit`,
+`jouet review-package` and `jouet handoff`/`pickup`. It is in
 early development; the commands land one at a time.
 
 ## Discussions and Issues: Restricted AI Replies
@@ -81,6 +81,9 @@ helpers, the setup, hook, ledger and agent-guide code, and the test selection be
   grammars the `grammars` feature compiles in, and structural search and rewrites on
   `ast-grep-core`, which shares tree-sitter with the grammars. Without the feature
   (`--no-default-features`), search is plain text.
+- `jouet-graph`: the code graph behind `jouet graph`, derived from codegraph (MIT, see `NOTICE`):
+  tree-sitter extraction (`extract/`), linking (`link/`), the SQLite store, the queries, and the
+  repository map behind `jouet read --map` (`map.rs`, Aider's design and weights, Apache-2.0).
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
   in the binary, so the crate makes no network calls.

@@ -1,13 +1,15 @@
-//! `jouet read FILE`: a file by its outline, a symbol or a range.
+//! `jouet read FILE`: a file by its outline, a symbol or a range; and
+//! `jouet read --map`, Aider's repository map on the code graph.
 
 use super::Output;
 use crate::ReadArgs;
+use jouet_graph::{DEFAULT_BUDGET, MapOptions, UNFOCUSED_MULTIPLIER};
 use jouet_output::exit::Exit;
 use jouet_search::memory::{self, Memory, Stamp};
 use jouet_search::symbols::{self, Located, SelectError, Selector};
 use serde::Serialize;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A file this long or shorter is printed whole when no mode is given.
 const WHOLE: usize = 300;
@@ -18,7 +20,101 @@ const SHORT: usize = 100;
 const MAX_LINES: usize = 400;
 
 pub(crate) fn run(args: &ReadArgs, out: &Output) -> Exit {
-    read_file(args, out)
+    if !args.map {
+        return read_file(args, out);
+    }
+    if args.outline || args.symbol.is_some() || args.range.is_some() {
+        return out.error(
+            Exit::Usage,
+            "--map reads a directory; --outline, --symbol and --range read a file",
+        );
+    }
+    let dir = PathBuf::from(args.path.as_deref().unwrap_or("."));
+    if !dir.is_dir() {
+        return out.error(
+            Exit::NotFound,
+            &format!("{}: no such directory", dir.display()),
+        );
+    }
+    let mut graph = match jouet_graph::Graph::open(&dir) {
+        Ok(graph) => graph,
+        Err(e) => return out.error(Exit::Precondition, &e.to_string()),
+    };
+    // Only files whose size or modification time changed are read again.
+    if let Err(e) = graph.refresh(None) {
+        return out.error(Exit::Failed, &e.to_string());
+    }
+    let root = graph.root().to_path_buf();
+    let Some(within) = std::fs::canonicalize(&dir)
+        .ok()
+        .and_then(|d| relative(&root, &d))
+    else {
+        return out.error(
+            Exit::Usage,
+            &format!("{} is outside the work tree", dir.display()),
+        );
+    };
+    let (focus_files, focus_idents) = split_focus(&root, &args.focus);
+    let budget = args
+        .budget
+        .unwrap_or(if focus_files.is_empty() && focus_idents.is_empty() {
+            DEFAULT_BUDGET * UNFOCUSED_MULTIPLIER
+        } else {
+            DEFAULT_BUDGET
+        });
+    let options = MapOptions {
+        focus_files,
+        focus_idents,
+        budget,
+        within: Some(within).filter(|w| !w.is_empty()),
+    };
+    let mut repo_map = match graph.map(&options) {
+        Ok(map) => map,
+        Err(e) => return out.error(Exit::Failed, &e.to_string()),
+    };
+    // Paths as every other command prints them: from the current directory.
+    let cwd = std::env::current_dir()
+        .and_then(|d| d.canonicalize())
+        .unwrap_or_default();
+    for file in &mut repo_map.files {
+        let full = root.join(&file.path);
+        if let Ok(rel) = full.strip_prefix(&cwd) {
+            file.path = rel.to_string_lossy().into_owned();
+        }
+    }
+    out.result(&repo_map, || jouet_graph::render_map(&repo_map));
+    Exit::Ok
+}
+
+/// `path` relative to `root`, with `/` separators; empty for `root`.
+fn relative(root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(root).ok()?;
+    Some(
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+/// Splits `--focus` values into files, relative to the work tree, and
+/// identifiers: a value naming an existing file is a file.
+fn split_focus(root: &Path, focus: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut files = Vec::new();
+    let mut idents = Vec::new();
+    for value in focus {
+        let path = Path::new(value);
+        let rel = [path.to_path_buf(), root.join(path)]
+            .into_iter()
+            .find(|p| p.is_file())
+            .and_then(|p| std::fs::canonicalize(p).ok())
+            .and_then(|p| relative(root, &p));
+        match rel {
+            Some(rel) => files.push(rel),
+            None => idents.push(value.clone()),
+        }
+    }
+    (files, idents)
 }
 
 #[derive(Serialize)]
@@ -113,7 +209,15 @@ fn is_zero(n: &usize) -> bool {
 }
 
 fn read_file(args: &ReadArgs, out: &Output) -> Exit {
-    let path = args.path.as_str();
+    let Some(path) = args.path.as_deref() else {
+        return out.error(
+            Exit::Usage,
+            "give a FILE to read, with --outline, --symbol NAME or --range A:B, or --map",
+        );
+    };
+    if args.budget.is_some() || !args.focus.is_empty() {
+        return out.error(Exit::Usage, "--budget and --focus are for --map");
+    }
     let modes = usize::from(args.outline)
         + usize::from(args.symbol.is_some())
         + usize::from(args.range.is_some());
