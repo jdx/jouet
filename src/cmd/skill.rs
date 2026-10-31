@@ -80,8 +80,7 @@ pub(crate) fn render(format: Format) -> String {
     }
     body.push_str(
         "\nHow:\n\n\
-         - Run `jouet agent-help` for the installed version's commands, flags and exit codes, and `jouet agent-help COMMAND` for one command. Work from that, not from memory.\n\
-         - Exit 1 means the answer is no (fix the code); exit 4 means jouet refused before doing anything (fix the request).\n\
+         - Run `jouet agent-help` for the installed version's commands, flags and exit codes, and `jouet agent-help COMMAND` for one command. Work from that, not from memory. Exit 1 means the answer is no (fix the code); exit 4 means jouet refused before doing anything (fix the request).\n\
          - When a jouet hook denies a command, use the command it suggests instead of rewording yours to get past it. If the denial is wrong, tell the user and name the rule.\n",
     );
     match format {

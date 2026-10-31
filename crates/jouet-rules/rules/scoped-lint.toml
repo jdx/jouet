@@ -1,0 +1,52 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "scoped-lint"
+why = "While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-30"
+needs = ["diag", "check"]
+suggest = "jouet diag check --changed"
+message = "It checks only the files you changed, through the project's hk checks, and prints one line per finding (`jouet diag delta` shows only what your edit introduced). Run the full lint once before you finish."
+
+# `cargo clippy` cut short with head or tail: the findings that matter may
+# be the ones cut off.
+[[rule.match]]
+command = "cargo clippy"
+unless_flags = ["-p", "--package", "--fix"]
+with = { command = ["head", "tail"] }
+
+# eslint over the whole tree.
+[[rule.match]]
+command = ["eslint", "npx eslint", "pnpm eslint", "pnpm exec eslint", "yarn eslint", "bunx eslint"]
+args = [".", "./"]
+unless_flags = ["--fix"]
+
+# The project's whole lint task, with nothing passed to it.
+[[rule.match]]
+command = "mise run lint"
+max_args = 0
+
+[rule.examples]
+fires = [
+  "cargo clippy --workspace --all-targets 2>&1 | head -50",
+  "cargo clippy -- -D warnings | tail -20",
+  "npx eslint .",
+  "eslint .",
+  "pnpm exec eslint ./",
+  "mise run lint",
+  "cd crate && mise run lint",
+]
+quiet = [
+  "cargo clippy -p jouet-diag 2>&1 | head",
+  "cargo clippy --workspace -- -D warnings",
+  "cargo clippy --fix --allow-dirty | tail",
+  "npx eslint src/a.ts",
+  "npx eslint --fix .",
+  "mise run lint-fix",
+  "mise run lint:clippy",
+  "jouet diag check --changed",
+  "hk check --files src/a.rs",
+  "echo 'mise run lint'",
+]

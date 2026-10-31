@@ -6,6 +6,7 @@ pub(crate) mod audit;
 pub(crate) mod ci;
 pub(crate) mod commit;
 pub(crate) mod completion;
+pub(crate) mod diag;
 pub(crate) mod edit;
 pub(crate) mod handoff;
 pub(crate) mod hook;

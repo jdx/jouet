@@ -6,6 +6,7 @@ mod affected;
 mod ci;
 mod cmd;
 mod config;
+mod diag;
 mod fnox;
 mod git;
 mod guide;
@@ -52,6 +53,8 @@ enum Cmd {
     Audit(AuditArgs),
     /// Commit only the named paths, with trailers
     Commit(CommitArgs),
+    /// Report the errors and warnings in files you changed, through hk
+    Diag(DiagArgs),
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
     /// Record the facts about this checkout for the next session
@@ -333,7 +336,12 @@ pub struct EditArgs {
     /// Run CMD through the shell after writing
     #[usage(long, global, value_name = "CMD")]
     check: Option<String>,
-    /// Restore every edited file if --check fails
+    /// Fail if the edit introduced diagnostics: the edited files are checked
+    /// through hk (`jouet diag`) before and after writing, and only new
+    /// findings count
+    #[usage(long, global)]
+    diag: bool,
+    /// Restore every edited file if --check or --diag fails
     #[usage(long, global)]
     revert_on_fail: bool,
     /// Refuse unless PATH's contents have this SHA-256 hash. Repeatable
@@ -349,6 +357,91 @@ pub enum EditCmd {
     Replace(ReplaceArgs),
     /// Print the SHA-256 hash of files, for --expect-hash
     Hash(HashArgs),
+}
+
+/// Report the errors and warnings in files you changed, through hk
+///
+/// With an hk config (hk.pkl), runs `hk run check --safe --format json` on
+/// exactly the files given, or with --changed (the default) those that
+/// differ from HEAD or are untracked, and prints hk's normalised findings:
+/// file, line, column, severity, rule, message and the step that found it.
+/// A step that sets no `diagnostic_format` is reported with its status and
+/// the end of its output. Without an hk config, falls back to cargo clippy,
+/// ruff or shellcheck in their JSON modes, or says diagnostics are
+/// unavailable. Exits 0 when clean, 1 with findings, 4 when hk refused to run
+/// (`--safe` rejects commands whose effect is unknown or destructive) or
+/// nothing can check the files.
+#[derive(Args)]
+pub struct DiagArgs {
+    #[usage(subcommand)]
+    cmd: DiagCmd,
+}
+
+#[derive(Subcommands)]
+pub enum DiagCmd {
+    /// Check files and report every finding
+    Check(DiagCheckArgs),
+    /// Report only the findings an edit introduced
+    Delta(DiagDeltaArgs),
+    /// Format files with the project's fixers (`hk run fix --safe`)
+    Fix(DiagFixArgs),
+}
+
+/// Check files and report every finding
+///
+/// Each check also remembers, per file, what it found in that version of
+/// the file, which is what `jouet diag delta` compares with.
+#[derive(Args)]
+pub struct DiagCheckArgs {
+    /// Files to check (default: --changed)
+    files: Vec<String>,
+    /// The files that differ from HEAD or are untracked
+    #[usage(long)]
+    changed: bool,
+    /// Show at most N findings (default 50); the rest are counted
+    #[usage(long, value_name = "N")]
+    max: Option<usize>,
+}
+
+/// Report only the findings an edit introduced
+///
+/// Checks the files, then compares each with the last check of an earlier
+/// version of it: a finding is the same one when its file, rule and step
+/// match and its message matches or it is within three lines, so findings
+/// that only moved are not new. A file unchanged since HEAD has nothing new.
+/// A changed file no check has seen before has no baseline; its findings are
+/// listed apart and not counted. Exits 1 when the edit introduced a finding
+/// or made a step without diagnostics fail.
+#[derive(Args)]
+pub struct DiagDeltaArgs {
+    /// Files to check (default: --changed)
+    files: Vec<String>,
+    /// The files that differ from HEAD or are untracked
+    #[usage(long)]
+    changed: bool,
+    /// Show at most N findings (default 50); the rest are counted
+    #[usage(long, value_name = "N")]
+    max: Option<usize>,
+}
+
+/// Format files with the project's fixers (`hk run fix --safe`)
+///
+/// Runs hk's fix steps on exactly these files, refusing (exit 4) a config
+/// with a fixer whose effect is unknown or destructive, and reports which
+/// files changed. Needs an hk config.
+#[derive(Args)]
+pub struct DiagFixArgs {
+    /// Files to format (default: --changed)
+    files: Vec<String>,
+    /// The files that differ from HEAD or are untracked
+    #[usage(long)]
+    changed: bool,
+    /// Only this hk step. Repeatable
+    #[usage(long, var, value_name = "STEP")]
+    step: Vec<String>,
+    /// Say what would run, changing nothing
+    #[usage(long)]
+    dry_run: bool,
 }
 
 /// Replace text in one file, given on the command line
@@ -1334,8 +1427,13 @@ pub struct CompletionArgs {
 pub struct HookArgs {
     /// claude or codex
     harness: Option<String>,
-    /// session-start, pre-tool-use, post-tool-use, post-tool-use-failure or stop
+    /// session-start, pre-tool-use, post-tool-use, post-tool-use-failure,
+    /// post-edit or stop
     event: Option<String>,
+    /// For `stop`: the hk stop hook (`hk agent stop-hook ...`) jouet runs in
+    /// its place, so one hook gives one verdict
+    #[usage(long, value_name = "CMD")]
+    hk: Option<String>,
 }
 
 /// List, reply to and resolve review threads
@@ -1507,6 +1605,7 @@ fn main() -> ExitCode {
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
+        Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),

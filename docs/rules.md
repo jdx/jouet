@@ -24,6 +24,7 @@ force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force 
 print-secrets      enabled  deny    builtin  builtin  2026-10-31  Printing secret values puts them in the transcript, which leaves the machine with every turn and outlives the session.
 secret-files       enabled  deny    builtin  builtin  2026-10-31  Reading a plaintext secrets file puts every value in it in the transcript, which leaves the machine with every turn and outlives the session.
 push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
+scoped-lint        enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
 affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
 checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 reread             enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
