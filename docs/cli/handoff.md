@@ -5,7 +5,7 @@
 
 Record the facts about this checkout for the next session
 
-Gathers the branch, its upstream and ahead/behind counts, HEAD, an operation in progress, uncommitted and untracked files, the branch's PR and its `pr status` attention codes, the session's last test, lint and build runs (recorded by `jouet setup`'s hooks) and background processes running in the worktree (Linux). Writes them as markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless -o names a file (`.json` writes JSON; `-` is stdout). Facts only: what the work is and what to do next is the agent's to add.
+Gathers the branch, its upstream and ahead/behind counts, HEAD, an operation in progress, uncommitted and untracked files, the branch's PR and its `pr status` attention codes, the session's last test, lint and build runs (recorded by `jouet setup`'s hooks), background processes running in the worktree (Linux), and its `jouet job`s. Writes them as markdown with the data embedded, to `<git dir>/jouet/handoff.md` unless -o names a file (`.json` writes JSON; `-` is stdout). Facts only: what the work is and what to do next is the agent's to add.
 
 ## Flags
 - **`-o --output <FILE>`** — Write the handoff to FILE (`-` is stdout)

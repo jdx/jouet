@@ -177,7 +177,7 @@ fn handle(
                 None
             };
             let mut entry = log.entry("stop");
-            if output.is_some() {
+            if output.as_ref().is_some_and(|o| o.get("decision").is_some()) {
                 entry.decisions.push(ledger::Decision {
                     rule: "verify".into(),
                     action: "block".into(),
@@ -555,10 +555,13 @@ fn session_state_path(payload: &Value) -> Option<PathBuf> {
 /// hook, as one decision. hk is not run when the session's last hk check
 /// passed at the tree as it is now.
 fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> Option<Value> {
+    // Jobs left running are a note, never a reason to block.
+    let note = if verify { jobs_note(payload) } else { None };
+    let as_note = |note: Option<String>| note.map(|note| json!({ "systemMessage": note }));
     // Block at most once in a row: after one nudge, the agent's answer
     // stands, so a check that cannot pass never traps it.
     if payload.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
-        return None;
+        return as_note(note);
     }
     let state = match harness {
         Harness::Claude => session_state_path(payload).map(|p| State::load(&p)),
@@ -589,12 +592,47 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
         run_hk_stop(hk_stop, payload)
     };
     let reason = match (jouet, hk) {
-        (None, None) => return None,
+        (None, None) => return as_note(note),
         (Some(one), None) => one,
         (None, Some(hk)) => format!("{hk} [hk]"),
         (Some(jouet), Some(hk)) => format!("{jouet}\n\nhk check: {hk} [hk]"),
     };
+    let reason = match &note {
+        Some(note) => format!("{reason}\n{note}"),
+        None => reason,
+    };
     Some(json!({ "decision": "block", "reason": reason }))
+}
+
+/// What the stop says about the `jouet job`s this session started in this
+/// work tree that are still running, if there are any.
+fn jobs_note(payload: &Value) -> Option<String> {
+    let session = payload.get("session_id").and_then(Value::as_str)?;
+    let cwd = payload.get("cwd").and_then(Value::as_str)?;
+    let store = jouet_wait::job::Store::here(Path::new(cwd))?;
+    let running: Vec<String> = store
+        .list()
+        .into_iter()
+        .filter(|j| j.session.as_deref() == Some(session))
+        .filter(|j| store.state(j) == jouet_wait::job::State::Running)
+        .map(|j| j.id)
+        .collect();
+    jobs_left(&running)
+}
+
+/// The note for jobs left running.
+fn jobs_left(running: &[String]) -> Option<String> {
+    let (what, it, it_is) = match running {
+        [] => return None,
+        [_] => ("A job this session started is", "it", "it"),
+        _ => ("Jobs this session started are", "them", "they"),
+    };
+    let names: Vec<String> = running.iter().map(|id| format!("`{id}`")).collect();
+    Some(format!(
+        "{what} still running: {}. Leave {it} if {it_is} should stay up; `jouet job stop {}` stops {it}. [jouet: jobs]",
+        names.join(", "),
+        running.join(" ")
+    ))
 }
 
 /// Runs hk's stop hook with this hook's payload and returns the reason it
@@ -807,6 +845,20 @@ mod tests {
             .as_str()
             .unwrap();
         assert_eq!(context, format!("{before}note one\nnote two\n"));
+    }
+
+    #[test]
+    fn the_jobs_note_names_each_job() {
+        assert_eq!(jobs_left(&[]), None);
+        let one = jobs_left(&["dev".into()]).unwrap();
+        assert!(
+            one.starts_with(
+                "A job this session started is still running: `dev`. Leave it if it should stay up;"
+            ),
+            "{one}"
+        );
+        let two = jobs_left(&["dev".into(), "api".into()]).unwrap();
+        assert!(two.contains("`jouet job stop dev api` stops them"), "{two}");
     }
 
     #[test]

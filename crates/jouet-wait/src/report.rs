@@ -205,26 +205,41 @@ fn headline(word: &str, good: bool, mode: Mode) -> String {
     }
 }
 
-/// The text result: a first line that starts with `MET` or `TIMEOUT`, then
-/// whatever the subject found, indented.
+/// The text result: a first line that starts with `MET`, `FAILED` or
+/// `TIMEOUT`, then whatever the subject found, indented.
 fn text(o: &Outcome, mode: Mode) -> String {
     let met = o.result == "met";
-    let word = headline(if met { "MET" } else { "TIMEOUT" }, met, mode);
     let took = elapsed(o.elapsed_s);
     let mut out = if met {
+        let word = headline("MET", true, mode);
         format!("{word} {} {}: {} ({took})\n", o.subject, o.target, o.state)
+    } else if o.result == "failed" {
+        let word = headline("FAILED", false, mode);
+        format!(
+            "{word} {} {}: {} after {took}\n",
+            o.subject, o.target, o.state
+        )
     } else {
+        let word = headline("TIMEOUT", false, mode);
         let checks = if o.checks == 1 { "check" } else { "checks" };
         format!(
             "{word} {} {}: {} after {took} ({} {checks}); run it again to keep waiting\n",
             o.subject, o.target, o.state, o.checks
         )
     };
-    let d = &o.detail;
+    out.push_str(&details(&o.detail));
+    out
+}
+
+/// What a subject found, indented, under a result's first line.
+pub(crate) fn details(d: &crate::Detail) -> String {
+    let mut out = String::new();
     if let Some(line) = &d.line {
         let _ = writeln!(out, "  {line}");
     }
-    if d.output_truncated {
+    // A tail cut from the top says how much is above it; an excerpt marks
+    // its own gaps.
+    if d.output_omitted > 0 {
         let path = d.log_path.as_deref().unwrap_or("not saved");
         let _ = writeln!(
             out,
@@ -235,7 +250,7 @@ fn text(o: &Outcome, mode: Mode) -> String {
     for line in &d.output {
         let _ = writeln!(out, "  {line}");
     }
-    if let (Some(path), false) = (&d.log_path, d.output_truncated) {
+    if let (Some(path), 0) = (&d.log_path, d.output_omitted) {
         let _ = writeln!(out, "  full log: {path}");
     }
     out
@@ -281,6 +296,27 @@ mod tests {
         assert_eq!(
             text,
             "MET cmd make check: exit 1 (6m12s)\n  ... 214 more lines (full log: /logs/x.log)\n  ok\n"
+        );
+    }
+
+    #[test]
+    fn a_failure_shows_its_excerpt_and_the_full_log() {
+        let detail = Detail {
+            output: vec!["... 40 lines skipped".into(), "Error: boom".into()],
+            output_truncated: true,
+            log_path: Some("/logs/d.log".into()),
+            ..Detail::default()
+        };
+        let o = Outcome {
+            subject: "daemon",
+            target: "api".into(),
+            state: "errored (exit code 1)".into(),
+            ..outcome("failed", detail)
+        };
+        assert_eq!(o.exit(), Exit::Failed);
+        assert_eq!(
+            text(&o, Mode::Agent),
+            "FAILED daemon api: errored (exit code 1) after 6m12s\n  ... 40 lines skipped\n  Error: boom\n  full log: /logs/d.log\n"
         );
     }
 

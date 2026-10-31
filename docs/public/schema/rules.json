@@ -196,6 +196,10 @@
           "format": "uint",
           "minimum": 0
         },
+        "background": {
+          "description": "The command runs in the background: `&` follows it, or the harness\nruns the call in the background (Claude Code's `run_in_background`).",
+          "type": "boolean"
+        },
         "text": {
           "description": "Regular expressions that must each match one of the command's words\nafter the program, or one of its here-documents. `|` gives\nalternatives within one.",
           "$ref": "#/$defs/OneOrMany_string"

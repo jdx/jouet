@@ -4,9 +4,9 @@
 //! A handoff records facts only: the branch and its upstream, HEAD, an
 //! operation in progress, uncommitted and untracked files, the PR and its
 //! `pr status` attention codes, the session's last test, lint and build
-//! runs, and background processes running in the worktree. What the work is
-//! and what to do next is the agent's to write; this is what it can stand
-//! on.
+//! runs, background processes running in the worktree, and its `jouet job`s.
+//! What the work is and what to do next is the agent's to write; this is
+//! what it can stand on.
 //!
 //! The markdown file carries the same facts as JSON in a trailing HTML
 //! comment, so `pickup` reads exactly what was written, and a reader sees
@@ -62,6 +62,9 @@ pub struct Handoff {
     pub checks: Vec<CheckRun>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<Process>,
+    /// The worktree's `jouet job`s; the caller adds them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<Job>,
     /// Facts that could not be gathered, and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
@@ -93,6 +96,80 @@ pub struct Pr {
 pub struct Attention {
     pub code: String,
     pub message: String,
+}
+
+/// A `jouet job`, as `jouet job ls --json` describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Job {
+    pub id: String,
+    /// `running`, `exited`, `stopped` or `gone`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub pid: u32,
+    /// The command, as a shell would need it written.
+    pub command: String,
+    pub log: String,
+}
+
+impl Job {
+    fn describe(&self) -> String {
+        match self.exit_code {
+            Some(code) => format!("exited {code}"),
+            None => self.state.clone(),
+        }
+    }
+}
+
+/// A job a handoff recorded, as it is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct JobNow {
+    pub id: String,
+    /// Its state when the handoff was written, such as `running` or
+    /// `exited 1`.
+    pub then: String,
+    /// Its state now, or `gone` when this worktree no longer has it.
+    pub now: String,
+}
+
+/// How the jobs a handoff recorded are doing, given `now`, this worktree's
+/// jobs today; and the drift: a job that was running and has since ended,
+/// or gone.
+pub fn jobs_now(then: &[Job], now: &[Job]) -> (Vec<JobNow>, Vec<Drift>) {
+    let mut states = Vec::new();
+    let mut drift = Vec::new();
+    for j in then {
+        let current = now.iter().find(|n| n.id == j.id && n.pid == j.pid);
+        states.push(JobNow {
+            id: j.id.clone(),
+            then: j.describe(),
+            now: current.map_or_else(|| "gone".into(), Job::describe),
+        });
+        if j.state != "running" {
+            continue;
+        }
+        let message = match current {
+            Some(n) if n.state == "running" => continue,
+            Some(n) => format!(
+                "job `{}` has {} since; `jouet job logs {}` shows how it ended",
+                j.id,
+                match n.exit_code {
+                    Some(code) => format!("exited {code}"),
+                    None => format!("ended ({})", n.state),
+                },
+                j.id
+            ),
+            None => format!(
+                "job `{}` is no longer in this worktree, or was started again",
+                j.id
+            ),
+        };
+        drift.push(Drift {
+            code: "job_ended",
+            message,
+        });
+    }
+    (states, drift)
 }
 
 /// Where the facts beyond git come from.
@@ -326,6 +403,26 @@ impl Handoff {
             .map(|p| format!("{} `{}`: attach with `{}`", p.pid, p.command, p.attach()))
             .collect();
         list(&mut s, "Background processes", &processes, data);
+        let jobs: Vec<String> = self
+            .jobs
+            .iter()
+            .map(|j| {
+                let follow = if j.state == "running" {
+                    format!(", `jouet wait job {}`", j.id)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "`{}` {}, pid {}: `{}`; `jouet job logs {}`{follow}",
+                    j.id,
+                    j.describe(),
+                    j.pid,
+                    j.command,
+                    j.id
+                )
+            })
+            .collect();
+        list(&mut s, "Jobs", &jobs, data);
         if !self.notes.is_empty() {
             s.push_str("- **Not gathered:**\n");
             for n in &self.notes {

@@ -159,6 +159,9 @@ pub(crate) struct Matcher {
     pub unless_args: Vec<Glob>,
     /// The command has at most this many arguments.
     pub max_args: Option<usize>,
+    /// The command runs in the background: `&` follows it, or the harness
+    /// runs the call in the background (Claude Code's `run_in_background`).
+    pub background: Option<bool>,
     /// Regular expressions that must each match one of the command's words
     /// after the program, or one of its here-documents. `|` gives
     /// alternatives within one.
@@ -242,6 +245,7 @@ impl Matcher {
             args,
             unless_args,
             max_args,
+            background,
             text,
             with,
             unless_with,
@@ -258,6 +262,7 @@ impl Matcher {
             || !args.is_empty()
             || !unless_args.is_empty()
             || max_args.is_some()
+            || background.is_some()
             || !text.is_empty()
             || with.is_some()
             || unless_with.is_some()

@@ -1217,3 +1217,80 @@ fn a_fires_example_can_pin_the_scope_it_records() {
         ]
     );
 }
+
+#[test]
+fn background_matches_an_ampersand_or_a_backgrounded_call() {
+    let code = "[[rule]]\nname = \"bg\"\nwhy = \"w\"\nmode = \"deny\"\nmessage = \"m\"\nmatch = { command = \"serve\", background = true }\nexamples = { fires = [\"serve &\"], quiet = [\"serve\"] }\n";
+    let engine = engine(vec![toml_user("bg", code)]);
+    let fires = |call: &Call| engine.evaluate(call).deny.is_some();
+    assert!(fires(&bash("serve &")));
+    assert!(fires(&bash("cd x && nohup serve > log 2>&1 &")));
+    assert!(!fires(&bash("serve")));
+    assert!(!fires(&bash("serve && sleep 1 &")));
+    let harness = Call {
+        input: Some(serde_json::json!({ "command": "serve", "run_in_background": true })),
+        ..bash("serve")
+    };
+    assert!(fires(&harness));
+}
+
+#[test]
+fn job_start_names_the_job_and_its_ready_check() {
+    let engine = engine(builtin());
+    let advice = |command: &str| {
+        let outcome = engine.evaluate(&bash(command));
+        let d = outcome.deny.or(outcome.warnings.into_iter().next());
+        let d = d.unwrap_or_else(|| panic!("nothing for {command}"));
+        assert_eq!(d.rule, "job-start", "{command}");
+        let message = d.message.unwrap();
+        let start = message.find('`').unwrap() + 1;
+        let end = start + message[start..].find('`').unwrap();
+        message[start..end].to_string()
+    };
+    assert_eq!(
+        advice("npm run dev &"),
+        "jouet job start dev -- npm run dev"
+    );
+    assert_eq!(
+        advice("nohup python3 -m http.server 9000 > s.log 2>&1 &"),
+        "jouet job start http-server --port 9000 -- python3 -m http.server 9000"
+    );
+    assert_eq!(
+        advice("npx vite & sleep 2 && curl -sf localhost:5173/health"),
+        "jouet job start vite --http http://localhost:5173/health -- npx vite"
+    );
+    assert_eq!(
+        advice("uvicorn app:app &"),
+        "jouet job start uvicorn --port 8000 -- uvicorn app:app"
+    );
+    assert_eq!(
+        advice("bundle exec rails s -p 3001 &"),
+        "jouet job start rails --port 3001 -- bundle exec rails s -p 3001"
+    );
+    assert_eq!(
+        advice("pnpm run dev:web -- --port=4000 &"),
+        "jouet job start dev-web --port 4000 -- pnpm run dev:web -- --port=4000"
+    );
+    assert_eq!(
+        advice("sleep 100 & node 'my server.js' &"),
+        "jouet job start my-server -- node 'my server.js'"
+    );
+    assert_eq!(
+        advice("cargo test --workspace > t.log 2>&1 &"),
+        "jouet job start cargo-test -- cargo test --workspace"
+    );
+    assert_eq!(
+        advice("npm run build &"),
+        "jouet job start build -- npm run build"
+    );
+    // Run in the harness's background, a pipe's reader is not the server.
+    let piped = Call {
+        input: Some(serde_json::json!({ "run_in_background": true })),
+        ..bash("npm run dev 2>&1 | tee dev.log")
+    };
+    let message = engine.evaluate(&piped).warnings.remove(0).message.unwrap();
+    assert!(
+        message.starts_with("Run `jouet job start dev -- npm run dev`"),
+        "{message}"
+    );
+}

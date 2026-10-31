@@ -90,6 +90,16 @@ fn input(m: &Matcher, call: &Call) -> bool {
     }) && !m.unless_input.iter().any(|name| field(name).is_some())
 }
 
+/// Whether the harness runs the whole call in the background, as Claude
+/// Code's Bash tool does with `run_in_background`.
+fn in_background(call: &Call) -> bool {
+    call.input
+        .as_ref()
+        .and_then(|i| i.get("run_in_background"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
 /// The path from the working directory, when it is inside it.
 fn relative<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
     cwd.map(|cwd| cwd.trim_end_matches(['/', '\\']))
@@ -186,6 +196,12 @@ fn command(m: &Matcher, c: &shell::Command, call: &Call) -> bool {
         return false;
     }
     if m.max_args.is_some_and(|max| words.args.len() > max) {
+        return false;
+    }
+    if m.background.is_some_and(|want| {
+        let backgrounded = in_background(call) || c.op == Some(shell::Op::Background);
+        backgrounded != want
+    }) {
         return false;
     }
     if m.secret_files

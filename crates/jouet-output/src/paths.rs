@@ -74,6 +74,14 @@ pub fn repo_key(cwd: &Path) -> Option<String> {
     Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
 }
 
+/// A directory, as the first 16 hex characters of the SHA-256 of its path
+/// with symlinks resolved: what keys records outside a work tree.
+pub fn dir_key(dir: &Path) -> Option<String> {
+    let dir = dir.canonicalize().ok()?;
+    let digest = Sha256::digest(dir.to_string_lossy().as_bytes());
+    Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

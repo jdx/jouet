@@ -1,6 +1,7 @@
 # jouet Development Guide
 
-jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
+jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet job`
+(one-off background work, without a daemon), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
 `jouet search` and `jouet read --map` (budgeted search and a repository map), `jouet audit` (where
@@ -70,7 +71,8 @@ helpers, the setup, hook, ledger and agent-guide code, and the test selection be
   spec (`routine.rs`), the sandboxed runtime and `joue` module (`runtime.rs`), the primitives
   (`prims/`), `joue test` and its fake GitHub (`testing.rs`), and the built-in routines and their
   fixtures (`routines/`). `jouet pr next` is the `pr-next` routine.
-- `jouet-wait`: the conditions and polling behind `jouet wait`.
+- `jouet-wait`: the conditions and polling behind `jouet wait`, and the native background jobs
+  behind `jouet job` (`job.rs`: detached spawns, job files, process-group stops; Unix only).
 - `jouet-audit`: the transcript readers (Claude Code, Codex), command shapes, redaction,
   categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
   `stats`, the ledger reader and estimates behind `jouet stats`.

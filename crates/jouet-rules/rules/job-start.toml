@@ -1,0 +1,136 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "job-start"
+why = "A server or a build started with `&` or nohup has no ready check, no log to ask for and no name to stop it by, so the agent polls it; `jouet job start` gives it all three."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["job", "start"]
+# The matchers find a server, a watcher, a build or a test suite started in
+# the background; the script names the `jouet job start` that replaces it,
+# with a ready check when the command or the rest of the call shows one.
+script = "job-start.luau"
+
+# A project's dev server, through its package manager or task runner.
+[[rule.match]]
+command = [
+  "npm run dev*", "npm run start*", "npm run serve*", "npm run watch*",
+  "npm run preview", "npm start",
+  "pnpm dev*", "pnpm run dev*", "pnpm start*", "pnpm run start*",
+  "pnpm serve*", "pnpm run serve*", "pnpm run watch*", "pnpm preview",
+  "yarn dev*", "yarn run dev*", "yarn start*", "yarn serve*", "yarn watch*",
+  "bun dev*", "bun run dev*", "bun run start*",
+  "deno task dev*", "deno task start*",
+  "mise run dev*", "mise run serve*", "mise run start*", "mise watch",
+]
+background = true
+
+# JavaScript dev servers and watchers.
+[[rule.match]]
+command = [
+  "vite", "npx vite", "bunx vite", "pnpm exec vite",
+  "next dev", "next start", "npx next dev", "npx next start",
+  "nuxt dev", "nuxi dev", "astro dev", "remix dev", "vitepress dev",
+  "webpack serve", "webpack-dev-server", "ng serve", "storybook dev",
+  "serve", "npx serve", "http-server", "npx http-server", "live-server",
+  "nodemon", "npx nodemon", "wrangler dev", "vercel dev", "netlify dev",
+]
+unless_args = ["build", "optimize"]
+background = true
+
+[[rule.match]]
+command = ["tsc", "npx tsc"]
+flags = ["-w", "--watch"]
+background = true
+
+[[rule.match]]
+command = ["node", "bun", "deno run", "tsx", "ts-node"]
+args = ["*server*"]
+background = true
+
+[[rule.match]]
+command = ["node", "tsx"]
+flags = ["--watch"]
+background = true
+
+# Python's servers.
+[[rule.match]]
+command = ["python", "python3", "python3.*"]
+text = '^(http\.server|runserver|uvicorn|gunicorn|hypercorn|daphne)$'
+background = true
+
+[[rule.match]]
+command = [
+  "uvicorn", "gunicorn", "hypercorn", "daphne", "flask run", "fastapi dev",
+  "fastapi run", "mkdocs serve", "streamlit run", "jupyter lab",
+  "jupyter notebook",
+]
+background = true
+
+# Everything else that serves or watches until it is stopped.
+[[rule.match]]
+command = [
+  "rails server", "rails s", "bundle exec rails server", "bundle exec rails s",
+  "jekyll serve", "bundle exec jekyll serve", "puma", "php artisan serve",
+  "hugo server", "hugo serve", "zola serve", "mdbook serve", "trunk serve",
+  "cargo watch", "cargo leptos watch", "cargo leptos serve", "watchexec",
+  "redis-server", "mongod",
+]
+background = true
+
+[[rule.match]]
+command = "php"
+flags = "-S"
+background = true
+
+[[rule.match]]
+command = ["docker compose up", "docker-compose up"]
+unless_flags = ["-d", "--detach"]
+background = true
+
+# A build or a test suite sent to the background with `&`, unless the same
+# call waits for it. (Run in the harness's own background, it is left
+# alone: the harness says when it ends.)
+[[rule.match]]
+command = [
+  "cargo build", "cargo test", "cargo nextest run", "cargo check",
+  "cargo clippy", "cargo bench", "npm test", "npm run build*", "npm run test*",
+  "pnpm test", "pnpm build", "pnpm run build*", "pnpm run test*", "yarn test",
+  "yarn build", "bun test", "pytest", "jest", "vitest run", "go test",
+  "go build", "make", "mise run build*", "mise run test*", "mise run ci",
+]
+background = true
+unless_with = { command = "wait" }
+
+[rule.examples]
+fires = [
+  { command = "npm run dev &", action = "deny" },
+  "nohup python3 -m http.server 8000 > server.log 2>&1 &",
+  "cd web && pnpm dev > /tmp/dev.log 2>&1 &",
+  "npx vite --port 4000 & sleep 3 && curl -sf localhost:4000",
+  "uvicorn app:app --reload &",
+  "cargo watch -x run &",
+  "docker compose up &",
+  "bundle exec rails s -p 3001 &",
+  "node server.js > out.log 2>&1 &",
+  "php -S localhost:8080 -t public &",
+  "python manage.py runserver 0.0.0.0:8001 &",
+  "cargo test --workspace > test.log 2>&1 &",
+  "nohup pytest -x > pytest.out &",
+  { command = "npm run dev", input = { run_in_background = true }, action = "warn" },
+  { command = "npm run dev 2>&1 | tee dev.log", input = { run_in_background = true }, action = "warn" },
+]
+quiet = [
+  "npm run dev",
+  "npm install &",
+  "cargo build & wait",
+  "cargo build -p a & cargo build -p b & wait",
+  "sleep 5 &",
+  "vite build &",
+  "docker compose up -d &",
+  "jouet job start dev --port 5173 -- npm run dev",
+  "echo 'npm run dev &'",
+  { command = "npm run build", input = { run_in_background = true } },
+  { command = "cargo test", input = { run_in_background = true } },
+]

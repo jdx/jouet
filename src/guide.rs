@@ -38,7 +38,13 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wait",
         Some(
-            "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process or command, instead of a sleep loop",
+            "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process, command or `jouet job`, instead of a sleep loop",
+        ),
+    ),
+    (
+        "job",
+        Some(
+            "running a build, a test suite, a long script or a server for one check in the background: `jouet job start ID --port N -- CMD` returns once it is ready, `jouet wait job ID` blocks until it ends, instead of `&`, nohup, sleep-and-curl loops and pkill",
         ),
     ),
     (
@@ -68,7 +74,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "handoff",
         Some(
-            "ending a session with work in progress: records the branch, uncommitted files, the PR, the last test runs and background processes for the next session",
+            "ending a session with work in progress: records the branch, uncommitted files, the PR, the last test runs, background processes and jobs for the next session",
         ),
     ),
     (

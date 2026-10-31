@@ -74,6 +74,10 @@ const BUILTIN: &[(&str, &str)] = &[
         "affected-tests",
         include_str!("../rules/affected-tests.toml"),
     ),
+    ("job-start", include_str!("../rules/job-start.toml")),
+    ("job-ready", include_str!("../rules/job-ready.toml")),
+    ("job-logs", include_str!("../rules/job-logs.toml")),
+    ("job-stop", include_str!("../rules/job-stop.toml")),
     ("checks", include_str!("../rules/checks.toml")),
     ("reread", include_str!("../rules/reread.toml")),
     ("large-read", include_str!("../rules/large-read.toml")),
@@ -93,6 +97,7 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         "affected-tests.luau",
         include_str!("../rules/affected-tests.luau"),
     ),
+    ("job-start.luau", include_str!("../rules/job-start.luau")),
     (
         "scoped-lint.luau",
         include_str!("../rules/scoped-lint.luau"),

@@ -85,6 +85,7 @@ export default defineConfig({
           { text: "jouet read", link: "/commands/read" },
           { text: "jouet graph", link: "/commands/graph" },
           { text: "jouet wait", link: "/commands/wait" },
+          { text: "jouet job", link: "/commands/job" },
           { text: "jouet ci run", link: "/commands/ci" },
           { text: "jouet pr status", link: "/commands/pr-status" },
           { text: "jouet pr threads", link: "/commands/pr-threads" },

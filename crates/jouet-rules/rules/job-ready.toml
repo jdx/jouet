@@ -1,0 +1,36 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "job-ready"
+why = "Sleeping and then fetching a local URL guesses how long a server takes to start; a ready check waits exactly that long, and stops early when the server dies."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["job", "start"]
+suggest = "jouet job start ID --http URL -- CMD"
+message = "It starts the server in the background and returns once URL answers, or fails with the end of the server's log. For a server that is already running, `jouet wait http URL` waits for it, or `jouet wait port PORT` for one that does not speak HTTP, such as a database (`jouet agent-help job`)."
+
+# A fetch of a local address in the same call as a sleep: `sleep 5 &&
+# curl ...`, or a loop that sleeps until it answers.
+[[rule.match]]
+command = ["curl", "wget", "http", "nc"]
+text = 'localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]'
+with = { command = "sleep", args = "*" }
+
+[rule.examples]
+fires = [
+  "sleep 5 && curl localhost:3000",
+  "sleep 3; curl -sf http://127.0.0.1:8000/health",
+  "until curl -sf localhost:5173 >/dev/null; do sleep 1; done",
+  "while ! nc -z localhost 5432; do sleep 0.5; done",
+  "for i in $(seq 30); do curl -s localhost:8080 && break; sleep 1; done",
+  "npm run build && sleep 2 && wget -qO- http://localhost:4000/",
+]
+quiet = [
+  "curl localhost:3000",
+  "sleep 5 && curl https://example.com",
+  "sleep 60 && gh pr checks 123",
+  "jouet wait http http://localhost:3000",
+  "echo 'sleep 5 && curl localhost:3000'",
+  "sleep && curl localhost:3000",
+]

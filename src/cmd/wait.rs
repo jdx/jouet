@@ -2,8 +2,8 @@
 
 use super::Output;
 use crate::{
-    WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitFileArgs, WaitHttpArgs, WaitLogArgs,
-    WaitPidArgs, WaitPrArgs, WaitRunArgs,
+    WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitFileArgs, WaitHttpArgs, WaitJobArgs,
+    WaitLogArgs, WaitPidArgs, WaitPrArgs, WaitRunArgs,
 };
 use jouet_github::Client;
 use jouet_github::pr::target::{self, Arg, Repo, Target};
@@ -11,6 +11,7 @@ use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_wait::checks::Selection;
 use jouet_wait::ci::{self, CiWait};
+use jouet_wait::job;
 use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
 use jouet_wait::pr::{PrWait, Until};
 use jouet_wait::remote::{self, Halt, Watch};
@@ -72,7 +73,40 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
         WaitCmd::Http(a) => local(http(a), &timing, reporter),
         WaitCmd::Pid(a) => local(pid(&a), &timing, reporter),
         WaitCmd::Cmd(a) => local(command(a, &timing), &timing, reporter),
+        WaitCmd::Job(a) => match job_wait(a) {
+            Ok(subject) => local(Ok(subject), &timing, reporter),
+            Err((exit, message)) => reporter(String::new()).fail(&Stop { exit, message }),
+        },
     }
+}
+
+/// `wait job ID`: exit 3 when this work tree has no such job.
+fn job_wait(a: WaitJobArgs) -> Result<Box<dyn Subject>, (Exit, String)> {
+    let usage = |message: String| (Exit::Usage, message);
+    let until = match a.until.as_deref() {
+        None => job::Until::Exited,
+        Some(name) => job::Until::parse(name)
+            .ok_or_else(|| usage(format!("--until must be exited or ready, not `{name}`")))?,
+    };
+    let ready = super::job::ready(a.port, a.http, None).map_err(usage)?;
+    if ready.is_some() && until == job::Until::Exited {
+        return Err(usage(
+            "--port and --http are ready checks: give them with --until ready".into(),
+        ));
+    }
+    let store = super::job::here().map_err(|m| (Exit::Precondition, m))?;
+    let found = store.get(&a.id).ok_or_else(|| {
+        (
+            Exit::NotFound,
+            format!(
+                "no job `{}` in this work tree; `jouet job ls` lists them",
+                a.id
+            ),
+        )
+    })?;
+    let lines = log_lines(a.log_lines, a.no_logs).map_err(usage)?;
+    let wait = job::JobWait::new(store, found, until, ready.as_ref(), lines).map_err(usage)?;
+    Ok(Box::new(wait))
 }
 
 /// Runs a local subject, or reports why it could not be built.

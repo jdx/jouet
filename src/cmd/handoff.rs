@@ -3,17 +3,18 @@
 use super::Output;
 use crate::{HandoffArgs, PickupArgs};
 use jouet_git::Git;
-use jouet_git::handoff::{self, Attention, Drift, Handoff, Options, Pr};
+use jouet_git::handoff::{self, Attention, Drift, Handoff, Job, JobNow, Options, Pr};
 use jouet_git::session;
 use jouet_github::Client;
 use jouet_github::pr::status::{self, Lookup};
 use jouet_github::pr::target::{self, Target};
 use jouet_output::exit::Exit;
 use jouet_output::time;
+use jouet_wait::job::Store;
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::Read as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
 struct HandoffReport<'a> {
@@ -36,6 +37,13 @@ pub(crate) fn run_handoff(args: &HandoffArgs, out: &Output) -> Exit {
         Ok(h) => h,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    if let Some(store) = Store::here(Path::new(&h.worktree)) {
+        let jobs = jobs_here(&store);
+        // A job's processes are listed once, as the job.
+        h.processes
+            .retain(|p| !jobs.iter().any(|j| j.pid == p.pid && j.state == "running"));
+        h.jobs = jobs;
+    }
     if args.no_pr {
         h.notes.push("pr: not looked up (--no-pr)".into());
     } else {
@@ -83,6 +91,25 @@ pub(crate) fn run_handoff(args: &HandoffArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
+/// The worktree's jobs, as a handoff records them.
+fn jobs_here(store: &Store) -> Vec<Job> {
+    store
+        .list()
+        .into_iter()
+        .map(|j| {
+            let row = super::job::row(store, j);
+            Job {
+                id: row.id,
+                state: row.state.to_string(),
+                exit_code: row.exit_code,
+                pid: row.pid,
+                command: super::job::shell_words(&row.command),
+                log: row.log,
+            }
+        })
+        .collect()
+}
+
 /// The open PR for the branch, else its newest, with its attention codes.
 fn lookup_pr(branch: &str) -> Result<Option<Pr>, String> {
     let repo = target::repo_from_git().ok_or("no GitHub remote in this checkout")?;
@@ -117,6 +144,9 @@ struct PickupReport<'a> {
     accurate: bool,
     #[serde(skip_serializing_if = "<[Drift]>::is_empty")]
     drift: &'a [Drift],
+    /// The jobs the handoff recorded, as they are now.
+    #[serde(skip_serializing_if = "<[JobNow]>::is_empty")]
+    jobs: &'a [JobNow],
     handoff: &'a Handoff,
 }
 
@@ -130,14 +160,24 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
         Ok(h) => h,
         Err(e) => return out.error(Exit::Precondition, &format!("{path}: {e}")),
     };
-    let drift = match handoff::drift(&git, &h) {
+    let mut drift = match handoff::drift(&git, &h) {
         Ok(drift) => drift,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    let mut jobs = Vec::new();
+    if !h.jobs.is_empty() {
+        let now = Store::here(Path::new(&h.worktree))
+            .map(|s| jobs_here(&s))
+            .unwrap_or_default();
+        let (states, ended) = handoff::jobs_now(&h.jobs, &now);
+        jobs = states;
+        drift.extend(ended);
+    }
     let report = PickupReport {
         path,
         accurate: drift.is_empty(),
         drift: &drift,
+        jobs: &jobs,
         handoff: &h,
     };
     out.result(&report, || {
@@ -145,6 +185,12 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
         let age = time::parse_utc(&h.created_at)
             .map(|t| format!(" ({} ago)", time::age(time::now() - t)))
             .unwrap_or_default();
+        if !jobs.is_empty() {
+            let _ = writeln!(s, "\n## Jobs now\n");
+            for j in &jobs {
+                let _ = writeln!(s, "- `{}`: {}, was {}", j.id, j.now, j.then);
+            }
+        }
         if drift.is_empty() {
             let _ = writeln!(
                 s,
