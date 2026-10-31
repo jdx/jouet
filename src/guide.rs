@@ -24,6 +24,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "ci",
+        Some(
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`), instead of pushing again to see; needs jactionlint",
+        ),
+    ),
+    (
         "pr",
         Some(
             "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
@@ -95,6 +101,10 @@ const COMPANIONS: &[(&str, &str)] = &[
     (
         "mbx",
         "mbx: Rust builds. Run cargo as usual (or prefix it with `mbx`); compiled output is shared across checkouts and builds are scheduled machine-wide. `mbx analyze` explains a slow rebuild",
+    ),
+    (
+        "jactionlint",
+        "jactionlint: lints GitHub workflows; `jouet ci run` runs their jobs here through it",
     ),
     (
         "rtk",
@@ -268,7 +278,7 @@ fn companions() -> Vec<&'static str> {
         .collect()
 }
 
-fn on_path(bin: &str) -> bool {
+pub(crate) fn on_path(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };

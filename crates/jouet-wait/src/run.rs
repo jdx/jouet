@@ -41,6 +41,7 @@ pub struct RunWait {
     workflow: Option<String>,
     head_sha: String,
     jobs: Vec<Check>,
+    local_runner: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,7 +71,16 @@ impl RunWait {
             workflow: None,
             head_sha: String::new(),
             jobs: Vec::new(),
+            local_runner: false,
         }
+    }
+
+    /// Suggests `jouet ci run` for a failed job, for when jactionlint is
+    /// installed.
+    #[must_use]
+    pub fn local_runner(mut self, on: bool) -> Self {
+        self.local_runner = on;
+        self
     }
 
     fn doc(&self, result: &'static str, mut jobs: Vec<Check>) -> Doc {
@@ -143,6 +153,9 @@ impl Watch for RunWait {
                 let mut jobs = jobs;
                 if let Some(lines) = self.log_lines {
                     attach_logs(client, &self.repo, &mut jobs, lines);
+                }
+                if self.local_runner {
+                    checks::suggest_local(&mut jobs, self.workflow.as_deref());
                 }
                 Poll::Done(self.doc("failure", jobs))
             }

@@ -3,6 +3,7 @@
 
 pub(crate) mod agent_help;
 pub(crate) mod audit;
+pub(crate) mod ci;
 pub(crate) mod commit;
 pub(crate) mod completion;
 pub(crate) mod edit;
