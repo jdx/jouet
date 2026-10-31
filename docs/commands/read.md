@@ -1,16 +1,19 @@
 ---
-description: Read a file by its outline, one definition or a range of lines, instead of whole.
+description: Read a file by its outline, one definition or a range of lines instead of whole, and a map of a repository's most important definitions, sized to a token budget.
 ---
 
 # jouet read
 
-Reading a whole file to find one thing is the most common way agents fill their context. `jouet read` reads in steps instead: a file's outline, then the one definition needed, or a range of lines.
+Reading a whole file to find one thing is the most common way agents fill their context. `jouet read` reads in steps instead: a file's outline, then the one definition needed, or a range of lines. `jouet read --map` does the same for a whole repository.
 
 ```text
 jouet read FILE [--outline | --symbol NAME | --range A:B] [--max-lines N] [--again]
+jouet read --map [PATH] [--budget TOKENS] [--focus FILE|NAME]...
 ```
 
 Every flag is listed in the [CLI reference](/cli/read).
+
+## Reading a file
 
 ```output
 $ jouet read src/lib.rs --outline
@@ -58,3 +61,88 @@ With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:
 An outline is an `outline` list of `kind`, `name`, `start` and `end`, with `more_definitions` when it was cut. A section has `more` for lines a cut left out, and `already_shown` instead of `text` for lines the session already has.
 
 The built-in `large-read` [rule](/rules) warns when the agent reads 400 lines or more of a file at once, with Claude Code's Read and no `offset` or `limit`, or with `cat` or `nl`, and suggests the outline.
+
+## The repository map
+
+`jouet read --map` prints a map of a repository: for the files that matter most, the line of each of their most important definitions, sized to fit a token budget. An agent starting on unfamiliar code reads the map instead of listing directories and opening whole files to see what is in them.
+
+```output
+$ jouet read --map --budget 40
+src/lib.rs
+  1: pub struct Client {
+  12: fn join_url(base: &str, path: &str) -> String {
+  16: fn fetch(url: &str) -> String {
+... 2 more definitions in 1 more file (raise --budget, or --focus a file or name)
+```
+
+With a `PATH`, only files under that directory are listed, though they are still ranked by the whole repository. Paths are printed from the current directory.
+
+### How the map is built
+
+The map is [Aider's repo map](https://aider.chat/docs/repomap.html) on jouet's [code graph](/commands/graph). Aider's design and its weights are used under the Apache-2.0 licence.
+
+1. **Uses.** The graph has already linked every call, construction, type, import and inheritance to the definition it means. The map counts, in one query, how often each file uses each definition. A use of a field or an enum variant counts for the type that holds it.
+2. **A graph of files.** A file that uses a definition gets an edge to the file defining it. Following Aider, an edge counts ×10 for a name you focused on, or a long distinctive one (snake, kebab or camel case, 8 characters or more), ×0.1 for a name starting with `_` or defined in more than 5 files, ×50 when the using file is one you focused on, and by the square root of the number of uses. A definition nothing uses gets a self-edge of 0.1.
+3. **Ranking.** Personalised PageRank ranks the files, favouring the ones you focused on, and each file's rank is shared among the definitions its edges point at.
+4. **The budget.** A binary search finds how many of the top-ranked definitions fit the budget, estimated at 4 bytes a token. Files are listed in path order, each with its definitions in line order. The last line counts what did not fit.
+
+The map lists functions, methods, types (structs, classes, enums, interfaces, traits, type aliases), modules, macros and exported variables. It leaves out locals, fields and enum variants.
+
+jouet departs from Aider in three places:
+
+- **Uses are resolved, not matched by name.** Aider counts a call to `load` as evidence for every file that defines a `load`. The graph knows which `load` it is, so a common method name such as `is_empty` or `try_from`, defined in dozens of places, no longer crowds out a repository's own types.
+- **A file's rank is shared over at least one unit of weight.** A file that uses nothing would otherwise pass all of its rank to its unused definitions' 0.1 self-edges, and a helper nothing calls would outrank what everything uses.
+- **The definitions of a focused identifier come first,** since you named it.
+
+### Focus
+
+`--focus` takes a file you are working on, or an identifier you care about, and can be repeated. A value naming an existing file is a file; anything else is an identifier.
+
+- What a focused file uses ranks higher, and the file's own definitions are left out, since you already have it open.
+- A focused identifier's definitions come first, uses of it count more, and files with it as a path component (`src/download.rs` for `download`) rank higher.
+
+The budget is 1,024 tokens with `--focus` and 8,192 without, when the map is the agent's whole view of the repository. These are Aider's defaults.
+
+### Speed
+
+The map reads the code graph, so the first map of a repository builds the graph (and a new worktree starts from a sibling's graph, when there is one). After that, only files whose size or modification time changed are read again, as before any graph query. A map takes about 155 ms on mise's repository (1,061 source files) and 35 ms on jouet's, on a 32-core Linux machine. Building mise's graph from nothing took 2.3 s.
+
+### JSON
+
+`jouet read --map --budget 40 --json` (`files_ranked` counts the files the graph has indexed):
+
+```json
+{
+  "files": [
+    {
+      "path": "src/lib.rs",
+      "defs": [
+        {
+          "line": 1,
+          "kind": "struct",
+          "name": "Client",
+          "text": "pub struct Client {"
+        },
+        {
+          "line": 12,
+          "kind": "function",
+          "name": "join_url",
+          "text": "fn join_url(base: &str, path: &str) -> String {"
+        },
+        {
+          "line": 16,
+          "kind": "function",
+          "name": "fetch",
+          "text": "fn fetch(url: &str) -> String {"
+        }
+      ]
+    }
+  ],
+  "tokens": 32,
+  "files_ranked": 2,
+  "more_defs": 2,
+  "more_files": 1
+}
+```
+
+`jouet read --map` exits 4 outside a git work tree, since the graph is kept per work tree, and 3 for a `PATH` that is not a directory.

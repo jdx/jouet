@@ -20,7 +20,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "reading a long file (400 lines or more): `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading it whole to find one thing. Read a shorter file whole, in one call; `--outline` prints a file of up to 100 lines whole anyway",
+            "reading a long file (400 lines or more): `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading it whole to find one thing. Read a shorter file whole, in one call; `--outline` prints a file of up to 100 lines whole anyway. For a repository new to you, `jouet read --map` prints its most important definitions to fit a token budget",
         ),
     ),
     (

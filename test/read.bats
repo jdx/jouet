@@ -204,3 +204,38 @@ payload() {
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload PreToolUse Bash '{"command": "sed -n 1,50p src/long.rs"}')"
 	assert_output ""
 }
+
+@test "read --map shows the definitions that matter, from the code graph, within the budget" {
+	init_repo
+	run --separate-stderr jouet read --map
+	assert_success
+	assert_line --index 0 src/lib.rs
+	assert_line '  1: pub struct Client {'
+	assert_line '  6:     pub fn download(&self, path: &str) -> String {'
+
+	run --separate-stderr jouet read --map --budget 10
+	assert_success
+	assert_line --regexp '^\.\.\. [0-9]+ more definitions? in [0-9]+ more files? \(raise --budget, or --focus a file or name\)$'
+
+	# A focused file's own definitions are left out: it is already open.
+	run --separate-stderr jouet read --map --focus src/lib.rs --json
+	assert_success
+	run jq -c '[.files[] | select(.defs) | .path]' <<<"$output"
+	assert_output '["src/main.rs"]'
+}
+
+@test "read --map needs a work tree, a directory, and its own flags" {
+	run --separate-stderr jouet read --map
+	assert_failure 4
+	assert_stderr --partial 'not inside a git work tree'
+
+	init_repo
+	run --separate-stderr jouet read --map nowhere
+	assert_failure 3
+	run --separate-stderr jouet read --map --outline
+	assert_failure 2
+	run --separate-stderr jouet read src/lib.rs --budget 10
+	assert_failure 2
+	run --separate-stderr jouet read
+	assert_failure 2
+}
