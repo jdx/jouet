@@ -1,0 +1,35 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "sed-line-edit"
+why = "A `sed -i` that deletes or replaces lines by number edits whatever those lines hold by then, and line numbers shift as soon as one edit lands; an edit by text fails when the text is not there."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["edit"]
+# The matcher finds `sed` run in place; the script looks for a delete,
+# change or insert by line number in its commands.
+script = "sed-line-edit.luau"
+
+[[rule.match]]
+command = "sed"
+
+[rule.examples]
+fires = [
+  "sed -i '356,413d;136,180d' src/config/config_file/config_root.rs",
+  "sed -i '3658,3667d' src/config/mod.rs",
+  "sed -i '632,635c\\    } else {' src/config/config_file/mod.rs",
+  "sed -i -e '13s/a/b/' -e '52,54d' src/config/project.rs",
+  "sed -i.bak '12i\\use std::fs;' src/main.rs",
+  "sed -Ei '7d' a.rs",
+  "sed --in-place '40,$d' notes.md",
+]
+quiet = [
+  "sed -n '356,413p' src/config/config_file/config_root.rs",
+  "sed '3,5d' a.rs > b.rs",
+  "sed -i 's/old/new/g' a.rs",
+  "sed -i '13s/old/new/' a.rs",
+  "sed -i '/^use std::fs;$/d' a.rs",
+  "sed -i -e '/start/,/end/d' a.rs",
+  "echo \"sed -i '3d' a\"",
+]

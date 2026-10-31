@@ -126,6 +126,7 @@ The built-in rules:
 | `ci-rerun` | `gh run rerun` (bare, `--failed` or `--job`), and `gh api` calls to a run's or job's `rerun` endpoints | [`jouet ci explain`](/commands/ci#jouet-ci-explain), whose `--rerun` reruns only a flaky or infrastructure failure |
 | `review-threads` | `gh api graphql` (or `curl` to the GraphQL API) with a `reviewThreads` query | `jouet pr threads` |
 | `python-edit` | a `python` heredoc or `-c` script that reads a file and writes it back, by `.replace(`, slicing, a regex or anything else (a file written from another, or a json, yaml or toml rewrite, is left alone) | `jouet edit` |
+| `sed-line-edit` | warns (does not deny) on `sed -i` that deletes, changes or inserts by line number (`356,413d`, `12i\`): line numbers shift once one edit lands. Substitutions and pattern addresses are left alone | your edit tool, or `jouet edit replace` |
 | `git-add-all` | `git add -A`, `--all`, `.` or `:/` | staging explicit paths |
 | `git-stash` | a bare `git stash`, `push` or `save` without a message, `pop`, `apply` or `drop` without a stash named, and `clear` | `git stash push -m <tag>` and `git stash apply <sha>`, or a WIP commit, because every worktree of a repository shares one stash |
 | `no-verify` | `--no-verify` on any git command, and `git commit -n` | fixing what the hook reports |
