@@ -194,6 +194,12 @@ the daily auto-merge of the release PR.
   computes the version and writes the changelog in its release PR.
 - Nobody merges the release PR by hand. `auto-merge-release.yml` does it daily, once the last
   release is at least two days old and a `fix:` or `feat:` has landed since.
+- Deprecate before you break. Removing or renaming a command, flag, JSON field, config key,
+  environment variable or built-in rule, changing a field's type or an exit code's meaning is
+  breaking (`docs/stability.md`). Keep the old form working where you can, with
+  `jouet_output::deprecated_at!(warn_at, remove_at, id, message)`, and give temporary code
+  `jouet_output::remove_by!(version, id)`. `remove_at` is the first major release at least 12
+  months after `warn_at`; see CONTRIBUTING.md.
 - Renaming `.github/workflows/release-plz.yml` breaks crates.io publishing until the trusted
   publisher is updated, because the OIDC claim names the workflow file.
 - Published crates carry source and licence only. Each crate's `Cargo.toml` lists what it ships

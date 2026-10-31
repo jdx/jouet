@@ -45,8 +45,9 @@ pub(crate) struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `override`,
-    /// `slow-hook` (a hook over its time budget; `tool` names its event), or
-    /// `fix` (hk's fixers run on edited files; `tool` names the edit tool).
+    /// `slow-hook` (a hook over its time budget; `tool` names its event),
+    /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
+    /// or `deprecated` (a command used something on its way out).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -67,6 +68,10 @@ pub(crate) struct Entry {
     /// For a `fix`: how many files the fixers changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formatted: Option<u64>,
+    /// For a `deprecated`: the deprecation's id, as `deprecated_at!` names
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecation: Option<String>,
     /// For a `skip-verify`: the reason given, with credentials redacted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -123,6 +128,32 @@ pub(crate) fn record_fix(
         scope: Some(scope.into()),
     });
     append(&dir, &entry);
+}
+
+/// Records that the deprecation `id` fired, unless the ledger is turned
+/// off, and returns whether this agent session recorded it before, so its
+/// note is printed once per session rather than on every command. Outside
+/// an agent session every process is told.
+pub(crate) fn record_deprecation(id: &str) -> bool {
+    let settings = crate::settings::Settings::load();
+    let Some(dir) = dir().filter(|_| settings.hooks.ledger) else {
+        return false;
+    };
+    deprecation_in(&dir, crate::cmd::search::session_id().as_deref(), id)
+}
+
+fn deprecation_in(dir: &Path, session: Option<&str>, id: &str) -> bool {
+    let told = session.is_some_and(|session| {
+        recent(dir, session)
+            .iter()
+            .any(|e| e.event == "deprecated" && e.deprecation.as_deref() == Some(id))
+    });
+    if !told {
+        let mut entry = Entry::new("cli", session, "deprecated");
+        entry.deprecation = Some(id.to_string());
+        append(dir, &entry);
+    }
+    told
 }
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
@@ -964,6 +995,21 @@ mod tests {
         let files = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(files, 2);
         assert_eq!(recent(dir.path(), "s-1"), [entry]);
+    }
+
+    #[test]
+    fn a_session_is_told_of_a_deprecation_once() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!deprecation_in(dir.path(), Some("s-1"), "old-flag"));
+        assert!(deprecation_in(dir.path(), Some("s-1"), "old-flag"));
+        assert!(!deprecation_in(dir.path(), Some("s-1"), "other-flag"));
+        assert!(!deprecation_in(dir.path(), Some("s-2"), "old-flag"));
+        // Outside a session, every process is told, and each is recorded.
+        assert!(!deprecation_in(dir.path(), None, "old-flag"));
+        assert!(!deprecation_in(dir.path(), None, "old-flag"));
+        let text = std::fs::read_to_string(dir.path().join("ledger.jsonl")).unwrap();
+        assert_eq!(text.matches(r#""deprecation":"old-flag""#).count(), 4);
+        assert_eq!(text.matches(r#""event":"deprecated""#).count(), 5);
     }
 
     #[test]

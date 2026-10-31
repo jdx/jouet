@@ -242,6 +242,7 @@ impl State {
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
         // A file from before failures were kept: its newest failed runs.
+        jouet_output::remove_by!("0.1.0", "verify-state-without-failures");
         if state.failures.is_empty() {
             for (kind, run) in &state.runs {
                 if !run.passed() {

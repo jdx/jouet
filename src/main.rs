@@ -2472,6 +2472,7 @@ pub struct ApplyArgs {
 }
 
 fn main() -> ExitCode {
+    jouet_output::deprecation::set_recorder(ledger::record_deprecation);
     if let Some(exit) = routine_typo() {
         return exit;
     }

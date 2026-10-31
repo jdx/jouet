@@ -52,6 +52,36 @@ allowed types and repository rules.
 Do not bump the crate version or edit the changelog in ordinary pull requests.
 release-plz generates both.
 
+## Deprecate before you break
+
+[Stability and deprecations](docs/stability.md) lists what counts as breaking:
+removing or renaming a command, flag, JSON field, config key, environment
+variable or built-in rule, changing a field's type, or changing what an exit
+code means. When a change like that can keep the old form working, keep it,
+and warn where it is read:
+
+```rust
+jouet_output::deprecated_at!(
+    "0.4.0",                  // the first release that warns: the next one
+    "1.0.0",                  // the release that removes it
+    "wait-poll",              // a stable kebab-case id, with no values in it
+    "`--poll` is now `--interval`"
+);
+```
+
+The note goes to stderr once per agent session, and the hook ledger records
+it. Once jouet's version reaches `remove_at`, a debug build fails the first
+time that path runs, so the release that gets there removes the code. Pick
+`remove_at` as the first major release at least 12 months after `warn_at`;
+before 1.0, 12 months is the aim, and the next minor release is the floor.
+Document the deprecation in the command's page and use a `feat` or `fix`
+commit, so the changelog carries it; the removal is a `!` commit with a
+`BREAKING CHANGE:` footer.
+
+Temporary code that has no user to warn, such as a fallback that reads a state
+file an older jouet wrote, gets `jouet_output::remove_by!("0.1.0", "id")`
+instead, which fails the build itself once jouet reaches that version.
+
 ## Check your work
 
 ```sh

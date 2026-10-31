@@ -11,7 +11,10 @@ pub struct Output {
 impl Output {
     pub fn new(json: bool, display: Option<&str>) -> Self {
         match Mode::detect(display) {
-            Ok(mode) => Self { json, mode },
+            Ok(mode) => {
+                crate::deprecation::set_mode(mode);
+                Self { json, mode }
+            }
             Err(message) => {
                 let out = Self {
                     json,
