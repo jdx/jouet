@@ -1,0 +1,45 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "curl-json"
+why = "Piping curl into jq or a Python one-liner to read a few JSON fields costs a script per call, and a wrong path or an error page prints the whole response; `jouet http --select` prints only those paths, with the status, within a budget."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["http"]
+suggest = "jouet http GET URL --select '$.path'"
+message = "It prints the status and the values at the JSONPaths given, cuts anything long to a budget with a marker naming the saved body, checks values with `--expect 'jsonpath $.ok == true'`, and redacts credentials (`jouet agent-help http`)."
+
+# curl's response read by jq, or by Python code that parses JSON. Downloads
+# to a file (`-o`, `-O`) are left alone, and so are installers (`curl ... |
+# sh`), which parse nothing.
+[[rule.match]]
+command = "curl"
+unless_flags = ["-o", "--output", "-O", "--remote-name", "--remote-name-all", "-T", "--upload-file", "-h", "--help"]
+with = { command = "jq" }
+
+[[rule.match]]
+command = "curl"
+unless_flags = ["-o", "--output", "-O", "--remote-name", "--remote-name-all", "-T", "--upload-file", "-h", "--help"]
+with = { command = ["python", "python3", "python3.*"], text = '\bjson\b' }
+
+[rule.examples]
+fires = [
+  "curl -s https://api.github.com/repos/jdx/mise | jq .stargazers_count",
+  "curl -fsSL localhost:3000/health | jq -r '.status'",
+  "curl -s -H 'Accept: application/json' https://example.com/api | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"id\"])'",
+  "curl -s https://example.com/api | python3 -m json.tool",
+  "curl -s https://example.com/api | python3 - <<'EOF'\nimport json, sys\nprint(json.load(sys.stdin)['items'][0])\nEOF",
+  "rtk curl -s localhost:8080/items | jq length",
+]
+quiet = [
+  "curl -fsSL https://mise.run | sh",
+  "curl -sSf https://sh.rustup.rs | bash -s -- -y",
+  "curl -o data.json https://example.com/data.json && jq . data.json",
+  "curl -sLO https://example.com/release.tar.gz",
+  "curl -s https://example.com/page.html",
+  "curl -s https://example.com | python3 -c 'import sys; print(len(sys.stdin.read()))'",
+  "jq .version package.json",
+  "echo 'curl -s x | jq .a'",
+  "jouet http GET https://example.com/api --select '$.id'",
+]

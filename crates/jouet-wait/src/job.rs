@@ -47,7 +47,12 @@ impl Ready {
     fn subject(&self, log: &Path) -> Result<Box<dyn Subject>, String> {
         Ok(match self {
             Self::Port(port) => Box::new(crate::local::PortWait::parse(&port.to_string(), false)?),
-            Self::Http(url) => Box::new(crate::local::HttpWait::new(url.clone(), None, None)),
+            Self::Http(url) => Box::new(crate::local::HttpWait::new(
+                url.clone(),
+                None,
+                None,
+                Vec::new(),
+            )),
             Self::Output(pattern) => {
                 let re = regex::Regex::new(pattern)
                     .map_err(|e| format!("--output is not a valid regex: {e}"))?;
