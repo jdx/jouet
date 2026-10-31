@@ -37,6 +37,7 @@
 - [`jouet graph prune`](/cli/graph/prune.md)
 - [`jouet handoff [FLAGS]`](/cli/handoff.md)
 - [`jouet pickup [FILE]`](/cli/pickup.md)
+- [`jouet sessions [--since <TIME>] [--all]`](/cli/sessions.md)
 - [`jouet stats [FLAGS]`](/cli/stats.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)
 - [`jouet pr status [FLAGS] [PRS]…`](/cli/pr/status.md)

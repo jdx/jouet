@@ -18,6 +18,7 @@
 //!
 //! [`stats`] builds on these to report what jouet saved: counted from the
 //! hook ledger, and estimated against the history before `jouet setup`.
+//! [`sessions`] reads only where recent sessions ran, for `jouet sessions`.
 //!
 //! Nothing here touches the network, and a report never holds file contents
 //! or whole commands, only shapes, unless examples are asked for, and those
@@ -39,6 +40,7 @@ mod pattern;
 mod read;
 mod record;
 mod redact;
+pub mod sessions;
 mod shape;
 pub mod stats;
 mod structure;

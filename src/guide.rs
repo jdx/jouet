@@ -80,7 +80,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pickup",
         Some(
-            "starting a session that continues earlier work: prints the last handoff and checks that it still holds",
+            "starting a session that continues earlier work: prints the last handoff and checks that it still holds; `jouet sessions` shows which other agent sessions are working where on this machine, and warns when two share a worktree",
         ),
     ),
     (
@@ -122,6 +122,8 @@ const WHEN: &[(&str, Option<&str>)] = &[
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // `pickup`'s line names it.
+    ("sessions", None),
     // `wind`'s line names it.
     ("unwind", None),
     // Named where it is needed: in a winding note at session start, which
