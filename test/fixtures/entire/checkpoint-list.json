@@ -1,0 +1,8 @@
+[
+  {"checkpoint_id":"01M66H17P11G5CYSP65VHNQVMB","session_id":"8d2ac41d-2f33-454f-8d12-c98a0770a25b","agent":"Claude Code","date":"2026-10-30T13:47:06Z","message":"test: bound the flaky-test checks against slow or missing ports","is_logs_only":true,"session_count":1,"session_ids":["8d2ac41d-2f33-454f-8d12-c98a0770a25b"]},
+  {"checkpoint_id":"bebbe9fcb97940e4f4e52467bab6717ab5aed931","session_id":"b58a7ecd-5735-44d9-923b-36cac0d93141","date":"2026-10-30T13:10:30Z","message":"<ci-monitor-event>\"Auto-fix pull requests\" is watching jdx/fnox PR #1088"},
+  {"checkpoint_id":"01M66E9JMCAY5SFGFSD0FSMXEQ","session_id":"8d2ac41d-2f33-454f-8d12-c98a0770a25b","agent":"Claude Code","date":"2026-10-30T14:56:05+02:00","message":"fix: wait for the fake proxy's port file before reading it","is_logs_only":true,"session_count":1,"session_ids":["8d2ac41d-2f33-454f-8d12-c98a0770a25b"]},
+  {"checkpoint_id":"01M64673BRRMC1VGPSTHGHSMR3","session_id":"b7460ac0-7421-4320-afa8-1536c91681e4","agent":"Codex","date":"2026-10-29T09:00:00Z","message":"feat: serve the proxy's MCP page","is_logs_only":true,"session_count":1,"session_ids":["b7460ac0-7421-4320-afa8-1536c91681e4"]},
+  {"checkpoint_id":"21832ae347735e2de7c853d27c5af6250b5507c3","session_id":"e0ce30a0-d4ba-489c-b6f5-d5c8fde87f5e","date":"2026-10-28T13:00:03Z","message":"Yes, fix both flaky tests in a separate PR off main."},
+  {"checkpoint_id":"01M64XB45CCJH09K1EVA8FD2Z4","session_id":"4670105f-8a5f-4b16-bff6-7513c170a3fb","agent":"Claude Code","date":"2026-10-27T09:00:00Z","message":"docs: say what the proxy serves","is_logs_only":true,"session_count":1,"session_ids":["4670105f-8a5f-4b16-bff6-7513c170a3fb"]}
+]

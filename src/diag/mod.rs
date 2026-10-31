@@ -19,7 +19,7 @@
 pub(crate) mod delta;
 mod fallback;
 pub(crate) mod fix;
-mod process;
+pub(crate) mod process;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

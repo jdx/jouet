@@ -88,8 +88,24 @@ The markdown file ends with the same facts as JSON in an HTML comment. A reader 
 
 When the handoff recorded jobs or daemons, pickup also lists each one as it is now, under `## Jobs now` and `## pitchfork daemons now`: still running, or how it ended.
 
+## Entire
+
+Where the repository has [Entire](https://entire.io), `jouet pickup` also lists the earlier sessions with checkpoints on this branch, from `entire checkpoint list --json` and `entire session list --json`: newest first, at most three, each with its last checkpoint (the commit subject, or for a checkpoint not committed yet its prompt, cut to 100 characters) and the files it touched. The session running pickup is left out, and checkpoints made after the handoff was written are counted. It ends with the `entire` commands that show more.
+
+```text
+## Entire: earlier sessions on this branch
+
+- Claude Code `8d2ac41d` (ended, active 1d ago): 2 checkpoints
+  - last checkpoint `01M66H17P11G` at 2026-10-30T13:47:06Z: test: bound the flaky-test checks against slow or missing ports
+  - files: mise.lock
+
+More: `entire session info 8d2ac41d-2f33-454f-8d12-c98a0770a25b`, `entire checkpoint list --session 8d2ac41d-2f33-454f-8d12-c98a0770a25b`, `entire checkpoint explain --checkpoint 01M66H17P11G --short`, `entire recap --static --week`.
+```
+
+This needs `entire` on `PATH`, the repository enabled (`entire status`) and a working login (`entire auth status`); otherwise pickup says nothing about Entire. jouet runs only those read-only commands, each with a timeout (`[entire] timeout_ms`, 5 seconds by default), and a call that fails or times out becomes a note under the heading. `JOUET_ENTIRE=false` turns it off. Entire does not change whether the handoff is accurate, or the exit code. `jouet handoff` does not record anything from Entire, because pickup reads it fresh.
+
 pickup exits 0 when nothing has drifted and 1 when something has. It does not fetch the PR again; run [`jouet pr status`](/commands/pr-status) for its current state. A missing handoff is exit 3, and a file that is not a handoff is exit 4.
 
 ## JSON
 
-`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty), `jobs` (each recorded job's `id` and its state `then` and `now`), `daemons` (the same for each daemon, with pitchfork's `error`) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.
+`jouet handoff --json` prints `{"path": ..., "handoff": {...}}`. `jouet pickup --json` prints the path, the handoff, `drift` (left out when empty), `jobs` (each recorded job's `id` and its state `then` and `now`), `daemons` (the same for each daemon, with pitchfork's `error`), `entire` (where the repository has Entire: `checkpoints` and `since_handoff` counts, `sessions` with each one's `id`, `agent`, `status`, `last_active`, `checkpoints`, `last_checkpoint` and `files`, `more_sessions`, and `notes`) and `accurate: true` when nothing has drifted. Fields that are null, false or empty are left out.

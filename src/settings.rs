@@ -17,6 +17,9 @@
 //!
 //! [wind]
 //! enabled = false
+//!
+//! [entire]
+//! timeout_ms = 3000
 //! ```
 
 use usage_rs::config::{EnvLayer, FileLayer, FileScope, Layers, resolve};
@@ -35,6 +38,24 @@ pub(crate) struct Settings {
     pub wind: WindSettings,
     #[usage(flatten)]
     pub share: ShareSettings,
+    #[usage(flatten)]
+    pub entire: EntireSettings,
+}
+
+/// Reading Entire's sessions, checkpoints and line origins, where a
+/// repository has Entire enabled.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "entire")]
+pub(crate) struct EntireSettings {
+    /// Draw on Entire where `entire` is installed, the repository is enabled and its login works; off never runs it
+    #[usage(env = "JOUET_ENTIRE", default = true)]
+    pub enabled: bool,
+    /// Milliseconds each `entire` call for status, sessions and checkpoints may take before jouet stops waiting
+    #[usage(env = "JOUET_ENTIRE_TIMEOUT_MS", default = 5000)]
+    pub timeout_ms: u64,
+    /// Milliseconds each `entire why` for --why may take; a repository with a long history can take a minute
+    #[usage(env = "JOUET_ENTIRE_WHY_TIMEOUT_MS", default = 15000)]
+    pub why_timeout_ms: u64,
 }
 
 /// Contributing back to jouet, through `jouet share`.

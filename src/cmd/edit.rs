@@ -4,6 +4,7 @@ use super::Output;
 use super::diag as diag_cmd;
 use super::scope::{self, How, Scope};
 use crate::diag::{self, Status, delta};
+use crate::entire;
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
 use jouet_edit::{
@@ -93,6 +94,11 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     if plan.report.ok() {
         plan.report.callers = callers(&plan.report);
     }
+    let why = if args.why && plan.report.ok() {
+        earlier_sessions(&plan)
+    } else {
+        Why::default()
+    };
     if !plan.report.ok() {
         let exit = if plan.report.only_missing_files() {
             Exit::NotFound
@@ -102,12 +108,12 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         if let Some(syntax) = counts {
             name_counts(&mut plan.report, syntax);
         }
-        print_report(out, &plan.report, None, None, scoped.as_ref());
+        print_report(out, &plan.report, None, None, scoped.as_ref(), &why);
         return exit;
     }
     if args.dry_run {
         plan.report.dry_run = true;
-        print_report(out, &plan.report, None, None, scoped.as_ref());
+        print_report(out, &plan.report, None, None, scoped.as_ref(), &why);
         return Exit::Ok;
     }
     let settings = crate::settings::Settings::load();
@@ -251,6 +257,7 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         fixed.as_ref(),
         diagnosed.as_ref(),
         scoped.as_ref(),
+        &why,
     );
     // Keep the code graph in step with what was written (or restored), when
     // the repository has one, as the post-tool-use hook does for file tools.
@@ -265,6 +272,73 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         super::graph::reindex(&cwd, &touched);
     }
     exit
+}
+
+/// What --why found: the lines the edit changes that earlier agent
+/// sessions wrote.
+#[derive(Default, Serialize)]
+struct Why {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    earlier_sessions: Vec<EarlierLines>,
+    /// Why --why could not look, or looked at only some files.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct EarlierLines {
+    path: String,
+    #[serde(flatten)]
+    lines: entire::AgentLines,
+}
+
+/// How many files --why asks `entire why` about.
+const WHY_FILES: usize = 10;
+
+/// The lines the plan changes that an agent session other than this one
+/// wrote, by `entire why`. A file Entire cannot answer for in time stops
+/// the lookup, since the next would be as slow; any other failure is noted
+/// for that file alone.
+fn earlier_sessions(plan: &edit::Plan) -> Why {
+    let mut why = Why::default();
+    let Some(entire) = std::env::current_dir()
+        .ok()
+        .and_then(|d| entire::Entire::here(&d))
+    else {
+        why.notes.push(super::read::NO_ENTIRE.into());
+        return why;
+    };
+    let current = super::sessions::current_session().map(|id| crate::ledger::redact_id(&id));
+    let changed = plan.changed_lines();
+    for (path, lines) in changed.iter().take(WHY_FILES) {
+        let origin = match entire.why(path) {
+            Ok(found) => entire::origin(&found, |n| lines.binary_search(&n).is_ok()),
+            Err(e) => {
+                why.notes.push(format!("--why: {e}"));
+                if entire.stalled() {
+                    break;
+                }
+                continue;
+            }
+        };
+        why.earlier_sessions.extend(
+            origin
+                .agent
+                .into_iter()
+                .filter(|a| a.session_id.is_none() || a.session_id != current)
+                .map(|lines| EarlierLines {
+                    path: path.clone(),
+                    lines,
+                }),
+        );
+    }
+    if changed.len() > WHY_FILES {
+        why.notes.push(format!(
+            "--why: looked at the first {WHY_FILES} of {} changed files",
+            changed.len()
+        ));
+    }
+    why
 }
 
 /// What `--diag` found: the delta between the files before and after.
@@ -724,6 +798,8 @@ struct EditOutput<'a> {
     /// resolve.
     #[serde(skip_serializing_if = "Option::is_none")]
     scope: Option<&'a scope::Report>,
+    #[serde(flatten)]
+    why: &'a Why,
 }
 
 fn print_report(
@@ -732,12 +808,14 @@ fn print_report(
     fix: Option<&diag::fix::Fixed>,
     diag: Option<&DiagOutcome>,
     scope: Option<&scope::Report>,
+    why: &Why,
 ) {
     let doc = EditOutput {
         report,
         fix,
         diag,
         scope,
+        why,
     };
     out.result(&doc, || {
         let mut text = scope.map(scope::render).unwrap_or_default();
@@ -747,6 +825,20 @@ fn print_report(
         }
         if let Some(d) = diag {
             text.push_str(&render_diag(d));
+        }
+        for e in &why.earlier_sessions {
+            let first = e.lines.lines.first().copied().unwrap_or(1);
+            let _ = writeln!(
+                text,
+                "warning: this edit changes {} of {} that an earlier session wrote: {}. Check that the change is intended (`entire why {}:{first}`)",
+                if e.lines.lines.len() == 1 { "a line" } else { "lines" },
+                e.path,
+                e.lines.describe(),
+                e.path
+            );
+        }
+        for note in &why.notes {
+            let _ = writeln!(text, "note: {note}");
         }
         text
     });

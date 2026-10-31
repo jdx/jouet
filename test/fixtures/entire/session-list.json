@@ -1,0 +1,57 @@
+[
+  {
+    "session_id": "8d2ac41d-2f33-454f-8d12-c98a0770a25b",
+    "agent": "Claude Code",
+    "model": "claude-sonnet-5-5",
+    "status": "ended",
+    "worktree_path": "@WORK@",
+    "started_at": "2026-10-30T12:53:55.906829783Z",
+    "ended_at": "2026-10-30T16:02:50.589845143Z",
+    "last_active": "2026-10-30T16:02:50.589846385Z",
+    "turns": 10,
+    "checkpoints": 10,
+    "tokens": {"total": 5454426, "input": 110, "cache_read": 5258551, "cache_write": 170647, "output": 25118},
+    "last_prompt": "Yes, ask Renovate to rebase PR 1087.",
+    "files_touched": ["wait_port.sh", "src/mcp/page.rs", "test/proxy_mcp.bats", "mise.lock", "Cargo.lock", "Cargo.toml"]
+  },
+  {
+    "session_id": "b58a7ecd-5735-44d9-923b-36cac0d93141",
+    "agent": "Claude Code",
+    "model": "claude-sonnet-5-5",
+    "status": "ended",
+    "worktree_path": "@WORK@",
+    "started_at": "2026-10-30T11:39:49.446300074Z",
+    "ended_at": "2026-10-30T13:45:51.964544975Z",
+    "last_active": "2026-10-30T13:45:51.964545997Z",
+    "turns": 6,
+    "checkpoints": 6,
+    "last_checkpoint_id": "01M66EWB1GYJFYSSJ7N11KT3QJ",
+    "last_prompt": "<ci-monitor-event>\"Auto-fix pull requests\" is watching jdx/fnox PR #1088 and detected the followi...",
+    "files_touched": ["mise.lock"]
+  },
+  {
+    "session_id": "b7460ac0-7421-4320-afa8-1536c91681e4",
+    "agent": "Codex",
+    "model": "gpt-5.5-codex",
+    "status": "ended",
+    "worktree_path": "@WORK@",
+    "started_at": "2026-10-29T08:10:00Z",
+    "last_active": "2026-10-29T09:01:00Z",
+    "turns": 3,
+    "checkpoints": 1,
+    "last_checkpoint_id": "01M64673BRRMC1VGPSTHGHSMR3",
+    "files_touched": ["src/mcp/page.rs"]
+  },
+  {
+    "session_id": "c0ffee00-1111-4222-8333-444455556666",
+    "agent": "Cursor",
+    "model": "cursor-small",
+    "status": "idle",
+    "worktree_path": "@WORK@",
+    "started_at": "2026-10-30T08:00:00Z",
+    "last_active": "2026-10-30T09:30:00Z",
+    "turns": 2,
+    "checkpoints": 2,
+    "files_touched": []
+  }
+]

@@ -630,6 +630,9 @@ Fail if the edit introduced diagnostics: the edited files are checked through hk
 \fB\-\-revert\-on\-fail\fR
 Restore every edited file if \-\-check or \-\-diag fails
 .TP
+\fB\-\-why\fR
+Warn when the edit changes lines an earlier agent session wrote, by `entire why`: the session, checkpoint and prompt behind them, so `\-\-dry\-run \-\-why` shows it before anything is written. It warns and does not refuse. Needs Entire enabled in the repository; off by default because `entire why` can take a minute where the history is long. Looks at the first 10 files
+.TP
 \fB\-\-pattern\fR \fI<PAT>\fR
 Rewrite code matching this ast\-grep pattern, instead of reading a spec
 .TP
@@ -929,7 +932,7 @@ Print help
 .SH "JOUET PICKUP"
 Print a handoff and check that it still holds
 
-Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it with the checkout: the branch, HEAD, the upstream, an operation in progress, uncommitted and untracked files, and whether its background processes still run. Exits 0 when nothing has drifted and 1 when something has. The PR is not fetched again: run `jouet pr status` for its current state.
+Reads `<git dir>/jouet/handoff.md`, or FILE, prints it, and compares it with the checkout: the branch, HEAD, the upstream, an operation in progress, uncommitted and untracked files, and whether its background processes still run. Exits 0 when nothing has drifted and 1 when something has. The PR is not fetched again: run `jouet pr status` for its current state. Where the repository has Entire (`entire` on PATH, the repository enabled, a working login), it also lists the earlier sessions with checkpoints on this branch: the last checkpoint of each and the files it touched, and the `entire` commands that show more.
 .PP
 \fBUsage:\fR jouet pickup [OPTIONS] [<FILE>]
 .PP
@@ -946,7 +949,7 @@ The handoff to read (`\-` is stdin)
 .SH "JOUET SESSIONS"
 Show which agent sessions are working where on this machine
 
-Reads Claude Code's transcripts (~/.claude/projects, or $CLAUDE_CONFIG_DIR) and Codex's rollouts (~/.codex/sessions, or $CODEX_HOME) written within \-\-since (default 24h). For each session it shows the harness, the directory it last worked in, that directory's work tree and checked\-out branch, and when its transcript was last written. A session is live when its transcript was written in the last 15 minutes. Only the end of each transcript is read, never what the session said, and nothing is written. Warns about two live sessions in one work tree, which commit each other's uncommitted work, and about a live session whose directory is gone. Lists live sessions; \-\-all also lists idle ones, marking those whose directory is gone. Exits 0 whether or not there are warnings.
+Reads Claude Code's transcripts (~/.claude/projects, or $CLAUDE_CONFIG_DIR) and Codex's rollouts (~/.codex/sessions, or $CODEX_HOME) written within \-\-since (default 24h). For each session it shows the harness, the directory it last worked in, that directory's work tree and checked\-out branch, and when its transcript was last written. A session is live when its transcript was written in the last 15 minutes. Only the end of each transcript is read, never what the session said, and nothing is written. Warns about two live sessions in one work tree, which commit each other's uncommitted work, and about a live session whose directory is gone. Lists live sessions; \-\-all also lists idle ones, marking those whose directory is gone. Where the repository in the current directory has Entire, the sessions Entire tracks there are added: a session jouet found gets its checkpoint count, and one only Entire knows (another agent, or a transcript kept elsewhere) is listed with it. Exits 0 whether or not there are warnings.
 .PP
 \fBUsage:\fR jouet sessions [OPTIONS]
 .PP
@@ -1311,6 +1314,9 @@ The most lines of code to print (default 400; 0 is no limit)
 .TP
 \fB\-\-again\fR
 Print lines this session was already shown, too
+.TP
+\fB\-\-why\fR
+With \-\-symbol or \-\-range, say where the lines came from, by `entire why`: the agent session, checkpoint and prompt that wrote them, or the commits people made them in. Needs Entire enabled in the repository. Off by default because `entire why` takes from tens of milliseconds to two minutes where the history is long ([entire] why_timeout_ms)
 .TP
 \fB\-\-map\fR
 Print a map of the repository's most important definitions, from the code graph

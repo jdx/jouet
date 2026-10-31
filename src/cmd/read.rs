@@ -3,6 +3,7 @@
 
 use super::Output;
 use crate::ReadArgs;
+use crate::entire::{self, Entire, Origin};
 use jouet_graph::{DEFAULT_BUDGET, MapOptions, UNFOCUSED_MULTIPLIER};
 use jouet_output::exit::Exit;
 use jouet_search::memory::{self, Memory, Stamp};
@@ -132,6 +133,9 @@ struct FileRead {
     /// --outline of a short file: it is printed whole as well.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     short: bool,
+    /// Why --why could not say where the lines came from.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -163,6 +167,9 @@ struct Section {
     callers: Vec<String>,
     #[serde(skip_serializing_if = "is_zero")]
     caller_count: usize,
+    /// With --why: where the lines came from, by `entire why`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<Origin>,
 }
 
 /// How many callers a symbol read names.
@@ -224,6 +231,9 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     if modes > 1 {
         return out.error(Exit::Usage, "give one of --outline, --symbol and --range");
     }
+    if args.why && args.symbol.is_none() && args.range.is_none() {
+        return out.error(Exit::Usage, "--why goes with --symbol or --range");
+    }
     let file = Path::new(path);
     let bytes = match std::fs::read(file) {
         Ok(bytes) => bytes,
@@ -241,6 +251,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         more_definitions: 0,
         sections: Vec::new(),
         short: false,
+        notes: Vec::new(),
     };
     let max = args.max_lines.unwrap_or(MAX_LINES);
     let mut memory = if args.again {
@@ -264,6 +275,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 already_shown: true,
                 callers: Vec::new(),
                 caller_count: 0,
+                origin: None,
             };
         }
         let shown_end = if max == 0 {
@@ -283,6 +295,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             already_shown: false,
             callers: Vec::new(),
             caller_count: 0,
+            origin: None,
         }
     };
     let outline = || symbols::outline(file, &bytes);
@@ -353,6 +366,9 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             .push(section(None, 1, lines.len(), &mut memory));
     }
     memory.save();
+    if args.why {
+        origins(path, &mut read);
+    }
     let implicit_outline = !args.outline && args.symbol.is_none() && args.range.is_none();
     // An outline is held to --max-lines too.
     let outline_total = read.outline.len();
@@ -363,6 +379,28 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     out.result(&read, || render(&read, implicit_outline));
     Exit::Ok
 }
+
+/// Fills in where each section's lines came from, by `entire why`, or says
+/// why it cannot.
+fn origins(path: &str, read: &mut FileRead) {
+    let Some(entire) = std::env::current_dir().ok().and_then(|d| Entire::here(&d)) else {
+        read.notes.push(NO_ENTIRE.into());
+        return;
+    };
+    match entire.why(path) {
+        Ok(why) => {
+            for s in read.sections.iter_mut().filter(|s| !s.already_shown) {
+                let (start, end) = (s.start, s.end);
+                let origin = entire::origin(&why, |n| (start..=end).contains(&n));
+                s.origin = Some(origin).filter(|o| !o.is_empty());
+            }
+        }
+        Err(e) => read.notes.push(format!("--why: {e}")),
+    }
+}
+
+/// What --why says without Entire.
+pub(crate) const NO_ENTIRE: &str = "--why: Entire is not set up here; it needs `entire` on PATH, the repository enabled (`entire status`) and a working login";
 
 fn to_u32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
@@ -494,6 +532,12 @@ fn render(read: &FileRead, implicit_outline: bool) -> String {
             }
             text.push('\n');
         }
+        if let Some(origin) = &s.origin {
+            let _ = writeln!(text, "{}", origin.line());
+        }
+    }
+    for note in &read.notes {
+        let _ = writeln!(text, "note: {note}");
     }
     text
 }

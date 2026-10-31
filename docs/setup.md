@@ -238,6 +238,11 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 
 [wind]
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
+
+[entire]
+enabled = true         # JOUET_ENTIRE: read Entire where it is set up (pickup, sessions, --why)
+timeout_ms = 5000      # JOUET_ENTIRE_TIMEOUT_MS: each `entire` call for status, sessions and checkpoints
+why_timeout_ms = 15000 # JOUET_ENTIRE_WHY_TIMEOUT_MS: each `entire why` for --why
 ```
 
 [Self-winding](/winding) is on after setup: the session-start primer shows at most two notes about rules jouet drafted from the ledger. `JOUET_WIND=0` turns it off.

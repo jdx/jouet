@@ -9,6 +9,7 @@ mod config;
 mod deps;
 mod diag;
 mod docs;
+mod entire;
 mod fnox;
 mod git;
 mod guide;
@@ -345,7 +346,10 @@ pub struct HandoffArgs {
 /// progress, uncommitted and untracked files, and whether its background
 /// processes still run. Exits 0 when nothing has drifted and 1 when
 /// something has. The PR is not fetched again: run `jouet pr status` for
-/// its current state.
+/// its current state. Where the repository has Entire (`entire` on PATH,
+/// the repository enabled, a working login), it also lists the earlier
+/// sessions with checkpoints on this branch: the last checkpoint of each
+/// and the files it touched, and the `entire` commands that show more.
 #[derive(Args)]
 pub struct PickupArgs {
     /// The handoff to read (`-` is stdin)
@@ -364,8 +368,12 @@ pub struct PickupArgs {
 /// session said, and nothing is written. Warns about two live sessions in
 /// one work tree, which commit each other's uncommitted work, and about a
 /// live session whose directory is gone. Lists live sessions; --all also
-/// lists idle ones, marking those whose directory is gone. Exits 0 whether
-/// or not there are warnings.
+/// lists idle ones, marking those whose directory is gone. Where the
+/// repository in the current directory has Entire, the sessions Entire
+/// tracks there are added: a session jouet found gets its checkpoint
+/// count, and one only Entire knows (another agent, or a transcript kept
+/// elsewhere) is listed with it. Exits 0 whether or not there are
+/// warnings.
 #[derive(Args)]
 pub struct SessionsArgs {
     /// Only sessions active since TIME: a duration ago such as 24h or 7d, a
@@ -521,6 +529,14 @@ pub struct EditArgs {
     /// Restore every edited file if --check or --diag fails
     #[usage(long, global)]
     revert_on_fail: bool,
+    /// Warn when the edit changes lines an earlier agent session wrote, by
+    /// `entire why`: the session, checkpoint and prompt behind them, so
+    /// `--dry-run --why` shows it before anything is written. It warns and
+    /// does not refuse. Needs Entire enabled in the repository; off by
+    /// default because `entire why` can take a minute where the history is
+    /// long. Looks at the first 10 files
+    #[usage(long, global)]
+    why: bool,
     /// Rewrite code matching this ast-grep pattern, instead of reading a spec
     #[usage(long, value_name = "PAT")]
     pattern: Option<String>,
@@ -963,6 +979,13 @@ pub struct ReadArgs {
     /// Print lines this session was already shown, too
     #[usage(long)]
     again: bool,
+    /// With --symbol or --range, say where the lines came from, by `entire
+    /// why`: the agent session, checkpoint and prompt that wrote them, or the
+    /// commits people made them in. Needs Entire enabled in the repository.
+    /// Off by default because `entire why` takes from tens of milliseconds
+    /// to two minutes where the history is long ([entire] why_timeout_ms)
+    #[usage(long)]
+    why: bool,
     /// Print a map of the repository's most important definitions, from the
     /// code graph
     #[usage(long)]
