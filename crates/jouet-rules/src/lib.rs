@@ -77,6 +77,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("print-secrets", include_str!("../rules/print-secrets.toml")),
     ("secret-files", include_str!("../rules/secret-files.toml")),
+    (
+        "committed-secrets",
+        include_str!("../rules/committed-secrets.toml"),
+    ),
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
     (
@@ -117,6 +121,10 @@ const BUILTIN: &[(&str, &str)] = &[
 
 /// The scripts built-in rules name.
 const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
+    (
+        "committed-secrets.luau",
+        include_str!("../rules/committed-secrets.luau"),
+    ),
     (
         "push-untested.luau",
         include_str!("../rules/push-untested.luau"),
@@ -318,6 +326,8 @@ pub struct Rule {
     /// The project files a rule is about, one of which must be there for it
     /// to run.
     requires: Option<decl::Requires>,
+    /// Whether the session-start primer names it, when it denies.
+    pub primer: bool,
     body: Body,
 }
 
@@ -968,6 +978,7 @@ impl Engine {
             line: 1,
             script: None,
             requires: None,
+            primer: true,
             body: Body::None,
         };
         let decls = match decl::parse(&source.code) {
@@ -1042,6 +1053,7 @@ impl Engine {
             line,
             script: d.script.as_ref().map(|s| s.0.clone()),
             requires: d.requires,
+            primer: d.primer.unwrap_or(true),
             body: Body::None,
         };
         let problem = problem.or_else(|| examples.as_ref().err().cloned());
@@ -1128,6 +1140,7 @@ impl Engine {
             line: 1,
             script: None,
             requires: None,
+            primer: true,
             body: Body::None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {

@@ -105,16 +105,16 @@ impl Report {
 /// A secret scan of the content a commit would record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SecretScan {
-    /// The program that scanned, such as `fnox`.
+    /// What scanned: `jouet` (gitleaks' rules), `fnox`, or `jouet+fnox`.
     pub tool: String,
     pub status: ScanStatus,
     /// How many files it read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_scanned: Option<u64>,
-    /// Where a secret's value was found. Never the value itself.
+    /// Where a secret was found. Never the secret itself.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<SecretFinding>,
-    /// Why the scan was skipped.
+    /// Why the scan, or a part of it, was skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// What the scanner warned about, such as secrets it could not check.
@@ -130,13 +130,21 @@ pub enum ScanStatus {
     Skipped,
 }
 
-/// One secret's value, found in one file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// One secret, found in one file: a fnox secret's value, named by
+/// `secret`, or what a gitleaks rule matched, named by `rule`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SecretFinding {
-    /// The secret's name.
+    /// The fnox secret's name.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub secret: String,
+    /// The gitleaks rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
     pub path: String,
     pub line: u64,
+    /// The rule's match, with the secret cut to its first characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redacted: Option<String>,
 }
 
 /// Scans the content a commit would record.

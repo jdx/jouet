@@ -95,7 +95,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
         keys("Rule"),
         [
             "author", "created", "examples", "match", "message", "mode", "name", "needs", "on",
-            "requires", "scope", "script", "suggest", "why"
+            "primer", "requires", "scope", "script", "suggest", "why"
         ]
     );
     assert_eq!(
@@ -145,6 +145,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "path",
             "read_lines",
             "scope",
+            "secrets",
             "seen",
             "session",
             "stack",

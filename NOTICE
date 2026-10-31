@@ -35,3 +35,32 @@ weights and budget defaults. Aider is Copyright Paul Gauthier and is licensed
 under the Apache License, Version 2.0; a copy of the licence is at
 https://www.apache.org/licenses/LICENSE-2.0. No Aider source code is
 included; the design and weights were reimplemented in Rust.
+
+jouet's secret scanning (the jouet-secrets crate) uses gitleaks' detection
+rules, https://github.com/gitleaks/gitleaks: its config/gitleaks.toml is
+vendored unchanged as crates/jouet-secrets/gitleaks/gitleaks.toml, and the
+way rules, entropy, allowlists, stopwords and .gitleaksignore fingerprints
+are applied follows gitleaks. gitleaks is distributed under the following
+licence:
+
+MIT License
+
+Copyright (c) 2019 Zachary Rice
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

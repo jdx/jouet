@@ -172,19 +172,7 @@ pub(crate) fn installed() -> bool {
 
 /// What `jouet commit` tells someone in a fnox project where fnox is not
 /// installed.
-pub(crate) fn skipped_scan() -> SecretScan {
-    SecretScan {
-        tool: "fnox".into(),
-        status: ScanStatus::Skipped,
-        files_scanned: None,
-        findings: Vec::new(),
-        reason: Some(
-            "this repository uses fnox, but fnox is not installed, so the commit was not scanned for secret values"
-                .into(),
-        ),
-        notes: Vec::new(),
-    }
-}
+pub(crate) const NOT_INSTALLED: &str = "this repository uses fnox, but fnox is not installed, so the commit was not checked for its secrets' values (gitleaks' rules still scanned it)";
 
 /// `fnox scan --values --staged` over the index `jouet commit` builds.
 pub(crate) struct Scan {
@@ -258,6 +246,7 @@ fn read_scan(
                 .get("line")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default(),
+            ..SecretFinding::default()
         })
         .collect();
     let files_scanned = report
@@ -425,6 +414,7 @@ DEPLOY_TOKEN = { provider = "age", value = "YWdl" }
                 secret: "DATABASE_URL".into(),
                 path: "config/app.env".into(),
                 line: 3,
+                ..SecretFinding::default()
             }]
         );
     }

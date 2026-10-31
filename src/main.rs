@@ -60,6 +60,8 @@ enum Cmd {
     Claim(ClaimArgs),
     /// Commit only the named paths, with trailers
     Commit(CommitArgs),
+    /// Find secrets in files, in what is staged, or in commits, with gitleaks' rules
+    Secrets(SecretsArgs),
     /// Report the errors and warnings in files you changed, through hk
     Diag(DiagArgs),
     /// Make exact, all-or-nothing edits across files
@@ -133,10 +135,15 @@ enum Cmd {
 /// co-author line (Claude Code) and the AI disclosure, with the tool and
 /// version from AI_AGENT. Warns about a subject that is not a conventional
 /// commit when the repository checks them. Hooks always run; when one fails,
-/// the end of its output is shown and the whole of it kept in a log. In a
-/// project that uses fnox, `fnox scan --values` first checks exactly what
-/// would be committed, and a secret's value there refuses the commit (exit
-/// 1), naming the secret and file, never the value.
+/// the end of its output is shown and the whole of it kept in a log.
+///
+/// Before committing, the lines the commit adds are scanned with gitleaks'
+/// rules (as `jouet secrets scan --staged` does), and in a project that uses
+/// fnox, `fnox scan --values` checks them for its secrets' values. A secret
+/// found refuses the commit (exit 1), naming the rule or secret and the
+/// file and line, never the value. A false positive is let through with
+/// --allow-secret RULE:PATH:LINE, `gitleaks:allow` on its line, or its
+/// fingerprint in .gitleaksignore.
 #[derive(Args)]
 pub struct CommitArgs {
     /// The files and directories to commit
@@ -156,12 +163,72 @@ pub struct CommitArgs {
     /// Show what would be committed, committing nothing
     #[usage(long)]
     dry_run: bool,
+    /// Commit this finding of the secret scan anyway, a false positive:
+    /// RULE:PATH:LINE as the refusal lists it. Repeatable
+    #[usage(long, var, value_name = "RULE:PATH:LINE")]
+    allow_secret: Vec<String>,
     /// Refused: name the paths to commit instead
     #[usage(short = 'A', long, hide)]
     all: bool,
     /// Refused: jouet commit always runs hooks
     #[usage(long, hide)]
     no_verify: bool,
+}
+
+/// Find secrets in files, in what is staged, or in commits, with gitleaks' rules
+#[derive(Args)]
+pub struct SecretsArgs {
+    #[usage(subcommand)]
+    cmd: SecretsCmd,
+}
+
+#[derive(Subcommands)]
+pub enum SecretsCmd {
+    /// Find API keys, tokens and private keys, with gitleaks' rules
+    Scan(SecretsScanArgs),
+}
+
+/// Find API keys, tokens and private keys, with gitleaks' rules
+///
+/// Uses gitleaks' detection rules (github.com/gitleaks/gitleaks, MIT), built
+/// in: each rule's keywords, regex, entropy and allowlists, and gitleaks'
+/// own allowlists, which leave out lockfiles, images and vendored code. A
+/// repository's .gitleaks.toml adds rules and allowlists ([extend]
+/// useDefault = true, or allowlists alone) or replaces the rules. A line
+/// with `gitleaks:allow` on it, and a finding whose fingerprint
+/// (PATH:RULE:LINE) is in .gitleaksignore, are passed over.
+///
+/// Without --staged or --diff, scans the files and directories given (the
+/// current directory by default) as they are on disk; directories are
+/// walked as git sees them, so ignored files are left out unless named.
+/// --staged scans only the lines the index adds to HEAD, which is what `git
+/// commit` would record. --diff REF scans the lines each commit in REF..HEAD
+/// adds, commit by commit, so a secret added and removed again is still
+/// found; REF may also be a range, A..B. With either, the paths limit the
+/// diff.
+///
+/// Each finding names its rule, file and line, with the match redacted to at
+/// most the secret's first four characters; the secret itself is never
+/// printed. Exits 1 when anything is found, 3 for a path or REF that does not
+/// exist, and 4 outside a git repository with --staged or --diff, or for a
+/// .gitleaks.toml that does not parse.
+///
+/// Examples:
+///   jouet secrets scan
+///   jouet secrets scan --staged
+///   jouet secrets scan --diff origin/main
+///   jouet secrets scan config/ .env.example
+#[derive(Args)]
+pub struct SecretsScanArgs {
+    /// Files and directories to scan; with --staged or --diff, the paths
+    /// the diff is limited to
+    paths: Vec<String>,
+    /// Scan the lines the index adds to HEAD: what `git commit` would record
+    #[usage(long)]
+    staged: bool,
+    /// Scan the lines each commit in REF..HEAD adds, or in a range A..B
+    #[usage(long, value_name = "REF")]
+    diff: Option<String>,
 }
 
 /// Run the test suite, or only the tests a change affects
@@ -2588,6 +2655,7 @@ fn main() -> ExitCode {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Claim(args) => cmd::claim::run(args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
+        Cmd::Secrets(args) => cmd::secrets::run(&args, &out),
         Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
         Cmd::Graph(args) => cmd::graph::run(&args, &out),

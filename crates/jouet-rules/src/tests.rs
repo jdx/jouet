@@ -551,6 +551,7 @@ return {
             git_branch: None,
             git_ahead: None,
             stack: None,
+            secrets: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
@@ -1343,6 +1344,18 @@ fn a_rule_that_requires_a_file_runs_only_where_it_is() {
     // Its examples still run as if the file were there.
     let rule = engine.rule("needs-file").unwrap();
     assert!(engine.examples(rule).unwrap().iter().all(|e| e.ok));
+}
+
+#[test]
+fn primer_false_keeps_a_rule_out_of_the_primer_but_it_still_denies() {
+    let code = "[[rule]]\nname = \"on-content\"\nwhy = \"w\"\nmode = \"deny\"\nmessage = \"m\"\nprimer = false\nmatch = { command = \"serve\" }\n[rule.examples]\nfires = [\"serve\"]\nquiet = [\"ls\"]\n";
+    let user = engine(vec![toml_user("on-content", code)]);
+    assert!(!user.rule("on-content").unwrap().primer);
+    assert!(user.evaluate(&bash("serve")).deny.is_some());
+    // Omitted, a rule is in the primer; the built-in one about content is not.
+    let builtin = engine(builtin());
+    assert!(builtin.rule("git-stash").unwrap().primer);
+    assert!(!builtin.rule("committed-secrets").unwrap().primer);
 }
 
 #[test]
