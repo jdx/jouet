@@ -167,6 +167,7 @@ fn handle(
             let read = reads::of(&call);
             call.read_lines = read.as_deref().and_then(reads::line_count);
             call.code_lines = read.as_deref().and_then(reads::code_line_count);
+            call.tracked_files = tracked_files(&call);
             call.fnox = call
                 .cwd
                 .as_deref()
@@ -507,14 +508,7 @@ impl Log<'_> {
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
         entry.tree = tree;
-        entry.decisions = records
-            .iter()
-            .map(|r| ledger::Decision {
-                rule: r.rule.clone(),
-                action: format!("record:{}", r.kind.name()),
-                scope: Some(if r.full { "full" } else { "partial" }.into()),
-            })
-            .collect();
+        entry.decisions = records.iter().map(decision).collect();
         self.append(entry);
     }
 }
@@ -771,6 +765,84 @@ fn run_dir(cwd: Option<&Path>, dir: Option<&str>) -> Option<PathBuf> {
         (None, Some(dir)) => Some(jouet_rules::resolve_dir(Path::new("."), dir)),
         (cwd, None) => cwd.map(Path::to_path_buf),
     }
+}
+
+/// A run of `jouet test`, recorded by `jouet test` itself, as `command`
+/// (how it was called) exiting `exit_code` in `cwd`. The hooks cannot see
+/// its exit status when its output is piped (`jouet test | tail` exits with
+/// tail's), and Codex sends hooks none at all, so it keeps its own result:
+/// in the session's state for the stop gate, and in the ledger for
+/// `push-untested` and `pr land`. It goes through the same post-tool-use
+/// rules as a hook's run, so a rule that would not record it records
+/// nothing here either.
+pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
+    let settings = Settings::load();
+    let hooks = &settings.hooks;
+    if !hooks.enabled || !(hooks.verify || hooks.ledger) {
+        return;
+    }
+    let call = Call {
+        event: Some(Event::PostToolUse),
+        harness: "jouet".into(),
+        tool: "Bash".into(),
+        command: Some(command.to_string()),
+        cwd: Some(cwd.to_string_lossy().into_owned()),
+        exit_code: Some(exit_code),
+        ..Call::default()
+    };
+    let records = rules::load(cwd).engine.evaluate(&call).records;
+    if records.is_empty() {
+        return;
+    }
+    let tree = jouet_rules::tree::work_tree(Some(cwd), TREE_TIMEOUT).ok();
+    let session = jouet_git::session::id_from_env();
+    if hooks.verify
+        && let Some(path) = session.as_deref().and_then(verify::state_path)
+    {
+        let root = verify::root_of(cwd);
+        let _ = verify::update(&path, |state| {
+            state.record(&root, records.clone(), tree.as_deref());
+        });
+    }
+    if hooks.ledger
+        && let Some(dir) = ledger::dir()
+    {
+        let mut entry = Entry::new("jouet", session.as_deref(), "test-run");
+        entry.repo = ledger::repo_key(cwd);
+        entry.shape = Some(ledger::shape(command));
+        entry.exit_code = Some(exit_code);
+        entry.tree = tree;
+        entry.decisions = records.iter().map(decision).collect();
+        ledger::append(&dir, &entry);
+    }
+}
+
+/// A recorded run, as the ledger keeps it: its kind and scope, never what
+/// it selected.
+fn decision(r: &Record) -> ledger::Decision {
+    ledger::Decision {
+        rule: r.rule.clone(),
+        action: format!("record:{}", r.kind.name()),
+        scope: Some(if r.full { "full" } else { "partial" }.into()),
+    }
+}
+
+/// How many files the work tree tracks, for a search a `min_tracked_files`
+/// matcher could be about: the Grep tool, or a command running grep or rg.
+/// Other calls do not pay for `git ls-files`. After a `cd`, the search runs
+/// somewhere else, so the count is unknown and the matcher holds.
+fn tracked_files(call: &Call) -> Option<u32> {
+    let words: Vec<&str> = call
+        .command
+        .as_deref()
+        .map(|c| c.split(|ch: char| !ch.is_ascii_alphanumeric()).collect())
+        .unwrap_or_default();
+    let search = call.tool == "Grep" || words.iter().any(|w| *w == "grep" || *w == "rg");
+    if !search || words.iter().any(|w| *w == "cd" || *w == "pushd") {
+        return None;
+    }
+    let cwd = call.cwd.as_deref().map(Path::new);
+    jouet_rules::tree::tracked_files(cwd, TREE_TIMEOUT).ok()
 }
 
 /// The session's work tree, hashed; None outside a repository.
@@ -1054,6 +1126,35 @@ mod tests {
                 .get("permissionDecision")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn tracked_files_are_counted_only_for_a_search_where_it_runs() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.path().join("a.rs"), "fn a() {}\n").unwrap();
+        git(&["add", "a.rs"]);
+        let call = |command: &str| Call {
+            tool: "Bash".into(),
+            command: Some(command.into()),
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            ..Call::default()
+        };
+        assert_eq!(tracked_files(&call("rg TODO")), Some(1));
+        // Not a search: git is not asked.
+        assert_eq!(tracked_files(&call("ls -la")), None);
+        // After a `cd`, the search runs somewhere else.
+        assert_eq!(tracked_files(&call("cd .. && rg TODO")), None);
     }
 
     #[test]

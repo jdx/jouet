@@ -102,6 +102,12 @@ fn conditions(m: &Matcher, call: &Call) -> bool {
     {
         return false;
     }
+    // An unknown count holds: outside a repository, a search can be large.
+    if m.min_tracked_files
+        .is_some_and(|min| call.tracked_files.is_some_and(|n| n < min))
+    {
+        return false;
+    }
     true
 }
 

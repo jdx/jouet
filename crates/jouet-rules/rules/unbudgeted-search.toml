@@ -11,13 +11,15 @@ suggest = "jouet search PATTERN"
 message = "It groups matches by the function they are in, stops at a byte budget with a marker for what it left out, and skips matches this session already saw (`jouet agent-help search`)."
 
 # rg over the whole working directory (no path, or `.`), printing every
-# matching line: no max count, no file list or count, and no `| head`.
+# matching line: no max count, no file list or count, and no `| head`. In
+# a work tree of fewer than 200 files, a search of all of it stays small.
 [[rule.match]]
 command = "rg"
 unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "--files-without-match", "-c", "--count", "--count-matches", "-q", "--quiet", "--files", "--json", "-h", "--help", "-V", "--version"]
 value_flags = ["-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "-M", "--max-columns", "-E", "--encoding", "-d", "--max-depth", "-r", "--replace", "-j", "--threads", "--sort", "--sortr", "--max-filesize"]
 max_args = 1
 unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+min_tracked_files = 200
 
 [[rule.match]]
 command = "rg"
@@ -26,6 +28,7 @@ value_flags = ["-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t"
 args = [".", "./"]
 max_args = 2
 unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+min_tracked_files = 200
 
 # grep -r over the whole working directory, likewise.
 [[rule.match]]
@@ -35,6 +38,7 @@ unless_flags = ["-m", "--max-count", "-l", "--files-with-matches", "-L", "--file
 value_flags = ["-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "--include", "--exclude", "--exclude-dir"]
 max_args = 1
 unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+min_tracked_files = 200
 
 [[rule.match]]
 command = "grep"
@@ -44,6 +48,7 @@ value_flags = ["-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--a
 args = [".", "./"]
 max_args = 2
 unless_with = { command = ["head", "tail", "wc", "less", "more"] }
+min_tracked_files = 200
 
 # Claude Code's Grep tool printing matching lines, over the whole working
 # directory, with no head_limit.
@@ -51,6 +56,7 @@ unless_with = { command = ["head", "tail", "wc", "less", "more"] }
 tool = "Grep"
 input = { output_mode = "content" }
 unless_input = ["head_limit", "path", "glob", "type"]
+min_tracked_files = 200
 
 [rule.examples]
 fires = [
@@ -61,8 +67,14 @@ fires = [
   "grep -rn TODO .",
   "grep -R fixme",
   { tool = "Grep", input = { pattern = "TODO", output_mode = "content" } },
+  # A large work tree, or one whose size is unknown (above).
+  { command = "rg -n retry_limit .", tracked_files = 4000 },
 ]
 quiet = [
+  # A small work tree: a search of all of it stays small.
+  { command = "rg -n 'retry_limit|retry-limit' .", tracked_files = 24 },
+  { command = "grep -rniE retry_limit . --exclude-dir=.git", tracked_files = 24 },
+  { tool = "Grep", input = { pattern = "TODO", output_mode = "content" }, tracked_files = 24 },
   "rg TODO src/backend",
   "rg -l TODO",
   "rg -c TODO",
