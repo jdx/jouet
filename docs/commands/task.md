@@ -14,7 +14,7 @@ jouet task apply ID --file local|shared [--name NAME] [--dry-run] [--json]
 The flags are listed in the CLI reference: [`task propose`](/cli/task/propose) and [`task apply`](/cli/task/apply).
 
 ::: warning Needs a recent mise
-`jouet task apply` needs a mise newer than 2026.10.24. The next release (2026.10.25, or 2026.11.0 if it lands in November) is the first with `mise tasks set` and `mise tasks rm`, file selection for `mise tasks add`, and `--json` on all three. A build of mise's `main` branch from after jdx/mise#15213 works too, though it still reports 2026.10.24: jouet checks that its `mise tasks set` exists. With an older mise, `apply` refuses with exit 4 and says which version it needs. `jouet task propose` only reads `mise tasks ls --json`, which older versions have.
+`jouet task apply` needs mise 2026.10.25 or later, the first release with `mise tasks set` and `mise tasks rm`, file selection for `mise tasks add`, and `--json` on all three. Update with `mise self-update`. With an older mise, `apply` refuses with exit 4 and says which version it needs. `jouet task propose` only reads `mise tasks ls --json`, which older versions have.
 :::
 
 ## Proposing

@@ -32,10 +32,12 @@ mod worktrees;
 
 pub use index::Refresh;
 pub use map::{
-    DEFAULT_BUDGET, MapDef, MapFile, MapOptions, RepoMap, UNFOCUSED_MULTIPLIER, Uses,
+    DEFAULT_BUDGET, MapDef, MapFile, MapOptions, RepoMap, UNFOCUSED_MULTIPLIER,
     render as render_map,
 };
-pub use query::{Affected, AffectedTest, Explored, MAX_RESULTS, Reach, SymbolQuery, is_test_path};
+pub use query::{
+    Affected, AffectedTest, Explored, MAX_RESULTS, Reach, Site, SymbolQuery, is_test_path,
+};
 pub use worktrees::Pruned;
 
 use rusqlite::Connection;

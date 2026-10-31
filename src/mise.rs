@@ -9,9 +9,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// The last mise release before `tasks add` chose the file and printed
-/// JSON, and before `tasks set` and `tasks rm` (jdx/mise#15213). The next
-/// release has them, whether it is 2026.10.25 or 2026.11.0.
+/// JSON, and before `tasks set` and `tasks rm` (jdx/mise#15213).
 pub(crate) const BEFORE: &str = "2026.10.24";
+
+/// The first mise release with them.
+pub(crate) const FIRST: &str = "2026.10.25";
 
 /// Why mise could not do what jouet asked.
 #[derive(Debug)]
@@ -27,11 +29,11 @@ pub(crate) enum Problem {
 impl Problem {
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::Missing => format!(
-                "mise is not installed; jouet writes tasks through a mise newer than {BEFORE}"
-            ),
+            Self::Missing => {
+                format!("mise is not installed; jouet writes tasks through mise {FIRST} or later")
+            }
             Self::TooOld(version) => format!(
-                "this needs a mise newer than {BEFORE}, the first with `mise tasks set` and `rm` and their JSON; the mise on PATH is {version}"
+                "this needs mise {FIRST} or later, the first with `mise tasks set` and `rm` and their JSON; the mise on PATH is {version}"
             ),
             Self::Failed(message) => message.clone(),
         }
@@ -161,7 +163,7 @@ mod tests {
             Some((2026, 10, 24))
         );
         let before = parse_version(BEFORE).unwrap();
-        assert!(parse_version("2026.10.25").unwrap() > before);
+        assert!(parse_version(FIRST).unwrap() > before);
         assert!(parse_version("2026.11.0").unwrap() > before);
         assert_eq!(parse_version("mise"), None);
     }

@@ -89,6 +89,17 @@ pub struct Case {
     /// Whether `jouet.git.state()` reports a dirty work tree; None when it
     /// has no answer, as for every other probe in an example.
     pub git_dirty: Option<bool>,
+    /// The agent session making the call.
+    pub session: Option<String>,
+    /// What `jouet.claims.held()` reads: every claim in the repository, as
+    /// `jouet claim` keeps them; None when it has no answer.
+    pub claims: Option<serde_json::Value>,
+    /// The branch `jouet.git.state()` reports checked out.
+    pub git_branch: Option<String>,
+    /// What `jouet.git.ahead()` answers, for any branch.
+    pub git_ahead: Option<u32>,
+    /// What `jouet.stack.layer()` answers.
+    pub stack: Option<serde_json::Value>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -253,6 +264,11 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         read_lines: None,
         fnox: None,
         git_dirty: None,
+        session: None,
+        claims: None,
+        git_branch: None,
+        git_ahead: None,
+        stack: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -363,7 +379,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
     let empty = CaseTable::default();
     let (command, t) = match item {
         CaseDecl::Command(command) => (Some(command.clone()), &empty),
-        CaseDecl::Call(t) => (t.command.clone(), t),
+        CaseDecl::Call(t) => (t.command.clone(), t.as_ref()),
     };
     let tool = t.tool.clone().unwrap_or_else(|| "Bash".into());
     if command.is_none() && tool == "Bash" {
@@ -397,6 +413,33 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
             files: f.files.clone(),
         }),
         git_dirty: t.git.as_ref().map(|g| g.dirty),
+        session: t.session.clone(),
+        claims: t.claims.as_ref().map(|claims| {
+            claims
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "pattern": c.pattern,
+                        "session": c.session,
+                        "worktree": c.worktree.as_deref().unwrap_or("/elsewhere"),
+                        "branch": c.branch,
+                        "note": c.note,
+                        "claimed_at": "2026-01-01T00:00:00Z",
+                        "expires_at": "2999-01-01T00:00:00Z",
+                    })
+                })
+                .collect()
+        }),
+        git_branch: t.git.as_ref().and_then(|g| g.branch.clone()),
+        git_ahead: t.git.as_ref().and_then(|g| g.ahead),
+        stack: t.stack.as_ref().map(|s| {
+            serde_json::json!({
+                "branch": s.branch,
+                "parent": s.parent,
+                "trunk": s.trunk.as_deref().unwrap_or("main"),
+                "parent_merged": s.parent_merged,
+            })
+        }),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -462,6 +505,7 @@ impl Engine {
                 command: case.command.clone(),
                 path: case.path.clone(),
                 cwd: None,
+                session: case.session.clone(),
                 exit_code: match rule.event {
                     Event::PostToolUse => Some(case.exit_code.unwrap_or(0)),
                     Event::PreToolUse => case.exit_code,
@@ -474,7 +518,16 @@ impl Engine {
             // Each example is a call of its own: probes are asked afresh.
             self.new_call();
             if let Some(dirty) = case.git_dirty {
-                self.stub_git_state(dirty);
+                self.stub_git_state(dirty, case.git_branch.as_deref());
+            }
+            if let Some(ahead) = case.git_ahead {
+                self.stub("ahead:*", ahead.into());
+            }
+            if let Some(stack) = &case.stack {
+                self.stub("stack:layer", stack.clone());
+            }
+            if let Some(claims) = &case.claims {
+                self.stub("claims", claims.clone());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
@@ -521,19 +574,29 @@ impl Engine {
     /// Gives `jouet.git.state()` an example's answer for this call: a clean
     /// work tree, or one with a changed file. Only a script asks, so a VM
     /// that cannot start has nobody to answer.
-    fn stub_git_state(&self, dirty: bool) {
+    fn stub_git_state(&self, dirty: bool, branch: Option<&str>) {
+        let mut state = serde_json::json!({
+            "detached": false,
+            "dirty": dirty,
+            "changed": u32::from(dirty),
+            "untracked": 0,
+            "conflicted": 0,
+        });
+        if let Some(branch) = branch {
+            state["branch"] = branch.into();
+        }
+        self.stub("git", state);
+    }
+
+    /// Gives a probe an example's answer for this call, under the key the
+    /// probe caches it by. Only a script asks, so a VM that cannot start has
+    /// nobody to answer.
+    fn stub(&self, key: &str, answer: serde_json::Value) {
         if let Ok(vm) = self.vm() {
-            let state = serde_json::json!({
-                "detached": false,
-                "dirty": dirty,
-                "changed": u32::from(dirty),
-                "untracked": 0,
-                "conflicted": 0,
-            });
             vm.shared
                 .cache
                 .borrow_mut()
-                .insert("git".into(), Ok(Some(state)));
+                .insert(key.into(), Ok(Some(answer)));
         }
     }
 

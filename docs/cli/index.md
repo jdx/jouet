@@ -14,6 +14,9 @@
 ## Subcommands
 
 - [`jouet audit [FLAGS]`](/cli/audit.md)
+- [`jouet claim [--for <DUR>] [--note <TEXT>] [PATHS]… [SUBCOMMAND]`](/cli/claim.md)
+- [`jouet claim ls [--all]`](/cli/claim/ls.md)
+- [`jouet claim release [PATHS]…`](/cli/claim/release.md)
 - [`jouet commit [FLAGS] [PATHS]…`](/cli/commit.md)
 - [`jouet diag <SUBCOMMAND>`](/cli/diag.md)
 - [`jouet diag check [--changed] [--max <N>] [FILES]…`](/cli/diag/check.md)
@@ -46,6 +49,9 @@
 - [`jouet pr threads apply [FLAGS] [ARGS]…`](/cli/pr/threads/apply.md)
 - [`jouet read [FLAGS] [PATH]`](/cli/read.md)
 - [`jouet review-package [-o --output <FILE>] [--context <N>] <BASE> [HEAD]`](/cli/review-package.md)
+- [`jouet stack <SUBCOMMAND>`](/cli/stack.md)
+- [`jouet stack status [BRANCH]`](/cli/stack/status.md)
+- [`jouet stack sync [FLAGS] [BRANCH]`](/cli/stack/sync.md)
 - [`jouet search [FLAGS] <PATTERN> [PATHS]…`](/cli/search.md)
 - [`jouet test [FLAGS] [EXTRA]…`](/cli/test.md)
 - [`jouet wait [FLAGS] <SUBCOMMAND>`](/cli/wait.md)

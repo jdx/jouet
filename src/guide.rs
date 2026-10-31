@@ -84,6 +84,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "stack",
+        Some(
+            "working on a stack of PRs: `jouet stack status` shows each layer's PR and whether it really contains the layer below, by ancestry and by content (a restack that reverted a parent's change is flagged), and `jouet stack sync` merges each layer up to date from its local branch and verifies it, instead of trusting `gh stack view` or restacking with rebase, `checkout -B` or force pushes",
+        ),
+    ),
+    (
         "test",
         Some(
             "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest or pytest; for anything else (such as plain `python -m unittest`) it exits 4, so run the project's own command",
@@ -104,16 +110,20 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent",
+            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent; `jouet unwind` proposes retiring a rule of yours that is noisy or keeps getting overridden",
         ),
     ),
     (
-        "unwind",
-        Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
+        "claim",
+        Some(
+            "working where other agent sessions on this machine also work: `jouet claim PATH... --note TEXT` tells them which files are yours, jouet's hooks warn when you edit or commit a path another session claims, and `jouet claim ls` lists who claims what",
+        ),
     ),
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // `wind`'s line names it.
+    ("unwind", None),
     // Named where it is needed: in a winding note at session start, which
     // says what to ask the user.
     ("task", None),
@@ -205,6 +215,10 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
+/// Commands that work as a pair, which the overview and the skill describe
+/// in one entry to stay within their budgets.
+pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in
 /// `jouet agent-help COMMAND`, so a new subcommand costs the overview a word,
@@ -214,8 +228,27 @@ pub(crate) fn overview() -> String {
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
         env!("CARGO_PKG_VERSION")
     );
-    for (meta, when) in agent_commands() {
+    let commands = agent_commands();
+    for (meta, when) in &commands {
         let name = meta.cmd.name;
+        if PAIRED.iter().any(|(_, second)| *second == name) {
+            continue;
+        }
+        let partner = PAIRED
+            .iter()
+            .find(|(first, _)| *first == name)
+            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
+        if let Some((other, other_when)) = partner {
+            let _ = writeln!(
+                out,
+                "jouet {name} / jouet {}: {} / {}",
+                other.cmd.name,
+                meta.about.unwrap_or(""),
+                lowercase_first(other.about.unwrap_or(""))
+            );
+            let _ = writeln!(out, "  when: {when}; {other_when}");
+            continue;
+        }
         let subs: Vec<&str> = meta
             .subcommands
             .iter()
@@ -347,6 +380,14 @@ fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
         parts.push(flag_usage(flag));
     }
     Some(parts.join(" "))
+}
+
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 fn conventions() -> String {

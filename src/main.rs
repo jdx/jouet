@@ -52,6 +52,8 @@ struct Jouet {
 enum Cmd {
     /// Report where coding-agent sessions spend tokens and time
     Audit(AuditArgs),
+    /// Claim paths for this session, so other sessions are warned off them
+    Claim(ClaimArgs),
     /// Commit only the named paths, with trailers
     Commit(CommitArgs),
     /// Report the errors and warnings in files you changed, through hk
@@ -72,6 +74,8 @@ enum Cmd {
     Read(ReadArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
+    /// Check a stack of PRs: does each layer really contain the one below
+    Stack(StackArgs),
     /// Search files like rg, within a budget, grouped by symbol
     Search(SearchArgs),
     /// Run the test suite, or only the tests a change affects
@@ -349,9 +353,19 @@ pub struct StatsArgs {
 /// - REPL is text with the pattern's `$X` filled in; the rest is copied as
 ///   written, and indentation follows the match.
 ///
+/// `--callers-of PATH#SYMBOL` rewrites only the calls the code graph
+/// attributes to that definition, so `load($$$A)` leaves other functions
+/// named `load` alone; write the pattern for the whole call (`$F($P)`,
+/// `$R.load($$$A)`). `--impact PATH#SYMBOL` rewrites only inside it and the
+/// code depending on it. Matches the graph cannot attribute (dynamic
+/// dispatch, macros, files it has not read) are listed as unresolved and
+/// left alone, and so are its calls the pattern missed. The report lists
+/// each rewrite and the test files that depend on them; --dry-run first.
+///
 /// Examples:
 ///   jouet edit --pattern '$C.get($URL).send()?' --rewrite '$C.get($URL).timeout(TIMEOUT).send()?' --lang rust src/
 ///   jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app/ --check 'python -m pytest -q' --revert-on-fail
+///   jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, None)' --lang rust --callers-of src/config.rs#load
 ///
 /// Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 #[derive(Args)]
@@ -389,6 +403,14 @@ pub struct EditArgs {
     /// go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --pattern, rewrite only the calls the code graph attributes to
+    /// this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --pattern, rewrite only inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
     /// With --pattern, the files and directories to rewrite (default .)
     paths: Vec<String>,
     /// Refuse unless PATH's contents have this SHA-256 hash. Repeatable
@@ -687,6 +709,7 @@ pub struct LandArgs {
 ///   jouet search --structural --lang rust '$X.unwrap()'
 ///   jouet search --structural --lang go 'if err != nil { return $$$ }'
 ///   jouet search --structural --lang typescript 'useEffect($FN, [])'
+///   jouet search --structural --lang rust '$F($$$A)' --callers-of src/config.rs#load
 
 #[derive(Args)]
 pub struct SearchArgs {
@@ -729,6 +752,14 @@ pub struct SearchArgs {
     /// typescript, tsx, go, ruby, java, c or cpp
     #[usage(long, value_name = "LANG")]
     lang: Option<String>,
+    /// With --structural, only the calls the code graph attributes to this
+    /// symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    callers_of: Option<String>,
+    /// With --structural, only matches inside this symbol and the code the
+    /// graph says depends on it, three hops back
+    #[usage(long, value_name = "PATH#SYMBOL")]
+    impact: Option<String>,
 }
 
 /// Read a file by its outline, a symbol or a range, or the repository's map
@@ -1060,6 +1091,130 @@ pub struct WaitJobArgs {
     /// Do not show its log
     #[usage(long)]
     no_logs: bool,
+}
+
+/// Claim paths for this session, so other sessions are warned off them
+///
+/// A claim is advisory: it blocks nothing. It tells other agent sessions on
+/// this machine that this session works on these paths, and jouet's hooks
+/// warn a session that edits or commits a path another live session claims,
+/// naming that session and its worktree. Every worktree of a repository
+/// shares its claims. PATH is a file, a directory (covering everything
+/// under it) or a glob (`*`, `**`, `?`). A claim lasts --for (default 2h),
+/// and lapses early when its worktree is removed or its agent exits.
+/// Claiming a path again renews it. Refuses (exit 1) when another live
+/// session claims an overlapping path, naming it; exits 4 outside an agent
+/// session (set JOUET_SESSION_ID to claim from elsewhere).
+#[derive(Args)]
+#[usage(args_conflicts_with_subcommands)]
+pub struct ClaimArgs {
+    #[usage(subcommand)]
+    cmd: Option<ClaimCmd>,
+    /// The files, directories or globs to claim
+    paths: Vec<String>,
+    /// How long the claim lasts (default 2h)
+    #[usage(long = "for", value_name = "DUR")]
+    duration: Option<String>,
+    /// What the session is doing there, shown to the others
+    #[usage(long, value_name = "TEXT")]
+    note: Option<String>,
+}
+
+#[derive(Subcommands)]
+pub enum ClaimCmd {
+    /// List the live claims in this repository, every session's
+    Ls(ClaimLsArgs),
+    /// Release this session's claims
+    Release(ClaimReleaseArgs),
+}
+
+/// List the live claims in this repository, every session's
+///
+/// Claims that expired, or whose worktree or agent is gone, are removed
+/// first; --all lists them before they go.
+#[derive(Args)]
+pub struct ClaimLsArgs {
+    /// Also list the claims that no longer hold
+    #[usage(long)]
+    all: bool,
+}
+
+/// Release this session's claims
+///
+/// Releases the claims on the paths given, or all of this session's claims
+/// in this repository. Another session's claim is never released: it lapses
+/// on its own.
+#[derive(Args)]
+pub struct ClaimReleaseArgs {
+    /// The claimed paths to release; all of this session's when none
+    paths: Vec<String>,
+}
+
+/// Check a stack of PRs: does each layer really contain the one below
+///
+/// A stack is a chain of PRs, each based on the branch of the one below.
+/// The chain comes from gh-stack's metadata when it tracks the branch, else
+/// from the PRs' bases on GitHub. Branches are read as they are locally and
+/// as of the last fetch; nothing is fetched or changed.
+#[derive(Args)]
+pub struct StackArgs {
+    #[usage(subcommand)]
+    cmd: StackCmd,
+}
+
+#[derive(Subcommands)]
+pub enum StackCmd {
+    /// Show each layer's PR and whether it contains its parent, by ancestry and content
+    Status(StackStatusArgs),
+    /// Bring each layer up to date by merging its parent, verified, never rebasing
+    Sync(StackSyncArgs),
+}
+
+/// Show each layer's PR and whether it contains its parent, by ancestry and content
+///
+/// For each layer: its PR, base and head, unpushed local commits, and
+/// whether it contains the layer below. That is checked by ancestry (the
+/// parent's tip is in its history) and by content: every file the parent
+/// layer changed must have that change in the layer's tree, so a restack
+/// that kept the commits but reverted their changes is caught. A layer
+/// whose prerequisite merged needs the trunk merged in. A layer's local
+/// branch is used when there is one, since it may hold unpushed fixes.
+/// Exits 1 when a layer needs attention, 3 when the branch is in no stack
+/// (no PR, and gh-stack does not track it), 5 when GitHub cannot be
+/// reached.
+#[derive(Args)]
+pub struct StackStatusArgs {
+    /// A branch in the stack (default: the current branch)
+    branch: Option<String>,
+}
+
+/// Bring each layer up to date by merging its parent, verified, never rebasing
+///
+/// Fetches, then goes up the stack from the bottom. Each layer starts from
+/// its local branch, never the remote's, so unpushed fixes are kept; a
+/// local branch behind its remote is refused. A layer that lacks its parent
+/// gets the parent merged in, or the trunk once its prerequisite has merged
+/// (a squash merge included). Each merge is checked before it is committed:
+/// every change it brings in must be in the merged tree. Sync stops at the
+/// first layer that conflicts, fails that check, is checked out in another
+/// worktree, or has uncommitted changes, and says what to do. A branch
+/// checked out nowhere is merged in a temporary worktree; the one checked
+/// out here is merged in place. Never rebases or force-pushes; pushes only
+/// with --push, plainly. Exits 1 on a conflict or a failed check, 4 when
+/// refused before merging, 5 when a fetch or push fails.
+#[derive(Args)]
+pub struct StackSyncArgs {
+    /// A branch in the stack (default: the current branch)
+    branch: Option<String>,
+    /// Show what would be merged; merge, fetch and push nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// Push the layers ahead of their remote branch afterwards (never forced)
+    #[usage(long)]
+    push: bool,
+    /// Use the remote branches as last fetched
+    #[usage(long)]
+    no_fetch: bool,
 }
 
 /// Wait for a pitchfork daemon to be ready, or to stop
@@ -1736,7 +1891,7 @@ pub struct UnwindArgs {
 /// sequences too, and a session start then names them. `jouet task apply ID
 /// --file local|shared` adds the task through `mise tasks add`, never by
 /// editing TOML; which file is the user's choice, so ask them first. Applying
-/// needs a mise newer than 2026.10.24.
+/// needs mise 2026.10.25 or later.
 #[derive(Args)]
 pub struct TaskArgs {
     #[usage(subcommand)]
@@ -1775,7 +1930,7 @@ pub struct TaskProposeArgs {
 /// repository's shared config for mise.toml, and prints the JSON mise
 /// returns. Without --file it refuses (exit 4) and says which file jouet
 /// suggests: ask the user, then pass their choice. A mise older than
-/// 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes,
+/// 2026.10.25 is refused (exit 4). A command with shell syntax (`&&`, pipes,
 /// quotes) is written as `sh -c '...'`, since mise quotes each word of a
 /// task's command.
 #[derive(Args)]
@@ -2056,6 +2211,7 @@ fn main() -> ExitCode {
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
+        Cmd::Claim(args) => cmd::claim::run(args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
         Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
@@ -2063,6 +2219,7 @@ fn main() -> ExitCode {
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
+        Cmd::Stack(args) => cmd::stack::run(args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),

@@ -2,8 +2,6 @@
 //! them, cut to a token budget.
 
 use jouet_graph::{Graph, MapOptions, render_map};
-use std::path::Path;
-
 fn repo(files: &[(&str, &str)]) -> (tempfile::TempDir, tempfile::TempDir, Graph) {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".git")).unwrap();
@@ -123,13 +121,21 @@ fn a_focused_name_comes_first_and_within_keeps_to_a_directory() {
         })
         .unwrap();
     assert_eq!(listed(&map)[0], "src/cache.rs#unused_helper");
-    let empty = graph
+    let src = graph
         .map(&MapOptions {
             budget: 10_000,
-            within: Some("lib".into()),
+            within: Some("src".into()),
             ..MapOptions::default()
         })
         .unwrap();
-    assert!(empty.files.is_empty(), "{empty:?}");
-    assert!(Path::new("src").is_relative());
+    assert!(!src.files.is_empty(), "{src:?}");
+    // A prefix of a directory's name is not the directory.
+    let sibling = graph
+        .map(&MapOptions {
+            budget: 10_000,
+            within: Some("sr".into()),
+            ..MapOptions::default()
+        })
+        .unwrap();
+    assert!(sibling.files.is_empty(), "{sibling:?}");
 }

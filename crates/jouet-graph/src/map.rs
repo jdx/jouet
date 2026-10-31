@@ -95,7 +95,7 @@ fn is_zero(n: &usize) -> bool {
 /// One use counted in bulk: how many times the file `from` uses the
 /// symbol `to` (a node's `nid`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Uses {
+pub(crate) struct Uses {
     pub from: String,
     pub to: i64,
     pub count: u32,
@@ -120,7 +120,7 @@ enum Ranked {
 impl Graph {
     /// Every file's uses of every symbol, in one query: the edges of the
     /// whole graph but containment, counted by using file and target.
-    pub fn uses(&self) -> Result<Vec<Uses>, Error> {
+    pub(crate) fn uses(&self) -> Result<Vec<Uses>, Error> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT s.file_path, e.target, COUNT(*) FROM edges e JOIN nodes s ON s.nid = e.source
              WHERE e.kind IN {USE_KINDS} GROUP BY s.file_path, e.target"

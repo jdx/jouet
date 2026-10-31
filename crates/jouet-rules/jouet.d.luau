@@ -67,6 +67,8 @@ export type JouetCall = {
 	-- The file a file tool reads or writes.
 	path: string?,
 	cwd: string?,
+	-- The agent session making the call: the hook payload's `session_id`.
+	session: string?,
 	-- The command's exit code (post-tool-use only).
 	exit_code: number?,
 	-- Every command the script runs: top-level ones first, then those inside
@@ -99,6 +101,10 @@ export type JouetExample = string | {
 	-- For a `fires` example with a `kind`: the scope it must record, "full",
 	-- or "partial" and what the run selected, such as "partial -p jouet".
 	scope: string?,
+	-- The session making the call.
+	session: string?,
+	-- The claims `jouet.claims.held()` finds; without them it has no answer.
+	claims: { { pattern: string, session: string, worktree: string?, branch: string?, note: string? } }?,
 }
 
 export type JouetRule = {
@@ -209,6 +215,25 @@ export type JouetCargoWorkspace = {
 	default_members: boolean,
 }
 
+-- A live claim `jouet claim` keeps, covering a path a call touches.
+export type JouetClaim = {
+	-- The path the claim covers, relative to the repository's root.
+	path: string,
+	-- What is claimed, relative to the repository's root: a file, a
+	-- directory ending in `/`, or a glob.
+	pattern: string,
+	-- The claiming session's ID; compare it with `call.session`.
+	session: string,
+	-- "claude" or "codex", when known.
+	harness: string?,
+	-- The worktree that session works in.
+	worktree: string,
+	branch: string?,
+	note: string?,
+	claimed_at: string,
+	expires_at: string,
+}
+
 -- A daemon a project's pitchfork config declares.
 export type JouetPitchforkDaemon = {
 	-- Its name in `[daemons.NAME]`: what `pitchfork start NAME` takes.
@@ -220,6 +245,17 @@ export type JouetPitchforkDaemon = {
 	ports: { number },
 	-- The config file that declares it.
 	file: string,
+}
+
+-- Where the current branch sits in a gh-stack stack.
+export type JouetStackLayer = {
+	branch: string,
+	-- The layer below, or the trunk for the bottom layer.
+	parent: string,
+	trunk: string,
+	-- The layer below was submitted as a PR and its remote branch is gone,
+	-- as when GitHub deletes a merged PR's branch and a fetch prunes it.
+	parent_merged: boolean,
 }
 
 export type JouetRepo = {
@@ -245,6 +281,14 @@ export type JouetGit = typeof(setmetatable(
 		-- staged or not; untracked and ignored files are left out. A commit
 		-- with the same content hashes the same. The `tree` of a recorded run.
 		tree: () -> (string?, string?),
+		-- The files a commit would take, as absolute paths: what is staged
+		-- ("staged", the default), or every changed tracked file ("tracked",
+		-- what `git commit -a` takes).
+		changed: (scope: string?) -> ({ string }?, string?),
+		-- How many commits on the local branch `branch` are not in `of` (a
+		-- branch, `origin/…` or a SHA): what moving the branch to `of` would
+		-- drop. nil when there is no such local branch.
+		ahead: (branch: string, of: string) -> (number?, string?),
 	},
 	{} :: {
 		-- A git command's subcommand and its arguments, past global options
@@ -314,6 +358,13 @@ declare jouet: {
 		-- has any, such as { "vitest" }; empty when there are none.
 		adapters: () -> ({ string }?, string?),
 	},
+	claims: {
+		-- The live claims, of any session, that cover the paths (relative to
+		-- the call's directory, or absolute). A directory covers the claims
+		-- inside it, as a pathspec does. Empty when none do; nil outside a
+		-- repository.
+		held: (paths: { string }) -> ({ JouetClaim }?, string?),
+	},
 	pitchfork: {
 		-- The daemons declared in the pitchfork config files from the
 		-- filesystem root down to the call's directory (`pitchfork.toml`,
@@ -321,6 +372,18 @@ declare jouet: {
 		-- winning; read from the files, without running pitchfork. nil when
 		-- none declares any.
 		daemons: () -> ({ JouetPitchforkDaemon }?, string?),
+	},
+	stack: {
+		-- The current branch's layer in the gh-stack stack holding it, from
+		-- gh-stack's metadata and the remote-tracking branches; nil when
+		-- gh-stack does not track it.
+		layer: () -> (JouetStackLayer?, string?),
+	},
+	stack: {
+		-- The current branch's layer in the gh-stack stack holding it, from
+		-- gh-stack's metadata and the remote-tracking branches; nil when
+		-- gh-stack does not track it.
+		layer: () -> (JouetStackLayer?, string?),
 	},
 	-- The work tree's root and its GitHub repository.
 	repo: () -> (JouetRepo?, string?),

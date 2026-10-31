@@ -24,6 +24,15 @@ Print version
 \fBaudit\fR
 Report where coding\-agent sessions spend tokens and time
 .TP
+\fBclaim\fR
+Claim paths for this session, so other sessions are warned off them
+.TP
+\fBclaim ls\fR
+List the live claims in this repository, every session's
+.TP
+\fBclaim release\fR
+Release this session's claims
+.TP
 \fBcommit\fR
 Commit only the named paths, with trailers
 .TP
@@ -119,6 +128,15 @@ Read a file by its outline, a symbol or a range, or the repository's map
 .TP
 \fBreview\-package\fR
 Write one file for reviewing a range of commits
+.TP
+\fBstack\fR
+Check a stack of PRs: does each layer really contain the one below
+.TP
+\fBstack status\fR
+Show each layer's PR and whether it contains its parent, by ancestry and content
+.TP
+\fBstack sync\fR
+Bring each layer up to date by merging its parent, verified, never rebasing
 .TP
 \fBsearch\fR
 Search files like rg, within a budget, grouped by symbol
@@ -299,6 +317,61 @@ Show one redacted example command per shape and pattern
 .TP
 \fB\-h, \-\-help\fR
 Print help
+.SH "JOUET CLAIM"
+Claim paths for this session, so other sessions are warned off them
+
+A claim is advisory: it blocks nothing. It tells other agent sessions on this machine that this session works on these paths, and jouet's hooks warn a session that edits or commits a path another live session claims, naming that session and its worktree. Every worktree of a repository shares its claims. PATH is a file, a directory (covering everything under it) or a glob (`*`, `**`, `?`). A claim lasts \-\-for (default 2h), and lapses early when its worktree is removed or its agent exits. Claiming a path again renews it. Refuses (exit 1) when another live session claims an overlapping path, naming it; exits 4 outside an agent session (set JOUET_SESSION_ID to claim from elsewhere).
+.PP
+\fBUsage:\fR jouet claim [OPTIONS] [<PATHS>] ... [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-for\fR \fI<DUR>\fR
+How long the claim lasts (default 2h)
+.TP
+\fB\-\-note\fR \fI<TEXT>\fR
+What the session is doing there, shown to the others
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+The files, directories or globs to claim
+.SH "JOUET CLAIM LS"
+List the live claims in this repository, every session's
+
+Claims that expired, or whose worktree or agent is gone, are removed first; \-\-all lists them before they go.
+.PP
+\fBUsage:\fR jouet claim ls [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-all\fR
+Also list the claims that no longer hold
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET CLAIM RELEASE"
+Release this session's claims
+
+Releases the claims on the paths given, or all of this session's claims in this repository. Another session's claim is never released: it lapses on its own.
+.PP
+\fBUsage:\fR jouet claim release [OPTIONS] [<PATHS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<PATHS>\fR
+The claimed paths to release; all of this session's when none
 .SH "JOUET COMMIT"
 Commit only the named paths, with trailers
 
@@ -447,9 +520,12 @@ A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found wit
 \- A name used twice must match the same text twice: `$A == $A`. \- REPL is text with the pattern's `$X` filled in; the rest is copied as
   written, and indentation follows the match.
 
+`\-\-callers\-of PATH#SYMBOL` rewrites only the calls the code graph attributes to that definition, so `load($$$A)` leaves other functions named `load` alone; write the pattern for the whole call (`$F($P)`, `$R.load($$$A)`). `\-\-impact PATH#SYMBOL` rewrites only inside it and the code depending on it. Matches the graph cannot attribute (dynamic dispatch, macros, files it has not read) are listed as unresolved and left alone, and so are its calls the pattern missed. The report lists each rewrite and the test files that depend on them; \-\-dry\-run first.
+
 Examples:
   jouet edit \-\-pattern '$C.get($URL).send()?' \-\-rewrite '$C.get($URL).timeout(TIMEOUT).send()?' \-\-lang rust src/
   jouet edit \-\-pattern 'print($$$ARGS)' \-\-rewrite 'log.info($$$ARGS)' \-\-lang python app/ \-\-check 'python \-m pytest \-q' \-\-revert\-on\-fail
+  jouet edit \-\-dry\-run \-\-pattern '$F($P)' \-\-rewrite '$F($P, None)' \-\-lang rust \-\-callers\-of src/config.rs#load
 
 Try a pattern with `jouet search \-\-structural \-\-lang LANG 'PAT'` first.
 .PP
@@ -487,6 +563,12 @@ What \-\-pattern's matches become; its `$X` are the pattern's
 .TP
 \fB\-\-lang\fR \fI<LANG>\fR
 The language of \-\-pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+.TP
+\fB\-\-callers\-of\fR \fI<PATH#SYMBOL>\fR
+With \-\-pattern, rewrite only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+.TP
+\fB\-\-impact\fR \fI<PATH#SYMBOL>\fR
+With \-\-pattern, rewrite only inside this symbol and the code the graph says depends on it, three hops back
 .TP
 \fB\-\-expect\-hash\fR \fI<PATH=SHA256>\fR
 Refuse unless PATH's contents have this SHA\-256 hash. Repeatable
@@ -1174,6 +1256,61 @@ The commit the review starts after, such as origin/main
 .TP
 \fB<HEAD>\fR
 The last commit to review (default HEAD)
+.SH "JOUET STACK"
+Check a stack of PRs: does each layer really contain the one below
+
+A stack is a chain of PRs, each based on the branch of the one below. The chain comes from gh\-stack's metadata when it tracks the branch, else from the PRs' bases on GitHub. Branches are read as they are locally and as of the last fetch; nothing is fetched or changed.
+.PP
+\fBUsage:\fR jouet stack [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET STACK STATUS"
+Show each layer's PR and whether it contains its parent, by ancestry and content
+
+For each layer: its PR, base and head, unpushed local commits, and whether it contains the layer below. That is checked by ancestry (the parent's tip is in its history) and by content: every file the parent layer changed must have that change in the layer's tree, so a restack that kept the commits but reverted their changes is caught. A layer whose prerequisite merged needs the trunk merged in. A layer's local branch is used when there is one, since it may hold unpushed fixes. Exits 1 when a layer needs attention, 3 when the branch is in no stack (no PR, and gh\-stack does not track it), 5 when GitHub cannot be reached.
+.PP
+\fBUsage:\fR jouet stack status [OPTIONS] [<BRANCH>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<BRANCH>\fR
+A branch in the stack (default: the current branch)
+.SH "JOUET STACK SYNC"
+Bring each layer up to date by merging its parent, verified, never rebasing
+
+Fetches, then goes up the stack from the bottom. Each layer starts from its local branch, never the remote's, so unpushed fixes are kept; a local branch behind its remote is refused. A layer that lacks its parent gets the parent merged in, or the trunk once its prerequisite has merged (a squash merge included). Each merge is checked before it is committed: every change it brings in must be in the merged tree. Sync stops at the first layer that conflicts, fails that check, is checked out in another worktree, or has uncommitted changes, and says what to do. A branch checked out nowhere is merged in a temporary worktree; the one checked out here is merged in place. Never rebases or force\-pushes; pushes only with \-\-push, plainly. Exits 1 on a conflict or a failed check, 4 when refused before merging, 5 when a fetch or push fails.
+.PP
+\fBUsage:\fR jouet stack sync [OPTIONS] [<BRANCH>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-dry\-run\fR
+Show what would be merged; merge, fetch and push nothing
+.TP
+\fB\-\-push\fR
+Push the layers ahead of their remote branch afterwards (never forced)
+.TP
+\fB\-\-no\-fetch\fR
+Use the remote branches as last fetched
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<BRANCH>\fR
+A branch in the stack (default: the current branch)
 .SH "JOUET SEARCH"
 Search files like rg, within a budget, grouped by symbol
 
@@ -1202,6 +1339,7 @@ Examples:
   jouet search \-\-structural \-\-lang rust '$X.unwrap()'
   jouet search \-\-structural \-\-lang go 'if err != nil { return $$$ }'
   jouet search \-\-structural \-\-lang typescript 'useEffect($FN, [])'
+  jouet search \-\-structural \-\-lang rust '$F($$$A)' \-\-callers\-of src/config.rs#load
 .PP
 \fBUsage:\fR jouet search [OPTIONS] <PATTERN> [<PATHS>] ...
 .PP
@@ -1240,6 +1378,12 @@ Match PATTERN as code, with ast\-grep: `$X` is one node, `$$$X` any number. Need
 .TP
 \fB\-\-lang\fR \fI<LANG>\fR
 The language of a \-\-structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+.TP
+\fB\-\-callers\-of\fR \fI<PATH#SYMBOL>\fR
+With \-\-structural, only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
+.TP
+\fB\-\-impact\fR \fI<PATH#SYMBOL>\fR
+With \-\-structural, only matches inside this symbol and the code the graph says depends on it, three hops back
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2112,7 +2256,7 @@ Print help
 .SH "JOUET TASK"
 Propose mise tasks for commands agents keep repeating, and add one
 
-`jouet task propose` reads this repository's recent session transcripts (Claude Code and Codex) and drafts a mise task for each command sequence, or long command, that agents ran at least 3 times in 2 sessions and no task already runs: its name, `run`, description, `depends` and `sources` where they can be inferred, how often it ran, and which file it should go in (mise.local.toml or mise.toml) with why. The hook ledger notices such sequences too, and a session start then names them. `jouet task apply ID \-\-file local|shared` adds the task through `mise tasks add`, never by editing TOML; which file is the user's choice, so ask them first. Applying needs a mise newer than 2026.10.24.
+`jouet task propose` reads this repository's recent session transcripts (Claude Code and Codex) and drafts a mise task for each command sequence, or long command, that agents ran at least 3 times in 2 sessions and no task already runs: its name, `run`, description, `depends` and `sources` where they can be inferred, how often it ran, and which file it should go in (mise.local.toml or mise.toml) with why. The hook ledger notices such sequences too, and a session start then names them. `jouet task apply ID \-\-file local|shared` adds the task through `mise tasks add`, never by editing TOML; which file is the user's choice, so ask them first. Applying needs mise 2026.10.25 or later.
 .PP
 \fBUsage:\fR jouet task [OPTIONS] <COMMAND>
 .PP
@@ -2142,7 +2286,7 @@ Print help
 .SH "JOUET TASK APPLY"
 Add a proposed task through mise, to the file the user chose
 
-Runs `mise tasks add \-\-json` (or `mise tasks set` for a task jouet added before) with `\-\-env local` for mise.local.toml or `\-\-path` to the repository's shared config for mise.toml, and prints the JSON mise returns. Without \-\-file it refuses (exit 4) and says which file jouet suggests: ask the user, then pass their choice. A mise older than 2026.10.24 or older is refused (exit 4). A command with shell syntax (`&&`, pipes, quotes) is written as `sh \-c '...'`, since mise quotes each word of a task's command.
+Runs `mise tasks add \-\-json` (or `mise tasks set` for a task jouet added before) with `\-\-env local` for mise.local.toml or `\-\-path` to the repository's shared config for mise.toml, and prints the JSON mise returns. Without \-\-file it refuses (exit 4) and says which file jouet suggests: ask the user, then pass their choice. A mise older than 2026.10.25 is refused (exit 4). A command with shell syntax (`&&`, pipes, quotes) is written as `sh \-c '...'`, since mise quotes each word of a task's command.
 .PP
 \fBUsage:\fR jouet task apply [OPTIONS] <ID>
 .PP

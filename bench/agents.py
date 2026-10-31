@@ -289,11 +289,16 @@ def probe(task: tasks.Task, root: Path, jouet_bin: Path) -> list[str]:
                 "XDG_CACHE_HOME": str(root / f"home{n}" / "cache"),
                 **(arms.gh_env(fake.url, "jdx/demo") if tool == "gh" else arms.jouet_env(fake.url)),
             }
-            proc = subprocess.run(
-                [str(target), *pr["args"]], cwd=workdir, env=env, capture_output=True, text=True, timeout=120
-            )
+            # `before` runs first against the same fake, as a reply before
+            # a listing that must still read the thread.
+            for args in [*pr.get("before", []), pr["args"]]:
+                proc = subprocess.run(
+                    [str(target), *args], cwd=workdir, env=env, capture_output=True, text=True, timeout=120
+                )
+                if proc.returncode != 0 and args is not pr["args"]:
+                    break
             gaps = fake.world.summary()["unanswered_examples"]
-        command = f"{tool} {' '.join(pr['args'])}"
+        command = f"{tool} {' '.join(args)}"
         if proc.returncode != pr.get("exit", 0):
             failures.append(
                 f"{task.name}: `{command}` exited {proc.returncode}, not {pr.get('exit', 0)}:\n"

@@ -66,6 +66,14 @@ const BUILTIN: &[(&str, &str)] = &[
     ("git-stash", include_str!("../rules/git-stash.toml")),
     ("no-verify", include_str!("../rules/no-verify.toml")),
     ("force-push", include_str!("../rules/force-push.toml")),
+    (
+        "reset-to-remote",
+        include_str!("../rules/reset-to-remote.toml"),
+    ),
+    (
+        "rebase-merged-base",
+        include_str!("../rules/rebase-merged-base.toml"),
+    ),
     ("print-secrets", include_str!("../rules/print-secrets.toml")),
     ("secret-files", include_str!("../rules/secret-files.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
@@ -91,6 +99,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("job-ready", include_str!("../rules/job-ready.toml")),
     ("job-logs", include_str!("../rules/job-logs.toml")),
     ("job-stop", include_str!("../rules/job-stop.toml")),
+    ("claimed-path", include_str!("../rules/claimed-path.toml")),
     ("checks", include_str!("../rules/checks.toml")),
     ("reread", include_str!("../rules/reread.toml")),
     ("large-read", include_str!("../rules/large-read.toml")),
@@ -124,6 +133,18 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/scoped-lint.luau"),
     ),
     ("checks.luau", include_str!("../rules/checks.luau")),
+    (
+        "claimed-path.luau",
+        include_str!("../rules/claimed-path.luau"),
+    ),
+    (
+        "reset-to-remote.luau",
+        include_str!("../rules/reset-to-remote.luau"),
+    ),
+    (
+        "rebase-merged-base.luau",
+        include_str!("../rules/rebase-merged-base.luau"),
+    ),
 ];
 
 /// The jouet version that stops loading whole-file `.luau` rules. A test
@@ -344,6 +365,8 @@ pub struct Call {
     /// The file a file tool reads or writes.
     pub path: Option<String>,
     pub cwd: Option<String>,
+    /// The agent session making the call, from the payload's `session_id`.
+    pub session: Option<String>,
     /// The command's exit code, for post-tool-use.
     pub exit_code: Option<i32>,
     /// The tool's input, as the harness sent it.
@@ -402,6 +425,7 @@ impl Call {
                 .iter()
                 .find_map(|key| text(payload.get("tool_input").and_then(|i| i.get(*key)))),
             cwd: text(payload.get("cwd")),
+            session: text(payload.get("session_id")),
             exit_code,
             input: payload.get("tool_input").cloned(),
             seen: None,
@@ -1676,6 +1700,7 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
     t.set("command", call.command.as_deref())?;
     t.set("path", call.path.as_deref())?;
     t.set("cwd", call.cwd.as_deref())?;
+    t.set("session", call.session.as_deref())?;
     t.set("exit_code", call.exit_code)?;
     let commands = match &call.command {
         Some(script) => commands_table(lua, script, call.exit_code)?,
