@@ -78,6 +78,37 @@ pub(crate) struct State {
     /// Failed runs no later run has cleared, oldest first.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub failures: BTreeMap<Kind, Vec<Run>>,
+    /// The newest lint run through hk (`hk check`, `jouet diag check`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hk: Option<Run>,
+}
+
+/// Whether a lint run went through hk: `hk check`, `hk run check`, or
+/// `jouet diag`, which runs it.
+fn through_hk(command: &str) -> bool {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    let hk = words
+        .windows(2)
+        .any(|w| (w[0] == "hk" || w[0].ends_with("/hk")) && matches!(w[1], "check" | "run"));
+    // `jouet diag`, also past jouet's output options (`jouet --json diag`).
+    let diag = words
+        .iter()
+        .position(|w| *w == "jouet" || w.ends_with("/jouet"))
+        .is_some_and(|at| {
+            words[at + 1..]
+                .iter()
+                .find(|w| !w.starts_with('-') && **w != "agent" && **w != "human" && **w != "plain")
+                == Some(&"diag")
+        });
+    hk || diag
+}
+
+impl Run {
+    /// Whether it covered what hk's stop hook checks: the whole project, or
+    /// every changed file.
+    fn covers_changes(&self) -> bool {
+        self.full || self.selector.as_deref() == Some("changed files")
+    }
 }
 
 impl State {
@@ -102,18 +133,57 @@ impl State {
             if failures.is_empty() {
                 self.failures.remove(&kind);
             }
+            if kind == Kind::Lint && through_hk(&run.command) {
+                self.hk = Some(run.clone());
+            }
             self.runs.insert(kind, run);
         }
     }
 
-    /// Why stopping should wait: a failure nothing has cleared, or a test
-    /// suite that has only partly run since the tree changed. `tree` gives
-    /// the work tree now; it is only asked for when a partial test pass
-    /// is the newest test run.
-    pub(crate) fn block_reason(&self, tree: impl FnOnce() -> Option<String>) -> Option<String> {
+    /// Whether the newest hk check passed, covered every changed file, and
+    /// ran at the tree `now` gives.
+    pub(crate) fn hk_passed_at(&self, now: impl Fn() -> Option<String>) -> bool {
+        self.hk.as_ref().is_some_and(|run| {
+            run.passed() && run.covers_changes() && run.tree.is_some() && run.tree == now()
+        })
+    }
+
+    /// Why stopping should wait: a failure nothing has cleared, a test
+    /// suite that has only partly run since the tree changed, or, in a
+    /// repository with an hk config (`hk_repo`), files changed since the
+    /// last hk check passed. `tree` gives the work tree now; it is only
+    /// asked for when one of the last two could apply.
+    pub(crate) fn block_reason(
+        &self,
+        tree: impl Fn() -> Option<String>,
+        hk_repo: bool,
+    ) -> Option<String> {
         if let Some(reason) = self.failure_reason() {
             return Some(reason);
         }
+        if let Some(reason) = self.partial_test_reason(&tree) {
+            return Some(reason);
+        }
+        let hk = self.hk.as_ref().filter(|_| hk_repo)?;
+        if !hk.passed() || hk.tree.is_none() {
+            return None;
+        }
+        if !hk.covers_changes() {
+            return Some(format!(
+                "The last hk check passed for only some files (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
+                hk.command
+            ));
+        }
+        if hk.tree == tree() {
+            return None;
+        }
+        Some(format!(
+            "Files changed after the last hk check passed (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
+            hk.command
+        ))
+    }
+
+    fn partial_test_reason(&self, tree: &impl Fn() -> Option<String>) -> Option<String> {
         let last = self.runs.get(&Kind::Test)?;
         if last.full || !last.passed() {
             return None;
@@ -327,7 +397,7 @@ mod tests {
 
     /// The reason to block with the work tree at `tree`.
     fn reason(state: &State, tree: &str) -> Option<String> {
-        state.block_reason(|| Some(tree.to_string()))
+        state.block_reason(|| Some(tree.to_string()), false)
     }
 
     #[test]
@@ -399,11 +469,51 @@ mod tests {
         assert!(why.starts_with("The tree has changed"), "{why}");
         assert!(why.contains("`cargo test --workspace`"), "{why}");
         // An unknown tree (a Codex session) is not the same tree.
-        assert!(state.block_reason(|| None).is_some());
+        assert!(state.block_reason(|| None, false).is_some());
         // A partial lint or build run is not asked about.
         let mut lint = State::default();
         lint.record([record(Kind::Lint, "cargo clippy -p a", 0, "-p a")], None);
-        assert_eq!(lint.block_reason(|| None), None);
+        assert_eq!(lint.block_reason(|| None, false), None);
+    }
+
+    #[test]
+    fn files_changed_after_a_passing_hk_check_block_in_an_hk_repo() {
+        let mut state = State::default();
+        let lint = |command: &str, code: i32, scope: &str| record(Kind::Lint, command, code, scope);
+        state.record(
+            [lint("jouet diag check --changed", 0, "changed files")],
+            Some("t1"),
+        );
+        assert!(state.hk_passed_at(|| Some("t1".into())));
+        assert!(!state.hk_passed_at(|| Some("t2".into())));
+        assert_eq!(state.block_reason(|| Some("t1".into()), true), None);
+        let why = state.block_reason(|| Some("t2".into()), true).unwrap();
+        assert!(
+            why.starts_with(
+                "Files changed after the last hk check passed (`jouet diag check --changed`)"
+            ),
+            "{why}"
+        );
+        // Not without an hk config, and not for a check of a few files.
+        assert_eq!(state.block_reason(|| Some("t2".into()), false), None);
+        state.record([lint("hk check src/a.rs", 0, "files src/a.rs")], Some("t1"));
+        assert!(!state.hk_passed_at(|| Some("t1".into())));
+        // At the same tree, a check of some files still asks for the changed ones.
+        let why = state.block_reason(|| Some("t1".into()), true).unwrap();
+        assert!(
+            why.starts_with("The last hk check passed for only some files (`hk check src/a.rs`)"),
+            "{why}"
+        );
+        // A failing hk check is a lint failure like any other.
+        state.record([lint("hk check --all", 1, "full")], Some("t3"));
+        let why = state.block_reason(|| Some("t3".into()), true).unwrap();
+        assert!(why.contains("`hk check --all` exited 1"), "{why}");
+        // Other linters are not hk.
+        assert!(!through_hk("cargo clippy --workspace"));
+        assert!(through_hk("mise x hk -- hk run check --files0-from -"));
+        assert!(through_hk("jouet --json diag check --changed"));
+        assert!(through_hk("jouet --display agent diag check"));
+        assert!(!through_hk("jouet edit replace diag --old a --new b"));
     }
 
     #[test]

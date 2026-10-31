@@ -67,6 +67,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("no-verify", include_str!("../rules/no-verify.toml")),
     ("force-push", include_str!("../rules/force-push.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
+    ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
     (
         "affected-tests",
         include_str!("../rules/affected-tests.toml"),

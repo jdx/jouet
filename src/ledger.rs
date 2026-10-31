@@ -45,7 +45,8 @@ pub(crate) struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `override`,
-    /// or `slow-hook` (a hook over its time budget; `tool` names its event).
+    /// `slow-hook` (a hook over its time budget; `tool` names its event), or
+    /// `fix` (hk's fixers run on edited files; `tool` names the edit tool).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -63,6 +64,9 @@ pub(crate) struct Entry {
     /// `jouet_rules::tree` hashes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<String>,
+    /// For a `fix`: how many files the fixers changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<u64>,
     /// For a `skip-verify`: the reason given, with credentials redacted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -85,6 +89,41 @@ impl Entry {
 }
 
 pub(crate) use jouet_output::paths::repo_key;
+
+/// Records what running hk's fixers on edited files did, unless the ledger
+/// is turned off. `tool` is the harness tool that edited, or None for `jouet
+/// edit` and `jouet diag fix`.
+pub(crate) fn record_fix(
+    root: &Path,
+    session: Option<&str>,
+    harness: &str,
+    tool: Option<&str>,
+    fixed: &crate::diag::fix::Fixed,
+) {
+    use crate::diag::fix::FixStatus;
+    let scope = match fixed.status {
+        FixStatus::NoConfig => return,
+        FixStatus::Ran => "ran",
+        FixStatus::Refused => "refused",
+        FixStatus::TimedOut => "timed-out",
+        FixStatus::Failed => "failed",
+    };
+    let settings = crate::settings::Settings::load();
+    let Some(dir) = dir().filter(|_| settings.hooks.ledger) else {
+        return;
+    };
+    let mut entry = Entry::new(harness, session, "fix");
+    entry.repo = repo_key(root);
+    entry.tool = tool.map(str::to_string);
+    entry.duration_ms = Some(fixed.duration_ms);
+    entry.formatted = Some(fixed.formatted.len() as u64);
+    entry.decisions.push(Decision {
+        rule: "fix-after".into(),
+        action: "fix".into(),
+        scope: Some(scope.into()),
+    });
+    append(&dir, &entry);
+}
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
 pub(crate) fn dir() -> Option<PathBuf> {

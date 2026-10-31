@@ -80,6 +80,7 @@ export default defineConfig({
         text: "Commands",
         items: [
           { text: "jouet edit", link: "/commands/edit" },
+          { text: "jouet diag", link: "/commands/diag" },
           { text: "jouet search", link: "/commands/search" },
           { text: "jouet read", link: "/commands/read" },
           { text: "jouet graph", link: "/commands/graph" },
@@ -108,6 +109,16 @@ export default defineConfig({
               { text: "audit", link: "/cli/audit" },
               { text: "stats", link: "/cli/stats" },
               { text: "commit", link: "/cli/commit" },
+              {
+                text: "diag",
+                link: "/cli/diag",
+                collapsed: true,
+                items: [
+                  { text: "check", link: "/cli/diag/check" },
+                  { text: "delta", link: "/cli/diag/delta" },
+                  { text: "fix", link: "/cli/diag/fix" },
+                ],
+              },
               {
                 text: "edit",
                 link: "/cli/edit/",

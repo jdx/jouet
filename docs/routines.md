@@ -118,6 +118,8 @@ A routine's name is its file name without `.luau`, in lowercase words joined by 
 | `wait.pid` | Waiting for a process to exit | none |
 | `jouet.pr_status`, `jouet.pr_next`, `jouet.pr_threads` | jouet's own PR commands | `github.read` |
 | `jouet.pr_reply`, `jouet.pr_resolve`, `jouet.pr_land` | jouet's commands that post or merge, with every refusal they have by hand | `github.write` |
+| `jouet.diag_check{files, changed, max}`, `jouet.diag_delta{...}` | [`jouet diag`](/commands/diag): the project's hk checks on files, as findings, or only those an edit introduced | `fs.read` |
+| `jouet.diag_fix{files, changed, step}` | The project's hk fixers on files (`hk run fix --safe`, which refuses a fixer whose effect is unknown or destructive) | `fs.write` |
 | `edit.plan(spec, opts)` | Applies a [`jouet edit`](/commands/edit) spec in memory and reports each edit | `fs.read` |
 | `edit.apply(spec, opts)` | Writes it only if every edit succeeded, all or nothing | `fs.write` |
 | `ledger.entries{event, since, limit}`, `ledger.last_run(kind)` | What the hooks recorded in this work tree: command shapes, exit codes, rule decisions | `ledger.read` |
