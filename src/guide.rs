@@ -105,12 +105,9 @@ const WHEN: &[(&str, Option<&str>)] = &[
         "unwind",
         Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
     ),
-    (
-        "graph",
-        Some(
-            "finding your way around code: `graph explore QUESTION` for the code that answers it, with its source; `graph callers`/`callees`/`impact SYMBOL` before changing a definition; `graph affected FILES` for the tests a change reaches; instead of grep chains and whole-file reads",
-        ),
-    ),
+    // Not in the overview: it is at its 40-line budget. `jouet agent-help
+    // graph` describes it, and `jouet read` and `jouet edit` use it.
+    ("graph", None),
     ("share", None),
     ("agent-help", None),
     ("audit", None),
