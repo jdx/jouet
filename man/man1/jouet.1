@@ -93,6 +93,9 @@ Write one file for reviewing a range of commits
 \fBsearch\fR
 Search files like rg, within a budget, grouped by symbol
 .TP
+\fBtest\fR
+Run the test suite, or only the tests a change affects
+.TP
 \fBwait\fR
 Block until a condition holds, then print one summary
 .TP
@@ -936,6 +939,35 @@ The regular expression to search for (a literal with \-F)
 .TP
 \fB<PATHS>\fR
 Files and directories to search (default .)
+.SH "JOUET TEST"
+Run the test suite, or only the tests a change affects
+
+Without \-\-affected, runs the repository's test task as the full suite: a mise `test` task, a package.json `test` script, Cargo.toml (`cargo test \-\-workspace`), a justfile or Makefile `test` target or go.mod, else the whole suite of each test runner found. With \-\-affected, runs only the tests that the changes since the merge base with \-\-since (default: the upstream, else the default branch), uncommitted and untracked files included, affect. Adapters delegate to each runner's own selection: vitest's and jest's module graphs, pytest\-testmon when it is installed, else a static import graph. The whole suite runs instead when a lockfile, tool versions, CI, the test configuration, a conftest or setup file, or a file no adapter can trace changed; nothing runs for docs only. Each test is listed with the chain of imports that picked it, and the command. Affected runs count as partial: the full suite still has to pass before you finish or push. Words after `\-\-` go to the runner. Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when no runner is found or installed.
+.PP
+\fBUsage:\fR jouet test [OPTIONS] [<EXTRA>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-affected\fR
+Run only the tests the changes affect
+.TP
+\fB\-\-since\fR \fI<REF>\fR
+Measure changes from the merge base with REF (default: the upstream, else the default branch)
+.TP
+\fB\-\-adapter\fR \fI<NAME>\fR
+Use only this adapter: vitest, jest or pytest
+.TP
+\fB\-\-dry\-run\fR
+Print what would run and why, running nothing
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<EXTRA>\fR
+Arguments for the test runner, after `\-\-`
 .SH "JOUET WAIT"
 Block until a condition holds, then print one summary
 

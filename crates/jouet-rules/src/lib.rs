@@ -68,6 +68,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ("force-push", include_str!("../rules/force-push.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
+    (
+        "affected-tests",
+        include_str!("../rules/affected-tests.toml"),
+    ),
     ("checks", include_str!("../rules/checks.toml")),
     ("reread", include_str!("../rules/reread.toml")),
     ("large-read", include_str!("../rules/large-read.toml")),
@@ -82,6 +86,10 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
         "push-untested.luau",
         include_str!("../rules/push-untested.luau"),
+    ),
+    (
+        "affected-tests.luau",
+        include_str!("../rules/affected-tests.luau"),
     ),
     ("checks.luau", include_str!("../rules/checks.luau")),
 ];
