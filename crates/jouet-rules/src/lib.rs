@@ -1649,6 +1649,17 @@ fn install_module(
             commands_table(lua, &script, exit_code)
         })?,
     )?;
+    jouet.set(
+        "unwrap",
+        lua.create_function(|_, words: Vec<String>| {
+            let command = shell::Command {
+                words,
+                ..shell::Command::default()
+            };
+            let via: Vec<String> = command.via().into_iter().map(String::from).collect();
+            Ok((command.argv().to_vec(), via))
+        })?,
+    )?;
     let has = has_command.clone();
     jouet.set(
         "has_command",

@@ -267,7 +267,7 @@ ok    job-ready           12 examples passed
 ok    job-logs            11 examples passed
 ok    job-stop            15 examples passed
 ok    claimed-path        18 examples passed
-ok    checks              83 examples passed
+ok    checks              86 examples passed
 ok    reread              12 examples passed
 ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed
@@ -340,6 +340,7 @@ A matcher in front of a script is worth having: a hook only starts a Luau VM whe
 - `jouet.options(args)` returns the arguments before `--`.
 - `jouet.short_flag(arg, "f", "o")` reads short-option clusters such as `-fu`.
 - `jouet.has_command("wait", "ci")` asks whether the installed jouet has a command.
+- `jouet.unwrap(words)` returns the words without wrappers, as `argv` has them, and the wrappers it looked through: for a command named inside another, such as the one after `jouet test --cmd --`.
 
 `jouet rule types` prints the whole API as Luau type definitions.
 

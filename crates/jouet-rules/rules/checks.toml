@@ -74,6 +74,10 @@ fires = [
   { command = "jouet test --cmd -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --cmd -- mise run test:e2e", exit_code = 1, kind = "test", scope = "partial test:e2e" },
   { command = "jouet test --cmd -- python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
+  # The command after --cmd is read through its wrappers, as any command is.
+  { command = "jouet test --cmd -- mise x -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
+  { command = "jouet test --cmd -- env RUST_LOG=1 cargo test -p jouet-edit", exit_code = 1, kind = "test", scope = "partial -p jouet-edit" },
+  { command = "jouet test --cmd -- timeout 600 cargo build", exit_code = 0, kind = "build" },
   # `python -m unittest` runs every test it finds, unless tests are named.
   { command = "python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
   { command = "python -m unittest -v", exit_code = 1, kind = "test", scope = "full" },
