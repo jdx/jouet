@@ -188,11 +188,41 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     Ok(())
 }
 
+/// The `test` script `npm init` writes, which only fails.
+const NPM_PLACEHOLDER: &str = r#"echo "Error: no test specified" && exit 1"#;
+
 /// The repository's test command, by the first of these it has: a mise
 /// `test` task, a package.json `test` script (run by the package manager
 /// its lockfile names), Cargo.toml, a justfile or Makefile `test` target,
 /// go.mod.
 pub fn test_task(root: &Path) -> Option<Vec<String>> {
+    test_task_with(root, mise_has_test)
+}
+
+/// Whether mise, asked in `root`, has a `test` task. It reads every config,
+/// include, glob, template and file-task name the way it runs them, which
+/// the files alone cannot tell. None when it cannot answer: mise is not
+/// installed, or it failed for another reason.
+fn mise_has_test(root: &Path) -> Option<bool> {
+    let out = Command::new("mise")
+        .args(["tasks", "info", "test", "--json"])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
+    if out.status.success() {
+        return Some(true);
+    }
+    String::from_utf8_lossy(&out.stderr)
+        .contains("Task not found")
+        .then_some(false)
+}
+
+/// [`test_task`], with how to ask mise for a `test` task. When mise cannot
+/// answer, the files are read instead.
+fn test_task_with(root: &Path, ask_mise: impl Fn(&Path) -> Option<bool>) -> Option<Vec<String>> {
     let has = |name: &str| root.join(name).is_file();
     let read = |name: &str| std::fs::read_to_string(root.join(name)).ok();
     let words = |w: &[&str]| Some(w.iter().map(|s| (*s).to_string()).collect());
@@ -232,27 +262,25 @@ pub fn test_task(root: &Path) -> Option<Vec<String>> {
                     .is_some_and(|tasks| tasks.contains_key("test"))
             }
         });
-    let mise_task = declared
-        || included
-        || [
-            "mise-tasks/test",
-            ".mise-tasks/test",
-            ".mise/tasks/test",
-            "mise/tasks/test",
-        ]
-        .iter()
-        .any(|f| has(f));
+    let task_dirs = ["mise-tasks", ".mise-tasks", ".mise/tasks", "mise/tasks"];
+    let file_task = task_dirs.iter().any(|d| has(&format!("{d}/test")));
+    // A repository that uses mise asks mise; the files are the fallback.
+    let uses_mise =
+        mise_files.iter().any(|f| has(f)) || task_dirs.iter().any(|d| root.join(d).is_dir());
+    let mise_task = match uses_mise.then(|| ask_mise(root)).flatten() {
+        Some(answer) => answer,
+        None => declared || included || file_task,
+    };
     if mise_task {
         return words(&["mise", "run", "test"]);
     }
-    // Not `npm init`'s placeholder, which only fails: `echo "Error: no
-    // test specified" && exit 1`.
+    // Not `npm init`'s placeholder, which only fails.
     let script = read("package.json")
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .is_some_and(|pkg| {
             pkg["scripts"]["test"]
                 .as_str()
-                .is_some_and(|s| !s.contains("no test specified"))
+                .is_some_and(|s| s.trim() != NPM_PLACEHOLDER)
         });
     if script {
         return if has("pnpm-lock.yaml") {
@@ -294,28 +322,34 @@ mod tests {
     fn the_test_task_is_found_by_what_the_repository_has() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert_eq!(test_task(root), None);
+        assert_eq!(test_task_with(root, |_| None), None);
         std::fs::write(root.join("go.mod"), "module x\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["go", "test", "./..."]);
+        assert_eq!(
+            test_task_with(root, |_| None).unwrap(),
+            ["go", "test", "./..."]
+        );
         std::fs::write(
             root.join("Makefile"),
             "build:\n\ttrue\ntest: build\n\ttrue\n",
         )
         .unwrap();
-        assert_eq!(test_task(root).unwrap(), ["make", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["make", "test"]);
         std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["cargo", "test"]);
         std::fs::write(
             root.join("package.json"),
             r#"{"scripts":{"test":"vitest"}}"#,
         )
         .unwrap();
         std::fs::write(root.join("pnpm-lock.yaml"), "").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["pnpm", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["pnpm", "test"]);
         std::fs::write(root.join("mise.toml"), "[tasks.lint]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["pnpm", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["pnpm", "test"]);
         std::fs::write(root.join("mise.toml"), "[tasks.test]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
+        assert_eq!(
+            test_task_with(root, |_| None).unwrap(),
+            ["mise", "run", "test"]
+        );
     }
 
     #[test]
@@ -330,20 +364,53 @@ mod tests {
         )
         .unwrap();
         std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["cargo", "test"]);
         std::fs::write(
             root.join("mise.toml"),
             "[task_config]\nincludes = [\"tasks.toml\", \"xtasks\"]\n",
         )
         .unwrap();
         std::fs::write(root.join("tasks.toml"), "[lint]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
+        assert_eq!(test_task_with(root, |_| None).unwrap(), ["cargo", "test"]);
         std::fs::write(root.join("tasks.toml"), "[test]\nrun = 'x'\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
+        assert_eq!(
+            test_task_with(root, |_| None).unwrap(),
+            ["mise", "run", "test"]
+        );
         // Or a file task in an included directory.
         std::fs::write(root.join("tasks.toml"), "").unwrap();
         std::fs::create_dir(root.join("xtasks")).unwrap();
         std::fs::write(root.join("xtasks/test"), "#!/bin/sh\n").unwrap();
-        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
+        assert_eq!(
+            test_task_with(root, |_| None).unwrap(),
+            ["mise", "run", "test"]
+        );
+        // When mise answers, its answer wins over the files: it knows
+        // precedence, globs, templates and every file-task name.
+        assert_eq!(
+            test_task_with(root, |_| Some(false)).unwrap(),
+            ["cargo", "test"]
+        );
+        std::fs::remove_file(root.join("xtasks/test")).unwrap();
+        assert_eq!(
+            test_task_with(root, |_| Some(true)).unwrap(),
+            ["mise", "run", "test"]
+        );
+    }
+
+    #[test]
+    fn only_npm_inits_own_placeholder_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let script = |s: &str| {
+            let pkg = serde_json::json!({ "scripts": { "test": s } });
+            std::fs::write(root.join("package.json"), pkg.to_string()).unwrap();
+            test_task_with(root, |_| None)
+        };
+        assert_eq!(script(NPM_PLACEHOLDER), None);
+        assert_eq!(
+            script("echo 'no test specified; running all tests' && jest").unwrap(),
+            ["npm", "test"]
+        );
     }
 }
