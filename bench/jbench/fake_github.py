@@ -321,6 +321,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
+        # The server speaks HTTP/1.0 and closes every connection after its
+        # response. Saying so keeps a client from reusing one from its pool
+        # and racing the close ("Peer disconnected").
+        self.send_header("Connection", "close")
         self.send_header("X-RateLimit-Limit", "5000")
         self.send_header("X-RateLimit-Remaining", "4999")
         self.end_headers()
