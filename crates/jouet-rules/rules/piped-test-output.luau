@@ -189,10 +189,57 @@ local function whole_suite(command: JouetCommand): boolean
 	return false
 end
 
+-- Whether a command is a `jouet test` run, past jouet's own options; a
+-- dry run or help only asks about one.
+local function jouet_test(command: JouetCommand): boolean
+	if command.program ~= "jouet" then
+		return false
+	end
+	local i = 2
+	while command.argv[i] do
+		local arg = command.argv[i]
+		if arg == "--display" then
+			i += 2
+		elseif string.sub(arg, 1, 1) == "-" then
+			i += 1
+		elseif arg ~= "test" then
+			return false
+		else
+			for k = i + 1, #command.argv do
+				local word = command.argv[k]
+				if word == "--" then
+					break
+				elseif word == "--dry-run" or INSPECT[word] then
+					return false
+				end
+			end
+			return true
+		end
+	end
+	return false
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		for i, command in call.commands do
-			if command.nested or not runs(command) then
+			if command.nested then
+				continue
+			end
+			-- `jouet test` already prints only what matters: the cut is
+			-- what to drop, and through a pipe it hides the exit status.
+			if jouet_test(command) then
+				local cut = cutter(call.commands, i)
+				if cut then
+					local status = if command.op == "pipe"
+						then ` Piped, the call exits with {cut.program}'s status, not the run's, so a failure is hidden and the run does not count as passing, unless \`set -o pipefail\` is on.`
+						else ""
+					return jouet.warn(
+						`Drop the {cut.program}: \`jouet test\` already prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes), and keeps the whole output in its log.{status}`
+					)
+				end
+				continue
+			end
+			if not runs(command) then
 				continue
 			end
 			local cut = cutter(call.commands, i)
