@@ -1,0 +1,63 @@
+2026-10-31T10:34:56.3464757Z ##[endgroup]
+2026-10-31T10:34:56.3466440Z ##[group]Determining the checkout info
+2026-10-31T10:34:56.3467965Z ##[endgroup]
+2026-10-31T10:34:56.3557937Z ##[group]Checking out the ref
+2026-10-31T10:34:56.4131123Z ##[endgroup]
+2026-10-31T10:34:56.4218653Z ##[group]Removing auth
+2026-10-31T10:34:56.5373543Z ##[endgroup]
+2026-10-31T10:34:56.6187044Z ##[group]Run taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
+2026-10-31T10:34:56.6219273Z ##[endgroup]
+2026-10-31T10:34:56.6302435Z ##[start-action display=Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh";id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action]
+2026-10-31T10:34:56.6373395Z ##[group]Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"
+2026-10-31T10:34:56.6435937Z ##[endgroup]
+2026-10-31T10:34:56.6550277Z ##[warning]tag ref should start with 'refs/tags/': 'refs/pull/73/merge'; this action only supports events from tag or release by default; see <https://github.com/taiki-e/upload-rust-binary-action#supported-events> for more (downgraded error to info because action is running in dry-run mode)
+2026-10-31T10:34:57.5253226Z [1m[92m  Downloaded[0m proc-macro-error-attr v1.0.4
+2026-10-31T10:34:57.5446355Z [1m[92m  Downloaded[0m thiserror-impl v1.0.31
+2026-10-31T10:34:57.5639099Z [1m[92m  Downloaded[0m thiserror v1.0.31
+2026-10-31T10:34:57.5718631Z [1m[92m  Downloaded[0m proc-macro-error v1.0.4
+2026-10-31T10:34:58.7283496Z [1m[92m   Compiling[0m proc-macro-error-attr v1.0.4
+2026-10-31T10:34:58.8930214Z [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-10-31T10:35:03.5045887Z [1m[92m   Compiling[0m thiserror-impl v1.0.31
+2026-10-31T10:35:08.1764440Z [1m[92m   Compiling[0m thiserror v1.0.31
+2026-10-31T10:36:15.8131871Z [1m[92m   Compiling[0m thiserror v2.0.21
+2026-10-31T10:36:18.8859615Z [1m[92m   Compiling[0m thiserror-impl v2.0.21
+2026-10-31T10:37:42.3388181Z [1m[92m   Compiling[0m ast-grep-core v0.51.0
+2026-10-31T10:37:43.4660692Z [1m[92m   Compiling[0m grep-regex v0.1.14
+2026-10-31T10:37:44.4757342Z [1m[92m   Compiling[0m usage-config v7.1.4
+2026-10-31T10:37:48.1368007Z [1m[92m   Compiling[0m usage-derive v7.1.4
+2026-10-31T10:37:59.2146614Z [1m[92m   Compiling[0m usage-rs v7.1.4
+2026-10-31T10:37:59.2523877Z [1m[92m   Compiling[0m jouet-search v0.0.1 (/project/crates/jouet-search)
+2026-10-31T10:38:05.1120502Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (/project/crates/jouet-audit)
+2026-10-31T10:38:06.7449113Z [1m[92m   Compiling[0m rusqlite v0.41.1
+2026-10-31T10:38:08.2765314Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (/project/crates/jouet-graph)
+2026-10-31T10:38:08.6562514Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (/project/crates/jouet-wait)
+2026-10-31T10:38:15.0234691Z [1m[92m   Compiling[0m mlua v0.12.2
+2026-10-31T10:38:18.3574920Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (/project/crates/jouet-routines)
+2026-10-31T10:38:19.5618774Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (/project/crates/jouet-rules)
+2026-10-31T10:38:33.5056812Z [1m[92m   Compiling[0m jouet v0.0.1 (/project)
+2026-10-31T10:38:37.2764113Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:38:37.2764912Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:38:37.2765343Z     [1m[94m|[0m
+2026-10-31T10:38:37.2766263Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:38:37.2767098Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:38:37.2767540Z 
+2026-10-31T10:38:41.2834880Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:38:41.3304005Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:38:41.4699679Z ##[error]Process completed with exit code 101.
+2026-10-31T10:38:41.4734570Z ##[end-action id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action;outcome=failure;conclusion=failure;duration_ms=224842]
+2026-10-31T10:38:41.4921229Z Post job cleanup.
+2026-10-31T10:38:41.5789990Z [command]/usr/bin/git version
+2026-10-31T10:38:41.5864294Z git version 2.56.0
+2026-10-31T10:38:41.5903129Z Temporarily overriding HOME='/home/runner/work/_temp/602a191f-da5b-4d0d-96dd-21a1a433b564' before making global git config changes
+2026-10-31T10:38:41.5904551Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:38:41.5909440Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/jouet/jouet
+2026-10-31T10:38:41.5943770Z Removing SSH command configuration
+2026-10-31T10:38:41.5950020Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:38:41.5987314Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:38:41.6215909Z Removing HTTP extra header
+2026-10-31T10:38:41.6220919Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:38:41.6254995Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:38:41.6481003Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:38:41.6486813Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:38:41.6519432Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:38:41.6920969Z Cleaning up orphan processes

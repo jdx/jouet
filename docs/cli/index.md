@@ -75,6 +75,7 @@
 - [`jouet job stop [--grace <DUR>] [IDS]…`](/cli/job/stop.md)
 - [`jouet ci <SUBCOMMAND>`](/cli/ci.md)
 - [`jouet ci run [FLAGS] [WORKFLOW] [-- ARGS]…`](/cli/ci/run.md)
+- [`jouet ci explain [FLAGS] [TARGET]`](/cli/ci/explain.md)
 - [`jouet rule <SUBCOMMAND>`](/cli/rule.md)
 - [`jouet rule list`](/cli/rule/list.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)

@@ -6,6 +6,7 @@
 //! GitHub shows, keeps the whole transcript in a log, and prints each
 //! failed step's output cut to what an agent needs.
 
+pub(crate) mod explain;
 pub(crate) mod plan;
 pub(crate) mod secrets;
 pub(crate) mod transcript;

@@ -11,7 +11,7 @@ pub mod checks;
 pub mod ci;
 pub mod daemon;
 pub mod job;
-mod joblog;
+pub mod joblog;
 pub mod local;
 mod os;
 pub mod pitchfork;

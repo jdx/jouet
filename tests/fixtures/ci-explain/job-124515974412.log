@@ -1,0 +1,53 @@
+2026-10-31T10:43:30.1781359Z ##[group]Setting env vars
+2026-10-31T10:43:30.1788940Z ##[group]Running mise --version
+2026-10-31T10:43:30.2000206Z ##[endgroup]
+2026-10-31T10:43:30.2383798Z ##[group]Running mise install --locked
+2026-10-31T10:43:30.2824015Z ##[endgroup]
+2026-10-31T10:43:30.2824973Z ##[group]Running mise ls
+2026-10-31T10:43:30.3123850Z ##[endgroup]
+2026-10-31T10:43:30.3425586Z ##[group]Exporting mise environment variables
+2026-10-31T10:43:30.4377893Z ##[endgroup]
+2026-10-31T10:43:30.4724884Z ##[group]Run actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
+2026-10-31T10:43:30.4730731Z ##[endgroup]
+2026-10-31T10:43:30.9149433Z ##[group]Run mise run docs:check
+2026-10-31T10:43:30.9181327Z ##[endgroup]
+2026-10-31T10:43:32.4147221Z [1m[92m   Compiling[0m jouet-edit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-edit)
+2026-10-31T10:43:32.4148937Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-audit)
+2026-10-31T10:43:32.4150503Z [1m[92m   Compiling[0m jouet-search v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-search)
+2026-10-31T10:43:35.9263750Z [1m[92m   Compiling[0m jouet-github v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-github)
+2026-10-31T10:43:36.4674566Z [1m[92m   Compiling[0m jouet-git v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-git)
+2026-10-31T10:43:37.0028407Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-graph)
+2026-10-31T10:43:38.7581196Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-rules)
+2026-10-31T10:43:39.1582298Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-routines)
+2026-10-31T10:43:39.2310825Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-wait)
+2026-10-31T10:43:43.9201331Z [1m[92m   Compiling[0m jouet v0.0.1 (/home/runner/work/jouet/jouet)
+2026-10-31T10:43:54.0671692Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:43:54.0672847Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:43:54.0673520Z     [1m[94m|[0m
+2026-10-31T10:43:54.0677276Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:43:54.0678314Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:43:54.0678850Z 
+2026-10-31T10:44:00.7200881Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:44:00.8168445Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:44:00.8170235Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:44:01.1758530Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:44:02.4669326Z [2mFinished in 31.52s[0m
+2026-10-31T10:44:02.4669834Z [34m[build][0m [31mERROR[0m task failed
+2026-10-31T10:44:02.4715928Z ##[error]Process completed with exit code 101.
+2026-10-31T10:44:02.4851460Z Post job cleanup.
+2026-10-31T10:44:02.6866265Z Post job cleanup.
+2026-10-31T10:44:02.7740285Z [command]/usr/bin/git version
+2026-10-31T10:44:02.7813594Z git version 2.56.0
+2026-10-31T10:44:02.7849482Z Temporarily overriding HOME='/home/runner/work/_temp/7318c135-de40-4993-8166-4da0f17f2227' before making global git config changes
+2026-10-31T10:44:02.7850310Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:44:02.7855605Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/jouet/jouet
+2026-10-31T10:44:02.7888255Z Removing SSH command configuration
+2026-10-31T10:44:02.7894452Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:44:02.7930291Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:44:02.8168759Z Removing HTTP extra header
+2026-10-31T10:44:02.8173679Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:44:02.8208307Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:44:02.8436263Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:44:02.8442613Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:44:02.8476017Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:44:02.8871979Z Cleaning up orphan processes

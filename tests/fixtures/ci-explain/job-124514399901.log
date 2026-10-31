@@ -1,0 +1,50 @@
+2026-10-31T10:35:04.0573231Z ##[group]Run taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
+2026-10-31T10:35:04.0580567Z ##[endgroup]
+2026-10-31T10:35:04.0652590Z ##[start-action display=Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh";id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action]
+2026-10-31T10:35:04.0812622Z ##[group]Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"
+2026-10-31T10:35:04.0838775Z ##[endgroup]
+2026-10-31T10:35:04.2804634Z ##[warning]tag ref should start with 'refs/tags/': 'refs/pull/73/merge'; this action only supports events from tag or release by default; see <https://github.com/taiki-e/upload-rust-binary-action#supported-events> for more (downgraded error to info because action is running in dry-run mode)
+2026-10-31T10:35:17.5037949Z [1m[92m  Downloaded[0m thiserror v2.0.21
+2026-10-31T10:35:19.3940394Z [1m[92m  Downloaded[0m thiserror-impl v2.0.21
+2026-10-31T10:36:09.0961964Z [1m[92m   Compiling[0m thiserror v2.0.21
+2026-10-31T10:36:15.5777937Z [1m[92m   Compiling[0m thiserror-impl v2.0.21
+2026-10-31T10:37:42.8071965Z [1m[92m   Compiling[0m unicode-width v0.2.3
+2026-10-31T10:37:43.0591771Z [1m[92m   Compiling[0m fallible-streaming-iterator v0.1.9
+2026-10-31T10:37:43.4743529Z [1m[92m   Compiling[0m rusqlite v0.41.1
+2026-10-31T10:37:47.0620261Z [1m[92m   Compiling[0m usage-lib v7.1.4
+2026-10-31T10:37:49.1412712Z [1m[92m   Compiling[0m grep-searcher v0.1.17
+2026-10-31T10:37:49.9077366Z [1m[92m   Compiling[0m schemars v1.2.3
+2026-10-31T10:37:56.2492890Z [1m[92m   Compiling[0m jouet-edit v0.0.1 (D:\a\jouet\jouet\crates\jouet-edit)
+2026-10-31T10:38:01.5162303Z [1m[92m   Compiling[0m zstd v0.14.3
+2026-10-31T10:38:02.4444430Z [1m[92m   Compiling[0m ast-grep-core v0.51.0
+2026-10-31T10:38:04.3163505Z [1m[92m   Compiling[0m grep-regex v0.1.14
+2026-10-31T10:38:06.3633926Z [1m[92m   Compiling[0m usage-config v7.1.4
+2026-10-31T10:38:12.8413522Z [1m[92m   Compiling[0m usage-derive v7.1.4
+2026-10-31T10:38:21.6439206Z [1m[92m   Compiling[0m jouet-search v0.0.1 (D:\a\jouet\jouet\crates\jouet-search)
+2026-10-31T10:38:31.8547882Z [1m[92m   Compiling[0m usage-rs v7.1.4
+2026-10-31T10:38:32.0563868Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (D:\a\jouet\jouet\crates\jouet-audit)
+2026-10-31T10:38:34.7404533Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (D:\a\jouet\jouet\crates\jouet-graph)
+2026-10-31T10:38:45.9609056Z [1m[92m   Compiling[0m mlua v0.12.2
+2026-10-31T10:38:52.7441199Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (D:\a\jouet\jouet\crates\jouet-rules)
+2026-10-31T10:38:56.6232505Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (D:\a\jouet\jouet\crates\jouet-routines)
+2026-10-31T10:38:59.3557481Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (D:\a\jouet\jouet\crates\jouet-wait)
+2026-10-31T10:39:19.8089268Z [1m[92m   Compiling[0m jouet v0.0.1 (D:\a\jouet\jouet)
+2026-10-31T10:39:24.9580934Z [1m[91merror[E0425][0m[1m[97m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:39:24.9581699Z    [1m[96m--> [0msrc\guide.rs:243:17
+2026-10-31T10:39:24.9582055Z     [1m[96m|[0m
+2026-10-31T10:39:24.9582503Z [1m[96m243[0m [1m[96m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:39:24.9583168Z     [1m[96m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:39:24.9583467Z 
+2026-10-31T10:39:30.2966372Z [1m[97mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:39:30.3299799Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:39:30.4062638Z ##[error]Process completed with exit code 101.
+2026-10-31T10:39:30.4105830Z ##[end-action id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action;outcome=failure;conclusion=failure;duration_ms=266339]
+2026-10-31T10:39:30.4429978Z Post job cleanup.
+2026-10-31T10:39:30.6229165Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-31T10:39:30.6594847Z git version 2.56.0.windows.2
+2026-10-31T10:39:30.6669341Z Temporarily overriding HOME='D:\a\_temp\f7372763-fadb-4411-950c-d3a425c59031' before making global git config changes
+2026-10-31T10:39:30.6670659Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:39:30.6684145Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\jouet\jouet
+2026-10-31T10:39:30.7086443Z Removing SSH command configuration
+2026-10-31T10:39:30.7103501Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:39:30.7606643Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""

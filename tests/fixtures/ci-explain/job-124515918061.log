@@ -1,0 +1,6 @@
+2026-10-31T10:44:10.5110790Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-31T10:44:18.6328872Z ##[group]Run Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+2026-10-31T10:44:40.3990464Z ##[group]Run rustup component add clippy
+2026-10-31T10:44:41.1565737Z ##[group]Run cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+2026-10-31T10:45:27.6541914Z ##[group]Run cargo build --locked --workspace
+2026-10-31T10:46:00.8456711Z ##[group]Run pwsh -NoProfile e2e-win/run.ps1

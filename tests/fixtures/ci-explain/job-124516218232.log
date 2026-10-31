@@ -1,0 +1,42 @@
+2026-10-31T10:44:58.2738414Z ##[group]Run mise run docs:check
+2026-10-31T10:44:58.2772174Z ##[endgroup]
+2026-10-31T10:44:59.2446207Z [1m[92m   Compiling[0m jouet-edit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-edit)
+2026-10-31T10:44:59.2448122Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-audit)
+2026-10-31T10:44:59.2470870Z [1m[92m   Compiling[0m jouet-search v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-search)
+2026-10-31T10:45:00.3409248Z [1m[92m   Compiling[0m jouet-github v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-github)
+2026-10-31T10:45:00.8561486Z [1m[92m   Compiling[0m jouet-git v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-git)
+2026-10-31T10:45:01.4111551Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-graph)
+2026-10-31T10:45:03.2031563Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-routines)
+2026-10-31T10:45:03.5941458Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-rules)
+2026-10-31T10:45:03.8714585Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-wait)
+2026-10-31T10:45:08.4624660Z [1m[92m   Compiling[0m jouet v0.0.1 (/home/runner/work/jouet/jouet)
+2026-10-31T10:45:16.3703938Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:45:16.3705061Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:45:16.3705623Z     [1m[94m|[0m
+2026-10-31T10:45:16.3706475Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:45:16.3707682Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:45:16.3708375Z 
+2026-10-31T10:45:23.5681305Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:45:23.6563775Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:45:23.6565699Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:45:24.2109117Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:45:24.9965999Z [2mFinished in 26.69s[0m
+2026-10-31T10:45:24.9966471Z [34m[build][0m [31mERROR[0m task failed
+2026-10-31T10:45:25.0012765Z ##[error]Process completed with exit code 101.
+2026-10-31T10:45:25.0144399Z Post job cleanup.
+2026-10-31T10:45:25.2160413Z Post job cleanup.
+2026-10-31T10:45:25.3015307Z [command]/usr/bin/git version
+2026-10-31T10:45:25.3056186Z git version 2.56.0
+2026-10-31T10:45:25.3096360Z Temporarily overriding HOME='/home/runner/work/_temp/c3679551-a716-4a01-a581-34017324f110' before making global git config changes
+2026-10-31T10:45:25.3098036Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:45:25.3103122Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/jouet/jouet
+2026-10-31T10:45:25.3135298Z Removing SSH command configuration
+2026-10-31T10:45:25.3142271Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:45:25.3176271Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:45:25.3414607Z Removing HTTP extra header
+2026-10-31T10:45:25.3420893Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:45:25.3457008Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:45:25.3683938Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:45:25.3689852Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:45:25.3723876Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:45:25.4131571Z Cleaning up orphan processes

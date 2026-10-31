@@ -25,15 +25,15 @@ const CONTEXT: usize = 2;
 
 /// A step's window, from the job's `steps`.
 #[derive(Debug, Clone)]
-pub(crate) struct Step {
-    pub(crate) name: String,
-    pub(crate) started_at: Option<i64>,
-    pub(crate) completed_at: Option<i64>,
+pub struct Step {
+    pub name: String,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
 }
 
 impl Step {
     /// The first failed step in a job document.
-    pub(crate) fn failed(job: &serde_json::Value) -> Option<Self> {
+    pub fn failed(job: &serde_json::Value) -> Option<Self> {
         let steps = job["steps"].as_array()?;
         let step = steps
             .iter()
@@ -114,7 +114,7 @@ fn step_lines(log: &str, step: Option<&Step>) -> Vec<String> {
 /// The failed step's last `tail` lines, plus earlier lines that look like
 /// errors with a little context, with a marker wherever lines were skipped.
 /// `tail` 0 keeps the whole step.
-pub(crate) fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
+pub fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
     let lines: Vec<String> = step_lines(log, step)
         .into_iter()
         .filter(|l| l != "##[endgroup]")

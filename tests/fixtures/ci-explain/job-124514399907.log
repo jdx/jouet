@@ -1,0 +1,43 @@
+2026-10-31T10:35:24.4392020Z ##[group]Run mise run test
+2026-10-31T10:35:24.4413550Z ##[endgroup]
+2026-10-31T10:35:34.0760860Z [34m[build][0m [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:35:36.5355150Z [34m[build][0m [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:35:36.5413770Z [34m[build][0m [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:35:36.5414170Z [34m[build][0m [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:35:37.1830260Z [34m[build][0m [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:35:37.1885180Z [2mFinished in 11.02s[0m
+2026-10-31T10:35:37.1885380Z [34m[build][0m [31mERROR[0m task failed
+2026-10-31T10:35:37.1943740Z ##[error]Process completed with exit code 101.
+2026-10-31T10:35:37.2646860Z Post job cleanup.
+2026-10-31T10:35:37.4050920Z Post job cleanup.
+2026-10-31T10:35:37.4615900Z [command]/opt/homebrew/bin/git version
+2026-10-31T10:35:37.4653280Z git version 2.53.0
+2026-10-31T10:35:37.4697210Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/33e9a776-c8d3-4ba9-b440-54b3daf71bba/.gitconfig'
+2026-10-31T10:35:37.4697740Z Temporarily overriding HOME='/Users/runner/work/_temp/33e9a776-c8d3-4ba9-b440-54b3daf71bba' before making global git config changes
+2026-10-31T10:35:37.4698210Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:35:37.4698540Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/jouet/jouet
+2026-10-31T10:35:37.4707820Z Removing SSH command configuration
+2026-10-31T10:35:37.4711180Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:35:37.4743580Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:35:37.5109020Z Entering 'test/bats'
+2026-10-31T10:35:37.5202780Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:35:37.5294300Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:35:37.5389470Z Removing HTTP extra header
+2026-10-31T10:35:37.5392840Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:35:37.5424650Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:35:37.5770780Z Entering 'test/bats'
+2026-10-31T10:35:37.5863610Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:35:37.5954310Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:35:37.6049530Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:35:37.6053730Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:35:37.6081830Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:35:37.6533720Z Entering 'test/bats'
+2026-10-31T10:35:37.6579980Z file:/Users/runner/work/jouet/jouet/.git/modules/test/bats/config	remote.origin.url
+2026-10-31T10:35:37.6609700Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:35:37.6657750Z file:/Users/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-assert/config	remote.origin.url
+2026-10-31T10:35:37.6685860Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:35:37.6733660Z file:/Users/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-support/config	remote.origin.url
+2026-10-31T10:35:37.6770110Z [command]/opt/homebrew/bin/git config --file /Users/runner/work/jouet/jouet/.git/modules/test/bats/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:35:37.6802610Z [command]/opt/homebrew/bin/git config --file /Users/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-assert/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:35:37.6830900Z [command]/opt/homebrew/bin/git config --file /Users/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-support/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:35:37.6992130Z Cleaning up orphan processes
