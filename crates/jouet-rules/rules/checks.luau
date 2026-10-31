@@ -517,12 +517,15 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			-- scope. A command the rule does not know is recorded as nothing,
 			-- as it is when run directly: called a partial test, a passing run
 			-- of the whole suite would hold up finishing.
+			-- Through its wrappers, as a command's own argv is: `jouet test
+			-- --cmd -- mise x -- cargo test` ran cargo.
+			local argv, via = jouet.unwrap(given)
 			local inner: JouetCommand = {
 				words = given,
-				argv = given,
-				program = jouet.basename(given[1]),
+				argv = argv,
+				program = if argv[1] then jouet.basename(argv[1]) else nil,
 				heredocs = {},
-				via = {},
+				via = via,
 				nested = command.nested,
 				status = command.status,
 				text = command.text,
