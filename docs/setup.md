@@ -125,7 +125,7 @@ The built-in rules:
 | `sleep-poll` | `sleep N` together with `gh pr checks`, `gh run view` or a `statusCheckRollup` query | `jouet wait ci` |
 | `ci-rerun` | `gh run rerun` (bare, `--failed` or `--job`), and `gh api` calls to a run's or job's `rerun` endpoints | [`jouet ci explain`](/commands/ci#jouet-ci-explain), whose `--rerun` reruns only a flaky or infrastructure failure |
 | `review-threads` | `gh api graphql` (or `curl` to the GraphQL API) with a `reviewThreads` query | `jouet pr threads` |
-| `python-edit` | a `python` heredoc or `-c` script that calls `.replace(` and writes a file | `jouet edit` |
+| `python-edit` | a `python` heredoc or `-c` script that reads a file and writes it back, by `.replace(`, slicing, a regex or anything else (a file written from another, or a json, yaml or toml rewrite, is left alone) | `jouet edit` |
 | `git-add-all` | `git add -A`, `--all`, `.` or `:/` | staging explicit paths |
 | `git-stash` | a bare `git stash`, `push` or `save` without a message, `pop`, `apply` or `drop` without a stash named, and `clear` | `git stash push -m <tag>` and `git stash apply <sha>`, or a WIP commit, because every worktree of a repository shares one stash |
 | `no-verify` | `--no-verify` on any git command, and `git commit -n` | fixing what the hook reports |
