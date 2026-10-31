@@ -450,5 +450,7 @@ fn parse_gh_stack(text: &str, branch: &str) -> Option<GhStack> {
     })
 }
 
+pub mod sync;
+
 #[cfg(test)]
 mod tests;

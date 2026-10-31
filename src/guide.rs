@@ -86,7 +86,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "stack",
         Some(
-            "working on a stack of PRs: `jouet stack status` shows each layer's PR and whether it really contains the layer below, by ancestry and by content (a restack that reverted a parent's change is flagged), unpushed commits, and layers whose prerequisite merged, instead of trusting `gh stack view`",
+            "working on a stack of PRs: `jouet stack status` shows each layer's PR and whether it really contains the layer below, by ancestry and by content (a restack that reverted a parent's change is flagged), and `jouet stack sync` merges each layer up to date from its local branch and verifies it, instead of trusting `gh stack view` or restacking with rebase, `checkout -B` or force pushes",
         ),
     ),
     (

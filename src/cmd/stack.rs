@@ -4,7 +4,7 @@
 //! on GitHub; what git says about them is jouet-git's.
 
 use super::Output;
-use crate::{StackArgs, StackCmd, StackStatusArgs};
+use crate::{StackArgs, StackCmd, StackStatusArgs, StackSyncArgs};
 use jouet_git::Git;
 use jouet_git::stack::{self, Layer, LayerState, Stack};
 use jouet_github::Client;
@@ -20,6 +20,7 @@ const MAX_LAYERS: usize = 20;
 pub(crate) fn run(args: StackArgs, out: &Output) -> Exit {
     match args.cmd {
         StackCmd::Status(a) => status(&a, out),
+        StackCmd::Sync(a) => sync(&a, out),
     }
 }
 
@@ -416,7 +417,119 @@ fn text(report: &Report, current: &str) -> String {
             );
         }
     }
+    let mergeable = report.layers.iter().any(|r| {
+        r.needs
+            .iter()
+            .any(|n| matches!(*n, "needs_parent" | "needs_trunk"))
+    });
+    if mergeable {
+        s.push_str("next: `jouet stack sync --dry-run` shows the merges that bring each layer up to date; `jouet stack sync` makes them\n");
+    }
     for note in report.notes {
+        let _ = writeln!(s, "note: {note}");
+    }
+    s
+}
+
+fn sync(args: &StackSyncArgs, out: &Output) -> Exit {
+    let (git, mut client, repo, branch) = match setup(args.branch.as_deref()) {
+        Ok(s) => s,
+        Err((exit, message)) => return out.error(exit, &message),
+    };
+    let found = match find(&git, &mut client, &repo, &branch) {
+        Ok(f) => f,
+        Err((exit, message)) => return out.error(exit, &message),
+    };
+    let opts = stack::sync::Options {
+        dry_run: args.dry_run,
+        push: args.push,
+        fetch: !args.no_fetch,
+    };
+    let report = stack::sync::sync(&git, &found.stack, opts);
+    let chain = std::iter::once(found.stack.trunk.clone())
+        .chain(
+            found
+                .stack
+                .layers
+                .iter()
+                .zip(&found.prs)
+                .map(|(l, pr)| match pr {
+                    Some(pr) => format!("#{}", pr.number),
+                    None => l.branch.clone(),
+                }),
+        )
+        .collect::<Vec<_>>()
+        .join(" ← ");
+    let doc = json!({
+        "source": found.source,
+        "trunk": found.stack.trunk,
+        "report": report,
+        "notes": found.notes,
+    });
+    out.result(&doc, || sync_text(&report, &chain, &found));
+    report.exit()
+}
+
+fn sync_text(report: &stack::sync::Report, chain: &str, found: &Found) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "{} {chain}{}",
+        if report.dry_run { "PLAN" } else { "SYNC" },
+        if report.dry_run {
+            " (dry run: nothing fetched, merged or pushed)"
+        } else {
+            ""
+        }
+    );
+    let width = found
+        .stack
+        .layers
+        .iter()
+        .map(|l| l.branch.len())
+        .max()
+        .unwrap_or(0);
+    for step in &report.steps {
+        let from = step.from.as_deref().unwrap_or("");
+        let what = match step.action {
+            "up_to_date" => "up to date".to_string(),
+            "skipped_merged" => "merged; skipped".to_string(),
+            "would_merge" => format!("would merge {from}"),
+            "merged" => format!(
+                "merged {from} ({})",
+                step.commit.as_deref().map_or("", |c| &c[..c.len().min(7)])
+            ),
+            other => other.to_string(),
+        };
+        let created = if step.created {
+            if report.dry_run {
+                "; would create the local branch from the remote's"
+            } else {
+                "; local branch created from the remote's"
+            }
+        } else {
+            ""
+        };
+        let _ = writeln!(s, "  {:width$}  {what}{created}", step.branch);
+    }
+    if let Some(stopped) = &report.stopped {
+        let _ = writeln!(s, "STOPPED at {}: {}", stopped.branch, stopped.message);
+        if !stopped.files.is_empty() {
+            let _ = writeln!(s, "  files: {}", stopped.files.join(", "));
+        }
+        let _ = writeln!(s, "  next: {}", stopped.next);
+    }
+    for push in &report.pushed {
+        match &push.error {
+            None => {
+                let _ = writeln!(s, "PUSHED {}", push.branch);
+            }
+            Some(e) => {
+                let _ = writeln!(s, "PUSH FAILED {}: {e}", push.branch);
+            }
+        }
+    }
+    for note in &found.notes {
         let _ = writeln!(s, "note: {note}");
     }
     s

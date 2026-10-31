@@ -1051,6 +1051,8 @@ pub struct StackArgs {
 pub enum StackCmd {
     /// Show each layer's PR and whether it contains its parent, by ancestry and content
     Status(StackStatusArgs),
+    /// Bring each layer up to date by merging its parent, verified, never rebasing
+    Sync(StackSyncArgs),
 }
 
 /// Show each layer's PR and whether it contains its parent, by ancestry and content
@@ -1069,6 +1071,35 @@ pub enum StackCmd {
 pub struct StackStatusArgs {
     /// A branch in the stack (default: the current branch)
     branch: Option<String>,
+}
+
+/// Bring each layer up to date by merging its parent, verified, never rebasing
+///
+/// Fetches, then goes up the stack from the bottom. Each layer starts from
+/// its local branch, never the remote's, so unpushed fixes are kept; a
+/// local branch behind its remote is refused. A layer that lacks its parent
+/// gets the parent merged in, or the trunk once its prerequisite has merged
+/// (a squash merge included). Each merge is checked before it is committed:
+/// every change it brings in must be in the merged tree. Sync stops at the
+/// first layer that conflicts, fails that check, is checked out in another
+/// worktree, or has uncommitted changes, and says what to do. A branch
+/// checked out nowhere is merged in a temporary worktree; the one checked
+/// out here is merged in place. Never rebases or force-pushes; pushes only
+/// with --push, plainly. Exits 1 on a conflict or a failed check, 4 when
+/// refused before merging, 5 when a fetch or push fails.
+#[derive(Args)]
+pub struct StackSyncArgs {
+    /// A branch in the stack (default: the current branch)
+    branch: Option<String>,
+    /// Show what would be merged; merge, fetch and push nothing
+    #[usage(long)]
+    dry_run: bool,
+    /// Push the layers ahead of their remote branch afterwards (never forced)
+    #[usage(long)]
+    push: bool,
+    /// Use the remote branches as last fetched
+    #[usage(long)]
+    no_fetch: bool,
 }
 
 /// Run one-off background work, such as a build or a server for one check

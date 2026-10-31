@@ -48,6 +48,7 @@
 - [`jouet review-package [-o --output <FILE>] [--context <N>] <BASE> [HEAD]`](/cli/review-package.md)
 - [`jouet stack <SUBCOMMAND>`](/cli/stack.md)
 - [`jouet stack status [BRANCH]`](/cli/stack/status.md)
+- [`jouet stack sync [FLAGS] [BRANCH]`](/cli/stack/sync.md)
 - [`jouet search [FLAGS] <PATTERN> [PATHS]…`](/cli/search.md)
 - [`jouet test [FLAGS] [EXTRA]…`](/cli/test.md)
 - [`jouet wait [FLAGS] <SUBCOMMAND>`](/cli/wait.md)
