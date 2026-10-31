@@ -4,8 +4,9 @@
 //! `jouet.repo()` (plain `git`), `jouet.cargo.workspace()` (`Cargo.toml`
 //! files), `jouet.test.adapters()` (the test runners `jouet test --affected`
 //! can select for, as the binary detects them), `jouet.pitchfork.daemons()`
-//! (the daemons a project's pitchfork config declares), and `jouet.env()` (an
-//! allowlist).
+//! (the daemons a project's pitchfork config declares), `jouet.secrets.scan()`
+//! (gitleaks' rules over what a commit or push would add), and `jouet.env()`
+//! (an allowlist).
 //!
 //! Every probe:
 //! - only reads;
@@ -25,6 +26,7 @@ pub(crate) mod git;
 mod github;
 mod ledger;
 mod pitchfork;
+mod secrets;
 mod stack;
 
 use crate::Shared;
@@ -427,6 +429,34 @@ pub(crate) fn install(
             answer(lua, found)
         })?,
     )?;
+
+    let secrets_table = lua.create_table()?;
+    let s = shared.clone();
+    secrets_table.set(
+        "scan",
+        lua.create_function(move |lua, (scope, paths): (Option<String>, Option<Vec<String>>)| {
+            let scope = scope.unwrap_or_else(|| "staged".into());
+            if !["staged", "tracked", "outgoing"].contains(&scope.as_str()) {
+                return Err(mlua::Error::runtime(format!(
+                    "jouet.secrets.scan: scope must be \"staged\", \"tracked\" or \"outgoing\", not `{scope}`"
+                )));
+            }
+            let paths = paths.unwrap_or_default();
+            // An example answers for any scope.
+            let stubbed = s.cache.borrow().get("secrets:*").cloned();
+            if let Some(answer_) = stubbed {
+                return answer(lua, answer_);
+            }
+            let key = format!("secrets:{scope}:{}", paths.join("\0"));
+            let found = cached(&s, &key, |p, left| {
+                let dir = p.dir.clone();
+                bounded(left, move || secrets::scan(dir.as_deref(), &scope, &paths, left))
+                    .ok_or("the secret scan did not finish within the budget")?
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("secrets", secrets_table)?;
 
     let s = shared.clone();
     jouet.set(

@@ -53,7 +53,7 @@ export default defineConfig({
       {
         text: "Guide",
         link: "/getting-started",
-        activeMatch: "^/(getting-started|why|conventions|stability|rules|winding|setup)",
+        activeMatch: "^/(getting-started|why|conventions|stability|forges|rules|winding|setup)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -70,6 +70,7 @@ export default defineConfig({
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Stability and deprecations", link: "/stability" },
+          { text: "GitLab and Forgejo", link: "/forges" },
           { text: "Rules", link: "/rules" },
           { text: "Routines and joue", link: "/routines" },
           { text: "Self-winding", link: "/winding" },
@@ -102,6 +103,7 @@ export default defineConfig({
           { text: "jouet audit", link: "/commands/audit" },
           { text: "jouet stats", link: "/commands/stats" },
           { text: "jouet commit", link: "/commands/commit" },
+          { text: "jouet secrets", link: "/commands/secrets" },
           { text: "jouet review-package", link: "/commands/review-package" },
           { text: "jouet handoff", link: "/commands/handoff" },
           { text: "jouet sessions", link: "/commands/sessions" },
@@ -120,6 +122,12 @@ export default defineConfig({
               { text: "audit", link: "/cli/audit" },
               { text: "stats", link: "/cli/stats" },
               { text: "commit", link: "/cli/commit" },
+              {
+                text: "secrets",
+                link: "/cli/secrets",
+                collapsed: true,
+                items: [{ text: "scan", link: "/cli/secrets/scan" }],
+              },
               {
                 text: "diag",
                 link: "/cli/diag",

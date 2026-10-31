@@ -1,8 +1,9 @@
-//! `wait run`: wait for one GitHub Actions run, failing fast on its first
-//! failed job.
+//! `wait run`: wait for one GitHub Actions run or GitLab pipeline, failing
+//! fast on its first failed job.
 
 use super::checks::{self, Check, Counts, Verdict};
-use super::ci::{attach_logs, result_exit};
+use super::ci::result_exit;
+use super::host::{Remote, Run};
 use super::remote::{Halt, Poll, Watch};
 use super::watch::{self, Cached, short};
 use super::{Event, Reporter};
@@ -18,12 +19,20 @@ use std::time::{Duration, Instant};
 /// Pages of jobs read at most (100 each).
 const MAX_PAGES: u32 = 10;
 
-/// Reads `RUN`: a run ID, or an Actions URL such as
-/// `https://github.com/o/r/actions/runs/456/job/123`, which also names the
-/// repository.
+/// Reads `RUN`: a run ID, an Actions URL such as
+/// `https://github.com/o/r/actions/runs/456/job/123`, or a GitLab pipeline
+/// URL such as `https://gitlab.com/group/project/-/pipelines/456`; a URL
+/// also names the repository.
 pub fn parse_run(arg: &str) -> Option<(Option<Repo>, u64)> {
     if let Ok(id) = arg.parse::<u64>() {
         return (id > 0).then_some((None, id));
+    }
+    if let Some((_, rest)) = arg.split_once("://")
+        && let Some((repo, after)) = rest.split_once("/-/pipelines/")
+        && let Some((host, path)) = repo.split_once('/')
+    {
+        let id = after.split(['/', '?', '#']).next()?.parse().ok()?;
+        return Some((Some(Repo::on(host, path)?), id));
     }
     let id = checks::run_id_in_url(arg)?;
     let (_, rest) = arg.split_once("://")?;
@@ -47,6 +56,9 @@ pub struct RunWait {
 #[derive(Debug, Serialize)]
 pub struct Doc {
     pub(crate) repo: String,
+    /// The host of a repository that is not on GitHub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) host: Option<String>,
     pub(crate) run_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) workflow: Option<String>,
@@ -87,6 +99,7 @@ impl RunWait {
         jobs.sort_by_key(|j| std::cmp::Reverse(j.state.failed()));
         Doc {
             repo: self.repo.to_string(),
+            host: self.repo.host.clone(),
             run_id: self.id,
             workflow: self.workflow.clone(),
             head_sha: self.head_sha.clone(),
@@ -96,26 +109,44 @@ impl RunWait {
             checks: jobs,
         }
     }
+}
 
-    fn fetch_jobs(&mut self, client: &mut Client) -> Result<Vec<Check>, Halt> {
-        let mut jobs = Vec::new();
-        for page in 1..=MAX_PAGES {
-            let path = format!(
-                "/repos/{}/{}/actions/runs/{}/jobs?per_page=100&page={page}",
-                self.repo.owner, self.repo.name, self.id
-            );
-            let Some(v) = watch::get_json(client, &mut self.cache, &path)? else {
-                break;
-            };
-            let list = v["jobs"].as_array().cloned().unwrap_or_default();
-            jobs.extend(list.iter().filter_map(Check::from_job));
-            let total = v["total_count"].as_u64().unwrap_or(0);
-            if list.len() < 100 || jobs.len() as u64 >= total {
-                break;
-            }
+/// A GitHub Actions run and its jobs, through the ETag cache.
+pub(crate) fn github_run(
+    client: &mut Client,
+    repo: &Repo,
+    id: u64,
+    cache: &mut BTreeMap<String, Cached>,
+) -> Result<Run, Halt> {
+    let base = format!("/repos/{}/{}/actions/runs/{id}", repo.owner, repo.name);
+    let run: Value = watch::get_json(client, cache, &base)?
+        .ok_or_else(|| Halt::not_found(format!("run {id} does not exist in {repo}")))?;
+    let mut jobs = Vec::new();
+    for page in 1..=MAX_PAGES {
+        let path = format!("{base}/jobs?per_page=100&page={page}");
+        let Some(v) = watch::get_json(client, cache, &path)? else {
+            break;
+        };
+        let list = v["jobs"].as_array().cloned().unwrap_or_default();
+        jobs.extend(list.iter().filter_map(Check::from_job));
+        let total = v["total_count"].as_u64().unwrap_or(0);
+        if list.len() < 100 || jobs.len() as u64 >= total {
+            break;
         }
-        Ok(jobs)
     }
+    let complete = run["status"].as_str() == Some("completed");
+    Ok(Run {
+        workflow: run["name"].as_str().map(str::to_string),
+        head_sha: run["head_sha"].as_str().unwrap_or_default().to_string(),
+        status: run["status"].as_str().unwrap_or("queued").to_string(),
+        failed: complete
+            && !matches!(
+                run["conclusion"].as_str(),
+                Some("success" | "skipped" | "neutral")
+            ),
+        complete,
+        jobs,
+    })
 }
 
 impl Watch for RunWait {
@@ -127,48 +158,34 @@ impl Watch for RunWait {
 
     fn poll(
         &mut self,
-        client: &mut Client,
+        remote: &mut Remote,
         _interval: Duration,
         _events: &mut Vec<Event>,
     ) -> Result<Poll<Doc>, Halt> {
-        let path = format!(
-            "/repos/{}/{}/actions/runs/{}",
-            self.repo.owner, self.repo.name, self.id
-        );
-        let run: Value = watch::get_json(client, &mut self.cache, &path)?.ok_or_else(|| {
-            Halt::not_found(format!("run {} does not exist in {}", self.id, self.repo))
-        })?;
-        self.workflow = run["name"].as_str().map(str::to_string);
-        self.head_sha = run["head_sha"].as_str().unwrap_or_default().to_string();
-        let jobs = self.fetch_jobs(client)?;
+        let run = remote.ci().run(&self.repo, self.id, &mut self.cache)?;
+        self.workflow = run.workflow;
+        self.head_sha = run.head_sha;
+        let jobs = run.jobs;
         self.jobs = jobs.clone();
-        let complete = run["status"].as_str() == Some("completed");
-        let failed_run = complete
-            && !matches!(
-                run["conclusion"].as_str(),
-                Some("success" | "skipped" | "neutral")
-            );
-        Ok(match (checks::verdict(&jobs, false), complete) {
+        Ok(match (checks::verdict(&jobs, false), run.complete) {
             (Verdict::Failure, _) => {
                 let mut jobs = jobs;
                 if let Some(lines) = self.log_lines {
-                    attach_logs(client, &self.repo, &mut jobs, lines);
+                    remote.ci().attach_logs(&self.repo, &mut jobs, lines);
                 }
-                if self.local_runner {
+                if self.local_runner && self.repo.host.is_none() {
                     checks::suggest_local(&mut jobs, self.workflow.as_deref());
                 }
                 Poll::Done(self.doc("failure", jobs))
             }
-            (_, true) if failed_run => Poll::Done(self.doc("failure", jobs)),
+            (_, true) if run.failed => Poll::Done(self.doc("failure", jobs)),
             (_, true) => Poll::Done(self.doc("success", jobs)),
-            (_, false) if jobs.is_empty() => {
-                Poll::Pending(run["status"].as_str().unwrap_or("queued").to_string())
-            }
+            (_, false) if jobs.is_empty() => Poll::Pending(run.status),
             (_, false) => Poll::Pending(Counts::of(&jobs).summary()),
         })
     }
 
-    fn timed_out(&mut self, _client: &mut Client) -> Doc {
+    fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
         self.doc("timeout", self.jobs.clone())
     }
 
@@ -214,5 +231,9 @@ mod tests {
         assert_eq!((repo.unwrap().to_string(), id), ("jdx/mise".into(), 456));
         assert_eq!(parse_run("0"), None);
         assert_eq!(parse_run("https://github.com/jdx/mise/pull/1"), None);
+        let (repo, id) =
+            parse_run("https://gitlab.com/group/sub/project/-/pipelines/77/builds").unwrap();
+        assert_eq!(repo.unwrap().qualified(), "gitlab.com/group/sub/project");
+        assert_eq!(id, 77);
     }
 }

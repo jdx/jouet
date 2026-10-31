@@ -667,6 +667,7 @@ dependencies = [
  "jouet-routines",
  "jouet-rules",
  "jouet-search",
+ "jouet-secrets",
  "jouet-wait",
  "libc",
  "mise-agent-env",
@@ -794,6 +795,7 @@ dependencies = [
  "jouet-git",
  "jouet-github",
  "jouet-output",
+ "jouet-secrets",
  "mlua",
  "regex",
  "schemars",
@@ -826,6 +828,20 @@ dependencies = [
  "tree-sitter-ruby",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "jouet-secrets"
+version = "0.0.1"
+dependencies = [
+ "aho-corasick",
+ "ignore",
+ "jouet-output",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]

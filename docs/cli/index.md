@@ -18,6 +18,8 @@
 - [`jouet claim ls [--all]`](/cli/claim/ls.md)
 - [`jouet claim release [PATHS]…`](/cli/claim/release.md)
 - [`jouet commit [FLAGS] [PATHS]…`](/cli/commit.md)
+- [`jouet secrets <SUBCOMMAND>`](/cli/secrets.md)
+- [`jouet secrets scan [--staged] [--diff <REF>] [PATHS]…`](/cli/secrets/scan.md)
 - [`jouet diag <SUBCOMMAND>`](/cli/diag.md)
 - [`jouet diag check [--changed] [--max <N>] [FILES]…`](/cli/diag/check.md)
 - [`jouet diag delta [--changed] [--max <N>] [FILES]…`](/cli/diag/delta.md)

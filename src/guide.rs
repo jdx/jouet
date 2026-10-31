@@ -90,6 +90,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "secrets",
+        Some(
+            "checking for API keys, tokens and private keys before they are committed or pushed: `jouet secrets scan` (files), `--staged` or `--diff REF` (the lines being added), with gitleaks' rules; `jouet commit` runs the same scan, and `--allow-secret RULE:PATH:LINE` lets a false positive through",
+        ),
+    ),
+    (
         "review-package",
         Some(
             "handing a range of commits to a reviewer: one file with the commits, a diffstat and the full diff, refusing a range that would show the wrong diff",
@@ -421,7 +427,25 @@ const USAGE: &[Usage] = &[
                 "show what would be committed",
             ),
         ],
-        more: "--file, --trailer, --no-trailers and what it refuses",
+        more: "--file, --trailer, --no-trailers, --allow-secret and what it refuses",
+    },
+    Usage {
+        command: "secrets",
+        lines: &[
+            (
+                "jouet secrets scan [<PATHS>...]",
+                "API keys, tokens and private keys in files, with gitleaks' rules",
+            ),
+            (
+                "jouet secrets scan --staged",
+                "only the lines the index adds: what `git commit` would record",
+            ),
+            (
+                "jouet secrets scan --diff REF",
+                "the lines each commit in REF..HEAD adds",
+            ),
+        ],
+        more: "false positives (gitleaks:allow, .gitleaksignore, .gitleaks.toml) and the --json fingerprints",
     },
     Usage {
         command: "review-package",
@@ -649,6 +673,7 @@ fn when(name: &str) -> Option<&'static str> {
 /// Commands that work together, which the overview and the skill describe
 /// in one entry, led by the first, to stay within their budgets.
 pub(crate) const GROUPED: &[&[&str]] = &[
+    &["commit", "secrets"],
     &["handoff", "pickup"],
     &["read", "docs", "deps", "db"],
     &["wait", "http"],
@@ -1101,7 +1126,7 @@ mod tests {
             "{text}"
         );
         // The family names, not each one's description: that is agent-help's.
-        assert!(text.contains("commit, "), "{text}");
+        assert!(text.contains("commit/secrets, "), "{text}");
         assert!(
             !text.contains("Commit only the named paths, with trailers"),
             "{text}"

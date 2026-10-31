@@ -41,6 +41,8 @@ jdx/mise#14922  3 unresolved of 6 threads (1 outdated)
 
 Each thread is addressed by the ID of its first comment: the number in the web UI's `#discussion_r…` links, such as `4385981140`. jouet works out the GraphQL thread ID that resolving needs and the thread a reply goes under, so an agent handles one number per thread. Giving the ID of a later comment fails with a message naming the thread it belongs to.
 
+On GitLab a thread is a resolvable discussion, and its ID is its first note's, the number in `#note_…` links. On Forgejo and Gitea, review comments on the same line make one thread, and its ID is its first comment's. Forgejo's API cannot resolve a thread, so `--resolve` there exits 4 before anything is posted; Gitea 1.26 and later can. See [GitLab and Forgejo](/forges).
+
 The pull request is chosen as for [`jouet pr status`](/commands/pr-status#choosing-pull-requests): a number, a URL, `owner/repo#123` or a branch, else the current branch's pull request, with the repository from `--repo` or the git remotes.
 
 ## Listing

@@ -3,12 +3,12 @@
 
 - **Usage:** `jouet wait run [FLAGS] <RUN>`
 
-Wait for a GitHub Actions run
+Wait for a GitHub Actions run or a GitLab pipeline
 
-Returns when the run completes, or on its first failed job, with the failed step's log excerpted as for `wait ci`.
+Returns when the run completes, or on its first failed job, with the failed step's log excerpted as for `wait ci`. Forgejo has no runs jouet can read, so it exits 4 there.
 
 ## Arguments
-- **`<RUN>`** — The run ID, or its Actions URL
+- **`<RUN>`** — The run ID, or its Actions or GitLab pipeline URL
 
 ## Flags
 - **`--repo <OWNER/NAME>`** — The repository for a bare run ID. Defaults to the git remote

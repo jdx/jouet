@@ -8,7 +8,7 @@ use jouet_git::handoff::{
 };
 use jouet_git::session;
 use jouet_github::Client;
-use jouet_github::pr::status::{self, Lookup};
+use jouet_github::pr::status::Lookup;
 use jouet_github::pr::target::{self, Target};
 use jouet_output::exit::Exit;
 use jouet_output::time;
@@ -162,7 +162,7 @@ fn lookup_pr(branch: &str) -> Result<Option<Pr>, String> {
     let repo = target::repo_from_git().ok_or("no GitHub remote in this checkout")?;
     let mut client = Client::from_env();
     let lookup = Lookup::Pr(Target::Branch(repo, branch.to_string()));
-    let fetched = status::fetch(&mut client, vec![lookup])?;
+    let fetched = jouet_github::host::fetch(&mut client, vec![lookup])?;
     let now = time::now();
     Ok(fetched.prs.into_iter().next().map(|p| {
         let s = p.finish(now);

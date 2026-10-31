@@ -1,0 +1,20 @@
+{
+  "number": 15077,
+  "title": "WIP: feat: Add support for OIDC RP-Initiated Logout",
+  "state": "open",
+  "draft": true,
+  "merged": false,
+  "mergeable": false,
+  "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077",
+  "merge_base": "cff8e8831a0695913dd0f383426a487baf899cd3",
+  "head": {
+    "ref": "rp-initiated-logout",
+    "sha": "5d9074d2e277a170927f748257b097b792573ea4",
+    "repo": {
+      "full_name": "ApolloFops/forgejo"
+    }
+  },
+  "base": {
+    "ref": "forgejo"
+  }
+}

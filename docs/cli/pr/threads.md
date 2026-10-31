@@ -5,7 +5,7 @@
 
 List, reply to and resolve review threads
 
-Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
+Lists unresolved threads by default, outdated ones included and marked. Each thread is addressed by its first comment's ID, the number in the web UI's `#discussion_r` links (`#note_` on GitLab, `#issuecomment-` on Forgejo). Forgejo cannot resolve threads through its API, so resolving there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges are removed, `<details>` collapse to their summary and each comment is cut at 30 lines with a marker; suggestion blocks are always kept whole.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR

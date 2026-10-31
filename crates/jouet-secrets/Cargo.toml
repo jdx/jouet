@@ -1,0 +1,29 @@
+[package]
+name = "jouet-secrets"
+version = "0.0.1"
+description = "Secret scanning with gitleaks' rules, behind jouet secrets scan and jouet commit"
+keywords = ["agents", "secrets", "gitleaks", "git"]
+categories = ["development-tools"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The source, gitleaks' rules and licence they are embedded from, jouet's
+# licence and the notice, and nothing a checkout happens to hold.
+include = ["/src/**", "/gitleaks/**", "/LICENSE", "/NOTICE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+aho-corasick.workspace = true
+ignore.workspace = true
+jouet-output.workspace = true
+regex.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
