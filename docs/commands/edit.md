@@ -146,7 +146,7 @@ Agents often write patterns that match nothing. The rules that matter most:
 - **The rewrite is text** with the pattern's metavariables filled in. Its indentation follows the match.
 - **Try it first** with `jouet search --structural --lang LANG 'PAT'`, which shows each match under the function it is in.
 
-These rules and worked examples are also in `jouet agent-help edit`.
+These rules and worked examples are also in `jouet agent-help edit --full`.
 
 ### Codex-style patch
 

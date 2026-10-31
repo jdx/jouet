@@ -85,6 +85,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     run.add_argument("--timeout", type=int, help="cap every task's timeout, in seconds")
     run.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
+    run.add_argument(
+        "--jouet-env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="set this in the jouet arm's agent environment, after `jouet setup` (repeatable), "
+        "such as JOUET_HOOKS_PRIME=0 to measure a session without the primer",
+    )
     run.add_argument("--out", type=Path, help="results directory (default bench/results/<timestamp>)")
     run.add_argument("--label", help="a line shown at the top of the summary")
     run.add_argument("--keep-work", action="store_true", help="keep each run's work tree and home")
@@ -118,6 +126,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if unknown:
         log(f"unknown task, harness or arm: {', '.join(unknown)}")
         return 2
+    bad_env = [e for e in args.jouet_env if "=" not in e]
+    if bad_env:
+        log(f"--jouet-env takes KEY=VALUE: {', '.join(bad_env)}")
+        return 2
+    jouet_env = dict(e.split("=", 1) for e in args.jouet_env)
     seed = args.seed if args.seed is not None else int(time.time())
     planned = runner.plan(selected, args.harness, args.arms, args.rounds, seed)
 
@@ -173,6 +186,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "effort": args.effort,
         "tasks": selected,
         "arms": args.arms,
+        "jouet_env": jouet_env,
         "harnesses": {
             name: {
                 "version": runner.version([str(bins[name]), "--version"]),
@@ -196,6 +210,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "max_total_tokens": args.max_total_tokens,
         "timeout_s": args.timeout,
         "jouet_bin": args.jouet.resolve(),
+        "jouet_env": jouet_env,
         "harness_bins": bins,
         "keep_work": args.keep_work,
     }

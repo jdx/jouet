@@ -163,7 +163,7 @@ Every command follows the same [conventions](/conventions), so an agent learns t
 
 ## What comes next
 
-The commands are the first layer. The second helps agents use them without being told every time: [`jouet setup`](/setup) installs hooks for Claude Code and Codex that catch a costly pattern as the agent runs it and point to the command that replaces it, driven by [rules](/rules) you can add to.
+The commands are the first layer. The second helps agents use them without being told every time: [`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot that catch a costly pattern as the agent runs it and point to the command that replaces it, driven by [rules](/rules) you can add to.
 
 Next is a report built from your own agent sessions that shows where their time and tokens go. It does not exist yet, and the details will change as it is built.
 
