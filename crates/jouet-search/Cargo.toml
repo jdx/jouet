@@ -50,3 +50,7 @@ tree-sitter-python = { workspace = true, optional = true }
 tree-sitter-ruby = { workspace = true, optional = true }
 tree-sitter-rust = { workspace = true, optional = true }
 tree-sitter-typescript = { workspace = true, optional = true }
+
+[package.metadata.cargo-shear]
+# Source the repo-map tests read as text, not modules of this crate.
+ignored-paths = ["tests/fixtures/**"]
