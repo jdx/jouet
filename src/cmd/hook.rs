@@ -831,6 +831,21 @@ mod tests {
         );
         let why = partial.block_reason(|| None, false).unwrap();
         assert!(why.contains("only a full test run clears it"), "{why}");
+        // A refusal, such as `diag check` with no hk config, is not a
+        // failed lint, and does not clear one either.
+        let refused = codex_state(
+            &engine,
+            vec![("/usr/bin/zsh -lc 'jouet diag check a.py'".into(), 4)],
+        );
+        assert_eq!(refused.block_reason(|| None, false), None);
+        let still = codex_state(
+            &engine,
+            vec![
+                ("jouet diag check a.py".into(), 1),
+                ("jouet diag check a.py".into(), 4),
+            ],
+        );
+        assert!(still.block_reason(|| None, false).is_some());
     }
 
     #[test]
