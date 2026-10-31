@@ -3,9 +3,9 @@
 
 - **Usage:** `jouet rule <SUBCOMMAND>`
 
-List, test and trust the rules jouet's hooks run
+List and test the rules jouet's hooks run
 
-Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforced: your settings cannot turn them off), in ~/.config/jouet/rules, in a repository's .jouet/rules once it is trusted, and in rule packs, pinned by commit. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
+Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforced: your settings cannot turn them off), in ~/.config/jouet/rules, in a repository's .jouet/rules once it is trusted (`jouet trust`), and in plugins. `jouet rule schema` prints their JSON schema; a rule with logic a matcher cannot express names a Luau `script`, written against the API `jouet rule types` prints.
 
 ## Flags
 - **`-h --help`** — Print help
@@ -16,10 +16,7 @@ Rules are `[[rule]]` tables in TOML files: built in, in /etc/jouet/rules (enforc
 - [`jouet rule list`](/cli/rule/list.md)
 - [`jouet rule log [NAME]`](/cli/rule/log.md)
 - [`jouet rule new [FLAGS] <NAME>`](/cli/rule/new.md)
-- [`jouet rule pack <SUBCOMMAND>`](/cli/rule/pack.md)
 - [`jouet rule promote [--reason <TEXT>] <NAME>`](/cli/rule/promote.md)
 - [`jouet rule schema`](/cli/rule/schema.md)
 - [`jouet rule test [FLAGS] [RULE]`](/cli/rule/test.md)
-- [`jouet rule trust [--yes] [--list]`](/cli/rule/trust.md)
 - [`jouet rule types`](/cli/rule/types.md)
-- [`jouet rule untrust`](/cli/rule/untrust.md)
