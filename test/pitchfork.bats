@@ -243,11 +243,10 @@ bash_payload() {
 	jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
 }
 
-# The rule that denied COMMAND, and the command its advice names.
+# The rule that denied COMMAND, if one did.
 denied() {
 	jouet hook claude pre-tool-use <<<"$(bash_payload "$1")" |
-		jq -r '.hookSpecificOutput | select(.permissionDecision == "deny") | .permissionDecisionReason' |
-		sed -E 's/.*\[jouet rule: ([a-z-]+)\]$/\1/; t; s/.*//'
+		jq -r '.hookSpecificOutput | select(.permissionDecision == "deny") | .permissionDecisionReason | capture("\\[jouet rule: (?<rule>[a-z-]+)\\]$").rule'
 }
 
 @test "a daemon pitchfork.toml declares is started and stopped through pitchfork" {
