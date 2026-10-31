@@ -70,7 +70,7 @@
           "type": "string"
         },
         "suggest": {
-          "description": "A command to run instead, shown before the message as \"Run `...`\ninstead.\"",
+          "description": "A command to run instead, shown before the message as \"Run `...`\ninstead.\" For a script rule, which writes its own message, only the\nsession-start primer names it.",
           "type": "string"
         },
         "match": {
