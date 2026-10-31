@@ -3,7 +3,8 @@
 jouet is a toolkit CLI for coding agents: `jouet wait` (CI and other conditions), `jouet pr threads`
 (review threads), `jouet pr status` (many PRs at once), `jouet pr next` and `jouet pr land` (what a
 PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothing file edits),
-`jouet audit` (where your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
+`jouet search` and `jouet read --map` (budgeted search and a repository map), `jouet audit` (where
+your agent sessions spend tokens and time), `jouet stats` (what jouet saved),
 and the git recipes `jouet commit`, `jouet review-package` and `jouet handoff`/`pickup`. It is in
 early development; the commands land one at a time.
 
@@ -71,6 +72,10 @@ helpers, and the setup, hook, ledger and agent-guide code. The rest lives in lib
 - `jouet-audit`: the transcript readers (Claude Code, Codex), command shapes, redaction,
   categories, patterns and the analyzer behind `jouet audit`, kept reusable for `jouet wind`, and
   `stats`, the ledger reader and estimates behind `jouet stats`.
+- `jouet-search`: `jouet search` (ripgrep's walker and searcher, with budgets and grouping by
+  enclosing symbol), the session memory of what an agent was shown, tree-sitter symbols for the
+  languages the `grammars` feature compiles in, and the repo map behind `jouet read --map`.
+  Without the feature (`--no-default-features`), search is plain text and there is no map.
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays
   in the binary, so the crate makes no network calls.

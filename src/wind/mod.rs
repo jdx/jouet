@@ -202,6 +202,7 @@ fn is_check(engine: &Engine, script: &str) -> bool {
         path: None,
         cwd: None,
         exit_code: Some(1),
+        ..Call::default()
     };
     !engine.evaluate(&call).records.is_empty()
 }

@@ -58,6 +58,11 @@ pub enum Edit {
         count: Count,
         line_aligned: bool,
     },
+    /// Replace a whole definition, found by a selector such as `fn
+    /// download` or `Vfox::download`, with `new`. The caller's
+    /// [`crate::Symbols`] finds it, so a formatter reflowing the text does
+    /// not break the match.
+    Symbol { selector: String, new: String },
     /// A patch hunk. It is searched for after the previous hunk, and after
     /// each anchor line in turn, and must match exactly once in what remains.
     Hunk {
@@ -188,6 +193,44 @@ fn parse_blocks(text: &str) -> Result<Spec, SpecError> {
             let path = path.trim();
             if path.is_empty() || path.starts_with('=') {
                 return Err(SpecError::at(n, "expected `=== PATH`"));
+            }
+            if let Some((path, selector)) = path.split_once('#') {
+                // `=== PATH#SYMBOL`: the definition's new text runs to the
+                // next `===` line or the end of the spec.
+                let (path, selector) = (path.trim(), selector.trim());
+                if path.is_empty() || selector.is_empty() {
+                    return Err(SpecError::at(n, "expected `=== PATH#SYMBOL`"));
+                }
+                let end = (i + 1..lines.len())
+                    .find(|&j| lines[j].starts_with("==="))
+                    .unwrap_or(lines.len());
+                let mut body = &lines[i + 1..end];
+                while let Some((last, rest)) = body.split_last()
+                    && last.trim().is_empty()
+                {
+                    body = rest;
+                }
+                while let Some((first, rest)) = body.split_first()
+                    && first.trim().is_empty()
+                {
+                    body = rest;
+                }
+                if body.is_empty() {
+                    return Err(SpecError::at(
+                        n,
+                        format!("`=== {path}#{selector}` has no new text for the definition"),
+                    ));
+                }
+                spec.push_edit(
+                    path,
+                    Edit::Symbol {
+                        selector: selector.to_string(),
+                        new: body.join("\n"),
+                    },
+                );
+                file = None;
+                i = end;
+                continue;
             }
             file = Some(path);
             i += 1;
@@ -427,6 +470,9 @@ struct JsonEdit {
     path: String,
     #[serde(default)]
     old: String,
+    /// A definition to replace, instead of `old`.
+    #[serde(default)]
+    symbol: Option<String>,
     new: String,
     #[serde(default)]
     count: Option<JsonCount>,
@@ -444,6 +490,21 @@ fn parse_json(text: &str) -> Result<Spec, SpecError> {
         .map_err(|e| SpecError::at(e.line(), format!("invalid JSON spec: {e}")))?;
     let mut spec = Spec::default();
     for (index, e) in entries.into_iter().enumerate() {
+        if let Some(selector) = e.symbol {
+            if !e.old.is_empty() || e.count.is_some() {
+                return Err(SpecError::new(format!(
+                    "entry {index}: `symbol` takes `new` only, not `old` or `count`"
+                )));
+            }
+            spec.push_edit(
+                &e.path,
+                Edit::Symbol {
+                    selector,
+                    new: e.new,
+                },
+            );
+            continue;
+        }
         let count = match e.count {
             None => Count::Exactly(1),
             Some(JsonCount::N(n)) if n > 0 => Count::Exactly(n),
@@ -485,6 +546,69 @@ mod tests {
             count,
             line_aligned,
         }
+    }
+
+    #[test]
+    fn a_symbol_section_takes_the_text_up_to_the_next_section() {
+        let spec = parse(
+            "=== src/a.rs#fn download\n\npub fn download() {\n    get();\n}\n\n=== src/b.rs\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n=== src/a.rs#Vfox::name\nfn name() {}\n",
+            Format::Blocks,
+        )
+        .unwrap();
+        assert_eq!(
+            spec.ops,
+            vec![
+                FileOp::Update {
+                    path: "src/a.rs".into(),
+                    edits: vec![
+                        Edit::Symbol {
+                            selector: "fn download".into(),
+                            new: "pub fn download() {\n    get();\n}".into(),
+                        },
+                        Edit::Symbol {
+                            selector: "Vfox::name".into(),
+                            new: "fn name() {}".into(),
+                        },
+                    ],
+                    move_to: None,
+                },
+                FileOp::Update {
+                    path: "src/b.rs".into(),
+                    edits: vec![replace("x\n", "y\n", Count::Exactly(1), true)],
+                    move_to: None,
+                },
+            ]
+        );
+        let err = parse("=== a.rs#download\n\n", Format::Blocks).unwrap_err();
+        assert!(err.message.contains("no new text"), "{err:?}");
+        let err = parse("=== #download\nx\n", Format::Blocks).unwrap_err();
+        assert!(err.message.contains("PATH#SYMBOL"), "{err:?}");
+    }
+
+    #[test]
+    fn a_json_entry_can_name_a_symbol() {
+        let spec = parse(
+            r#"[{"path": "a.rs", "symbol": "download", "new": "fn download() {}"}]"#,
+            Format::Json,
+        )
+        .unwrap();
+        assert_eq!(
+            spec.ops,
+            vec![FileOp::Update {
+                path: "a.rs".into(),
+                edits: vec![Edit::Symbol {
+                    selector: "download".into(),
+                    new: "fn download() {}".into()
+                }],
+                move_to: None,
+            }]
+        );
+        let err = parse(
+            r#"[{"path": "a.rs", "symbol": "d", "old": "x", "new": "y"}]"#,
+            Format::Json,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("`symbol` takes `new` only"), "{err:?}");
     }
 
     #[test]

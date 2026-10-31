@@ -38,6 +38,8 @@ fn plan(text: &str, opts: Option<&Table>, what: &str) -> mlua::Result<Plan> {
     let options = Options {
         expect_hashes,
         diff: field(opts, "diff", what)?.unwrap_or(false),
+        // Routines have no grammars: a symbol edit is refused.
+        symbols: None,
     };
     jouet_edit::plan(&spec, &options)
         .map_err(|e| Fail::new(Exit::Failed, format!("{what}: reading files: {e}")).raise())
