@@ -377,7 +377,6 @@ fn callers(report: &Report) -> Vec<Callers> {
         .iter()
         .filter_map(|f| std::fs::canonicalize(&f.path).ok())
         .collect();
-    let cache = jouet_output::paths::cache_dir().map(|d| d.join("tags"));
     let shown = |full: PathBuf| {
         full.strip_prefix(&cwd)
             .map_or(full.clone(), Path::to_path_buf)
@@ -404,33 +403,9 @@ fn callers(report: &Report) -> Vec<Callers> {
             out.push(Callers {
                 symbol: change.name.clone(),
                 references,
-                resolved: true,
                 more,
             });
-            continue;
         }
-        let mut references: Vec<Reference> =
-            jouet_search::map::references(&root, &change.name, cache.as_deref())
-                .into_iter()
-                .filter(|(rel, _)| {
-                    std::fs::canonicalize(root.join(rel)).is_ok_and(|p| !touched.contains(&p))
-                })
-                .map(|(rel, line)| Reference {
-                    path: shown(root.join(&rel)),
-                    line: line as usize,
-                })
-                .collect();
-        if references.is_empty() {
-            continue;
-        }
-        let more = references.len().saturating_sub(CALLERS_SHOWN);
-        references.truncate(CALLERS_SHOWN);
-        out.push(Callers {
-            symbol: change.name.clone(),
-            references,
-            resolved: false,
-            more,
-        });
     }
     out
 }
@@ -835,14 +810,24 @@ fn render(report: &Report) -> String {
             s.push_str("  every edited file was restored\n");
         }
     }
+    // A changed signature the graph found no callers for is still worth a
+    // look: the graph may not know the definition yet.
+    for change in report
+        .files
+        .iter()
+        .flat_map(|f| &f.edits)
+        .filter_map(|e| e.signature.as_ref())
+        .filter(|change| !report.callers.iter().any(|c| c.symbol == change.name))
+    {
+        let _ = writeln!(
+            s,
+            "note: the signature of {} changed; check its callers",
+            change.name
+        );
+    }
     for c in &report.callers {
         let total = c.references.len() + c.more;
-        let found = match (c.resolved, total == 1) {
-            (true, true) => "caller",
-            (true, false) => "callers",
-            (false, true) => "reference to it",
-            (false, false) => "references to it",
-        };
+        let found = if total == 1 { "caller" } else { "callers" };
         let _ = writeln!(
             s,
             "warning: the signature of {} changed; {total} {found} in files this edit does not change may need updating:",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# `jouet search` and `jouet read --map` as an agent runs them, and the hook
-# rules that steer reads and searches towards them.
+# `jouet search` as an agent runs it, and the hook rules that steer reads
+# and searches.
 
 setup() {
 	load "test_helper/common_setup"
@@ -111,35 +111,6 @@ src/main.rs: 1 match already shown, unchanged"
 	assert_success
 	assert_output "src/lib.rs (2)
 src/main.rs (1)"
-}
-
-@test "read --map shows the definitions that matter, within the budget" {
-	run --separate-stderr jouet read --map
-	assert_success
-	assert_line --index 0 src/lib.rs
-	assert_line '  1: pub struct Client {'
-	assert_line '  6:     pub fn download(&self, path: &str) -> String {'
-
-	run --separate-stderr jouet read --map --budget 10
-	assert_success
-	assert_line --regexp '^\.\.\. [0-9]+ more definitions in [0-9]+ more files? \(raise --budget, or --focus a file or name\)$'
-
-	run --separate-stderr jouet read --map --focus src/main.rs --json
-	assert_success
-	run jq -r '[.files[].path] | join(",")' <<<"$output"
-	assert_output src/lib.rs
-}
-
-@test "read --map caches tags, and needs --map" {
-	run --separate-stderr jouet read --map --json
-	run jq '.cached // 0' <<<"$output"
-	assert_output 0
-	run --separate-stderr jouet read --map --json
-	run jq '.cached' <<<"$output"
-	assert_output 2
-
-	run --separate-stderr jouet read
-	assert_failure 2
 }
 
 # A Claude Code hook payload in session `s1`.
