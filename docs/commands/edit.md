@@ -91,21 +91,7 @@ use crate::http::HTTP_FETCH;
 - The definition is its signature and body. Comments and attributes above it stay as they are.
 - Write the new text at any indentation: it is moved to where the definition sits.
 - An edit that would leave the file with more syntax errors than it has is refused (`does_not_parse`). This also catches new text cut short.
-- When the edit changes the definition's first line, its signature in most languages, the report lists references to its name in files the edit does not change, from the [repo map](/commands/read#how-the-map-is-built)'s tags: callers that may need updating. Names are matched by text, so some may belong to another definition of the same name.
-
-  ```output
-  $ jouet edit <<'JOUET_EDIT'
-  === src/lib.rs#Client::download
-  pub fn download(&self, path: &str, retries: u32) -> String {
-      let _ = retries;
-      fetch(&join_url(&self.base, path))
-  }
-  JOUET_EDIT
-  ok          src/lib.rs  1 edit  +3 -3
-  warning: the signature of download changed; 1 reference to it in files this edit does not change may need updating:
-    src/main.rs:3
-  1 of 1 file written
-  ```
+- When the edit changes the definition's first line, its signature in most languages, the report says so (`signature` in JSON, a note in text), since its callers may need changing too.
 
 Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
 
@@ -297,7 +283,6 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `files[].error` | Why a file failed: `code` is `not_found`, `already_exists`, `hash_mismatch` or `not_text`, with a `message` |
 | `files[].diff` | The unified diff, with `--diff` |
 | `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
-| `callers` | For each definition whose signature changed: its `symbol`, `references` (`path`, `line`) in files the edit does not change, and how many `more` were left out of the list |
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
 
 `jouet edit hash --json` prints `{"files":[{"path":"…","sha256":"…"}]}`.
