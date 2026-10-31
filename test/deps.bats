@@ -101,7 +101,8 @@ teardown() {
 hint: check it where it is published'
 	run --separate-stderr jouet deps info cargo:secret-crate@1.0.0
 	assert_failure 4
-	assert_equal "$(wc -c <"$REQUESTS")" 0
+	# Nothing was asked of any registry.
+	assert [ ! -s "$REQUESTS" ]
 }
 
 @test "a Go module's deprecation comes from its latest go.mod" {
