@@ -72,6 +72,8 @@ enum Cmd {
     Read(ReadArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
+    /// Check a stack of PRs: does each layer really contain the one below
+    Stack(StackArgs),
     /// Search files like rg, within a budget, grouped by symbol
     Search(SearchArgs),
     /// Run the test suite, or only the tests a change affects
@@ -1036,6 +1038,42 @@ pub struct WaitJobArgs {
     /// Do not show its log
     #[usage(long)]
     no_logs: bool,
+}
+
+/// Check a stack of PRs: does each layer really contain the one below
+///
+/// A stack is a chain of PRs, each based on the branch of the one below.
+/// The chain comes from gh-stack's metadata when it tracks the branch, else
+/// from the PRs' bases on GitHub. Branches are read as they are locally and
+/// as of the last fetch; nothing is fetched or changed.
+#[derive(Args)]
+pub struct StackArgs {
+    #[usage(subcommand)]
+    cmd: StackCmd,
+}
+
+#[derive(Subcommands)]
+pub enum StackCmd {
+    /// Show each layer's PR and whether it contains its parent, by ancestry and content
+    Status(StackStatusArgs),
+}
+
+/// Show each layer's PR and whether it contains its parent, by ancestry and content
+///
+/// For each layer: its PR, base and head, unpushed local commits, and
+/// whether it contains the layer below. That is checked by ancestry (the
+/// parent's tip is in its history) and by content: every file the parent
+/// layer changed must have that change in the layer's tree, so a restack
+/// that kept the commits but reverted their changes is caught. A layer
+/// whose prerequisite merged needs the trunk merged in. A layer's local
+/// branch is used when there is one, since it may hold unpushed fixes.
+/// Exits 1 when a layer needs attention, 3 when the branch is in no stack
+/// (no PR, and gh-stack does not track it), 5 when GitHub cannot be
+/// reached.
+#[derive(Args)]
+pub struct StackStatusArgs {
+    /// A branch in the stack (default: the current branch)
+    branch: Option<String>,
 }
 
 /// Wait for a pitchfork daemon to be ready, or to stop
@@ -2039,6 +2077,7 @@ fn main() -> ExitCode {
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
+        Cmd::Stack(args) => cmd::stack::run(args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),

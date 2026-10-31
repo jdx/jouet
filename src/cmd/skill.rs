@@ -45,10 +45,6 @@ pub(crate) fn run(args: &SkillArgs, out: &Output) -> Exit {
 /// The skill file. Claude Code and Codex read the same `SKILL.md` shape; the
 /// AGENTS.md snippet is the body under a heading, for harnesses without
 /// skills.
-/// Commands that work as a pair, which the skill describes in one line to
-/// stay within its budget.
-const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
-
 pub(crate) fn render(format: Format) -> String {
     let commands = guide::agent_commands();
     let mut body = String::new();
@@ -58,10 +54,10 @@ pub(crate) fn render(format: Format) -> String {
     body.push_str("When to reach for it:\n\n");
     for (meta, when) in &commands {
         let name = meta.cmd.name;
-        if PAIRED.iter().any(|(_, second)| *second == name) {
+        if guide::PAIRED.iter().any(|(_, second)| *second == name) {
             continue;
         }
-        let partner = PAIRED
+        let partner = guide::PAIRED
             .iter()
             .find(|(first, _)| *first == name)
             .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));

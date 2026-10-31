@@ -120,6 +120,12 @@ Read a file by its outline, a symbol or a range
 \fBreview\-package\fR
 Write one file for reviewing a range of commits
 .TP
+\fBstack\fR
+Check a stack of PRs: does each layer really contain the one below
+.TP
+\fBstack status\fR
+Show each layer's PR and whether it contains its parent, by ancestry and content
+.TP
 \fBsearch\fR
 Search files like rg, within a budget, grouped by symbol
 .TP
@@ -1162,6 +1168,35 @@ The commit the review starts after, such as origin/main
 .TP
 \fB<HEAD>\fR
 The last commit to review (default HEAD)
+.SH "JOUET STACK"
+Check a stack of PRs: does each layer really contain the one below
+
+A stack is a chain of PRs, each based on the branch of the one below. The chain comes from gh\-stack's metadata when it tracks the branch, else from the PRs' bases on GitHub. Branches are read as they are locally and as of the last fetch; nothing is fetched or changed.
+.PP
+\fBUsage:\fR jouet stack [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET STACK STATUS"
+Show each layer's PR and whether it contains its parent, by ancestry and content
+
+For each layer: its PR, base and head, unpushed local commits, and whether it contains the layer below. That is checked by ancestry (the parent's tip is in its history) and by content: every file the parent layer changed must have that change in the layer's tree, so a restack that kept the commits but reverted their changes is caught. A layer whose prerequisite merged needs the trunk merged in. A layer's local branch is used when there is one, since it may hold unpushed fixes. Exits 1 when a layer needs attention, 3 when the branch is in no stack (no PR, and gh\-stack does not track it), 5 when GitHub cannot be reached.
+.PP
+\fBUsage:\fR jouet stack status [OPTIONS] [<BRANCH>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<BRANCH>\fR
+A branch in the stack (default: the current branch)
 .SH "JOUET SEARCH"
 Search files like rg, within a budget, grouped by symbol
 

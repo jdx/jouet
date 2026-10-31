@@ -13,6 +13,7 @@ pub mod handoff;
 mod procs;
 pub mod review;
 pub mod session;
+pub mod stack;
 pub mod status;
 
 use jouet_output::exit::Exit;
