@@ -150,6 +150,10 @@ const COMPANIONS: &[(&str, &str)] = &[
         "bd",
         "bd (beads): issue tracking for agents; `bd ready` lists unblocked work",
     ),
+    (
+        "fnox",
+        "fnox: a project's secrets, encrypted or in a vault. `fnox exec -- CMD` runs a command with them in its environment and `fnox list` shows their names; never print a value (`fnox get`, `env`) into the transcript",
+    ),
 ];
 
 fn root() -> &'static CommandMeta<'static> {

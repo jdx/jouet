@@ -259,3 +259,80 @@ fn seen_matches_what_the_caller_worked_out() {
     assert!(!fires(read(Some(false))));
     assert!(!fires(read(None)));
 }
+
+/// Whether `toml` matches `command` run in `/repo/app` of a fnox project
+/// with these secrets and files.
+fn fires_in_fnox(toml: &str, command: &str, secrets: &[&str], files: &[&str]) -> bool {
+    let m: Matcher = toml::from_str(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
+    assert_eq!(m.problem(false), None, "{toml}");
+    let call = Call {
+        tool: "Bash".into(),
+        command: Some(command.into()),
+        cwd: Some("/repo/app".into()),
+        fnox: Some(crate::Fnox {
+            secrets: secrets.iter().map(|s| (*s).to_string()).collect(),
+            files: files.iter().map(|s| (*s).to_string()).collect(),
+        }),
+        ..Call::default()
+    };
+    any(&[m], &call, &crate::call_commands(&call))
+}
+
+#[test]
+fn fnox_keys_read_the_project_the_caller_found() {
+    assert!(fires_in_fnox(
+        "command = \"env\"\nfnox = true",
+        "env",
+        &[],
+        &[]
+    ));
+    assert!(!fires("command = \"env\"\nfnox = true", "env"));
+    assert!(fires("command = \"env\"\nfnox = false", "env"));
+
+    let vars = "command = \"echo\"\nsecret_vars = true";
+    assert!(fires_in_fnox(vars, "echo ${API_KEY}", &["API_KEY"], &[]));
+    assert!(!fires_in_fnox(vars, "echo '${API_KEY}'", &["API_KEY"], &[]));
+    assert!(!fires_in_fnox(vars, "echo $HOME", &["API_KEY"], &[]));
+    assert!(!fires(vars, "echo $API_KEY"));
+
+    let args = "command = \"printenv\"\nsecret_args = true";
+    assert!(fires_in_fnox(args, "printenv API_KEY", &["API_KEY"], &[]));
+    assert!(!fires_in_fnox(args, "printenv HOME", &["API_KEY"], &[]));
+
+    // Files are compared as paths, from the working directory.
+    let files = "command = \"cat\"\nsecret_files = true";
+    let abs = ["/repo/secrets.env"];
+    assert!(fires_in_fnox(files, "cat ../secrets.env", &[], &abs));
+    assert!(fires_in_fnox(files, "cat /repo/secrets.env", &[], &abs));
+    assert!(!fires_in_fnox(files, "cat secrets.env", &[], &abs));
+}
+
+#[test]
+fn prints_is_output_that_reaches_the_transcript() {
+    let m = "command = \"fnox get\"\nprints = true";
+    assert!(fires(m, "fnox get A"));
+    assert!(fires(m, "fnox get A 2>/dev/null"));
+    assert!(fires(m, "fnox get A >&2"));
+    assert!(!fires(m, "fnox get A > a.txt"));
+    assert!(!fires(m, "fnox get A &>/dev/null"));
+    assert!(!fires(m, "fnox get A | pbcopy"));
+    assert!(!fires(m, "export A=$(fnox get A)"));
+    assert!(fires(
+        "command = \"fnox get\"\nprints = false",
+        "fnox get A >a"
+    ));
+}
+
+#[test]
+fn unless_paths_excludes_a_file_tools_path() {
+    let m: Matcher =
+        toml::from_str("tool = \"Read\"\npaths = \".env*\"\nunless_paths = \"*.example\"").unwrap();
+    let read = |path: &str| Call {
+        tool: "Read".into(),
+        path: Some(path.into()),
+        ..Call::default()
+    };
+    let fires = |c: Call| any(std::slice::from_ref(&m), &c, &[]);
+    assert!(fires(read("app/.env.local")));
+    assert!(!fires(read("app/.env.example")));
+}

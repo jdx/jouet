@@ -5,7 +5,7 @@
 
 Commit only the named paths, with trailers
 
-Commits exactly the paths given, as they are in the working tree (`git commit --only`): anything else already staged stays staged, and untracked files are added only when a named path covers them. Refuses -A, `.`, the repository root and a path with no changes. Paths are literal, never globs. Appends the configured trailers; inside an agent the default is a co-author line (Claude Code) and the AI disclosure, with the tool and version from AI_AGENT. Warns about a subject that is not a conventional commit when the repository checks them. Hooks always run; when one fails, the end of its output is shown and the whole of it kept in a log.
+Commits exactly the paths given, as they are in the working tree (`git commit --only`): anything else already staged stays staged, and untracked files are added only when a named path covers them. Refuses -A, `.`, the repository root and a path with no changes. Paths are literal, never globs. Appends the configured trailers; inside an agent the default is a co-author line (Claude Code) and the AI disclosure, with the tool and version from AI_AGENT. Warns about a subject that is not a conventional commit when the repository checks them. Hooks always run; when one fails, the end of its output is shown and the whole of it kept in a log. In a project that uses fnox, `fnox scan --values` first checks exactly what would be committed, and a secret's value there refuses the commit (exit 1), naming the secret and file, never the value.
 
 ## Arguments
 - **`[PATHS]…`** — The files and directories to commit

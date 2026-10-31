@@ -322,12 +322,17 @@ fn test(args: &RuleTestArgs, cwd: &Path, out: &Output) -> Exit {
             Ok(payload) => Call::from_hook(&payload, "test"),
             Err(message) => return out.error(Exit::Usage, &message),
         },
-        (None, Some(command)) => Call {
-            tool: "Bash".into(),
-            command: Some(command.clone()),
-            harness: "test".into(),
-            ..Call::default()
-        },
+        (None, Some(command)) => {
+            let cwd = std::env::current_dir().ok();
+            Call {
+                tool: "Bash".into(),
+                command: Some(command.clone()),
+                harness: "test".into(),
+                fnox: cwd.as_deref().and_then(crate::fnox::context),
+                cwd: cwd.map(|d| d.to_string_lossy().into_owned()),
+                ..Call::default()
+            }
+        }
         (None, None) if args.replay => return replay_ledger(&engine, rule, out),
         (None, None) => return examples(&engine, rule, out),
     };

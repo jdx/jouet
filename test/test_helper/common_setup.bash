@@ -93,3 +93,51 @@ commit_file() {
 	git add -- "$1"
 	git commit -q -m "$3"
 }
+
+# Puts a fake `fnox` on PATH that appends its arguments to
+# $BATS_TEST_TMPDIR/fnox.log and, for `fnox scan --values --staged`, does
+# what the real one does: reads the files the index stages (honouring
+# GIT_INDEX_FILE), reports those holding FAKE_FNOX_VALUE as the secret
+# FAKE_FNOX_NAME in fnox's JSON, and exits 1 when it found any. With
+# FAKE_FNOX_ERROR set it fails as fnox does when it cannot resolve the
+# secrets: a miette error on stderr, nothing on stdout, exit 1. Those are
+# read from $BATS_TEST_TMPDIR/fnox.env, a file of NAME=VALUE lines.
+fake_fnox() {
+	cat >"$BATS_TEST_TMPDIR/bin/fnox" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >>"$BATS_TEST_TMPDIR/fnox.log"
+[ "$1 $2 $3" = "scan --values --staged" ] || exit 0
+# shellcheck disable=SC1091
+[ -f "$BATS_TEST_TMPDIR/fnox.env" ] && . "$BATS_TEST_TMPDIR/fnox.env"
+if [ -n "${FAKE_FNOX_ERROR:-}" ]; then
+	printf 'Error: fnox::config::error\n\n  \303\227 Configuration error: %s\n\n' "$FAKE_FNOX_ERROR" >&2
+	exit 1
+fi
+if [ -n "${FAKE_FNOX_UNCHECKED:-}" ]; then
+	printf 'Warning: 1 secret(s) have no value and were not checked: %s\n' "$FAKE_FNOX_UNCHECKED" >&2
+fi
+files=0
+findings=""
+for f in $(git diff --cached --name-only --diff-filter=ACMR); do
+	files=$((files + 1))
+	line=$(git show ":$f" | grep -n -F -- "${FAKE_FNOX_VALUE:-unset-value}" | head -1 | cut -d: -f1)
+	if [ -n "$line" ]; then
+		[ -n "$findings" ] && findings="$findings,"
+		findings="$findings
+    {
+      \"path\": \"$f\",
+      \"line\": $line,
+      \"column\": 1,
+      \"detector\": \"resolved-secret\",
+      \"severity\": \"high\",
+      \"redacted\": \"****\",
+      \"secret\": \"${FAKE_FNOX_NAME:-SECRET}\"
+    }"
+	fi
+done
+count=$(printf '%s' "$findings" | grep -c '"path"')
+printf '{\n  "findings": [%s\n  ],\n  "summary": {\n    "files_scanned": %s,\n    "files_with_findings": %s,\n    "findings": %s\n  }\n}\n' "$findings" "$files" "$count" "$count"
+[ "$count" -eq 0 ]
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/fnox"
+}

@@ -3,8 +3,9 @@
 //! The hooks read the command an agent is about to run and must not mistake
 //! `git commit -m "never git add -A"` for `git add -A`. This splits a script
 //! into simple commands at unquoted operators, removes quotes, drops
-//! redirections, and keeps here-document bodies apart from the words, which is
-//! all a pattern needs. It never fails: text it cannot make sense of becomes
+//! redirections (noting one of standard output), notes the parameters each
+//! command expands, and keeps here-document bodies apart from the words,
+//! which is all a pattern needs. It never fails: text it cannot make sense of becomes
 //! words, and the worst outcome is a missed match.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,14 @@ pub struct Command {
     pub heredocs: Vec<String>,
     /// The operator after the command, or `None` at the end of the script.
     pub op: Option<Op>,
+    /// The parameters the command expands outside single quotes, by name:
+    /// `$HOME` and `${HOME:-/}` are both `HOME`.
+    pub vars: Vec<String>,
+    /// Its standard output goes to a file (`> out`, `>> log`, `&> all`),
+    /// not where it would otherwise go.
+    pub stdout_redirected: bool,
+    /// It runs inside `$(...)`, whose output becomes part of a word.
+    pub captured: bool,
 }
 
 /// A parsed script: its top-level commands, and the commands inside command
@@ -178,6 +187,10 @@ impl Command {
                 }
                 _ => return (via, w),
             };
+            // `env` or `sudo -u x` with no command runs the wrapper itself.
+            if next.is_empty() {
+                return (via, w);
+            }
             via.push(basename(first));
             w = next;
         }
@@ -387,6 +400,7 @@ impl Parser {
                     Some('>') => {
                         b.end_word();
                         self.redirect(&mut b);
+                        b.current.stdout_redirected = true;
                     }
                     _ => b.end_command(Some(Op::Background)),
                 },
@@ -403,15 +417,20 @@ impl Parser {
                 }
                 '<' | '>' => {
                     // `2>` and `10<`: an all-digit word before is the fd.
-                    if b.word
-                        .as_deref()
-                        .is_some_and(|w| w.chars().all(|c| c.is_ascii_digit()))
-                    {
-                        b.word = None;
-                    }
+                    let fd = b
+                        .word
+                        .take_if(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()));
                     b.end_word();
                     self.pos -= 1;
-                    self.redirect(&mut b);
+                    let op = self.redirect(&mut b);
+                    let stdout = fd.as_deref().is_none_or(|fd| fd == "1");
+                    if stdout && op.starts_with('>') && !op.ends_with('&') {
+                        b.current.stdout_redirected = true;
+                    }
+                }
+                '$' => {
+                    let text = self.parameter(&mut b);
+                    b.word().push_str(&text);
                 }
                 c => b.word().push(c),
             }
@@ -423,8 +442,10 @@ impl Parser {
     }
 
     /// At `<`, `>` or `&>`: consumes the operator, and arranges for the target
-    /// word to be dropped or read as a here-document delimiter.
-    fn redirect(&mut self, b: &mut Builder) {
+    /// word to be dropped or read as a here-document delimiter. Returns the
+    /// operator, with a trailing `&` when it duplicates a descriptor
+    /// (`>&2`) rather than opening a file.
+    fn redirect(&mut self, b: &mut Builder) -> String {
         let start = self.pos;
         while self
             .peek()
@@ -445,9 +466,41 @@ impl Parser {
                     self.pos += 1;
                 }
             }
-            o if o.ends_with("&-") => {}
+            o if o.ends_with("&-") => return format!("{o}&"),
             _ => b.skip_word = true,
         }
+        op
+    }
+
+    /// After a `$` outside single quotes: notes the parameter it expands, if
+    /// any, and returns its text, which stays part of the word. `$(` is
+    /// handled before this.
+    fn parameter(&mut self, b: &mut Builder) -> String {
+        let start = self.pos - 1;
+        let braced = self.peek() == Some('{');
+        if braced {
+            self.pos += 1;
+        }
+        let name_start = self.pos;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            self.pos += 1;
+        }
+        let name: String = self.chars[name_start..self.pos].iter().collect();
+        if braced {
+            while let Some(c) = self.peek() {
+                self.pos += 1;
+                if c == '}' {
+                    break;
+                }
+            }
+        }
+        if name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            b.current.vars.push(name);
+        }
+        self.chars[start..self.pos].iter().collect()
     }
 
     fn read_heredocs(&mut self, b: &mut Builder) {
@@ -496,6 +549,10 @@ impl Parser {
                     let text = self.substitution();
                     b.word().push_str(&text);
                 }
+                '$' => {
+                    let text = self.parameter(b);
+                    b.word().push_str(&text);
+                }
                 '`' => {
                     let text = self.backquoted();
                     b.word().push_str(&text);
@@ -510,7 +567,10 @@ impl Parser {
     fn substitution(&mut self) -> String {
         let start = self.pos - 1;
         self.pos += 1;
-        let commands = self.list(true);
+        let mut commands = self.list(true);
+        for c in &mut commands {
+            c.captured = true;
+        }
         self.nested.extend(commands);
         self.chars[start..self.pos].iter().collect()
     }
@@ -700,5 +760,49 @@ mod tests {
             words("cargo \\\n  test # git add -A\n"),
             [vec!["cargo", "test"]]
         );
+    }
+    #[test]
+    fn parameters_outside_single_quotes_are_noted() {
+        let script =
+            parse("echo \"$TOKEN\" ${DB_URL:-x} '$QUOTED' $1 $? cost\\$5; printf %s $HOME");
+        assert_eq!(script.commands[0].vars, ["TOKEN", "DB_URL"]);
+        assert_eq!(
+            script.commands[0].words,
+            [
+                "echo",
+                "$TOKEN",
+                "${DB_URL:-x}",
+                "$QUOTED",
+                "$1",
+                "$?",
+                "cost$5"
+            ]
+        );
+        assert_eq!(script.commands[1].vars, ["HOME"]);
+    }
+
+    #[test]
+    fn redirected_and_captured_output_is_noted() {
+        let script = parse(
+            "fnox get A > a.txt; fnox get B 2>/dev/null; fnox get C >&2; fnox get D &> all; fnox get E 1>>log; X=$(fnox get F)",
+        );
+        let redirected: Vec<bool> = script
+            .commands
+            .iter()
+            .map(|c| c.stdout_redirected)
+            .collect();
+        // `X=$(...)` alone is only an assignment; its command is nested.
+        assert_eq!(redirected, [true, false, false, true, true]);
+        assert!(script.nested[0].captured);
+        assert!(!script.commands[0].captured);
+    }
+
+    #[test]
+    fn a_wrapper_with_nothing_to_run_is_the_program() {
+        let script = parse("env; env -u HOME; env FOO=1 cargo test");
+        let argv: Vec<&[String]> = script.commands.iter().map(Command::argv).collect();
+        assert_eq!(argv[0], ["env"]);
+        assert_eq!(argv[1], ["env", "-u", "HOME"]);
+        assert_eq!(argv[2], ["cargo", "test"]);
     }
 }
