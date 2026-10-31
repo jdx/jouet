@@ -1,6 +1,6 @@
 [package]
 name = "jouet-github"
-version = "0.0.1"
+version = "0.0.2"
 description = "jouet's GitHub client and the pull request model behind its pr and wait commands"
 keywords = ["agents", "github"]
 categories = ["development-tools"]
