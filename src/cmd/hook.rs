@@ -145,6 +145,14 @@ fn handle(
                 (Vec::new(), None)
             };
             log.post_tool_use(payload, &call, &records, tree);
+            // A run of a mise task jouet added, for `jouet unwind`.
+            if settings.wind.enabled
+                && let (Some(command), Some(cwd)) = (call.command.as_deref(), call.cwd.as_deref())
+                && command.contains("mise")
+                && let Some(paths) = wind::Paths::locate()
+            {
+                wind::tasks::record_use(&paths, Path::new(cwd), command, crate::wind::now());
+            }
             if hooks.graph {
                 super::graph::reindex_after_tool(payload, &call);
             }
@@ -222,7 +230,8 @@ fn remember(call: &Call, session: Option<&str>) {
 
 /// Winds, then picks the notes to show a starting session: at most
 /// [`wind::MAX_PER_START`], one line each. The ledger's notes come first,
-/// then sessions worth a review and what reviews proposed.
+/// then mise tasks proposed for this repository, then sessions worth a
+/// review and what reviews proposed.
 fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) -> Vec<String> {
     if !settings.wind.enabled {
         return Vec::new();
@@ -237,6 +246,8 @@ fn wind_notes(settings: &Settings, session: Option<&str>, repo: Option<&str>) ->
         .iter()
         .map(|note| wind::note_line(note, session))
         .collect();
+    let room = wind::MAX_PER_START.saturating_sub(lines.len());
+    lines.extend(wind::tasks::lines_for_session(&paths, session, repo, room));
     let room = wind::MAX_PER_START.saturating_sub(lines.len());
     lines.extend(wind::review::lines_for_session(
         &paths, session, repo, room, now,

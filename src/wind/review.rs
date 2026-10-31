@@ -349,7 +349,7 @@ pub(crate) fn lines_for_session(
     .unwrap_or_default()
 }
 
-fn mark_shown(shown: &mut Vec<String>, status: &mut Status, session: &str) {
+pub(super) fn mark_shown(shown: &mut Vec<String>, status: &mut Status, session: &str) {
     if !shown.iter().any(|s| s == session) {
         shown.push(session.to_string());
     }

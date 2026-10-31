@@ -114,6 +114,9 @@ const WHEN: &[(&str, Option<&str>)] = &[
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // Named where it is needed: in a winding note at session start, which
+    // says what to ask the user.
+    ("task", None),
     ("share", None),
     ("agent-help", None),
     ("audit", None),
