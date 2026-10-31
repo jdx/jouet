@@ -231,7 +231,9 @@ vitest (vitest's module graph): 2 test files
 	assert_line '  run: python3 -m unittest discover -s tests'
 	assert_stderr --partial 'Ran 2 tests'
 
-	printf 'def add(a, b):\n    return a - b\n' >calc/arith.py
+	# A different size from the original: Python's bytecode cache checks the
+	# source's size and its mtime in whole seconds.
+	printf 'def add(a, b):\n    return a + b + 1\n' >calc/arith.py
 	run --separate-stderr jouet test --affected
 	assert_failure 1
 	assert_line --partial 'unittest (a static import graph (best-effort'
