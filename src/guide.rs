@@ -84,6 +84,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "stack",
+        Some(
+            "working on a stack of PRs: `jouet stack status` shows each layer's PR and whether it really contains the layer below, by ancestry and by content (a restack that reverted a parent's change is flagged), and `jouet stack sync` merges each layer up to date from its local branch and verifies it, instead of trusting `gh stack view` or restacking with rebase, `checkout -B` or force pushes",
+        ),
+    ),
+    (
         "test",
         Some(
             "running tests while you iterate: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push. It runs a mise, npm, just or make `test` task, cargo, go, vitest, jest or pytest; for anything else (such as plain `python -m unittest`) it exits 4, so run the project's own command",
@@ -209,6 +215,10 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
+/// Commands that work as a pair, which the overview and the skill describe
+/// in one entry to stay within their budgets.
+pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in
 /// `jouet agent-help COMMAND`, so a new subcommand costs the overview a word,
@@ -218,8 +228,27 @@ pub(crate) fn overview() -> String {
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
         env!("CARGO_PKG_VERSION")
     );
-    for (meta, when) in agent_commands() {
+    let commands = agent_commands();
+    for (meta, when) in &commands {
         let name = meta.cmd.name;
+        if PAIRED.iter().any(|(_, second)| *second == name) {
+            continue;
+        }
+        let partner = PAIRED
+            .iter()
+            .find(|(first, _)| *first == name)
+            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
+        if let Some((other, other_when)) = partner {
+            let _ = writeln!(
+                out,
+                "jouet {name} / jouet {}: {} / {}",
+                other.cmd.name,
+                meta.about.unwrap_or(""),
+                lowercase_first(other.about.unwrap_or(""))
+            );
+            let _ = writeln!(out, "  when: {when}; {other_when}");
+            continue;
+        }
         let subs: Vec<&str> = meta
             .subcommands
             .iter()
@@ -351,6 +380,14 @@ fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
         parts.push(flag_usage(flag));
     }
     Some(parts.join(" "))
+}
+
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 fn conventions() -> String {

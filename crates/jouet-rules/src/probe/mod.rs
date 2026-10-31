@@ -25,6 +25,7 @@ pub(crate) mod git;
 mod github;
 mod ledger;
 mod pitchfork;
+mod stack;
 
 use crate::Shared;
 use crate::json::to_lua;
@@ -386,6 +387,36 @@ pub(crate) fn install(
             let key = format!("changed:{scope}");
             let found = cached(&s, &key, |p, left| {
                 claims::changed(p.dir.as_deref(), &scope, left).map(Some)
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+
+    let stack_table = lua.create_table()?;
+    let s = shared.clone();
+    stack_table.set(
+        "layer",
+        lua.create_function(move |lua, ()| {
+            let found = cached(&s, "stack:layer", |p, left| {
+                stack::layer(p.dir.as_deref(), left)
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("stack", stack_table)?;
+
+    let s = shared.clone();
+    git_table.set(
+        "ahead",
+        lua.create_function(move |lua, (branch, of): (String, String)| {
+            // An example answers for any branch.
+            let stubbed = s.cache.borrow().get("ahead:*").cloned();
+            if let Some(answer_) = stubbed {
+                return answer(lua, answer_);
+            }
+            let key = format!("ahead:{branch}:{of}");
+            let found = cached(&s, &key, |p, left| {
+                stack::ahead(p.dir.as_deref(), &branch, &of, left)
             })?;
             answer(lua, found)
         })?,

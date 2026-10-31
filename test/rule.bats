@@ -43,7 +43,7 @@ setup() {
 	assert_success
 	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
-	assert_line '24 of 24 rules passed their examples'
+	assert_line '26 of 26 rules passed their examples'
 
 	cat >"$RULES/no-rm.toml" <<'TOML'
 [[rule]]
@@ -62,12 +62,12 @@ TOML
 	assert_line '            - expected: quiet'
 	assert_line '            + actual:   deny: rm deletes for good'
 	assert_line --regexp '^FAIL  bare +it has no examples$'
-	assert_line '24 of 26 rules passed their examples'
+	assert_line '26 of 28 rules passed their examples'
 	refute_line --partial 'echo rm'
 
 	run --separate-stderr jouet rule test --all --json
 	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
-	assert_output '[24,2,[2,1]]'
+	assert_output '[26,2,[2,1]]'
 
 	run --separate-stderr jouet rule test
 	assert_failure 2

@@ -247,6 +247,17 @@ export type JouetPitchforkDaemon = {
 	file: string,
 }
 
+-- Where the current branch sits in a gh-stack stack.
+export type JouetStackLayer = {
+	branch: string,
+	-- The layer below, or the trunk for the bottom layer.
+	parent: string,
+	trunk: string,
+	-- The layer below was submitted as a PR and its remote branch is gone,
+	-- as when GitHub deletes a merged PR's branch and a fetch prunes it.
+	parent_merged: boolean,
+}
+
 export type JouetRepo = {
 	-- The work tree's root.
 	root: string,
@@ -274,6 +285,10 @@ export type JouetGit = typeof(setmetatable(
 		-- ("staged", the default), or every changed tracked file ("tracked",
 		-- what `git commit -a` takes).
 		changed: (scope: string?) -> ({ string }?, string?),
+		-- How many commits on the local branch `branch` are not in `of` (a
+		-- branch, `origin/…` or a SHA): what moving the branch to `of` would
+		-- drop. nil when there is no such local branch.
+		ahead: (branch: string, of: string) -> (number?, string?),
 	},
 	{} :: {
 		-- A git command's subcommand and its arguments, past global options
@@ -357,6 +372,18 @@ declare jouet: {
 		-- winning; read from the files, without running pitchfork. nil when
 		-- none declares any.
 		daemons: () -> ({ JouetPitchforkDaemon }?, string?),
+	},
+	stack: {
+		-- The current branch's layer in the gh-stack stack holding it, from
+		-- gh-stack's metadata and the remote-tracking branches; nil when
+		-- gh-stack does not track it.
+		layer: () -> (JouetStackLayer?, string?),
+	},
+	stack: {
+		-- The current branch's layer in the gh-stack stack holding it, from
+		-- gh-stack's metadata and the remote-tracking branches; nil when
+		-- gh-stack does not track it.
+		layer: () -> (JouetStackLayer?, string?),
 	},
 	-- The work tree's root and its GitHub repository.
 	repo: () -> (JouetRepo?, string?),

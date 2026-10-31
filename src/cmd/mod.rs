@@ -24,6 +24,7 @@ pub(crate) mod search;
 pub(crate) mod setup;
 pub(crate) mod share;
 pub(crate) mod skill;
+pub(crate) mod stack;
 pub(crate) mod stats;
 pub(crate) mod task;
 pub(crate) mod test;

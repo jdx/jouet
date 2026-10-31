@@ -381,6 +381,9 @@ pub(crate) struct CaseTable {
     /// The claims `jouet.claims.held()` finds in the repository; omitted,
     /// it has no answer, as for any probe in an example.
     pub claims: Option<Vec<ClaimCase>>,
+    /// Where `jouet.stack.layer()` places the current branch in a stack;
+    /// omitted, it has no answer.
+    pub stack: Option<StackCase>,
 }
 
 /// A claim in an example's repository, as `jouet claim` would keep it.
@@ -404,8 +407,31 @@ pub(crate) struct ClaimCase {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "ExampleGit")]
 pub(crate) struct GitCase {
-    /// Whether anything is changed, untracked or conflicted.
+    /// Whether anything is changed, untracked or conflicted; `false` if
+    /// omitted.
+    #[serde(default)]
     pub dirty: bool,
+    /// The branch checked out; omitted, HEAD is detached.
+    pub branch: Option<String>,
+    /// What `jouet.git.ahead()` answers, for any branch: how many of its
+    /// commits the other commit lacks. Omitted, it has no answer.
+    pub ahead: Option<u32>,
+}
+
+/// An example's place in a stack, as `jouet.stack.layer()` would report it.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExampleStack")]
+pub(crate) struct StackCase {
+    /// The current branch.
+    pub branch: String,
+    /// The layer below it, or the trunk.
+    pub parent: String,
+    /// The trunk; `main` if omitted.
+    pub trunk: Option<String>,
+    /// Whether the layer below has merged.
+    #[serde(default)]
+    pub parent_merged: bool,
 }
 
 /// An example's fnox project, as jouet's hook would read it from the
@@ -436,7 +462,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox`, `git`, `session` or `claims`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox`, `git`, `session`, `claims` or `stack`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))
