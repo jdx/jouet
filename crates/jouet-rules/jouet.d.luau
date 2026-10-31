@@ -335,6 +335,11 @@ declare jouet: {
 	short_flag: (arg: string, flag: string, takes_value: string?) -> boolean,
 	contains: (list: { string }, value: string) -> boolean,
 	basename: (path: string) -> string,
+	-- Words with wrappers such as `env FOO=1`, `sudo`, `timeout 60`, `rtk`
+	-- and `mise x tool --` removed, as a command's `argv` has them, and the
+	-- wrappers it looked through: for a command named inside another, such
+	-- as the one after `jouet test --cmd --`.
+	unwrap: (words: { string }) -> ({ string }, { string }),
 
 	-- Probes. The GitHub ones need the network: off in hooks unless
 	-- `rules.network` is on.
