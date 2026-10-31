@@ -203,25 +203,57 @@ pub fn test_task(root: &Path) -> Option<Vec<String>> {
         ".config/mise.toml",
         ".mise/config.toml",
     ];
-    let mise_task = mise_files.iter().filter_map(|f| read(f)).any(|text| {
-        toml::from_str::<toml::Table>(&text)
-            .ok()
-            .and_then(|t| t.get("tasks")?.as_table()?.get("test").cloned())
-            .is_some()
-    }) || [
-        "mise-tasks/test",
-        ".mise-tasks/test",
-        ".mise/tasks/test",
-        "mise/tasks/test",
-    ]
-    .iter()
-    .any(|f| has(f));
+    let configs: Vec<toml::Table> = mise_files
+        .iter()
+        .filter_map(|f| read(f))
+        .filter_map(|text| toml::from_str::<toml::Table>(&text).ok())
+        .collect();
+    let declared = configs.iter().any(|config| {
+        config
+            .get("tasks")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|tasks| tasks.contains_key("test"))
+    });
+    // `[task_config] includes`: TOML files of tasks keyed by name, as
+    // mise's own `tasks.toml`, or directories of file tasks.
+    let included = configs
+        .iter()
+        .filter_map(|config| config.get("task_config")?.get("includes")?.as_array())
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .any(|include| {
+            let path = root.join(include);
+            if path.is_dir() {
+                path.join("test").is_file()
+            } else {
+                std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+                    .is_some_and(|tasks| tasks.contains_key("test"))
+            }
+        });
+    let mise_task = declared
+        || included
+        || [
+            "mise-tasks/test",
+            ".mise-tasks/test",
+            ".mise/tasks/test",
+            "mise/tasks/test",
+        ]
+        .iter()
+        .any(|f| has(f));
     if mise_task {
         return words(&["mise", "run", "test"]);
     }
+    // Not `npm init`'s placeholder, which only fails: `echo "Error: no
+    // test specified" && exit 1`.
     let script = read("package.json")
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .is_some_and(|pkg| pkg["scripts"]["test"].is_string());
+        .is_some_and(|pkg| {
+            pkg["scripts"]["test"]
+                .as_str()
+                .is_some_and(|s| !s.contains("no test specified"))
+        });
     if script {
         return if has("pnpm-lock.yaml") {
             words(&["pnpm", "test"])
@@ -283,6 +315,35 @@ mod tests {
         std::fs::write(root.join("mise.toml"), "[tasks.lint]\nrun = 'x'\n").unwrap();
         assert_eq!(test_task(root).unwrap(), ["pnpm", "test"]);
         std::fs::write(root.join("mise.toml"), "[tasks.test]\nrun = 'x'\n").unwrap();
+        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
+    }
+
+    #[test]
+    fn a_test_task_in_an_included_file_or_directory_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // mise's own layout: npm's placeholder script, and the test task
+        // in an included `tasks.toml`.
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
+        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
+        std::fs::write(
+            root.join("mise.toml"),
+            "[task_config]\nincludes = [\"tasks.toml\", \"xtasks\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tasks.toml"), "[lint]\nrun = 'x'\n").unwrap();
+        assert_eq!(test_task(root).unwrap(), ["cargo", "test"]);
+        std::fs::write(root.join("tasks.toml"), "[test]\nrun = 'x'\n").unwrap();
+        assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
+        // Or a file task in an included directory.
+        std::fs::write(root.join("tasks.toml"), "").unwrap();
+        std::fs::create_dir(root.join("xtasks")).unwrap();
+        std::fs::write(root.join("xtasks/test"), "#!/bin/sh\n").unwrap();
         assert_eq!(test_task(root).unwrap(), ["mise", "run", "test"]);
     }
 }
