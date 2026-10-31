@@ -270,7 +270,7 @@ ok    reread              12 examples passed
 ok    large-read          11 examples passed
 ok    unbudgeted-search   23 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
-27 of 28 rules passed their examples
+28 of 29 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:
