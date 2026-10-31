@@ -32,7 +32,7 @@ features:
     link: /commands/pr-status
     linkText: Read the guide
   - title: 'jouet setup <span class="jouet-status is-ready">available</span>'
-    details: Hooks for Claude Code and Codex. Rules deny an agent's costly habits and name the command to use instead, and it cannot finish while its last test run failed.
+    details: Hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Rules deny an agent's costly habits and name the command to use instead, and it cannot finish while its last test run failed.
     link: /setup
     linkText: Read the guide
 ---
