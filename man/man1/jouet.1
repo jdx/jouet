@@ -1124,7 +1124,7 @@ Read the reply from FILE (`\-` is stdin)
 Resolve the thread after replying
 .TP
 \fB\-\-ignore\-resolved\fR
-Skip a thread that is already resolved instead of failing
+Leave a thread that is already resolved alone; without this, a reply still goes into it
 .TP
 \fB\-\-dry\-run\fR
 Check everything and show what would be posted, posting nothing
@@ -1153,7 +1153,7 @@ Every ID is checked before any thread is resolved. A PR given after the IDs must
 Reply with TEXT before resolving each thread
 .TP
 \fB\-\-ignore\-resolved\fR
-Skip threads that are already resolved instead of failing
+Leave threads that are already resolved alone; without this, replies still go into them
 .TP
 \fB\-\-dry\-run\fR
 Check everything and show what would happen, changing nothing
@@ -1199,7 +1199,7 @@ The list holds {"id": N, "reply": "...", "resolve": true} entries. Every entry i
 Read the list from FILE (`\-` is stdin)
 .TP
 \fB\-\-ignore\-resolved\fR
-Skip threads that are already resolved instead of failing
+Leave threads that are already resolved alone; without this, replies still go into them
 .TP
 \fB\-\-dry\-run\fR
 Check everything and show what would be posted, posting nothing
