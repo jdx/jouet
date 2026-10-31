@@ -4,9 +4,9 @@
   "context": "us.auth.entire.io",
   "user": "github:jdx",
   "jurisdiction": "us",
-  "token_source": "file /home/test/.config/entire/tokens.json",
+  "token_source": "FAKE-TOKEN-SOURCE-never-print-me",
   "current_session_id": "01M2ZPG00KN823ZZ49X9923PCF",
   "expires_at": "2026-11-30T10:29:21Z",
-  "active_sessions": 1,
+  "active_sessions": 10,
   "available_contexts": 1
 }

@@ -27,6 +27,9 @@ _common_setup() {
 	# The display mode is under test, so nothing from the developer's shell
 	# chooses it. Agent detection is cleared per test where it matters.
 	unset JOUET_DISPLAY
+	# The developer's own `entire` stays out of the tests; entire.bats turns it
+	# back on with a fake one on PATH.
+	export JOUET_ENTIRE=false
 	export HOME="$BATS_TEST_TMPDIR/home"
 	export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
 	export JOUET_LOG_DIR="$BATS_TEST_TMPDIR/logs"

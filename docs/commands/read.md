@@ -7,7 +7,7 @@ description: Read a file by its outline, one definition or a range of lines inst
 Reading a whole file to find one thing is the most common way agents fill their context. `jouet read` reads in steps instead: a file's outline, then the one definition needed, or a range of lines. `jouet read --map` does the same for a whole repository.
 
 ```text
-jouet read FILE [--outline | --symbol NAME | --range A:B] [--max-lines N] [--again]
+jouet read FILE [--outline | --symbol NAME | --range A:B] [--max-lines N] [--again] [--why]
 jouet read --map [PATH] [--budget TOKENS] [--focus FILE|NAME]...
 ```
 
@@ -59,6 +59,20 @@ With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:
 ```
 
 An outline is an `outline` list of `kind`, `name`, `start` and `end`, with `more_definitions` when it was cut. A section has `more` for lines a cut left out, and `already_shown` instead of `text` for lines the session already has.
+
+## Where lines came from, with `--why`
+
+In a repository with [Entire](https://entire.io), `--why` with `--symbol` or `--range` adds a line saying where the lines came from, by `entire why FILE --json`: which agent session and checkpoint wrote them, with the commit and the start of the prompt, and how many lines people wrote and in how many commits.
+
+```text
+$ jouet read test/proxy_mcp.bats --range 145:152 --why
+145		# closes as soon as the child is reaped (seen failing on macOS)
+...
+152			sleep 0.1
+origin (entire why): 7 lines (145-148, 150-152) by Claude Code session 8d2ac41d, checkpoint 01M66E9JMCAY (commit b7140d9a): "why did this fail https://github.com/jdx/fnox/pull/1087#issuecomment-6520951953"; 1 line (149) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "why did this fail https://github.com/jdx/fnox/pull/1087#issuecomment-6520951953"
+```
+
+It is off by default because `entire why` is slow where the history is long. Measured with entire 0.11.4 on one machine, a file took 44 to 300 ms in repositories with a few hundred commits, and 22 to 124 seconds in one with about 11,000. `[entire] why_timeout_ms` (15 seconds by default) bounds the wait. A timeout, a file Entire cannot place, or a repository without Entire is a `note:` line, and the read still prints. With `--json`, a section has `origin`: `agent` (one entry per checkpoint: `checkpoint_id`, `session_id`, `agent`, `commit`, `lines` and `prompt`), `human_lines`, `human_commits` and `uncommitted_lines`. Prompts are cut to their first line and 100 characters, with credentials redacted.
 
 The built-in `large-read` [rule](/rules) warns when the agent reads 400 lines or more of source code at once, with Claude Code's Read and no `offset` or `limit`, or with `cat` or `nl`, and suggests the outline. Only files the outline can read count: a log, a command's saved output or a document read whole does not.
 

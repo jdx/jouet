@@ -1353,9 +1353,10 @@ impl Engine {
                     return Ok((None, Vec::new()));
                 }
                 let table = self.script(&rule.name, code, table)?;
-                self.run_luau(rule, table, call)?
+                let matched = matcher::matched(matchers, call, commands);
+                self.run_luau(rule, table, call, &matched)?
             }
-            Body::Luau(table) => self.run_luau(rule, table, call)?,
+            Body::Luau(table) => self.run_luau(rule, table, call, &[])?,
         };
         let decision = match returned {
             None => None,
@@ -1427,13 +1428,14 @@ impl Engine {
         rule: &Rule,
         table: &Table,
         call: &Call,
+        matched: &[bool],
     ) -> Result<(LuauVerdict, Vec<Record>), String> {
         let vm = self.vm()?;
         vm.shared.current.replace(rule.name.clone());
         // Raw reads throughout: a rule's tables can carry metamethods, which
         // must never run outside the budget.
         let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
-        let call_table = call_table(&vm.lua, call).map_err(|e| e.to_string())?;
+        let call_table = call_table(&vm.lua, call, matched).map_err(|e| e.to_string())?;
         vm.shared.records.borrow_mut().clear();
         let returned = vm.guarded(|| {
             Ok(match check.call::<Value>(call_table)? {
@@ -1660,7 +1662,7 @@ fn install_module(
     jouet.set(
         "parse",
         lua.create_function(|lua, (script, exit_code): (String, Option<i32>)| {
-            commands_table(lua, &script, exit_code)
+            commands_table(lua, &script, exit_code, &[])
         })?,
     )?;
     jouet.set(
@@ -1754,7 +1756,9 @@ fn install_module(
     Ok(())
 }
 
-fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
+/// `matched` says, in the order of `call_commands`, which commands the
+/// rule's matchers matched.
+fn call_table(lua: &Lua, call: &Call, matched: &[bool]) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.set("event", call.event.unwrap_or(Event::PreToolUse).name())?;
     t.set("harness", call.harness.as_str())?;
@@ -1765,7 +1769,7 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
     t.set("session", call.session.as_deref())?;
     t.set("exit_code", call.exit_code)?;
     let commands = match &call.command {
-        Some(script) => commands_table(lua, script, call.exit_code)?,
+        Some(script) => commands_table(lua, script, call.exit_code, matched)?,
         None => lua.create_table()?,
     };
     t.set("commands", commands)?;
@@ -1775,18 +1779,24 @@ fn call_table(lua: &Lua, call: &Call) -> mlua::Result<Table> {
 /// Every command a script runs, as tables: the top-level ones with their
 /// exit status when it is known, then those inside `$(...)`, then those in
 /// scripts passed to `sh -c` and the like.
-fn commands_table(lua: &Lua, script: &str, exit_code: Option<i32>) -> mlua::Result<Table> {
+fn commands_table(
+    lua: &Lua,
+    script: &str,
+    exit_code: Option<i32>,
+    matched: &[bool],
+) -> mlua::Result<Table> {
     let (top, nested) = commands(script);
     let statuses = match exit_code {
         Some(code) => shell::statuses(&top, code),
         None => vec![None; top.len()],
     };
+    let hit = |i: usize| matched.get(i).copied().unwrap_or(false);
     let list = lua.create_table()?;
-    for (command, status) in top.iter().zip(statuses) {
-        list.push(command_table(lua, command, false, status)?)?;
+    for (i, (command, status)) in top.iter().zip(statuses).enumerate() {
+        list.push(command_table(lua, command, false, status, hit(i))?)?;
     }
-    for command in &nested {
-        list.push(command_table(lua, command, true, None)?)?;
+    for (i, command) in nested.iter().enumerate() {
+        list.push(command_table(lua, command, true, None, hit(top.len() + i))?)?;
     }
     Ok(list)
 }
@@ -1796,6 +1806,7 @@ fn command_table(
     command: &shell::Command,
     nested: bool,
     status: Option<i32>,
+    matched: bool,
 ) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     let argv = command.argv();
@@ -1818,6 +1829,7 @@ fn command_table(
     t.set("env", command.env.clone())?;
     t.set("nested", nested)?;
     t.set("status", status)?;
+    t.set("matched", matched)?;
     let text = argv.join(" ");
     let text = match text.char_indices().nth(80) {
         Some((i, _)) => format!("{}...", &text[..i]),

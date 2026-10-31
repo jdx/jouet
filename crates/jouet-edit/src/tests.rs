@@ -694,3 +694,17 @@ fn spans_are_refused_when_the_file_changed_overlap_or_break_the_syntax() {
     );
     assert_eq!(f.read("a.rs"), text);
 }
+
+#[test]
+fn changed_lines_are_the_original_lines_removed_or_replaced() {
+    let f = Fixture::new(&[("a.rs", "one\ntwo\nthree\nfour\n"), ("b.rs", "x\n")]);
+    let text = format!(
+        "{}{}",
+        block("a.rs", "two\nthree\n", "TWO\n"),
+        block("b.rs", "x\n", "x\ny\n")
+    );
+    let plan = plan(&f.spec(&text, Format::Blocks), &Options::default()).unwrap();
+    assert!(plan.report.ok());
+    // b.rs only gained a line, so nothing that was there changed.
+    assert_eq!(plan.changed_lines(), [(f.path("a.rs"), vec![2, 3])]);
+}

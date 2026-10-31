@@ -392,6 +392,34 @@ pub struct Plan {
     entries: BTreeMap<PathBuf, Entry>,
 }
 
+impl Plan {
+    /// For each file the plan changes, the 1-based lines of its text on disk
+    /// that the plan removes or replaces, in order. Lines only inserted touch
+    /// nothing that was there; a binary file has no lines.
+    pub fn changed_lines(&self) -> Vec<(String, Vec<usize>)> {
+        self.report
+            .files
+            .iter()
+            .filter_map(|f| {
+                let before = self.entries.get(&identity(Path::new(&f.path)))?;
+                let before = std::str::from_utf8(before.original.as_deref()?).ok()?;
+                let to = f.moved_to.as_deref().unwrap_or(&f.path);
+                let after = match &self.entries.get(&identity(Path::new(to)))?.current {
+                    State::Text(s) => s.as_str(),
+                    State::Absent => "",
+                    State::Binary => return None,
+                };
+                let lines: Vec<usize> = similar::TextDiff::from_lines(before, after)
+                    .iter_all_changes()
+                    .filter(|c| c.tag() == similar::ChangeTag::Delete)
+                    .filter_map(|c| c.old_index().map(|i| i + 1))
+                    .collect();
+                (!lines.is_empty()).then(|| (f.path.clone(), lines))
+            })
+            .collect()
+    }
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()

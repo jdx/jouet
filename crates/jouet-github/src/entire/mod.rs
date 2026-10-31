@@ -25,11 +25,22 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// How long one `entire` call may take, unless `JOUET_ENTIRE_TIMEOUT` says.
-const TIMEOUT: Duration = Duration::from_secs(15);
+/// How long one `entire` call may take when jouet's settings were not
+/// passed in: `[entire] timeout_ms`'s default.
+const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// jouet's `[entire]` settings, passed in by [`configure`].
+static SETTINGS: OnceLock<(bool, Duration)> = OnceLock::new();
+
+/// Whether jouet may run `entire` at all, and how long one call may take:
+/// jouet's `[entire] enabled` and `timeout_ms` settings (`JOUET_ENTIRE`,
+/// `JOUET_ENTIRE_TIMEOUT_MS`). Set once, before anything probes.
+pub fn configure(enabled: bool, timeout: Duration) {
+    let _ = SETTINGS.set((enabled, timeout));
+}
 /// Findings per page.
 const PAGE: &str = "100";
 /// Trails listed when looking for a branch's trail by name.
@@ -96,7 +107,6 @@ pub struct Findings {
 
 /// The `entire` CLI, found and logged in.
 pub struct Entire {
-    program: String,
     timeout: Duration,
     reads: Mutex<HashMap<Vec<String>, Result<Value, String>>>,
 }
@@ -112,28 +122,19 @@ pub fn selector(repo: &Repo) -> String {
 
 impl Entire {
     /// `entire`, if it is on PATH and logged in; otherwise why not, in words
-    /// fit for `entire: {available: false, reason}`. `JOUET_ENTIRE` names
-    /// another program to run, or with `off` turns Entire off.
+    /// fit for `entire: {available: false, reason}`.
     pub fn probe() -> Result<Self, String> {
-        let program = std::env::var("JOUET_ENTIRE").unwrap_or_else(|_| "entire".into());
-        if matches!(program.as_str(), "" | "0" | "off" | "false") {
-            return Err("turned off by JOUET_ENTIRE".into());
+        let (enabled, timeout) = SETTINGS.get().copied().unwrap_or((true, TIMEOUT));
+        if !enabled {
+            return Err("turned off by [entire] enabled = false (JOUET_ENTIRE)".into());
         }
-        let timeout = std::env::var("JOUET_ENTIRE_TIMEOUT")
-            .ok()
-            .and_then(|t| jouet_output::time::parse_duration(&t).ok())
-            .unwrap_or(TIMEOUT);
         let entire = Self {
-            program,
             timeout,
             reads: Mutex::new(HashMap::new()),
         };
         let status = match entire.run(&["auth", "status", "--json"]) {
             Ok(status) => status,
-            Err(Run::Missing) if entire.program == "entire" => {
-                return Err("entire is not on PATH".into());
-            }
-            Err(Run::Missing) => return Err(format!("{} was not found", entire.program)),
+            Err(Run::Missing) => return Err("entire is not on PATH".into()),
             Err(e) => return Err(format!("entire auth status: {}", e.message())),
         };
         let doc: Value = serde_json::from_str(&status)
@@ -263,7 +264,7 @@ impl Entire {
 
     /// Runs `entire ARGS` with no stdin and a deadline, returning stdout.
     fn run(&self, args: &[&str]) -> Result<String, Run> {
-        let mut child = Command::new(&self.program)
+        let mut child = Command::new("entire")
             .args(args)
             // Plain prompts and no colour, should anything ask or paint.
             .env("ACCESSIBLE", "1")
@@ -354,6 +355,9 @@ impl Run {
     fn message(&self) -> String {
         match self {
             Self::Missing => "entire is not on PATH".into(),
+            Self::TimedOut(t) if t.as_secs() == 0 => {
+                format!("entire took longer than {}ms", t.as_millis())
+            }
             Self::TimedOut(t) => format!("entire took longer than {}s", t.as_secs()),
             Self::Failed(m) => m.clone(),
         }

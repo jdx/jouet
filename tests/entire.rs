@@ -21,18 +21,19 @@ const TOKEN: &str = "good-token";
 
 /// The fake `entire`: logs its arguments to `entire.log` beside it and
 /// answers from test/fixtures/entire. `FAKE_ENTIRE_AUTH=out` is logged out.
+/// PATH holds only its directory, so it names `cat` by its path.
 const FAKE_ENTIRE: &str = r#"#!/bin/sh
-printf '%s\n' "$*" >>"$(dirname "$0")/entire.log"
+printf '%s\n' "$*" >>"${0%/*}/entire.log"
 fx="$FAKE_ENTIRE_FIXTURES"
 case "$*" in
 "auth status --json")
-	if [ "${FAKE_ENTIRE_AUTH:-}" = out ]; then echo '{"logged_in": false}'; else cat "$fx/auth-status.json"; fi ;;
+	if [ "${FAKE_ENTIRE_AUTH:-}" = out ]; then /bin/cat "$fx/auth-logged-out.json"; else /bin/cat "$fx/auth-ok.json"; fi ;;
 "trail show 424 --json --repo gh/jdx/mise"|"trail show --branch "*" --json --repo gh/jdx/mise")
-	cat "$fx/show.json" ;;
+	/bin/cat "$fx/show.json" ;;
 "trail finding --trail 424 --json -n 100 --repo gh/jdx/mise")
-	cat "$fx/finding-open.json" ;;
+	/bin/cat "$fx/finding-open.json" ;;
 "trail finding --trail 424 --json -n 100 --repo gh/jdx/mise --status any --freshness any --include-dismissed")
-	cat "$fx/finding-any.json" ;;
+	/bin/cat "$fx/finding-any.json" ;;
 *)
 	echo "fake entire: unexpected call: $*" >&2; exit 64 ;;
 esac
@@ -107,20 +108,15 @@ fn jouet(fake: &Fake, dir: &Path, entire: bool, env: &[(&str, &str)], args: &[&s
             "FAKE_ENTIRE_FIXTURES",
             Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/entire"),
         )
-        .env(
-            "JOUET_ENTIRE",
-            if entire {
-                program.to_str().unwrap()
-            } else {
-                "/nonexistent/entire"
-            },
-        );
+        // Only the fake on PATH, or nothing at all.
+        .env("PATH", if entire { bin } else { dir.join("empty") });
     for var in [
         "GH_TOKEN",
         "GITHUB_TOKEN",
         "JOUET_DISPLAY",
         "JOUET_REPLY_FOOTER",
-        "JOUET_ENTIRE_TIMEOUT",
+        "JOUET_ENTIRE",
+        "JOUET_ENTIRE_TIMEOUT_MS",
         "HTTPS_PROXY",
         "https_proxy",
     ] {
@@ -223,7 +219,7 @@ fn without_entire_the_gates_still_show_and_json_says_why() {
     let doc = json(&jouet(&fake, dir.path(), false, &[], &args));
     assert_eq!(
         doc["entire"],
-        json!({ "available": false, "reason": "/nonexistent/entire was not found" })
+        json!({ "available": false, "reason": "entire is not on PATH" })
     );
     let finding = doc["prs"][0]["attention"]
         .as_array()
@@ -350,6 +346,6 @@ fn pr_threads_lists_findings_apart_from_threads() {
     ));
     assert_eq!(
         doc["entire"],
-        json!({ "available": false, "reason": "/nonexistent/entire was not found" })
+        json!({ "available": false, "reason": "entire is not on PATH" })
     );
 }

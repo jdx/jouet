@@ -20,7 +20,7 @@ The findings themselves come from the `entire` CLI, and only when it is on PATH 
 "entire": { "available": false, "reason": "entire is not on PATH" }
 ```
 
-jouet runs `entire` to read and change findings and never handles its credentials. Every call has a timeout (15 seconds, or `JOUET_ENTIRE_TIMEOUT`), and one command asks about each trail once. `pr status` and `pr next` start `entire` only for a pull request whose findings gate fails, so a repository without Entire never runs it. `JOUET_ENTIRE` names another program to run, and `JOUET_ENTIRE=off` turns Entire off.
+jouet runs `entire` to read and change findings and never handles its credentials. Every call has a timeout (`[entire] timeout_ms`, 5 seconds by default, or `JOUET_ENTIRE_TIMEOUT_MS`), and one command asks about each trail once. `pr status` and `pr next` start `entire` only for a pull request whose findings gate fails, so a repository without Entire never runs it. `JOUET_ENTIRE=false` (`[entire] enabled = false`) turns Entire off, as it does for [`pickup` and `sessions`](/commands/handoff).
 
 The trail is the one the check links to, else the one tracking the pull request's head branch (`entire trail show --branch`), else, for a merged pull request, the newest trail that tracked it.
 

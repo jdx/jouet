@@ -1,207 +1,246 @@
 #!/usr/bin/env bats
+# Messages name commands in backquotes, which the tests match literally.
+# shellcheck disable=SC2016
 
-# `jouet pr threads` changing Entire findings through a fake `entire` that
-# replays `--json` output recorded from jdx/mise#13958 (trail #424: two open
-# findings, resolved and dismissed stale ones) and logs every call. A
-# branch's findings need nothing from GitHub, which is an address nothing
-# listens on, so no test here touches the network. tests/pr_status.rs and
-# tests/pr_threads.rs cover the commands that read GitHub too.
-
-BRANCH=claude/project-thread-htk77e-5-experimental
-OPEN=01M4C997EAAK13R52CVH7GYY7M
-RESOLVED=01M4C58QTFMH4RQH9V760F97GZ
-DISMISSED=01M45K987D892K9QM9CMYBSTC4
+# jouet with Entire: the earlier sessions on the branch in `jouet pickup`,
+# Entire's sessions in `jouet sessions`, and where lines came from in `jouet
+# read --why` and `jouet edit --why`. A fake `entire` on PATH records its
+# arguments and answers with what entire 0.11.4 prints (test/fixtures/entire).
+# FAKE_ENTIRE picks the repository's state: enabled (the default), disabled or
+# logged-out.
 
 setup() {
 	load "test_helper/common_setup"
 	_common_setup
-	export JOUET_GITHUB_API_URL="http://127.0.0.1:9"
-	export JOUET_GITHUB_TOKEN="test-token"
-	unset JOUET_REPLY_FOOTER JOUET_ENTIRE JOUET_ENTIRE_TIMEOUT
+	init_repo
+	export JOUET_ENTIRE=true
+	export CLAUDE_CONFIG_DIR="$BATS_TEST_TMPDIR/claude"
+	export CODEX_HOME="$BATS_TEST_TMPDIR/codex"
 	export FAKE_ENTIRE_FIXTURES="$PROJECT_ROOT/test/fixtures/entire"
-	fake_entire
-}
-
-# A fake `entire` on PATH. FAKE_ENTIRE_AUTH=out makes it logged out,
-# FAKE_ENTIRE_SLEEP makes every call that slow, and FAKE_ENTIRE_FAIL makes
-# writes fail with that message, as the real one fails: a line on stderr,
-# exit 1.
-fake_entire() {
+	export FAKE_ENTIRE_LOG="$BATS_TEST_TMPDIR/entire.log"
+	: >"$FAKE_ENTIRE_LOG"
 	cat >"$BATS_TEST_TMPDIR/bin/entire" <<'SH'
-#!/bin/sh
-printf '%s\n' "$*" >>"$BATS_TEST_TMPDIR/entire.log"
-[ -n "${FAKE_ENTIRE_SLEEP:-}" ] && sleep "$FAKE_ENTIRE_SLEEP"
-fx="$FAKE_ENTIRE_FIXTURES"
+#!/usr/bin/env bash
+# Records each call, then answers from the recorded fixtures.
+printf '%s\n' "$*" >>"$FAKE_ENTIRE_LOG"
+fixture() { sed "s|@WORK@|$BATS_TEST_TMPDIR/work|g" "$FAKE_ENTIRE_FIXTURES/$1"; }
 case "$*" in
+"status --json")
+	case "${FAKE_ENTIRE:-enabled}" in
+	disabled) fixture status-disabled.json ;;
+	*) fixture status-enabled.json ;;
+	esac
+	;;
 "auth status --json")
-	if [ "${FAKE_ENTIRE_AUTH:-}" = out ]; then
-		echo '{"logged_in": false}'
-	else
-		cat "$fx/auth-status.json"
-	fi
+	case "${FAKE_ENTIRE:-enabled}" in
+	logged-out) fixture auth-logged-out.json ;;
+	*) fixture auth-ok.json ;;
+	esac
 	;;
-"trail show --branch claude/project-thread-htk77e-5-experimental --json --repo gh/jdx/mise")
-	cat "$fx/show.json"
-	;;
-"trail show --branch "*" --repo gh/jdx/elsewhere")
-	echo "jdx/elsewhere is not onboarded to Entire, or is not visible to your login. If it should be onboarded, run 'entire repo mirror add'." >&2
-	exit 1
-	;;
-"trail show --branch "*)
-	echo "no trail found for current branch \"$4\"" >&2
-	echo "hint: run 'entire trail create' or 'entire trail list --status any'" >&2
-	exit 1
-	;;
-"trail list --status any --json -n 100 --repo gh/jdx/mise")
-	echo '[]'
-	;;
-"trail finding --trail 424 --json -n 100 --repo gh/jdx/mise --status any --freshness any --include-dismissed")
-	cat "$fx/finding-any.json"
-	;;
-"trail finding resolve 424 "* | "trail finding dismiss 424 "* | "trail finding reopen 424 "*)
-	if [ -n "${FAKE_ENTIRE_FAIL:-}" ]; then
-		echo "Error: $FAKE_ENTIRE_FAIL" >&2
+"session list --json") fixture session-list.json ;;
+"checkpoint list --json --no-pager") fixture checkpoint-list.json ;;
+"why "*" --json")
+	[[ -n ${FAKE_ENTIRE_SLOW:-} ]] && exec sleep 5
+	file="why-$(basename "$2").json"
+	if [[ ! -f $FAKE_ENTIRE_FIXTURES/$file ]]; then
+		echo "git blame --line-porcelain $2: exit status 128 (stderr: fatal: no such path '$2' in HEAD)" >&2
 		exit 1
 	fi
-	echo "Finding $5 updated"
+	fixture "$file"
 	;;
 *)
 	echo "fake entire: unexpected call: $*" >&2
-	exit 64
+	exit 99
 	;;
 esac
 SH
 	chmod +x "$BATS_TEST_TMPDIR/bin/entire"
+	commit_file wait_port.sh $'#!/bin/sh\nport=""\nfor _ in $(seq 1 100); do\n\tport=$(cat port 2>/dev/null || true)\ndone\necho "$port"\n' 'init'
 }
 
-# The calls that changed a finding, one per line.
-writes() {
-	grep -E '^trail finding (resolve|dismiss|reopen) ' "$BATS_TEST_TMPDIR/entire.log" || true
+# Fails if jouet ran anything but the read-only calls it is allowed.
+assert_only_read_only_calls() {
+	run grep -Ev '^(status --json|auth status --json|session list --json|checkpoint list --json --no-pager|why [^ ]+ --json)$' "$FAKE_ENTIRE_LOG"
+	assert_failure
 }
 
-@test "resolving a finding records the reply as the reason, and leaves GitHub alone" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --reply "Fixed: uninstall tiny first"
+# PATH without the fake or any real `entire`.
+path_without_entire() {
+	local dir out=""
+	local IFS=:
+	for dir in $PATH; do
+		[[ -x $dir/entire ]] && continue
+		out="$out${out:+:}$dir"
+	done
+	printf '%s' "$out"
+}
 
+@test "pickup lists the earlier sessions on the branch from Entire's checkpoints, without this one" {
+	jouet handoff --no-pr >/dev/null
+	export CLAUDE_CODE_SESSION_ID=b58a7ecd-5735-44d9-923b-36cac0d93141
+
+	run --separate-stderr jouet pickup
 	assert_success
-	assert_line "[entire:01M4C997EA] resolved on Entire trail #424"
-	assert_line "Entire findings are separate from GitHub threads: no thread was changed by these."
-	assert_equal "$(writes)" "trail finding resolve 424 $OPEN -m Fixed: uninstall tiny first --repo gh/jdx/mise"
+	assert_line '## Entire: earlier sessions on this branch'
+	assert_line --regexp '^- Claude Code `8d2ac41d` \(ended, active [0-9]+[smhd] ago\): 2 checkpoints$'
+	assert_line '  - last checkpoint `01M66H17P11G` at 2026-10-30T13:47:06Z: test: bound the flaky-test checks against slow or missing ports'
+	assert_line '  - files: wait_port.sh, src/mcp/page.rs, test/proxy_mcp.bats, mise.lock, Cargo.lock, ... 1 more'
+	assert_line --regexp '^- Codex `b7460ac0` \(ended, active [0-9]+[smhd] ago\): 1 checkpoint$'
+	# Entire no longer lists this session, and its checkpoint is not committed:
+	# the message is its prompt.
+	assert_line '- session `e0ce30a0`: 1 checkpoint'
+	assert_line '  - last checkpoint `21832ae34773` at 2026-10-28T13:00:03Z: Yes, fix both flaky tests in a separate PR off main.'
+	assert_line '- ... 1 more session (`entire checkpoint list`)'
+	assert_line --partial 'More: `entire session info 8d2ac41d-2f33-454f-8d12-c98a0770a25b`'
+	assert_line --partial 'Still accurate'
+	refute_output --partial b58a7ecd
+	refute_output --partial FAKE-TOKEN-SOURCE
+	assert_only_read_only_calls
+	# Each question is asked once.
+	run grep -c '^status --json$' "$FAKE_ENTIRE_LOG"
+	assert_output 1
 }
 
-@test "dismissing needs a reason, and is refused before entire is asked" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --dismiss --json
+@test "pickup --json carries Entire's sessions" {
+	jouet handoff --no-pr >/dev/null
 
+	run --separate-stderr jouet pickup --json
+	assert_success
+	run jq -c '.entire | {checkpoints, more: .more_sessions, first: .sessions[0] | {id, agent, status, checkpoints, last: .last_checkpoint.id, file_count}}' <<<"$output"
+	assert_output '{"checkpoints":6,"more":2,"first":{"id":"8d2ac41d-2f33-454f-8d12-c98a0770a25b","agent":"Claude Code","status":"ended","checkpoints":2,"last":"01M66H17P11G5CYSP65VHNQVMB","file_count":6}}'
+}
+
+@test "pickup says nothing of Entire where it is disabled, logged out or missing" {
+	jouet handoff --no-pr >/dev/null
+
+	FAKE_ENTIRE=disabled run --separate-stderr jouet pickup --json
+	assert_success
+	run jq 'has("entire")' <<<"$output"
+	assert_output false
+	# Disabled: the login is not even asked about.
+	run cat "$FAKE_ENTIRE_LOG"
+	assert_output 'status --json'
+
+	: >"$FAKE_ENTIRE_LOG"
+	FAKE_ENTIRE=logged-out run --separate-stderr jouet pickup
+	assert_success
+	refute_output --partial Entire
+	assert_equal "$stderr" ""
+	run cat "$FAKE_ENTIRE_LOG"
+	assert_output $'status --json\nauth status --json'
+
+	PATH="$(path_without_entire)" run --separate-stderr "$JOUET_BIN" pickup
+	assert_success
+	refute_output --partial Entire
+	assert_equal "$stderr" ""
+}
+
+@test "JOUET_ENTIRE=false never runs entire" {
+	jouet handoff --no-pr >/dev/null
+	JOUET_ENTIRE=false run --separate-stderr jouet pickup
+	assert_success
+	refute_output --partial Entire
+	run cat "$FAKE_ENTIRE_LOG"
+	assert_output ''
+}
+
+@test "a slow entire is a note in pickup, not an error" {
+	jouet handoff --no-pr >/dev/null
+	cat >"$BATS_TEST_TMPDIR/bin/entire" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+"status --json") echo '{"enabled":true}' ;;
+"auth status --json") echo '{"logged_in":true}' ;;
+*) exec sleep 5 ;;
+esac
+SH
+	JOUET_ENTIRE_TIMEOUT_MS=300 run --separate-stderr jouet pickup
+	assert_success
+	assert_line '- note: `entire checkpoint list --json --no-pager` took longer than 300ms, so jouet stopped waiting'
+}
+
+@test "sessions adds Entire's sessions, once each" {
+	local file="$CLAUDE_CONFIG_DIR/projects/p/8d2ac41d-2f33-454f-8d12-c98a0770a25b.jsonl"
+	mkdir -p "$(dirname "$file")"
+	printf '{"type":"user","cwd":"%s","gitBranch":"main","message":{"content":"x"}}\n' "$BATS_TEST_TMPDIR/work" >"$file"
+
+	run --separate-stderr jouet sessions --all --since 2020-01-01
+	assert_success
+	assert_line --regexp '^ live  claude  8d2ac41d .*/work  \[main\]  \(Entire: 10 checkpoints\)$'
+	assert_line --regexp '^ idle  cursor  c0ffee00 .*/work  \[main\]  \(only in Entire, 2 checkpoints\)$'
+	assert_line --regexp '^ idle  codex   b7460ac0 .*  \(only in Entire, 1 checkpoint\)$'
+	run grep -c 8d2ac41d <<<"$output"
+	assert_output 1
+	refute_output --partial FAKE-TOKEN-SOURCE
+
+	run --separate-stderr jouet sessions --all --since 2020-01-01 --json
+	run jq -c '[.sessions[] | {harness, id: .id[0:8], entire}] | sort_by(.id)' <<<"$output"
+	assert_output '[{"harness":"claude","id":"8d2ac41d","entire":{"status":"ended","checkpoints":10}},{"harness":"claude","id":"b58a7ecd","entire":{"status":"ended","checkpoints":6,"only":true}},{"harness":"codex","id":"b7460ac0","entire":{"status":"ended","checkpoints":1,"only":true}},{"harness":"cursor","id":"c0ffee00","entire":{"status":"idle","checkpoints":2,"only":true}}]'
+	assert_only_read_only_calls
+}
+
+@test "sessions without Entire lists what the transcripts say" {
+	FAKE_ENTIRE=disabled run --separate-stderr jouet sessions --all --since 2020-01-01
+	assert_success
+	assert_output 'no live agent sessions on this machine'
+}
+
+@test "read --why says which session and checkpoint wrote the lines" {
+	run --separate-stderr jouet read wait_port.sh --range 2:5 --why
+	assert_success
+	assert_line --partial '4	'
+	assert_line 'origin (entire why): 3 lines (3-5) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "Yes, fix both flaky tests in a separate PR off main. GH_TOKEN=[redacted]"; 1 line by people (1 commit)'
+	refute_output --partial ghp_
+
+	run --separate-stderr jouet read wait_port.sh --range 3:4 --why --again --json
+	run jq -c '.sections[0].origin.agent[0] | {checkpoint_id, session_id, lines}' <<<"$output"
+	assert_output '{"checkpoint_id":"01M66H17P11G5CYSP65VHNQVMB","session_id":"8d2ac41d-2f33-454f-8d12-c98a0770a25b","lines":[3,4]}'
+	assert_only_read_only_calls
+}
+
+@test "read --why needs a range or symbol, and says when Entire is not there" {
+	run --separate-stderr jouet read wait_port.sh --why
 	assert_failure 2
-	assert_equal "$(jq -r '.error.code' <<<"$output")" "usage"
-	assert_equal "$(jq -r '.error.message' <<<"$output")" "dismissing entire:01M4C997EA needs a reason; nothing was changed"
-	[ ! -e "$BATS_TEST_TMPDIR/entire.log" ]
-}
+	assert_equal "$stderr" 'jouet: --why goes with --symbol or --range'
 
-@test "a reply with --dismiss dismisses, the reply being the reason" {
-	run --separate-stderr jouet pr threads reply "entire:$OPEN" "$BRANCH" --repo jdx/mise --dismiss --body "Not reachable: tiny is never installed here" --json
-
+	FAKE_ENTIRE=disabled run --separate-stderr jouet read wait_port.sh --range 1:2 --why
 	assert_success
-	assert_equal "$(jq -c '.entire' <<<"$output")" "{\"trail\":424,\"results\":[{\"id\":\"entire:$OPEN\",\"finding\":\"$OPEN\",\"dismissed\":true}]}"
-	assert_equal "$(jq -r '.pr // "none"' <<<"$output")" "none"
-	assert_equal "$(writes)" "trail finding dismiss 424 $OPEN -m Not reachable: tiny is never installed here --repo gh/jdx/mise"
-}
+	assert_line 'note: --why: Entire is not set up here; it needs `entire` on PATH, the repository enabled (`entire status`) and a working login'
 
-@test "a finding takes no reply of its own" {
-	run --separate-stderr jouet pr threads reply entire:01M4C997EA "$BRANCH" --repo jdx/mise --body "Looking"
-
-	assert_failure 2
-	assert_equal "$stderr" "jouet: entire:01M4C997EA is an Entire finding, which takes no reply of its own; nothing was changed
-hint: add --resolve or --dismiss: the reply becomes the reason recorded on Entire"
-}
-
-@test "resolved and dismissed findings are left as they are, and unresolve reopens" {
-	run --separate-stderr jouet pr threads resolve "entire:${RESOLVED:0:10}" "entire:${DISMISSED:0:10}" "$BRANCH" --repo jdx/mise
-
+	# Without --why, entire is not asked.
+	: >"$FAKE_ENTIRE_LOG"
+	run --separate-stderr jouet read wait_port.sh --range 1:2 --again
 	assert_success
-	assert_line "[entire:${RESOLVED:0:10}] already resolved on Entire trail #424"
-	assert_line "[entire:${DISMISSED:0:10}] already dismissed on Entire trail #424"
-	assert_equal "$(writes)" ""
+	run cat "$FAKE_ENTIRE_LOG"
+	assert_output ''
+}
 
-	run --separate-stderr jouet pr threads unresolve "entire:${RESOLVED:0:10}" "$BRANCH" --repo jdx/mise
-
+@test "edit --why warns about lines an earlier session wrote, and not this session's own" {
+	run --separate-stderr jouet edit replace wait_port.sh --old '|| true)' --new '|| :)' --dry-run --why
 	assert_success
-	assert_line "[entire:${RESOLVED:0:10}] reopened on Entire trail #424"
-	assert_equal "$(writes)" "trail finding reopen 424 $RESOLVED --repo gh/jdx/mise"
-}
+	assert_line 'warning: this edit changes a line of wait_port.sh that an earlier session wrote: 1 line (4) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "Yes, fix both flaky tests in a separate PR off main. GH_TOKEN=[redacted]". Check that the change is intended (`entire why wait_port.sh:4`)'
 
-@test "a dry run prints the entire command and changes nothing" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --reply "It's fixed" --dry-run
+	run --separate-stderr jouet edit replace wait_port.sh --old '|| true)' --new '|| :)' --dry-run --why --json
+	run jq -c '.earlier_sessions[] | {path, lines, checkpoint_id}' <<<"$output"
+	assert_output '{"path":"wait_port.sh","lines":[4],"checkpoint_id":"01M66H17P11G5CYSP65VHNQVMB"}'
 
+	CLAUDE_CODE_SESSION_ID=8d2ac41d-2f33-454f-8d12-c98a0770a25b run --separate-stderr jouet edit replace wait_port.sh --old '|| true)' --new '|| :)' --why
 	assert_success
-	assert_line "[entire:01M4C997EA] would resolve on Entire trail #424"
-	assert_line "  | entire trail finding resolve 424 $OPEN -m 'It'\\''s fixed' --repo gh/jdx/mise"
-	assert_equal "$(writes)" ""
+	refute_output --partial warning
+	assert_content wait_port.sh $'#!/bin/sh\nport=""\nfor _ in $(seq 1 100); do\n\tport=$(cat port 2>/dev/null || :)\ndone\necho "$port"\n'
+	assert_only_read_only_calls
 }
 
-@test "apply takes findings by handle" {
-	run --separate-stderr jouet pr threads apply - "$BRANCH" --repo jdx/mise <<JSON
-[{"id": "entire:01M4C997EA", "reply": "Fixed", "resolve": true},
- {"id": "entire:01M4C997DZ", "reply": "Duplicate of the first", "dismiss": true}]
-JSON
-
+@test "edit --why writes the edit when entire why is too slow, and says so" {
+	FAKE_ENTIRE_SLOW=1 JOUET_ENTIRE_WHY_TIMEOUT_MS=300 run --separate-stderr jouet edit replace wait_port.sh --old 'echo' --new 'printf "%s\n"' --why
 	assert_success
-	assert_equal "$(writes)" "trail finding resolve 424 $OPEN -m Fixed --repo gh/jdx/mise
-trail finding dismiss 424 01M4C997DZH5KQRP31NW93NQHR -m Duplicate of the first --repo gh/jdx/mise"
+	assert_line 'note: --why: `entire why wait_port.sh --json` took longer than 300ms, so jouet stopped waiting'
+	assert_line --partial '1 of 1 file written'
 }
 
-@test "an unknown handle is not found, and nothing changes" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA entire:01ZZZZZZZZ "$BRANCH" --repo jdx/mise
-
-	assert_failure 3
-	assert_equal "$stderr" "jouet: no finding entire:01ZZZZZZZZ on Entire trail #424; nothing was changed"
-	assert_equal "$(writes)" ""
-}
-
-@test "a branch no trail tracks is not found" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA feat/elsewhere --repo jdx/mise
-
-	assert_failure 3
-	assert_equal "$stderr" "jouet: no Entire trail tracks jdx/mise:feat/elsewhere; nothing was changed"
-}
-
-@test "a repository Entire does not know has no trail, quietly" {
-	run --separate-stderr jouet pr threads resolve entire:01M4C997EA main --repo jdx/elsewhere
-
-	assert_failure 3
-	assert_equal "$stderr" "jouet: no Entire trail tracks jdx/elsewhere:main; nothing was changed"
-}
-
-@test "a write entire refuses stops there and exits 5" {
-	FAKE_ENTIRE_FAIL="finding is locked" run --separate-stderr jouet pr threads resolve entire:01M4C997EA entire:01M4C997DZ "$BRANCH" --repo jdx/mise
-
-	assert_failure 5
-	assert_line "[entire:01M4C997EA] resolve failed: finding is locked"
-	assert_line "[entire:01M4C997DZ] resolve failed: not tried after an earlier failure"
-	assert_line "stopped at a failure; re-running skips what was already posted and resolved"
-}
-
-@test "without entire on PATH, changing a finding is refused as a precondition" {
-	rm "$BATS_TEST_TMPDIR/bin/entire"
-	PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --reply Fixed --json
-
-	assert_failure 4
-	assert_equal "$(jq -r '.error.code' <<<"$output")" "precondition"
-	assert_equal "$(jq -r '.error.message' <<<"$output")" "entire is not on PATH, so Entire findings cannot be changed; nothing was changed"
-}
-
-@test "logged out of entire, changing a finding is refused as a precondition" {
-	FAKE_ENTIRE_AUTH=out run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --reply Fixed
-
-	assert_failure 4
-	assert_equal "$stderr" "jouet: entire is not logged in (see \`entire auth status\`), so Entire findings cannot be changed; nothing was changed
-hint: findings are changed through the entire CLI: install it and run \`entire login\`"
-	assert_equal "$(writes)" ""
-}
-
-@test "an entire that hangs is cut off at JOUET_ENTIRE_TIMEOUT" {
-	FAKE_ENTIRE_SLEEP=5 JOUET_ENTIRE_TIMEOUT=1s run --separate-stderr jouet pr threads resolve entire:01M4C997EA "$BRANCH" --repo jdx/mise --reply Fixed
-
-	assert_failure 4
-	assert_equal "$stderr" "jouet: entire auth status: entire took longer than 1s, so Entire findings cannot be changed; nothing was changed
-hint: findings are changed through the entire CLI: install it and run \`entire login\`"
+@test "edit without --why never runs entire" {
+	run --separate-stderr jouet edit replace wait_port.sh --old 'echo' --new 'printf "%s\n"'
+	assert_success
+	run cat "$FAKE_ENTIRE_LOG"
+	assert_output ''
 }
