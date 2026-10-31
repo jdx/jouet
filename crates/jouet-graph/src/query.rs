@@ -315,7 +315,7 @@ impl Graph {
     fn rel(&self, path: &str) -> String {
         let p = Path::new(path);
         if p.is_absolute() {
-            crate::index::relative(&self.root, p).unwrap_or_else(|| path.to_string())
+            crate::index::relative_resolved(&self.root, p).unwrap_or_else(|| path.to_string())
         } else {
             path.trim_start_matches("./").to_string()
         }
