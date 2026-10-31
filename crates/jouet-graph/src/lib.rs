@@ -28,7 +28,9 @@ mod store;
 mod worktrees;
 
 pub use index::Refresh;
-pub use query::{Affected, AffectedTest, Explored, MAX_RESULTS, Reach, SymbolQuery, is_test_path};
+pub use query::{
+    Affected, AffectedTest, Explored, MAX_RESULTS, Reach, Site, SymbolQuery, is_test_path,
+};
 pub use worktrees::Pruned;
 
 use rusqlite::Connection;

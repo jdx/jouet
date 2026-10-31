@@ -86,6 +86,58 @@ fn a_recorded_pr_reads_into_threads() {
     );
 }
 
+/// `fullDatabaseId` is nullable on GitHub: the ID falls back to the one in
+/// the URL, and a comment with neither is left out and counted, rather
+/// than failing the listing.
+#[test]
+fn a_comment_without_an_id_is_left_out_not_fatal() {
+    let comment = |id: Value, url: &str| {
+        json!({
+            "fullDatabaseId": id, "url": url, "createdAt": "2026-10-29T09:00:00Z",
+            "body": "b", "author": { "__typename": "User", "login": "octo" },
+        })
+    };
+    let thread = |id: &str, comments: Vec<Value>| {
+        json!({
+            "id": id, "isResolved": false, "isOutdated": false, "path": "a.py", "line": 1,
+            "startLine": null, "originalLine": 1, "originalStartLine": null,
+            "diffSide": "RIGHT", "startDiffSide": null,
+            "comments": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": comments },
+        })
+    };
+    let page = |nodes: Vec<Value>| json!({ "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": nodes });
+    let data = json!({
+        "viewer": { "login": "me" },
+        "repository": { "pullRequest": {
+            "id": "PR_1", "number": 12, "url": "u", "headRefName": "b", "headRefOid": "h",
+            "baseRefOid": "o", "headRepository": null,
+            "reviewThreads": page(vec![
+                thread("T1", vec![
+                    comment(json!("55500"), "https://github.com/o/r/pull/12#discussion_r55500"),
+                    comment(Value::Null, "https://github.com/o/r/pull/12#discussion_r55600"),
+                    comment(Value::Null, "https://github.com/o/r/pull/12"),
+                ]),
+                thread("T2", vec![
+                    comment(Value::Null, "https://github.com/o/r/pull/12"),
+                    comment(json!("55701"), "https://github.com/o/r/pull/12#discussion_r55701"),
+                ]),
+            ]),
+            "reviews": page(vec![]),
+            "comments": page(vec![comment(Value::Null, "https://github.com/o/r/pull/12#issuecomment-66601")]),
+        } }
+    });
+    let repo = Repo::parse("o/r").unwrap();
+    let pr = read(&repo, &data, &[], &mut Pages::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(pr.threads.len(), 1);
+    let ids: Vec<u64> = pr.threads[0].comments.iter().map(|c| c.id).collect();
+    assert_eq!(ids, [55500, 55600]);
+    assert_eq!(pr.others[0].id, 66601);
+    // One reply in T1, and T2 whole, since its handle was missing.
+    assert_eq!(pr.unreadable, 3);
+}
+
 #[test]
 fn threads_keep_their_side_of_the_diff() {
     assert!(pr().threads.iter().all(|t| t.side == Side::Right));

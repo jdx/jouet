@@ -14,7 +14,9 @@ needs to answer what `gh` and `jouet` ask:
   (`pullRequests`);
 - `... on Type` matches an item's `__typename`;
 - `__type(name:)` lists the fields the fixture's objects of that type have,
-  which is all `gh` asks of introspection.
+  which is all `gh` asks of introspection;
+- a few fields GitHub computes from others are derived when a fixture
+  leaves them out (`DERIVED`), so they cannot disagree with what they count.
 
 A field a fixture does not have resolves to null and is reported through
 `missing`, so a report can show where the fake fell short instead of the
@@ -357,8 +359,11 @@ class Executor:
         if f.name == "__type":
             return self.introspect(args.get("name", ""))
         filters = {k: v for k, v in args.items() if k not in PAGING}
+        derive = DERIVED.get((where.rsplit(".", 1)[-1], f.name))
         if f.name in obj:
             value = obj[f.name]
+        elif derive is not None:
+            return derive(self, obj)
         elif filters and f"{f.name}s" in obj:
             items = items_of(obj[f"{f.name}s"])
             found = [i for i in items if matches_filters(i, filters)]
@@ -370,16 +375,23 @@ class Executor:
         else:
             self.missing.append(f"{where}.{f.name}")
             return None
-        if f.name not in obj or not (filters or wants_connection(f)):
+        if f.name not in obj or not (filters or self.wants_connection(f)):
             return value
         items = items_of(value)
         if items is None:
             return value
         if filters and isinstance(items, list):
             items = [i for i in items if matches_filters(i, filters)]
-        if wants_connection(f):
+        if self.wants_connection(f):
             return connection(items)
         return items
+
+    def wants_connection(self, f: Field) -> bool:
+        """Whether `f` selects a connection's fields, directly or through a
+        fragment (`reviewThreads { ...threads }`)."""
+        return f.selections is not None and any(
+            s.name in ("nodes", "edges", "totalCount", "pageInfo") for s in self.collect(f.selections, None)
+        )
 
     def introspect(self, name: str) -> dict[str, Any]:
         """`__type(name:)`, which `gh` asks to detect features: the fields
@@ -414,10 +426,34 @@ def matches(on: str, typename: str | None) -> bool:
     return on in INTERFACES or typename is None or on == typename
 
 
-def wants_connection(f: Field) -> bool:
-    return f.selections is not None and any(
-        isinstance(s, Field) and s.name in ("nodes", "edges", "totalCount", "pageInfo") for s in f.selections
-    )
+def counts_by_state(typename: str, state: Callable[[dict[str, Any]], str | None]):
+    """A rollup's `checkRunCountsByState` or `statusContextCountsByState`:
+    its contexts of `typename`, counted by state."""
+
+    def derive(_: Executor, contexts: dict[str, Any]) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for c in items_of(contexts) or []:
+            if isinstance(c, dict) and c.get("__typename") == typename and (s := state(c)):
+                counts[s] = counts.get(s, 0) + 1
+        return [{"state": s, "count": n} for s, n in counts.items()]
+
+    return derive
+
+
+def check_run_state(run: dict[str, Any]) -> str | None:
+    """A check run's state as GitHub counts it: its conclusion once it has
+    completed, its status before."""
+    return run.get("conclusion") if run.get("status") == "COMPLETED" else run.get("status")
+
+
+# Fields GitHub computes, by (parent type or field, name), derived when a
+# fixture leaves them out.
+DERIVED: dict[tuple[str, str], Callable[[Executor, dict[str, Any]], Any]] = {
+    ("contexts", "checkRunCountsByState"): counts_by_state("CheckRun", check_run_state),
+    ("contexts", "statusContextCountsByState"): counts_by_state("StatusContext", lambda c: c.get("state")),
+    # A fixture holds one repository, which every PR in it belongs to.
+    ("PullRequest", "repository"): lambda ex, _: ex.root.get("repository"),
+}
 
 
 def items_of(value: Any) -> list[Any] | None:

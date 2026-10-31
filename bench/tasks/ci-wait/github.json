@@ -800,7 +800,8 @@
                       "$until": 50,
                       "$before": {
                         "state": "PENDING"
-                      }
+                      },
+                      "id": "SCR_1"
                     },
                     "messageHeadline": "Parse thousands separators",
                     "committedDate": "2026-10-30T12:00:00Z",
@@ -911,7 +912,8 @@
               "$until": 50,
               "$before": {
                 "state": "PENDING"
-              }
+              },
+              "id": "SCR_2"
             },
             "labels": {
               "nodes": []
@@ -958,6 +960,9 @@
                   "deletions": 0
                 }
               ]
+            },
+            "timelineItems": {
+              "nodes": []
             }
           }
         ]
@@ -1059,7 +1064,8 @@
           "$until": 50,
           "$before": {
             "state": "PENDING"
-          }
+          },
+          "id": "SCR_3"
         },
         "messageHeadline": "Parse thousands separators",
         "committedDate": "2026-10-30T12:00:00Z",

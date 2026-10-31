@@ -364,13 +364,9 @@ local function diag_scope(args: { string }): (Kind?, Scope)
 end
 
 -- `jouet test`: the full suite, unless `--affected` or words after `--`
--- narrow it; the selector names them. A dry run, help, a usage error (2)
--- and no runner found (4) ran no tests.
-local function jouet_test(command: JouetCommand, args: { string }): (Kind?, Scope)
+-- narrow it; the selector names them. A dry run and help ran no tests.
+local function jouet_test(args: { string }): (Kind?, Scope)
 	local unknown = partial(nil)
-	if command.status == 2 or command.status == 4 then
-		return nil, unknown
-	end
 	local picks: { string } = {}
 	local affected = false
 	local sub = false
@@ -455,13 +451,18 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			return nil, unknown
 		end
 		return hk_scope(args, if first == "run" then 3 else 2)
+	elseif program == "jouet" and (command.status == 2 or command.status == 4) then
+		-- A usage error (2) or a refusal (4), such as `diag check` with no
+		-- hk config or `test` with no runner found, checked nothing: it
+		-- neither fails a check nor clears an earlier failure.
+		return nil, unknown
 	elseif program == "jouet" and jouet_subcommand(args) == "diag" then
 		return diag_scope(args)
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
 	elseif program == "jouet" then
-		return jouet_test(command, args)
+		return jouet_test(args)
 	elseif program == "bats" then
 		return "test", unknown
 	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "pytest" then

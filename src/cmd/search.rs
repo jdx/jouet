@@ -1,11 +1,13 @@
 //! `jouet search`: budgeted search with session memory.
 
 use super::Output;
+use super::scope::{How, Scope};
 use crate::SearchArgs;
 use jouet_output::exit::Exit;
 use jouet_search::memory::Memory;
 use jouet_search::search::{self, Budget, Error, Options};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The default total budget in bytes: about 1,500 tokens.
 const BUDGET: usize = 6000;
@@ -22,6 +24,23 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
             "-F, -i and -w are for text patterns, not --structural ones",
         );
     }
+    let how = match How::from_flags(args.callers_of.as_deref(), args.impact.as_deref()) {
+        Ok(how) => how,
+        Err(message) => return out.error(Exit::Usage, &message),
+    };
+    if how.is_some() && !args.structural {
+        return out.error(
+            Exit::Usage,
+            "--callers-of and --impact go with --structural",
+        );
+    }
+    // The graph is consulted before the walk, and dropped before it: the
+    // filter holds only what it read.
+    let scope = match how.map(|(how, symbol)| Scope::open(how, symbol)) {
+        Some(Ok((_, scope))) => Some(Arc::new(scope)),
+        Some(Err((exit, message))) => return out.error(exit, &message),
+        None => None,
+    };
     let options = Options {
         pattern: args.pattern.clone(),
         paths: args.paths.iter().map(PathBuf::from).collect(),
@@ -37,6 +56,9 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         },
         cache: jouet_output::paths::cache_dir().map(|d| d.join("defs")),
         structural: args.lang.clone(),
+        filter: scope
+            .clone()
+            .map(|s| s as Arc<dyn jouet_search::structural::Filter>),
     };
     let mut memory = if args.again || args.files_with_matches {
         Memory::none()
@@ -49,7 +71,26 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         Err(e @ Error::NotFound(_)) => return out.error(Exit::NotFound, &e.to_string()),
     };
     memory.save();
-    out.result(&report, || search::render(&report, args.files_with_matches));
+    drop(options);
+    let scope = scope.and_then(Arc::into_inner).map(Scope::finish);
+    #[derive(serde::Serialize)]
+    struct Scoped<'a> {
+        #[serde(flatten)]
+        report: &'a search::Report,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<&'a super::scope::Report>,
+    }
+    let doc = Scoped {
+        report: &report,
+        scope: scope.as_ref(),
+    };
+    out.result(&doc, || {
+        let mut text = search::render(&report, args.files_with_matches);
+        if let Some(scope) = &scope {
+            text.push_str(&super::scope::render(scope));
+        }
+        text
+    });
     if report.matches == 0 {
         Exit::Failed
     } else {
