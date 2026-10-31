@@ -1,0 +1,10 @@
+{
+  "name": "request",
+  "version": "2.88.2",
+  "license": "Apache-2.0",
+  "repository": {
+    "url": "git+https://github.com/request/request.git",
+    "type": "git"
+  },
+  "deprecated": "request has been deprecated, see https://github.com/request/request/issues/3142"
+}

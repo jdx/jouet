@@ -21,7 +21,10 @@ mod rust;
 mod space;
 mod text;
 
-pub(crate) use locate::{Lang, Missing, Package, locate, name_key, neighbours};
+pub(crate) use locate::{
+    Lang, Locked, Missing, Package, Pin, go_escape, locate, lockfiles, name_key, neighbours,
+    split_spec,
+};
 pub(crate) use text::summary;
 
 use jouet_graph::extract::Node;

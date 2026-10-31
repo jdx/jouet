@@ -13,7 +13,8 @@ pub enum Exit {
     Usage,
     NotFound,
     Precondition,
-    /// Authentication, network or rate-limit failure talking to the host.
+    /// Authentication, network or rate-limit failure talking to GitHub or a
+    /// package registry.
     Remote,
     /// Still pending when `--timeout` expired; running the same command
     /// again keeps waiting.
@@ -93,9 +94,11 @@ impl Exit {
             Self::Ok => "done",
             Self::Failed => "the answer is no: fix the code",
             Self::Usage => "bad arguments",
-            Self::NotFound => "no such file, PR or thread",
+            Self::NotFound => "no such file, PR, thread or package",
             Self::Precondition => "refused before doing anything: fix the request",
-            Self::Remote => "GitHub could not be reached or refused: check auth, then retry",
+            Self::Remote => {
+                "GitHub or a registry could not be reached or refused: check auth, then retry"
+            }
             Self::Timeout => "still pending: run the same command again to keep waiting",
             Self::Act => "the agent has something to do: run the suggested command",
             Self::Waiting => "waiting on CI, a reviewer or GitHub: wait, then ask again",

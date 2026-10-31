@@ -102,6 +102,12 @@ declare jouet: {
 	docs: {
 		lookup: (args: { [any]: any }?) -> Ran,
 	},
+	-- net: packages checked against their registries and OSV (`jouet deps`);
+	-- info { packages, refresh? }, audit { ecosystem?, refresh? }
+	deps: {
+		info: (args: { [any]: any }?) -> Ran,
+		audit: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

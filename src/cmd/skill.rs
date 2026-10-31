@@ -54,25 +54,23 @@ pub(crate) fn render(format: Format) -> String {
     body.push_str("When to reach for it:\n\n");
     for (meta, when) in &commands {
         let name = meta.cmd.name;
-        if guide::PAIRED.iter().any(|(_, second)| *second == name) {
+        let members = guide::group(name).unwrap_or(&[]);
+        if members.first().is_some_and(|first| *first != name) {
             continue;
         }
-        let partner = guide::PAIRED
-            .iter()
-            .find(|(first, _)| *first == name)
-            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
-        match partner {
-            Some((other, other_when)) => {
-                let _ = writeln!(
-                    body,
-                    "- `jouet {name}` and `jouet {}`: {when}; {other_when}.",
-                    other.cmd.name
-                );
-            }
-            None => {
-                let _ = writeln!(body, "- `jouet {name}`: {when}.");
+        let mut names = vec![format!("`jouet {name}`")];
+        let mut whens = vec![*when];
+        for other in members.iter().skip(1) {
+            if let Some((meta, other_when)) = commands.iter().find(|(m, _)| m.cmd.name == *other) {
+                names.push(format!("`jouet {}`", meta.cmd.name));
+                whens.push(other_when);
             }
         }
+        let names = match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => names.join(""),
+        };
+        let _ = writeln!(body, "- {names}: {}.", whens.join("; "));
     }
     body.push_str(
         "\nHow:\n\n\

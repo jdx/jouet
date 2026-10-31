@@ -30,6 +30,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "deps",
+        Some(
+            "adding or upgrading a dependency: `jouet deps info cargo:NAME npm:NAME pypi:NAME go:MODULE` (or a bare NAME the project's lockfile places) says whether each exists (with close names when not), its latest version, licence, deprecation and OSV advisories, before you write it into a manifest from memory; `jouet deps audit` checks every locked version against OSV",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -223,9 +229,14 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
-/// Commands that work as a pair, which the overview and the skill describe
-/// in one entry to stay within their budgets.
-pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup"), ("read", "docs")];
+/// Commands that work together, which the overview and the skill describe
+/// in one entry, led by the first, to stay within their budgets.
+pub(crate) const GROUPED: &[&[&str]] = &[&["handoff", "pickup"], &["read", "docs", "deps"]];
+
+/// The group `name` belongs to, if any.
+pub(crate) fn group(name: &str) -> Option<&'static [&'static str]> {
+    GROUPED.iter().copied().find(|g| g.contains(&name))
+}
 
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in
@@ -239,22 +250,26 @@ pub(crate) fn overview() -> String {
     let commands = agent_commands();
     for (meta, when) in &commands {
         let name = meta.cmd.name;
-        if PAIRED.iter().any(|(_, second)| *second == name) {
+        let members = group(name).unwrap_or(&[]);
+        if members.first().is_some_and(|first| *first != name) {
             continue;
         }
-        let partner = PAIRED
+        let others: Vec<_> = members
             .iter()
-            .find(|(first, _)| *first == name)
-            .and_then(|(_, second)| commands.iter().find(|(m, _)| m.cmd.name == *second));
-        if let Some((other, other_when)) = partner {
-            let _ = writeln!(
-                out,
-                "jouet {name} / jouet {}: {} / {}",
-                other.cmd.name,
-                meta.about.unwrap_or(""),
-                lowercase_first(other.about.unwrap_or(""))
-            );
-            let _ = writeln!(out, "  when: {when}; {other_when}");
+            .skip(1)
+            .filter_map(|other| commands.iter().find(|(m, _)| m.cmd.name == *other))
+            .collect();
+        if !others.is_empty() {
+            let mut names = format!("jouet {name}");
+            let mut abouts = meta.about.unwrap_or("").to_string();
+            let mut whens = (*when).to_string();
+            for (other, other_when) in others {
+                let _ = write!(names, " / jouet {}", other.cmd.name);
+                let _ = write!(abouts, " / {}", lowercase_first(other.about.unwrap_or("")));
+                let _ = write!(whens, "; {other_when}");
+            }
+            let _ = writeln!(out, "{names}: {abouts}");
+            let _ = writeln!(out, "  when: {whens}");
             continue;
         }
         let subs: Vec<&str> = meta
@@ -338,20 +353,23 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     let commands = agent_commands();
     let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
-    // A pair is one entry, as in the overview: `read/docs`.
+    // A group is one entry, as in the overview: `read/docs/deps`.
     let names: Vec<String> = commands
         .iter()
         .map(|(m, _)| m.cmd.name)
-        .filter(|name| !PAIRED.iter().any(|(_, second)| second == name))
-        .map(
-            |name| match PAIRED.iter().find(|(first, _)| *first == name) {
-                Some((_, second)) if present(second) => format!("{name}/{second}"),
-                _ => name.to_string(),
-            },
-        )
+        .filter(|name| group(name).is_none_or(|g| g[0] == *name))
+        .map(|name| match group(name) {
+            Some(members) => members
+                .iter()
+                .filter(|m| present(m))
+                .copied()
+                .collect::<Vec<_>>()
+                .join("/"),
+            None => name.to_string(),
+        })
         .collect();
     let mut out = format!(
-        "jouet is installed, a CLI toolkit for coding agents: {}. When a task matches one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
+        "jouet is installed, a CLI toolkit for coding agents: {}. If a task fits one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
         names.join(", ")
     );
     let usage: Vec<String> = PRIMED

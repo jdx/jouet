@@ -17,6 +17,9 @@
 //!   answer.
 //! - `jouet.docs.lookup{pkg, symbol}`: a dependency's API at the version the
 //!   project locked (`jouet docs`), with `lang`, `budget` and `private`.
+//! - `jouet.deps.info{packages}` and `jouet.deps.audit{}`: packages checked
+//!   against their registries and OSV (`jouet deps`), with `refresh`, and
+//!   `ecosystem` for an audit.
 //!
 //! Each takes a table: positional arguments in order (or by name), flags by
 //! name with `_` for `-`. Each returns `{ ok, exit_code, json, error,
@@ -249,6 +252,23 @@ pub const COMMANDS: &[Command] = &[
         FsRead,
         &[("pkg", false), ("symbol", false)],
         &[&[("lang", Val), ("budget", Val), ("private", Switch)]],
+    ),
+    // `jouet.deps`: packages checked against their registries and OSV.
+    read(
+        "jouet.deps",
+        "info",
+        &["deps", "info"],
+        Net,
+        &[("packages", true)],
+        &[&[("refresh", Switch)]],
+    ),
+    read(
+        "jouet.deps",
+        "audit",
+        &["deps", "audit"],
+        Net,
+        &[],
+        &[&[("ecosystem", Val), ("refresh", Switch)]],
     ),
     read(
         "jouet",
@@ -538,6 +558,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     let jouet = lua.create_table()?;
     let code = lua.create_table()?;
     let docs = lua.create_table()?;
+    let deps = lua.create_table()?;
     for command in COMMANDS {
         let name = command.name();
         let f = primitive(
@@ -575,11 +596,13 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
             "wait" => wait.set(command.key, f)?,
             "jouet.code" => code.set(command.key, f)?,
             "jouet.docs" => docs.set(command.key, f)?,
+            "jouet.deps" => deps.set(command.key, f)?,
             _ => jouet.set(command.key, f)?,
         }
     }
     jouet.set("code", code)?;
     jouet.set("docs", docs)?;
+    jouet.set("deps", deps)?;
     globals.set("wait", wait)?;
     globals.set("jouet", jouet)?;
     Ok(())
