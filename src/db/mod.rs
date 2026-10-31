@@ -312,7 +312,9 @@ fn remote_host(url: &str) -> Option<String> {
         let name = match (addrs.get(i), host) {
             (Some(addr), _) => addr.to_string(),
             (None, ::postgres::config::Host::Tcp(name)) => name.clone(),
-            (None, _) => continue,
+            // A Unix socket is this machine; Windows has none.
+            #[cfg(unix)]
+            (None, ::postgres::config::Host::Unix(_)) => continue,
         };
         if !local(&name) {
             return Some(if name.contains(':') {
