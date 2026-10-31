@@ -204,7 +204,8 @@
                 }
               }
             ]
-          }
+          },
+          "id": "SCR_1"
         },
         "messageHeadline": "Add average_line",
         "committedDate": "2026-10-30T08:00:00Z",
@@ -309,7 +310,8 @@
                             }
                           }
                         ]
-                      }
+                      },
+                      "id": "SCR_2"
                     },
                     "messageHeadline": "Add average_line",
                     "committedDate": "2026-10-30T08:00:00Z",
@@ -358,7 +360,8 @@
                     }
                   }
                 ]
-              }
+              },
+              "id": "SCR_3"
             },
             "reviewThreads": {
               "nodes": [
@@ -705,6 +708,9 @@
                   "deletions": 0
                 }
               ]
+            },
+            "timelineItems": {
+              "nodes": []
             }
           }
         ]

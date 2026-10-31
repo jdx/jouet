@@ -42,3 +42,9 @@ args = [
   "query=query($n: Int!) { repository(owner: \"jdx\", name: \"demo\") { pullRequest(number: $n) { reviewThreads(first: 50) { nodes { id isResolved path line comments(first: 20) { nodes { databaseId author { login } body } } } } } } }",
 ]
 stdout_contains = "PRRT_kwDOdemo1"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "next", "12", "--json"]
+exit = 10
+stdout_contains = "unresolved_threads"

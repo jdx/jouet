@@ -116,6 +116,41 @@ class ExecuteTest(unittest.TestCase):
         self.assertEqual(response["data"]["resolveReviewThread"]["thread"]["isResolved"], True)
         self.assertEqual(calls, [{"input": {"threadId": "T1"}}])
 
+    def test_a_connection_through_a_fragment(self):
+        query = "{ repository { pullRequest(number: 7) { reviewThreads { ...t } } } } fragment t on X { pageInfo { hasNextPage } nodes { id } }"
+        response, missing = run(query)
+        threads = response["data"]["repository"]["pullRequest"]["reviewThreads"]
+        self.assertEqual((threads["pageInfo"], len(threads["nodes"]), missing), ({"hasNextPage": False}, 2, []))
+
+    def test_derived_fields(self):
+        root = {
+            "repository": {
+                "__typename": "Repository",
+                "nameWithOwner": "jdx/demo",
+                "pullRequest": {"__typename": "PullRequest", "rollup": {"contexts": {"nodes": [
+                    {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None},
+                    {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"},
+                    {"__typename": "StatusContext", "state": "SUCCESS"},
+                ]}}},
+            }
+        }
+        executor = Executor(root)
+        response = executor.execute(
+            "{ repository { pullRequest { repository { nameWithOwner } rollup { contexts {"
+            " checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }"
+        )
+        pr = response["data"]["repository"]["pullRequest"]
+        self.assertEqual(pr["repository"], {"nameWithOwner": "jdx/demo"})
+        self.assertEqual(
+            pr["rollup"]["contexts"],
+            {
+                "checkRunCountsByState": [{"state": "FAILURE", "count": 2}, {"state": "IN_PROGRESS", "count": 1}],
+                "statusContextCountsByState": [{"state": "SUCCESS", "count": 1}],
+            },
+        )
+        self.assertEqual(executor.missing, [])
+
     def test_unknown_mutation_is_an_error(self):
         response, _ = run("mutation { mergePullRequest(input: {}) { clientMutationId } }")
         self.assertIn("no mutation mergePullRequest", response["errors"][0]["message"])

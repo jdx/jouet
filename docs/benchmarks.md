@@ -65,7 +65,7 @@ The fake executes real GraphQL queries (variables, aliases, fragments, connectio
 `mise run test:bench` proves each task without running an agent:
 
 - `check.py` fails on the untouched fixture and passes after `solve.py`;
-- each task's probes run against the fake and get the exit codes they expect, with no request it cannot answer. Probes are the commands an agent would use: `jouet wait ci`, `jouet pr threads` (listing, replying and resolving), `gh pr checks`, `gh run view --log-failed`, `gh pr view` and `gh api graphql`. A probe's `before` commands run first against the same fake, so a listing after a reply is checked too.
+- each task's probes run against the fake and get the exit codes they expect, with no request it cannot answer. Probes are the commands an agent would use: `jouet wait ci`, `jouet pr next`, `jouet pr threads` (listing, replying and resolving), `gh pr checks`, `gh run view --log-failed`, `gh pr view` and `gh api graphql`. A probe's `before` commands run first against the same fake, so a listing after a reply is checked too.
 
 ### What can't be held constant
 
