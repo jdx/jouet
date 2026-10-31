@@ -1,13 +1,14 @@
 ---
-description: Check a stack of PRs, layer by layer, by ancestry and by content, so a restack that kept the commits but reverted their changes is caught.
+description: Check a stack of PRs layer by layer, by ancestry and by content, so a restack that kept the commits but reverted their changes is caught, and bring it up to date by merging.
 ---
 
 # jouet stack
 
-`jouet stack status` checks a stack of PRs, each built on the branch of the one below. For each layer it shows the layer's PR, and whether the layer really contains the layer below it.
+`jouet stack status` checks a stack of PRs, each built on the branch of the one below. For each layer it shows the layer's PR, and whether the layer really contains the layer below it. `jouet stack sync` brings the layers up to date by merging, and verifies each merge.
 
 ```text
 jouet stack status [BRANCH] [--json]
+jouet stack sync [BRANCH] [--dry-run] [--push] [--no-fetch] [--json]
 ```
 
 ## Why
@@ -48,6 +49,39 @@ For each layer, jouet reads the local branch, because it may hold fixes not yet 
 - **Merged prerequisites.** When the layer below has merged, its branch has left the stack, and the layer `needs origin/main merged in` until the trunk is an ancestor. Merging the trunk works where a rebase onto it would conflict, because a squash merge leaves the old commits behind.
 - **The remote.** `N unpushed` counts local commits the remote does not have. This is information, not a problem. `N behind origin/BRANCH` counts remote commits the local branch lacks, and that is a problem: restacking from the local branch would leave them out.
 
+## Syncing a stack
+
+`jouet stack sync` brings each layer up to date by merging its parent into it, from the bottom of the stack up. Here a fix on `feat/parser` reaches the layers above it:
+
+```output
+$ jouet stack sync --dry-run
+PLAN main ← feat/parser ← feat/cache ← feat/cli (dry run: nothing fetched, merged or pushed)
+  feat/parser  up to date
+  feat/cache   would merge feat/parser
+  feat/cli     would merge feat/cache
+$ jouet stack sync
+SYNC main ← feat/parser ← feat/cache ← feat/cli
+  feat/parser  up to date
+  feat/cache   merged feat/parser (737a42b)
+  feat/cli     merged feat/cache (e631215)
+```
+
+Each rule below comes from something that went wrong when stacks were restacked by hand:
+
+- **It merges, and never rebases or force-pushes.** A rebase rewrites commits that other sessions and reviewers have already seen, and needs a force push. A merge needs neither.
+- **It starts from the local branch, never `origin/…`.** Running `git checkout -B layer origin/layer` during a restack drops fixes that were committed but not yet pushed. sync uses the local branch, and creates it from the remote's only when there is no local branch. It refuses (exit 4) a local branch that is behind its remote, because someone pushed work the local branch lacks.
+- **It merges the trunk after a prerequisite merges.** Once the layer below has merged, often as a squash, the layer gets the trunk merged in (`origin/main`). A rebase onto the trunk would conflict with the old commits instead.
+- **It verifies each merge before committing it.** Each merge is made with `--no-commit`. As in `stack status`, every change the merge brings in must be in the merged tree, and a merge that would leave some out is aborted. sync also stops at a layer that is in order by history but lacks its parent's changes, because merging again cannot bring them back.
+- **It stops at the first problem and says what to do.** For a conflict, it lists the files:
+  - in a temporary worktree, it aborts the merge and gives the commands to redo it by hand;
+  - in this worktree, it leaves the conflict for you to resolve.
+
+  For a content problem, it names the files and the `git checkout PARENT -- FILE` command that restores them.
+- **It leaves other worktrees alone.** A layer checked out in another worktree belongs to whoever works there, so sync stops (exit 4) and says to run it there. The layer checked out in this worktree is merged in place, and only when it has no uncommitted changes. A layer checked out nowhere is merged in a temporary worktree, and its branch is moved only if nobody moved it in the meantime.
+- **It pushes only with `--push`, and never force-pushes.** Each layer that is ahead of its remote branch is pushed with a plain push. A layer that was never pushed is left alone.
+
+sync fetches the remote first; `--no-fetch` skips that. `--dry-run` fetches nothing and only shows the plan. sync exits 1 on a conflict or a failed check, 4 when it refused before merging, and 5 when a fetch or push failed. Without GitHub, sync cannot tell which PRs have merged, so it merges each layer's old parent branch rather than the trunk; a note says so.
+
 ## JSON
 
 `--json` prints `source` (`gh-stack` or `github`), `trunk`, `remote`, and `layers`, bottom first. Each layer has:
@@ -61,3 +95,10 @@ For each layer, jouet reads the local branch, because it may hold fixes not yet 
 - `needs`: the codes `missing_branch`, `parent_changes_missing`, `behind_remote`, `needs_trunk` and `needs_parent`.
 
 Fields that are empty are left out. `notes` lists anything else jouet had to say.
+
+`stack sync --json` prints `source`, `trunk`, `notes` and `report`. The report has:
+
+- `steps`: each layer's `branch` and `action` (`up_to_date`, `merged`, `would_merge` or `skipped_merged`), with `from` and `commit` for a merge;
+- `stopped`: where sync stopped, with `branch`, `reason`, `message`, `next` and `files`;
+- `pushed`: for each push, `branch`, `ok` and `error`;
+- `dry_run`.

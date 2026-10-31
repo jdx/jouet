@@ -89,3 +89,73 @@ setup() {
 	run --separate-stderr jouet stack status --json
 	assert_equal "$(jq -r .error.code <<<"$output")" remote
 }
+
+# A bare origin to fetch from and push to, beside the GitHub remote jouet
+# reads the repository from.
+with_origin() {
+	git init -q --bare -b main ../origin.git
+	git remote rename origin github
+	git remote add origin ../origin.git
+	git push -q origin main a b
+	git fetch -q origin
+}
+
+@test "sync merges a fix up the stack, verifies it, and pushes only when asked" {
+	with_origin
+	(cd ../wt-a && printf 'one\nfixed twice\nthree\n' >lib.txt && git commit -qam 'a: fix again')
+	git worktree remove ../wt-b
+	git checkout -q --detach main
+
+	run --separate-stderr jouet stack sync b --dry-run
+	assert_success
+	assert_line --index 0 'PLAN main ← a ← b (dry run: nothing fetched, merged or pushed)'
+	assert_line --index 1 '  a  up to date'
+	assert_line --index 2 '  b  would merge a'
+	local before
+	before="$(git rev-parse b)"
+
+	run --separate-stderr jouet stack sync b
+	assert_success
+	assert_line --index 0 'SYNC main ← a ← b'
+	assert_line --index 2 --regexp '^  b  merged a \([0-9a-f]{7}\)$'
+	assert_equal "$(git show b:lib.txt)" $'one\nfixed twice\nthree'
+	git merge-base --is-ancestor "$before" b
+	# Merged in a temporary worktree, which is gone; nothing was pushed.
+	assert_equal "$(git worktree list | wc -l | tr -d ' ')" 2
+	assert_equal "$(git rev-parse origin/b)" "$before"
+
+	run --separate-stderr jouet stack status b
+	assert_success
+
+	run --separate-stderr jouet stack sync b --push --json
+	assert_success
+	assert_equal "$(jq -c '[.report.pushed[] | [.branch, .ok]]' <<<"$output")" '[["a",true],["b",true]]'
+	assert_equal "$(git -C ../origin.git rev-parse b)" "$(git rev-parse b)"
+}
+
+@test "sync leaves a branch checked out in another worktree to whoever works there" {
+	with_origin
+	(cd ../wt-a && printf 'one\nfixed twice\nthree\n' >lib.txt && git commit -qam 'a: fix again')
+	local before
+	before="$(git rev-parse b)"
+	run --separate-stderr jouet stack sync b --no-fetch
+	assert_failure 4
+	assert_line --index 2 "STOPPED at b: \`b\` is checked out in $(cd ../wt-b && pwd -P), which another session may be working in"
+	assert_equal "$(git rev-parse b)" "$before"
+
+	# Run there, it merges in place.
+	cd ../wt-b
+	run --separate-stderr jouet stack sync --no-fetch
+	assert_success
+	assert_equal "$(cat lib.txt)" $'one\nfixed twice\nthree'
+}
+
+@test "sync stops at a layer whose restack reverted its parent's fix" {
+	(cd ../wt-a && printf 'one\nfixed twice\nthree\n' >lib.txt && git commit -qam 'a: fix again')
+	cd ../wt-b
+	git merge -q --no-edit -s ours a
+	run --separate-stderr jouet stack sync --no-fetch
+	assert_failure 1
+	assert_line --index 2 --regexp "^STOPPED at b: \`b\` would not have all of \`a\`'s changes: lib.txt \(undoes [0-9a-f]+ a: fix again\)$"
+	assert_line --index 4 '  next: in `b`, restore them with `git checkout a -- lib.txt` and commit, unless the difference is meant; then rerun `jouet stack sync`'
+}

@@ -13,3 +13,4 @@ A stack is a chain of PRs, each based on the branch of the one below. The chain 
 ## Subcommands
 
 - [`jouet stack status [BRANCH]`](/cli/stack/status.md)
+- [`jouet stack sync [FLAGS] [BRANCH]`](/cli/stack/sync.md)

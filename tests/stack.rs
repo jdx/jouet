@@ -119,7 +119,12 @@ fn jouet(dir: &Path, fake: &Fake, args: &[&str]) -> Output {
         .env("JOUET_GITHUB_TOKEN", TOKEN)
         .env("JOUET_DISPLAY", "plain")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1");
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        // `stack sync` commits merges; a CI runner has no identity to infer.
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t");
     for var in ["GH_TOKEN", "GITHUB_TOKEN", "HTTPS_PROXY", "https_proxy"] {
         cmd.env_remove(var);
     }
@@ -260,4 +265,58 @@ fn gh_stack_metadata_names_the_layers_and_works_without_github() {
         "{text}"
     );
     assert!(text.contains("note: GitHub could not be reached, so merged PRs are not known"));
+}
+
+#[test]
+fn sync_merges_the_trunk_into_the_layer_above_a_squash_merged_prerequisite() {
+    let tmp = repo();
+    let dir = tmp.path();
+    git(dir, &["checkout", "-q", "main"]);
+    git(dir, &["merge", "-q", "--squash", "a"]);
+    git(dir, &["commit", "-qm", "a (#1)"]);
+    let sha = git(dir, &["rev-parse", "main"]);
+    git(dir, &["update-ref", "refs/remotes/origin/main", &sha]);
+    git(dir, &["checkout", "-q", "--detach", "main"]);
+    let mut prs = chain();
+    prs[0] = pr(1, "a", "main", "MERGED");
+    let fake = github(prs);
+
+    let out = jouet(
+        dir,
+        &fake,
+        &["stack", "sync", "b", "--no-fetch", "--dry-run"],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        "PLAN main ← #1 ← #2 ← #3 (dry run: nothing fetched, merged or pushed)\n  \
+         a  merged; skipped\n  \
+         b  would merge origin/main\n  \
+         c  would merge b\n"
+    );
+    let out = jouet(dir, &fake, &["stack", "sync", "b", "--no-fetch", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json(&out);
+    let steps: Vec<(String, String)> = doc["report"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["branch"].as_str().unwrap().to_string(),
+                s["action"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            ("a".to_string(), "skipped_merged".to_string()),
+            ("b".to_string(), "merged".to_string()),
+            ("c".to_string(), "merged".to_string()),
+        ]
+    );
+    git(dir, &["merge-base", "--is-ancestor", "origin/main", "c"]);
+    let status = jouet(dir, &fake, &["stack", "status", "c"]);
+    assert_eq!(status.status.code(), Some(0), "{}", stdout(&status));
 }
