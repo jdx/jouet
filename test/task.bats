@@ -35,11 +35,15 @@ fake_mise() {
 printf '%s\0' "$@" | jq -cRs 'split("\u0000")[:-1]' >>"$MISE_LOG"
 # What `tasks add|set|rm --json` prints for the task its arguments name.
 report() {
-	local action=$1 path="$PWD/mise.toml" name="" run=() dry=false table='{}'
+	# The directory itself, not $PWD, which jouet's own shell set: on macOS
+	# /tmp is a link to /private/tmp, and mise reports the real path.
+	local dir
+	dir=$(pwd -P)
+	local action=$1 path="$dir/mise.toml" name="" run=() dry=false table='{}'
 	shift 2
 	while (($#)); do
 		case $1 in
-		--env) path="$PWD/mise.$2.toml"; shift ;;
+		--env) path="$dir/mise.$2.toml"; shift ;;
 		--path) path=$2; shift ;;
 		--description) table=$(jq -c --arg v "$2" '.description = $v' <<<"$table"); shift ;;
 		--depends | --sources) table=$(jq -c --arg k "${1#--}" --arg v "$2" '.[$k] += [$v]' <<<"$table"); shift ;;
