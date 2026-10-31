@@ -3,7 +3,9 @@
 use super::Output;
 use crate::{HandoffArgs, PickupArgs};
 use jouet_git::Git;
-use jouet_git::handoff::{self, Attention, Drift, Handoff, Job, JobNow, Options, Pr};
+use jouet_git::handoff::{
+    self, Attention, Daemon, DaemonNow, Drift, Handoff, Job, JobNow, Options, Pr,
+};
 use jouet_git::session;
 use jouet_github::Client;
 use jouet_github::pr::status::{self, Lookup};
@@ -11,6 +13,7 @@ use jouet_github::pr::target::{self, Target};
 use jouet_output::exit::Exit;
 use jouet_output::time;
 use jouet_wait::job::Store;
+use jouet_wait::pitchfork;
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -43,6 +46,16 @@ pub(crate) fn run_handoff(args: &HandoffArgs, out: &Output) -> Exit {
         h.processes
             .retain(|p| !jobs.iter().any(|j| j.pid == p.pid && j.state == "running"));
         h.jobs = jobs;
+    }
+    match daemons(Path::new(&h.worktree)) {
+        Ok(found) => {
+            // A daemon's process is listed once, as the daemon.
+            h.processes
+                .retain(|p| !found.iter().any(|d| d.pid == Some(p.pid)));
+            h.daemons = found;
+        }
+        Err(Some(e)) => h.notes.push(format!("pitchfork daemons: {e}")),
+        Err(None) => {}
     }
     if args.no_pr {
         h.notes.push("pr: not looked up (--no-pr)".into());
@@ -110,6 +123,40 @@ fn jobs_here(store: &Store) -> Vec<Job> {
         .collect()
 }
 
+/// The pitchfork daemons in the worktree's namespace that are running, on
+/// their way up or down, or failed; `Err(None)` without pitchfork. Daemons
+/// in `global`, where pitchfork puts those started outside a project, are
+/// left out: nothing says which checkout they belong to.
+fn daemons(top: &Path) -> Result<Vec<Daemon>, Option<String>> {
+    let listed = match pitchfork::list_project(Some(top)) {
+        Ok(listed) => listed,
+        Err(pitchfork::Error::Missing) => return Err(None),
+        Err(e) => return Err(Some(e.message())),
+    };
+    Ok(listed
+        .into_iter()
+        .filter(|d| d.namespace != "global")
+        .filter(|d| {
+            matches!(
+                d.phase(),
+                pitchfork::Phase::Up | pitchfork::Phase::Moving | pitchfork::Phase::Failed
+            )
+        })
+        .map(recorded)
+        .collect())
+}
+
+/// What a handoff keeps of a daemon.
+fn recorded(d: pitchfork::Daemon) -> Daemon {
+    Daemon {
+        id: d.id,
+        status: d.status,
+        pid: d.pid,
+        port: d.port,
+        error: d.error,
+    }
+}
+
 /// The open PR for the branch, else its newest, with its attention codes.
 fn lookup_pr(branch: &str) -> Result<Option<Pr>, String> {
     let repo = target::repo_from_git().ok_or("no GitHub remote in this checkout")?;
@@ -147,6 +194,9 @@ struct PickupReport<'a> {
     /// The jobs the handoff recorded, as they are now.
     #[serde(skip_serializing_if = "<[JobNow]>::is_empty")]
     jobs: &'a [JobNow],
+    /// The pitchfork daemons the handoff recorded, as they are now.
+    #[serde(skip_serializing_if = "<[DaemonNow]>::is_empty")]
+    daemons: &'a [DaemonNow],
     handoff: &'a Handoff,
 }
 
@@ -173,11 +223,30 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
         jobs = states;
         drift.extend(ended);
     }
+    let mut daemons = Vec::new();
+    if !h.daemons.is_empty() {
+        match pitchfork::list_project(Some(Path::new(&h.worktree))) {
+            Ok(listed) => {
+                let now: Vec<Daemon> = listed.into_iter().map(recorded).collect();
+                let (states, changed) = handoff::daemons_now(&h.daemons, &now);
+                daemons = states;
+                drift.extend(changed);
+            }
+            Err(e) => drift.push(Drift {
+                code: "daemons_unknown",
+                message: format!(
+                    "the handoff recorded pitchfork daemons, but {}",
+                    e.message()
+                ),
+            }),
+        }
+    }
     let report = PickupReport {
         path,
         accurate: drift.is_empty(),
         drift: &drift,
         jobs: &jobs,
+        daemons: &daemons,
         handoff: &h,
     };
     out.result(&report, || {
@@ -189,6 +258,16 @@ pub(crate) fn run_pickup(args: &PickupArgs, out: &Output) -> Exit {
             let _ = writeln!(s, "\n## Jobs now\n");
             for j in &jobs {
                 let _ = writeln!(s, "- `{}`: {}, was {}", j.id, j.now, j.then);
+            }
+        }
+        if !daemons.is_empty() {
+            let _ = writeln!(s, "\n## pitchfork daemons now\n");
+            for d in &daemons {
+                let now = match &d.error {
+                    Some(error) => format!("{} ({error})", d.now),
+                    None => d.now.clone(),
+                };
+                let _ = writeln!(s, "- `{}`: {now}, was {}", d.id, d.then);
             }
         }
         if drift.is_empty() {

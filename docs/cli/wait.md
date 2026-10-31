@@ -20,6 +20,7 @@ Replaces `sleep N; check; repeat` loops. The first check is immediate; later one
 
 - [`jouet wait ci [FLAGS] [PR]`](/cli/wait/ci.md)
 - [`jouet wait cmd [--expect-exit <N>] [-- CMD]…`](/cli/wait/cmd.md)
+- [`jouet wait daemon [FLAGS] <ID>`](/cli/wait/daemon.md)
 - [`jouet wait file [--contains <REGEX>] [--gone] <PATH>`](/cli/wait/file.md)
 - [`jouet wait http [--status <CODE>] [--contains <REGEX>] <URL>`](/cli/wait/http.md)
 - [`jouet wait job [FLAGS] <ID>`](/cli/wait/job.md)
