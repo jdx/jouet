@@ -188,6 +188,21 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     Ok(())
 }
 
+/// Whether `path` is a file task mise would load: a file, executable on
+/// Unix, since mise skips one that is not.
+fn file_task(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        path.metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
 /// The `test` script `npm init` writes, which only fails.
 const NPM_PLACEHOLDER: &str = r#"echo "Error: no test specified" && exit 1"#;
 
@@ -254,7 +269,7 @@ fn test_task_with(root: &Path, ask_mise: impl Fn(&Path) -> Option<bool>) -> Opti
         .any(|include| {
             let path = root.join(include);
             if path.is_dir() {
-                path.join("test").is_file()
+                file_task(&path.join("test"))
             } else {
                 std::fs::read_to_string(&path)
                     .ok()
@@ -263,13 +278,15 @@ fn test_task_with(root: &Path, ask_mise: impl Fn(&Path) -> Option<bool>) -> Opti
             }
         });
     let task_dirs = ["mise-tasks", ".mise-tasks", ".mise/tasks", "mise/tasks"];
-    let file_task = task_dirs.iter().any(|d| has(&format!("{d}/test")));
+    let task_file = task_dirs
+        .iter()
+        .any(|d| file_task(&root.join(d).join("test")));
     // A repository that uses mise asks mise; the files are the fallback.
     let uses_mise =
         mise_files.iter().any(|f| has(f)) || task_dirs.iter().any(|d| root.join(d).is_dir());
     let mise_task = match uses_mise.then(|| ask_mise(root)).flatten() {
         Some(answer) => answer,
-        None => declared || included || file_task,
+        None => declared || included || task_file,
     };
     if mise_task {
         return words(&["mise", "run", "test"]);
@@ -381,6 +398,14 @@ mod tests {
         std::fs::write(root.join("tasks.toml"), "").unwrap();
         std::fs::create_dir(root.join("xtasks")).unwrap();
         std::fs::write(root.join("xtasks/test"), "#!/bin/sh\n").unwrap();
+        // mise skips a file task that is not executable, and so does this.
+        #[cfg(unix)]
+        {
+            assert_eq!(test_task_with(root, |_| None).unwrap(), ["cargo", "test"]);
+            use std::os::unix::fs::PermissionsExt as _;
+            let executable = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(root.join("xtasks/test"), executable).unwrap();
+        }
         assert_eq!(
             test_task_with(root, |_| None).unwrap(),
             ["mise", "run", "test"]
