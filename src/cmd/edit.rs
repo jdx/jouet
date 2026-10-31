@@ -204,6 +204,18 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         }
     }
     print_report(out, &plan.report, fixed.as_ref(), diagnosed.as_ref());
+    // Keep the code graph in step with what was written (or restored), when
+    // the repository has one, as the post-tool-use hook does for file tools.
+    if let Ok(cwd) = std::env::current_dir() {
+        let touched: Vec<_> = plan
+            .report
+            .files
+            .iter()
+            .flat_map(|f| std::iter::once(&f.path).chain(&f.moved_to))
+            .map(|p| cwd.join(p))
+            .collect();
+        super::graph::reindex(&cwd, &touched);
+    }
     exit
 }
 

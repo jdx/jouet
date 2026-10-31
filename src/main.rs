@@ -57,6 +57,8 @@ enum Cmd {
     Diag(DiagArgs),
     /// Make exact, all-or-nothing edits across files
     Edit(EditArgs),
+    /// Query the code graph: symbols, callers, impact and affected tests
+    Graph(GraphArgs),
     /// Record the facts about this checkout for the next session
     Handoff(HandoffArgs),
     /// Print a handoff and check that it still holds
@@ -962,6 +964,48 @@ pub struct WaitCmdArgs {
     command: Vec<String>,
 }
 
+/// Query the code graph: symbols, callers, impact and affected tests
+///
+/// The graph is built with tree-sitter from Rust, Python, TypeScript and
+/// JavaScript, Go, Ruby, Java, C and C++ files, and kept in a database in
+/// $XDG_CACHE_HOME/jouet/graph, one per work tree: nothing is written into
+/// the repository. There is no daemon: every query first
+/// re-indexes the files that changed since the last one, and jouet's
+/// post-tool-use hook re-indexes files an agent edits. The code graph
+/// builds on codegraph's design and extraction.
+#[derive(Args)]
+pub struct GraphArgs {
+    #[usage(subcommand)]
+    cmd: GraphCmd,
+}
+
+#[derive(Subcommands)]
+pub enum GraphCmd {
+    /// Build the graph, or bring it up to date
+    Index(GraphIndexArgs),
+    /// Show where the graph lives and what it holds
+    Status(GraphStatusArgs),
+}
+
+/// Build the graph, or bring it up to date
+///
+/// Lists the work tree's source files (honouring .gitignore), and extracts
+/// only the files whose content changed since the last index. Files larger
+/// than 1 MiB or not UTF-8 are recorded without symbols.
+#[derive(Args)]
+pub struct GraphIndexArgs {
+    /// Drop the graph and index everything from scratch
+    #[usage(long)]
+    full: bool,
+}
+
+/// Show where the graph lives and what it holds
+///
+/// Prints the database's path and size, and how many files, symbols,
+/// edges and references it holds. Does not index.
+#[derive(Args)]
+pub struct GraphStatusArgs {}
+
 /// Run GitHub Actions jobs on this machine
 #[derive(Args)]
 pub struct CiArgs {
@@ -1607,6 +1651,7 @@ fn main() -> ExitCode {
         Cmd::Commit(args) => cmd::commit::run(&args, &out),
         Cmd::Diag(args) => cmd::diag::run(&args, &out),
         Cmd::Edit(args) => cmd::edit::run(args, &out),
+        Cmd::Graph(args) => cmd::graph::run(&args, &out),
         Cmd::Handoff(args) => cmd::handoff::run_handoff(&args, &out),
         Cmd::Pickup(args) => cmd::handoff::run_pickup(&args, &out),
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
