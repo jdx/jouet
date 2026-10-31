@@ -67,6 +67,10 @@ pub struct Doc {
     pub(crate) counts: Counts,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) checks: Vec<Check>,
+    /// The PR's base branch, for the command that updates a branch an
+    /// Entire Gates check calls out of date.
+    #[serde(skip)]
+    pub(crate) base: String,
 }
 
 /// Finds the PR a target names: a number as is, a branch through its open
@@ -196,6 +200,12 @@ impl CiWait {
             elapsed_s: self.start.elapsed().as_secs(),
             counts: Counts::of(&checks),
             checks,
+            base: self
+                .last
+                .pr
+                .as_ref()
+                .map(|p| p.base_ref.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -323,12 +333,62 @@ impl Watch for CiWait {
             out.push_str("  still pending; run it again to keep waiting\n");
         }
         out.push_str(&checks::failure_blocks(&doc.checks));
+        out.push_str(&entire_lines(doc));
         out
     }
 
     fn exit(&self, doc: &Doc) -> Exit {
         result_exit(doc.result)
     }
+}
+
+/// What a failed Entire Gates check comes down to. A derived one points at
+/// the real cause: the failed checks above, or the branch being behind or
+/// conflicting. Failing on findings, it says where they are listed.
+fn entire_lines(doc: &Doc) -> String {
+    let mut out = String::new();
+    let pr = format!("{}#{}", doc.repo, doc.pr);
+    for (c, g) in doc
+        .checks
+        .iter()
+        .filter(|c| c.state.failed())
+        .filter_map(|c| Some((c, c.entire.as_ref()?)))
+    {
+        if c.derived() {
+            let _ = writeln!(
+                out,
+                "\n{} fails only because of what is reported elsewhere: {}",
+                c.name,
+                g.failing_text()
+            );
+            if g.fails("checks") {
+                let others = doc.checks.iter().any(|o| o.state.failed() && !o.derived());
+                out.push_str(if others {
+                    "  the failed checks above are the cause\n"
+                } else {
+                    "  the failing checks are not among those waited for here\n"
+                });
+            }
+            if g.fails("up_to_date") {
+                let base = if doc.base.is_empty() {
+                    "BASE"
+                } else {
+                    &doc.base
+                };
+                let _ = writeln!(
+                    out,
+                    "  update the branch: git fetch origin {base} && git merge origin/{base}"
+                );
+            }
+        } else if g.fails("findings") {
+            let _ = writeln!(
+                out,
+                "\n{} fails on open findings: `jouet pr threads {pr}` lists them",
+                c.name
+            );
+        }
+    }
+    out
 }
 
 pub(crate) fn result_exit(result: &str) -> Exit {

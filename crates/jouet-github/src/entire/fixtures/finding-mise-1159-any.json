@@ -1,0 +1,111 @@
+{
+  "counts": {
+    "Open": 1,
+    "OpenHigh": 0,
+    "OpenMedium": 0,
+    "OpenLow": 1,
+    "Resolved": 1,
+    "Dismissed": 0,
+    "Stale": 1
+  },
+  "findings": [
+    {
+      "id": "01M65ECBREMZRY2QJEYDHEDYBA",
+      "trailId": "01M659Z3PQVF861CZ28PMK8KC5",
+      "repositoryId": "01KWHDK2EKTJT9BA4KSDQCWRA5",
+      "reviewId": "01M65ECBQXTY1N5Q6XNXK8723D",
+      "codeVersionId": "01M65EB9T396F210Q8S0PR95XH",
+      "actorId": "agent:trail-review",
+      "title": null,
+      "body": "`deleted_paths_under` counts any path ever deleted in history, even if a later commit saved it again. If the user deletes a tracked file, saves, then recreates the file, `live_matches_saved` sees it as an addition that is in `deleted` and returns false. The entry is then treated as held, so the recreated file is probably not captured or published until a pull releases it. Consider only counting deletions that are not followed by a re-add, or deletions that did not originate from this machine's own checkpoints.",
+      "severity": "low",
+      "confidence": 0.4,
+      "status": "open",
+      "statusReason": null,
+      "staleOutcome": "current",
+      "staleCheckedAt": null,
+      "staleCheckedCodeVersionId": null,
+      "clientId": "4878cbc5895afe371edd82c6a3437019",
+      "clientIdHash": "e6b8c8b1132cd5bc6f13e8db50446edcfccb283d61c2537e18f83bae176e3ec5",
+      "createdAt": "2026-10-30T03:41:43.564Z",
+      "updatedAt": "2026-10-30T03:41:43.564Z",
+      "location": {
+        "id": "01M65ECBRE5071RCEWMA4GB238",
+        "reviewCommentId": "01M65ECBREMZRY2QJEYDHEDYBA",
+        "codeVersionId": "01M65EB9T396F210Q8S0PR95XH",
+        "granularity": "line",
+        "filePath": "crates/mise-system/src/history/shadow.rs",
+        "startLine": 2116,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "        let literal = format!(\":(literal){stream}\");",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M65ECBRE89VCCTJVYWDN7J6M"
+    },
+    {
+      "id": "01M65A0ACHHRSZQWTGF0H1SYJ9",
+      "trailId": "01M659Z3PQVF861CZ28PMK8KC5",
+      "repositoryId": "01KWHDK2EKTJT9BA4KSDQCWRA5",
+      "reviewId": "01M65A0ACDWWAQ4N7DJSTXVS69",
+      "codeVersionId": "01M65A0ACBX9Q06Q5F93K2RN1Q",
+      "actorId": "agent:trail-review",
+      "title": null,
+      "body": "live_matches_saved now returns true whenever every saved file is live and unchanged, ignoring live files with no saved version. That also covers a file another machine deleted and pulled into the saved version but not yet applied locally. The stream is then treated as held, and the next capture re-saves the file, silently reverting the remote deletion. Before this change the live/saved set mismatch made the stream unheld, so the capture carried the pulled version and the deletion was applied. The check needs a way to tell a widened-entry addition from a remotely deleted file, for example by only ignoring live files that no previous narrower stream covered, or files not present in the upstream history.",
+      "severity": "medium",
+      "confidence": 0.6,
+      "status": "resolved",
+      "statusReason": "Fixed in 58b789e5d2: extra live files only count as additions when no stream held here covered them; e2e test_dotfiles_profile_remote_deletion reproduces the scenario.",
+      "staleOutcome": "stale",
+      "staleCheckedAt": "2026-10-30T03:05:43.851Z",
+      "staleCheckedCodeVersionId": "01M65CAEM0CS3VKQNWMAPVBB4J",
+      "clientId": "aa22b06b46d10779cb9b7053c12929a5",
+      "clientIdHash": "86cf7f8aa385177176d20ea09b84881b1a81357e35e4389774e67615f747fe31",
+      "createdAt": "2026-10-30T02:25:14.64Z",
+      "updatedAt": "2026-10-30T03:05:52.814Z",
+      "location": {
+        "id": "01M65A0ACHHR4AC0H5WC963YGD",
+        "reviewCommentId": "01M65A0ACHHRSZQWTGF0H1SYJ9",
+        "codeVersionId": "01M65A0ACBX9Q06Q5F93K2RN1Q",
+        "granularity": "line",
+        "filePath": "crates/mise-system/src/history/held.rs",
+        "startLine": 253,
+        "startColumn": null,
+        "endLine": null,
+        "endColumn": null,
+        "selectedText": "    Ok(true)",
+        "nearbyText": null,
+        "language": null
+      },
+      "discussionId": "01M65A0ACHNT0M5NR1ZRC7K18F"
+    }
+  ],
+  "has_more": false,
+  "trail": {
+    "id": "01M659Z3PQVF861CZ28PMK8KC5",
+    "number": 1159,
+    "url": "https://entire.com/gh/jdx/mise/trails/1159",
+    "branch": "",
+    "originalBranch": "claude/github-issue-discussion-e01ea6",
+    "base": "main",
+    "title": "fix(dotfiles): keep saving a directory tracked in place of narrower paths",
+    "status": "merged",
+    "author": {
+      "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+      "login": "jdx"
+    },
+    "assignees": [
+      "jdx"
+    ],
+    "createdAt": "2026-10-30T02:24:35.031Z",
+    "updatedAt": "2026-10-30T11:36:24.507Z",
+    "mergedAt": "2026-10-30T11:35:41Z",
+    "unresolvedCount": 1,
+    "bodyDocument": {
+      "textSnapshot": "",
+      "etag": "W/\"2026-10-30T02:24:35.060254Z\""
+    }
+  }
+}

@@ -260,3 +260,85 @@ fn each_action_has_one_kind_and_a_snake_case_name() {
     );
     assert_eq!(Action::AwaitingApproval.as_str(), "awaiting_approval");
 }
+
+/// A failed Entire Gates check on the head with this summary, recorded
+/// from jdx/mise#13958.
+fn gates(pr: &mut Value, summary: &str) {
+    pr["commits"]["nodes"][0]["commit"]["checkSuites"] = json!({ "nodes": [{ "checkRuns": { "nodes": [{
+        "status": "COMPLETED", "conclusion": "FAILURE",
+        "detailsUrl": "https://entire.io/gh/jdx/mise/trails/424",
+        "title": "2 blocking gates not passing", "summary": summary,
+    }] } }] });
+}
+
+const CHECKS_AND_FINDINGS: &str = "- ❌ **Checks**: failed — CI checks have not passed\n- ❌ **Findings**: failed — Unresolved findings: 2 medium severity\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)";
+
+/// A PR whose only failing check is Entire Gates, failing as `summary` says.
+fn entire_only(summary: &str) -> PrStatus {
+    let mut raw = recorded("l3");
+    green(&mut raw);
+    raw["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["checkRunCountsByState"] =
+        json!([{ "state": "SUCCESS", "count": 12 }, { "state": "FAILURE", "count": 1 }]);
+    gates(&mut raw, summary);
+    let mut fetched = read_pr(&raw).unwrap();
+    fetched.status_mut().checks.failing = vec![crate::entire::CHECK.into()];
+    fetched.finish(now())
+}
+
+#[test]
+fn entire_gates_is_not_a_failing_check_of_its_own() {
+    let pr = entire_only(
+        "- ❌ **Checks**: failed — CI checks have not passed\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)",
+    );
+    assert!(
+        pr.attention.iter().all(|a| a.code != "checks_failing"),
+        "{:?}",
+        pr.attention
+    );
+    assert_eq!(next(&pr).action, Action::ReadyToMerge);
+}
+
+#[test]
+fn open_entire_findings_name_the_first_to_fix() {
+    let mut pr = entire_only(CHECKS_AND_FINDINGS);
+    let n = next(&pr);
+    assert_eq!((n.action, n.kind), (Action::EntireFindings, Kind::Act));
+    assert_eq!(
+        n.reason,
+        "Entire Gates: checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity"
+    );
+    assert_eq!(n.command.as_deref(), Some("jouet pr threads jdx/jouet#19"));
+    // With the findings `entire` listed.
+    let e = pr.entire.as_mut().unwrap();
+    e.findings = crate::entire::Brief::of(&[crate::entire::Finding {
+        id: "01M4C997DZH5KQRP31NW93NQHR".into(),
+        status: "open".into(),
+        severity: Some("medium".into()),
+        stale: false,
+        path: Some("e2e/cli/test_deps_tool_install".into()),
+        line: Some(21),
+        end_line: None,
+        title: "Only removes the compat symlink.".into(),
+        body: String::new(),
+        author: "agent:trail-review".into(),
+        created_at: String::new(),
+        status_reason: None,
+    }]);
+    assert_eq!(
+        e.findings_message(),
+        "Fix Entire finding [entire:01M4C997DZ] at e2e/cli/test_deps_tool_install:21 (medium): Only removes the compat symlink."
+    );
+}
+
+#[test]
+fn an_out_of_date_branch_by_entire_is_behind_base() {
+    let pr = entire_only(
+        "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Up to date**: failed — 3 commits behind · Merge conflicts\n\n[Trail #88 on Entire](https://entire.com/gh/jdx/-/trails/3284/changes/jouet/88)",
+    );
+    let n = next(&pr);
+    assert_eq!(n.action, Action::BehindBase);
+    assert_eq!(
+        n.reason,
+        "Entire Gates: 3 commits behind · Merge conflicts; update the branch from main before it can merge"
+    );
+}

@@ -190,6 +190,16 @@ A job that failed only because another one did, such as a `needs:` job that repo
 
 A failure on only one OS can be a real bug on that OS. It counts as flaky the first time, so it gets one rerun. If the rerun fails the same way on the same commit, the next explain finds the two failures and calls it real.
 
+## Entire Gates
+
+The [Entire Gates](/entire-gates) check is not an Actions job, so it gets no verdict. When it fails on the PR's head, a closing line says what it comes down to instead of reporting it as one more failure:
+
+```text
+Entire Gates fails (checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity): it repeats the failed jobs above; it has open findings, which a rerun cannot fix: jouet pr threads jdx/mise#13958
+```
+
+A failed checks gate repeats the jobs explained above. A branch that is not up to date gets the command that merges its base. Only a PR target is looked at, on its current head: a run or job named on its own may be on a commit the PR has since moved past, where an out-of-date gate is noise. The rerun plan never counts the Entire Gates check.
+
 ## Rerunning
 
 `--rerun` reruns the failed jobs, and the jobs that follow them, through GitHub's rerun-failed-jobs API, or that one job with `--job`, but only when every failed job is flaky or infrastructure. If any failed job is real or unknown, it reruns nothing and exits `4`, naming the jobs. Without `--rerun`, the report gives the command to run when a rerun is allowed.
@@ -208,7 +218,7 @@ The logs of at most 20 failed jobs per run are read; any others are `unknown`. E
 
 ## Output and exit codes
 
-The first word of the text result is the worst verdict among the failed jobs: `REAL`, `UNKNOWN`, `INFRA` or `FLAKY`. It is `PASS` when nothing failed and `PENDING` when nothing has failed yet but a run is still going. `--json` prints `repo`, `pr`, `result` (`real`, `unknown`, `infrastructure`, `flaky`, `passed` or `pending`), `runs` and `rerun` (`allowed`, `reason`, `command`, `jobs`, `started`), plus `github` (`requests`, `cached`). Each run has `run_id`, `workflow`, `head_sha`, `head_branch`, `attempt`, `url`, `prs`, `in_progress`, `jobs` and `following`. Each job has `name`, `job_id`, `url`, `os`, `verdict`, `failed_step`, `tests`, `location`, `errors`, `infrastructure` (`cause`, `line`), `main_broken`, `evidence`, `log_excerpt`, `log_truncated` and `log_path`.
+The first word of the text result is the worst verdict among the failed jobs: `REAL`, `UNKNOWN`, `INFRA` or `FLAKY`. It is `PASS` when nothing failed and `PENDING` when nothing has failed yet but a run is still going. `--json` prints `repo`, `pr`, `result` (`real`, `unknown`, `infrastructure`, `flaky`, `passed` or `pending`), `runs` and `rerun` (`allowed`, `reason`, `command`, `jobs`, `started`), plus `github` (`requests`, `cached`). `entire_gates`, when the Entire Gates check fails, holds its `state`, `title`, `gates`, `trail` and `url`, the `head_sha` it is on, `derived` when it only repeats other failures, and the `note`. Each run has `run_id`, `workflow`, `head_sha`, `head_branch`, `attempt`, `url`, `prs`, `in_progress`, `jobs` and `following`. Each job has `name`, `job_id`, `url`, `os`, `verdict`, `failed_step`, `tests`, `location`, `errors`, `infrastructure` (`cause`, `line`), `main_broken`, `evidence`, `log_excerpt`, `log_truncated` and `log_path`.
 
 | Exit | When |
 |---|---|

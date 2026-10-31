@@ -5,10 +5,10 @@
 
 Unresolve threads
 
-A PR given after the IDs must not be a bare number: write it as #N.
+A PR given after the IDs must not be a bare number: write it as #N. An Entire finding (`entire:ID`) is reopened on Entire.
 
 ## Arguments
-- **`[ARGS]…`** — Thread IDs, then optionally the PR
+- **`[ARGS]…`** — Thread IDs or Entire finding handles, then optionally the PR
 
 ## Flags
 - **`--dry-run`** — Check everything and show what would happen, changing nothing

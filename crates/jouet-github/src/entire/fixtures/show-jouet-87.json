@@ -1,0 +1,463 @@
+{
+  "number": 87,
+  "trail_id": "01M69BA64M42DQMAHHKSC015QQ",
+  "url": "https://entire.com/gh/jdx/jouet/trails/87",
+  "branch": "fix/cmd-through-wrappers",
+  "original_branch": "fix/cmd-through-wrappers",
+  "base": "main",
+  "title": "fix(rule): read the command after jouet test --cmd through its wrappers",
+  "body": "",
+  "status": "open",
+  "author": {
+    "id": "01KVXJKTKXPZN75VHNT4D041RQ",
+    "login": "jdx"
+  },
+  "assignees": [
+    "jdx"
+  ],
+  "labels": [],
+  "created_at": "2026-10-31T16:05:04.275Z",
+  "updated_at": "2026-10-31T16:11:54.266Z",
+  "merged_at": null,
+  "mergeability": {
+    "head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+    "mergeable": false,
+    "conflict_status": "conflicting",
+    "checks": {
+      "availability": "available",
+      "runs": [
+        {
+          "name": "final",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124591198507",
+          "started_at": "2026-10-31T16:25:20Z",
+          "completed_at": "2026-10-31T16:25:24Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / final",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124591180868",
+          "started_at": "2026-10-31T16:25:15Z",
+          "completed_at": "2026-10-31T16:25:17Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "deploy",
+          "status": "completed",
+          "conclusion": "skipped",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500096/job/124588933325",
+          "started_at": "2026-10-31T16:15:52Z",
+          "completed_at": "2026-10-31T16:15:52Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500096/job/124588306457",
+          "started_at": "2026-10-31T16:13:56Z",
+          "completed_at": "2026-10-31T16:15:52Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "untrusted",
+          "status": "completed",
+          "conclusion": "skipped",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588173592",
+          "started_at": "2026-10-31T16:12:48Z",
+          "completed_at": "2026-10-31T16:12:48Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (aarch64-apple-darwin, macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172997",
+          "started_at": "2026-10-31T16:14:31Z",
+          "completed_at": "2026-10-31T16:21:02Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / test",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172984",
+          "started_at": "2026-10-31T16:12:49Z",
+          "completed_at": "2026-10-31T16:16:04Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / test-windows",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172960",
+          "started_at": "2026-10-31T16:13:49Z",
+          "completed_at": "2026-10-31T16:16:14Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172916",
+          "started_at": "2026-10-31T16:15:11Z",
+          "completed_at": "2026-10-31T16:22:16Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (aarch64-unknown-linux-gnu, ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172908",
+          "started_at": "2026-10-31T16:14:22Z",
+          "completed_at": "2026-10-31T16:20:17Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / msrv",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172890",
+          "started_at": "2026-10-31T16:14:34Z",
+          "completed_at": "2026-10-31T16:15:09Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (x86_64-pc-windows-msvc, windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172876",
+          "started_at": "2026-10-31T16:14:19Z",
+          "completed_at": "2026-10-31T16:25:13Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (aarch64-pc-windows-msvc, windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172825",
+          "started_at": "2026-10-31T16:13:13Z",
+          "completed_at": "2026-10-31T16:24:24Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (x86_64-unknown-linux-gnu, ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172815",
+          "started_at": "2026-10-31T16:14:14Z",
+          "completed_at": "2026-10-31T16:21:29Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / release-build (aarch64-unknown-linux-musl, ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172796",
+          "started_at": "2026-10-31T16:13:19Z",
+          "completed_at": "2026-10-31T16:18:42Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "trusted / test-macos",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172662",
+          "started_at": "2026-10-31T16:13:07Z",
+          "completed_at": "2026-10-31T16:16:47Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "title",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://github.com/jdx/jouet/actions/runs/41218516487/job/124588010005",
+          "started_at": "2026-10-31T16:13:03Z",
+          "completed_at": "2026-10-31T16:13:06Z",
+          "app_name": "GitHub Actions"
+        },
+        {
+          "name": "CodeRabbit",
+          "status": "completed",
+          "conclusion": "neutral",
+          "details_url": "https://coderabbit.ai?utm_source=cr_app&utm_medium=github",
+          "started_at": "2026-10-31T16:12:01Z",
+          "completed_at": "2026-10-31T16:12:01Z",
+          "app_name": "coderabbitai"
+        },
+        {
+          "name": "Socket Security: Pull Request Alerts",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://socket.dev",
+          "started_at": "2026-10-31T16:11:59Z",
+          "completed_at": "2026-10-31T16:12:01Z",
+          "app_name": "Socket Security"
+        },
+        {
+          "name": "Socket Security: Project Report",
+          "status": "completed",
+          "conclusion": "success",
+          "details_url": "https://socket.dev/dashboard/org/jdx/sbom/f8ee753f-5dd1-44c4-a25f-a3198dbb09eb",
+          "started_at": "2026-10-31T16:11:56Z",
+          "completed_at": "2026-10-31T16:11:58Z",
+          "app_name": "Socket Security"
+        }
+      ]
+    },
+    "gates": [
+      {
+        "id": "",
+        "gate_definition_id": "01M66QV47Z1NBJJFGDBK5ZKNEY",
+        "gate_key": "approvals",
+        "gate_type": "approvals",
+        "blocking": false,
+        "status": "skipped",
+        "state": "disabled",
+        "outcome": null,
+        "rationale": "No reviewers have approved this trail",
+        "head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "evaluated_at_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "approved": 0,
+          "changes_requested": false,
+          "config": {
+            "version": 1,
+            "min_reviewers": 1,
+            "allow_self_approval": false,
+            "dismiss_stale_approvals_on_push": false
+          },
+          "required": 1,
+          "self_excluded": false,
+          "stale_dismissed": 0,
+          "total": 0
+        },
+        "created_at": "2026-10-31T16:29:06.895875001Z",
+        "completed_at": "2026-10-31T16:29:06.895875001Z"
+      },
+      {
+        "id": "",
+        "gate_definition_id": "01M66QV48571MBP91QG295XH3Y",
+        "gate_key": "checks",
+        "gate_type": "checks",
+        "blocking": true,
+        "status": "passed",
+        "state": "evaluated",
+        "outcome": "passed",
+        "rationale": "CI checks have passed",
+        "head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "evaluated_at_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "state": "success",
+          "total_count": 20,
+          "checks": [
+            {
+              "name": "final",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124591198507"
+            },
+            {
+              "name": "trusted / final",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124591180868"
+            },
+            {
+              "name": "deploy",
+              "status": "completed",
+              "conclusion": "skipped",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500096/job/124588933325"
+            },
+            {
+              "name": "build",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500096/job/124588306457"
+            },
+            {
+              "name": "untrusted",
+              "status": "completed",
+              "conclusion": "skipped",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588173592"
+            },
+            {
+              "name": "trusted / release-build (aarch64-apple-darwin, macos-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172997"
+            },
+            {
+              "name": "trusted / test",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172984"
+            },
+            {
+              "name": "trusted / test-windows",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172960"
+            },
+            {
+              "name": "trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172916"
+            },
+            {
+              "name": "trusted / release-build (aarch64-unknown-linux-gnu, ubuntu-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172908"
+            },
+            {
+              "name": "trusted / msrv",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172890"
+            },
+            {
+              "name": "trusted / release-build (x86_64-pc-windows-msvc, windows-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172876"
+            },
+            {
+              "name": "trusted / release-build (aarch64-pc-windows-msvc, windows-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172825"
+            },
+            {
+              "name": "trusted / release-build (x86_64-unknown-linux-gnu, ubuntu-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172815"
+            },
+            {
+              "name": "trusted / release-build (aarch64-unknown-linux-musl, ubuntu-latest)",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172796"
+            },
+            {
+              "name": "trusted / test-macos",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218500144/job/124588172662"
+            },
+            {
+              "name": "title",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://github.com/jdx/jouet/actions/runs/41218516487/job/124588010005"
+            },
+            {
+              "name": "CodeRabbit",
+              "status": "completed",
+              "conclusion": "neutral",
+              "details_url": "https://coderabbit.ai?utm_source=cr_app&utm_medium=github"
+            },
+            {
+              "name": "Socket Security: Pull Request Alerts",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://socket.dev"
+            },
+            {
+              "name": "Socket Security: Project Report",
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": "https://socket.dev/dashboard/org/jdx/sbom/f8ee753f-5dd1-44c4-a25f-a3198dbb09eb"
+            }
+          ],
+          "config": {
+            "version": 1,
+            "required_checks": [],
+            "require_all_success": true
+          }
+        },
+        "created_at": "2026-10-31T16:29:06.895913703Z",
+        "completed_at": "2026-10-31T16:29:06.895913703Z"
+      },
+      {
+        "id": "01M69BPKRCGCKXQHB7K5Q9JF14",
+        "gate_definition_id": "01M66QV482A60GR3HFZB1SBKR4",
+        "gate_key": "findings",
+        "gate_type": "findings",
+        "blocking": true,
+        "status": "passed",
+        "state": "evaluated",
+        "outcome": "passed",
+        "rationale": "No blocking findings",
+        "head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "evaluated_at_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "stale_reason": null,
+        "finding_count": 0,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "config": {
+            "version": 1,
+            "agent_findings_min_severity": "medium"
+          },
+          "reviewed_head": false,
+          "agent_findings": {
+            "low": 0,
+            "high": 0,
+            "medium": 0,
+            "unspecified": 0
+          },
+          "review_in_flight": false,
+          "reviewer_configured": false,
+          "review_grace_expired": false,
+          "agent_blocking_findings": 0
+        },
+        "created_at": "2026-10-31T16:11:51.436466Z",
+        "completed_at": "2026-10-31T16:11:51.436466Z"
+      },
+      {
+        "id": "",
+        "gate_definition_id": "01M66QV487AV34Y07RBGJ15Z6T",
+        "gate_key": "up_to_date",
+        "gate_type": "up_to_date",
+        "blocking": true,
+        "status": "failed",
+        "state": "evaluated",
+        "outcome": "failed",
+        "rationale": "Merge conflicts",
+        "head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "evaluated_at_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+        "stale_reason": null,
+        "finding_count": null,
+        "reviewers": [],
+        "runner_ids": [],
+        "value": {
+          "comparison_status": "available",
+          "resolved_head_sha": "7af3ddead7e8d5974d7905a720b4947557746521",
+          "behind_by": 2,
+          "compare_status": "diverged",
+          "merge_status": "conflicting",
+          "config": {
+            "version": 1,
+            "allow_behind_if_mergeable": true
+          }
+        },
+        "created_at": "2026-10-31T16:22:47.882231Z",
+        "completed_at": null
+      }
+    ]
+  }
+}

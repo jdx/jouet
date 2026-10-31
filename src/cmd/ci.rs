@@ -183,6 +183,14 @@ fn render_explain(r: &explain::Report) -> String {
             }
         }
     }
+    if let Some(e) = &r.entire_gates {
+        let _ = writeln!(
+            s,
+            "\nEntire Gates fails ({}): {}",
+            e.gates.failing_text(),
+            e.note
+        );
+    }
     s.push('\n');
     let rerun = &r.rerun;
     if rerun.started {

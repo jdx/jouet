@@ -3,9 +3,10 @@
 //!
 //! The order is fixed and the first state that applies wins: merged, closed,
 //! draft, conflict, mergeability still unknown, behind its base, failing
-//! checks, pending checks, changes requested, unresolved threads, waiting on
-//! approval, blocked by another branch protection rule, auto-merge, and
-//! finally ready to merge. The states come from what `pr status` fetched,
+//! checks, pending checks, changes requested, unresolved threads, open
+//! Entire findings, another failing Entire gate, waiting on approval,
+//! blocked by another branch protection rule, auto-merge, and finally ready
+//! to merge. The states come from what `pr status` fetched,
 //! and its attention codes and messages, so the two commands never disagree.
 
 use super::status::{PrStatus, State};
@@ -38,6 +39,8 @@ pub enum Action {
     ChecksPending,
     ChangesRequested,
     UnresolvedThreads,
+    EntireFindings,
+    EntireGates,
     AwaitingApproval,
     Blocked,
     AutoMerge,
@@ -53,9 +56,11 @@ impl Action {
             | Self::BehindBase
             | Self::ChecksFailing
             | Self::ChangesRequested
-            | Self::UnresolvedThreads => Kind::Act,
+            | Self::UnresolvedThreads
+            | Self::EntireFindings => Kind::Act,
             Self::MergeableUnknown
             | Self::ChecksPending
+            | Self::EntireGates
             | Self::AwaitingApproval
             | Self::Blocked
             | Self::AutoMerge => Kind::Wait,
@@ -74,6 +79,8 @@ impl Action {
             Self::ChecksPending => "checks_pending",
             Self::ChangesRequested => "changes_requested",
             Self::UnresolvedThreads => "unresolved_threads",
+            Self::EntireFindings => "entire_findings",
+            Self::EntireGates => "entire_gates",
             Self::AwaitingApproval => "awaiting_approval",
             Self::Blocked => "blocked",
             Self::AutoMerge => "auto_merge",
@@ -183,6 +190,20 @@ pub fn next(pr: &PrStatus) -> Next {
             Action::UnresolvedThreads,
             reason,
             Some(format!("jouet pr threads {name}")),
+        );
+    }
+    if let Some(reason) = attention("entire_findings") {
+        return step(
+            Action::EntireFindings,
+            reason,
+            Some(format!("jouet pr threads {name}")),
+        );
+    }
+    if let Some(reason) = attention("entire_gates") {
+        return step(
+            Action::EntireGates,
+            reason,
+            Some(format!("jouet pr status {name}")),
         );
     }
     if pr.review.as_deref() == Some("review_required") {

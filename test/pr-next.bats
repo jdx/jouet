@@ -16,7 +16,7 @@ setup() {
 	assert_success
 	assert_output --partial "stops at the first state that applies"
 	assert_output --partial "ready_to_merge"
-	assert_output --partial "outside the shared table on purpose"
+	assert_output --partial "the shared table on purpose"
 }
 
 @test "a bad --settle is a usage error, as one JSON document" {

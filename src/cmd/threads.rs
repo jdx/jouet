@@ -2,9 +2,11 @@
 //! them.
 
 use super::Output;
+use super::entire::{self, Wanted};
 use crate::config::Config;
 use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git};
 use jouet_github::Client;
+use jouet_github::entire::Change;
 use jouet_github::pr::target::{self, Arg, Repo, Target};
 use jouet_github::pr::threads::condense::{self, condense};
 use jouet_github::pr::threads::write::{self, Entry, Options, Outcome};
@@ -22,10 +24,14 @@ use std::io::{IsTerminal, Read};
 const MAX_LINES: usize = 30;
 
 /// A failure that stops a command: its exit code, message and hint.
-struct Stop(Exit, String, Option<String>);
+pub(super) struct Stop(
+    pub(super) Exit,
+    pub(super) String,
+    pub(super) Option<String>,
+);
 
 impl Stop {
-    fn new(exit: Exit, message: impl Into<String>) -> Self {
+    pub(super) fn new(exit: Exit, message: impl Into<String>) -> Self {
         Self(exit, message.into(), None)
     }
 }
@@ -100,6 +106,8 @@ struct Listing<'a> {
     /// Comments left out because GitHub sent no ID for them.
     #[serde(skip_serializing_if = "is_zero")]
     unreadable: usize,
+    /// The findings on the PR's Entire trail, apart from the threads.
+    entire: entire::Listing,
     #[serde(skip)]
     since_label: Option<&'a str>,
 }
@@ -119,6 +127,7 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         ),
         _ => None,
     };
+    let probe = entire::Probe::start();
     let mut client = Client::from_env();
     let bots = config.bots();
     let pr = fetch(&mut client, &target, args.include_reviews, &bots)?;
@@ -153,6 +162,7 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         add_context(&mut client, &pr, &mut shown, n);
     }
     let unresolved = shown.iter().any(|t| t.kind == Kind::Thread && !t.resolved);
+    let entire = entire::list(probe, &pr.repo, &pr.head_ref, &filter, args.full, MAX_LINES);
     let listing = Listing {
         repo: pr.repo.to_string(),
         pr: pr.number,
@@ -160,6 +170,7 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         since: since.map(time::format_utc),
         threads: shown,
         unreadable: pr.unreadable,
+        entire,
         since_label: args.since.as_deref(),
     };
     out.result(&listing, || render_list(&listing, now));
@@ -375,6 +386,7 @@ fn render_list(l: &Listing, now: i64) -> String {
             "\nReply with `{reply}`, ID being the number in brackets; add --resolve to resolve it too, or `jouet pr threads apply` takes many at once."
         );
     }
+    entire::render(&mut s, &l.entire, now);
     s
 }
 
@@ -479,7 +491,14 @@ fn body_lines(s: &mut String, body: &str, lead: &str, indent: &str) {
 }
 
 fn reply(args: &ThreadsArgs, a: &ReplyArgs, out: &Output) -> Result<Exit, Stop> {
-    let id = id(&a.id)?;
+    let finding = entire::handle(&a.id).is_some();
+    if a.dismiss && !finding {
+        return Err(Stop::new(
+            Exit::Usage,
+            "--dismiss is for Entire findings (entire:ID); a GitHub thread is resolved",
+        ));
+    }
+    let id = if finding { 0 } else { id(&a.id)? };
     let body = match (&a.body, &a.body_file) {
         (Some(body), None) => body.clone(),
         (None, Some(file)) => read_input(file, "--body-file")?,
@@ -496,24 +515,54 @@ fn reply(args: &ThreadsArgs, a: &ReplyArgs, out: &Output) -> Result<Exit, Stop> 
             "the reply is empty; nothing was posted",
         ));
     }
+    let pr = a.pr.as_deref().or(args.pr.as_deref());
+    if finding {
+        let change = match (a.dismiss, a.resolve) {
+            (true, _) => Change::Dismiss,
+            (false, true) => Change::Resolve,
+            (false, false) => {
+                return Err(Stop(
+                    Exit::Usage,
+                    format!("{} is an Entire finding, which takes no reply of its own; nothing was changed", a.id),
+                    Some("add --resolve or --dismiss: the reply becomes the reason recorded on Entire".into()),
+                ));
+            }
+        };
+        let wanted = [Wanted::new(&a.id, change, Some(body))?];
+        return write_threads(args, pr, &[], &wanted, a.ignore_resolved, a.dry_run, out);
+    }
     let entries = vec![Entry {
         id,
         reply: Some(body),
         resolve: a.resolve,
         unresolve: false,
     }];
-    let pr = a.pr.as_deref().or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
+    write_threads(args, pr, &entries, &[], a.ignore_resolved, a.dry_run, out)
 }
 
 fn resolve(args: &ThreadsArgs, a: &ResolveArgs, out: &Output) -> Result<Exit, Stop> {
-    let (ids, pr) = ids_and_pr(&a.args)?;
+    let Named { ids, handles, pr } = ids_and_pr(&a.args)?;
     if a.reply.as_deref().is_some_and(|r| r.trim().is_empty()) {
         return Err(Stop::new(
             Exit::Usage,
             "--reply is empty; nothing was posted",
         ));
     }
+    if a.dismiss && !ids.is_empty() {
+        return Err(Stop::new(
+            Exit::Usage,
+            "--dismiss is for Entire findings (entire:ID); GitHub threads are resolved",
+        ));
+    }
+    let change = if a.dismiss {
+        Change::Dismiss
+    } else {
+        Change::Resolve
+    };
+    let wanted = handles
+        .iter()
+        .map(|h| Wanted::new(h, change, a.reply.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
     let entries: Vec<Entry> = ids
         .into_iter()
         .map(|id| Entry {
@@ -524,11 +573,23 @@ fn resolve(args: &ThreadsArgs, a: &ResolveArgs, out: &Output) -> Result<Exit, St
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
+    write_threads(
+        args,
+        pr,
+        &entries,
+        &wanted,
+        a.ignore_resolved,
+        a.dry_run,
+        out,
+    )
 }
 
 fn unresolve(args: &ThreadsArgs, a: &UnresolveArgs, out: &Output) -> Result<Exit, Stop> {
-    let (ids, pr) = ids_and_pr(&a.args)?;
+    let Named { ids, handles, pr } = ids_and_pr(&a.args)?;
+    let wanted = handles
+        .iter()
+        .map(|h| Wanted::new(h, Change::Reopen, None))
+        .collect::<Result<Vec<_>, _>>()?;
     let entries: Vec<Entry> = ids
         .into_iter()
         .map(|id| Entry {
@@ -539,7 +600,7 @@ fn unresolve(args: &ThreadsArgs, a: &UnresolveArgs, out: &Output) -> Result<Exit
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());
-    write_threads(args, pr, &entries, false, a.dry_run, out)
+    write_threads(args, pr, &entries, &wanted, false, a.dry_run, out)
 }
 
 fn apply(args: &ThreadsArgs, a: &ApplyArgs, out: &Output) -> Result<Exit, Stop> {
@@ -564,19 +625,87 @@ fn apply(args: &ThreadsArgs, a: &ApplyArgs, out: &Output) -> Result<Exit, Stop> 
             ));
         }
     };
-    let entries = write::parse_apply(&text).map_err(|e| Stop::new(Exit::Usage, e))?;
+    let (entries, wanted) = parse_apply(&text)?;
     let pr = prs.first().map(|s| s.as_str()).or(args.pr.as_deref());
-    write_threads(args, pr, &entries, a.ignore_resolved, a.dry_run, out)
+    write_threads(
+        args,
+        pr,
+        &entries,
+        &wanted,
+        a.ignore_resolved,
+        a.dry_run,
+        out,
+    )
+}
+
+/// An `apply` list: entries for threads (numeric IDs), read as before, and
+/// for Entire findings (`entire:ID`).
+fn parse_apply(text: &str) -> Result<(Vec<Entry>, Vec<Wanted>), Stop> {
+    let usage = |m: String| Stop::new(Exit::Usage, m);
+    let list: Vec<serde_json::Value> =
+        serde_json::from_str(text).map_err(|e| usage(format!("apply file: {e}")))?;
+    let (findings, threads): (Vec<_>, Vec<_>) = list.into_iter().partition(|e| {
+        e["id"]
+            .as_str()
+            .is_some_and(|id| entire::handle(id).is_some())
+    });
+    let mut wanted: Vec<Wanted> = Vec::new();
+    for e in &findings {
+        let id = e["id"].as_str().unwrap_or_default();
+        let flag = |k: &str| e[k].as_bool().unwrap_or(false);
+        let change = match (flag("dismiss"), flag("resolve"), flag("unresolve")) {
+            (true, _, false) => Change::Dismiss,
+            (false, true, false) => Change::Resolve,
+            (false, false, true) => Change::Reopen,
+            (false, false, false) => {
+                return Err(usage(format!(
+                    "apply file: {id} neither resolves, dismisses nor unresolves"
+                )));
+            }
+            _ => {
+                return Err(usage(format!(
+                    "apply file: {id} asks for two changes at once"
+                )));
+            }
+        };
+        let reply = match &e["reply"] {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+            _ => return Err(usage(format!("apply file: the reply to {id} is empty"))),
+        };
+        let w = Wanted::new(id, change, reply)?;
+        if wanted.iter().any(|o| o.prefix == w.prefix) {
+            return Err(usage(format!("apply file: {id} is listed twice")));
+        }
+        wanted.push(w);
+    }
+    let entries = if threads.is_empty() && !findings.is_empty() {
+        Vec::new()
+    } else {
+        let text = serde_json::to_string(&threads).unwrap_or_default();
+        write::parse_apply(&text).map_err(usage)?
+    };
+    Ok((entries, wanted))
 }
 
 fn id(s: &str) -> Result<u64, Stop> {
     write::parse_id(s).ok_or_else(|| Stop::new(Exit::Usage, format!("`{s}` is not a thread ID")))
 }
 
-/// Splits arguments into thread IDs (bare numbers) and at most one PR.
-fn ids_and_pr(args: &[String]) -> Result<(Vec<u64>, Option<&str>), Stop> {
+/// What a resolve or unresolve names: threads, findings and the PR.
+struct Named<'a> {
+    ids: Vec<u64>,
+    handles: Vec<String>,
+    pr: Option<&'a str>,
+}
+
+/// Splits arguments into thread IDs (bare numbers), Entire finding handles
+/// and at most one PR.
+fn ids_and_pr(args: &[String]) -> Result<Named<'_>, Stop> {
+    let (handles, args): (Vec<&String>, Vec<&String>) =
+        args.iter().partition(|a| entire::handle(a).is_some());
     let (ids, prs): (Vec<&String>, Vec<&String>) =
-        args.iter().partition(|a| write::parse_id(a).is_some());
+        args.into_iter().partition(|a| write::parse_id(a).is_some());
     if prs.len() > 1 {
         return Err(Stop::new(
             Exit::Usage,
@@ -589,11 +718,15 @@ fn ids_and_pr(args: &[String]) -> Result<(Vec<u64>, Option<&str>), Stop> {
             ),
         ));
     }
-    if ids.is_empty() {
+    if ids.is_empty() && handles.is_empty() {
         return Err(Stop::new(Exit::Usage, "name at least one thread ID"));
     }
     let ids = ids.iter().map(|s| id(s)).collect::<Result<Vec<_>, _>>()?;
-    Ok((ids, prs.first().map(|s| s.as_str())))
+    Ok(Named {
+        ids,
+        handles: handles.into_iter().cloned().collect(),
+        pr: prs.first().map(|s| s.as_str()),
+    })
 }
 
 fn read_input(file: &str, what: &str) -> Result<String, Stop> {
@@ -622,48 +755,112 @@ fn read_input(file: &str, what: &str) -> Result<String, Stop> {
 #[derive(Serialize)]
 struct Written {
     repo: String,
-    pr: u64,
+    /// Absent when only Entire findings were changed on a branch's trail,
+    /// which needs nothing from GitHub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pr: Option<u64>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     dry_run: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     results: Vec<Outcome>,
+    /// The Entire findings changed, apart from the threads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entire: Option<entire::Written>,
 }
 
 fn write_threads(
     args: &ThreadsArgs,
     pr: Option<&str>,
     entries: &[Entry],
+    wanted: &[Wanted],
     ignore_resolved: bool,
     dry_run: bool,
     out: &Output,
 ) -> Result<Exit, Stop> {
     let target = target(pr, args.repo.as_deref())?;
     let config = config()?;
-    let mut client = Client::from_env();
-    let pr = fetch(&mut client, &target, false, &config.bots())?;
+    // Refused before anything is posted when findings are named and
+    // `entire` cannot change them.
+    let entire = if wanted.is_empty() {
+        None
+    } else {
+        Some(entire::require(entire::Probe::start())?)
+    };
     let uses_sha = entries
         .iter()
-        .any(|e| e.reply.as_deref().is_some_and(|r| r.contains("{sha}")));
-    let options = Options {
-        footer: config.reply_footer(),
-        sha: if uses_sha { git::short_head() } else { None },
-        ignore_resolved,
+        .filter_map(|e| e.reply.as_deref())
+        .chain(wanted.iter().filter_map(|w| w.message.as_deref()))
+        .any(|r| r.contains("{sha}"));
+    let sha = if uses_sha { git::short_head() } else { None };
+    let footer = config.reply_footer();
+    let mut client = Client::from_env();
+    // A branch's findings need nothing from GitHub.
+    let pr = match (&target, entries.is_empty() && !uses_sha) {
+        (Target::Branch(..), true) => None,
+        _ => Some(fetch(&mut client, &target, false, &config.bots())?),
     };
-    let mut results =
-        write::plan(entries, &pr, &options).map_err(|e| Stop(e.exit, e.message, e.hint))?;
-    if results.iter().any(Outcome::posts_sha) {
-        check_pushed(&mut client, &pr)?;
+    let (repo, branch) = match (&pr, &target) {
+        (Some(pr), _) => (pr.repo.clone(), pr.head_ref.clone()),
+        (None, Target::Branch(repo, branch)) => (repo.clone(), branch.clone()),
+        (None, Target::Number(..)) => unreachable!("a PR number is always fetched"),
+    };
+    let mut results = Vec::new();
+    if let Some(pr) = &pr
+        && !entries.is_empty()
+    {
+        let options = Options {
+            footer: footer.clone(),
+            sha: sha.clone(),
+            ignore_resolved,
+        };
+        results =
+            write::plan(entries, pr, &options).map_err(|e| Stop(e.exit, e.message, e.hint))?;
     }
-    let ok = if dry_run {
+    let finding_sha = wanted
+        .iter()
+        .any(|w| w.message.as_deref().is_some_and(|m| m.contains("{sha}")));
+    if let Some(pr) = &pr
+        && (results.iter().any(Outcome::posts_sha) || finding_sha)
+    {
+        check_pushed(&mut client, pr)?;
+    }
+    let wanted: Vec<Wanted> = wanted
+        .iter()
+        .map(|w| {
+            let mut w = w.clone();
+            w.message = w.message.map(|m| {
+                let m = match &sha {
+                    Some(sha) => m.replace("{sha}", sha),
+                    None => m,
+                };
+                match &footer {
+                    Some(footer) => format!("{m}\n\n{footer}"),
+                    None => m,
+                }
+            });
+            w
+        })
+        .collect();
+    let mut ok = if dry_run {
         write::dry_run(&mut results);
         true
     } else {
         write::execute(&mut client, &mut results)
     };
+    let mut changed = None;
+    if let Some(entire) = &entire
+        && ok
+    {
+        let (written, done) = entire::write(entire, &repo, &branch, &wanted, dry_run)?;
+        ok = done;
+        changed = Some(written);
+    }
     let written = Written {
-        repo: pr.repo.to_string(),
-        pr: pr.number,
+        repo: repo.to_string(),
+        pr: pr.as_ref().map(|p| p.number),
         dry_run,
         results,
+        entire: changed,
     };
     out.result(&written, || render_written(&written));
     Ok(if ok { Exit::Ok } else { Exit::Remote })
@@ -752,6 +949,10 @@ fn render_written(w: &Written) -> String {
                 let _ = writeln!(s, "{}", format!("  | {line}").trim_end());
             }
         }
+    }
+    if let Some(e) = &w.entire {
+        entire::render_written(&mut s, e, w.dry_run);
+        failed |= e.results.iter().any(entire::Outcome::failed);
     }
     if failed {
         s.push_str("stopped at a failure; re-running skips what was already posted and resolved\n");

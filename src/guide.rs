@@ -68,7 +68,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "pr",
         Some(
-            "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads (`pr threads`), instead of gh loops and raw GraphQL",
+            "checking many PRs at once (`pr status`), finding the one thing a PR needs next (`pr next`) and merging it once ready (`pr land`), or reading, replying to and resolving review threads and Entire findings (`pr threads`), instead of gh loops, raw GraphQL and `entire trail finding`",
         ),
     ),
     (
@@ -339,7 +339,7 @@ const USAGE: &[Usage] = &[
         lines: &[
             (
                 "jouet pr threads [<PR>] [--context N] [--full]",
-                "the unresolved review threads, with N lines of code around each",
+                "the unresolved review threads and open Entire findings, with N lines of code around each thread",
             ),
             (
                 "jouet pr threads reply <ID> [<PR>] --body TEXT --resolve",
