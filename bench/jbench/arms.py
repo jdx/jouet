@@ -14,8 +14,8 @@ says:
 
 - `plain`: the harness as installed, with no jouet on `PATH`;
 - `jouet`: `jouet` on `PATH` and `jouet setup <harness>` run in the
-  isolated home, which installs the hooks, the skill and the session-start
-  primer that points the agent at `jouet agent-help`.
+  isolated home, which installs the hooks and the session-start primer that
+  points the agent at `jouet agent-help`.
 
 `gh` and `jouet` are wrapper scripts when a task has a fake GitHub, so the
 agent's own environment carries no hint of it.
@@ -47,7 +47,7 @@ class Arm:
 
 ARMS = {
     "plain": Arm("plain", False, "the harness as installed, without jouet"),
-    "jouet": Arm("jouet", True, "jouet on PATH, with `jouet setup` hooks, skill and primer"),
+    "jouet": Arm("jouet", True, "jouet on PATH, with `jouet setup` hooks and primer"),
 }
 
 
