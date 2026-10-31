@@ -365,20 +365,30 @@ end
 
 -- `jouet test`: the full suite, unless `--affected` or words after `--`
 -- narrow it; the selector names them. A dry run and help ran no tests.
-local function jouet_test(args: { string }): (Kind?, Scope)
+-- With `--cmd`, the words after `--` are the command it ran, returned
+-- third for the caller to classify.
+local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 	local unknown = partial(nil)
 	local picks: { string } = {}
 	local affected = false
+	local cmd = false
 	local sub = false
 	local i = 1
 	while i <= #args do
 		local arg = args[i]
 		i += 1
 		if arg == "--" then
+			if sub and cmd then
+				return nil, unknown, table.move(args, i, #args, 1, {})
+			end
 			if sub and i <= #args then
 				table.insert(picks, "-- " .. table.concat(args, " ", i))
 			end
 			break
+		elseif arg == "--cmd" then
+			cmd = true
+		elseif arg == "--budget" then
+			i += 1
 		elseif arg == "--display" then
 			i += 1
 		elseif arg == "--json" or string.sub(arg, 1, 10) == "--display=" then
@@ -462,7 +472,24 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
 	elseif program == "jouet" then
-		return jouet_test(args)
+		local kind, scope, given = jouet_test(args)
+		if given and #given > 0 then
+			-- `jouet test --cmd -- CMD` ran CMD: a test or a build, with its
+			-- scope, and a test when the rule does not know CMD.
+			local inner: JouetCommand = {
+				words = given,
+				argv = given,
+				program = jouet.basename(given[1]),
+				heredocs = {},
+				via = {},
+				nested = command.nested,
+				status = command.status,
+				text = command.text,
+			}
+			local inner_kind, inner_scope = classify(inner, dir)
+			return inner_kind or "test", inner_scope
+		end
+		return kind, scope
 	elseif program == "bats" then
 		return "test", unknown
 	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "pytest" then

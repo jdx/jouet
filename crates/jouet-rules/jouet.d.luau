@@ -43,6 +43,12 @@ export type JouetCommand = {
 	via: { string },
 	-- The operator after the command; nil at the end of the script.
 	op: ("seq" | "and" | "or" | "pipe" | "background")?,
+	-- The file its standard output is redirected to (`> out.log`, `&> all`),
+	-- as written; nil when there is none.
+	stdout_to: string?,
+	-- The variable assignments before the program (`RUST_LOG=1 cargo test`),
+	-- which `words` leaves out.
+	env: { string },
 	-- Inside `$(...)` or a script passed to `sh -c`.
 	nested: boolean,
 	-- The exit status this command is known to have had (post-tool-use only):

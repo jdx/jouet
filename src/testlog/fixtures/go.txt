@@ -1,0 +1,10 @@
+--- FAIL: TestAdd (0.00s)
+    calc_test.go:7: Add(2, 2) = 5, want 4
+--- FAIL: TestTable (0.00s)
+    --- FAIL: TestTable/zero (0.00s)
+        calc_test.go:15: got 1, want 0
+    --- FAIL: TestTable/one (0.00s)
+        calc_test.go:15: got 2, want 1
+FAIL
+FAIL	example.com/calc	0.001s
+FAIL

@@ -19,6 +19,7 @@ mod settings;
 mod setup;
 mod share;
 mod spec;
+mod testlog;
 mod verify;
 mod wind;
 
@@ -169,9 +170,26 @@ pub struct CommitArgs {
 /// file, or a file no adapter can trace changed; nothing runs for docs
 /// only. Each test is listed with the chain of imports that picked it, and
 /// the command. Affected runs count as partial: the full suite still has to
-/// pass before you finish or push. Words after `--` go to the runner. Exits
-/// 1 when tests fail, 2 for a usage error (the runner's too), 4 when no
-/// runner is found or installed.
+/// pass before you finish or push. Words after `--` go to the runner.
+///
+/// With --cmd, the words after `--` are the whole command instead, run
+/// directly rather than through a shell: one test, an e2e suite or a build,
+/// such as `jouet test --cmd -- cargo build`.
+///
+/// Every run's output, stdout and stderr together, goes to a log under
+/// jouet's log directory, kept for a week. For an agent (and in plain display), that is all
+/// it goes to: a passing run prints one line with the counts and the log's
+/// path, and a failing one each failure's name and the lines that explain it
+/// (the assertion, the panic, the compiler error), up to --budget bytes,
+/// then the names of the failures that did not fit. Read more from the log
+/// rather than running it again. For a person at a terminal, the output
+/// streams as it runs. Failures are recognised in the output of cargo test
+/// and nextest, rustc, tsc, go test and go build, pytest, unittest, jest,
+/// vitest and TAP (bats); for any other output, a failing run shows the end
+/// of it.
+///
+/// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
+/// no runner is found or installed.
 #[derive(Args)]
 pub struct TestArgs {
     /// Run only the tests the changes affect
@@ -187,7 +205,14 @@ pub struct TestArgs {
     /// Print what would run and why, running nothing
     #[usage(long)]
     dry_run: bool,
-    /// Arguments for the test runner, after `--`
+    /// Run the words after `--` as the command, instead of the test task
+    #[usage(long)]
+    cmd: bool,
+    /// Bytes of failure text to show (default 4000; 0 shows every failure
+    /// whole)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// Arguments for the test runner, after `--`; with --cmd, the command
     extra: Vec<String>,
 }
 

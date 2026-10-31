@@ -1,0 +1,94 @@
+=== RUN   TestAdd0
+    calc_test.go:6: checking 0
+--- PASS: TestAdd0 (0.00s)
+=== RUN   TestAdd1
+    calc_test.go:13: checking 1
+--- PASS: TestAdd1 (0.00s)
+=== RUN   TestAdd2
+    calc_test.go:20: checking 2
+--- PASS: TestAdd2 (0.00s)
+=== RUN   TestAdd3
+    calc_test.go:27: checking 3
+--- PASS: TestAdd3 (0.00s)
+=== RUN   TestAdd4
+    calc_test.go:34: checking 4
+--- PASS: TestAdd4 (0.00s)
+=== RUN   TestAdd5
+    calc_test.go:41: checking 5
+--- PASS: TestAdd5 (0.00s)
+=== RUN   TestAdd6
+    calc_test.go:48: checking 6
+    calc_test.go:50: Add(6, 1) = 0, want 7
+--- FAIL: TestAdd6 (0.00s)
+=== RUN   TestAdd7
+    calc_test.go:55: checking 7
+--- PASS: TestAdd7 (0.00s)
+=== RUN   TestAdd8
+    calc_test.go:62: checking 8
+--- PASS: TestAdd8 (0.00s)
+=== RUN   TestAdd9
+    calc_test.go:69: checking 9
+--- PASS: TestAdd9 (0.00s)
+=== RUN   TestAdd10
+    calc_test.go:76: checking 10
+--- PASS: TestAdd10 (0.00s)
+=== RUN   TestAdd11
+    calc_test.go:83: checking 11
+--- PASS: TestAdd11 (0.00s)
+=== RUN   TestAdd12
+    calc_test.go:90: checking 12
+--- PASS: TestAdd12 (0.00s)
+=== RUN   TestAdd13
+    calc_test.go:97: checking 13
+--- PASS: TestAdd13 (0.00s)
+=== RUN   TestAdd14
+    calc_test.go:104: checking 14
+--- PASS: TestAdd14 (0.00s)
+=== RUN   TestAdd15
+    calc_test.go:111: checking 15
+--- PASS: TestAdd15 (0.00s)
+=== RUN   TestAdd16
+    calc_test.go:118: checking 16
+--- PASS: TestAdd16 (0.00s)
+=== RUN   TestAdd17
+    calc_test.go:125: checking 17
+--- PASS: TestAdd17 (0.00s)
+=== RUN   TestAdd18
+    calc_test.go:132: checking 18
+--- PASS: TestAdd18 (0.00s)
+=== RUN   TestAdd19
+    calc_test.go:139: checking 19
+--- PASS: TestAdd19 (0.00s)
+=== RUN   TestAdd20
+    calc_test.go:146: checking 20
+--- PASS: TestAdd20 (0.00s)
+=== RUN   TestAdd21
+    calc_test.go:153: checking 21
+--- PASS: TestAdd21 (0.00s)
+=== RUN   TestAdd22
+    calc_test.go:160: checking 22
+--- PASS: TestAdd22 (0.00s)
+=== RUN   TestAdd23
+    calc_test.go:167: checking 23
+--- PASS: TestAdd23 (0.00s)
+=== RUN   TestAdd24
+    calc_test.go:174: checking 24
+--- PASS: TestAdd24 (0.00s)
+=== RUN   TestAdd25
+    calc_test.go:181: checking 25
+--- PASS: TestAdd25 (0.00s)
+=== RUN   TestAdd26
+    calc_test.go:188: checking 26
+--- PASS: TestAdd26 (0.00s)
+=== RUN   TestAdd27
+    calc_test.go:195: checking 27
+--- PASS: TestAdd27 (0.00s)
+=== RUN   TestAdd28
+    calc_test.go:202: checking 28
+--- PASS: TestAdd28 (0.00s)
+=== RUN   TestAdd29
+    calc_test.go:209: checking 29
+--- PASS: TestAdd29 (0.00s)
+FAIL
+FAIL	example.com/calc	0.002s
+FAIL

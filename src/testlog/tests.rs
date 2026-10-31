@@ -1,0 +1,289 @@
+use super::*;
+
+/// A runner's real output, from `fixtures/`, with paths made `/work`.
+fn fixture(name: &str) -> String {
+    let path = format!(
+        "{}/src/testlog/fixtures/{name}.txt",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read_to_string(path).unwrap()
+}
+
+fn names(d: &Digest) -> Vec<&str> {
+    d.failures.iter().map(|f| f.name.as_str()).collect()
+}
+
+fn counts(d: &Digest) -> [u64; 3] {
+    [d.passed, d.failed, d.skipped]
+}
+
+#[test]
+fn cargo_test_failures_keep_the_panic_and_drop_libtest_noise() {
+    let d = digest(&fixture("cargo-test"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [40, 3, 0]);
+    assert_eq!(
+        names(&d),
+        [
+            "tests::adds_negative_numbers",
+            "tests::parses_padded_input",
+            "tests::unwraps_none"
+        ]
+    );
+    assert_eq!(
+        d.failures[0].lines,
+        [
+            "checking negatives",
+            "",
+            "thread 'tests::adds_negative_numbers' (1234) panicked at src/lib.rs:9:74:",
+            "assertion `left == right` failed: sum of negatives",
+            "  left: -5",
+            " right: -6",
+        ]
+    );
+    assert!(d.more_failures.is_empty());
+}
+
+#[test]
+fn nextest_failures_are_named_once_with_their_streams() {
+    let d = digest(&fixture("nextest"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [37, 2, 0]);
+    assert_eq!(
+        names(&d),
+        [
+            "demo tests::adds_negative_numbers",
+            "demo tests::parses_padded_input"
+        ]
+    );
+    // The empty stdout section is gone, and so is libtest's own summary.
+    assert_eq!(
+        d.failures[1].lines,
+        [
+            "  stderr ───",
+            "",
+            "    thread 'tests::parses_padded_input' (1234) panicked at src/lib.rs:10:64:",
+            "    parse failed: Err(\"invalid digit found in string\")",
+        ]
+    );
+}
+
+#[test]
+fn rustc_errors_are_named_by_location_and_warnings_counted() {
+    let d = digest(&fixture("cargo-build"), true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        [
+            "src/lib.rs:1:61: error[E0425]: cannot find value `undefined_var` in this scope",
+            "src/lib.rs:2:23: error[E0308]: mismatched types",
+        ]
+    );
+    assert!(
+        d.failures[1]
+            .lines
+            .contains(&"help: try using a conversion method".to_string())
+    );
+
+    let warned = "   Compiling demo v0.1.0 (/work)
+warning: unused variable: `unused`
+ --> src/lib.rs:1:41
+  |
+1 | pub fn add(a: i32, b: i32) -> i32 { let unused = 1; a + b }
+  |                                         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_unused`
+
+warning: `demo` (lib) generated 1 warning (run `cargo fix --lib -p demo` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+";
+    let d = digest(warned, false, DEFAULT_BUDGET);
+    assert_eq!(d.warnings, 1);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn go_subtests_replace_their_parent_and_build_errors_are_grouped() {
+    let d = digest(&fixture("go"), true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["TestAdd", "TestTable/zero", "TestTable/one"]);
+    assert_eq!(
+        d.failures[0].lines,
+        ["calc_test.go:7: Add(2, 2) = 5, want 4"]
+    );
+
+    // Two top-level tests failed.
+    assert_eq!(counts(&d), [0, 2, 0]);
+
+    // With -v, a test logs before its result line.
+    let d = digest(&fixture("go-v"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [29, 1, 0]);
+    assert_eq!(names(&d), ["TestAdd6"]);
+    assert_eq!(
+        d.failures[0].lines,
+        [
+            "calc_test.go:48: checking 6",
+            "calc_test.go:50: Add(6, 1) = 0, want 7"
+        ]
+    );
+
+    let d = digest(&fixture("go-build"), true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["build example.com/calc"]);
+    assert_eq!(d.failures[0].lines.len(), 2);
+}
+
+#[test]
+fn pytest_sections_merge_with_the_short_summary() {
+    let d = digest(&fixture("pytest-q"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [2, 3, 1]);
+    assert_eq!(
+        names(&d),
+        [
+            "tests/test_calc.py::test_add",
+            "tests/test_calc.py::TestStrings::test_upper",
+            "tests/test_calc.py::test_param[2]",
+        ]
+    );
+    assert_eq!(
+        d.failures[0].lines.last().unwrap(),
+        "tests/test_calc.py:7: AssertionError"
+    );
+
+    let d = digest(&fixture("pytest"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["ERROR collecting tests/test_broken.py"]);
+    assert!(
+        d.failures[0]
+            .lines
+            .contains(&"E   ModuleNotFoundError: No module named 'not_a_module'".to_string())
+    );
+}
+
+#[test]
+fn unittest_failures_and_errors_count_as_failed() {
+    let d = digest(&fixture("unittest"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 0]);
+    assert_eq!(
+        names(&d),
+        [
+            "test_err (test_u.T.test_err)",
+            "test_add (test_u.T.test_add)"
+        ]
+    );
+    assert_eq!(
+        d.failures[1].lines.last().unwrap(),
+        "AssertionError: 2 != 3"
+    );
+}
+
+#[test]
+fn jest_and_vitest_keep_the_assertion_and_the_diff() {
+    let d = digest(&fixture("jest"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 0]);
+    assert_eq!(names(&d), ["add › adds", "add › objects"]);
+    assert_eq!(
+        d.failures[0].lines[0],
+        "    expect(received).toBe(expected) // Object.is equality"
+    );
+
+    let d = digest(&fixture("vitest"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 0]);
+    assert_eq!(
+        names(&d),
+        [
+            "test/broken.test.js [ test/broken.test.js ]",
+            "test/calc.test.js > add > adds",
+            "test/calc.test.js > add > objects",
+        ]
+    );
+    let objects = &d.failures[2].lines;
+    assert_eq!(
+        objects[0],
+        "AssertionError: expected { a: 1, b: [ 1, 2 ] } to deeply equal { a: 1, b: [ 1, 3 ] }"
+    );
+    // The middle of a long failure keeps its diff.
+    assert!(objects.contains(&"-     3,".to_string()), "{objects:#?}");
+    assert!(objects.contains(&"+     2,".to_string()), "{objects:#?}");
+    assert!(objects.iter().any(|l| l.ends_with("lines skipped")));
+}
+
+#[test]
+fn bats_failures_carry_their_comment_lines() {
+    let d = digest(&fixture("bats"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 1]);
+    assert_eq!(names(&d), ["greets", "fails with output"]);
+    assert_eq!(
+        d.failures[1].lines,
+        [
+            "(in test file t.bats, line 10)",
+            "  `false' failed",
+            "some diagnostic"
+        ]
+    );
+}
+
+#[test]
+fn a_passing_run_has_counts_and_no_failures() {
+    let text = "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed; 1 ignored; 0 measured\n\nrunning 1 test\ntest c ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured\n";
+    let d = digest(text, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [3, 0, 1]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn an_unrecognised_failure_shows_the_end_of_the_output() {
+    let text: String = (1..=50).map(|i| format!("step {i}\n")).collect::<String>() + "boom\n";
+    let d = digest(&text, true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["no failure recognised; the end of the output"]);
+    let lines = &d.failures[0].lines;
+    assert_eq!(lines.first().unwrap(), "... 31 lines skipped");
+    assert_eq!(lines.last().unwrap(), "boom");
+    // A passing run that says nothing recognisable shows nothing.
+    assert!(digest(&text, false, DEFAULT_BUDGET).failures.is_empty());
+}
+
+#[test]
+fn colour_carriage_returns_and_task_prefixes_are_cleaned() {
+    let text = "[test:e2e] 1..2\n[test:e2e] ok 1 a\n[test:e2e] progress 10%\rprogress 100%\n[test:e2e] \x1b[31mnot ok 2 b\x1b[0m\n[test:e2e] # it broke\n";
+    let d = digest(text, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 1, 0]);
+    assert_eq!(names(&d), ["b"]);
+    assert_eq!(d.failures[0].lines, ["it broke"]);
+}
+
+#[test]
+fn the_budget_shows_failures_in_order_then_names_then_a_count() {
+    let mut text = String::new();
+    for i in 0..300 {
+        text.push_str(&format!("test t{i:03} ... FAILED\n"));
+    }
+    text.push_str("\nfailures:\n\n");
+    for i in 0..300 {
+        text.push_str(&format!(
+            "---- t{i:03} stdout ----\nthread 't{i:03}' panicked at src/lib.rs:{i}:1:\n{}\n\n",
+            "x".repeat(200)
+        ));
+    }
+    let d = digest(&text, true, 1000);
+    // Each failure costs about 300 bytes, so three fit.
+    assert_eq!(names(&d), ["t000", "t001", "t002"]);
+    assert_eq!(d.more_failures.first().unwrap(), "t003");
+    let named = 3 + d.more_failures.len() as u64;
+    assert_eq!(named + d.failures_omitted, 300);
+    assert!(d.failures_omitted > 0);
+
+    // A first failure bigger than the budget is cut to it.
+    let d = digest(&text, true, 100);
+    assert_eq!(names(&d), ["t000"]);
+    assert_eq!(d.failures[0].lines.last().unwrap(), "... 1 line skipped");
+
+    // 0 removes the budget.
+    assert_eq!(digest(&text, true, 0).failures.len(), 300);
+}
+
+#[test]
+fn a_long_line_is_cut_and_says_by_how_much() {
+    let text = format!(
+        "test t ... FAILED\n\nfailures:\n\n---- t stdout ----\nthread 't' panicked at src/lib.rs:1:1:\n  left: \"{}\"\n right: \"b\"\n\n",
+        "é".repeat(300)
+    );
+    let d = digest(&text, true, DEFAULT_BUDGET);
+    let lines = &d.failures[0].lines;
+    assert_eq!(lines.len(), 3);
+    assert!(lines[1].ends_with(" ... 211 more bytes"), "{}", lines[1]);
+    assert_eq!(lines[2], " right: \"b\"");
+}

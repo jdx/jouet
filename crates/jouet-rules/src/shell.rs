@@ -30,9 +30,12 @@ pub struct Command {
     /// The parameters the command expands outside single quotes, by name:
     /// `$HOME` and `${HOME:-/}` are both `HOME`.
     pub vars: Vec<String>,
-    /// Its standard output goes to a file (`> out`, `>> log`, `&> all`),
-    /// not where it would otherwise go.
-    pub stdout_redirected: bool,
+    /// The variable assignments before the program (`RUST_LOG=1 cargo
+    /// test`), as written after quote removal.
+    pub env: Vec<String>,
+    /// The file its standard output goes to (`> out`, `>> log`, `&> all`)
+    /// instead of where it would otherwise go, as written.
+    pub stdout_to: Option<String>,
     /// It runs inside `$(...)`, whose output becomes part of a word.
     pub captured: bool,
 }
@@ -276,6 +279,8 @@ struct Builder {
     word: Option<String>,
     /// The next word is a redirection's target, not an argument.
     skip_word: bool,
+    /// That target is where standard output goes.
+    stdout_target: bool,
     /// The next word is a here-document delimiter.
     heredoc: Option<bool>,
     pending: Vec<Pending>,
@@ -292,6 +297,9 @@ impl Builder {
             });
         } else if self.skip_word {
             self.skip_word = false;
+            if std::mem::take(&mut self.stdout_target) {
+                self.current.stdout_to = Some(word);
+            }
         } else {
             self.current.words.push(word);
         }
@@ -305,7 +313,11 @@ impl Builder {
             .iter()
             .position(|w| !RESERVED.contains(&w.as_str()) && !is_assignment(w))
             .unwrap_or(command.words.len());
-        command.words.drain(..keep);
+        command.env = command
+            .words
+            .drain(..keep)
+            .filter(|w| is_assignment(w))
+            .collect();
         command.op = op;
         if command.words.is_empty() && command.heredocs.is_empty() {
             // `do`, `done`, a blank line: carry the operator to the previous
@@ -338,6 +350,7 @@ impl Parser {
             current: Command::default(),
             word: None,
             skip_word: false,
+            stdout_target: false,
             heredoc: None,
             pending: Vec::new(),
         };
@@ -400,7 +413,7 @@ impl Parser {
                     Some('>') => {
                         b.end_word();
                         self.redirect(&mut b);
-                        b.current.stdout_redirected = true;
+                        b.stdout_target = true;
                     }
                     _ => b.end_command(Some(Op::Background)),
                 },
@@ -425,7 +438,7 @@ impl Parser {
                     let op = self.redirect(&mut b);
                     let stdout = fd.as_deref().is_none_or(|fd| fd == "1");
                     if stdout && op.starts_with('>') && !op.ends_with('&') {
-                        b.current.stdout_redirected = true;
+                        b.stdout_target = true;
                     }
                 }
                 '$' => {
@@ -662,6 +675,13 @@ mod tests {
     }
 
     #[test]
+    fn leading_assignments_are_kept_apart() {
+        let script = parse("do RUST_LOG=debug A='x y' cargo test; FOO=1");
+        assert_eq!(script.commands[0].words, ["cargo", "test"]);
+        assert_eq!(script.commands[0].env, ["RUST_LOG=debug", "A=x y"]);
+    }
+
+    #[test]
     fn heredoc_bodies_are_kept_apart_from_words() {
         let script = parse("python3 - <<'EOF'\nprint('a; b')\nEOF\necho next");
         assert_eq!(script.commands[0].words, ["python3", "-"]);
@@ -786,13 +806,16 @@ mod tests {
         let script = parse(
             "fnox get A > a.txt; fnox get B 2>/dev/null; fnox get C >&2; fnox get D &> all; fnox get E 1>>log; X=$(fnox get F)",
         );
-        let redirected: Vec<bool> = script
+        let redirected: Vec<Option<&str>> = script
             .commands
             .iter()
-            .map(|c| c.stdout_redirected)
+            .map(|c| c.stdout_to.as_deref())
             .collect();
         // `X=$(...)` alone is only an assignment; its command is nested.
-        assert_eq!(redirected, [true, false, false, true, true]);
+        assert_eq!(
+            redirected,
+            [Some("a.txt"), None, None, Some("all"), Some("log")]
+        );
         assert!(script.nested[0].captured);
         assert!(!script.commands[0].captured);
     }

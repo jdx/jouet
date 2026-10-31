@@ -1,0 +1,5 @@
+# example.com/calc [example.com/calc.test]
+./calc.go:3:41: undefined: c
+./calc.go:4:28: cannot use 1 (untyped int constant) as string value in return statement
+FAIL	example.com/calc [build failed]
+FAIL

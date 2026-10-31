@@ -1,0 +1,90 @@
+   Compiling demo v0.1.0 (/work)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+────────────
+ Nextest run ID 65684062-cbc4-43a4-9c72-7b1e22982fe2 with nextest profile: default
+    Starting 43 tests across 1 binary
+        PASS [   0.003s] ( 1/43) demo tests::t04
+        PASS [   0.003s] ( 2/43) demo tests::t10
+        PASS [   0.003s] ( 3/43) demo tests::t01
+        PASS [   0.003s] ( 4/43) demo tests::t07
+        PASS [   0.004s] ( 5/43) demo tests::t02
+        PASS [   0.004s] ( 6/43) demo tests::t05
+        PASS [   0.004s] ( 7/43) demo tests::t03
+        FAIL [   0.003s] ( 8/43) demo tests::adds_negative_numbers
+  stdout ───
+
+    running 1 test
+    checking negatives
+    test tests::adds_negative_numbers ... FAILED
+
+    failures:
+
+    failures:
+        tests::adds_negative_numbers
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::adds_negative_numbers' (1234) panicked at src/lib.rs:9:74:
+    assertion `left == right` failed: sum of negatives
+      left: -5
+     right: -6
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure: 31 tests still running
+        FAIL [   0.003s] ( 9/43) demo tests::parses_padded_input
+  stdout ───
+
+    running 1 test
+    test tests::parses_padded_input ... FAILED
+
+    failures:
+
+    failures:
+        tests::parses_padded_input
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::parses_padded_input' (1234) panicked at src/lib.rs:10:64:
+    parse failed: Err("invalid digit found in string")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.003s] (10/43) demo tests::t31
+        PASS [   0.003s] (11/43) demo tests::t33
+        PASS [   0.003s] (12/43) demo tests::t34
+        PASS [   0.003s] (13/43) demo tests::t32
+        PASS [   0.003s] (14/43) demo tests::t36
+        PASS [   0.003s] (15/43) demo tests::t35
+        PASS [   0.003s] (16/43) demo tests::t37
+        PASS [   0.012s] (17/43) demo tests::t06
+        PASS [   0.016s] (18/43) demo tests::t19
+        PASS [   0.016s] (19/43) demo tests::t11
+        PASS [   0.016s] (20/43) demo tests::t09
+        PASS [   0.016s] (21/43) demo tests::t26
+        PASS [   0.016s] (22/43) demo tests::t24
+        PASS [   0.004s] (23/43) demo tests::t23
+        PASS [   0.016s] (24/43) demo tests::t30
+        PASS [   0.016s] (25/43) demo tests::t28
+        PASS [   0.016s] (26/43) demo tests::t13
+        PASS [   0.017s] (27/43) demo tests::t12
+        PASS [   0.017s] (28/43) demo tests::t22
+        PASS [   0.017s] (29/43) demo tests::t17
+        PASS [   0.017s] (30/43) demo tests::t18
+        PASS [   0.017s] (31/43) demo tests::t16
+        PASS [   0.017s] (32/43) demo tests::t15
+        PASS [   0.017s] (33/43) demo tests::t25
+        PASS [   0.017s] (34/43) demo tests::t14
+        PASS [   0.017s] (35/43) demo tests::t08
+        PASS [   0.017s] (36/43) demo tests::t20
+        PASS [   0.017s] (37/43) demo tests::t29
+        PASS [   0.018s] (38/43) demo tests::t27
+        PASS [   0.018s] (39/43) demo tests::t21
+────────────
+     Summary [   0.018s] 39/43 tests run: 37 passed, 2 failed, 0 skipped
+        FAIL [   0.003s] ( 8/43) demo tests::adds_negative_numbers
+        FAIL [   0.003s] ( 9/43) demo tests::parses_padded_input
+warning: 4/43 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)
+error: test run failed

@@ -83,6 +83,10 @@ const BUILTIN: &[(&str, &str)] = &[
         "affected-tests",
         include_str!("../rules/affected-tests.toml"),
     ),
+    (
+        "piped-test-output",
+        include_str!("../rules/piped-test-output.toml"),
+    ),
     // Before the job rules: a daemon the project declares is pitchfork's.
     (
         "pitchfork-start",
@@ -119,6 +123,10 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
         "affected-tests.luau",
         include_str!("../rules/affected-tests.luau"),
+    ),
+    (
+        "piped-test-output.luau",
+        include_str!("../rules/piped-test-output.luau"),
     ),
     (
         "pitchfork-start.luau",
@@ -1777,6 +1785,8 @@ fn command_table(
             shell::Op::Background => "background",
         }),
     )?;
+    t.set("stdout_to", command.stdout_to.as_deref())?;
+    t.set("env", command.env.clone())?;
     t.set("nested", nested)?;
     t.set("status", status)?;
     let text = argv.join(" ");

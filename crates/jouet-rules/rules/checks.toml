@@ -69,6 +69,11 @@ fires = [
   { command = "jouet test --affected", exit_code = 0, kind = "test", scope = "partial --affected" },
   { command = "jouet test --affected --since origin/main --json", exit_code = 1, kind = "test", scope = "partial --affected --since origin/main" },
   { command = "jouet test -- -k slow", exit_code = 0, kind = "test", scope = "partial -- -k slow" },
+  # `jouet test --cmd -- CMD` is a run of CMD.
+  { command = "jouet test --cmd -- cargo build", exit_code = 1, kind = "build" },
+  { command = "jouet test --cmd -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
+  { command = "jouet test --cmd -- mise run test:e2e", exit_code = 1, kind = "test", scope = "partial test:e2e" },
+  { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0, kind = "test", scope = "partial" },
 ]
 quiet = [
   { command = "cargo fmt", exit_code = 0 },
@@ -90,6 +95,7 @@ quiet = [
   { command = "jouet test --affected --dry-run", exit_code = 0 },
   { command = "jouet test --since main", exit_code = 2 },
   { command = "jouet test --affected", exit_code = 4 },
+  { command = "jouet test --cmd -- cargo test", exit_code = 4 },
   # `diag check` refused (no hk config) or misused: no lint ran.
   { command = "jouet diag check wordcount.py", exit_code = 4 },
   { command = "jouet --json diag check --changed", exit_code = 4 },
