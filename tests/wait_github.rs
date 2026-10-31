@@ -522,6 +522,27 @@ fn ci_fails_fast_with_the_failed_steps_log_while_the_run_is_in_progress() {
         "{text}"
     );
     assert!(text.contains("  full log: "), "{text}");
+    assert!(!text.contains("locally:"), "no jactionlint here: {text}");
+
+    // With jactionlint installed, it says how to run the job here.
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for name in ["jactionlint", "jactionlint.exe"] {
+        std::fs::write(bin.join(name), "").unwrap();
+    }
+    let out = command(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--display", "agent"]].concat(),
+    )
+    .env("PATH", &bin)
+    .output()
+    .unwrap();
+    let text = stdout(&out);
+    assert!(
+        text.contains("  locally: jouet ci run test --check unit\n"),
+        "{text}"
+    );
 }
 
 #[test]

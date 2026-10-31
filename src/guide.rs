@@ -26,13 +26,19 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "edit",
         Some(
-            "changing files: exact replacements, or whole definitions by name (`=== PATH#SYMBOL`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
+            "changing files: exact replacements (`jouet edit replace <PATH> --old TEXT --new TEXT`, or a spec on stdin), or whole definitions by name (`=== PATH#SYMBOL`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
         ),
     ),
     (
         "wait",
         Some(
             "waiting for CI, a PR or a workflow run, or for a file, log line, port, URL, process or command, instead of a sleep loop",
+        ),
+    ),
+    (
+        "ci",
+        Some(
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`), instead of pushing again to see; needs jactionlint",
         ),
     ),
     (
@@ -120,6 +126,10 @@ const COMPANIONS: &[(&str, &str)] = &[
         "mbx: Rust builds. Run cargo as usual (or prefix it with `mbx`); compiled output is shared across checkouts and builds are scheduled machine-wide. `mbx analyze` explains a slow rebuild",
     ),
     (
+        "jactionlint",
+        "jactionlint: lints GitHub workflows; `jouet ci run` runs their jobs here through it",
+    ),
+    (
         "rtk",
         "rtk: shrinks the output of common commands; see `rtk --help`",
     ),
@@ -166,7 +176,10 @@ fn when(name: &str) -> Option<&'static str> {
     WHEN.iter().find(|(n, _)| *n == name).and_then(|(_, w)| *w)
 }
 
-/// The guide for the whole tool, kept under about 80 lines.
+/// The guide for the whole tool: one entry per command family, with its
+/// subcommands by name and when to reach for it. Flags and synopses live in
+/// `jouet agent-help COMMAND`, so a new subcommand costs the overview a word,
+/// not a line.
 pub(crate) fn overview() -> String {
     let mut out = format!(
         "jouet {}: a toolkit CLI for coding agents. Reach for it before hand-rolling a script.\n\n",
@@ -174,32 +187,25 @@ pub(crate) fn overview() -> String {
     );
     for (meta, when) in agent_commands() {
         let name = meta.cmd.name;
-        // No blank line between commands: each starts at the margin, and
-        // the overview stays inside its line budget.
-        let _ = writeln!(out, "jouet {name}: {}", meta.about.unwrap_or(""));
-        let _ = writeln!(out, "  when: {when}");
-        let usage = synopsis(&format!("jouet {name}"), meta);
-        let listed: Vec<_> = meta
+        let subs: Vec<&str> = meta
             .subcommands
             .iter()
             .filter(|s| {
                 let at = (name, s.cmd.name);
                 !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
             })
+            .map(|s| s.cmd.name)
             .collect();
-        // A bare `jouet pr` above its subcommands says nothing.
-        if listed.is_empty() || usage != format!("jouet {name}") {
-            let _ = writeln!(out, "  {usage}");
-        }
-        for sub in listed {
-            let path = format!("jouet {name} {}", sub.cmd.name);
-            let _ = writeln!(
-                out,
-                "  {}: {}",
-                synopsis(&path, sub),
-                sub.about.unwrap_or("")
-            );
-        }
+        let head = if subs.is_empty() {
+            format!("jouet {name}")
+        } else if meta.subcommand_required() {
+            format!("jouet {name} <{}>", subs.join("|"))
+        } else {
+            // The family also runs on its own.
+            format!("jouet {name} [{}]", subs.join("|"))
+        };
+        let _ = writeln!(out, "{head}: {}", meta.about.unwrap_or(""));
+        let _ = writeln!(out, "  when: {when}");
     }
     out.push('\n');
     out.push_str(&conventions());
@@ -207,7 +213,7 @@ pub(crate) fn overview() -> String {
         let _ = writeln!(out, "Also installed: {line}.");
     }
     out.push_str(
-        "Details: `jouet agent-help COMMAND` for one command's flags, `jouet COMMAND --help`.\n",
+        "Details: `jouet agent-help COMMAND` for its subcommands and flags, `jouet COMMAND --help`.\n",
     );
     out
 }
@@ -411,11 +417,16 @@ mod tests {
             .lines()
             .filter(|line| !line.starts_with("Also installed:"))
             .count();
-        assert!(own <= 80, "{own} lines:\n{text}");
+        assert!(own <= 40, "{own} lines:\n{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
             "{text}"
         );
+        // Families list their subcommands by name, so a new one costs a word.
+        assert!(text.contains("jouet pr <"), "{text}");
+        assert!(text.contains("|land"), "{text}");
+        assert!(text.contains("jouet edit [replace|hash]"), "{text}");
+        assert!(text.contains("jouet wait <ci|"), "{text}");
         assert!(text.contains("4 precondition"), "{text}");
         assert!(!text.contains("jouet setup"), "{text}");
     }
