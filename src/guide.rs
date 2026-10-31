@@ -18,12 +18,6 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
-        "read",
-        Some(
-            "finding your way around a repository: `jouet read --map` prints the most important definitions to fit a token budget, instead of listing and reading whole files",
-        ),
-    ),
-    (
         "edit",
         Some(
             "changing files: exact replacements that all land or none do, instead of python/sed rewrites or a string of separate edits",

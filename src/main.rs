@@ -59,8 +59,6 @@ enum Cmd {
     Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
-    /// Read a map of the repository's most important definitions
-    Read(ReadArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
     /// Search files like rg, within a budget, grouped by symbol
@@ -509,41 +507,6 @@ pub struct SearchArgs {
     /// Show matches this session was already shown, too
     #[usage(long)]
     again: bool,
-}
-
-/// Read a map of the repository's most important definitions
-///
-/// `--map` prints, for the files that matter most, the line of each of
-/// their most important definitions, sized to a token budget, so an agent
-/// can find its way around a repository without reading whole files. It is
-/// Aider's repo map rebuilt in Rust: tree-sitter finds every definition and
-/// reference, files are ranked by personalised PageRank over who refers to
-/// whom, and as many top-ranked definitions are shown as fit the budget.
-/// Tags are cached by modification time, so a second map of the same tree
-/// only re-reads files that changed.
-///
-/// --focus names a file you are working on, or an identifier you care
-/// about: what it uses ranks higher, and a focused file's own definitions
-/// are left out, as you already have it open. The budget defaults to 1024
-/// tokens with --focus and 8192 without.
-///
-/// Examples:
-///   jouet read --map
-///   jouet read --map --focus src/backend/vfox.rs --focus download
-///   jouet read --map crates/ --budget 2000
-#[derive(Args)]
-pub struct ReadArgs {
-    /// With --map, the directory to map (default .)
-    path: Option<String>,
-    /// Print a map of the most important definitions
-    #[usage(long)]
-    map: bool,
-    /// The map's size in tokens, estimated at 4 bytes each
-    #[usage(long, value_name = "TOKENS")]
-    budget: Option<usize>,
-    /// A file you are working on, or an identifier you care about. Repeatable
-    #[usage(long, var, value_name = "FILE|NAME")]
-    focus: Vec<String>,
 }
 
 /// Block until a condition holds, then print one summary
@@ -1361,7 +1324,6 @@ fn main() -> ExitCode {
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
-        Cmd::Read(args) => cmd::read::run(&args, &out),
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),
