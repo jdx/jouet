@@ -108,6 +108,13 @@ declare jouet: {
 		info: (args: { [any]: any }?) -> Ran,
 		audit: (args: { [any]: any }?) -> Ran,
 	},
+	-- db.read: a database's schema and read-only queries (`jouet db`);
+	-- schema { table?, url?, remote?, budget? },
+	-- query { sql, url?, remote?, limit?, width?, budget?, timeout? }
+	db: {
+		schema: (args: { [any]: any }?) -> Ran,
+		query: (args: { [any]: any }?) -> Ran,
+	},
 }
 
 declare edit: {

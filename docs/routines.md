@@ -121,6 +121,7 @@ A routine's name is its file name without `.luau`, in lowercase words joined by 
 | `jouet.diag_check{files, changed, max}`, `jouet.diag_delta{...}` | [`jouet diag`](/commands/diag): the project's hk checks on files, as findings, or only those an edit introduced | `fs.read` |
 | `jouet.docs.lookup{pkg, symbol, lang, budget, private}` | [`jouet docs`](/commands/docs): a dependency's outline, or one definition's signature, doc and source, at the version the project locked, from its installed sources | `fs.read` |
 | `jouet.deps.info{packages, refresh}`, `jouet.deps.audit{ecosystem, refresh}` | [`jouet deps`](/commands/deps): whether packages exist, their latest version, licence and advisories, and the locked dependencies checked against OSV | `net` |
+| `jouet.db.schema{table, url, remote, budget}`, `jouet.db.query{sql, url, remote, limit, width, budget, timeout}` | [`jouet db`](/commands/db): a SQLite or Postgres database's tables, columns, keys and indexes, and one read-only query's rows, cut to a limit | `db.read` |
 | `jouet.diag_fix{files, changed, step}` | The project's hk fixers on files (`hk run fix --safe`, which refuses a fixer whose effect is unknown or destructive) | `fs.write` |
 | `edit.plan(spec, opts)` | Applies a [`jouet edit`](/commands/edit) spec in memory and reports each edit | `fs.read` |
 | `edit.apply(spec, opts)` | Writes it only if every edit succeeded, all or nothing | `fs.write` |
@@ -143,6 +144,7 @@ A routine reaches only what its header declares:
 | `net` | Waits on ports and URLs |
 | `ledger.read` | The hooks' ledger |
 | `mise.read`, `mise.run` | mise's config and tasks, and running them |
+| `db.read` | A database's schema and read-only queries, local unless the call passes `remote` |
 
 A primitive outside them fails with exit `4`, and the error names the line to add. Reading a routine's header is enough to know what running it can do.
 

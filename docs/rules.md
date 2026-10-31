@@ -42,6 +42,7 @@ checks              enabled  record  builtin  builtin  2026-10-30  Records test,
 reread              enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
 large-read          enabled  warn    builtin  builtin  2026-10-30  Reading a long source file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
 unbudgeted-search   enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
+unbounded-query     enabled  warn    builtin  builtin  2026-10-31  `sqlite3` or `psql -c` printing a SELECT with no LIMIT puts every row, and every long value, in the context; `jouet db query` prints the first 50 rows and counts the rest.
 ```
 
 The columns are: name, state, mode, scope, author, created, and why.
@@ -271,8 +272,9 @@ ok    checks              83 examples passed
 ok    reread              12 examples passed
 ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed
+ok    unbounded-query     18 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
-28 of 29 rules passed their examples
+29 of 30 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:

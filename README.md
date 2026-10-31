@@ -109,6 +109,7 @@ match shows what moved.
 | [`jouet read --map`](https://jouet.jdx.dev/commands/read) | reading whole files to learn a codebase; Aider's repo map, on the code graph |
 | [`jouet docs`](https://jouet.jdx.dev/commands/docs) | recalling a dependency's API from memory or reading it out of the cargo registry and `node_modules`; its signatures and docs at the locked version |
 | [`jouet deps`](https://jouet.jdx.dev/commands/deps) | adding a dependency from memory: whether it exists, its latest version, licence and deprecation, and the OSV advisories on that version or on everything locked |
+| [`jouet db`](https://jouet.jdx.dev/commands/db) | `sqlite3` and `psql -c` printing whole tables; a SQLite or Postgres schema in a few lines, and read-only queries cut to 50 rows, local databases only |
 | [`jouet wait`](https://jouet.jdx.dev/commands/wait) | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
 | [`jouet pr status`](https://jouet.jdx.dev/commands/pr-status) | `for` loops over `gh pr view` |
 | [`jouet pr threads`](https://jouet.jdx.dev/commands/pr-threads) | hand-written `reviewThreads` GraphQL, replies and resolves |

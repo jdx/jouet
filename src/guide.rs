@@ -36,6 +36,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "db",
+        Some(
+            "looking at a SQLite or Postgres database: `jouet db schema [TABLE]` lists its tables with columns, keys and indexes, and `jouet db query SQL` runs one read-only query, with rows cut to --limit and a count of the rest, instead of `sqlite3` or `psql` printing whole tables. The database is --url, DATABASE_URL, or DATABASE_URL in the project's fnox config; a write is refused (exit 4) even with write rights, and a host other than this machine needs --remote",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -231,7 +237,7 @@ fn when(name: &str) -> Option<&'static str> {
 
 /// Commands that work together, which the overview and the skill describe
 /// in one entry, led by the first, to stay within their budgets.
-pub(crate) const GROUPED: &[&[&str]] = &[&["handoff", "pickup"], &["read", "docs", "deps"]];
+pub(crate) const GROUPED: &[&[&str]] = &[&["handoff", "pickup"], &["read", "docs", "deps", "db"]];
 
 /// The group `name` belongs to, if any.
 pub(crate) fn group(name: &str) -> Option<&'static [&'static str]> {
@@ -353,7 +359,7 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     let commands = agent_commands();
     let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
-    // A group is one entry, as in the overview: `read/docs/deps`.
+    // A group is one entry, as in the overview: `read/docs/deps/db`.
     let names: Vec<String> = commands
         .iter()
         .map(|(m, _)| m.cmd.name)
@@ -369,7 +375,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
         })
         .collect();
     let mut out = format!(
-        "jouet is installed, a CLI toolkit for coding agents: {}. If a task fits one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
+        "jouet is installed, a CLI toolkit for coding agents: {}. If one fits, `jouet agent-help COMMAND` says when to use it and its flags.\n",
         names.join(", ")
     );
     let usage: Vec<String> = PRIMED

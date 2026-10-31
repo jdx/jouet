@@ -20,6 +20,9 @@
 //! - `jouet.deps.info{packages}` and `jouet.deps.audit{}`: packages checked
 //!   against their registries and OSV (`jouet deps`), with `refresh`, and
 //!   `ecosystem` for an audit.
+//! - `jouet.db.schema{table}` and `jouet.db.query{sql}`: a database's schema
+//!   and read-only queries (`jouet db`), with `url`, `remote`, `budget`,
+//!   and `limit`, `width` and `timeout` for a query.
 //!
 //! Each takes a table: positional arguments in order (or by name), flags by
 //! name with `_` for `-`. Each returns `{ ok, exit_code, json, error,
@@ -30,7 +33,7 @@
 
 use super::primitive;
 use crate::Fail;
-use crate::capability::Capability::{self, FsRead, FsWrite, GithubRead, GithubWrite, Net};
+use crate::capability::Capability::{self, DbRead, FsRead, FsWrite, GithubRead, GithubWrite, Net};
 use crate::runtime::{Ctx, to_lua};
 use crate::world::StepOutput;
 use jouet_output::exit::Exit;
@@ -269,6 +272,30 @@ pub const COMMANDS: &[Command] = &[
         Net,
         &[],
         &[&[("ecosystem", Val), ("refresh", Switch)]],
+    ),
+    // `jouet.db`: a database's schema, and read-only queries.
+    read(
+        "jouet.db",
+        "schema",
+        &["db", "schema"],
+        DbRead,
+        &[("table", false)],
+        &[&[("url", Val), ("remote", Switch), ("budget", Val)]],
+    ),
+    read(
+        "jouet.db",
+        "query",
+        &["db", "query"],
+        DbRead,
+        &[("sql", false)],
+        &[&[
+            ("url", Val),
+            ("remote", Switch),
+            ("limit", Val),
+            ("width", Val),
+            ("budget", Val),
+            ("timeout", Val),
+        ]],
     ),
     read(
         "jouet",
@@ -559,6 +586,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
     let code = lua.create_table()?;
     let docs = lua.create_table()?;
     let deps = lua.create_table()?;
+    let db = lua.create_table()?;
     for command in COMMANDS {
         let name = command.name();
         let f = primitive(
@@ -597,12 +625,14 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
             "jouet.code" => code.set(command.key, f)?,
             "jouet.docs" => docs.set(command.key, f)?,
             "jouet.deps" => deps.set(command.key, f)?,
+            "jouet.db" => db.set(command.key, f)?,
             _ => jouet.set(command.key, f)?,
         }
     }
     jouet.set("code", code)?;
     jouet.set("docs", docs)?;
     jouet.set("deps", deps)?;
+    jouet.set("db", db)?;
     globals.set("wait", wait)?;
     globals.set("jouet", jouet)?;
     Ok(())

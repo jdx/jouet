@@ -147,6 +147,7 @@ The `until` loop above would still be polling: a failed check never makes `gh pr
 | [`jouet read --map`](/commands/read) | Listing directories and reading whole files to learn a codebase; the most important definitions, sized to a token budget |
 | [`jouet docs`](/commands/docs) | Guessing a dependency's API from memory, or reading files out of the cargo registry and `node_modules`; its signatures and docs at the version the lockfile names |
 | [`jouet deps`](/commands/deps) | Adding a dependency from memory, which may not exist, be deprecated or have a known advisory; asks its registry and OSV first, and checks the locked versions against OSV |
+| [`jouet db`](/commands/db) | `sqlite3 app.db "select * from …"` and `psql -c` printing every row; the schema in a few lines, and one read-only query cut to a limit, refused when it would write or reach another machine |
 | [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; and around `gh pr checks` and `gh run view` |
 | [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
