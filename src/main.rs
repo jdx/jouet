@@ -59,7 +59,7 @@ enum Cmd {
     Stats(StatsArgs),
     /// Inspect pull requests
     Pr(PrArgs),
-    /// Read a file by its outline, a symbol or a range
+    /// Read a file by its outline, a symbol or a range, or the repository's map
     Read(ReadArgs),
     /// Write one file for reviewing a range of commits
     ReviewPackage(ReviewPackageArgs),
@@ -261,8 +261,9 @@ pub struct StatsArgs {
 /// them; it must match exactly one definition. The new text runs to the
 /// next `===` line, at any indentation: it is indented to where the
 /// definition sits. Comments and attributes above the definition stay. An
-/// edit that would add syntax errors is refused, and one that changes the
-/// definition's first line is noted, as its callers may need changing.
+/// edit that would add syntax errors is refused, and when it changes the
+/// definition's first line, references to its name in other files are
+/// listed as callers that may need updating.
 ///
 ///   === src/backend/vfox.rs#Vfox::download
 ///   pub fn download(&self, url: &str, retries: u32) -> Result<()> {
@@ -579,7 +580,7 @@ pub struct SearchArgs {
     lang: Option<String>,
 }
 
-/// Read a file by its outline, a symbol or a range
+/// Read a file by its outline, a symbol or a range, or the repository's map
 ///
 /// Reading a large file whole to find one thing fills the context with code
 /// that is not needed. Read it in steps instead:
@@ -599,6 +600,18 @@ pub struct SearchArgs {
 /// Definitions come from tree-sitter, for Rust, Python, JavaScript,
 /// TypeScript, Go, Ruby, Java, C and C++.
 ///
+/// `--map` prints, for the files that matter most, the line of each of
+/// their most important definitions, sized to a token budget, so an agent
+/// can find its way around a repository without reading whole files. It is
+/// Aider's repo map rebuilt in Rust: tree-sitter finds every definition and
+/// reference, files are ranked by personalised PageRank over who refers to
+/// whom, and as many top-ranked definitions are shown as fit the budget.
+/// Tags are cached by modification time, so a second map of the same tree
+/// only re-reads files that changed. --focus names a file you are working
+/// on, or an identifier you care about: what it uses ranks higher, and a
+/// focused file's own definitions are left out, as you already have it
+/// open. The budget defaults to 1024 tokens with --focus and 8192 without.
+///
 /// Exits 3 for a file or symbol that does not exist, and 2 for an outline or
 /// symbol of a file whose language jouet cannot read.
 ///
@@ -606,10 +619,11 @@ pub struct SearchArgs {
 ///   jouet read src/backend/vfox.rs --outline
 ///   jouet read src/backend/vfox.rs --symbol 'Vfox::download'
 ///   jouet read src/backend/vfox.rs --range 120:160
+///   jouet read --map --focus src/backend/vfox.rs --focus download
 #[derive(Args)]
 pub struct ReadArgs {
-    /// The file to read
-    path: String,
+    /// The file to read, or with --map the directory to map (default .)
+    path: Option<String>,
     /// List the file's definitions and their line ranges
     #[usage(long)]
     outline: bool,
@@ -625,6 +639,15 @@ pub struct ReadArgs {
     /// Print lines this session was already shown, too
     #[usage(long)]
     again: bool,
+    /// Print a map of the repository's most important definitions
+    #[usage(long)]
+    map: bool,
+    /// The map's size in tokens, estimated at 4 bytes each
+    #[usage(long, value_name = "TOKENS")]
+    budget: Option<usize>,
+    /// For the map: a file you are working on, or an identifier you care about. Repeatable
+    #[usage(long, var, value_name = "FILE|NAME")]
+    focus: Vec<String>,
 }
 
 /// Block until a condition holds, then print one summary

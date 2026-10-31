@@ -89,7 +89,7 @@ RS
 	assert_line --index 2 '... 16 more lines (--range 3:18, or raise --max-lines)'
 }
 
-@test "edit by symbol survives a reformat, indents the new text and notes a changed signature" {
+@test "edit by symbol survives a reformat, indents the new text and warns about callers" {
 	# A formatter wraps the call; a search block for the old text would miss.
 	cat >src/lib.rs <<'RS'
 pub struct Client {
@@ -123,7 +123,8 @@ pub fn download(&self, path: &str, retries: u32) -> String {
 JOUET_EDIT
 	assert_success
 	assert_line --index 0 --regexp '^ok +src/lib.rs  1 edit'
-	assert_line 'note: the signature of download changed; check its callers'
+	assert_line 'warning: the signature of download changed; 1 reference to it in files this edit does not change may need updating:'
+	assert_line '  src/main.rs:3'
 	run jouet read src/lib.rs --symbol download --again
 	assert_output "src/lib.rs: method Client::download (6-9)
 6	    pub fn download(&self, path: &str, retries: u32) -> String {

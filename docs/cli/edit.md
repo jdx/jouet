@@ -7,7 +7,7 @@ Make exact, all-or-nothing edits across files
 
 Reads a spec from --spec or stdin: search/replace blocks, a Codex-style patch, or JSON. Every edit is checked before any file is written, so a failed edit leaves every file as it was.
 
-A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found with tree-sitter, so a formatter reflowing its text cannot break the match. SYMBOL is a name, a kind and a name (`fn download`), or a qualified name (`Vfox::download`), as `jouet read FILE --outline` lists them; it must match exactly one definition. The new text runs to the next `===` line, at any indentation: it is indented to where the definition sits. Comments and attributes above the definition stay. An edit that would add syntax errors is refused, and one that changes the definition's first line is noted, as its callers may need changing.
+A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found with tree-sitter, so a formatter reflowing its text cannot break the match. SYMBOL is a name, a kind and a name (`fn download`), or a qualified name (`Vfox::download`), as `jouet read FILE --outline` lists them; it must match exactly one definition. The new text runs to the next `===` line, at any indentation: it is indented to where the definition sits. Comments and attributes above the definition stay. An edit that would add syntax errors is refused, and when it changes the definition's first line, references to its name in other files are listed as callers that may need updating.
 
   === src/backend/vfox.rs#Vfox::download
   pub fn download(&self, url: &str, retries: u32) -> Result<()> {

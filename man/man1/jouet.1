@@ -73,7 +73,7 @@ Unresolve threads
 Reply to and resolve many threads from a JSON list
 .TP
 \fBread\fR
-Read a file by its outline, a symbol or a range
+Read a file by its outline, a symbol or a range, or the repository's map
 .TP
 \fBreview\-package\fR
 Write one file for reviewing a range of commits
@@ -261,7 +261,7 @@ Make exact, all\-or\-nothing edits across files
 
 Reads a spec from \-\-spec or stdin: search/replace blocks, a Codex\-style patch, or JSON. Every edit is checked before any file is written, so a failed edit leaves every file as it was.
 
-A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found with tree\-sitter, so a formatter reflowing its text cannot break the match. SYMBOL is a name, a kind and a name (`fn download`), or a qualified name (`Vfox::download`), as `jouet read FILE \-\-outline` lists them; it must match exactly one definition. The new text runs to the next `===` line, at any indentation: it is indented to where the definition sits. Comments and attributes above the definition stay. An edit that would add syntax errors is refused, and one that changes the definition's first line is noted, as its callers may need changing.
+A blocks section headed `=== PATH#SYMBOL` replaces a whole definition, found with tree\-sitter, so a formatter reflowing its text cannot break the match. SYMBOL is a name, a kind and a name (`fn download`), or a qualified name (`Vfox::download`), as `jouet read FILE \-\-outline` lists them; it must match exactly one definition. The new text runs to the next `===` line, at any indentation: it is indented to where the definition sits. Comments and attributes above the definition stay. An edit that would add syntax errors is refused, and when it changes the definition's first line, references to its name in other files are listed as callers that may need updating.
 
   === src/backend/vfox.rs#Vfox::download
   pub fn download(&self, url: &str, retries: u32) \-> Result<()> {
@@ -718,7 +718,7 @@ Print help
 \fB<ARGS>\fR
 `\-` to read the list from stdin, and optionally the PR
 .SH "JOUET READ"
-Read a file by its outline, a symbol or a range
+Read a file by its outline, a symbol or a range, or the repository's map
 
 Reading a large file whole to find one thing fills the context with code that is not needed. Read it in steps instead:
 
@@ -731,14 +731,17 @@ Reading a large file whole to find one thing fills the context with code that is
 
 With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. Code is printed with line numbers, at most \-\-max\-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; \-\-again prints them. Definitions come from tree\-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
 
+`\-\-map` prints, for the files that matter most, the line of each of their most important definitions, sized to a token budget, so an agent can find its way around a repository without reading whole files. It is Aider's repo map rebuilt in Rust: tree\-sitter finds every definition and reference, files are ranked by personalised PageRank over who refers to whom, and as many top\-ranked definitions are shown as fit the budget. Tags are cached by modification time, so a second map of the same tree only re\-reads files that changed. \-\-focus names a file you are working on, or an identifier you care about: what it uses ranks higher, and a focused file's own definitions are left out, as you already have it open. The budget defaults to 1024 tokens with \-\-focus and 8192 without.
+
 Exits 3 for a file or symbol that does not exist, and 2 for an outline or symbol of a file whose language jouet cannot read.
 
 Examples:
   jouet read src/backend/vfox.rs \-\-outline
   jouet read src/backend/vfox.rs \-\-symbol 'Vfox::download'
   jouet read src/backend/vfox.rs \-\-range 120:160
+  jouet read \-\-map \-\-focus src/backend/vfox.rs \-\-focus download
 .PP
-\fBUsage:\fR jouet read [OPTIONS] <PATH>
+\fBUsage:\fR jouet read [OPTIONS] [<PATH>]
 .PP
 \fBOptions:\fR
 .PP
@@ -758,13 +761,22 @@ The most lines of code to print (default 400; 0 is no limit)
 \fB\-\-again\fR
 Print lines this session was already shown, too
 .TP
+\fB\-\-map\fR
+Print a map of the repository's most important definitions
+.TP
+\fB\-\-budget\fR \fI<TOKENS>\fR
+The map's size in tokens, estimated at 4 bytes each
+.TP
+\fB\-\-focus\fR \fI<FILE|NAME>\fR
+For the map: a file you are working on, or an identifier you care about. Repeatable
+.TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
 .PP
 .TP
 \fB<PATH>\fR
-The file to read
+The file to read, or with \-\-map the directory to map (default .)
 .SH "JOUET REVIEW-PACKAGE"
 Write one file for reviewing a range of commits
 

@@ -144,6 +144,7 @@ The `until` loop above would still be polling: a failed check never makes `gh pr
 |---|---|
 | [`jouet edit`](/commands/edit) | Heredoc edits with a hand-written `assert s.count(old) == 1`; all or nothing, never partly written |
 | [`jouet search`](/commands/search) | `rg` and `grep -r` printing every match in the tree; grouped by the function each match is in, cut to a budget, and without the matches the session already saw |
+| [`jouet read --map`](/commands/read) | Listing directories and reading whole files to learn a codebase; the most important definitions, sized to a token budget |
 | [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; and around `gh pr checks` and `gh run view` |
 | [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
@@ -154,7 +155,7 @@ Every command follows the same [conventions](/conventions), so an agent learns t
 
 - **An output compressor.** Shrinking arbitrary command output is [rtk](https://github.com/rtk-ai/rtk)'s job.
 - **A worktree, stacked-PR or memory tool.** Each of those already has a healthy dedicated tool.
-- **An IDE.** `jouet search` reads definitions with tree-sitter, not language servers, so it matches names, not resolved types; there is no server to run.
+- **An IDE.** `jouet search` and the map read definitions with tree-sitter, not language servers, so they match names, not resolved types; there is no server to run.
 - **Interactive.** Every command works without a TTY and never prompts.
 - **Multi-host, yet.** The PR commands start with GitHub.
 

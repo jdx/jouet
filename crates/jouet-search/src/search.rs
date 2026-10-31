@@ -409,11 +409,12 @@ fn enclosing(files: &[Collected], cache: Option<&Path>) -> Vec<Vec<Option<Symbol
                             .ok()
                             .and_then(|source| symbols::definitions(&c.path, &source)),
                     };
-                    let defs = defs.unwrap_or_default();
-                    let defs: Vec<Option<symbols::Def>> = lines
-                        .iter()
-                        .map(|l| symbols::enclosing(&defs, *l).cloned())
-                        .collect();
+                    let file = symbols::FileSymbols {
+                        defs: defs.unwrap_or_default(),
+                        refs: Vec::new(),
+                    };
+                    let defs: Vec<Option<symbols::Def>> =
+                        lines.iter().map(|l| file.enclosing(*l).cloned()).collect();
                     let found = defs
                         .into_iter()
                         .map(|d| {

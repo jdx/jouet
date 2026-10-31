@@ -1,7 +1,8 @@
-//! Definitions and search on a small repository with a file in each
-//! supported language.
+//! Symbols, search and the repository map, on a small repository with a
+//! file in each supported language.
 #![cfg(feature = "grammars")]
 
+use jouet_search::map::{self, Options as MapOptions};
 use jouet_search::memory::Memory;
 use jouet_search::search::{self, Budget, Options, Report};
 use jouet_search::symbols;
@@ -12,8 +13,9 @@ const FIXTURE: &str = "tests/fixtures/polyglot";
 fn defs(path: &str) -> Vec<(String, String)> {
     let path = Path::new(FIXTURE).join(path);
     let source = std::fs::read(&path).unwrap();
-    symbols::definitions(&path, &source)
+    symbols::parse(&path, &source)
         .unwrap()
+        .defs
         .into_iter()
         .map(|d| (d.kind, d.name))
         .collect()
@@ -106,13 +108,28 @@ fn every_language_yields_its_definitions() {
 }
 
 #[test]
+fn references_include_rust_types_and_path_calls() {
+    let path = Path::new(FIXTURE).join("src/main.rs");
+    let source = std::fs::read(&path).unwrap();
+    let refs: Vec<String> = symbols::parse(&path, &source)
+        .unwrap()
+        .refs
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    for name in ["Downloader", "new", "download"] {
+        assert!(refs.contains(&name.to_string()), "{name} in {refs:?}");
+    }
+}
+
+#[test]
 fn a_definition_encloses_its_lines_and_the_innermost_wins() {
     let path = Path::new(FIXTURE).join("java/App.java");
-    let defs = symbols::definitions(&path, &std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(symbols::enclosing(&defs, 3).unwrap().name, "main");
-    assert_eq!(symbols::enclosing(&defs, 1).unwrap().name, "App");
-    assert_eq!(symbols::enclosing(&defs, 10).unwrap().name, "greet");
-    assert!(symbols::enclosing(&defs, 7).is_none());
+    let symbols = symbols::parse(&path, &std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(symbols.enclosing(3).unwrap().name, "main");
+    assert_eq!(symbols.enclosing(1).unwrap().name, "App");
+    assert_eq!(symbols.enclosing(10).unwrap().name, "greet");
+    assert!(symbols.enclosing(7).is_none());
 }
 
 fn options(pattern: &str) -> Options {
@@ -281,6 +298,126 @@ fn matches_already_shown_collapse_until_the_file_changes() {
     let mut memory = Memory::open(state.path(), "session");
     let fourth = search::run(&o, &mut memory).unwrap();
     assert_eq!(fourth.files[0].already_shown, 3);
+}
+
+fn map_options(budget: usize) -> MapOptions {
+    MapOptions {
+        root: PathBuf::from(FIXTURE),
+        budget,
+        ..MapOptions::default()
+    }
+}
+
+#[test]
+fn the_map_fits_the_budget_and_says_what_it_left_out() {
+    let full = map::build(&map_options(10_000));
+    assert_eq!(full.more_defs, 0);
+    assert_eq!(full.files_scanned, 11);
+    let small = map::build(&map_options(60));
+    assert!(small.tokens <= 60, "{}", small.tokens);
+    assert!(small.more_defs > 1 && small.more_files > 1);
+    let text = map::render(&small);
+    assert!(
+        text.ends_with(&format!(
+            "... {} more definitions in {} more files (raise --budget, or --focus a file or name)\n",
+            small.more_defs, small.more_files
+        )),
+        "{text}"
+    );
+}
+
+#[test]
+fn definitions_left_out_of_files_already_shown_are_counted_there() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        repo.path().join("a.rs"),
+        "fn alpha() { beta(); }\nfn beta() { gamma(); }\nfn gamma() {}\n",
+    )
+    .unwrap();
+    let map = map::build(&MapOptions {
+        root: repo.path().to_path_buf(),
+        budget: 10,
+        ..MapOptions::default()
+    });
+    assert_eq!((map.files.len(), map.more_files), (1, 0));
+    assert!(
+        map::render(&map).ends_with(&format!(
+            "... {} more definitions in the files above (raise --budget, or --focus a file or name)\n",
+            map.more_defs
+        )),
+        "{}",
+        map::render(&map)
+    );
+}
+
+#[test]
+fn a_focused_file_ranks_what_it_uses_and_is_left_out() {
+    let mut options = map_options(25);
+    options.focus_files = vec!["src/main.rs".into()];
+    let map = map::build(&options);
+    let text = map::render(&map);
+    assert!(
+        text.starts_with("src/lib.rs\n  3: pub struct Downloader {\n"),
+        "{text}"
+    );
+    assert!(map.files.iter().all(|f| f.path != "src/main.rs"));
+}
+
+#[test]
+fn a_focused_identifier_ranks_its_definitions_first() {
+    let mut options = map_options(30);
+    options.focus_idents = vec!["Session".into()];
+    let map = map::build(&options);
+    let text = map::render(&map);
+    assert!(text.starts_with("web/api.ts\n"), "{text}");
+    assert!(text.contains("export class Session {"), "{text}");
+}
+
+#[test]
+fn the_map_snapshot() {
+    let map = map::build(&map_options(10_000));
+    assert_eq!(map::render(&map), include_str!("fixtures/polyglot.map.txt"));
+}
+
+#[test]
+fn tags_are_cached_by_modification_time() {
+    let repo = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    for (name, body) in [("a.rs", "fn a() { b(); }\n"), ("b.rs", "fn b() {}\n")] {
+        std::fs::write(repo.path().join(name), body).unwrap();
+    }
+    let options = MapOptions {
+        root: repo.path().to_path_buf(),
+        budget: 1000,
+        cache: Some(cache.path().to_path_buf()),
+        ..MapOptions::default()
+    };
+    let cold = map::build(&options);
+    assert_eq!((cold.files_scanned, cold.cached), (2, 0));
+    let warm = map::build(&options);
+    assert_eq!((warm.files_scanned, warm.cached), (2, 2));
+    // A changed file is read again, and its new definitions appear.
+    std::fs::write(repo.path().join("b.rs"), "fn b() {}\nfn c() {}\n").unwrap();
+    let changed = map::build(&options);
+    assert_eq!(changed.cached, 1);
+    assert!(map::render(&changed).contains("fn c() {}"));
+}
+
+#[test]
+fn definitions_alone_are_what_a_full_parse_finds() {
+    for entry in ignore::Walk::new(FIXTURE).flatten() {
+        let path = entry.path();
+        if !symbols::supported(path) {
+            continue;
+        }
+        let source = std::fs::read(path).unwrap();
+        assert_eq!(
+            symbols::definitions(path, &source).unwrap(),
+            symbols::parse(path, &source).unwrap().defs,
+            "{}",
+            path.display()
+        );
+    }
 }
 
 #[test]

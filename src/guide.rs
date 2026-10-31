@@ -20,7 +20,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "read",
         Some(
-            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing",
+            "reading code: `jouet read FILE --outline`, then `--symbol NAME` or `--range A:B`, instead of reading a whole file to find one thing; `jouet read --map` prints a repository's most important definitions to fit a token budget",
         ),
     ),
     (
@@ -380,8 +380,15 @@ mod tests {
     #[test]
     fn the_overview_stays_short() {
         let text = overview();
-        // The cap is a budget to defend, not a ceiling to fill.
-        assert!(text.lines().count() <= 80, "{text}");
+        // The cap is a budget to defend, not a ceiling to fill. It counts
+        // jouet's own lines: the "Also installed" lines depend on which
+        // companion tools are on this machine's PATH, so counting them made
+        // the test pass or fail by machine.
+        let own = text
+            .lines()
+            .filter(|line| !line.starts_with("Also installed:"))
+            .count();
+        assert!(own <= 80, "{own} lines:\n{text}");
         assert!(
             text.contains("jouet edit replace <PATH> --old TEXT --new TEXT"),
             "{text}"
