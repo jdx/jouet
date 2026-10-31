@@ -3,14 +3,12 @@
 use super::Output;
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
-use jouet_edit::{
-    self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
-};
+use jouet_edit::{self as edit, EditStatus, FileStatus, Options, Report, Span, SymbolError};
 use jouet_output::exit::Exit;
 use jouet_search::symbols::{self, SelectError, Selector};
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     let spec = match &args.cmd {
@@ -48,9 +46,7 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         Ok(plan) => plan,
         Err(e) => return out.error(Exit::Failed, &format!("reading files: {e}")),
     };
-    if plan.report.ok() {
-        plan.report.callers = callers(&plan.report);
-    }
+
     if !plan.report.ok() {
         let exit = if plan.report.only_missing_files() {
             Exit::NotFound
@@ -164,63 +160,6 @@ impl edit::Symbols for TreeSitter {
     fn syntax_errors(&self, path: &Path, text: &str) -> Option<usize> {
         symbols::syntax_errors(path, text.as_bytes())
     }
-}
-
-/// How many references to a changed signature are listed.
-const CALLERS_SHOWN: usize = 10;
-
-/// For each definition whose signature a symbol edit changed, the
-/// references to its name in files the edit does not change. Names are
-/// matched by text, so some may be another definition's.
-fn callers(report: &Report) -> Vec<Callers> {
-    let changed: Vec<&edit::SignatureChange> = report
-        .files
-        .iter()
-        .flat_map(|f| &f.edits)
-        .filter_map(|e| e.signature.as_ref())
-        .collect();
-    if changed.is_empty() {
-        return Vec::new();
-    }
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let root = crate::git::toplevel().unwrap_or_else(|| cwd.clone());
-    let touched: Vec<PathBuf> = report
-        .files
-        .iter()
-        .filter_map(|f| std::fs::canonicalize(&f.path).ok())
-        .collect();
-    let cache = jouet_output::paths::cache_dir().map(|d| d.join("tags"));
-    let mut out = Vec::new();
-    for change in changed {
-        let mut references: Vec<Reference> =
-            jouet_search::map::references(&root, &change.name, cache.as_deref())
-                .into_iter()
-                .filter(|(rel, _)| {
-                    std::fs::canonicalize(root.join(rel)).is_ok_and(|p| !touched.contains(&p))
-                })
-                .map(|(rel, line)| {
-                    let full = root.join(&rel);
-                    let shown = full
-                        .strip_prefix(&cwd)
-                        .map_or(full.clone(), Path::to_path_buf);
-                    Reference {
-                        path: shown.to_string_lossy().into_owned(),
-                        line: line as usize,
-                    }
-                })
-                .collect();
-        if references.is_empty() {
-            continue;
-        }
-        let more = references.len().saturating_sub(CALLERS_SHOWN);
-        references.truncate(CALLERS_SHOWN);
-        out.push(Callers {
-            symbol: change.name.clone(),
-            references,
-            more,
-        });
-    }
-    out
 }
 
 fn read_spec(args: &EditArgs) -> Result<Spec, String> {
@@ -448,24 +387,17 @@ fn render(report: &Report) -> String {
             s.push_str("  every edited file was restored\n");
         }
     }
-    for c in &report.callers {
-        let total = c.references.len() + c.more;
+    for change in report
+        .files
+        .iter()
+        .flat_map(|f| &f.edits)
+        .filter_map(|e| e.signature.as_ref())
+    {
         let _ = writeln!(
             s,
-            "warning: the signature of {} changed; {total} {} to it in files this edit does not change may need updating:",
-            c.symbol,
-            if total == 1 {
-                "reference"
-            } else {
-                "references"
-            }
+            "note: the signature of {} changed; check its callers",
+            change.name
         );
-        for r in &c.references {
-            let _ = writeln!(s, "  {}:{}", r.path, r.line);
-        }
-        if c.more > 0 {
-            let _ = writeln!(s, "  ... {} more", c.more);
-        }
     }
     let total = report.files.len();
     if report.dry_run {
