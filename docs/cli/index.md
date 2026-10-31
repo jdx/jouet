@@ -14,6 +14,9 @@
 ## Subcommands
 
 - [`jouet audit [FLAGS]`](/cli/audit.md)
+- [`jouet claim [--for <DUR>] [--note <TEXT>] [PATHS]… [SUBCOMMAND]`](/cli/claim.md)
+- [`jouet claim ls [--all]`](/cli/claim/ls.md)
+- [`jouet claim release [PATHS]…`](/cli/claim/release.md)
 - [`jouet commit [FLAGS] [PATHS]…`](/cli/commit.md)
 - [`jouet diag <SUBCOMMAND>`](/cli/diag.md)
 - [`jouet diag check [--changed] [--max <N>] [FILES]…`](/cli/diag/check.md)

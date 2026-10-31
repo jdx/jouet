@@ -41,6 +41,7 @@ pub(crate) fn probes(cwd: &Path, network: bool) -> Probes {
     let ledger = jouet_output::paths::state_dir().map(|d| d.join("ledger"));
     Probes::new(Some(cwd.to_path_buf()), ledger, network)
         .with_repo_key(crate::ledger::repo_key(cwd))
+        .with_claims(jouet_output::paths::state_dir().map(|d| d.join("claims")))
         .with_test_adapters(|dir| {
             crate::affected::near(dir)
                 .into_iter()

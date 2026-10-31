@@ -89,6 +89,11 @@ pub struct Case {
     /// Whether `jouet.git.state()` reports a dirty work tree; None when it
     /// has no answer, as for every other probe in an example.
     pub git_dirty: Option<bool>,
+    /// The agent session making the call.
+    pub session: Option<String>,
+    /// What `jouet.claims.held()` reads: every claim in the repository, as
+    /// `jouet claim` keeps them; None when it has no answer.
+    pub claims: Option<serde_json::Value>,
     /// The branch `jouet.git.state()` reports checked out.
     pub git_branch: Option<String>,
     /// What `jouet.git.ahead()` answers, for any branch.
@@ -259,6 +264,8 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         read_lines: None,
         fnox: None,
         git_dirty: None,
+        session: None,
+        claims: None,
         git_branch: None,
         git_ahead: None,
         stack: None,
@@ -406,6 +413,23 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
             files: f.files.clone(),
         }),
         git_dirty: t.git.as_ref().map(|g| g.dirty),
+        session: t.session.clone(),
+        claims: t.claims.as_ref().map(|claims| {
+            claims
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "pattern": c.pattern,
+                        "session": c.session,
+                        "worktree": c.worktree.as_deref().unwrap_or("/elsewhere"),
+                        "branch": c.branch,
+                        "note": c.note,
+                        "claimed_at": "2026-01-01T00:00:00Z",
+                        "expires_at": "2999-01-01T00:00:00Z",
+                    })
+                })
+                .collect()
+        }),
         git_branch: t.git.as_ref().and_then(|g| g.branch.clone()),
         git_ahead: t.git.as_ref().and_then(|g| g.ahead),
         stack: t.stack.as_ref().map(|s| {
@@ -481,6 +505,7 @@ impl Engine {
                 command: case.command.clone(),
                 path: case.path.clone(),
                 cwd: None,
+                session: case.session.clone(),
                 exit_code: match rule.event {
                     Event::PostToolUse => Some(case.exit_code.unwrap_or(0)),
                     Event::PreToolUse => case.exit_code,
@@ -500,6 +525,9 @@ impl Engine {
             }
             if let Some(stack) = &case.stack {
                 self.stub("stack:layer", stack.clone());
+            }
+            if let Some(claims) = &case.claims {
+                self.stub("claims", claims.clone());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {

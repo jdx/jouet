@@ -110,16 +110,20 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "wind",
         Some(
-            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent",
+            "a winding note at session start names a drafted rule or a proposal: `jouet wind show ID` reads it; or a session is worth reviewing: `jouet wind review SESSION` prints a prompt and a digest for a subagent; `jouet unwind` proposes retiring a rule of yours that is noisy or keeps getting overridden",
         ),
     ),
     (
-        "unwind",
-        Some("a rule of yours keeps getting overridden or is noisy: it proposes retiring it"),
+        "claim",
+        Some(
+            "working where other agent sessions on this machine also work: `jouet claim PATH... --note TEXT` tells them which files are yours, jouet's hooks warn when you edit or commit a path another session claims, and `jouet claim ls` lists who claims what",
+        ),
     ),
     // Not in the overview: it is at its 40-line budget. `jouet agent-help
     // graph` describes it, and `jouet read` and `jouet edit` use it.
     ("graph", None),
+    // `wind`'s line names it.
+    ("unwind", None),
     // Named where it is needed: in a winding note at session start, which
     // says what to ask the user.
     ("task", None),
@@ -376,6 +380,14 @@ fn short_synopsis(path: &[&str], flags: &[&str]) -> Option<String> {
         parts.push(flag_usage(flag));
     }
     Some(parts.join(" "))
+}
+
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 fn conventions() -> String {
