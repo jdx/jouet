@@ -20,7 +20,7 @@ jouet edit hash PATH...
 - **All or nothing.** Every edit in every file is applied in memory first. If any edit fails, no file is written and the output says so: `0 of 2 files written`. Each file is written to a temporary file beside it and renamed into place, keeping its permissions, and if a write fails part way, the files already written are restored.
 - **In order.** Edits to one file apply in the order given, and each one sees the result of the one before. Two spellings of the same file, such as `a.rs` and `sub/../a.rs` or its absolute path, are the same file.
 - **Exact.** Search text matches exactly, whitespace included. In a file with CRLF line endings, line breaks in the search and replacement text are treated as CRLF.
-- **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When it matches too often, it lists the line of every match, so you can add context or set a count.
+- **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When the text does occur, but inside a line or only with other indentation, it says so and where. When it matches too often, it lists the line of every match, so you can add context or set a count.
 - **Every problem at once.** A failed edit does not stop the others from being checked, so one run reports everything wrong with a spec.
 
 ## Spec formats
@@ -51,7 +51,7 @@ use crate::http::HTTP_FETCH;
 ```
 
 - `=== PATH` starts a file's section. Every block belongs to the section above it, and a section can appear more than once.
-- Block search text matches whole lines.
+- Block search text matches whole lines, indentation included. A search that holds the start of a line that goes on matches nothing; use `jouet edit replace` for text inside a line.
 - A block must match exactly once, unless it sets a count: `count=N` needs exactly `N` matches, and `count=all` replaces every match but still needs at least one.
 - An empty search creates the file with the replacement as its content. The file must not exist yet.
 - When the text being edited contains conflict markers itself, lengthen the fence. A block opened with ten `<` must be closed with ten `>`, and its separator is ten `=`:
@@ -287,7 +287,7 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `files[].added`, `files[].removed` | Lines added and removed |
 | `files[].error` | Why a file failed: `code` is `not_found`, `already_exists`, `hash_mismatch` or `not_text`, with a `message` |
 | `files[].diff` | The unified diff, with `--diff` |
-| `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
+| `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, the `closest` region for a search that matched nothing, and, for a block or patch search that matched nothing, a `near_miss`: `{"kind": "inside_line", "lines": [13]}` when the text occurs inside a line (with `multiline` when it spans several lines), or `{"kind": "whitespace", "lines": [13]}` when it matches once indentation and trailing whitespace are ignored. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
 | `callers` | For each definition whose signature changed: its `symbol`, `references` (`path`, `line`) in files the edit does not change, and how many `more` were left out of the list |
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
 | `diag` | The `--diag` result: `status` (`clean`, `introduced`, `refused` or `unavailable`), the `new` findings, `new_failed_steps`, and the `kept` and `fixed` counts |
