@@ -205,6 +205,22 @@ payload() {
 	assert_output ""
 }
 
+@test "a long log or document read whole does not warn: it has no outline" {
+	for i in $(seq 1 500); do printf 'line %d\n' "$i"; done >run.log
+	cp run.log notes.md
+	for i in $(seq 1 500); do printf 'fn f%d() {}\n' "$i"; done >src/long.rs
+
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload PreToolUse Bash '{"command": "cat run.log"}')"
+	assert_output ""
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload PreToolUse Read '{"file_path": "notes.md"}')"
+	assert_output ""
+
+	# The source file in the same read still counts.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload PreToolUse Bash '{"command": "cat run.log src/long.rs"}')"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial '[jouet rule: large-read]'
+}
+
 @test "read --map shows the definitions that matter, from the code graph, within the budget" {
 	init_repo
 	run --separate-stderr jouet read --map

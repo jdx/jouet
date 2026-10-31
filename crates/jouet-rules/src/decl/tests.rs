@@ -109,6 +109,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "fnox",
             "input",
             "max_args",
+            "min_code_lines",
             "min_read_lines",
             "paths",
             "prints",
@@ -133,6 +134,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
         [
             "action",
             "claims",
+            "code_lines",
             "command",
             "exit_code",
             "fnox",

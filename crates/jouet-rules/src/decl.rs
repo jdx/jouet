@@ -116,8 +116,8 @@ pub(crate) struct Requires {
 /// Which calls a rule matches. Every key given must hold; a list in a key
 /// matches if any of its items does (`text` excepted: every pattern must
 /// match). Every key but `tool`, `paths`, `unless_paths`, `input`,
-/// `unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is
-/// about a command, and needs `command`.
+/// `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox` and
+/// `secret_files` is about a command, and needs `command`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Matcher {
@@ -211,6 +211,10 @@ pub(crate) struct Matcher {
     /// read with `cat`, `head`, `tail`, `sed -n` or `nl`. jouet's hook counts
     /// them; set it in an example with `read_lines`.
     pub min_read_lines: Option<u32>,
+    /// Like `min_read_lines`, counting only source files `jouet read
+    /// --outline` can outline, so a long log or command output read whole
+    /// does not count. Set it in an example with `code_lines`.
+    pub min_code_lines: Option<u32>,
     /// For file tools: the path matches none of these patterns, read as in
     /// `paths`.
     #[serde(default, deserialize_with = "one_or_many")]
@@ -247,6 +251,7 @@ impl Matcher {
             unless_input: _,
             seen: _,
             min_read_lines: _,
+            min_code_lines: _,
             unless_paths: _,
             fnox: _,
             secret_files: _,
@@ -293,13 +298,14 @@ impl Matcher {
             || !self.unless_input.is_empty()
             || self.seen.is_some()
             || self.min_read_lines.is_some()
+            || self.min_code_lines.is_some()
             || !self.unless_paths.is_empty()
             || self.fnox.is_some()
             || self.secret_files.is_some()
             || self.with.is_some()
             || self.unless_with.is_some();
         if nested && not_command {
-            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `fnox`, `secret_files`, `with` or `unless_with`".into());
+            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox`, `secret_files`, `with` or `unless_with`".into());
         }
         if self.command.is_empty() && self.about_a_command() {
             return Some("it says how a command looks, but not which: add `command`".into());
@@ -369,6 +375,9 @@ pub(crate) struct CaseTable {
     /// How many lines of files the call reads, as jouet's hook would count
     /// them.
     pub read_lines: Option<u32>,
+    /// How many of those lines are in source files `jouet read --outline`
+    /// can outline.
+    pub code_lines: Option<u32>,
     /// The call runs in a project that uses fnox, whose config defines
     /// these secrets and files; omitted, it does not.
     pub fnox: Option<FnoxCase>,
@@ -462,7 +471,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox`, `git`, `session`, `claims` or `stack`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `code_lines`, `fnox`, `git`, `session`, `claims` or `stack`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

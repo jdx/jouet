@@ -123,7 +123,9 @@ fn handle(
             let engine = load(payload)?;
             let mut call = Call::from_hook(payload, harness.name());
             call.seen = seen(&call, log.session);
-            call.read_lines = reads::of(&call).and_then(|r| reads::line_count(&r));
+            let read = reads::of(&call);
+            call.read_lines = read.as_deref().and_then(reads::line_count);
+            call.code_lines = read.as_deref().and_then(reads::code_line_count);
             call.fnox = call
                 .cwd
                 .as_deref()

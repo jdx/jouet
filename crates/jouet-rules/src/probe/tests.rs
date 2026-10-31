@@ -467,7 +467,7 @@ fn scoped_lint_is_quiet_on_a_clean_work_tree() {
     );
     engine.set_probes(Probes::new(Some(work.clone()), None, false));
     let lint = Call {
-        command: Some("cargo clippy --workspace -- -D warnings 2>&1 | head -20".into()),
+        command: Some("cargo clippy --workspace 2>&1 | head -20".into()),
         ..bash()
     };
     // A freshly merged or checked-out tree: nothing to iterate on.

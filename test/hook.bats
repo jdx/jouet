@@ -189,7 +189,7 @@ stop_reason() {
 	git -C repo -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm init
 	lint() {
 		jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd, tool_name: "Bash",
-			tool_input: {command: "cargo clippy --workspace -- -D warnings 2>&1 | head -20"}}' |
+			tool_input: {command: "cargo clippy --workspace 2>&1 | head -20"}}' |
 			jouet hook claude pre-tool-use
 	}
 
