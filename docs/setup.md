@@ -1,5 +1,5 @@
 ---
-description: Install jouet's hooks into Claude Code or Codex, so agents are steered toward jouet's commands and cannot finish on a failing check.
+description: Install jouet's hooks into Claude Code, Codex, Cursor, Gemini CLI or Copilot, so agents are steered toward jouet's commands and cannot finish on a failing check.
 ---
 
 # Agent setup and hooks
@@ -11,6 +11,9 @@ The [skill](#the-skill-and-agent-help) is installed only with `--skill`, or when
 ```sh
 jouet setup claude              # Claude Code: ~/.claude/settings.json
 jouet setup codex               # Codex: ~/.codex/hooks.json
+jouet setup cursor              # Cursor: ~/.cursor/hooks.json
+jouet setup gemini              # Gemini CLI: ~/.gemini/settings.json
+jouet setup copilot             # Copilot CLI: ~/.copilot/hooks/jouet.json
 jouet setup claude --skill      # also ~/.claude/skills/jouet/SKILL.md
 jouet setup claude --project    # this repository, for you alone (.claude/settings.local.json)
 jouet setup claude --shared     # this repository, for everyone (.claude/settings.json)
@@ -31,15 +34,21 @@ The hooks, their rules and the settings below are new and may change between rel
 | Claude Code | `--shared` | `.claude/settings.json` | `.claude/skills/jouet/SKILL.md` |
 | Codex | `--global` (default) | `~/.codex/hooks.json` (`$CODEX_HOME` if set) | `~/.agents/skills/jouet/SKILL.md` |
 | Codex | `--shared` | `.codex/hooks.json` | `.agents/skills/jouet/SKILL.md` |
+| Cursor | `--global` (default) | `~/.cursor/hooks.json` | `~/.agents/skills/jouet/SKILL.md` |
+| Cursor | `--shared` | `.cursor/hooks.json` | `.agents/skills/jouet/SKILL.md` |
+| Gemini CLI | `--global` (default) | `~/.gemini/settings.json` | `~/.agents/skills/jouet/SKILL.md` |
+| Gemini CLI | `--shared` | `.gemini/settings.json` | `.agents/skills/jouet/SKILL.md` |
+| Copilot | `--global` (default) | `~/.copilot/hooks/jouet.json` (`$COPILOT_HOME/hooks` if set) | `~/.agents/skills/jouet/SKILL.md` |
+| Copilot | `--shared` | `.github/hooks/jouet.json` | `.agents/skills/jouet/SKILL.md` |
 
 - **`--project` is yours alone.** It writes at the root of the enclosing git repository, into Claude Code's `.claude/settings.local.json`, which Claude Code reads alongside `settings.json` but which is not meant to be committed. Claude Code ignores that file in git once it has written to it itself; until then, and for the skill, setup says when git does not ignore them, so you can list them in `.gitignore` or `.git/info/exclude`.
 - **`--shared` is for everyone who clones the repository.** It writes the tracked `.claude/settings.json` or `.codex/hooks.json`, for a team that has agreed to use jouet. Since the hooks do nothing where jouet is not installed, contributors without it are not broken, but they get no hooks either.
-- **Codex has no hooks file of your own in a project.** It reads project hooks only from the repository's `.codex/hooks.json` and `.codex/config.toml`, so `jouet setup codex --project` is refused: use `--global`, or `--shared` to install there for everyone.
-- **Merges, never clobbers.** jouet adds its own matcher group to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone.
+- **Only Claude Code has a project hooks file of your own.** Codex reads project hooks only from the repository's `.codex/hooks.json` and `.codex/config.toml`, Cursor from `.cursor/hooks.json`, Gemini CLI from `.gemini/settings.json` and Copilot from `.github/hooks/*.json`, so `--project` is refused for them: use `--global`, or `--shared` to install there for everyone.
+- **Merges, never clobbers.** jouet adds its own matcher group (in Cursor's and Copilot's files, its own handler) to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone.
 - **Re-running is a no-op.** jouet recognises its entries by their command, which runs `jouet hook ...`, and only rewrites them when they differ from what this version installs. Entries an older version installed, such as the bare `jouet hook claude stop`, are replaced in place, not duplicated.
-- **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`.
+- **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`; Copilot's `jouet.json`, which is jouet's alone, is removed.
 - **The skill is jouet's only while it is unedited.** setup ends the `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps any other `skills/jouet/SKILL.md`, including one you have edited. Running setup without `--skill` removes the skill an earlier version installed, while it is unedited.
-- **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's. Upgrading from a version that installed bare commands changes them, so they need trusting again.
+- **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's. Upgrading from a version that installed bare commands changes them, so they need trusting again. Cursor runs a project's hooks only in a trusted workspace, Gemini CLI runs hooks from settings files (yours too) only in a trusted folder, and Copilot reads a repository's hooks only once you trust the folder, and reads hooks only when it starts.
 
 ### When jouet is not on PATH
 
@@ -51,6 +60,8 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-to
 
 So a contributor without jouet, or an app started with a shorter `PATH` than your shell's, gets no hooks rather than an error on every tool call. setup says so when jouet is not on `PATH` where you run it. The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }`.
 
+Cursor, Gemini CLI and Copilot read a hook's stdout as JSON even when it has nothing to say, so their guard prints `{}` instead: `sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'`. Copilot's handlers have a `bash` and a `powershell` command. Cursor and Gemini CLI have one command, which they run with PowerShell on Windows, so a `--global` install made on Windows gets the PowerShell form; a `--shared` one gets `sh -c`, for everyone else who clones the repository.
+
 The hooks find jouet on `PATH` rather than at the path of the jouet that ran setup. That path changes on every upgrade with mise, Homebrew and other version managers, differs between machines that share a settings file, and means nothing to anyone else in a `--shared` install. A hook pointing at a path that is gone would skip just as silently, but on every machine after every upgrade.
 
 ### Worktrees
@@ -58,6 +69,34 @@ The hooks find jouet on `PATH` rather than at the path of the jouet that ran set
 Claude Code reads `.claude/settings.local.json` from the main checkout's root, also in sessions that run in a linked worktree such as the desktop app's `.claude/worktrees/*`, so `--project` writes it there even when you run it from a worktree. The skill is read through from the main checkout only when the worktree has no `.claude/skills` directory of its own; a repository that tracks `.claude/skills` has one in every worktree. On Windows Claude Code reads the local file from each worktree instead, and a new worktree starts without it unless the repository's [`.worktreeinclude`](https://code.claude.com/docs/en/worktrees#copy-gitignored-files-into-worktrees) lists it.
 
 If you work across many repositories or worktrees, install with `--global` instead, and choose which hooks run with the [settings](#settings) below.
+
+### Cursor, Gemini CLI and Copilot
+
+Each has documented command hooks for the four events jouet uses, and `jouet hook` reads their payloads into the shape the [rules](/rules) see: their shell tools become `Bash` (`Shell`, `run_shell_command`, `bash`), their file tools `Read`, `Grep`, `Edit` and `Write`, with Claude Code's field names, so a rule matches the same calls in every harness. What each cannot do:
+
+| | Cursor | Gemini CLI | Copilot |
+|---|---|---|---|
+| Session start | `sessionStart` | `SessionStart` | `sessionStart` |
+| Before a tool | `preToolUse`: `Shell`, `Read`, `Grep` | `BeforeTool`: `run_shell_command`, `read_file`, `grep_search`, `replace`, `write_file` | `preToolUse`: `bash`, `powershell`, `view`, `create`, `edit`, `grep`, `rg` |
+| Rule actions | deny; warn after the call (`preToolUse` can only allow or deny, so the warning waits for `postToolUse`) | deny; warn after the call (`BeforeTool` can only allow or deny, so the warning waits for `AfterTool`) | deny; warn before the call, as `additionalContext` |
+| After a tool | `postToolUse`, `postToolUseFailure` (`Shell`, `Read`, `Grep`); exit code from `tool_output` | `AfterTool`; exit code from the `Exit Code: N` line of the result, absent for 0 | `postToolUse`, `postToolUseFailure`; exit code from `<exited with exit code N>` in the result |
+| After an edit | `afterFileEdit`, which formats with `[edit] fix_after` but cannot report it | `AfterTool`: `replace`, `write_file` | `postToolUse`: `create`, `edit` |
+| Stop gate | `stop` blocks with a `followup_message`, Cursor's next user message: once (`loop_count`), and only for a completed turn | `AfterAgent` blocks (`decision: "block"`), once (`stop_hook_active`) | `agentStop` blocks (`decision: "block"`), once (`stop_hook_active`) |
+
+- **Cursor** does not enforce a denial of a file read today (Cursor staff [confirmed](https://forum.cursor.com/t/154377) it is broken), so a rule on `Read` only warns there in effect. Its `Write` tool is not steered: it sends the whole file to hooks, which fails to start them for a large one. Cursor also runs the hooks in Claude Code's `settings.json` files: while jouet's Cursor hooks are installed, jouet's Claude Code hooks step aside in Cursor sessions (they tell by `CURSOR_VERSION` without `CLAUDECODE`), so each call gets one verdict. Cloud agents run only a repository's hooks, and not `sessionStart`.
+- **Gemini CLI** gives the model a shell command's exit code only as text, so a command cancelled, killed by a signal or moved to the background is not recorded. Its matchers are unanchored regular expressions, so jouet's are anchored, and each handler is named (`jouet-pre-tool-use`, ...) so `hooksConfig.disabled` can turn one off.
+- **Copilot**'s hooks reference does not list its tools' arguments; jouet reads `view`, `create` and `edit` by the names Copilot CLI sends today (`path`, `view_range`, `file_text`, `old_str`, `new_str`). A shell result without an exit code is not recorded. The cloud agent reads `.github/hooks/` from the default branch only, and its runner needs jouet on `PATH`. Copilot also reads a repository's `.claude/settings.json`; there jouet's Claude Code hooks have no way to tell Copilot from Claude Code, so a repository with both `--shared` installs runs each hook twice.
+- **Warnings are never turned into denials.** A decision about a shell command, warnings included, goes to the [ledger](#the-ledger) when the call is checked, as in every harness, so `jouet stats` and winding see it whether or not the agent did. A warning held for after the call reaches the agent when the harness runs its post-tool-use hook for that call, which jouet installs for every steered tool, failures included; a call another hook denies never runs, and its warning stays in the ledger only.
+- **Payloads** in `test/fixtures/hooks` follow each harness's documentation; jouet's tests replay them without the harness.
+
+### opencode and Amp
+
+`jouet setup` does not support these two, because neither has command hooks:
+
+- **opencode** has only JavaScript and TypeScript plugins, and its V1 and V2 plugin APIs are incompatible.
+- **Amp** has only TypeScript plugins, which replaced its `amp.permissions` rules with `delegate`, the one way it ran an outside program before a tool call.
+
+jouet's commands work there all the same; only the hooks do not: no primer, rules or stop check. Add the snippet `jouet skill --format agents-md` prints to their `AGENTS.md`, which points the agent at `jouet agent-help`.
 
 ## The hooks
 
@@ -126,9 +165,9 @@ The stop hook keeps an agent from declaring success while a test, lint or build 
 - **Partial runs after a change.** When the newest test run is a partial pass and the tree has changed since the last full test pass (or there has been none in the session), the hook blocks once and asks for the full suite, or for a reason it is not needed. Partial runs at the tree the full suite passed at are fine. Lint and build runs are not asked about.
 - **The tree.** Each run records the tree it ran against: a hash of the content of every tracked file, staged or not, built from `git ls-files -s` and `git hash-object` (without `-w`) for files changed in the work tree, so nothing is written to the repository. Untracked and ignored files are left out, and a commit with the same content hashes the same, so committing what was tested keeps the tree. (`git stash create` gives a real tree id, but writes objects on every check.)
 - **hk.** In a repository with an hk config, a passing hk check (`hk check`, `hk run check` or `jouet diag check`) covering the changed files is remembered with its tree; if files change after it, the hook asks for another check. A failing one is a lint failure like any other. See [one stop gate](/commands/diag#one-stop-gate) for running hk's own stop hook inside jouet's.
-- **Jobs left running.** When the agent stops, the hook names the [`jouet job`](/commands/job)s that session started in this work tree that are still running, with the `jouet job stop` that would stop them. That is a note for the user (Claude Code's `systemMessage`), never a reason to block; when a failed check blocks the stop, the note goes into the reason too. A job knows its session from `JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` when it was started.
+- **Jobs left running.** When the agent stops, the hook names the [`jouet job`](/commands/job)s that session started in this work tree that are still running, with the `jouet job stop` that would stop them. That is a note for the user (Claude Code's and Gemini CLI's `systemMessage`; Cursor and Copilot have no such note at a stop), never a reason to block; when a failed check blocks the stop, the note goes into the reason too. A job knows its session from `JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` when it was started.
 - **Blocking once.** The hook blocks with a one-line reason, and if the agent stops again straight away (the harness reports `stop_hook_active`), its answer stands. A check that cannot pass never traps the agent.
-- **Where runs are recorded.** Claude Code reports each command's exit code to the post-tool-use hooks, which keep each kind's newest run, newest full pass and uncleared failures in `$XDG_STATE_HOME/jouet/sessions/<session>.json`. Updates take a lock, so commands finishing at once cannot drop each other's runs, and files untouched for a week are removed. Codex sends hooks no exit code, so its stop hook reads the commands in the last 8 MiB of the session transcript instead, and runs them through the same rules. That format is Codex's own: if it changes, the hook stops blocking rather than blocking wrongly. The transcript does not say which tree each command saw, so for Codex any partial test run after a full one asks for the full suite once.
+- **Where runs are recorded.** Claude Code reports each command's exit code to the post-tool-use hooks, which keep each kind's newest run, newest full pass and uncleared failures in `$XDG_STATE_HOME/jouet/sessions/<session>.json`. Updates take a lock, so commands finishing at once cannot drop each other's runs, and files untouched for a week are removed. Cursor, Gemini CLI and Copilot report exit codes too, each in its own way ([above](#cursor-gemini-cli-and-copilot)), and their runs are kept the same way. Codex sends hooks no exit code, so its stop hook reads the commands in the last 8 MiB of the session transcript instead, and runs them through the same rules. That format is Codex's own: if it changes, the hook stops blocking rather than blocking wrongly. The transcript does not say which tree each command saw, so for Codex any partial test run after a full one asks for the full suite once.
 
 ### Before pushing and landing
 
@@ -141,7 +180,7 @@ Known false positives and misses:
 
 - A check you expected to fail, such as a test written to fail first or a failure that is already on the main branch, still blocks once. Say so in the reply and stop again.
 - A full pass of a different selection does not clear a partial failure unless it is a full run: `cargo test -p a` failing, then `cargo test -p a -p b` passing, still blocks once.
-- A check piped through `head` or `tail` reads as whatever that command returned, so its failures are missed unless `set -o pipefail` is on.
+- A check piped through `head`, `tail` or `grep` exits with that command's status, not the check's, so without `set -o pipefail` it is not recorded at all: it neither clears an earlier failure nor fails one. Run it through `jouet test` instead, or with `pipefail`.
 - A command that changes tracked files and then runs the tests, such as a formatter in the same script, is recorded at the tree after it finished.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.
 
@@ -207,8 +246,8 @@ An organisation's [enforced rules](/rules#enforced-rules) in `/etc/jouet/rules` 
 
 ## The primer, the skill and `agent-help`
 
-The session-start primer is four lines, about 300 tokens: the command families by name, usage for `jouet commit`, `jouet edit replace` and `jouet pr threads reply`, the rules that deny with the command each suggests, and the stop check. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them. It also says that Python scripts that rewrite files are denied, and that `jouet edit replace` takes several files and replacements in one call, because agents reached for a heredoc to batch replacements even with the `python-edit` rule named.
+The session-start primer is four lines, about 340 tokens: the command families by name, usage for `jouet test`, `jouet commit`, `jouet edit replace` and `jouet pr threads reply` with a note that these need no lookup, the rules that deny with the command each suggests, and the stop check. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them. It also says that Python scripts that rewrite files are denied, and that `jouet edit replace` takes several files and replacements in one call, because agents reached for a heredoc to batch replacements even with the `python-edit` rule named.
 
 `jouet skill` prints the skill `jouet setup --skill` installs, about 25 lines of when and why that end in "run `jouet agent-help`". setup leaves it out by default because the primer covers it: with both, every request carried the command list twice, and Codex read the skill file before starting. `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills or hooks.
 
-`jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk, beads (`bd`) or [fnox](https://fnox.jdx.dev) is on `PATH`, the guide says what each is for instead of jouet duplicating it.
+`jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command's usage in about 1 kB: when to reach for it, the invocations agents use, each with what it does, the exit codes, and a last line saying what `--full` adds. `jouet agent-help COMMAND --full` prints the whole guide: that usage, then every subcommand with all its flags and details, and the output conventions. Agents used to read the whole guide, up to 7 kB, before a command's first use. With `--json`, `text` is the whole guide and `usage` the short one. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk, beads (`bd`) or [fnox](https://fnox.jdx.dev) is on `PATH`, the guide says what each is for instead of jouet duplicating it.

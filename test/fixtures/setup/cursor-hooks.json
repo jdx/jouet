@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor session-start'",
+        "timeout": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor pre-tool-use'",
+        "matcher": "Shell|Read|Grep",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor post-tool-use'",
+        "matcher": "Shell|Read|Grep",
+        "timeout": 10
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor post-tool-use-failure'",
+        "matcher": "Shell|Read|Grep",
+        "timeout": 10
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor post-edit'",
+        "timeout": 10
+      }
+    ],
+    "stop": [
+      {
+        "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'",
+        "timeout": 10
+      }
+    ]
+  }
+}
