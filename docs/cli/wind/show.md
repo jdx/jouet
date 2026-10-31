@@ -6,7 +6,7 @@
 Show a note or a proposal: what was noticed, and what was drafted
 
 ## Arguments
-- **`<ID>`** — The id of a note (n3), a proposal (p2) or a suggested review (r1)
+- **`<ID>`** — The id of a note (n3), a proposal (p2), a suggested review (r1) or a mise task (t1)
 
 ## Flags
 - **`-h --help`** — Print help

@@ -57,6 +57,10 @@
           },
           "default": []
         },
+        "requires": {
+          "description": "The project files the rule is about, such as `pitchfork.toml`: it\nonly runs where one of them is in the call's directory or a\ndirectory above it. Its examples run as if one were.",
+          "$ref": "#/$defs/Requires"
+        },
         "message": {
           "description": "What the agent is told when the rule matches. Required unless a\n`script` decides.",
           "type": "string"
@@ -123,6 +127,21 @@
           "const": "post-tool-use"
         }
       ]
+    },
+    "Requires": {
+      "description": "Where a rule applies.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Files of which one must be in the call's directory or a directory\nabove it, such as `pitchfork.toml` or `.config/pitchfork.toml`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
     },
     "OneOrMany_Matcher": {
       "anyOf": [

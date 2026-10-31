@@ -74,6 +74,19 @@ const BUILTIN: &[(&str, &str)] = &[
         "affected-tests",
         include_str!("../rules/affected-tests.toml"),
     ),
+    // Before the job rules: a daemon the project declares is pitchfork's.
+    (
+        "pitchfork-start",
+        include_str!("../rules/pitchfork-start.toml"),
+    ),
+    (
+        "pitchfork-stop",
+        include_str!("../rules/pitchfork-stop.toml"),
+    ),
+    (
+        "pitchfork-logs",
+        include_str!("../rules/pitchfork-logs.toml"),
+    ),
     ("job-start", include_str!("../rules/job-start.toml")),
     ("job-ready", include_str!("../rules/job-ready.toml")),
     ("job-logs", include_str!("../rules/job-logs.toml")),
@@ -96,6 +109,14 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
         "affected-tests.luau",
         include_str!("../rules/affected-tests.luau"),
+    ),
+    (
+        "pitchfork-start.luau",
+        include_str!("../rules/pitchfork-start.luau"),
+    ),
+    (
+        "pitchfork-stop.luau",
+        include_str!("../rules/pitchfork-stop.luau"),
     ),
     ("job-start.luau", include_str!("../rules/job-start.luau")),
     (
@@ -263,6 +284,9 @@ pub struct Rule {
     pub line: usize,
     /// The script a TOML rule names, as it names it.
     pub script: Option<String>,
+    /// The project files a rule is about, one of which must be there for it
+    /// to run.
+    requires: Option<decl::Requires>,
     body: Body,
 }
 
@@ -288,6 +312,14 @@ enum Body {
 }
 
 impl Rule {
+    /// The command a matcher rule names to run instead.
+    pub fn suggest(&self) -> Option<&str> {
+        match &self.body {
+            Body::Match { suggest, .. } => suggest.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Why this rule's file format is deprecated and how to move off it,
     /// for a rule of yours or a repository's written as a whole `.luau` file.
     pub fn deprecation(&self) -> Option<String> {
@@ -873,6 +905,7 @@ impl Engine {
             format: Format::Toml,
             line: 1,
             script: None,
+            requires: None,
             body: Body::None,
         };
         let decls = match decl::parse(&source.code) {
@@ -946,6 +979,7 @@ impl Engine {
             format: Format::Toml,
             line,
             script: d.script.as_ref().map(|s| s.0.clone()),
+            requires: d.requires,
             body: Body::None,
         };
         let problem = problem.or_else(|| examples.as_ref().err().cloned());
@@ -1031,6 +1065,7 @@ impl Engine {
             format: Format::Luau,
             line: 1,
             script: None,
+            requires: None,
             body: Body::None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {
@@ -1222,7 +1257,7 @@ impl Engine {
                 message,
                 suggest: suggested,
             } => {
-                if !matcher::any(matchers, call, commands) {
+                if !matcher::any(matchers, call, commands) || !self.in_use(rule, call, enforce) {
                     return Ok((None, Vec::new()));
                 }
                 suggest.clone_from(suggested);
@@ -1237,6 +1272,9 @@ impl Engine {
                 table,
             } => {
                 if !matchers.is_empty() && !matcher::any(matchers, call, commands) {
+                    return Ok((None, Vec::new()));
+                }
+                if !self.in_use(rule, call, enforce) {
                     return Ok((None, Vec::new()));
                 }
                 let table = self.script(&rule.name, code, table)?;
@@ -1276,6 +1314,34 @@ impl Engine {
             }
         };
         Ok((decision, records))
+    }
+
+    /// Whether a file a rule requires is in the call's directory or one
+    /// above it. Only a call that is enforced asks: examples run as if one
+    /// were.
+    fn in_use(&self, rule: &Rule, call: &Call, enforce: bool) -> bool {
+        !enforce || self.in_use_at(rule, call.cwd.as_deref().map(Path::new))
+    }
+
+    /// Whether a file a rule requires is in the probes' directory or one
+    /// above it, as for a call made there. A rule that requires none always
+    /// applies.
+    pub fn in_use_here(&self, rule: &Rule) -> bool {
+        self.in_use_at(rule, None)
+    }
+
+    /// Looks in `cwd`, else the probes' directory, else this process's.
+    fn in_use_at(&self, rule: &Rule, cwd: Option<&Path>) -> bool {
+        let Some(requires) = &rule.requires else {
+            return true;
+        };
+        let probes = self.probes.borrow();
+        let here = std::env::current_dir().ok();
+        let dir = cwd
+            .map(Path::to_path_buf)
+            .or_else(|| probes.as_ref().and_then(Probes::dir))
+            .or(here);
+        dir.is_some_and(|dir| probe::has_file(&requires.files, &dir))
     }
 
     /// Runs a Luau rule's `check` under its budget: the action and message
@@ -1335,6 +1401,21 @@ fn compose(message: &str, suggest: Option<&str>) -> String {
 fn rule_problem(d: &decl::RuleDecl, event: Event) -> Option<String> {
     let matchers = &d.matchers;
     let message = d.message.as_deref();
+    if let Some(r) = &d.requires {
+        if r.files.is_empty() {
+            return Some("`requires` names the `files` the rule is about".into());
+        }
+        if let Some(file) = r.files.iter().find(|f| {
+            f.is_empty()
+                || Path::new(f)
+                    .components()
+                    .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        }) {
+            return Some(format!(
+                "`requires.files` are paths within a directory, such as \"pitchfork.toml\", not `{file}`"
+            ));
+        }
+    }
     for (i, m) in matchers.iter().enumerate() {
         if let Some(problem) = m.problem(false) {
             let at = if matchers.len() == 1 {

@@ -1,17 +1,17 @@
 ---
-description: Install jouet's hooks and skill into Claude Code or Codex, so agents are steered toward jouet's commands and cannot finish on a failing check.
+description: Install jouet's hooks into Claude Code or Codex, so agents are steered toward jouet's commands and cannot finish on a failing check.
 ---
 
 # Agent setup and hooks
 
-`jouet setup` connects jouet to a coding agent's harness. It installs two things:
+`jouet setup` connects jouet to a coding agent's harness. It installs **hooks** that call back into `jouet hook`. They prime each session with a few lines about jouet, run jouet's [rules](/rules), which deny a handful of costly hand-rolled patterns and name the jouet command or git habit to use instead, and stop the agent from finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code.
 
-- **A skill** that tells the agent when to reach for jouet. It is deliberately thin: the flags live in the binary, behind `jouet agent-help`, so the skill never goes stale when jouet is upgraded.
-- **Hooks** that call back into `jouet hook`. They prime each session with a short guide, run jouet's [rules](/rules), which deny a handful of costly hand-rolled patterns and name the jouet command or git habit to use instead, and stop the agent from finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code.
+The [skill](#the-skill-and-agent-help) is installed only with `--skill`, or when priming is turned off: the primer already tells the agent what the skill would, in every session.
 
 ```sh
-jouet setup claude              # Claude Code: ~/.claude/settings.json and ~/.claude/skills/jouet/
-jouet setup codex               # Codex: ~/.codex/hooks.json and ~/.agents/skills/jouet/
+jouet setup claude              # Claude Code: ~/.claude/settings.json
+jouet setup codex               # Codex: ~/.codex/hooks.json
+jouet setup claude --skill      # also ~/.claude/skills/jouet/SKILL.md
 jouet setup claude --project    # this repository, for you alone (.claude/settings.local.json)
 jouet setup claude --shared     # this repository, for everyone (.claude/settings.json)
 jouet setup codex --dry-run     # show the diff, write nothing
@@ -38,7 +38,7 @@ The hooks, their rules and the settings below are new and may change between rel
 - **Merges, never clobbers.** jouet adds its own matcher group to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone.
 - **Re-running is a no-op.** jouet recognises its entries by their command, which runs `jouet hook ...`, and only rewrites them when they differ from what this version installs. Entries an older version installed, such as the bare `jouet hook claude stop`, are replaced in place, not duplicated.
 - **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`.
-- **The skill is jouet's only while it is unedited.** setup ends the `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps any other `skills/jouet/SKILL.md`, including one you have edited, with a note.
+- **The skill is jouet's only while it is unedited.** setup ends the `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps any other `skills/jouet/SKILL.md`, including one you have edited. Running setup without `--skill` removes the skill an earlier version installed, while it is unedited.
 - **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's. Upgrading from a version that installed bare commands changes them, so they need trusting again.
 
 ### When jouet is not on PATH
@@ -63,7 +63,7 @@ If you work across many repositories or worktrees, install with `--global` inste
 
 | Event | Claude Code | Codex | What jouet does |
 |---|---|---|---|
-| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the installed commands and the active rules, and in a fnox project, how to use its secrets. |
+| Session start | `SessionStart` | `SessionStart` | Adds a few lines of context: the command families by name, how to commit and edit with jouet, the rules that deny and what each suggests instead, and in a fnox project, how to use its secrets. |
 | Before a shell command, a Read or a Grep | `PreToolUse` (`Bash\|Read\|Grep`) | `PreToolUse` (`^Bash$`) | Runs the pre-tool-use rules: denies the command with one line of advice, or passes on a warning. |
 | After a shell command or a Read | `PostToolUse` (`Bash\|Read`), `PostToolUseFailure` (`Bash`) | none | Runs the post-tool-use rules, which record test, lint and build runs, and remembers which lines of which files the session read. |
 | After a file edit | `PostToolUse` (`Edit\|Write\|MultiEdit`) | none | With `[edit] fix_after`, formats the file with the project's hk fixers ([how](/commands/diag#formatting-after-edits)); otherwise nothing. |
@@ -99,6 +99,11 @@ The built-in rules:
 | `job-ready` | `sleep` together with `curl`, `wget`, `http` or `nc` against `localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]`, as in `sleep 5 && curl localhost:3000` or `until curl ...; do sleep 1; done` | `jouet job start ID --http URL -- CMD`, or for a server already running `jouet wait http URL` (`jouet wait port PORT` for one that does not speak HTTP) |
 | `job-logs` | warns on `tail -f` of a `*.log` or `*.out` file, and on reading `nohup.out` | `jouet job logs ID -n 50` |
 | `job-stop` | warns on `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall` of a dev server, `fuser -k` and `kill-port` | `jouet job stop ID` |
+| `pitchfork-start` | starting by hand a daemon the project's pitchfork config declares: a command that is a daemon's `run` command (arguments added or not), or a server told to listen on a daemon's port | `pitchfork start ID`, with the daemon named |
+| `pitchfork-stop` | `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall`, `fuser -k` or `kill-port` aimed at a declared daemon's port or command line | `pitchfork stop ID` or `pitchfork restart ID` |
+| `pitchfork-logs` | warns on `pitchfork logs --follow` | `pitchfork logs ID -n 50` |
+
+The `pitchfork-start` and `pitchfork-stop` rules run only in a project with a pitchfork config (`pitchfork.toml`, `pitchfork.local.toml`, `.config/pitchfork.toml` or `.config/pitchfork.local.toml` in the call's directory or one above it), and read the daemons it declares from the files, without running pitchfork. They run before the `job-*` rules, so a declared daemon goes to pitchfork and anything else to `jouet job`; elsewhere the session-start primer leaves them out. The stop hook leaves pitchfork daemons alone: they are meant to keep running.
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.
 
@@ -192,8 +197,10 @@ enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 
 [Self-winding](/winding) is on after setup: the session-start primer shows at most two notes about rules jouet drafted from the ledger. `JOUET_WIND=0` turns it off.
 
-## The skill and `agent-help`
+## The primer, the skill and `agent-help`
 
-`jouet skill` prints the skill `jouet setup` installs, about 25 lines of when and why that end in "run `jouet agent-help`". `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills.
+The session-start primer is four lines, about 250 tokens: the command families by name, usage for `jouet commit` and `jouet edit replace`, the rules that deny with the command each suggests, and the stop check. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them.
+
+`jouet skill` prints the skill `jouet setup --skill` installs, about 25 lines of when and why that end in "run `jouet agent-help`". setup leaves it out by default because the primer covers it: with both, every request carried the command list twice, and Codex read the skill file before starting. `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills or hooks.
 
 `jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command in full: when to reach for each command, its flags, the output conventions and the exit-code table. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk, beads (`bd`) or [fnox](https://fnox.jdx.dev) is on `PATH`, the guide says what each is for instead of jouet duplicating it.

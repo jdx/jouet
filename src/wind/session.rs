@@ -281,6 +281,33 @@ pub(crate) fn digest(
     ))
 }
 
+/// The shell commands a session ran, for `jouet task propose`: raw, so
+/// secrets are the caller's to look for. `None` when the transcript is
+/// outside `project` or cannot be read.
+pub(crate) fn shell_runs(
+    found: &Found<'_>,
+    project: Option<&Path>,
+) -> Option<Vec<super::tasks::Run>> {
+    let transcript = read(found, project, true)?;
+    let session = transcript.session.clone();
+    Some(
+        transcript
+            .calls
+            .into_iter()
+            .filter(|c| c.tool == jouet_audit::Tool::Shell)
+            .filter_map(|c| {
+                Some(super::tasks::Run {
+                    session: session.clone(),
+                    command: c.command?,
+                    failed: c.failed,
+                    duration_ms: c.duration_ms.unwrap_or(0),
+                    output_bytes: c.output_bytes,
+                })
+            })
+            .collect(),
+    )
+}
+
 /// Digests the transcript a hook names, for the stop hook's threshold.
 pub(crate) fn digest_path(harness: &str, path: &Path, redactor: &Redactor) -> Option<Digest> {
     let readers = Readers::from_env(Some(harness)).ok()?;
