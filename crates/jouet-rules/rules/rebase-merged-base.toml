@@ -1,0 +1,52 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "rebase-merged-base"
+why = "After a stacked PR's prerequisite merges, often squashed, rebasing the layer above onto the trunk replays commits the trunk already has in another form, conflicts, and needs a force push; merging the trunk in does not."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["stack", "sync"]
+# The matcher finds a rebase; the script asks whether the branch is a
+# stacked layer whose prerequisite merged: from gh-stack's metadata, or,
+# with `rules.network`, from GitHub.
+script = "rebase-merged-base.luau"
+
+[[rule.match]]
+command = "git rebase"
+unless_flags = [
+  "--abort",
+  "--continue",
+  "--skip",
+  "--quit",
+  "--edit-todo",
+  "--show-current-patch",
+  "-h",
+  "--help",
+]
+
+# gh-stack's own restack cascades a rebase and pushes with a force.
+[[rule.match]]
+command = ["gh stack rebase", "gh stack sync"]
+unless_flags = ["-h", "--help"]
+
+[rule.examples]
+fires = [
+  { command = "git rebase origin/main", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "git fetch && git rebase -i main", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "git rebase --onto main feat/parser", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "gh stack rebase", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "gh stack sync", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+]
+quiet = [
+  # The prerequisite has not merged.
+  { command = "git rebase origin/main", stack = { branch = "feat/cache", parent = "feat/parser" } },
+  # The bottom layer, on the trunk itself.
+  { command = "git rebase origin/main", stack = { branch = "feat/parser", parent = "main" } },
+  # Not in a stack jouet knows of.
+  "git rebase origin/main",
+  { command = "git rebase --continue", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "git rebase --abort", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  { command = "git merge origin/main", stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true } },
+  "echo 'git rebase origin/main'",
+]

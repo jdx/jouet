@@ -10,6 +10,8 @@ setup() {
 	load "test_helper/common_setup"
 	_common_setup
 	export JOUET_GITHUB_API_URL="http://127.0.0.1:9" JOUET_GITHUB_TOKEN=test-token JOUET_DISPLAY=plain
+	unset JOUET_HOOKS JOUET_HOOKS_STEER JOUET_RULES_DISABLE
+	export XDG_CONFIG_HOME="$BATS_TEST_TMPDIR/config"
 	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 	export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 	git init -q -b main repo
@@ -158,4 +160,47 @@ with_origin() {
 	assert_failure 1
 	assert_line --index 2 --regexp "^STOPPED at b: \`b\` would not have all of \`a\`'s changes: lib.txt \(undoes [0-9a-f]+ a: fix again\)$"
 	assert_line --index 4 '  next: in `b`, restore them with `git checkout a -- lib.txt` and commit, unless the difference is meant; then rerun `jouet stack sync`'
+}
+
+# A pre-tool-use hook call for shell command $1, in this directory.
+hook() {
+	jq -cn --arg cwd "$PWD" --arg c "$1" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' |
+		jouet hook claude pre-tool-use
+}
+
+@test "resetting a branch to its remote copy warns when it would drop local commits" {
+	with_origin
+	cd ../wt-b
+	run --separate-stderr hook 'git checkout -B b origin/b'
+	assert_output ''
+	# A fix committed on b but not pushed.
+	echo fix >fix.txt
+	git add fix.txt
+	git commit -qm 'b: fix'
+	run --separate-stderr hook 'git checkout -B b origin/b'
+	assert_equal "$(jq -r .hookSpecificOutput.additionalContext <<<"$output")" \
+		'This drops 1 commit on the local `b` that `origin/b` does not have, such as fixes not pushed yet. Keep them by merging instead: `git merge origin/b` on `b`, or `jouet stack sync` for a stack of PRs. [jouet rule: reset-to-remote]'
+	run --separate-stderr hook 'git reset --hard origin/b'
+	assert_output --partial 'This drops 1 commit on the local `b`'
+	run --separate-stderr hook 'git reset --hard HEAD^'
+	assert_output ''
+}
+
+@test "rebasing a layer whose prerequisite merged warns, pointing at stack sync" {
+	with_origin
+	cat >.git/gh-stack <<-'JSON'
+		{"stacks":[{"trunk":{"branch":"main"},"branches":[{"branch":"a","pullRequest":{"number":1}},{"branch":"b","pullRequest":{"number":2}}]}]}
+	JSON
+	cd ../wt-b
+	run --separate-stderr hook 'git rebase origin/main'
+	assert_output ''
+	# a merged on GitHub, which deleted its branch; the fetch pruned it.
+	git push -q origin --delete a
+	git fetch -q --prune origin
+	run --separate-stderr hook 'git rebase origin/main'
+	assert_output --partial '`b` is stacked on `a`, which has merged.'
+	assert_output --partial '`jouet stack sync` does that from the local branch'
+	run --separate-stderr hook 'git rebase --continue'
+	assert_output ''
 }

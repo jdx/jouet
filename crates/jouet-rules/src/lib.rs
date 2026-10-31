@@ -66,6 +66,14 @@ const BUILTIN: &[(&str, &str)] = &[
     ("git-stash", include_str!("../rules/git-stash.toml")),
     ("no-verify", include_str!("../rules/no-verify.toml")),
     ("force-push", include_str!("../rules/force-push.toml")),
+    (
+        "reset-to-remote",
+        include_str!("../rules/reset-to-remote.toml"),
+    ),
+    (
+        "rebase-merged-base",
+        include_str!("../rules/rebase-merged-base.toml"),
+    ),
     ("print-secrets", include_str!("../rules/print-secrets.toml")),
     ("secret-files", include_str!("../rules/secret-files.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
@@ -124,6 +132,14 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/scoped-lint.luau"),
     ),
     ("checks.luau", include_str!("../rules/checks.luau")),
+    (
+        "reset-to-remote.luau",
+        include_str!("../rules/reset-to-remote.luau"),
+    ),
+    (
+        "rebase-merged-base.luau",
+        include_str!("../rules/rebase-merged-base.luau"),
+    ),
 ];
 
 /// The jouet version that stops loading whole-file `.luau` rules. A test
