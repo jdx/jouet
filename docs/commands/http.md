@@ -104,7 +104,16 @@ The body is read as JSON whatever its content type says. The same assertions wor
 
 ## Sending a body
 
-`--json-body` sends JSON and sets `Content-Type: application/json` unless a header gives one. It refuses text that is not JSON. `--data` sends its text as it is. Both read a file with `@FILE`, and `--data @-` reads stdin. (`--json` is jouet's flag for printing one JSON document, as on every command.)
+`--json-body` sends JSON and sets `Content-Type: application/json` unless a `--header Content-Type:...` gives another. It refuses text that is not JSON. `--data` sends its text as it is. Both read a file with `@FILE`, and `--data @-` reads stdin. Giving both is a usage error (exit 2). (`--json` is jouet's flag for printing one JSON document, as on every command.)
+
+| curl | jouet http |
+|---|---|
+| `curl -d @x.json -H 'content-type: application/json' URL` | `jouet http POST URL --json-body @x.json` |
+| `curl --json '{"name":"x"}' URL` | `jouet http POST URL --json-body '{"name":"x"}'` |
+| `curl -d 'a=1&b=2' URL` | `jouet http POST URL --data 'a=1&b=2' -H 'Content-Type: application/x-www-form-urlencoded'` |
+| `curl --data-binary @- URL` | `jouet http POST URL --data @-` |
+
+Unlike curl, `--data` sets no content type of its own.
 
 ```sh
 jouet http POST https://api.example.com/items --json-body '{"name":"x"}' --expect status=201 -s '$.id'

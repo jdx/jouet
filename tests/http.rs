@@ -368,6 +368,30 @@ fn the_request_is_sent_as_given_and_credentials_never_printed() {
     );
     assert_eq!(body["body"], r#"{"name":"x","secret":"[redacted]"}"#);
 
+    // A Content-Type given by --header wins over --json-body's.
+    let out = jouet(
+        dir.path(),
+        &[
+            "--json",
+            "http",
+            "POST",
+            &format!("{base}/echo"),
+            "--json-body",
+            "{}",
+            "-H",
+            "Content-Type: application/vnd.api+json",
+        ],
+        &[],
+    );
+    let doc = json(&out);
+    let sent: Vec<&str> = doc["body"]["headers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|h| h.as_str()?.strip_prefix("content-type: "))
+        .collect();
+    assert_eq!(sent, ["application/vnd.api+json"], "{doc}");
+
     // `--data @FILE` sends the file as it is.
     std::fs::write(dir.path().join("body.txt"), "plain text").unwrap();
     let out = jouet(
@@ -467,6 +491,11 @@ fn refusals_and_failures_exit_with_the_shared_codes() {
             &["http", "POST", &items, "--json-body", "{nope"],
             2,
             "--json-body is not JSON",
+        ),
+        (
+            &["http", "POST", &items, "--json-body", "{}", "--data", "x"],
+            2,
+            "give --json-body or --data, not both",
         ),
         (
             &["http", "POST", &items, "--data", "@missing.json"],
