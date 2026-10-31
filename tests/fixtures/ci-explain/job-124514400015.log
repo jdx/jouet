@@ -1,0 +1,57 @@
+2026-10-31T10:34:57.2788300Z ##[endgroup]
+2026-10-31T10:34:57.2789630Z ##[group]Determining the checkout info
+2026-10-31T10:34:57.2790810Z ##[endgroup]
+2026-10-31T10:34:57.3023780Z ##[group]Checking out the ref
+2026-10-31T10:34:57.4231480Z ##[endgroup]
+2026-10-31T10:34:57.4925870Z ##[group]Removing auth
+2026-10-31T10:34:57.8998970Z ##[endgroup]
+2026-10-31T10:34:57.9542000Z ##[group]Run taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
+2026-10-31T10:34:57.9563280Z ##[endgroup]
+2026-10-31T10:34:57.9850390Z ##[start-action display=Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh";id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action]
+2026-10-31T10:34:58.0133710Z ##[group]Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"
+2026-10-31T10:34:58.0205420Z ##[endgroup]
+2026-10-31T10:34:58.0729960Z ##[warning]tag ref should start with 'refs/tags/': 'refs/pull/73/merge'; this action only supports events from tag or release by default; see <https://github.com/taiki-e/upload-rust-binary-action#supported-events> for more (downgraded error to info because action is running in dry-run mode)
+2026-10-31T10:35:00.0919530Z [1m[92m  Downloaded[0m thiserror v2.0.21
+2026-10-31T10:35:00.1056770Z [1m[92m  Downloaded[0m thiserror-impl v2.0.21
+2026-10-31T10:35:25.4783770Z [1m[92m   Compiling[0m thiserror v2.0.21
+2026-10-31T10:35:30.5680480Z [1m[92m   Compiling[0m thiserror-impl v2.0.21
+2026-10-31T10:36:14.7652640Z [1m[92m   Compiling[0m encoding_rs_io v0.1.8
+2026-10-31T10:36:14.8889910Z [1m[92m   Compiling[0m itertools v0.15.0
+2026-10-31T10:36:16.1605580Z [1m[92m   Compiling[0m jouet-git v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-git)
+2026-10-31T10:36:17.2716650Z [1m[92m   Compiling[0m hashlink v0.12.2
+2026-10-31T10:36:17.5188860Z [1m[92m   Compiling[0m memmap2 v0.9.12
+2026-10-31T10:36:17.6834120Z [1m[92m   Compiling[0m fallible-streaming-iterator v0.1.9
+2026-10-31T10:36:17.7771670Z [1m[92m   Compiling[0m dyn-clone v1.0.20
+2026-10-31T10:36:17.8612870Z [1m[92m   Compiling[0m unicode-width v0.2.3
+2026-10-31T10:36:17.9930360Z [1m[92m   Compiling[0m fallible-iterator v0.3.0
+2026-10-31T10:36:18.2374000Z [1m[92m   Compiling[0m similar v3.2.1
+2026-10-31T10:36:22.1872900Z [1m[92m   Compiling[0m semver v1.0.28
+2026-10-31T10:36:22.4710850Z [1m[92m   Compiling[0m usage-lib v7.1.4
+2026-10-31T10:36:28.2025270Z [1m[92m   Compiling[0m jouet-edit v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-edit)
+2026-10-31T10:36:28.3072780Z [1m[92m   Compiling[0m mlua v0.12.2
+2026-10-31T10:36:33.0995840Z [1m[92m   Compiling[0m rusqlite v0.41.1
+2026-10-31T10:36:34.8950040Z [1m[92m   Compiling[0m schemars v1.2.3
+2026-10-31T10:36:37.4384090Z [1m[92m   Compiling[0m grep-searcher v0.1.17
+2026-10-31T10:36:37.8059600Z [1m[92m   Compiling[0m zstd v0.14.3
+2026-10-31T10:36:38.0670300Z [1m[92m   Compiling[0m ast-grep-core v0.51.0
+2026-10-31T10:36:38.8883780Z [1m[92m   Compiling[0m grep-regex v0.1.14
+2026-10-31T10:36:39.5364930Z [1m[92m   Compiling[0m usage-config v7.1.4
+2026-10-31T10:36:39.9773490Z [1m[92m   Compiling[0m usage-derive v7.1.4
+2026-10-31T10:36:42.2286100Z [1m[92m   Compiling[0m jouet-search v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-search)
+2026-10-31T10:36:47.6325270Z [1m[92m   Compiling[0m usage-rs v7.1.4
+2026-10-31T10:36:47.7166230Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-audit)
+2026-10-31T10:36:48.2716370Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-rules)
+2026-10-31T10:36:51.0080000Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-graph)
+2026-10-31T10:37:00.7998640Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-routines)
+2026-10-31T10:37:03.7626680Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (/Users/runner/work/jouet/jouet/crates/jouet-wait)
+2026-10-31T10:37:11.1467110Z [1m[92m   Compiling[0m jouet v0.0.1 (/Users/runner/work/jouet/jouet)
+2026-10-31T10:37:15.6707800Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:37:15.6708890Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:37:15.6709190Z     [1m[94m|[0m
+2026-10-31T10:37:15.6709840Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:37:15.6710690Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:37:15.6711030Z 
+2026-10-31T10:37:19.8955970Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:37:19.9050660Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:37:19.9731500Z ##[error]Process completed with exit code 101.
+2026-10-31T10:37:19.9812170Z ##[end-action id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action;outcome=failure;conclusion=failure;duration_ms=141924]

@@ -1,0 +1,48 @@
+2026-10-31T10:35:09.3484827Z ##[group]Run rustup component add rustfmt clippy
+2026-10-31T10:35:09.3495501Z ##[endgroup]
+2026-10-31T10:35:09.3893136Z ##[group]Run mise x hk -- hk check --all
+2026-10-31T10:35:09.3901293Z ##[endgroup]
+2026-10-31T10:35:16.6043374Z   cargo-clippy – [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:35:18.8133810Z   cargo-clippy – [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:35:18.8279982Z   cargo-clippy – [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:35:18.8841274Z   cargo-clippy – [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:35:18.8928199Z [2mmise[0m lock            hk@2.9.0 windows-x64
+2026-10-31T10:35:18.8928357Z [2mmise[0m lock            hk@2.9.0 linux-x64
+2026-10-31T10:35:18.8928515Z [2mmise[0m lock            hk@2.9.0 macos-x64
+2026-10-31T10:35:18.8928674Z [2mmise[0m lock            hk@2.9.0 macos-arm64
+2026-10-31T10:35:18.8928870Z [2mmise[0m lock            hk@2.9.0 linux-arm64-musl
+2026-10-31T10:35:18.8929040Z [2mmise[0m lock            usage@7.1.3 linux-arm64
+2026-10-31T10:35:18.8929220Z [2mmise[0m lock            usage@7.1.3 linux-arm64-musl
+2026-10-31T10:35:18.8929390Z [2mmise[0m lock            usage@7.1.3 windows-x64
+2026-10-31T10:35:18.8929560Z [2mmise[0m lock            usage@7.1.3 macos-arm64
+2026-10-31T10:35:18.8929725Z [2mmise[0m lock            usage@7.1.3 macos-x64
+2026-10-31T10:35:18.8929888Z [2mmise[0m lock            usage@7.1.3 linux-x64
+2026-10-31T10:35:18.8930057Z [2mmise[0m lock            usage@7.1.3 linux-x64-musl
+2026-10-31T10:35:18.8930363Z [2mmise[0m lock          [38;5;10m✓[0m 77 targets checked
+2026-10-31T10:35:18.8930618Z [1m[92m    Checking[0m jouet-output v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-output)
+2026-10-31T10:35:18.8930908Z [1m[92m    Checking[0m jouet-edit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-edit)
+2026-10-31T10:35:18.8931233Z [1m[92m    Checking[0m jouet-audit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-audit)
+2026-10-31T10:35:18.8931522Z [1m[92m    Checking[0m jouet-search v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-search)
+2026-10-31T10:35:18.8931802Z [1m[92m    Checking[0m jouet-github v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-github)
+2026-10-31T10:35:18.8932085Z [1m[92m    Checking[0m jouet-graph v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-graph)
+2026-10-31T10:35:18.8932361Z [1m[92m    Checking[0m jouet-git v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-git)
+2026-10-31T10:35:18.8932635Z [1m[92m    Checking[0m jouet-wait v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-wait)
+2026-10-31T10:35:18.8932908Z [1m[92m    Checking[0m jouet-rules v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-rules)
+2026-10-31T10:35:18.8933201Z [1m[92m    Checking[0m jouet-routines v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-routines)
+2026-10-31T10:35:18.8933466Z [1m[92m    Checking[0m jouet v0.0.1 (/home/runner/work/jouet/jouet)
+2026-10-31T10:35:18.8933707Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:35:18.8933914Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:35:18.8934047Z     [1m[94m|[0m
+2026-10-31T10:35:18.8934286Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:35:18.8934533Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:35:18.8934656Z 
+2026-10-31T10:35:18.8934775Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:35:18.8935031Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:35:18.8935273Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:35:18.8935518Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:35:18.8935825Z hk ERROR To fix, run: cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings
+2026-10-31T10:35:18.8936033Z 
+2026-10-31T10:35:18.8936132Z See /home/runner/work/jouet/jouet/.git/hk/output.log for full command output
+2026-10-31T10:35:18.8942294Z ##[error]Process completed with exit code 101.
+2026-10-31T10:35:18.9034267Z Post job cleanup.
+2026-10-31T10:35:18.9922811Z Post job cleanup.

@@ -1,0 +1,41 @@
+2026-10-31T10:35:08.9307320Z ##[group]Run cargo check --locked --workspace --all-targets
+2026-10-31T10:35:08.9326453Z ##[endgroup]
+2026-10-31T10:35:09.0374929Z [1m[92m    Updating[0m crates.io index
+2026-10-31T10:35:09.7583577Z [1m[92m    Checking[0m jouet-output v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-output)
+2026-10-31T10:35:09.7630368Z [1m[92m    Checking[0m jouet-edit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-edit)
+2026-10-31T10:35:09.7631663Z [1m[92m    Checking[0m jouet-audit v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-audit)
+2026-10-31T10:35:09.7634748Z [1m[92m    Checking[0m jouet-search v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-search)
+2026-10-31T10:35:09.8450923Z [1m[92m    Checking[0m jouet-github v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-github)
+2026-10-31T10:35:10.0471112Z [1m[92m    Checking[0m jouet-git v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-git)
+2026-10-31T10:35:10.0871740Z [1m[92m    Checking[0m jouet-graph v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-graph)
+2026-10-31T10:35:10.6713353Z [1m[92m    Checking[0m jouet-wait v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-wait)
+2026-10-31T10:35:10.7428567Z [1m[92m    Checking[0m jouet-rules v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-rules)
+2026-10-31T10:35:10.8991049Z [1m[92m    Checking[0m jouet-routines v0.0.1 (/home/runner/work/jouet/jouet/crates/jouet-routines)
+2026-10-31T10:35:11.7840830Z [1m[92m    Checking[0m jouet v0.0.1 (/home/runner/work/jouet/jouet)
+2026-10-31T10:35:16.6881432Z [0m[1m[38;5;9merror[E0425][0m[0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:35:16.6882196Z [0m   [0m[0m[1m[38;5;12m--> [0m[0msrc/guide.rs:243:17[0m
+2026-10-31T10:35:16.6882626Z [0m    [0m[0m[1m[38;5;12m|[0m
+2026-10-31T10:35:16.6883347Z [0m[1m[38;5;12m243[0m[0m [0m[0m[1m[38;5;12m|[0m[0m [0m[0m                lowercase_first(other.about.unwrap_or(""))[0m
+2026-10-31T10:35:16.6884285Z [0m    [0m[0m[1m[38;5;12m|[0m[0m                 [0m[0m[1m[38;5;9m^^^^^^^^^^^^^^^[0m[0m [0m[0m[1m[38;5;9mnot found in this scope[0m
+2026-10-31T10:35:16.6884733Z 
+2026-10-31T10:35:19.6815862Z [0m[1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:35:19.7134902Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:35:19.7135651Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:35:20.3394413Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:35:20.3543565Z ##[error]Process completed with exit code 101.
+2026-10-31T10:35:20.3663455Z Post job cleanup.
+2026-10-31T10:35:20.4335534Z [command]/usr/bin/git version
+2026-10-31T10:35:20.4368042Z git version 2.56.0
+2026-10-31T10:35:20.4394673Z Temporarily overriding HOME='/home/runner/work/_temp/8c8827dd-b612-4253-8ee0-b92149596a3f' before making global git config changes
+2026-10-31T10:35:20.4396055Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:35:20.4398877Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/jouet/jouet
+2026-10-31T10:35:20.4426865Z Removing SSH command configuration
+2026-10-31T10:35:20.4431552Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:35:20.4461244Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:35:20.4651762Z Removing HTTP extra header
+2026-10-31T10:35:20.4655575Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:35:20.4683364Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:35:20.4868192Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:35:20.4873115Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:35:20.4930886Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:35:20.5273246Z Cleaning up orphan processes

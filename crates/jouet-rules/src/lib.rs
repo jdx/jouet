@@ -57,6 +57,7 @@ const PRELUDE: &str = include_str!("prelude.luau");
 /// The built-in rules, embedded in the binary, in the order they run.
 const BUILTIN: &[(&str, &str)] = &[
     ("sleep-poll", include_str!("../rules/sleep-poll.toml")),
+    ("ci-rerun", include_str!("../rules/ci-rerun.toml")),
     (
         "review-threads",
         include_str!("../rules/review-threads.toml"),
