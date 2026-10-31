@@ -49,6 +49,7 @@
 - [`jouet pr threads unresolve [--dry-run] [ARGS]…`](/cli/pr/threads/unresolve.md)
 - [`jouet pr threads apply [FLAGS] [ARGS]…`](/cli/pr/threads/apply.md)
 - [`jouet read [FLAGS] [PATH]`](/cli/read.md)
+- [`jouet docs [FLAGS] <PACKAGE> [SYMBOL]`](/cli/docs.md)
 - [`jouet review-package [-o --output <FILE>] [--context <N>] <BASE> [HEAD]`](/cli/review-package.md)
 - [`jouet stack <SUBCOMMAND>`](/cli/stack.md)
 - [`jouet stack status [BRANCH]`](/cli/stack/status.md)

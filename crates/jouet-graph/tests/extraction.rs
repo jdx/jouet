@@ -356,6 +356,27 @@ fn comment_markers_cleaned_rust_and_c() {
         doc("m.rs", "/// rust doc line\nfn rs_fn() {}", "rs_fn").as_deref(),
         Some("rust doc line")
     );
+    // Past the attributes between the doc comment and its item, and not a
+    // comment a blank line separates from it.
+    assert_eq!(
+        doc(
+            "m.rs",
+            "//! The module.\n\n/// A unit.\npub struct Unit;",
+            "Unit"
+        )
+        .as_deref(),
+        Some("A unit.")
+    );
+    assert_eq!(doc("m.rs", "// Licence.\n\npub struct Bare;", "Bare"), None);
+    assert_eq!(
+        doc(
+            "m.rs",
+            "/// A point.\n#[derive(Clone)]\n#[cfg_attr(test, derive(Debug))]\npub struct Point {\n    x: u8,\n}",
+            "Point"
+        )
+        .as_deref(),
+        Some("A point.")
+    );
     assert_eq!(
         doc("m.c", "/* c block */\nvoid c_fn(void) {}", "c_fn").as_deref(),
         Some("c block")

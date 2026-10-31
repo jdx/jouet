@@ -40,8 +40,11 @@
 //!   and only when the macro name is a bare identifier.
 //! - A rust type alias emits NO ref to its aliased type (the shared code
 //!   reads a `value` field; rust's field is `type`).
-//! - An `attribute_item` between a doc comment and its item breaks the
-//!   docstring sibling chain (`#[derive(..)]` kills the docstring).
+//!
+//! Unlike codegraph, a docstring is the doc comment rustdoc would give the
+//! item: read past the attributes between it and the item (in codegraph,
+//! `#[derive(..)]` cut it off), and without comments a blank line separates
+//! from it (a licence header, the module's `//!` doc).
 //!
 //! Files with parse errors are walked as tree-sitter recovered them;
 //! codegraph defers them to its wasm extractor.
@@ -50,7 +53,7 @@ use crate::extract::buffers::{
     Arena, BoolFlags, EdgeRow, Extraction, FLAG_IS_ASYNC, FLAG_IS_EXPORTED, FUNCTION_REF_CODE,
     NONE, NONE_STR, NodeRow, RefRow, StrRef, Tables, edge_kind_index, finish, node_kind_index,
 };
-use crate::extract::docstring::preceding_docstring;
+use crate::extract::docstring::preceding_rust_doc_comment;
 use crate::extract::ids;
 use crate::extract::textutil as util;
 use regex::Regex;
@@ -59,6 +62,11 @@ use std::sync::OnceLock;
 use tree_sitter::{Node, Parser};
 
 const MAX_VALUE_REF_NODES: usize = 20_000;
+
+/// The comments above an item, past its attributes (`#[derive(..)]`).
+fn doc_comment(node: Node, src: &str) -> Option<String> {
+    preceding_rust_doc_comment(node, src)
+}
 
 /// JS `/<[^>]*>/g` — the non-nested generic strip (breaks on nested generics
 /// by design: `Result<Vec<Foo>, E>` → `Result, E>` → returnType undefined).
@@ -629,7 +637,7 @@ impl<'t> Walker<'t> {
         }
         let extra = Extra {
             decorators,
-            docstring: preceding_docstring(node, self.src),
+            docstring: doc_comment(node, self.src),
             signature: self.signature_of(node),
             visibility: Some(self.visibility_of(node)),
             // isAsync hook exists but never finds a direct `async` child (it
@@ -687,7 +695,7 @@ impl<'t> Walker<'t> {
         stack_guard!();
         let name = self.extract_name(node);
         let extra = Extra {
-            docstring: preceding_docstring(node, self.src),
+            docstring: doc_comment(node, self.src),
             ..Extra::default() // no visibility/isExported on the interface path
         };
         let Some(row) = self.create_node("trait", &name, node, extra) else {
@@ -717,7 +725,7 @@ impl<'t> Walker<'t> {
         stack_guard!();
         let name = self.extract_name(node);
         let extra = Extra {
-            docstring: preceding_docstring(node, self.src),
+            docstring: doc_comment(node, self.src),
             visibility: Some(self.visibility_of(node)),
             ..Extra::default()
         };
@@ -751,7 +759,7 @@ impl<'t> Walker<'t> {
         };
         let name = self.extract_name(node);
         let extra = Extra {
-            docstring: preceding_docstring(node, self.src),
+            docstring: doc_comment(node, self.src),
             visibility: Some(self.visibility_of(node)),
             ..Extra::default()
         };
@@ -796,7 +804,7 @@ impl<'t> Walker<'t> {
             return;
         }
         let extra = Extra {
-            docstring: preceding_docstring(node, self.src),
+            docstring: doc_comment(node, self.src),
             // Private unless `pub` (any form), as the wasm walker reads it:
             // the resolver keeps a private alias to its own module.
             visibility: Some(self.visibility_of(node)),
@@ -814,7 +822,7 @@ impl<'t> Walker<'t> {
     /// The initializer is walked under the declared symbol (#693), and returned
     /// then for the declaration scan to skip.
     fn extract_variable(&mut self, node: Node<'t>) -> Vec<usize> {
-        let docstring = preceding_docstring(node, self.src);
+        let docstring = doc_comment(node, self.src);
         let name_field = node.child_by_field_name("name");
         // An impl's associated const is its type's (`Limits::MAX`), as its methods are.
         let owner = self.impl_item_owner(node);

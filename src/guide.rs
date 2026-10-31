@@ -24,6 +24,12 @@ const WHEN: &[(&str, Option<&str>)] = &[
         ),
     ),
     (
+        "docs",
+        Some(
+            "using a dependency's API: `jouet docs PKG` outlines it and `jouet docs PKG SYMBOL` prints one definition's signature, doc and source, at the version the project's lockfile names (Rust, TypeScript, Python, Go), instead of guessing from memory or reading the cargo registry, node_modules or site-packages by hand",
+        ),
+    ),
+    (
         "edit",
         Some(
             "changing files: exact replacements (`jouet edit replace <PATHS>... --old TEXT --new TEXT`, --old and --new repeatable, or a spec on stdin), whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
@@ -219,7 +225,7 @@ fn when(name: &str) -> Option<&'static str> {
 
 /// Commands that work as a pair, which the overview and the skill describe
 /// in one entry to stay within their budgets.
-pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup")];
+pub(crate) const PAIRED: &[(&str, &str)] = &[("handoff", "pickup"), ("read", "docs")];
 
 /// The guide for the whole tool: one entry per command family, with its
 /// subcommands by name and when to reach for it. Flags and synopses live in
@@ -330,7 +336,20 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 /// one `jouet agent-help COMMAND` away; listing them here as well made every
 /// session pay for them.
 pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
-    let names: Vec<&str> = agent_commands().iter().map(|(m, _)| m.cmd.name).collect();
+    let commands = agent_commands();
+    let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
+    // A pair is one entry, as in the overview: `read/docs`.
+    let names: Vec<String> = commands
+        .iter()
+        .map(|(m, _)| m.cmd.name)
+        .filter(|name| !PAIRED.iter().any(|(_, second)| second == name))
+        .map(
+            |name| match PAIRED.iter().find(|(first, _)| *first == name) {
+                Some((_, second)) if present(second) => format!("{name}/{second}"),
+                _ => name.to_string(),
+            },
+        )
+        .collect();
     let mut out = format!(
         "jouet is installed, a CLI toolkit for coding agents: {}. When a task matches one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
         names.join(", ")

@@ -1,0 +1,12 @@
+version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "demo-missing"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "demo-req"
+version = "2.3.1"
+source = { registry = "https://pypi.org/simple" }

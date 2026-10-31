@@ -164,6 +164,13 @@ pub(crate) fn preceding_go_doc_comment(node: Node, src: &str) -> Option<String> 
     preceding_docstring_with(node, src, &[], true, true, true)
 }
 
+/// The doc comment rustdoc gives an item: the comments right above it, past
+/// its attributes (`#[derive(..)]`), and not ones a blank line separates
+/// from it (a licence header, the module's `//!` doc).
+pub(crate) fn preceding_rust_doc_comment(node: Node, src: &str) -> Option<String> {
+    preceding_docstring_with(node, src, &["attribute_item"], false, true, false)
+}
+
 fn preceding_docstring_with(
     node: Node,
     src: &str,
@@ -181,18 +188,47 @@ fn preceding_docstring_with(
         }
     }
 
-    let mut comments: Vec<Node> = Vec::new();
+    // The comments and stepped-over nodes before the anchor, nearest first.
+    let mut chain: Vec<Node> = Vec::new();
     let mut sibling = anchor.prev_named_sibling();
     while let Some(s) = sibling {
-        if is_comment(s.kind()) {
-            comments.push(s);
-            sibling = s.prev_named_sibling();
-        } else if step_over.contains(&s.kind()) {
+        if is_comment(s.kind()) || step_over.contains(&s.kind()) {
+            chain.push(s);
             sibling = s.prev_named_sibling();
         } else {
             break;
         }
     }
+    if skip_detached {
+        // Walk back from the declaration: the nearest node must end on the
+        // line above it, and each one before joins while it ends on the line
+        // the next one starts, or the line before that. A stepped-over node
+        // (a Rust attribute) links the comments above it to the declaration.
+        let mut next_row = anchor.start_position().row;
+        let mut attached = 0;
+        for (i, node) in chain.iter().enumerate() {
+            // A Rust `line_comment` ends after its newline, at column 0 of
+            // the next line.
+            let at = node.end_position();
+            let end = if at.column == 0 && at.row > node.start_position().row {
+                at.row - 1
+            } else {
+                at.row
+            };
+            let joins = if i == 0 {
+                end + 1 == next_row
+            } else {
+                end + 1 >= next_row
+            };
+            if !joins {
+                break;
+            }
+            next_row = node.start_position().row;
+            attached = i + 1;
+        }
+        chain.truncate(attached);
+    }
+    let mut comments: Vec<Node> = chain.into_iter().filter(|n| is_comment(n.kind())).collect();
     comments.reverse(); // collected nearest-first; TS unshifts to keep source order
 
     let mut first = 0;
@@ -210,24 +246,6 @@ fn preceding_docstring_with(
             end_row = c.end_position().row;
             first += 1;
         }
-    }
-    if skip_detached {
-        // Walk back from the declaration: the last comment must end on the
-        // line above it, and each one before joins while it ends on the line
-        // the next one starts, or the line before that.
-        let mut start = comments.len();
-        if start > first
-            && comments[start - 1].end_position().row + 1 == anchor.start_position().row
-        {
-            start -= 1;
-            while start > first
-                && comments[start - 1].end_position().row + 1
-                    >= comments[start].start_position().row
-            {
-                start -= 1;
-            }
-        }
-        first = start;
     }
     let doc_comments: Vec<Node> = comments[first..]
         .iter()
