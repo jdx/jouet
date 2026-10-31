@@ -14,6 +14,8 @@ use std::time::Duration;
 
 /// Titles longer than this are cut at a word boundary in text output.
 const TITLE_WIDTH: usize = 40;
+/// Open Entire findings listed under a PR; `pr threads` lists them all.
+const FINDINGS: usize = 3;
 
 pub(crate) fn run(args: PrArgs, out: &Output) -> ExitCode {
     match args.cmd {
@@ -119,6 +121,7 @@ fn render(report: &Report) -> String {
         }
         s.push_str(&line);
         s.push('\n');
+        entire_lines(&mut s, p, &format!("{}#{}", p.repo, p.number));
     }
     if !report.not_found.is_empty() {
         let _ = writeln!(s, "not found: {}", report.not_found.join(", "));
@@ -163,6 +166,41 @@ fn render(report: &Report) -> String {
     }
     s.push('\n');
     s
+}
+
+/// Under a PR whose Entire Gates check fails: which gates fail and why,
+/// then its open findings, up to `FINDINGS` of them.
+fn entire_lines(s: &mut String, p: &PrStatus, name: &str) {
+    let Some(e) = p.entire.as_ref().filter(|e| e.gates.failed()) else {
+        return;
+    };
+    let _ = write!(s, "  entire: {}", e.gates.failing_text());
+    if let Some(trail) = e.gates.trail {
+        let _ = write!(s, " (trail #{trail})");
+    }
+    if e.gates.derived() {
+        s.push_str("; repeats what is reported above");
+    }
+    s.push('\n');
+    if let Some(note) = &e.note {
+        let _ = writeln!(s, "  ({note})");
+    }
+    for f in e.findings.iter().take(FINDINGS) {
+        let _ = write!(s, "    [{}] {}", f.handle, f.location);
+        if let Some(severity) = &f.severity {
+            let _ = write!(s, "  {severity}");
+        }
+        let _ = writeln!(s, "  {}", f.title);
+    }
+    let more = e.findings.len().saturating_sub(FINDINGS);
+    if more > 0 || e.findings_incomplete {
+        let n = if e.findings_incomplete {
+            format!("{more}+")
+        } else {
+            more.to_string()
+        };
+        let _ = writeln!(s, "    ... {n} more: jouet pr threads {name}");
+    }
 }
 
 /// Cuts a title to `TITLE_WIDTH` characters at a word boundary, marking the
@@ -235,6 +273,7 @@ mod tests {
                 matched: 1234,
                 listed: 1000,
             }],
+            entire: None,
         };
         assert_eq!(
             render(&report),

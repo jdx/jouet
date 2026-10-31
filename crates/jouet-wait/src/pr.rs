@@ -392,6 +392,7 @@ mod tests {
             review: None,
             unresolved_threads: 0,
             auto_merge: false,
+            entire: None,
             attention: Vec::new(),
         }
     }

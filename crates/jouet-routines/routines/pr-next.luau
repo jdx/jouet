@@ -3,7 +3,8 @@
 --- help: Works through a fixed order and stops at the first state that applies:
 --- help: merged, closed, draft, conflict, mergeable_unknown, behind_base,
 --- help: checks_failing, checks_pending, changes_requested, unresolved_threads,
---- help: awaiting_approval, blocked, auto_merge, ready_to_merge. The states come
+--- help: entire_findings, entire_gates, awaiting_approval, blocked, auto_merge,
+--- help: ready_to_merge. The states come
 --- help: from the same data and attention codes as `jouet pr status`. Exits 0
 --- help: when nothing is left to do, 10 when the agent must act and 20 when
 --- help: waiting on someone or something else; with several PRs, 10 wins.
@@ -44,8 +45,10 @@ local KIND = {
 	checks_failing = "act",
 	changes_requested = "act",
 	unresolved_threads = "act",
+	entire_findings = "act",
 	mergeable_unknown = "wait",
 	checks_pending = "wait",
+	entire_gates = "wait",
 	awaiting_approval = "wait",
 	blocked = "wait",
 	auto_merge = "wait",
@@ -123,6 +126,14 @@ local function decide(pr: Pr): (string, string, string?)
 	reason = attention(pr, "unresolved_threads")
 	if reason then
 		return "unresolved_threads", reason, `jouet pr threads {name}`
+	end
+	reason = attention(pr, "entire_findings")
+	if reason then
+		return "entire_findings", reason, `jouet pr threads {name}`
+	end
+	reason = attention(pr, "entire_gates")
+	if reason then
+		return "entire_gates", reason, `jouet pr status {name}`
 	end
 	if pr.review == "review_required" then
 		return "awaiting_approval", "Waiting for an approving review", `jouet wait pr {name} --until approved`
@@ -257,7 +268,8 @@ return {
 			prs = entries,
 			not_found = found.not_found,
 			incomplete = found.incomplete,
-		}, { "prs", "not_found", "incomplete" })
+			entire = found.entire,
+		}, { "prs", "not_found", "incomplete", "entire" })
 		if not joue.json then
 			print(render(report))
 		end

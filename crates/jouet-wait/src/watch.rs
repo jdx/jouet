@@ -16,6 +16,7 @@
 //! [`paths::watch_dir`]: jouet_output::paths::watch_dir
 
 use super::checks::Check;
+use jouet_github::entire::gates;
 use jouet_github::pr::target::Repo;
 use jouet_github::{Client, Failure};
 use serde::{Deserialize, Serialize};
@@ -301,11 +302,17 @@ fn keep_check_runs(v: Value) -> Value {
         .into_iter()
         .flatten()
         .map(|r| {
-            json!({
+            let mut kept = json!({
                 "id": r["id"], "name": r["name"], "status": r["status"],
                 "conclusion": r["conclusion"], "html_url": r["html_url"],
                 "details_url": r["details_url"], "app": { "slug": r["app"]["slug"] },
-            })
+            });
+            // The Entire Gates check says in its summary why it failed.
+            if r["name"] == gates::CHECK {
+                kept["output"] =
+                    json!({ "title": r["output"]["title"], "summary": r["output"]["summary"] });
+            }
+            kept
         })
         .collect();
     json!({ "total_count": v["total_count"], "check_runs": runs })
@@ -423,7 +430,10 @@ fn fetch_checks(
 ) -> Result<Vec<Check>, Failure> {
     let mut checks = Vec::new();
     for page in 1..=MAX_PAGES {
-        let path = format!("{base}/commits/{sha}/check-runs?per_page=100&page={page}");
+        // `filter=latest` is GitHub's default. Naming it keys this list apart
+        // from caches written before the Entire Gates summary was kept.
+        let path =
+            format!("{base}/commits/{sha}/check-runs?filter=latest&per_page=100&page={page}");
         let Some(v) = cached_get(client, cache, &path, keep_check_runs)? else {
             break;
         };

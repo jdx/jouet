@@ -18,3 +18,10 @@ point into the test's repository are written `@WORK@`.
   yet (40 hex digits, whose `message` is the prompt).
 - `why-wait_port.sh.json`: `entire why wait_port.sh --json`, the whole-file
   form, with a credential planted in a prompt to prove it is redacted.
+- `show.json`: `entire trail show 424 --json --repo gh/jdx/mise`, the trail
+  of jdx/mise#13958, with its check runs left out.
+- `finding-open.json`: `entire trail finding --trail 424 --json`: its two
+  open, current findings.
+- `finding-any.json`: the same with `--status any --freshness any
+  --include-dismissed`: those two and the resolved and dismissed stale ones.
+  `test/entire-findings.bats` and `tests/entire.rs` replay these.

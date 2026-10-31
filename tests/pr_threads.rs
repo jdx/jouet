@@ -156,6 +156,8 @@ fn jouet_with(
         .env("XDG_CONFIG_HOME", dir.join("config"))
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        // Never the developer's `entire`; a test that wants one names it.
+        .env("JOUET_ENTIRE", "false")
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {

@@ -93,6 +93,26 @@ JSON
 
 Each thread gets one line: `replied`, `resolved`, `unresolved`, `reply already posted`, `skipped: REASON` or `failed: REASON`, then the reply's URL.
 
+## Entire findings
+
+When the `entire` CLI is on PATH and logged in, the open findings on the pull request's [Entire](/entire-gates) trail are listed after the threads, under a heading that names the trail:
+
+```text
+Entire trail #424: 2 open findings
+These are Entire's, not GitHub threads: resolving one leaves the other as it was.
+
+[entire:01M4C997EA] e2e/tasks/test_task_monorepo_deps_tool_install:44  medium  agent:trail-review  23d ago
+  Identical `rm -rf "${MISE_DATA_DIR}/installs/tiny/1"* 2>/dev/null || true` pattern as test_deps_tool_install: ...
+```
+
+- **Handles.** A finding is addressed as `entire:` and the start of its ID, ten characters unless two findings share them. Any unique start of eight characters or more works, and so does the whole 26-character ID on its own. A number is always a thread.
+- **Filters.** `--all` adds resolved and dismissed findings, `--resolved` lists only those. A stale finding, raised on an earlier version of the code, counts as outdated for `--outdated` and `--no-outdated`; an agent's (`agent:...`) counts as a bot's for `--bots` and `--no-bots`. `--author`, `--path` and `--since` apply as to threads. Bodies are condensed the same way.
+- **Resolving.** `resolve entire:ID --reply REASON` runs `entire trail finding resolve`, with the reply as the reason Entire records. `--dismiss` dismisses instead, and needs a reason. `reply entire:ID --body REASON` takes `--resolve` or `--dismiss`: Entire has no reply to a finding of its own. `unresolve entire:ID` reopens one. In `apply`, an entry for a finding has its handle as the `id`, with `"resolve": true`, `"dismiss": true` or `"unresolve": true`.
+- **Separate from threads.** Findings and threads can be named in one call. Each is written by its own system: a finding never resolves a thread, and a thread never resolves a finding.
+- **The same safeguards.** Every handle is matched before anything changes, `{sha}` and the reply footer apply to the reason, a finding already resolved or dismissed is left alone (as a resolved thread is), the first failure stops the batch, and `--dry-run` prints each `entire` command instead of running it.
+- **No GitHub needed** for findings on a branch's trail: `jouet pr threads resolve entire:ID BRANCH --reply ...` asks only `entire`, unless the reason uses `{sha}`.
+- **Without `entire`**, listing carries on with the threads alone and `--json` says why under `entire`; changing a finding is refused with exit 4.
+
 ## JSON
 
 `--json` prints one document. Fields that are null, false or empty are left out:
@@ -134,9 +154,10 @@ Each thread gets one line: `replied`, `resolved`, `unresolved`, `reply already p
 - `start_line` is the first line of a comment on a range of lines. A range that starts on the other side of the diff has none.
 - `side` is `left` for a comment on the base side of the diff, whose `line` is a line of the base version. It is absent for the head's side.
 - `context` is `{"start": N, "lines": [...]}` with `--context`.
+- `entire` holds the findings, apart from `threads` and `counts`, which stay GitHub's: `available` (and the `reason` when it is false), the `trail` number and `url`, and `findings`, each with `handle`, `id`, `status`, `severity`, `stale`, `path`, `line`, `end_line`, `title`, `body`, `author`, `created_at` and `status_reason`. `incomplete` says Entire listed more than it let jouet read.
 - `unreadable` counts comments left out because GitHub sent no ID for them, in `fullDatabaseId` or in the URL. A thread whose first comment is one of them is left out whole, since that ID is its handle. The listing still succeeds, and the text output says how many were left out.
 
-Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per thread with `replied`, `already_replied`, `resolved`, `unresolved`, `url`, `skipped` or `failed`, and in a dry run the `body` that would be posted.
+Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per thread with `replied`, `already_replied`, `resolved`, `unresolved`, `url`, `skipped` or `failed`, and in a dry run the `body` that would be posted. Findings changed are under `entire: {"trail", "results": [...]}`, each with the handle as given (`id`), the whole ID (`finding`), `resolved`, `dismissed` or `reopened`, `already` (`resolved`, `dismissed` or `open`, when it was left alone), `failed`, and in a dry run the `command`. `pr` is absent when only findings on a branch's trail were changed.
 
 ## Exit codes
 
@@ -144,7 +165,7 @@ Writes print `{"repo", "pr", "dry_run", "results": [...]}`, one result per threa
 |---|---|
 | `0` | Listed, or every write was applied or skipped, even with unresolved threads |
 | `1` | With `--fail-if-unresolved`, a listed thread is unresolved |
-| `2` | Bad arguments, an empty reply, or a malformed `apply` list |
-| `3` | The pull request, a thread ID, or the `@SHA` commit does not exist |
-| `4` | Nothing was posted: `{sha}` names a commit that is not on the pull request's branch |
+| `2` | Bad arguments, an empty reply, a malformed `apply` list, or a dismissal without a reason |
+| `3` | The pull request, a thread ID, a finding, its trail, or the `@SHA` commit does not exist |
+| `4` | Nothing was posted: `{sha}` names a commit that is not on the pull request's branch, or a finding was named and `entire` is missing or logged out |
 | `5` | Authentication, network or rate-limit failure, including a batch stopped part way |

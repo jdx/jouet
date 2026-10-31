@@ -12,6 +12,7 @@ pub(crate) mod deps;
 pub(crate) mod diag;
 pub(crate) mod docs;
 pub(crate) mod edit;
+pub(crate) mod entire;
 pub(crate) mod graph;
 pub(crate) mod handoff;
 pub(crate) mod hook;

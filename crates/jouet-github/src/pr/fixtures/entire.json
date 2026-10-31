@@ -1,0 +1,168 @@
+{
+  "data": {
+    "l0": {
+      "pullRequest": {
+        "id": "PR_kwDOIvux3s8AAAABGoANGQ",
+        "number": 13958,
+        "title": "feat(install): turn the identity install layout on with experimental features",
+        "url": "https://github.com/jdx/mise/pull/13958",
+        "state": "OPEN",
+        "isDraft": true,
+        "baseRefName": "main",
+        "headRefName": "claude/project-thread-htk77e-5-experimental",
+        "headRefOid": "a674e652548d34d75f72266d3014f1f5f5f726e8",
+        "repository": {
+          "nameWithOwner": "jdx/mise"
+        },
+        "mergeable": "CONFLICTING",
+        "mergeStateStatus": "DIRTY",
+        "reviewDecision": null,
+        "autoMergeRequest": null,
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNVQwODoxNzowOVrOqPPa8A=="
+          },
+          "nodes": [
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            },
+            {
+              "isResolved": true
+            }
+          ]
+        },
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-10-05T12:42:00Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "committedDate": "2026-10-07T22:45:56Z",
+                "statusCheckRollup": {
+                  "id": "SCR_kwDOIvux3toAKGE2NzRlNjUyNTQ4ZDM0ZDc1ZjcyMjY2ZDMwMTRmMWY1ZjVmNzI2ZTg",
+                  "contexts": {
+                    "checkRunCountsByState": [
+                      {
+                        "state": "ACTION_REQUIRED",
+                        "count": 0
+                      },
+                      {
+                        "state": "CANCELLED",
+                        "count": 0
+                      },
+                      {
+                        "state": "COMPLETED",
+                        "count": 0
+                      },
+                      {
+                        "state": "FAILURE",
+                        "count": 4
+                      },
+                      {
+                        "state": "IN_PROGRESS",
+                        "count": 0
+                      },
+                      {
+                        "state": "NEUTRAL",
+                        "count": 0
+                      },
+                      {
+                        "state": "PENDING",
+                        "count": 0
+                      },
+                      {
+                        "state": "QUEUED",
+                        "count": 0
+                      },
+                      {
+                        "state": "SKIPPED",
+                        "count": 22
+                      },
+                      {
+                        "state": "STALE",
+                        "count": 0
+                      },
+                      {
+                        "state": "STARTUP_FAILURE",
+                        "count": 0
+                      },
+                      {
+                        "state": "SUCCESS",
+                        "count": 27
+                      },
+                      {
+                        "state": "TIMED_OUT",
+                        "count": 0
+                      },
+                      {
+                        "state": "WAITING",
+                        "count": 0
+                      }
+                    ],
+                    "statusContextCountsByState": [
+                      {
+                        "state": "EXPECTED",
+                        "count": 0
+                      },
+                      {
+                        "state": "ERROR",
+                        "count": 0
+                      },
+                      {
+                        "state": "FAILURE",
+                        "count": 0
+                      },
+                      {
+                        "state": "PENDING",
+                        "count": 0
+                      },
+                      {
+                        "state": "SUCCESS",
+                        "count": 2
+                      }
+                    ]
+                  }
+                },
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "checkRuns": {
+                        "nodes": [
+                          {
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "detailsUrl": "https://entire.io/gh/jdx/mise/trails/424",
+                            "title": "2 blocking gates not passing",
+                            "summary": "- ❌ **Checks**: failed — CI checks have not passed\n- ❌ **Findings**: failed — Unresolved findings: 2 medium severity\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

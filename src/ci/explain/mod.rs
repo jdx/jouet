@@ -29,6 +29,7 @@ pub(crate) mod verdict;
 
 use super::Refusal;
 use github::{BRIEF, Gh};
+use jouet_github::entire::Gates;
 use jouet_github::pr::target::Repo;
 use jouet_github::{Client, Failure};
 use jouet_output::exit::Exit;
@@ -82,6 +83,9 @@ pub(crate) struct Report {
     /// `real`, `unknown`, `infrastructure` or `flaky`.
     pub(crate) result: &'static str,
     pub(crate) runs: Vec<RunReport>,
+    /// The Entire Gates check on the head, when it failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) entire_gates: Option<EntireNote>,
     pub(crate) rerun: Rerun,
     pub(crate) github: Calls,
 }
@@ -356,8 +360,13 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
         Target::Job(repo, id) => (repo.clone(), None, None, Some(*id)),
     };
     let mut gh = Gh::new(client, repo.clone(), cache_root);
+    let mut pr_doc = None;
     let mut runs: Vec<Run> = match (pr, runs, only_job) {
-        (Some(n), _, _) => pr_runs(&mut gh, n)?,
+        (Some(n), _, _) => {
+            let (doc, runs) = pr_runs(&mut gh, n)?;
+            pr_doc = Some(doc);
+            runs
+        }
         (_, Some(id), _) => vec![run(&mut gh, id)?],
         (_, _, Some(job)) => {
             let doc = gh
@@ -401,6 +410,10 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
             .map(|r| format!("--run {} --repo {repo}", r.id))
             .unwrap_or_default(),
     };
+    let entire = match (pr, &pr_doc) {
+        (Some(n), Some(doc)) => entire_gates(&mut gh, n, doc, !failed.is_empty()),
+        _ => None,
+    };
     let mut rerun = rerun_plan(&reports, &again, in_progress);
     if req.rerun {
         if !rerun.allowed {
@@ -428,6 +441,7 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
         pr,
         result,
         runs: reports,
+        entire_gates: entire,
         rerun,
         github: Calls {
             requests: gh.fetched,
@@ -461,7 +475,7 @@ fn gh_repo(gh: &Gh<'_>) -> String {
 
 /// The latest run of each workflow on a PR's head that has failed or is
 /// still going.
-fn pr_runs(gh: &mut Gh<'_>, pr: u64) -> Result<Vec<Run>, Refusal> {
+fn pr_runs(gh: &mut Gh<'_>, pr: u64) -> Result<(Value, Vec<Run>), Refusal> {
     let doc = gh
         .json(&format!("/pulls/{pr}"), None)
         .map_err(remote)?
@@ -485,12 +499,86 @@ fn pr_runs(gh: &mut Gh<'_>, pr: u64) -> Result<Vec<Run>, Refusal> {
             latest.insert(run.workflow_id, run);
         }
     }
-    Ok(latest
+    let runs = latest
         .into_values()
         .filter(|r| {
             !r.completed() || matches!(r.conclusion.as_str(), "failure" | "timed_out" | "cancelled")
         })
-        .collect())
+        .collect();
+    Ok((doc, runs))
+}
+
+/// What a failed Entire Gates check comes down to, said once next to the
+/// jobs rather than reported as another failure.
+#[derive(Debug, Serialize)]
+pub(crate) struct EntireNote {
+    #[serde(flatten)]
+    pub(crate) gates: Gates,
+    /// The commit the check is on.
+    pub(crate) head_sha: String,
+    /// It only repeats failures reported elsewhere: failed checks, or a
+    /// branch behind or conflicting with its base.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) derived: bool,
+    pub(crate) note: String,
+}
+
+/// The Entire Gates check on PR `n`'s head, when it failed; `pr` is the
+/// PR's document. Only a PR's current head is looked at: a run named on
+/// its own may be on a head the PR has moved past, where an out-of-date
+/// gate is noise.
+fn entire_gates(gh: &mut Gh<'_>, n: u64, pr: &Value, failed_jobs: bool) -> Option<EntireNote> {
+    let sha = pr["head"]["sha"].as_str().filter(|s| !s.is_empty())?;
+    let doc = gh
+        .json(
+            &format!("/commits/{sha}/check-runs?check_name=Entire%20Gates&filter=latest"),
+            Some(BRIEF),
+        )
+        .ok()??;
+    let check = doc["check_runs"].as_array()?.first()?;
+    let output = &check["output"];
+    let gates = Gates::parse(
+        check["status"].as_str().unwrap_or_default(),
+        check["conclusion"].as_str(),
+        output["title"].as_str(),
+        output["summary"].as_str(),
+        check["details_url"].as_str(),
+    );
+    if !gates.failed() {
+        return None;
+    }
+    let base = pr["base"]["ref"].as_str().unwrap_or("BASE");
+    let name = format!("{}#{n}", gh.repo);
+    let mut parts = Vec::new();
+    if gates.fails("checks") {
+        parts.push(if failed_jobs {
+            "it repeats the failed jobs above".to_string()
+        } else {
+            "it repeats failing checks outside the runs explained here".to_string()
+        });
+    }
+    if let Some(g) = gates.failing().find(|g| g.gate == "up_to_date") {
+        parts.push(format!(
+            "the branch is not up to date with {base} ({}): git fetch origin {base} && git merge origin/{base}",
+            g.reason.as_deref().unwrap_or("behind or conflicting")
+        ));
+    }
+    if gates.fails("approvals") {
+        parts
+            .push("it waits for an approval on the Entire trail, which a rerun cannot give".into());
+    }
+    if gates.fails("findings") {
+        parts.push(format!(
+            "it has open findings, which a rerun cannot fix: jouet pr threads {name}"
+        ));
+    }
+    let note = parts.join("; ");
+    Some(EntireNote {
+        derived: gates.derived(),
+        gates,
+        head_sha: sha.to_string(),
+        note,
+    })
 }
 
 /// The jobs of a run's attempt; a finished attempt's never change.

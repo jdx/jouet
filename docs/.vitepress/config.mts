@@ -75,6 +75,7 @@ export default defineConfig({
           { text: "Routines and joue", link: "/routines" },
           { text: "Self-winding", link: "/winding" },
           { text: "Agent setup and hooks", link: "/setup" },
+          { text: "Entire findings and gates", link: "/entire-gates" },
           { text: "Benchmarks", link: "/benchmarks" },
         ],
       },

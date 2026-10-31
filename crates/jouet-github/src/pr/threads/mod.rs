@@ -601,6 +601,27 @@ pub fn select<'a>(pr: &'a PrThreads, f: &Filter) -> Vec<&'a Thread> {
     pr.threads.iter().chain(&pr.others).filter(keep).collect()
 }
 
+/// Whether a listing's filter keeps an Entire finding, read the way a
+/// thread is: a stale finding is outdated, an agent's (`agent:...`) a
+/// bot's, and `since` goes by when it was raised. Its status is chosen
+/// when the findings are fetched.
+pub fn keeps_finding(f: &Filter, finding: &crate::entire::Finding) -> bool {
+    let outdated = f.outdated.is_none_or(|o| o == finding.stale);
+    let author = f.authors.is_empty() || f.authors.iter().any(|a| same_login(a, &finding.author));
+    let bots = f
+        .bots
+        .is_none_or(|b| b == finding.author.starts_with("agent:"));
+    let since = f
+        .since
+        .is_none_or(|since| time::parse_utc(&finding.created_at).is_some_and(|t| t >= since));
+    let path = f.paths.is_empty()
+        || finding
+            .path
+            .as_deref()
+            .is_some_and(|p| f.paths.iter().any(|g| path_matches(g, p)));
+    outdated && author && bots && since && path
+}
+
 /// Whether `path` matches a `--path` pattern: a glob over the whole path
 /// (`*` and `?` stay within a directory, `**` crosses them), a directory
 /// holding it, or, for a pattern without `/`, its file name.

@@ -5,7 +5,9 @@
 
 Show where PRs stand and why any need attention
 
-Prints one line per PR, then a summary. GitHub PRs are fetched in one batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are read through their REST APIs. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, behind_base, draft and mergeable_unknown.
+Prints one line per PR, then a summary. GitHub PRs are fetched in one batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are read through their REST APIs. Each PR lists fixed attention codes: conflict, checks_failing, checks_missing, changes_requested, unresolved_threads, entire_findings, entire_gates, behind_base, draft and mergeable_unknown.
+
+A PR with an Entire Gates check gets a line saying which gate fails and why. The check is not counted as a failing check of its own: a failed checks gate repeats the checks above, an up-to-date gate is behind_base, and a findings gate is entire_findings, naming the open findings when the `entire` CLI is on PATH and logged in. Without it, `--json` says why under `entire`.
 
 ## Arguments
 - **`[PRS]…`** — PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the current branch's PR

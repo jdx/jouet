@@ -156,6 +156,8 @@ impl Forgejo {
             review: decision(&reviews),
             unresolved_threads: u32::try_from(unresolved).unwrap_or(u32::MAX),
             auto_merge: false,
+            // Entire Gates is a GitHub check run.
+            entire: None,
             attention: Vec::new(),
         }))
     }

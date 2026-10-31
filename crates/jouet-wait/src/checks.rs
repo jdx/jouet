@@ -2,6 +2,7 @@
 //! and Actions jobs reduced to one shape, selected by name, counted, and
 //! judged.
 
+use jouet_github::entire::gates::{self, Gates};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Write as _;
@@ -92,6 +93,9 @@ pub(crate) struct Check {
     /// Actions job when jactionlint is installed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub(crate) local: Option<String>,
+    /// For the Entire Gates check, its gates as its summary lists them.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) entire: Option<Gates>,
 }
 
 impl Check {
@@ -110,7 +114,15 @@ impl Check {
             log_truncated: false,
             log_path: None,
             local: None,
+            entire: None,
         }
+    }
+
+    /// A failed Entire Gates check that only repeats other failures (failed
+    /// checks, or a branch behind or conflicting with its base) or waits for
+    /// an approval on the trail. It does not count as a failure of CI.
+    pub(crate) fn derived(&self) -> bool {
+        self.state.failed() && self.entire.as_ref().is_some_and(Gates::not_ci)
     }
 
     /// An entry of `GET /repos/{o}/{r}/commits/{sha}/check-runs`. Actions
@@ -128,6 +140,20 @@ impl Check {
         if v["app"]["slug"].as_str() == Some("github-actions") {
             check.job_id = v["id"].as_u64();
             check.run_id = url.and_then(run_id_in_url);
+        }
+        if check.name == gates::CHECK {
+            // Its details are the trail on Entire.
+            if let Some(trail) = v["details_url"].as_str() {
+                check.url = Some(trail.to_string());
+            }
+            let output = &v["output"];
+            check.entire = Some(Gates::parse(
+                v["status"].as_str().unwrap_or_default(),
+                conclusion,
+                output["title"].as_str(),
+                output["summary"].as_str(),
+                v["details_url"].as_str(),
+            ));
         }
         Some(check)
     }
@@ -221,12 +247,18 @@ pub(crate) struct Counts {
     pub(crate) pending: u32,
     pub(crate) skipped: u32,
     pub(crate) cancelled: u32,
+    /// Failed Entire Gates checks that only repeat other failures.
+    pub(crate) derived: u32,
 }
 
 impl Counts {
     pub(crate) fn of(checks: &[Check]) -> Self {
         let mut c = Self::default();
         for check in checks {
+            if check.derived() {
+                c.derived += 1;
+                continue;
+            }
             *match check.state {
                 State::Pass => &mut c.pass,
                 State::Fail => &mut c.fail,
@@ -247,6 +279,9 @@ impl Counts {
         if self.cancelled > 0 {
             let _ = write!(s, ", {} cancelled", self.cancelled);
         }
+        if self.derived > 0 {
+            let _ = write!(s, ", {} derived", self.derived);
+        }
         s
     }
 }
@@ -260,9 +295,10 @@ pub(crate) enum Verdict {
 }
 
 /// Judges the selected checks: a failure ends the wait at once unless
-/// `all`, in which case every check must finish first.
+/// `all`, in which case every check must finish first. A derived failure
+/// is not one.
 pub(crate) fn verdict(checks: &[Check], all: bool) -> Verdict {
-    let failed = checks.iter().any(|c| c.state.failed());
+    let failed = checks.iter().any(|c| c.state.failed() && !c.derived());
     let pending = checks.iter().any(|c| !c.state.finished());
     match (failed, pending) {
         (true, false) => Verdict::Failure,
@@ -276,7 +312,7 @@ pub(crate) fn verdict(checks: &[Check], all: bool) -> Verdict {
 /// excerpt.
 pub(crate) fn failure_blocks(checks: &[Check]) -> String {
     let mut out = String::new();
-    for c in checks.iter().filter(|c| c.state.failed()) {
+    for c in checks.iter().filter(|c| c.state.failed() && !c.derived()) {
         let word = if c.state == State::Cancelled {
             "CANCELLED"
         } else {
@@ -301,6 +337,9 @@ pub(crate) fn failure_blocks(checks: &[Check]) -> String {
         }
         if let Some(local) = &c.local {
             let _ = writeln!(out, "  locally: {local}");
+        }
+        if let Some(g) = &c.entire {
+            let _ = writeln!(out, "  {}", g.failing_text());
         }
     }
     out
@@ -399,6 +438,75 @@ mod tests {
         assert!(!required.selects(&c));
         c.required = true;
         assert!(required.selects(&c));
+    }
+
+    /// The Entire Gates check run as GitHub lists it, recorded from
+    /// jdx/mise#15220 (checks) and jdx/mise#13958 (checks and findings).
+    fn entire_gates(summary: &str) -> Check {
+        Check::from_check_run(&json!({
+            "id": 124530630313u64, "name": "Entire Gates", "status": "completed",
+            "conclusion": "failure", "app": { "slug": "entire" },
+            "html_url": "https://github.com/jdx/mise/runs/124530630313",
+            "details_url": "https://entire.io/gh/jdx/mise/trails/424",
+            "output": { "title": "1 blocking gate not passing", "summary": summary },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn entire_gates_failing_on_other_checks_is_derived() {
+        let gates = entire_gates(
+            "- ❌ **Checks**: failed — CI checks have not passed\n- ✅ **Findings**: passed — Agent review found no blocking issues\n\n[Trail #1176 on Entire](https://entire.com/gh/jdx/-/trails/3261/changes/mise/1176)",
+        );
+        assert!(gates.derived());
+        assert_eq!(
+            gates.url.as_deref(),
+            Some("https://entire.io/gh/jdx/mise/trails/424")
+        );
+        let mut release = Check::new("release".into(), State::Fail);
+        release.job_id = Some(1);
+        // A failed check alongside is the failure; Entire Gates is not another.
+        let both = [gates.clone(), release];
+        assert_eq!(verdict(&both, false), Verdict::Failure);
+        assert_eq!(
+            Counts::of(&both).summary(),
+            "0 pass, 1 fail, 0 skipped, 0 pending, 1 derived"
+        );
+        assert!(!failure_blocks(&both).contains("FAIL Entire Gates"));
+        // While the others rerun, a stale Entire Gates failure ends nothing.
+        let rerunning = [gates.clone(), Check::new("release".into(), State::Pending)];
+        assert_eq!(verdict(&rerunning, false), Verdict::Pending);
+        let behind = entire_gates(
+            "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Up to date**: failed — 3 commits behind · Merge conflicts",
+        );
+        assert_eq!(
+            verdict(&[behind, Check::new("test".into(), State::Pass)], false),
+            Verdict::Success
+        );
+        // An approval still to come on the trail is not a CI failure either.
+        let approval = entire_gates(
+            "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Approvals**: failed — No reviewers have approved this trail",
+        );
+        assert!(approval.derived());
+        assert_eq!(
+            verdict(&[approval, Check::new("test".into(), State::Pass)], false),
+            Verdict::Success
+        );
+    }
+
+    #[test]
+    fn entire_gates_failing_on_findings_is_a_failure() {
+        let gates = entire_gates(
+            "- ❌ **Checks**: failed — CI checks have not passed\n- ❌ **Findings**: failed — Unresolved findings: 2 medium severity",
+        );
+        assert!(!gates.derived());
+        assert_eq!(
+            verdict(std::slice::from_ref(&gates), false),
+            Verdict::Failure
+        );
+        assert!(failure_blocks(&[gates]).contains(
+            "FAIL Entire Gates\n  https://entire.io/gh/jdx/mise/trails/424\n  checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity\n"
+        ));
     }
 
     #[test]

@@ -48,13 +48,28 @@ Every open pull request lists the reasons it needs attention, as fixed codes wit
 | `checks_missing` | No checks registered more than 5 minutes after the last push |
 | `changes_requested` | A reviewer requested changes |
 | `unresolved_threads` | Review threads are unresolved |
-| `behind_base` | GitHub requires the branch to be updated before it can merge |
+| `entire_findings` | The Entire Gates check fails on open findings. The message names the first to fix, when the `entire` CLI could list them |
+| `entire_gates` | The Entire Gates check fails on a gate jouet does not know, or names none |
+| `behind_base` | GitHub requires the branch to be updated before it can merge, or the Entire Gates check fails because it is not up to date |
 | `draft` | It is a draft |
 | `mergeable_unknown` | GitHub still had not computed mergeability after `--settle` |
 
 Merged and closed pull requests never need attention.
 
 To block until a pull request has no attention codes left, or until one appears that only the agent can clear, use [`jouet wait pr --until ready`](/commands/wait#wait-pr).
+
+## Entire Gates
+
+A pull request whose [Entire Gates](/entire-gates) check fails gets a line saying which gates fail and why, and, when the findings gate fails and the `entire` CLI is on PATH and logged in, up to three open findings with the handle `jouet pr threads` takes:
+
+```text
+#13958 draft feat(install): turn the identity...  CONFLICT  ci 29/55 fail: trusted / windows-e2e, trusted / test-ci, test-ci, Entire Gates  threads 0  review -
+  entire: checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity (trail #424)
+    [entire:01M4C997EA] e2e/tasks/test_task_monorepo_deps_tool_install:44  medium  Identical `rm -rf "${MISE_DATA_DIR}/installs/tiny/1"* 2>/dev/null || true` pattern as...
+    [entire:01M4C997DZ] e2e/cli/test_deps_tool_install:21  medium  `rm -rf "${MISE_DATA_DIR}/installs/tiny/1"* 2>/dev/null || true` only removes the compat symlink...
+```
+
+The check still counts in the `ci` column, as GitHub reports it, but never in `checks_failing`: a failed checks gate repeats the checks already named there, a branch that is not up to date is `behind_base`, and open findings are `entire_findings`. A line that only repeats other failures ends `; repeats what is reported above`.
 
 ## Waiting for mergeability with `--settle`
 
@@ -99,6 +114,8 @@ GitHub computes mergeability lazily, so a pull request that has not been looked 
 - `review` is GitHub's review decision, lowercased: `approved`, `changes_requested` or `review_required`.
 - `pushed_at` is the later of the head commit's committer date and the last force push, because GitHub's API records no time for a plain push.
 - `incomplete` lists searches that matched more pull requests than GitHub lists (1,000), with how many matched and how many were listed.
+- `entire`, on a pull request with an Entire Gates check, holds the check's `state` (`passed`, `failed`, `pending` or `neutral`), its `title`, each of its `gates` with `gate`, `status` and `reason`, the `trail` number and `url`, and, when the findings gate fails, the open `findings` (`id`, `handle`, `severity`, `path`, `line`, `title`). `findings_incomplete` says Entire listed more than it let jouet read, `error` why `entire` could not be asked, and `note` that the gates came from `entire trail show` because the check's summary was in a form jouet does not know.
+- `entire` at the top level, present when some pull request's findings gate fails, is `{"available": true}` or `{"available": false, "reason": "..."}`.
 
 ## GitHub access
 

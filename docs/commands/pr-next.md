@@ -36,11 +36,13 @@ The states are checked in a fixed order, and the first that applies is the answe
 | `draft` | act | It is a draft | `gh pr ready N --repo OWNER/NAME` |
 | `conflict` | act | It conflicts with its base | `git fetch origin BASE && git merge origin/BASE` |
 | `mergeable_unknown` | wait | GitHub has not finished computing mergeability or the merge state | `jouet wait pr PR --until mergeable` |
-| `behind_base` | act | Branch protection requires the branch to be up to date with its base | `git fetch origin BASE && git merge origin/BASE` |
+| `behind_base` | act | Branch protection, or a failing [Entire Gates](/entire-gates) check, requires the branch to be up to date with its base | `git fetch origin BASE && git merge origin/BASE` |
 | `checks_failing` | act | A check failed | `jouet wait ci PR`, which shows the failed step's log |
 | `checks_pending` | wait | A check is still running, or none has registered yet on a recent push | `jouet wait ci PR` |
 | `changes_requested` | act | A reviewer requested changes | `jouet pr threads PR --include-reviews` |
 | `unresolved_threads` | act | Review threads are unresolved | `jouet pr threads PR` |
+| `entire_findings` | act | The Entire Gates check fails on open findings. The reason names the first finding and where it is, as `Fix Entire finding [entire:01M4C997EA] at e2e/cli/test_deps_tool_install:21 (medium): ...`, when the `entire` CLI could list them | `jouet pr threads PR` |
+| `entire_gates` | wait | The Entire Gates check fails on a gate jouet does not know | `jouet pr status PR` |
 | `awaiting_approval` | wait | An approving review is required | `jouet wait pr PR --until approved` |
 | `blocked` | wait | GitHub reports the merge as blocked by another branch protection rule or ruleset | `jouet wait pr PR --until any-change` |
 | `auto_merge` | wait | Auto-merge is enabled, so GitHub will merge it | `jouet wait pr PR --until merged` |
@@ -48,9 +50,10 @@ The states are checked in a fixed order, and the first that applies is the answe
 
 The data and the reasons come from the same query and [attention codes](/commands/pr-status#attention) as `jouet pr status`, so the two commands never disagree. `--settle` waits for an unknown mergeable state the same way.
 
-Two choices are deliberate:
+Three choices are deliberate:
 
 - **Updating is a merge.** Both `conflict` and `behind_base` suggest merging the base into the branch, never a rebase and force-push.
+- **Entire Gates is not a check of its own.** A failing Entire Gates check is never `checks_failing`: its checks gate repeats the other checks, its up-to-date gate is `behind_base`, and its findings gate is `entire_findings`.
 - **No checks is not a blocker on its own.** A push with no checks yet is `checks_pending` for 5 minutes. After that, a repository with no CI can still be `ready_to_merge`: branch protection knows which checks it requires, and a missing required check makes GitHub report the merge as `blocked`.
 
 `ready_to_merge` is "done" for the agent: landing the pull request is a decision for whoever owns it, made with [`jouet pr land`](/commands/pr-land).

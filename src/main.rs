@@ -724,7 +724,14 @@ pub enum PrCmd {
 /// (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are
 /// read through their REST APIs. Each PR lists fixed attention codes: conflict,
 /// checks_failing, checks_missing, changes_requested, unresolved_threads,
-/// behind_base, draft and mergeable_unknown.
+/// entire_findings, entire_gates, behind_base, draft and mergeable_unknown.
+///
+/// A PR with an Entire Gates check gets a line saying which gate fails and
+/// why. The check is not counted as a failing check of its own: a failed
+/// checks gate repeats the checks above, an up-to-date gate is behind_base,
+/// and a findings gate is entire_findings, naming the open findings when
+/// the `entire` CLI is on PATH and logged in. Without it, `--json` says
+/// why under `entire`.
 #[derive(Args)]
 pub struct StatusArgs {
     /// PRs as numbers, URLs, OWNER/REPO#N or branch names. Defaults to the
@@ -754,7 +761,8 @@ pub struct StatusArgs {
 /// Works through a fixed order and stops at the first state that applies:
 /// merged, closed, draft, conflict, mergeable_unknown, behind_base,
 /// checks_failing, checks_pending, changes_requested, unresolved_threads,
-/// awaiting_approval, blocked, auto_merge, ready_to_merge. The states come
+/// entire_findings, entire_gates, awaiting_approval, blocked, auto_merge,
+/// ready_to_merge. The states come
 /// from the same data and attention codes as `pr status`. Exits 0 when
 /// nothing is left to do, 10 when the agent must act and 20 when waiting on
 /// someone or something else; with several PRs, 10 wins over 20. These two
@@ -2644,6 +2652,12 @@ pub struct HookArgs {
 /// there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges
 /// are removed, `<details>` collapse to their summary and each comment is cut
 /// at 30 lines with a marker; suggestion blocks are always kept whole.
+///
+/// When the `entire` CLI is on PATH and logged in, the open findings on the
+/// PR's Entire trail follow the threads, each addressed as `entire:ID`.
+/// They are Entire's, not GitHub's: resolving a finding leaves the threads
+/// as they were. A stale finding counts as outdated and an agent's as a
+/// bot's. Without the CLI, `--json` says why under `entire`.
 #[derive(Args)]
 pub struct ThreadsArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current
@@ -2717,9 +2731,12 @@ pub enum ThreadsCmd {
 /// HEAD is on the PR's branch on GitHub. The configured reply footer is
 /// appended. A reply that is already the thread's last comment from you is
 /// not posted again.
+///
+/// For an Entire finding (`entire:ID`), the reply is the reason recorded on
+/// Entire, so it needs --resolve or --dismiss.
 #[derive(Args)]
 pub struct ReplyArgs {
-    /// The thread's ID
+    /// The thread's ID, or an Entire finding's handle (`entire:ID`)
     id: String,
     /// The PR. Defaults to the current branch's PR
     pr: Option<String>,
@@ -2732,6 +2749,10 @@ pub struct ReplyArgs {
     /// Resolve the thread after replying
     #[usage(long)]
     resolve: bool,
+    /// Dismiss the Entire finding instead of resolving it, with the reply
+    /// as the reason
+    #[usage(long)]
+    dismiss: bool,
     /// Leave a thread that is already resolved alone; without this, a reply still goes into it
     #[usage(long)]
     ignore_resolved: bool,
@@ -2744,13 +2765,22 @@ pub struct ReplyArgs {
 ///
 /// Every ID is checked before any thread is resolved. A PR given after the
 /// IDs must not be a bare number: write it as #N.
+///
+/// Entire findings (`entire:ID`, as `jouet pr threads` lists them) are
+/// resolved on Entire through the `entire` CLI, with --reply as the reason;
+/// --dismiss dismisses them instead, and needs a reason. A finding and a
+/// GitHub thread are separate: resolving one never resolves the other.
 #[derive(Args)]
 pub struct ResolveArgs {
-    /// Thread IDs, then optionally the PR
+    /// Thread IDs or Entire finding handles, then optionally the PR
     args: Vec<String>,
-    /// Reply with TEXT before resolving each thread
+    /// Reply with TEXT before resolving each thread; for an Entire finding,
+    /// the reason recorded
     #[usage(long, value_name = "TEXT")]
     reply: Option<String>,
+    /// Dismiss the Entire findings instead of resolving them; needs --reply
+    #[usage(long)]
+    dismiss: bool,
     /// Leave threads that are already resolved alone; without this, replies still go into them
     #[usage(long)]
     ignore_resolved: bool,
@@ -2761,10 +2791,11 @@ pub struct ResolveArgs {
 
 /// Unresolve threads
 ///
-/// A PR given after the IDs must not be a bare number: write it as #N.
+/// A PR given after the IDs must not be a bare number: write it as #N. An
+/// Entire finding (`entire:ID`) is reopened on Entire.
 #[derive(Args)]
 pub struct UnresolveArgs {
-    /// Thread IDs, then optionally the PR
+    /// Thread IDs or Entire finding handles, then optionally the PR
     args: Vec<String>,
     /// Check everything and show what would happen, changing nothing
     #[usage(long)]
@@ -2777,6 +2808,11 @@ pub struct UnresolveArgs {
 /// entry is checked before anything is posted. Re-running the same list after
 /// a failure is safe: resolved threads and replies already posted are
 /// skipped.
+///
+/// An entry for an Entire finding has its handle as the ID, {"id":
+/// "entire:ID", "reply": "...", "resolve": true}, with "dismiss": true to
+/// dismiss it (which needs a reply) or "unresolve": true to reopen it. Its
+/// reply is the reason recorded on Entire.
 #[derive(Args)]
 pub struct ApplyArgs {
     /// `-` to read the list from stdin, and optionally the PR
@@ -2807,6 +2843,11 @@ fn main() -> ExitCode {
     if let Cmd::Hook(args) = &cli.cmd {
         return cmd::hook::run(args).into();
     }
+    let entire = settings::Settings::load().entire;
+    jouet_github::entire::configure(
+        entire.enabled,
+        std::time::Duration::from_millis(entire.timeout_ms),
+    );
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
