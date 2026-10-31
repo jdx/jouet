@@ -61,4 +61,4 @@ Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 ## Subcommands
 
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
-- [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
+- [`jouet edit replace [FLAGS] [PATHS]…`](/cli/edit/replace.md)

@@ -363,6 +363,18 @@ fn render_list(l: &Listing, now: i64) -> String {
         s.push('\n');
         render_thread(&mut s, t, now);
     }
+    // Where the IDs are is where an agent decides to reply, so the usage is
+    // here rather than one `--help` away.
+    if l.threads
+        .iter()
+        .any(|t| t.kind == Kind::Thread && !t.resolved)
+        && let Some(reply) = crate::guide::short_synopsis(&["pr", "threads", "reply"], &["--body"])
+    {
+        let _ = writeln!(
+            s,
+            "\nReply with `{reply}`, ID being the number in brackets; add --resolve to resolve it too, or `jouet pr threads apply` takes many at once."
+        );
+    }
     s
 }
 

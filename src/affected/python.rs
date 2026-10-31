@@ -1,8 +1,8 @@
-//! The pytest adapter. With pytest-testmon installed it delegates to
-//! testmon, which selects by the coverage each test recorded. Otherwise it
-//! walks a static import graph from the changed modules to the test files
-//! that import them, which is best-effort: dynamic imports and plugins are
-//! invisible to it.
+//! The pytest and unittest adapters. With pytest-testmon installed, pytest's
+//! delegates to testmon, which selects by the coverage each test recorded.
+//! Otherwise both walk a static import graph from the changed modules to the
+//! test files that import them, which is best-effort: dynamic imports and
+//! plugins are invisible to it.
 
 use super::classify::{extension, file_name};
 use super::graph::Graph;
@@ -220,57 +220,58 @@ impl Pytest {
         };
         Ok((files.into_iter().collect(), Some(note.into())))
     }
+}
 
-    /// The test files that import a changed module, directly or not.
-    fn static_graph(&self, project: &Project, sources: &[Change]) -> Vec<Test> {
-        let mut files: BTreeSet<String> = super::changes::git(
-            &project.root,
-            &[
-                "ls-files",
-                "-z",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-            ],
-        )
-        .unwrap_or_default()
-        .split('\0')
-        .filter(|p| matches!(extension(p).as_str(), "py" | "pyi"))
-        .map(str::to_string)
+/// The test files, as `config` names them, that import a changed module,
+/// directly or not.
+fn static_graph(project: &Project, config: &Config, sources: &[Change]) -> Vec<Test> {
+    let mut files: BTreeSet<String> = super::changes::git(
+        &project.root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )
+    .unwrap_or_default()
+    .split('\0')
+    .filter(|p| matches!(extension(p).as_str(), "py" | "pyi"))
+    .map(str::to_string)
+    .collect();
+    let deleted: BTreeSet<&str> = sources
+        .iter()
+        .filter(|s| s.status == Status::Deleted)
+        .map(|s| s.path.as_str())
         .collect();
-        let deleted: BTreeSet<&str> = sources
-            .iter()
-            .filter(|s| s.status == Status::Deleted)
-            .map(|s| s.path.as_str())
-            .collect();
-        files.extend(deleted.iter().map(|p| (*p).to_string()));
-        let modules = Modules::new(project, &self.config, &files);
-        let mut graph = Graph::default();
-        for file in &files {
-            if deleted.contains(file.as_str()) {
-                continue;
-            }
-            let Ok(text) = std::fs::read_to_string(project.root.join(file)) else {
-                continue;
-            };
-            let deps = pyimports::imports(&text)
-                .iter()
-                .flat_map(|import| modules.resolve(file, import))
-                .collect::<Vec<_>>();
-            graph.add(file, deps);
+    files.extend(deleted.iter().map(|p| (*p).to_string()));
+    let modules = Modules::new(project, config, &files);
+    let mut graph = Graph::default();
+    for file in &files {
+        if deleted.contains(file.as_str()) {
+            continue;
         }
-        let changed: Vec<String> = sources.iter().map(|s| s.path.clone()).collect();
-        graph
-            .dependents(&changed)
-            .into_iter()
-            .filter(|(path, _)| {
-                project.inside(path).is_some()
-                    && self.config.is_test(path)
-                    && !deleted.contains(path.as_str())
-            })
-            .map(|(path, via)| Test { path, via })
-            .collect()
+        let Ok(text) = std::fs::read_to_string(project.root.join(file)) else {
+            continue;
+        };
+        let deps = pyimports::imports(&text)
+            .iter()
+            .flat_map(|import| modules.resolve(file, import))
+            .collect::<Vec<_>>();
+        graph.add(file, deps);
     }
+    let changed: Vec<String> = sources.iter().map(|s| s.path.clone()).collect();
+    graph
+        .dependents(&changed)
+        .into_iter()
+        .filter(|(path, _)| {
+            project.inside(path).is_some()
+                && config.is_test(path)
+                && !deleted.contains(path.as_str())
+        })
+        .map(|(path, via)| Test { path, via })
+        .collect()
 }
 
 /// pytest for this project: a virtualenv's in the project or the
@@ -508,7 +509,7 @@ impl Adapter for Pytest {
                 note,
             });
         }
-        let tests = self.static_graph(project, sources);
+        let tests = static_graph(project, &self.config, sources);
         argv.extend(tests.iter().map(|t| project.relative_to_dir(&t.path)));
         Ok(Selection {
             tests,
@@ -533,6 +534,143 @@ impl Adapter for Pytest {
             0 => Exit::Ok,
             // pytest's own usage error.
             4 => Exit::Usage,
+            _ => Exit::Failed,
+        }
+    }
+}
+
+/// Whether `dir` is a unittest project: not a pytest one, and a test file
+/// (`test*.py`) here, in `tests/` or in `test/` imports unittest.
+pub(crate) fn detect_unittest(dir: &Path) -> bool {
+    let imports_unittest = |dir: &Path| {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("test")
+                    && name.ends_with(".py")
+                    && std::fs::read_to_string(entry.path())
+                        .is_ok_and(|text| text.contains("unittest"))
+            })
+    };
+    !detect(dir)
+        && [dir, &dir.join("tests"), &dir.join("test")]
+            .into_iter()
+            .any(imports_unittest)
+}
+
+/// The unittest adapter for one project: `python -m unittest`, choosing
+/// tests from the static import graph.
+pub(crate) struct Unittest {
+    /// A virtualenv's Python in the project or the repository root, or
+    /// python3.
+    python: String,
+    /// The tests' directory when it is not a package, which discovery from
+    /// the project directory would not enter.
+    start: Option<&'static str>,
+    config: Config,
+}
+
+impl Unittest {
+    pub(crate) fn load(project: &Project) -> Self {
+        let bin = if cfg!(windows) { "Scripts" } else { "bin" };
+        let venv = [&project.dir, &project.root].into_iter().find_map(|base| {
+            [".venv", "venv"]
+                .into_iter()
+                .find_map(|venv| super::executable(&base.join(venv).join(bin), "python"))
+        });
+        let python = match venv {
+            Some(found) => found.to_string_lossy().into_owned(),
+            None if cfg!(windows) => "python".into(),
+            None => "python3".into(),
+        };
+        let start = ["tests", "test"].into_iter().find(|d| {
+            let dir = project.dir.join(d);
+            dir.is_dir() && !dir.join("__init__.py").is_file()
+        });
+        Self {
+            python,
+            start,
+            // unittest discovery's default pattern.
+            config: Config {
+                files: vec!["test*.py".into()],
+                pythonpath: Vec::new(),
+            },
+        }
+    }
+
+    fn unittest(&self) -> Vec<String> {
+        vec![self.python.clone(), "-m".into(), "unittest".into()]
+    }
+}
+
+impl Adapter for Unittest {
+    fn name(&self) -> &'static str {
+        "unittest"
+    }
+
+    fn precision(&self) -> String {
+        "a static import graph (best-effort: dynamic imports are invisible to it)".into()
+    }
+
+    fn covers(&self, ecosystem: Ecosystem) -> bool {
+        ecosystem == Ecosystem::Python
+    }
+
+    fn traces(&self, path: &str) -> bool {
+        matches!(extension(path).as_str(), "py" | "pyi")
+    }
+
+    fn traces_deletions(&self) -> bool {
+        true
+    }
+
+    fn trigger(&self, path: &str) -> Option<&'static str> {
+        match file_name(path) {
+            "pyproject.toml" | "setup.py" | "setup.cfg" => {
+                Some("the package configuration changed")
+            }
+            _ => None,
+        }
+    }
+
+    fn full(&self, _project: &Project, extra: &[String]) -> Result<Vec<String>, Error> {
+        let mut argv = self.unittest();
+        argv.push("discover".into());
+        if let Some(start) = self.start {
+            argv.extend(["-s".into(), start.into()]);
+        }
+        argv.extend(extra.iter().cloned());
+        Ok(argv)
+    }
+
+    fn select(
+        &self,
+        project: &Project,
+        _base: &Base,
+        sources: &[Change],
+        extra: &[String],
+    ) -> Result<Selection, Error> {
+        let tests = static_graph(project, &self.config, sources);
+        let mut argv = self.unittest();
+        argv.extend(extra.iter().cloned());
+        argv.extend(tests.iter().map(|t| project.relative_to_dir(&t.path)));
+        Ok(Selection {
+            tests,
+            command: argv,
+            note: None,
+        })
+    }
+
+    fn exit(&self, code: i32) -> Exit {
+        match code {
+            0 => Exit::Ok,
+            // argparse's usage error.
+            2 => Exit::Usage,
+            // 1 is a failure, and 5 (Python 3.12 on) means no tests ran.
             _ => Exit::Failed,
         }
     }

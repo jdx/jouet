@@ -43,7 +43,7 @@ Format files with the project's fixers (`hk run fix \-\-safe`)
 Make exact, all\-or\-nothing edits across files
 .TP
 \fBedit replace\fR
-Replace text in one file, given on the command line
+Replace text in files, given on the command line
 .TP
 \fBedit hash\fR
 Print the SHA\-256 hash of files, for \-\-expect\-hash
@@ -517,34 +517,39 @@ Print help
 \fB<PATHS>\fR
 With \-\-pattern, the files and directories to rewrite (default .)
 .SH "JOUET EDIT REPLACE"
-Replace text in one file, given on the command line
+Replace text in files, given on the command line
 
-Matches anywhere in the file, like `str::replace`, and requires exactly one match unless \-\-count or \-\-all says otherwise.
+Matches anywhere in a file, like `str::replace`, and requires exactly one match in each file unless \-\-count or \-\-all says otherwise. Repeat \-\-old and \-\-new for several replacements: the Nth \-\-new replaces the Nth \-\-old, in order. Every replacement applies to every file, and every file is checked before any is written, so a rename across files is one call that lands whole or not at all.
+
+Examples:
+  jouet edit replace src/lib.rs \-\-old 'let x = 1;' \-\-new 'let x = 2;'
+  jouet edit replace a.py b.py \-\-old retry_limit \-\-new max_attempts \-\-all
+  jouet edit replace app.py \-\-old 'a()' \-\-new 'b()' \-\-old 'c()' \-\-new 'd()'
 .PP
-\fBUsage:\fR jouet edit replace [OPTIONS] <PATH>
+\fBUsage:\fR jouet edit replace [OPTIONS] [<PATHS>] ...
 .PP
 \fBOptions:\fR
 .PP
 .TP
 \fB\-\-old\fR \fI<TEXT>\fR
-The text to find
+The text to find. Repeatable
 .TP
 \fB\-\-new\fR \fI<TEXT>\fR
-The text to put in its place
+The text to put in its place, one for each \-\-old
 .TP
 \fB\-\-count\fR \fI<N>\fR
-How many matches there must be
+How many matches each \-\-old must have in each file
 .TP
 \fB\-\-all\fR
-Replace every match (at least one)
+Replace every match (at least one in each file)
 .TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
 .PP
 .TP
-\fB<PATH>\fR
-The file to edit
+\fB<PATHS>\fR
+The files to edit
 .SH "JOUET EDIT HASH"
 Print the SHA\-256 hash of files, for \-\-expect\-hash
 .PP
@@ -1118,7 +1123,7 @@ Reading a large file whole to find one thing fills the context with code that is
    (`Vfox::download`, `Shop.Cart`); every definition it matches is printed.
 3. `\-\-range A:B`: lines A to B (`A:` to the end, `:B` from the start).
 
-With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. Code is printed with line numbers, at most \-\-max\-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; \-\-again prints them. Definitions come from tree\-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
+With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. `\-\-outline` prints a file of up to 100 lines whole too (with its outline in \-\-json), since reading it after its outline would cost another call. Code is printed with line numbers, at most \-\-max\-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; \-\-again prints them. Definitions come from tree\-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
 
 Exits 3 for a file or symbol that does not exist, and 2 for an outline or symbol of a file whose language jouet cannot read.
 
@@ -1133,7 +1138,7 @@ Examples:
 .PP
 .TP
 \fB\-\-outline\fR
-List the file's definitions and their line ranges
+List the file's definitions and their line ranges (a file of up to 100 lines is printed whole)
 .TP
 \fB\-\-symbol\fR \fI<NAME>\fR
 Print the definitions this names: NAME, KIND NAME or Scope::NAME

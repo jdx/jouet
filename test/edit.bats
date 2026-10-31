@@ -336,6 +336,34 @@ EOF
 	assert_content a.txt $'c c c\n'
 }
 
+@test "edit replace takes several files and pairs, and writes none unless all match" {
+	printf 'retry_limit = 3\n' >config.py
+	printf 'def go(retry_limit):\n    return retry_limit\n' >client.py
+	printf 'no setting here\n' >other.py
+
+	run --separate-stderr jouet edit replace config.py client.py other.py --old retry_limit --new max_attempts --all
+	assert_failure 4
+	assert_line --regexp '^failed +other\.py +1 edit$'
+	assert_line '0 of 3 files written'
+	assert_content config.py $'retry_limit = 3\n'
+
+	run --separate-stderr jouet edit replace config.py client.py --old retry_limit --new max_attempts --all
+	assert_success
+	assert_line '2 of 2 files written'
+	assert_content client.py $'def go(max_attempts):\n    return max_attempts\n'
+
+	# The Nth --new replaces the Nth --old.
+	run --separate-stderr jouet edit replace config.py --old max_attempts --old 3 --new attempts --new 5
+	assert_success
+	assert_content config.py $'attempts = 5\n'
+
+	run --separate-stderr jouet edit replace config.py --old a --old b --new c
+	assert_failure 2
+	assert_stderr --partial 'give one --new for each --old (got 2 --old and 1 --new)'
+	run --separate-stderr jouet edit replace --old a --new b
+	assert_failure 2
+}
+
 @test "edit hash and --expect-hash refuse to edit a file that changed since it was read" {
 	printf 'one two\n' >a.txt
 

@@ -220,6 +220,27 @@ vitest (vitest's module graph): 2 test files
 	refute_line --partial 'partial run'
 }
 
+@test "plain unittest runs whole through discover, and an affected run follows imports" {
+	command -v python3 >/dev/null || need python3 "not installed"
+	project unittest
+
+	run --separate-stderr jouet test
+	assert_success
+	assert_line "unittest: the full suite (the runner's own, as there is no test task)"
+	# tests/ is not a package, so discovery has to start there.
+	assert_line '  run: python3 -m unittest discover -s tests'
+	assert_stderr --partial 'Ran 2 tests'
+
+	printf 'def add(a, b):\n    return a - b\n' >calc/arith.py
+	run --separate-stderr jouet test --affected
+	assert_failure 1
+	assert_line --partial 'unittest (a static import graph (best-effort'
+	assert_line '  tests/test_arith.py: imports calc/arith.py (changed)'
+	refute_line --partial 'tests/test_strings.py'
+	assert_stderr --partial 'Ran 1 test'
+	assert_line --regexp '^unittest: failed \(exit 1\) in [0-9.]+s$'
+}
+
 @test "usage errors and missing runners exit 2 and 4" {
 	run --separate-stderr jouet test --since main
 	assert_failure 2

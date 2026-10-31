@@ -14,7 +14,7 @@ Reading a large file whole to find one thing fills the context with code that is
    (`Vfox::download`, `Shop.Cart`); every definition it matches is printed.
 3. `--range A:B`: lines A to B (`A:` to the end, `:B` from the start).
 
-With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. Code is printed with line numbers, at most --max-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; --again prints them. Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
+With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. `--outline` prints a file of up to 100 lines whole too (with its outline in --json), since reading it after its outline would cost another call. Code is printed with line numbers, at most --max-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; --again prints them. Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
 
 Exits 3 for a file or symbol that does not exist, and 2 for an outline or symbol of a file whose language jouet cannot read.
 
@@ -27,7 +27,7 @@ Examples:
 - **`<PATH>`** — The file to read
 
 ## Flags
-- **`--outline`** — List the file's definitions and their line ranges
+- **`--outline`** — List the file's definitions and their line ranges (a file of up to 100 lines is printed whole)
 - **`--symbol <NAME>`** — Print the definitions this names: NAME, KIND NAME or Scope::NAME
 - **`--range <A:B>`** — Print lines A to B: `A:B`, `A:` or `:B`
 - **`--max-lines <N>`** — The most lines of code to print (default 400; 0 is no limit)

@@ -27,7 +27,7 @@ src/lib.rs: method Client::download (6-9)
 9	    }
 ```
 
-- **`--outline`** lists every definition with its line range, each named with its scope: the class, module or namespace it is in, a Rust `impl` block's type, or a Go method's receiver.
+- **`--outline`** lists every definition with its line range, each named with its scope: the class, module or namespace it is in, a Rust `impl` block's type, or a Go method's receiver. A file of up to 100 lines is printed whole instead, under a line saying so, because its outline saves little and reading it after the outline costs another call; `--json` then has both the outline and the file, and `short: true`. A short file this session was already shown gets only its outline.
 - **`--symbol NAME`** prints the definitions `NAME` matches. `NAME` is a name (`download`), a kind and a name (`fn download`, `class Cart`, `trait Backend`), or a name with its scope (`Client::download`, `Shop.Cart`). The same selectors pick definitions for [`jouet edit`'s symbol targets](/commands/edit#symbol-targets).
 - **`--range A:B`** prints lines `A` to `B`; `A:` runs to the end and `:B` starts at the beginning.
 - **With none of them,** a file of up to 300 lines is printed whole, and a longer one as its outline, with a line saying so.

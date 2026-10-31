@@ -201,7 +201,7 @@ enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 
 ## The primer, the skill and `agent-help`
 
-The session-start primer is four lines, about 250 tokens: the command families by name, usage for `jouet commit` and `jouet edit replace`, the rules that deny with the command each suggests, and the stop check. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them.
+The session-start primer is four lines, about 300 tokens: the command families by name, usage for `jouet commit`, `jouet edit replace` and `jouet pr threads reply`, the rules that deny with the command each suggests, and the stop check. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them. It also says that Python scripts that rewrite files are denied, and that `jouet edit replace` takes several files and replacements in one call, because agents reached for a heredoc to batch replacements even with the `python-edit` rule named.
 
 `jouet skill` prints the skill `jouet setup --skill` installs, about 25 lines of when and why that end in "run `jouet agent-help`". setup leaves it out by default because the primer covers it: with both, every request carried the command list twice, and Codex read the skill file before starting. `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills or hooks.
 
