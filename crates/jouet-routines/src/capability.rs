@@ -36,10 +36,13 @@ pub enum Capability {
     /// Running the project's tasks: a mise task, or its test command.
     #[serde(rename = "mise.run")]
     MiseRun,
+    /// Reading a database's schema, and read-only queries.
+    #[serde(rename = "db.read")]
+    DbRead,
 }
 
 impl Capability {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::GithubRead,
         Self::GithubWrite,
         Self::GitRead,
@@ -49,6 +52,7 @@ impl Capability {
         Self::LedgerRead,
         Self::MiseRead,
         Self::MiseRun,
+        Self::DbRead,
     ];
 
     pub fn name(self) -> &'static str {
@@ -62,6 +66,7 @@ impl Capability {
             Self::LedgerRead => "ledger.read",
             Self::MiseRead => "mise.read",
             Self::MiseRun => "mise.run",
+            Self::DbRead => "db.read",
         }
     }
 
