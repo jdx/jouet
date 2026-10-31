@@ -89,6 +89,7 @@ export default defineConfig({
           { text: "jouet db", link: "/commands/db" },
           { text: "jouet graph", link: "/commands/graph" },
           { text: "jouet wait", link: "/commands/wait" },
+          { text: "jouet http", link: "/commands/http" },
           { text: "jouet job", link: "/commands/job" },
           { text: "jouet ci run", link: "/commands/ci" },
           { text: "jouet ci explain", link: "/commands/ci#jouet-ci-explain" },

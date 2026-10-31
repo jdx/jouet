@@ -15,6 +15,6 @@ Reply to a thread
 - **`--body <TEXT>`** — The reply
 - **`--body-file <FILE>`** — Read the reply from FILE (`-` is stdin)
 - **`--resolve`** — Resolve the thread after replying
-- **`--ignore-resolved`** — Skip a thread that is already resolved instead of failing
+- **`--ignore-resolved`** — Leave a thread that is already resolved alone; without this, a reply still goes into it
 - **`--dry-run`** — Check everything and show what would be posted, posting nothing
 - **`-h --help`** — Print help

@@ -1,11 +1,12 @@
 //! Replying to, resolving and unresolving threads.
 //!
 //! Every request is checked against the PR before anything is posted, so a
-//! bad ID or a thread someone already resolved fails the whole call with
-//! nothing written. Writes then go one at a time and stop at the first
-//! failure. A retry is safe: a thread already resolved is not resolved again,
-//! and a reply whose exact text is already the thread's last comment from
-//! the same user is not posted again.
+//! bad ID fails the whole call with nothing written. A thread someone already
+//! resolved, often a review bot after a push, still takes a reply and stays
+//! resolved. Writes then go one at a time and stop at the first failure. A
+//! retry is safe: a thread already resolved is not resolved again, and a reply
+//! whose exact text is already the thread's last comment from the same user
+//! is not posted again.
 
 use super::{PrThreads, Thread, same_login};
 use crate::Client;
@@ -75,11 +76,8 @@ pub struct Options {
     pub footer: Option<String>,
     /// The short HEAD SHA that `{sha}` expands to, when there is one.
     pub sha: Option<String>,
-    /// Skip threads already resolved instead of failing.
+    /// Leave threads already resolved alone, posting nothing to them.
     pub ignore_resolved: bool,
-    /// Treat a resolve of an already-resolved thread as done rather than as
-    /// a mistake: `apply` is meant to be re-run after a partial failure.
-    pub retry_safe: bool,
 }
 
 /// What happened to one thread, or in a dry run what would.
@@ -92,6 +90,10 @@ pub struct Outcome {
     /// posted again.
     #[serde(skip_serializing_if = "is_false")]
     pub already_replied: bool,
+    /// The thread was resolved before: the reply went in, and it stays
+    /// resolved.
+    #[serde(skip_serializing_if = "is_false")]
+    pub already_resolved: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub resolved: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -172,7 +174,6 @@ pub fn plan(entries: &[Entry], pr: &PrThreads, o: &Options) -> Result<Vec<Outcom
             ),
         });
     }
-    let mut conflicts = Vec::new();
     let mut outcomes = Vec::new();
     for e in entries {
         let t = find(e.id).expect("unknown IDs were rejected");
@@ -199,11 +200,13 @@ pub fn plan(entries: &[Entry], pr: &PrThreads, o: &Options) -> Result<Vec<Outcom
                 out.skipped = Some("not resolved".into());
             }
         } else if t.resolved && (out.post.is_some() || e.resolve) {
-            if (out.post.is_none() && o.retry_safe) || o.ignore_resolved {
+            // A reviewer, often a bot after a push, resolved it already: a
+            // reply still goes in, and the thread stays resolved.
+            if out.post.is_some() && !o.ignore_resolved {
+                out.already_resolved = true;
+            } else {
                 out.skipped = Some("already resolved".into());
                 out.post = None;
-            } else {
-                conflicts.push(e.id.to_string());
             }
         } else if out.post.is_none() && !e.resolve {
             out.skipped = Some("reply already posted".into());
@@ -211,21 +214,6 @@ pub fn plan(entries: &[Entry], pr: &PrThreads, o: &Options) -> Result<Vec<Outcom
             out.resolve = e.resolve;
         }
         outcomes.push(out);
-    }
-    if !conflicts.is_empty() {
-        let (noun, verb) = if conflicts.len() == 1 {
-            ("thread", "is")
-        } else {
-            ("threads", "are")
-        };
-        return Err(PlanError {
-            exit: Exit::Precondition,
-            message: format!(
-                "{noun} {} {verb} already resolved; nothing was posted",
-                conflicts.join(", ")
-            ),
-            hint: Some("--ignore-resolved skips resolved threads".into()),
-        });
     }
     Ok(outcomes)
 }

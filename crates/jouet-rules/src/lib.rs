@@ -116,6 +116,7 @@ const BUILTIN: &[(&str, &str)] = &[
         "unbounded-query",
         include_str!("../rules/unbounded-query.toml"),
     ),
+    ("curl-json", include_str!("../rules/curl-json.toml")),
 ];
 
 /// The scripts built-in rules name.

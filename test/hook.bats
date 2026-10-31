@@ -263,7 +263,8 @@ stop_reason() {
 	run jq -r '.shape' "$ledger"
 	assert_line --index 0 'cd <arg> && for <arg> in <arg>…; do gh pr checks <arg> --repo <arg>; done'
 	assert_line --index 1 'case <arg> in <arg>) make <arg>;; esac'
-	run grep -cE 'acme|deploy-prod|101' "$ledger"
+	# Every field but the timestamp, whose digits can hold "101".
+	run bash -c "jq -c 'del(.ts)' '$ledger' | grep -cE 'acme|deploy-prod|101'"
 	assert_output 0
 }
 

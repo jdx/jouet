@@ -95,6 +95,8 @@ enum Cmd {
     Test(TestArgs),
     /// Block until a condition holds, then print one summary
     Wait(WaitArgs),
+    /// Send an HTTP request and print the status and only the JSON paths asked for, within a budget
+    Http(HttpArgs),
     /// Run one-off background work, such as a build or a server for one check
     Job(JobArgs),
     /// Run GitHub Actions jobs here, or say whether a failure on GitHub is flaky
@@ -1097,6 +1099,78 @@ pub struct DbQueryArgs {
     remote: bool,
 }
 
+/// Send an HTTP request and print the status and only the JSON paths asked for, within a budget
+///
+/// Prints the status, the content type, size and time, the headers worth
+/// acting on (location, retry-after, rate limits), and the body cut to
+/// --budget bytes with a marker naming what was left out and the file the
+/// whole body is saved in. With --select, it prints only the values at
+/// those JSONPaths (RFC 9535) instead of the body, so nothing needs piping
+/// through jq or Python. JSON is printed compact for agents and indented
+/// for people.
+///
+/// --expect checks the response in hurl's style: a query (`status`, `header
+/// NAME`, `jsonpath PATH`, `body`, `duration` in milliseconds), an optional
+/// `count` and `not`, then a predicate (`==`, `!=`, `>`, `>=`, `<`, `<=`,
+/// `contains`, `startsWith`, `endsWith`, `matches`, `exists`, `isEmpty`) and
+/// its value. Without a `status` assertion, a status of 400 or more fails.
+///
+/// Secrets are never printed: Authorization, cookies, and headers and JSON
+/// keys named like a token, password, API key or session are redacted, and so is any value of `${NAME}`, which jouet
+/// expands from its own environment in the URL, headers and an inline body.
+/// Give credentials that way, from the environment or through `fnox exec --
+/// jouet http ...`, not written into the command; in a project that uses
+/// fnox, its secrets' values are redacted too.
+///
+/// Exits 1 when an assertion fails, 3 when a --data or --json-body file is
+/// missing, 4 when a `${NAME}` is not set, 5 when the server cannot be
+/// reached, and 124 when it does not answer within --timeout.
+///
+/// Examples:
+///   jouet http GET https://api.github.com/repos/jdx/mise --select '$.stargazers_count'
+///   jouet http GET localhost:3000/health --expect 'jsonpath $.ok == true'
+///   jouet http POST https://api.example.com/items --json-body '{"name":"x"}' --expect status=201
+///   fnox exec -- jouet http GET https://api.example.com/me -H 'Authorization: Bearer ${API_TOKEN}'
+#[derive(Args)]
+pub struct HttpArgs {
+    /// GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS
+    method: String,
+    /// The URL; one without a scheme is taken as http:// for localhost and
+    /// https:// otherwise
+    url: String,
+    /// A request header, NAME:VALUE (repeatable)
+    #[usage(short = 'H', long, value_name = "NAME:VALUE")]
+    header: Vec<String>,
+    /// Send JSON (checked to be JSON) with Content-Type: application/json;
+    /// @FILE reads it from a file
+    #[usage(long, value_name = "JSON")]
+    json_body: Option<String>,
+    /// Send this text as the body; @FILE reads a file and @- stdin
+    #[usage(short = 'd', long, value_name = "DATA")]
+    data: Option<String>,
+    /// Print only the values at this JSONPath, such as `$.items[*].name`
+    /// (repeatable)
+    #[usage(short = 's', long, value_name = "JSONPATH")]
+    select: Vec<String>,
+    /// Check the response, as in `status == 200` or `jsonpath $.ok == true`,
+    /// and exit 1 if it fails (repeatable)
+    #[usage(short = 'e', long, value_name = "ASSERTION")]
+    expect: Vec<String>,
+    /// The most bytes of body or selected values to print (default 4000; 0
+    /// is no limit)
+    #[usage(long, value_name = "BYTES")]
+    budget: Option<usize>,
+    /// Print every response header, not only those worth acting on
+    #[usage(short = 'i', long)]
+    headers: bool,
+    /// Do not follow redirects, so a 3xx is the answer
+    #[usage(long)]
+    no_follow: bool,
+    /// Give up after DUR, such as 10s or 2m (default 30s)
+    #[usage(long, value_name = "DUR")]
+    timeout: Option<String>,
+}
+
 /// Look up a dependency's API at the version the project locked
 ///
 /// Answers from the sources already installed for the project, at the
@@ -1361,7 +1435,9 @@ pub struct WaitPortArgs {
 /// Wait for a URL to answer with a status, and optionally a match
 ///
 /// Any 2xx status counts unless --status says otherwise. Redirects are
-/// followed, except when --status asks for a 3xx.
+/// followed, except when --status asks for a 3xx. --expect takes the
+/// assertions `jouet http` does, such as `jsonpath $.ready == true`, and
+/// waits until all of them hold.
 #[derive(Args)]
 pub struct WaitHttpArgs {
     /// The http:// or https:// URL to GET
@@ -1372,6 +1448,10 @@ pub struct WaitHttpArgs {
     /// Also wait until a line of the body matches REGEX, and print that line
     #[usage(long, value_name = "REGEX")]
     contains: Option<String>,
+    /// Also wait until ASSERTION holds, as in `jouet http --expect`
+    /// (repeatable)
+    #[usage(long, value_name = "ASSERTION")]
+    expect: Vec<String>,
 }
 
 /// Wait for a process to exit
@@ -2531,7 +2611,7 @@ pub struct ReplyArgs {
     /// Resolve the thread after replying
     #[usage(long)]
     resolve: bool,
-    /// Skip a thread that is already resolved instead of failing
+    /// Leave a thread that is already resolved alone; without this, a reply still goes into it
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would be posted, posting nothing
@@ -2550,7 +2630,7 @@ pub struct ResolveArgs {
     /// Reply with TEXT before resolving each thread
     #[usage(long, value_name = "TEXT")]
     reply: Option<String>,
-    /// Skip threads that are already resolved instead of failing
+    /// Leave threads that are already resolved alone; without this, replies still go into them
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would happen, changing nothing
@@ -2583,7 +2663,7 @@ pub struct ApplyArgs {
     /// Read the list from FILE (`-` is stdin)
     #[usage(long, value_name = "FILE")]
     file: Option<String>,
-    /// Skip threads that are already resolved instead of failing
+    /// Leave threads that are already resolved alone; without this, replies still go into them
     #[usage(long)]
     ignore_resolved: bool,
     /// Check everything and show what would be posted, posting nothing
@@ -2624,6 +2704,7 @@ fn main() -> ExitCode {
         Cmd::Search(args) => cmd::search::run(&args, &out),
         Cmd::Test(args) => cmd::test::run(&args, &out),
         Cmd::Wait(args) => cmd::wait::run(args, &out),
+        Cmd::Http(args) => cmd::http::run(&args, &out),
         Cmd::Job(args) => cmd::job::run(args, &out),
         Cmd::Ci(args) => cmd::ci::run(args, &out),
         Cmd::Rule(args) => cmd::rule::run(&args, &out),

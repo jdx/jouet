@@ -357,7 +357,6 @@ fn options() -> Options {
         footer: None,
         sha: Some("abc1234".into()),
         ignore_resolved: false,
-        retry_safe: false,
     }
 }
 
@@ -402,36 +401,35 @@ fn unknown_ids_fail_the_whole_call() {
 }
 
 #[test]
-fn resolved_threads_fail_unless_skipped() {
+fn a_resolved_thread_takes_a_reply_and_stays_resolved() {
+    // A review bot often resolves its own thread after a push, before the
+    // agent replies with what fixed it.
     let entries = [
         entry(OPEN_CODE, Some("done"), true),
-        entry(RESOLVED_OUTDATED, None, true),
+        entry(RESOLVED_OUTDATED, Some("fixed in abc1234"), true),
     ];
-    let e = plan_error(&entries, &options());
-    assert_eq!(e.exit, Exit::Precondition);
-    assert!(
-        e.message.contains(&RESOLVED_OUTDATED.to_string()),
-        "{}",
-        e.message
-    );
-    assert!(e.hint.unwrap().contains("--ignore-resolved"));
+    let mut out = plan(&entries, &pr(), &options()).unwrap();
+    write::dry_run(&mut out);
+    assert!(out[0].skipped.is_none() && out[0].replied && out[0].resolved);
+    assert!(out[1].skipped.is_none());
+    assert!(out[1].already_resolved);
+    assert!(out[1].replied);
+    assert!(!out[1].resolved, "it is resolved already");
+
+    // A resolve with nothing to post is done already.
+    let out = plan(&[entry(RESOLVED_OUTDATED, None, true)], &pr(), &options()).unwrap();
+    assert_eq!(out[0].skipped.as_deref(), Some("already resolved"));
+
+    // --ignore-resolved leaves resolved threads alone, reply and all.
     let o = Options {
         ignore_resolved: true,
         ..options()
     };
-    let out = plan(&entries, &pr(), &o).unwrap();
+    let mut out = plan(&entries, &pr(), &o).unwrap();
+    write::dry_run(&mut out);
     assert_eq!(out[1].skipped.as_deref(), Some("already resolved"));
+    assert!(!out[1].replied);
     assert!(out[0].skipped.is_none());
-    // A reply into a thread someone resolved is refused even by apply.
-    let reply = [entry(RESOLVED_OUTDATED, Some("late"), true)];
-    let retry = Options {
-        retry_safe: true,
-        ..options()
-    };
-    assert_eq!(plan_error(&reply, &retry).exit, Exit::Precondition);
-    // But a resolve that already happened is done.
-    let out = plan(&entries[1..], &pr(), &retry).unwrap();
-    assert_eq!(out[0].skipped.as_deref(), Some("already resolved"));
 }
 
 #[test]
