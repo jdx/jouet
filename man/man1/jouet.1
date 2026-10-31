@@ -141,6 +141,12 @@ Wait for a process to exit
 \fBwait cmd\fR
 Re\-run a command until it exits with the expected code
 .TP
+\fBci\fR
+Run GitHub Actions jobs on this machine
+.TP
+\fBci run\fR
+Run a workflow's jobs here with jactionlint, and show why any failed
+.TP
 \fBrule\fR
 List, test and trust the rules jouet's hooks run
 .TP
@@ -1325,6 +1331,48 @@ Print help
 .TP
 \fB<CMD>\fR
 The command and its arguments, after `\-\-`
+.SH "JOUET CI"
+Run GitHub Actions jobs on this machine
+.PP
+\fBUsage:\fR jouet ci [OPTIONS] <COMMAND>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET CI RUN"
+Run a workflow's jobs here with jactionlint, and show why any failed
+
+Runs `jactionlint run`, which needs no container engine: each job runs in a copy of the checkout, in the OS sandbox, with a throwaway home and no secrets unless given. Prints one line for the run, then each failed step with the end of its output (cut like `wait ci`'s log excerpts) and the jobs that were skipped and why; the whole transcript is kept in a log. WORKFLOW is a file of .github/workflows (the extension is optional), a path, or a workflow's `name:`. \-\-check takes a check's name as `wait ci` prints it and runs the job behind it. Arguments after `\-\-` go to `jactionlint run` as they are, such as `\-\-secret NAME=VALUE`. It shows what happens on this machine, not whether GitHub will pass: jobs for another OS are skipped. Exits 1 when a job failed, 3 when no workflow or job matches, 4 when jactionlint is missing or the run could not start.
+.PP
+\fBUsage:\fR jouet ci run [OPTIONS] [<WORKFLOW>] [<ARGS>] ...
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-j, \-\-job\fR \fI<ID>\fR
+Run only this job and the jobs it needs. Repeatable
+.TP
+\fB\-\-check\fR \fI<NAME>\fR
+Run the job behind this check name, such as `unit (ubuntu\-latest)`
+.TP
+\fB\-e, \-\-event\fR \fI<EVENT>\fR
+The event that triggers the workflow (default push)
+.TP
+\fB\-\-log\-lines\fR \fI<N>\fR
+Lines of each failed step to show (default 60; 0 shows all of it)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<WORKFLOW>\fR
+The workflow. Needed when the repository has several and no \-\-check is given
+.TP
+\fB<ARGS>\fR
+Arguments for `jactionlint run`, after `\-\-`
 .SH "JOUET RULE"
 List, test and trust the rules jouet's hooks run
 
