@@ -305,6 +305,9 @@ struct Builder {
     /// The next word is a here-document delimiter.
     heredoc: Option<bool>,
     pending: Vec<Pending>,
+    /// The last command is followed by `&&` or `||`, and nothing but variable
+    /// assignments has come since.
+    chained: bool,
 }
 
 impl Builder {
@@ -329,6 +332,10 @@ impl Builder {
     fn end_command(&mut self, op: Option<Op>) {
         self.end_word();
         let mut command = std::mem::take(&mut self.current);
+        // `function name { ...`: neither word is a command.
+        if command.words.first().is_some_and(|w| w == "function") {
+            command.words.drain(..2.min(command.words.len()));
+        }
         let keep = command
             .words
             .iter()
@@ -340,7 +347,28 @@ impl Builder {
             .filter(|w| is_assignment(w))
             .collect();
         command.op = op;
+        // The header of `for x in a b`, `select` or `case x in` runs nothing.
+        if command
+            .words
+            .first()
+            .is_some_and(|w| matches!(w.as_str(), "for" | "select" | "case"))
+        {
+            self.chained = false;
+            return;
+        }
+        if command.words.is_empty() && !command.env.is_empty() {
+            // `a && X=1; b`: the assignment ends `a`'s chain, so the operator
+            // after it, not `&&`, is what comes between `a` and `b`.
+            if self.chained
+                && let Some(last) = self.commands.last_mut()
+            {
+                last.op = op;
+            }
+            self.chained = self.chained && matches!(op, Some(Op::And | Op::Or));
+            return;
+        }
         if command.words.is_empty() && command.heredocs.is_empty() {
+            self.chained = false;
             // `do`, `done`, a blank line: carry the operator to the previous
             // command so `a && \n b` still chains.
             if let (Some(op), Some(last)) = (op, self.commands.last_mut())
@@ -350,11 +378,25 @@ impl Builder {
             }
             return;
         }
+        self.chained = matches!(op, Some(Op::And | Op::Or));
         self.commands.push(command);
     }
 
     fn word(&mut self) -> &mut String {
         self.word.get_or_insert_with(String::new)
+    }
+
+    /// At the `(` of `name()` or `function name()`: the words so far are only
+    /// the name of a function being defined, not a command that runs.
+    fn names_function(&self) -> bool {
+        let words: Vec<&str> = self
+            .current
+            .words
+            .iter()
+            .chain(&self.word)
+            .map(String::as_str)
+            .collect();
+        matches!(words[..], [_] | ["function", _])
     }
 }
 
@@ -374,6 +416,7 @@ impl Parser {
             stdout_target: false,
             heredoc: None,
             pending: Vec::new(),
+            chained: false,
         };
         while let Some(c) = self.peek() {
             self.pos += 1;
@@ -417,6 +460,11 @@ impl Parser {
                     b.word().push_str(&text);
                 }
                 ')' if in_subst => break,
+                '(' if self.peek() == Some(')') && b.names_function() => {
+                    self.pos += 1;
+                    b.word = None;
+                    b.current = Command::default();
+                }
                 '(' | ')' => {
                     b.end_command(Some(Op::Seq));
                 }
@@ -448,6 +496,10 @@ impl Parser {
                         }
                         b.end_command(Some(Op::Pipe));
                     }
+                }
+                '<' | '>' if self.peek() == Some('(') => {
+                    let text = self.substitution();
+                    b.word().push_str(&text);
                 }
                 '<' | '>' => {
                     // `2>` and `10<`: an all-digit word before is the fd.
@@ -600,6 +652,24 @@ impl Parser {
     /// and returns its source text, which stays part of the word.
     fn substitution(&mut self) -> String {
         let start = self.pos - 1;
+        if self.chars[start] == '$' && self.chars.get(self.pos + 1) == Some(&'(') {
+            // `$((n + 1))` is arithmetic: no command runs inside.
+            let mut depth = 0;
+            while let Some(c) = self.peek() {
+                self.pos += 1;
+                match c {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return self.chars[start..self.pos].iter().collect();
+        }
         self.pos += 1;
         let mut commands = self.list(true);
         for c in &mut commands {
@@ -890,5 +960,81 @@ mod tests {
         assert_eq!(argv[0], ["env"]);
         assert_eq!(argv[1], ["env", "-u", "HOME"]);
         assert_eq!(argv[2], ["cargo", "test"]);
+    }
+
+    fn ops(script: &str) -> Vec<Option<Op>> {
+        parse(script).commands.iter().map(|c| c.op).collect()
+    }
+
+    #[test]
+    fn a_function_definition_is_not_a_command() {
+        assert_eq!(
+            words("reply() { gh pr view; }; reply"),
+            [vec!["gh", "pr", "view"], vec!["reply"]]
+        );
+        assert_eq!(words("run () { cargo test; }"), [vec!["cargo", "test"]]);
+        assert_eq!(
+            words("function f { git add -A; }"),
+            [vec!["git", "add", "-A"]]
+        );
+        assert_eq!(words("function g() { echo hi; }"), [vec!["echo", "hi"]]);
+    }
+
+    #[test]
+    fn loop_and_case_headers_are_not_commands() {
+        assert_eq!(
+            words("for t in a b; do cargo test $t; done"),
+            [vec!["cargo", "test", "$t"]]
+        );
+        assert_eq!(
+            words("select x in a b; do echo $x; done"),
+            [vec!["echo", "$x"]]
+        );
+        assert_eq!(words("case $x in a) echo a;; esac"), [vec!["echo", "a"]]);
+        // `for` as an argument is still an argument.
+        assert_eq!(words("echo for"), [vec!["echo", "for"]]);
+    }
+
+    #[test]
+    fn arithmetic_expansion_runs_no_command() {
+        let script = parse("echo $((n+3)) \"$((1 + (2*3)))\" $(date)");
+        assert_eq!(
+            script.commands[0].words,
+            ["echo", "$((n+3))", "$((1 + (2*3)))", "$(date)"]
+        );
+        assert_eq!(script.nested.len(), 1);
+        assert_eq!(script.nested[0].words, ["date"]);
+    }
+
+    #[test]
+    fn process_substitutions_are_words_and_their_commands_nested() {
+        let script = parse("diff <(git show HEAD:a) <(ls -a) > out");
+        assert_eq!(
+            script.commands[0].words,
+            ["diff", "<(git show HEAD:a)", "<(ls -a)"]
+        );
+        assert_eq!(script.commands[0].stdout_to.as_deref(), Some("out"));
+        let nested: Vec<&[String]> = script.nested.iter().map(|c| &c.words[..]).collect();
+        assert_eq!(nested, [&["git", "show", "HEAD:a"][..], &["ls", "-a"][..]]);
+        assert!(script.nested.iter().all(|c| c.captured));
+    }
+
+    #[test]
+    fn an_assignment_ends_the_chain_before_it() {
+        assert_eq!(
+            ops("cd a && S=1; mise exec -- cargo test"),
+            [Some(Op::Seq), None]
+        );
+        // Still one chain through the assignment.
+        assert_eq!(ops("cd a && S=1 && cargo test"), [Some(Op::And), None]);
+        assert_eq!(
+            status_of("cd a && S=$(pwd); cargo test", 101),
+            [None, Some(101)]
+        );
+        // A loop header between them is not an assignment.
+        assert_eq!(
+            ops("cd a && for i in 1 2; do x=1; cargo test; done"),
+            [Some(Op::And), Some(Op::Seq)]
+        );
     }
 }
