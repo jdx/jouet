@@ -267,7 +267,7 @@ ok    job-ready           12 examples passed
 ok    job-logs            11 examples passed
 ok    job-stop            15 examples passed
 ok    claimed-path        18 examples passed
-ok    checks              86 examples passed
+ok    checks              88 examples passed
 ok    reread              12 examples passed
 ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed
@@ -344,7 +344,7 @@ A matcher in front of a script is worth having: a hook only starts a Luau VM whe
 
 `jouet rule types` prints the whole API as Luau type definitions.
 
-A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
+A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one piped into another without `set -o pipefail`: `cargo test | tail` exits with tail's status, so `cargo test` gets none. `jouet.record("test", command, scope, selector)` records a run with that status. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so. The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after only partial test runs on changed code ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Type checking
 

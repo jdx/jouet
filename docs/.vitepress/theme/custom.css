@@ -445,6 +445,13 @@ summary:focus-visible,
 .vp-doc :not(pre) > code {
   overflow-wrap: anywhere;
 }
+/* A table's first column is short names (keys, flags, rules): breaking them
+   anywhere lets the browser size that column down to one character, so keep
+   them whole. A table wider than the page scrolls instead. */
+.vp-doc td:first-child > code {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
 .vp-doc table {
   font-size: 14px;
   line-height: 1.6;
