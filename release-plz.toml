@@ -18,9 +18,9 @@ semver_check = false
 # Every crate shares one version, moved together by `version_group`. The
 # libraries exist to build the `jouet` binary and promise nothing on their own,
 # so a separate number per crate would say nothing. release-plz publishes them
-# in dependency order: jouet-output, then jouet-github and jouet-git, then
-# jouet-edit, jouet-rules, jouet-wait, jouet-audit and jouet-search, then
-# jouet-routines, then jouet.
+# in dependency order: jouet-output, then jouet-github, jouet-git and
+# jouet-graph, then jouet-edit, jouet-rules, jouet-wait, jouet-audit and
+# jouet-search, then jouet-routines, then jouet.
 [[package]]
 name = "jouet"
 publish = true
@@ -31,6 +31,7 @@ changelog_include = [
   "jouet-output",
   "jouet-github",
   "jouet-git",
+  "jouet-graph",
   "jouet-edit",
   "jouet-rules",
   "jouet-wait",
@@ -63,6 +64,14 @@ git_release_enable = false
 
 [[package]]
 name = "jouet-git"
+publish = true
+version_group = "jouet"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+
+[[package]]
+name = "jouet-graph"
 publish = true
 version_group = "jouet"
 changelog_update = false

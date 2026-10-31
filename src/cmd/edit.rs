@@ -5,13 +5,15 @@ use super::diag as diag_cmd;
 use crate::diag::{self, Status, delta};
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
-use jouet_edit::{self as edit, EditStatus, FileStatus, Options, Report, Span, SymbolError};
+use jouet_edit::{
+    self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
+};
 use jouet_output::exit::Exit;
 use jouet_search::symbols::{self, SelectError, Selector};
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
     let spec = match &args.cmd {
@@ -49,7 +51,9 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         Ok(plan) => plan,
         Err(e) => return out.error(Exit::Failed, &format!("reading files: {e}")),
     };
-
+    if plan.report.ok() {
+        plan.report.callers = callers(&plan.report);
+    }
     if !plan.report.ok() {
         let exit = if plan.report.only_missing_files() {
             Exit::NotFound
@@ -200,6 +204,18 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         }
     }
     print_report(out, &plan.report, fixed.as_ref(), diagnosed.as_ref());
+    // Keep the code graph in step with what was written (or restored), when
+    // the repository has one, as the post-tool-use hook does for file tools.
+    if let Ok(cwd) = std::env::current_dir() {
+        let touched: Vec<_> = plan
+            .report
+            .files
+            .iter()
+            .flat_map(|f| std::iter::once(&f.path).chain(&f.moved_to))
+            .map(|p| cwd.join(p))
+            .collect();
+        super::graph::reindex(&cwd, &touched);
+    }
     exit
 }
 
@@ -322,6 +338,105 @@ impl edit::Symbols for TreeSitter {
         symbols::syntax_errors(path, text.as_bytes())
     }
 }
+
+/// How many references to a changed signature are listed.
+const CALLERS_SHOWN: usize = 10;
+
+/// For each definition whose signature a symbol edit changed, its callers
+/// in files the edit does not change: from the code graph when the work
+/// tree has one, else references to its name matched by text, so some may
+/// be another definition's.
+fn callers(report: &Report) -> Vec<Callers> {
+    let changed: Vec<(&str, &edit::SignatureChange)> = report
+        .files
+        .iter()
+        .flat_map(|f| f.edits.iter().map(move |e| (f.path.as_str(), e)))
+        .filter_map(|(path, e)| e.signature.as_ref().map(|s| (path, s)))
+        .collect();
+    if changed.is_empty() {
+        return Vec::new();
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = crate::git::toplevel().unwrap_or_else(|| cwd.clone());
+    let touched: Vec<PathBuf> = report
+        .files
+        .iter()
+        .filter_map(|f| std::fs::canonicalize(&f.path).ok())
+        .collect();
+    let shown = |full: PathBuf| {
+        full.strip_prefix(&cwd)
+            .map_or(full.clone(), Path::to_path_buf)
+            .to_string_lossy()
+            .into_owned()
+    };
+    // The code graph, when the work tree has one, knows the definition's
+    // callers, not just lines that mention its name.
+    let mut graph = jouet_graph::Graph::open_existing(&cwd).ok().flatten();
+    let mut out = Vec::new();
+    for (path, change) in changed {
+        let callers = graph
+            .as_mut()
+            .and_then(|g| graph_callers(g, &cwd.join(path), change, &touched));
+        if let Some(mut references) = callers {
+            if references.is_empty() {
+                continue;
+            }
+            for r in &mut references {
+                r.path = shown(root.join(&r.path));
+            }
+            let more = references.len().saturating_sub(CALLERS_SHOWN);
+            references.truncate(CALLERS_SHOWN);
+            out.push(Callers {
+                symbol: change.name.clone(),
+                references,
+                more,
+            });
+        }
+    }
+    out
+}
+
+/// The callers the code graph has for the definition a symbol edit
+/// changes, outside the files the edit touches, as paths relative to the
+/// work tree; `None` when the graph has no such definition, and the text
+/// match stands in.
+fn graph_callers(
+    graph: &mut jouet_graph::Graph,
+    path: &Path,
+    change: &edit::SignatureChange,
+    touched: &[PathBuf],
+) -> Option<Vec<Reference>> {
+    // The edit is not written yet, so this is the definition as it was.
+    graph
+        .reindex_paths(&[path.to_path_buf()], Some(CALLER_BUDGET))
+        .ok()?;
+    let symbol = graph.enclosing(path, change.line as u32).ok()??;
+    if symbol.name != change.name {
+        return None;
+    }
+    let root = graph.root().to_path_buf();
+    let mut seen = std::collections::BTreeSet::new();
+    Some(
+        graph
+            .callers(&symbol.id, 1)
+            .ok()?
+            .into_iter()
+            .filter(|r| !touched.contains(&root.join(&r.symbol.path)))
+            .map(|r| {
+                (
+                    r.symbol.path,
+                    r.line.unwrap_or(r.symbol.start_line) as usize,
+                )
+            })
+            .filter(|key| seen.insert(key.clone()))
+            .map(|(path, line)| Reference { path, line })
+            .collect(),
+    )
+}
+
+/// How long finding a changed definition's callers may spend bringing the
+/// graph up to date for its file.
+const CALLER_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
 fn read_spec(args: &EditArgs) -> Result<Spec, String> {
     let text = match args.spec.as_deref() {
@@ -598,17 +713,35 @@ fn render(report: &Report) -> String {
             s.push_str("  every edited file was restored\n");
         }
     }
+    // A changed signature the graph found no callers for is still worth a
+    // look: the graph may not know the definition yet.
     for change in report
         .files
         .iter()
         .flat_map(|f| &f.edits)
         .filter_map(|e| e.signature.as_ref())
+        .filter(|change| !report.callers.iter().any(|c| c.symbol == change.name))
     {
         let _ = writeln!(
             s,
             "note: the signature of {} changed; check its callers",
             change.name
         );
+    }
+    for c in &report.callers {
+        let total = c.references.len() + c.more;
+        let found = if total == 1 { "caller" } else { "callers" };
+        let _ = writeln!(
+            s,
+            "warning: the signature of {} changed; {total} {found} in files this edit does not change may need updating:",
+            c.symbol,
+        );
+        for r in &c.references {
+            let _ = writeln!(s, "  {}:{}", r.path, r.line);
+        }
+        if c.more > 0 {
+            let _ = writeln!(s, "  ... {} more", c.more);
+        }
     }
     let total = report.files.len();
     if report.dry_run {

@@ -27,6 +27,8 @@ struct CommitConfig {
     conventional: Option<String>,
     /// The conventional-commit types to accept.
     types: Option<Vec<String>>,
+    /// Whether to scan a fnox project's commits for secret values.
+    secret_scan: Option<bool>,
 }
 
 impl Config {
@@ -100,6 +102,21 @@ impl Config {
             .ok_or_else(|| format!("{source} must be warn, refuse or off, not `{name}`"))
     }
 
+    /// Whether `jouet commit` scans for secret values in a fnox project:
+    /// `JOUET_COMMIT_SECRET_SCAN`, else `[commit] secret_scan`, else on.
+    pub(crate) fn commit_secret_scan(&self) -> Result<bool, String> {
+        match std::env::var("JOUET_COMMIT_SECRET_SCAN") {
+            Ok(value) if !value.is_empty() => match value.to_ascii_lowercase().as_str() {
+                "1" | "true" | "on" | "yes" => Ok(true),
+                "0" | "false" | "off" | "no" => Ok(false),
+                _ => Err(format!(
+                    "JOUET_COMMIT_SECRET_SCAN must be on or off, not `{value}`"
+                )),
+            },
+            _ => Ok(self.commit.secret_scan.unwrap_or(true)),
+        }
+    }
+
     /// The conventional-commit types to accept.
     pub(crate) fn commit_types(&self) -> Vec<String> {
         self.commit.types.clone().unwrap_or_else(|| {
@@ -136,7 +153,7 @@ mod tests {
     fn the_commit_table() {
         let config: Config = toml::from_str(
             "[commit]\ntrailers = [\"AI-Assisted: Tool: {tool}; model: anthropic/claude-opus-5-5\"]\n\
-             conventional = \"refuse\"\ntypes = [\"feat\", \"registry\"]\n",
+             conventional = \"refuse\"\ntypes = [\"feat\", \"registry\"]\nsecret_scan = false\n",
         )
         .unwrap();
         assert_eq!(config.commit_types(), ["feat", "registry"]);
@@ -145,6 +162,7 @@ mod tests {
             Some(&["AI-Assisted: Tool: {tool}; model: anthropic/claude-opus-5-5".to_string()][..])
         );
         assert_eq!(config.commit.conventional.as_deref(), Some("refuse"));
+        assert_eq!(config.commit.secret_scan, Some(false));
         let empty = Config::default();
         assert!(empty.commit_types().contains(&"fix".to_string()));
     }

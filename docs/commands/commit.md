@@ -48,6 +48,33 @@ commit failed (exit 1); nothing was committed and nothing was left staged
 
 A `commit-msg` hook may change the message; the report shows the message as committed.
 
+## Secrets in fnox projects
+
+In a project that uses [fnox](https://fnox.jdx.dev), jouet asks fnox whether the commit holds the value of one of the project's secrets before it commits. A project uses fnox when there is a `fnox.toml` (or `.fnox.toml`, `.config/fnox.toml`, or a profile or local variant) in the current directory or a directory above it.
+
+jouet builds a temporary git index from HEAD plus the named paths, which is exactly what `git commit --only` will record, and runs `fnox scan --values --staged --format json` against it with `GIT_INDEX_FILE`. fnox resolves the active profile's secrets and looks for their actual values. Other staged work is not scanned, and the real index is never touched.
+
+When fnox finds a value, nothing is committed, the untracked files stay untracked, and jouet exits 1. It names the secret and the file. The value is never printed:
+
+```text
+commit refused: fnox found the value of a secret in what would be committed; nothing was committed and nothing was left staged
+  STRIPE_KEY  config/app.env:1
+  remove the value from those files; read it from the environment, with `fnox exec -- CMD`, instead
+```
+
+A clean scan adds a line such as `fnox found no secret values in 2 files`. fnox's warnings about secrets it could not check, such as one with no value set, are passed on with their names.
+
+| Situation | What happens |
+|---|---|
+| fnox is not on `PATH` | The commit goes ahead with a warning that it was not scanned (`secret_scan.status` is `skipped`). |
+| fnox fails, for example because it cannot decrypt the secrets | Refused with exit 4 and fnox's error. A security check that could not run does not pass. |
+| fnox fails inside `fnox proxy run` | The commit goes ahead with a warning. The agent only ever had placeholders, and fnox usually cannot resolve the real values there. |
+| `--dry-run` | Not scanned. |
+
+Turn the scan off with `secret_scan = false` under `[commit]` in `~/.config/jouet/config.toml`, or `JOUET_COMMIT_SECRET_SCAN=off` for one run. It is on by default.
+
+The scan has the limits of `fnox scan --values`. It finds exact values only, so an encoded, split or partial value gets past it, and so does a secret shorter than 8 characters, which fnox skips. Agents running jouet's hooks are also kept from printing secrets in the first place. See [the fnox rules](/setup#fnox).
+
 ## Trailers
 
 The message gets trailers through `git interpret-trailers`, which joins an existing trailer block and skips a trailer that is already there. The first source that is set wins:
@@ -123,12 +150,14 @@ What happens when a subject breaks a rule is set by `conventional` under `[commi
 
 A file's `status` is `added`, `modified`, `deleted` or `type_changed`. `--dry-run` sets `dry_run` instead of `committed` and shows the message as it would be committed. A failed commit has a `failure` with `exit_code`, `output`, `lines_omitted` and `log_path`.
 
+In a fnox project, `secret_scan` has the `tool` (`fnox`), a `status` (`clean`, `found` or `skipped`), `files_scanned`, and, when values were found, `findings`, each with the `secret`, `path` and `line`. A skipped scan has a `reason`. fnox's warnings are in `notes`.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | Committed, or the dry run found something to commit |
-| 1 | git refused the commit, usually because a hook failed |
+| 1 | git refused the commit, usually because a hook failed, or fnox found a secret's value in it |
 | 2 | Usage: no paths, `-A`, `.`, `--no-verify`, no message or a bad trailer |
 | 3 | A named path does not exist |
-| 4 | A named path has no changes or is ignored, or `refuse` rejected the subject |
+| 4 | A named path has no changes or is ignored, `refuse` rejected the subject, or fnox could not scan the commit |

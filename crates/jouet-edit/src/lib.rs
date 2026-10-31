@@ -106,6 +106,8 @@ pub struct EditReport {
 pub struct SignatureChange {
     /// The definition's name, without its scope.
     pub name: String,
+    /// The 1-based line of the definition's name, before the edit.
+    pub line: usize,
     pub before: String,
     pub after: String,
 }
@@ -137,6 +139,23 @@ pub enum SymbolError {
     Invalid(String),
     /// Nothing matched; the file's definitions, described.
     NotFound(Vec<String>),
+}
+
+/// A definition whose signature changed, and its callers in the code graph
+/// in files the edit did not touch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Callers {
+    pub symbol: String,
+    pub references: Vec<Reference>,
+    /// References left out of the list.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub more: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Reference {
+    pub path: String,
+    pub line: usize,
 }
 
 fn serialize_count<S: Serializer>(count: &Count, s: S) -> Result<S::Ok, S::Error> {
@@ -179,6 +198,10 @@ pub struct Report {
     pub files: Vec<FileReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckReport>,
+    /// Definitions whose signature a symbol edit changed, with references
+    /// to them elsewhere: callers that may need changing too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub callers: Vec<Callers>,
 }
 
 /// The result of `--check`: the command run after writing, and its output.
@@ -405,6 +428,7 @@ pub fn plan(spec: &Spec, options: &Options) -> io::Result<Plan> {
             files_written: 0,
             files,
             check: None,
+            callers: Vec::new(),
         },
         entries,
     })
@@ -735,6 +759,7 @@ fn apply_symbol(
             .unwrap_or(selector);
         report.signature = Some(SignatureChange {
             name: name.to_string(),
+            line: span.line,
             before: was,
             after: is,
         });

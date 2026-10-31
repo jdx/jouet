@@ -55,6 +55,51 @@ struct Section {
     more: usize,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     already_shown: bool,
+    /// For --symbol, when the work tree has a code graph: the definition's
+    /// callers, as `name (path:line)`, the first few of `caller_count`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    callers: Vec<String>,
+    #[serde(skip_serializing_if = "is_zero")]
+    caller_count: usize,
+}
+
+/// How many callers a symbol read names.
+const CALLERS_SHOWN: usize = 5;
+
+/// The callers the code graph has for the definition named on `line` of
+/// `file`, and how many there are; nothing without a graph.
+fn graph_callers(file: &Path, line: u32) -> (Vec<String>, usize) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let Ok(Some(mut graph)) = jouet_graph::Graph::open_existing(&cwd) else {
+        return (Vec::new(), 0);
+    };
+    let abs = cwd.join(file);
+    if graph
+        .reindex_paths(
+            std::slice::from_ref(&abs),
+            Some(std::time::Duration::from_millis(250)),
+        )
+        .is_err()
+    {
+        return (Vec::new(), 0);
+    }
+    let Ok(Some(symbol)) = graph.enclosing(&abs, line) else {
+        return (Vec::new(), 0);
+    };
+    let callers = graph.callers(&symbol.id, 1).unwrap_or_default();
+    let shown = callers
+        .iter()
+        .take(CALLERS_SHOWN)
+        .map(|r| {
+            format!(
+                "{} ({}:{})",
+                r.symbol.qualified_name,
+                r.symbol.path,
+                r.line.unwrap_or(r.symbol.start_line)
+            )
+        })
+        .collect();
+    (shown, callers.len())
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -106,6 +151,8 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 text: String::new(),
                 more: 0,
                 already_shown: true,
+                callers: Vec::new(),
+                caller_count: 0,
             };
         }
         let shown_end = if max == 0 {
@@ -123,6 +170,8 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             text: lines[start - 1..shown_end].join("\n"),
             more: end - shown_end,
             already_shown: false,
+            callers: Vec::new(),
+            caller_count: 0,
         }
     };
     let outline = || symbols::outline(file, &bytes);
@@ -146,12 +195,15 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             Ok(found) => {
                 for l in found {
                     let label = describe(&l);
-                    read.sections.push(section(
+                    let mut read_section = section(
                         Some(label),
                         l.def.start as usize,
                         l.def.end as usize,
                         &mut memory,
-                    ));
+                    );
+                    (read_section.callers, read_section.caller_count) =
+                        graph_callers(file, l.def.line);
+                    read.sections.push(read_section);
                 }
             }
             Err(SelectError::NotFound) => {
@@ -302,6 +354,19 @@ fn render(read: &FileRead, implicit_outline: bool) -> String {
                 s.end + 1,
                 s.end + s.more
             );
+        }
+        if !s.callers.is_empty() {
+            let _ = write!(text, "called by: {}", s.callers.join(", "));
+            if s.caller_count > s.callers.len() {
+                let _ = write!(
+                    text,
+                    ", ... {} more (jouet graph callers {}:{})",
+                    s.caller_count - s.callers.len(),
+                    read.path,
+                    s.start
+                );
+            }
+            text.push('\n');
         }
     }
     text

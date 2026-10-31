@@ -91,7 +91,7 @@ use crate::http::HTTP_FETCH;
 - The definition is its signature and body. Comments and attributes above it stay as they are.
 - Write the new text at any indentation: it is moved to where the definition sits.
 - An edit that would leave the file with more syntax errors than it has is refused (`does_not_parse`). This also catches new text cut short.
-- When the edit changes the definition's first line, its signature in most languages, the report says so (`signature` in JSON, a note in text), since its callers may need changing too.
+- When the edit changes the definition's first line, its signature in most languages, its callers may need changing too. If the work tree has a [code graph](/commands/graph), the report lists the definition's callers in files the edit does not change (`callers` in JSON). Otherwise, or when the graph does not know the definition, it notes the change (`signature` in JSON).
 
 Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
 
@@ -274,6 +274,7 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `files[].error` | Why a file failed: `code` is `not_found`, `already_exists`, `hash_mismatch` or `not_text`, with a `message` |
 | `files[].diff` | The unified diff, with `--diff` |
 | `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
+| `callers` | For each definition whose signature changed, from the code graph: its `symbol`, its callers' `references` (`path`, `line`) in files the edit does not change, and how many `more` were left out of the list |
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
 | `diag` | The `--diag` result: `status` (`clean`, `introduced`, `refused` or `unavailable`), the `new` findings, `new_failed_steps`, and the `kept` and `fixed` counts |
 | `fix` | What `[edit] fix_after` did: `status`, the `formatted` files, `failed_steps` |

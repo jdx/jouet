@@ -17,6 +17,9 @@ pub(crate) struct Plan {
 #[derive(Debug, Deserialize)]
 pub(crate) struct PlanJob {
     pub(crate) id: String,
+    /// Whether the job runs, given the jobs asked for and what they need.
+    #[serde(default)]
+    pub(crate) selected: bool,
     #[serde(default)]
     pub(crate) cells: Vec<Cell>,
 }

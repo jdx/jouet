@@ -84,6 +84,8 @@ pub struct Case {
     pub seen: Option<bool>,
     /// How many lines of files the call reads.
     pub read_lines: Option<u32>,
+    /// The fnox project the call runs in, if any.
+    pub fnox: Option<crate::Fnox>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -103,6 +105,9 @@ pub struct Example {
     /// How many lines of files the call reads.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_lines: Option<u32>,
+    /// The call runs in a project that uses fnox.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fnox: bool,
     /// `fires`, `fires deny`, `fires record test` or `quiet`.
     pub expected: String,
     /// `deny`, `warn`, `record test`, `quiet` or `error: ...`.
@@ -136,6 +141,9 @@ impl Example {
         }
         if let Some(lines) = self.read_lines {
             extra.push(format!("{lines} lines"));
+        }
+        if self.fnox {
+            extra.push("fnox project".into());
         }
         if !extra.is_empty() {
             if !text.is_empty() {
@@ -233,6 +241,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         input: None,
         seen: None,
         read_lines: None,
+        fnox: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -372,6 +381,10 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
             .map(|i| serde_json::Value::Object(i.clone().into_iter().collect())),
         seen: t.seen,
         read_lines: t.read_lines,
+        fnox: t.fnox.as_ref().map(|f| crate::Fnox {
+            secrets: f.secrets.clone(),
+            files: f.files.clone(),
+        }),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -444,6 +457,7 @@ impl Engine {
                 input: case.input.clone(),
                 seen: case.seen,
                 read_lines: case.read_lines,
+                fnox: case.fnox.clone(),
             };
             // Each example is a call of its own: probes are asked afresh.
             self.new_call();
@@ -474,6 +488,7 @@ impl Engine {
                 exit_code: call.exit_code,
                 seen: case.seen == Some(true),
                 read_lines: case.read_lines,
+                fnox: case.fnox.is_some(),
                 expected: match &case.scope {
                     Some(scope) => format!("{} {scope}", case.expect.text()),
                     None => case.expect.text(),

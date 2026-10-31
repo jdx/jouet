@@ -8,6 +8,7 @@ pub(crate) mod commit;
 pub(crate) mod completion;
 pub(crate) mod diag;
 pub(crate) mod edit;
+pub(crate) mod graph;
 pub(crate) mod handoff;
 pub(crate) mod hook;
 pub(crate) mod land;
