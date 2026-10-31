@@ -150,8 +150,12 @@ mod tests {
             skill.contains("- `jouet handoff` and `jouet pickup`: ending a session"),
             "{skill}"
         );
-        // The cap is a budget to defend, not a ceiling to fill.
-        assert!(skill.lines().count() <= 30, "{skill}");
+        // The cap is a budget to defend, not a ceiling to fill. A command
+        // family costs at most one bullet; everything else has a fixed
+        // budget, so a new command does not hit it.
+        let bullets = skill.lines().filter(|l| l.starts_with("- `jouet ")).count();
+        assert!(bullets <= guide::agent_commands().len(), "{skill}");
+        assert!(skill.lines().count() - bullets <= 17, "{skill}");
         // Flags belong to agent-help.
         assert!(!skill.contains("--expect-hash"), "{skill}");
     }
