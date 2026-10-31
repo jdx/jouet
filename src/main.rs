@@ -13,6 +13,7 @@ mod docs;
 mod fnox;
 mod git;
 mod guide;
+mod harness;
 mod ledger;
 mod mise;
 mod reads;
@@ -114,11 +115,11 @@ enum Cmd {
     AgentHelp(AgentHelpArgs),
     /// Print jouet's agent skill
     Skill(SkillArgs),
-    /// Install jouet's hooks into Claude Code or Codex
+    /// Install jouet's hooks into a coding agent's harness
     Setup(SetupArgs),
     /// Print a shell completion script
     Completion(CompletionArgs),
-    /// Answer a Claude Code or Codex hook
+    /// Answer a harness's hook
     #[usage(hide)]
     Hook(HookArgs),
 }
@@ -2335,11 +2336,17 @@ pub struct TaskApplyArgs {
 /// Print a short usage guide written for agents
 ///
 /// When to reach for each command, its key flags, the exit codes and the
-/// output modes, generated from this binary's own CLI definition.
+/// output modes, generated from this binary's own CLI definition. With a
+/// command, prints the invocations agents use, each with what it does, and
+/// what --full adds: every subcommand and flag, and the details. With --json,
+/// `text` is always the whole guide and `usage` the short one.
 #[derive(Args)]
 pub struct AgentHelpArgs {
-    /// A command to describe in full, such as `edit`
+    /// A command to describe, such as `edit`
     command: Vec<String>,
+    /// Print the command's whole guide: every subcommand and flag, and the details
+    #[usage(long)]
+    full: bool,
 }
 
 /// Print jouet's agent skill
@@ -2356,17 +2363,18 @@ pub struct SkillArgs {
     contribute: bool,
 }
 
-/// Install jouet's hooks into Claude Code or Codex
+/// Install jouet's hooks into a coding agent's harness
 ///
-/// Merges hooks into Claude Code's settings.json or Codex's hooks.json,
-/// keeping every other hook. The session-start hook primes each session with
+/// Merges hooks into Claude Code's settings.json, Codex's hooks.json,
+/// Cursor's hooks.json, Gemini CLI's settings.json or Copilot's
+/// hooks/jouet.json, keeping every other hook. The session-start hook primes each session with
 /// the commands and rules, so the skill, which says the same, is installed
 /// only with --skill or when priming is off ([hooks] prime). Running it again
 /// changes nothing; --uninstall removes only what jouet added. The hooks do
 /// nothing where jouet is not on PATH.
 #[derive(Args)]
 pub struct SetupArgs {
-    /// claude or codex
+    /// claude, codex, cursor, gemini or copilot
     harness: String,
     /// Install for every project, under your home directory (the default)
     #[usage(long)]
@@ -2375,8 +2383,10 @@ pub struct SetupArgs {
     /// .claude/settings.local.json
     #[usage(long)]
     project: bool,
-    /// Install into the repository's tracked .claude/settings.json, or
-    /// .codex/hooks.json, for everyone who clones it (implies --project)
+    /// Install into the repository's tracked hooks file (.claude/settings.json,
+    /// .codex/hooks.json, .cursor/hooks.json, .gemini/settings.json or
+    /// .github/hooks/jouet.json), for everyone who clones it (implies
+    /// --project)
     #[usage(long)]
     shared: bool,
     /// Show what would change without writing anything
@@ -2409,13 +2419,13 @@ pub struct CompletionArgs {
     joue: bool,
 }
 
-/// Answer a Claude Code or Codex hook
+/// Answer a harness's hook
 ///
 /// Reads the hook's JSON on stdin and runs jouet's rules. Installed by
 /// `jouet setup`; never blocks the agent on an error of its own.
 #[derive(Args)]
 pub struct HookArgs {
-    /// claude or codex
+    /// claude, codex, cursor, gemini or copilot
     harness: Option<String>,
     /// session-start, pre-tool-use, post-tool-use, post-tool-use-failure,
     /// post-edit or stop
@@ -2582,6 +2592,7 @@ pub struct ApplyArgs {
 }
 
 fn main() -> ExitCode {
+    jouet_output::deprecation::set_recorder(ledger::record_deprecation);
     if let Some(exit) = routine_typo() {
         return exit;
     }

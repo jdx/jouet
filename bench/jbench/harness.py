@@ -98,6 +98,12 @@ class Claude(Harness):
             "--permission-mode",
             "bypassPermissions",
             "--strict-mcp-config",
+            # A claude.ai login otherwise downloads the account's skills in
+            # the background, and their listing (about 3.8k tokens) joins
+            # every request after it lands: in a long run, not in a short
+            # one, which made the arm with more requests look costlier.
+            "--settings",
+            '{"syncClaudeAiSkills": false}',
         ]
         if opts.get("effort"):
             cmd += ["--effort", opts["effort"]]

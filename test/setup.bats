@@ -146,8 +146,9 @@ hook_command() {
 }
 
 @test "setup rejects an unknown harness and conflicting scopes" {
-	run --separate-stderr jouet setup cursor
+	run --separate-stderr jouet setup vim
 	assert_failure 2
+	assert_equal "$stderr" "jouet: the harness must be claude, codex, cursor, gemini or copilot, not \`vim\`"
 
 	run --separate-stderr jouet setup claude --global --project
 	assert_failure 2
@@ -301,4 +302,130 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 	assert_success
 	assert_output --partial "note: this repository uses fnox: start the agent with \`fnox proxy run -- claude\`"
+}
+
+@test "setup cursor, gemini and copilot write each harness's own hooks file" {
+	run --separate-stderr jouet setup cursor
+	assert_success
+	assert_line "created $HOME/.cursor/hooks.json"
+	assert_golden "$HOME/.cursor/hooks.json" cursor-hooks.json
+
+	run --separate-stderr jouet setup gemini
+	assert_success
+	assert_line "created $HOME/.gemini/settings.json"
+	assert_line "note: Gemini CLI runs hooks from settings files only in a trusted folder"
+	assert_golden "$HOME/.gemini/settings.json" gemini-settings.json
+
+	COPILOT_HOME="$BATS_TEST_TMPDIR/copilot" run --separate-stderr jouet setup copilot
+	assert_success
+	assert_line "created $BATS_TEST_TMPDIR/copilot/hooks/jouet.json"
+	assert_golden "$BATS_TEST_TMPDIR/copilot/hooks/jouet.json" copilot-hooks.json
+}
+
+@test "setup gemini merges into existing settings, and a re-run and uninstall keep them" {
+	mkdir -p "$HOME/.gemini"
+	printf '%s\n' '{"ui":{"theme":"GitHub"},"hooks":{"AfterAgent":[{"hooks":[{"type":"command","command":"notify-send done"}]}]}}' \
+		>"$HOME/.gemini/settings.json"
+
+	run --separate-stderr jouet setup gemini
+	assert_success
+	run jq -c '[.ui.theme, [.hooks.AfterAgent[].hooks[].command]]' "$HOME/.gemini/settings.json"
+	assert_output '["GitHub",["notify-send done","sh -c '"'"'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"'"'"]]'
+
+	run --separate-stderr jouet setup gemini
+	assert_line "unchanged $HOME/.gemini/settings.json"
+
+	run --separate-stderr jouet setup gemini --uninstall
+	assert_success
+	run jq -c . "$HOME/.gemini/settings.json"
+	assert_output '{"ui":{"theme":"GitHub"},"hooks":{"AfterAgent":[{"hooks":[{"type":"command","command":"notify-send done"}]}]}}'
+}
+
+@test "setup cursor keeps other hooks and the version, and uninstalling removes only jouet's" {
+	mkdir -p "$HOME/.cursor"
+	printf '%s\n' '{"version":1,"hooks":{"beforeShellExecution":[{"command":"./approve.sh","matcher":"curl"}],"stop":[{"command":"./notify.sh"}]}}' \
+		>"$HOME/.cursor/hooks.json"
+
+	run --separate-stderr jouet setup cursor
+	assert_success
+	run jq -c '[.version, [.hooks.stop[].command]]' "$HOME/.cursor/hooks.json"
+	assert_output '[1,["./notify.sh","sh -c '"'"'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'"'"'"]]'
+
+	run --separate-stderr jouet setup cursor --uninstall
+	run jq -c . "$HOME/.cursor/hooks.json"
+	assert_output '{"version":1,"hooks":{"beforeShellExecution":[{"command":"./approve.sh","matcher":"curl"}],"stop":[{"command":"./notify.sh"}]}}'
+}
+
+@test "setup copilot owns hooks/jouet.json, which uninstalling removes" {
+	run --separate-stderr jouet setup copilot --dry-run
+	assert_output --partial "would create $HOME/.copilot/hooks/jouet.json"
+	assert [ ! -e "$HOME/.copilot" ]
+
+	jouet setup copilot >/dev/null
+	run --separate-stderr jouet setup copilot --uninstall
+	assert_success
+	assert_line "removed $HOME/.copilot/hooks/jouet.json"
+	assert [ ! -e "$HOME/.copilot/hooks/jouet.json" ]
+}
+
+@test "setup refuses --project for harnesses with no hooks file of your own, and --shared writes the repository's" {
+	init_repo
+	work=$(pwd -P) # macOS reports /private/tmp for /tmp
+
+	run --separate-stderr jouet setup cursor --project
+	assert_failure 2
+	assert_equal "$stderr" "jouet: Cursor has no project hooks file of your own: .cursor/hooks.json is the repository's, shared with everyone who clones it. Use --global, or --project --shared to install there anyway"
+	run --separate-stderr jouet setup gemini --project
+	assert_failure 2
+	run --separate-stderr jouet setup copilot --project
+	assert_failure 2
+	assert [ ! -e .cursor ] && assert [ ! -e .gemini ] && assert [ ! -e .github ]
+
+	run --separate-stderr jouet setup cursor --shared
+	assert_success
+	assert_line "created $work/.cursor/hooks.json"
+	assert_line "note: Cursor runs a project's hooks only once the workspace is trusted"
+	run --separate-stderr jouet setup gemini --shared
+	assert_line "created $work/.gemini/settings.json"
+	run --separate-stderr jouet setup copilot --shared --skill
+	assert_success
+	assert_line "created $work/.github/hooks/jouet.json"
+	assert_line "created $work/.agents/skills/jouet/SKILL.md"
+	assert_line --partial "cloud agent uses .github/hooks/ only from the default branch"
+}
+
+@test "setup cursor says that Cursor also runs jouet's Claude Code hooks" {
+	jouet setup claude >/dev/null
+
+	run --separate-stderr jouet setup cursor
+
+	assert_success
+	assert_line "note: Cursor also runs the Claude Code hooks in $HOME/.claude/settings.json: while these are installed, those step aside in Cursor sessions, so each call gets one verdict"
+}
+
+@test "an installed Cursor, Gemini CLI or Copilot hook answers {} once jouet is not on PATH" {
+	jouet setup cursor >/dev/null
+	jouet setup gemini >/dev/null
+	jouet setup copilot >/dev/null
+	mkdir -p "$BATS_TEST_TMPDIR/sh-only"
+	ln -s "$(command -v sh)" "$BATS_TEST_TMPDIR/sh-only/sh"
+	input='{"session_id":"s1","cwd":"/tmp","tool_name":"run_shell_command","tool_input":{"command":"git add -A"}}'
+
+	for command in \
+		"$(jq -r '.hooks.preToolUse[0].command' "$HOME/.cursor/hooks.json")" \
+		"$(jq -r '.hooks.BeforeTool[0].hooks[0].command' "$HOME/.gemini/settings.json")" \
+		"$(jq -r '.hooks.preToolUse[0].bash' "$HOME/.copilot/hooks/jouet.json")"; do
+		run --separate-stderr sh -c "$command" <<<"$input"
+		assert_success
+		refute_output ""
+
+		run --separate-stderr env PATH="$BATS_TEST_TMPDIR/sh-only" sh -c "$command" <<<"$input"
+		assert_success
+		assert_output '{}'
+		assert_equal "$stderr" ""
+	done
+	# Gemini CLI's own tool names reach jouet's rules.
+	command=$(jq -r '.hooks.BeforeTool[0].hooks[0].command' "$HOME/.gemini/settings.json")
+	run --separate-stderr sh -c "$command" <<<"$input"
+	assert_output --partial '"decision":"deny"'
 }

@@ -1,0 +1,1 @@
+{"session_id":"8f14e45f-ceea-467f-a8a5-4b5b6a3b1c2d","transcript_path":"/home/u/.gemini/tmp/app/chats/session-2026-10-31T12-00-1a2b3c4d.jsonl","cwd":"/work/app","hook_event_name":"BeforeTool","timestamp":"2026-10-31T12:00:05.000Z","tool_name":"run_shell_command","tool_input":{"command":"git add -A","description":"Stage the changes"}}

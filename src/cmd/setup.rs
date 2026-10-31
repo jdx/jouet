@@ -1,4 +1,4 @@
-//! `jouet setup claude|codex`: installs jouet's hooks and skill.
+//! `jouet setup HARNESS`: installs jouet's hooks and skill.
 
 use super::Output;
 use super::skill::{self, Format};
@@ -54,7 +54,8 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         return out.error(
             Exit::Usage,
             &format!(
-                "the harness must be claude or codex, not `{}`",
+                "the harness must be {}, not `{}`",
+                setup::NAMES,
                 args.harness
             ),
         );
@@ -72,11 +73,16 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     } else {
         Scope::Global
     };
-    if harness == Harness::Codex && scope == Scope::Local && !args.uninstall {
+    if !harness.has_local_file() && scope == Scope::Local && !args.uninstall {
+        let file = harness.config_path(Scope::Shared, Path::new(""), Path::new(""));
         return out.error(
             Exit::Usage,
-            "Codex has no project hooks file of your own: .codex/hooks.json is the repository's, \
-             shared with everyone who clones it. Use --global, or --project --shared to install there anyway",
+            &format!(
+                "{} has no project hooks file of your own: {} is the repository's, \
+                 shared with everyone who clones it. Use --global, or --project --shared to install there anyway",
+                harness.title(),
+                file.display()
+            ),
         );
     }
     let Some(home) = std::env::home_dir() else {
@@ -94,9 +100,11 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     let project = project_root(&cwd, harness, scope);
     let config = harness.config_path(scope, &home, &project);
     let skill = harness.skill_path(scope, &home, &project);
+    // Every harness but Claude Code reads the shared `.agents/skills`, in
+    // Codex's shape.
     let format = match harness {
         Harness::Claude => Format::Claude,
-        Harness::Codex => Format::Codex,
+        _ => Format::Codex,
     };
 
     let mut files = Vec::new();
@@ -104,10 +112,11 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     // At project scope, the other kind of project install may be there too,
     // from an earlier setup: uninstalling removes both, and installing says
     // when the other's hooks are not these, since both would run.
-    let other_scope = match (harness, scope) {
-        (Harness::Codex, _) | (_, Scope::Global) => None,
-        (Harness::Claude, Scope::Local) => Some(Scope::Shared),
-        (Harness::Claude, Scope::Shared) => Some(Scope::Local),
+    let other_scope = match scope {
+        _ if !harness.has_local_file() => None,
+        Scope::Global => None,
+        Scope::Local => Some(Scope::Shared),
+        Scope::Shared => Some(Scope::Local),
     };
     let (other_config, other_skill) = match other_scope {
         Some(other) => {
@@ -120,17 +129,17 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         }
         None => (None, None),
     };
-    match plan_config(&config, harness, args.uninstall) {
+    match plan_config(&config, harness, scope, args.uninstall) {
         Ok(change) => files.push(change),
         Err(message) => return out.error(Exit::Precondition, &message),
     }
     if let Some(other) = other_config {
         if args.uninstall {
-            match plan_config(&other, harness, true) {
+            match plan_config(&other, harness, scope, true) {
                 Ok(change) => files.push(change),
                 Err(message) => return out.error(Exit::Precondition, &message),
             }
-        } else if read_hooks(&other).is_ok_and(|(_, doc)| outdated(&doc, harness)) {
+        } else if read_hooks(&other).is_ok_and(|(_, doc)| outdated(&doc, harness, scope)) {
             notes.push(format!(
                 "{} has jouet's hooks from another version, which would run as well as these; \
                  `jouet setup {} --project --uninstall` removes them from both files",
@@ -186,7 +195,9 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         let written: Vec<&Path> = std::iter::once(config.as_path())
             .chain(want_skill.then_some(skill.as_path()))
             .collect();
-        notes.extend(install_notes(harness, scope, &project, &written, changed));
+        notes.extend(install_notes(
+            harness, scope, &home, &project, &written, changed,
+        ));
     }
     let report = Report {
         harness: harness.name(),
@@ -253,18 +264,19 @@ fn hk_stop_notes(
 /// Whether a hook file holds jouet hooks other than the ones this version
 /// installs. Claude Code runs a handler defined in two settings files once,
 /// so only different ones would run twice.
-fn outdated(doc: &serde_json::Value, harness: Harness) -> bool {
+fn outdated(doc: &serde_json::Value, harness: Harness, scope: Scope) -> bool {
     let mut current = doc.clone();
-    setup::install(&mut current, harness);
+    setup::install(&mut current, harness, scope);
     has_jouet(doc) && current != *doc
 }
 
 /// What someone installing should know: that the hooks are inert without
-/// jouet on `PATH`, who else gets them, what git would pick up, Codex's
-/// trust step, and in a fnox project, its credential proxy.
+/// jouet on `PATH`, who else gets them, what git would pick up, each
+/// harness's trust step, and in a fnox project, its credential proxy.
 fn install_notes(
     harness: Harness,
     scope: Scope,
+    home: &Path,
     project: &Path,
     paths: &[&Path],
     changed: bool,
@@ -300,11 +312,50 @@ fn install_notes(
             }
         }
     }
-    if harness == Harness::Codex && changed {
-        notes.push(
+    match harness {
+        Harness::Codex if changed => notes.push(
             "Codex skips new or changed hooks until they are trusted: run /hooks in Codex and trust jouet's."
                 .to_string(),
-        );
+        ),
+        Harness::Cursor => {
+            if scope != Scope::Global {
+                notes.push(
+                    "Cursor runs a project's hooks only once the workspace is trusted".to_string(),
+                );
+            }
+            let claude = [
+                Harness::Claude.config_path(Scope::Global, home, project),
+                project.join(".claude").join("settings.json"),
+                project.join(".claude").join("settings.local.json"),
+            ];
+            for path in claude {
+                if read_hooks(&path).is_ok_and(|(_, doc)| has_jouet(&doc)) {
+                    notes.push(format!(
+                        "Cursor also runs the Claude Code hooks in {}: while these are installed, \
+                         those step aside in Cursor sessions, so each call gets one verdict",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        Harness::Gemini => notes.push(
+            "Gemini CLI runs hooks from settings files only in a trusted folder".to_string(),
+        ),
+        Harness::Copilot => {
+            notes.push(
+                "Copilot reads hooks when it starts, and a repository's only once you trust the folder: \
+                 restart Copilot CLI to pick these up"
+                    .to_string(),
+            );
+            if scope == Scope::Shared {
+                notes.push(
+                    "Copilot's cloud agent uses .github/hooks/ only from the default branch, and \
+                     does nothing with them where its runner has no jouet on PATH"
+                        .to_string(),
+                );
+            }
+        }
+        _ => {}
     }
     notes.extend(fnox_note(harness, project, crate::fnox::under_proxy()));
     notes
@@ -314,7 +365,10 @@ fn install_notes(
 /// `fnox proxy run`.
 fn fnox_note(harness: Harness, project: &Path, proxied: bool) -> Option<String> {
     crate::fnox::Project::find(project)?;
-    let agent = harness.name();
+    let agent = match harness {
+        Harness::Cursor => "cursor-agent",
+        _ => harness.name(),
+    };
     Some(if proxied {
         "this repository uses fnox, and this shell already runs under `fnox proxy run`: an agent started from here gets placeholder credentials"
             .to_string()
@@ -355,17 +409,26 @@ fn project_root(cwd: &Path, harness: Harness, scope: Scope) -> PathBuf {
         .to_path_buf()
 }
 
-fn plan_config(path: &Path, harness: Harness, uninstall: bool) -> Result<FileChange, String> {
+fn plan_config(
+    path: &Path,
+    harness: Harness,
+    scope: Scope,
+    uninstall: bool,
+) -> Result<FileChange, String> {
     let (before, mut doc) = read_hooks(path)?;
     let original = doc.clone();
     if uninstall {
         setup::uninstall(&mut doc);
     } else {
-        setup::install(&mut doc, harness);
+        setup::install(&mut doc, harness, scope);
     }
     if doc == original {
         // Same JSON: leave the file, and its formatting, alone.
         return plan_file(path, before);
+    }
+    // jouet's own file goes once nothing else is in it.
+    if harness.owns_file() && setup::is_empty(&doc) {
+        return plan_file(path, None);
     }
     // A file uninstalling empties is kept as `{}`: it may have been there
     // before jouet was.

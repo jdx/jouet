@@ -313,7 +313,7 @@ Print a short usage guide written for agents
 Print jouet's agent skill
 .TP
 \fBsetup\fR
-Install jouet's hooks into Claude Code or Codex
+Install jouet's hooks into a coding agent's harness
 .TP
 \fBcompletion\fR
 Print a shell completion script
@@ -2641,12 +2641,15 @@ The rule to share; with \-\-idea, the idea's key (default: the most recorded)
 .SH "JOUET AGENT-HELP"
 Print a short usage guide written for agents
 
-When to reach for each command, its key flags, the exit codes and the output modes, generated from this binary's own CLI definition.
+When to reach for each command, its key flags, the exit codes and the output modes, generated from this binary's own CLI definition. With a command, prints the invocations agents use, each with what it does, and what \-\-full adds: every subcommand and flag, and the details. With \-\-json, `text` is always the whole guide and `usage` the short one.
 .PP
 \fBUsage:\fR jouet agent\-help [OPTIONS] [<COMMAND>] ...
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-full\fR
+Print the command's whole guide: every subcommand and flag, and the details
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2654,7 +2657,7 @@ Print help
 .PP
 .TP
 \fB<COMMAND>\fR
-A command to describe in full, such as `edit`
+A command to describe, such as `edit`
 .SH "JOUET SKILL"
 Print jouet's agent skill
 
@@ -2674,9 +2677,9 @@ Print the optional skill for proposing rules and ideas to jouet instead
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET SETUP"
-Install jouet's hooks into Claude Code or Codex
+Install jouet's hooks into a coding agent's harness
 
-Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 .PP
 \fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
 .PP
@@ -2690,7 +2693,7 @@ Install for every project, under your home directory (the default)
 Install into this repository for you alone: Claude Code's untracked .claude/settings.local.json
 .TP
 \fB\-\-shared\fR
-Install into the repository's tracked .claude/settings.json, or .codex/hooks.json, for everyone who clones it (implies \-\-project)
+Install into the repository's tracked hooks file (.claude/settings.json, .codex/hooks.json, .cursor/hooks.json, .gemini/settings.json or .github/hooks/jouet.json), for everyone who clones it (implies \-\-project)
 .TP
 \fB\-\-dry\-run\fR
 Show what would change without writing anything
@@ -2707,7 +2710,7 @@ Print help
 .PP
 .TP
 \fB<HARNESS>\fR
-claude or codex
+claude, codex, cursor, gemini or copilot
 .SH "JOUET COMPLETION"
 Print a shell completion script
 
