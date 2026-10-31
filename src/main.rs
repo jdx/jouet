@@ -95,7 +95,7 @@ enum Cmd {
     AgentHelp(AgentHelpArgs),
     /// Print jouet's agent skill
     Skill(SkillArgs),
-    /// Install jouet's hooks and skill into Claude Code or Codex
+    /// Install jouet's hooks into Claude Code or Codex
     Setup(SetupArgs),
     /// Print a shell completion script
     Completion(CompletionArgs),
@@ -1683,12 +1683,14 @@ pub struct SkillArgs {
     contribute: bool,
 }
 
-/// Install jouet's hooks and skill into Claude Code or Codex
+/// Install jouet's hooks into Claude Code or Codex
 ///
 /// Merges hooks into Claude Code's settings.json or Codex's hooks.json,
-/// keeping every other hook, and installs the skill. Running it again changes
-/// nothing; --uninstall removes only what jouet added. The hooks do nothing
-/// where jouet is not on PATH.
+/// keeping every other hook. The session-start hook primes each session with
+/// the commands and rules, so the skill, which says the same, is installed
+/// only with --skill or when priming is off ([hooks] prime). Running it again
+/// changes nothing; --uninstall removes only what jouet added. The hooks do
+/// nothing where jouet is not on PATH.
 #[derive(Args)]
 pub struct SetupArgs {
     /// claude or codex
@@ -1710,6 +1712,10 @@ pub struct SetupArgs {
     /// Remove jouet's hooks and skill
     #[usage(long)]
     uninstall: bool,
+    /// Install the skill as well, which the session-start primer otherwise
+    /// stands in for
+    #[usage(long)]
+    skill: bool,
 }
 
 /// Print a shell completion script

@@ -256,7 +256,7 @@ Print a short usage guide written for agents
 Print jouet's agent skill
 .TP
 \fBsetup\fR
-Install jouet's hooks and skill into Claude Code or Codex
+Install jouet's hooks into Claude Code or Codex
 .TP
 \fBcompletion\fR
 Print a shell completion script
@@ -2118,9 +2118,9 @@ Print the optional skill for proposing rules and ideas to jouet instead
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET SETUP"
-Install jouet's hooks and skill into Claude Code or Codex
+Install jouet's hooks into Claude Code or Codex
 
-Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 .PP
 \fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
 .PP
@@ -2141,6 +2141,9 @@ Show what would change without writing anything
 .TP
 \fB\-\-uninstall\fR
 Remove jouet's hooks and skill
+.TP
+\fB\-\-skill\fR
+Install the skill as well, which the session\-start primer otherwise stands in for
 .TP
 \fB\-h, \-\-help\fR
 Print help

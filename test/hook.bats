@@ -86,8 +86,10 @@ TOML
 
 	assert_success
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
-	assert_line --index 0 --partial 'jouet is installed: '
+	assert_line --index 0 --partial 'jouet is installed, a CLI toolkit for coding agents: '
+	assert_output --partial "python-edit (use \`jouet edit\`)"
 	assert_output --partial 'git-stash'
+	refute_output --partial 'large-read'
 }
 
 @test "session-start tells the agent about a Luau rule file to convert" {

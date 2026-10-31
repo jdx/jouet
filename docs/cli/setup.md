@@ -3,9 +3,9 @@
 
 - **Usage:** `jouet setup [FLAGS] <HARNESS>`
 
-Install jouet's hooks and skill into Claude Code or Codex
+Install jouet's hooks into Claude Code or Codex
 
-Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook, and installs the skill. Running it again changes nothing; --uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping every other hook. The session-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with --skill or when priming is off ([hooks] prime). Running it again changes nothing; --uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 
 ## Arguments
 - **`<HARNESS>`** — claude or codex
@@ -16,4 +16,5 @@ Merges hooks into Claude Code's settings.json or Codex's hooks.json, keeping eve
 - **`--shared`** — Install into the repository's tracked .claude/settings.json, or .codex/hooks.json, for everyone who clones it (implies --project)
 - **`--dry-run`** — Show what would change without writing anything
 - **`--uninstall`** — Remove jouet's hooks and skill
+- **`--skill`** — Install the skill as well, which the session-start primer otherwise stands in for
 - **`-h --help`** — Print help

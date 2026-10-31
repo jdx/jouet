@@ -288,6 +288,14 @@ enum Body {
 }
 
 impl Rule {
+    /// The command a matcher rule names to run instead.
+    pub fn suggest(&self) -> Option<&str> {
+        match &self.body {
+            Body::Match { suggest, .. } => suggest.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Why this rule's file format is deprecated and how to move off it,
     /// for a rule of yours or a repository's written as a whole `.luau` file.
     pub fn deprecation(&self) -> Option<String> {

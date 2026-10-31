@@ -418,12 +418,17 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
 }
 
 fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
-    let rules: Vec<&str> = if steer {
+    // Only the rules that deny: a warning costs the agent no call.
+    let rules: Vec<(&str, Option<&str>)> = if steer {
         engine
             .rules()
             .iter()
-            .filter(|r| r.state == jouet_rules::State::Enabled && r.event == Event::PreToolUse)
-            .map(|r| r.name.as_str())
+            .filter(|r| {
+                r.state == jouet_rules::State::Enabled
+                    && r.event == Event::PreToolUse
+                    && r.mode == jouet_rules::Mode::Deny
+            })
+            .map(|r| (r.name.as_str(), r.suggest()))
             .collect()
     } else {
         Vec::new()
@@ -868,6 +873,12 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(context.contains("git-stash"), "{context}");
+        assert!(
+            context.contains("python-edit (use `jouet edit`)"),
+            "{context}"
+        );
+        // Only deny rules: a warning costs the agent no call.
+        assert!(!context.contains("large-read"), "{context}");
         assert!(!context.contains("checks"), "{context}");
         assert_eq!(
             context.contains("sleep-poll"),

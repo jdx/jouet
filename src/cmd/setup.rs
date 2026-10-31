@@ -142,13 +142,22 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     if !args.uninstall {
         notes.extend(hk_stop_notes(harness, scope, &config, &home, &cwd));
     }
-    let skill_text = (!args.uninstall).then(|| stamp(&skill::render(format)));
-    match plan_skill(&skill, skill_text) {
-        Ok((change, note)) => {
-            files.push(change);
-            notes.extend(note);
+    // The primer says what the skill says, in every session, so the skill
+    // is installed only when asked for or when priming is off. Without it,
+    // setup's own unedited skill from an earlier install goes, and anyone
+    // else's is left alone without a word.
+    let hooks = crate::settings::Settings::load().hooks;
+    let want_skill = !args.uninstall && (args.skill || !(hooks.enabled && hooks.prime));
+    let ours = matches!(read(&skill), Ok(Some(text)) if stamped_by_jouet(&text));
+    if want_skill || args.uninstall || ours {
+        let skill_text = want_skill.then(|| stamp(&skill::render(format)));
+        match plan_skill(&skill, skill_text) {
+            Ok((change, note)) => {
+                files.push(change);
+                notes.extend(note);
+            }
+            Err(message) => return out.error(Exit::Precondition, &message),
         }
-        Err(message) => return out.error(Exit::Precondition, &message),
     }
 
     if args.uninstall
@@ -174,13 +183,10 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         .iter()
         .any(|f| matches!(f.action, Action::Create | Action::Update | Action::Remove));
     if !args.uninstall {
-        notes.extend(install_notes(
-            harness,
-            scope,
-            &project,
-            &[&config, &skill],
-            changed,
-        ));
+        let written: Vec<&Path> = std::iter::once(config.as_path())
+            .chain(want_skill.then_some(skill.as_path()))
+            .collect();
+        notes.extend(install_notes(harness, scope, &project, &written, changed));
     }
     let report = Report {
         harness: harness.name(),

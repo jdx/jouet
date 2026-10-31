@@ -27,7 +27,7 @@ Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), 
 ### Arms
 
 - **plain:** the harness as installed, with no jouet on `PATH`.
-- **jouet:** `jouet` on `PATH`, and `jouet setup claude` or `jouet setup codex` run in the run's home, which installs the hooks, the skill and the session-start primer that points the agent at `jouet agent-help`.
+- **jouet:** `jouet` on `PATH`, and `jouet setup claude` or `jouet setup codex` run in the run's home, which installs the hooks and the session-start primer that points the agent at `jouet agent-help`.
 
 The prompt is the same in both arms. Adding an arm for rtk, or for jouet with only some rules, means adding an entry to `ARMS` in `bench/jbench/arms.py` with its setup step.
 
@@ -142,4 +142,4 @@ The workflow installs the harnesses from `mise.bench.toml`, at the versions `mis
 - Five small tasks in Python repositories are not a survey of real work. They cover the chores jouet targets, so a result says how much jouet helps on those chores, not on a whole session.
 - A few runs per arm only detect large effects. Read the spread and the pair counts before the medians.
 - The fake GitHub answers what its fixtures hold. An agent that asks for something else gets a 404, which the report lists, and a different answer than GitHub would give.
-- The primer and skill that `jouet setup` installs add context to every request. The benchmark measures that cost too, which is part of the point.
+- The primer that `jouet setup` installs adds context to every request. The benchmark measures that cost too, which is part of the point.
