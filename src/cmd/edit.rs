@@ -6,9 +6,11 @@ use crate::diag::{self, Status, delta};
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
 use jouet_edit::{
-    self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
+    self as edit, Callers, EditStatus, FileStatus, NearMiss, Options, Reference, Report, Span,
+    SymbolError,
 };
 use jouet_output::exit::Exit;
+use jouet_search::structural::Structural;
 use jouet_search::symbols::{self, SelectError, Selector};
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -16,9 +18,21 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
+    if args.pattern.is_none()
+        && (!args.paths.is_empty() || args.rewrite.is_some() || args.lang.is_some())
+    {
+        return out.error(
+            Exit::Usage,
+            "paths, --rewrite and --lang go with --pattern; a spec names its own files",
+        );
+    }
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
         Some(EditCmd::Replace(replace)) => replace_spec(replace),
+        None if args.pattern.is_some() => match pattern_spec(&args) {
+            Ok(spec) => Ok(spec),
+            Err((exit, message)) => return out.error(exit, &message),
+        },
         None => read_spec(&args),
     };
     let spec = match spec {
@@ -421,6 +435,60 @@ fn callers(report: &Report) -> Vec<Callers> {
     out
 }
 
+/// `--pattern`, `--rewrite` and `--lang`: every match of the pattern under
+/// the paths, rewritten, as one edit per file.
+fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
+    let usage = |m: &str| (Exit::Usage, m.to_string());
+    let pattern = args.pattern.as_deref().unwrap_or_default();
+    let (Some(rewrite), Some(lang)) = (args.rewrite.as_deref(), args.lang.as_deref()) else {
+        return Err(usage("--pattern needs --rewrite and --lang"));
+    };
+    if args.spec.is_some() || args.format.is_some() {
+        return Err(usage(
+            "--pattern rewrites code itself; it takes no --spec or --format",
+        ));
+    }
+    let structural =
+        Structural::new(pattern, lang, Some(rewrite)).map_err(|e| usage(&e.to_string()))?;
+    let paths: Vec<PathBuf> = if args.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        args.paths.iter().map(PathBuf::from).collect()
+    };
+    if let Some(missing) = paths.iter().find(|p| !p.exists()) {
+        return Err((
+            Exit::NotFound,
+            format!("{}: no such file or directory", missing.display()),
+        ));
+    }
+    let (files, read) = structural.search_files(&paths);
+    if files.is_empty() {
+        return Err((
+            Exit::Precondition,
+            format!(
+                "the pattern matched nothing in {read} {lang} {}; nothing was written (`jouet agent-help edit` has pattern examples)",
+                if read == 1 { "file" } else { "files" }
+            ),
+        ));
+    }
+    let ops = files
+        .into_iter()
+        .map(|f| FileOp::Update {
+            path: f.path.to_string_lossy().into_owned(),
+            edits: vec![Edit::Spans {
+                spans: f
+                    .matches
+                    .into_iter()
+                    .map(|m| (m.start, m.end, m.replacement.unwrap_or_default()))
+                    .collect(),
+                original: f.source,
+            }],
+            move_to: None,
+        })
+        .collect();
+    Ok(Spec { ops })
+}
+
 /// The callers the code graph has for the definition a symbol edit
 /// changes, outside the files the edit touches, as paths relative to the
 /// work tree; `None` when the graph has no such definition, and the text
@@ -626,9 +694,23 @@ fn edit_problem(e: &edit::EditReport) -> String {
     };
     match e.status {
         EditStatus::Ok => "ok".into(),
-        EditStatus::NoMatch => match &e.symbol {
-            Some(symbol) => format!("no definition matches `{symbol}`"),
-            None => "no match".into(),
+        EditStatus::NoMatch => match (&e.symbol, &e.near_miss) {
+            (Some(symbol), _) => format!("no definition matches `{symbol}`"),
+            (None, Some(NearMiss::InsideLine { lines, multiline })) => {
+                let at = if *multiline {
+                    format!("at {}, but starts or ends inside a line", line_list(lines))
+                } else {
+                    format!("inside {}", line_list(lines))
+                };
+                format!(
+                    "no match as whole lines; the text occurs {at} (SEARCH blocks hold whole lines, or use `jouet edit replace` for text inside a line)"
+                )
+            }
+            (None, Some(NearMiss::Whitespace { lines })) => format!(
+                "no match; the text matches at {} once indentation and trailing whitespace are ignored (copy the file's whitespace exactly)",
+                line_list(lines)
+            ),
+            (None, None) => "no match".into(),
         },
         EditStatus::TooManyMatches if e.symbol.is_some() => format!(
             "{} definitions match `{}`, at lines {}; add a kind or a scope, such as `fn download` or `Vfox::download`",
@@ -657,6 +739,21 @@ fn edit_problem(e: &edit::EditReport) -> String {
             "the new `{}` does not parse",
             e.symbol.as_deref().unwrap_or("")
         ),
+    }
+}
+
+/// `line 13`, `lines 13 and 40`, or the first few and how many more.
+fn line_list(lines: &[usize]) -> String {
+    const SHOWN: usize = 5;
+    let mut shown: Vec<String> = lines.iter().take(SHOWN).map(usize::to_string).collect();
+    let more = lines.len().saturating_sub(SHOWN);
+    if more > 0 {
+        shown.push(format!("{more} more"));
+    }
+    match shown.as_slice() {
+        [one] => format!("line {one}"),
+        [rest @ .., last] => format!("lines {} and {last}", rest.join(", ")),
+        [] => String::new(),
     }
 }
 

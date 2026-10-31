@@ -372,6 +372,18 @@ pub(crate) struct CaseTable {
     /// The call runs in a project that uses fnox, whose config defines
     /// these secrets and files; omitted, it does not.
     pub fnox: Option<FnoxCase>,
+    /// What `jouet.git.state()` reports for the work tree; omitted, it has
+    /// no answer, as for any probe in an example.
+    pub git: Option<GitCase>,
+}
+
+/// An example's work tree, as `jouet.git.state()` would report it.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExampleGit")]
+pub(crate) struct GitCase {
+    /// Whether anything is changed, untracked or conflicted.
+    pub dirty: bool,
 }
 
 /// An example's fnox project, as jouet's hook would read it from the
@@ -402,7 +414,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines` or `fnox`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `fnox` or `git`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

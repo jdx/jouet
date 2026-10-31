@@ -108,7 +108,7 @@ hk has a stop hook of its own (`hk agent stop-hook`, from `hk agent hooks`). Ins
 
 ## Steering
 
-The built-in `scoped-lint` rule warns, without denying, on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint`, and suggests `jouet diag check --changed` while iterating, with the full lint once at the end.
+The built-in `scoped-lint` rule warns, without denying, on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint`, and suggests `jouet diag check --changed` while iterating, with the full lint once at the end. It stays quiet when the work tree has nothing uncommitted, such as right after a merge, pull or checkout: there is no change to check, and that lint is the full one.
 
 ## In routines
 

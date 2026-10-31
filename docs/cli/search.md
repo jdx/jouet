@@ -18,6 +18,8 @@ Embeds ripgrep's walker and searcher, so it respects .gitignore, skips hidden an
   that has not changed since, collapses to one line (`src/x.rs: 3 already
   shown, unchanged`). --again shows them anyway.
 
+With --structural, PATTERN is code in --lang, matched by ast-grep: `$X` is one node, `$$$X` any number, and only files in that language are searched. Quote it in single quotes, or the shell expands `$X` (`jouet agent-help edit` has more on patterns).
+
 Exits 0 with matches, 1 with none, 2 for a bad pattern or glob, and 3 for a path that does not exist.
 
 Examples:
@@ -25,6 +27,9 @@ Examples:
   jouet search -F 'client.get(' -g '*.rs'
   jouet search -i timeout --budget 2000 --file-budget 400
   jouet search -l TODO
+  jouet search --structural --lang rust '$X.unwrap()'
+  jouet search --structural --lang go 'if err != nil { return $$$ }'
+  jouet search --structural --lang typescript 'useEffect($FN, [])'
 
 ## Arguments
 - **`<PATTERN>`** — The regular expression to search for (a literal with -F)
@@ -40,4 +45,6 @@ Examples:
 - **`--budget <BYTES>`** — The most bytes to print in total (default 6000; 0 is no limit)
 - **`--file-budget <BYTES>`** — The most bytes to print from one file (default 1500; 0 is no limit)
 - **`--again`** — Show matches this session was already shown, too
+- **`--structural`** — Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any number. Needs --lang
+- **`--lang <LANG>`** — The language of a --structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
 - **`-h --help`** — Print help

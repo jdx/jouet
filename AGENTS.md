@@ -78,7 +78,8 @@ helpers, the setup, hook, ledger and agent-guide code, and the test selection be
   `stats`, the ledger reader and estimates behind `jouet stats`.
 - `jouet-search`: `jouet search` (ripgrep's walker and searcher, with budgets and grouping by
   enclosing symbol), the session memory of what an agent was shown, tree-sitter symbols for the
-  languages the `grammars` feature compiles in, and the repo map behind `jouet read --map`.
+  languages the `grammars` feature compiles in, the repo map behind `jouet read --map`, and
+  structural search and rewrites on `ast-grep-core`, which shares tree-sitter with the grammars.
   Without the feature (`--no-default-features`), search is plain text and there is no map.
 - `jouet-git`: the git recipes behind `jouet commit`, `jouet review-package`, `jouet handoff` and
   `jouet pickup`. It shells out to `git` with literal pathspecs; the PR lookup for `handoff` stays

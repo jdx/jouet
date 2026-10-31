@@ -395,6 +395,10 @@
         "fnox": {
           "description": "The call runs in a project that uses fnox, whose config defines\nthese secrets and files; omitted, it does not.",
           "$ref": "#/$defs/ExampleFnox"
+        },
+        "git": {
+          "description": "What `jouet.git.state()` reports for the work tree; omitted, it has\nno answer, as for any probe in an example.",
+          "$ref": "#/$defs/ExampleGit"
         }
       },
       "additionalProperties": false
@@ -436,6 +440,20 @@
         }
       },
       "additionalProperties": false
+    },
+    "ExampleGit": {
+      "description": "An example's work tree, as `jouet.git.state()` would report it.",
+      "type": "object",
+      "properties": {
+        "dirty": {
+          "description": "Whether anything is changed, untracked or conflicted.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "dirty"
+      ]
     }
   }
 }
