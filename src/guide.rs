@@ -50,7 +50,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "ci",
         Some(
-            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`), instead of pushing again to see; needs jactionlint",
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR] --run ID` says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
         ),
     ),
     (

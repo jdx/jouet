@@ -1,0 +1,70 @@
+2026-10-31T10:43:02.4578840Z ##[group]Run mise run test
+2026-10-31T10:43:02.4607560Z ##[endgroup]
+2026-10-31T10:43:16.9156440Z [36m[1m[test:cargo][0m test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-31T10:43:17.2966640Z [36m[1m[test:cargo][0m test share::signals::tests::the_ledger_shows_crashes_codes_usage_errors_and_abandoned_answers ... ok
+2026-10-31T10:43:17.6484590Z [36m[1m[test:cargo][0m test result: ok. 206 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+2026-10-31T10:43:17.6690100Z [36m[1m[test:cargo][0m test unknown_flag_is_a_usage_error ... ok
+2026-10-31T10:43:17.6694230Z [36m[1m[test:cargo][0m test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+2026-10-31T10:43:17.6966260Z [36m[1m[test:cargo][0m test a_spec_cut_short_is_a_usage_error_in_json_too ... ok
+2026-10-31T10:43:17.7157490Z [36m[1m[test:cargo][0m test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+2026-10-31T10:43:18.2554010Z [36m[1m[test:cargo][0m test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+2026-10-31T10:43:18.5199690Z [36m[1m[test:cargo][0m test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+2026-10-31T10:43:19.0182810Z [36m[1m[test:cargo][0m test without_yes_and_without_a_person_it_is_a_usage_error_before_any_request ... ok
+2026-10-31T10:43:19.8336310Z [36m[1m[test:cargo][0m test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+2026-10-31T10:43:19.8668060Z [36m[1m[test:cargo][0m test bad_arguments_are_usage_errors ... ok
+2026-10-31T10:43:19.8883250Z [36m[1m[test:e2e][0m ok 8 usage errors exit 2, and no transcripts at all exit 3
+2026-10-31T10:43:20.6557350Z [36m[1m[test:cargo][0m test a_server_error_is_retried ... ok
+2026-10-31T10:43:21.3649600Z [36m[1m[test:cargo][0m test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+2026-10-31T10:43:21.6563770Z [36m[1m[test:cargo][0m test empty_replies_and_bad_lists_are_usage_errors ... ok
+2026-10-31T10:43:22.3791460Z [36m[1m[test:cargo][0m test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+2026-10-31T10:43:22.9374740Z [36m[1m[test:cargo][0m test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+2026-10-31T10:43:23.8541960Z [36m[1m[test:e2e][0m ok 29 completion rejects an unknown shell as a usage error
+2026-10-31T10:43:23.9008190Z [36m[1m[test:cargo][0m test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+2026-10-31T10:43:27.1111610Z [36m[1m[test:e2e][0m ok 47 an unknown display mode is a usage error
+2026-10-31T10:43:28.4446970Z [36m[1m[test:cargo][0m test a_branch_in_no_stack_exits_3_and_github_errors_exit_5 ... ok
+2026-10-31T10:43:28.8042020Z [36m[1m[test:cargo][0m test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.90s
+2026-10-31T10:43:30.2551950Z [36m[1m[test:cargo][0m test a_command_is_rerun_until_it_exits_as_expected ... FAILED
+2026-10-31T10:43:30.2886910Z [36m[1m[test:cargo][0m test bad_requests_are_usage_errors ... ok
+2026-10-31T10:43:31.1748720Z [36m[1m[test:e2e][0m ok 69 usage errors exit 2 with the reason on stderr and nothing on stdout
+2026-10-31T10:43:31.5632420Z [36m[1m[test:cargo][0m failures:
+2026-10-31T10:43:31.5633360Z [36m[1m[test:cargo][0m thread 'a_command_is_rerun_until_it_exits_as_expected' (47818) panicked at tests/wait.rs:436:5:
+2026-10-31T10:43:31.5647470Z [36m[1m[test:cargo][0m note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+2026-10-31T10:43:31.5647740Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:31.5647860Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:31.5648000Z [36m[1m[test:cargo][0m failures:
+2026-10-31T10:43:31.5652860Z [36m[1m[test:cargo][0m     a_command_is_rerun_until_it_exits_as_expected
+2026-10-31T10:43:31.5653220Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:31.5653540Z [36m[1m[test:cargo][0m test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.76s
+2026-10-31T10:43:31.5653830Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:31.5654100Z [36m[1m[test:cargo][0m [1m[91merror[0m: test failed, to rerun pass `-p jouet --test wait`
+2026-10-31T10:43:31.5663960Z [2mFinished in 27.12s[0m
+2026-10-31T10:43:31.5664170Z [36m[1m[test:cargo][0m [31mERROR[0m task failed
+2026-10-31T10:43:31.5725390Z ##[error]Process completed with exit code 101.
+2026-10-31T10:43:31.6120060Z Post job cleanup.
+2026-10-31T10:43:31.7345160Z Post job cleanup.
+2026-10-31T10:43:31.7946120Z [command]/opt/homebrew/bin/git version
+2026-10-31T10:43:31.7985220Z git version 2.53.0
+2026-10-31T10:43:31.7999390Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/32a6018c-ddd6-4b7d-b749-82a91847c965/.gitconfig'
+2026-10-31T10:43:31.8003190Z Temporarily overriding HOME='/Users/runner/work/_temp/32a6018c-ddd6-4b7d-b749-82a91847c965' before making global git config changes
+2026-10-31T10:43:31.8003610Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:43:31.8005650Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/jouet/jouet
+2026-10-31T10:43:31.8044470Z Removing SSH command configuration
+2026-10-31T10:43:31.8044740Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:43:31.8074380Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:43:31.8450190Z Entering 'test/bats'
+2026-10-31T10:43:31.8539960Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:43:31.8632110Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:43:31.8728360Z Removing HTTP extra header
+2026-10-31T10:43:31.8731800Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:43:31.8769600Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:43:31.9138510Z Entering 'test/bats'
+2026-10-31T10:43:31.9229520Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:43:31.9320870Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:43:31.9420830Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:43:31.9424720Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:43:31.9453230Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:43:31.9802930Z Entering 'test/bats'
+2026-10-31T10:43:31.9849620Z file:/Users/runner/work/jouet/jouet/.git/modules/test/bats/config	remote.origin.url
+2026-10-31T10:43:31.9876820Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:43:31.9925050Z file:/Users/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-assert/config	remote.origin.url
+2026-10-31T10:43:31.9956230Z Entering 'test/test_helper/bats-support'

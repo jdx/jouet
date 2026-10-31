@@ -1,0 +1,41 @@
+2026-10-31T10:39:42.1732732Z ##[group]Runner Image Provisioner
+2026-10-31T10:39:42.1734584Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-31T10:39:42.1735173Z Build Date: 2026-10-21T00:45:21Z
+2026-10-31T10:39:42.1735862Z Worker ID: {8683fd84-6bb2-4219-abf9-1b30a1cc3431}
+2026-10-31T10:39:42.1736455Z Region: westus3
+2026-10-31T10:39:42.1736968Z Cloud: Azure
+2026-10-31T10:39:42.1737462Z ##[endgroup]
+2026-10-31T10:39:42.1738571Z ##[group]Operating System
+2026-10-31T10:39:42.1739168Z Ubuntu
+2026-10-31T10:39:42.1739619Z 24.04.5
+2026-10-31T10:39:42.1740075Z LTS
+2026-10-31T10:39:42.1740560Z ##[endgroup]
+2026-10-31T10:39:42.1741036Z ##[group]Runner Image
+2026-10-31T10:39:42.1741613Z Image: ubuntu-24.04
+2026-10-31T10:39:42.1742241Z Version: 20261025.353.1
+2026-10-31T10:39:42.1743382Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261025.353/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-31T10:39:42.1744621Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261025.353
+2026-10-31T10:39:42.1745484Z ##[endgroup]
+2026-10-31T10:39:42.1746310Z ##[group]GITHUB_TOKEN Permissions
+2026-10-31T10:39:42.1747963Z Metadata: read
+2026-10-31T10:39:42.1748474Z ##[endgroup]
+2026-10-31T10:39:42.1750220Z Secret source: Actions
+2026-10-31T10:39:42.1751261Z Cache mode: write
+2026-10-31T10:39:42.1752182Z Prepare workflow directory
+2026-10-31T10:39:42.2036998Z Prepare all required actions
+2026-10-31T10:39:42.2134768Z Complete job name: final
+2026-10-31T10:39:42.3201466Z ##[group]Run if { [[ "$TRUSTED_RESULT" == success && "$UNTRUSTED_RESULT" == skipped ]] ||
+2026-10-31T10:39:42.3203278Z [36;1mif { [[ "$TRUSTED_RESULT" == success && "$UNTRUSTED_RESULT" == skipped ]] ||[0m
+2026-10-31T10:39:42.3204651Z [36;1m   [[ "$TRUSTED_RESULT" == skipped && "$UNTRUSTED_RESULT" == success ]]; }; then[0m
+2026-10-31T10:39:42.3205818Z [36;1m  exit 0[0m
+2026-10-31T10:39:42.3206774Z [36;1mfi[0m
+2026-10-31T10:39:42.3207637Z [36;1mecho "trusted=$TRUSTED_RESULT untrusted=$UNTRUSTED_RESULT"[0m
+2026-10-31T10:39:42.3208764Z [36;1mexit 1[0m
+2026-10-31T10:39:42.3526345Z shell: /usr/bin/bash -e {0}
+2026-10-31T10:39:42.3527339Z env:
+2026-10-31T10:39:42.3527868Z   TRUSTED_RESULT: failure
+2026-10-31T10:39:42.3528478Z   UNTRUSTED_RESULT: skipped
+2026-10-31T10:39:42.3529078Z ##[endgroup]
+2026-10-31T10:39:42.3725513Z trusted=failure untrusted=skipped
+2026-10-31T10:39:42.3746335Z ##[error]Process completed with exit code 1.
+2026-10-31T10:39:42.3953436Z Cleaning up orphan processes

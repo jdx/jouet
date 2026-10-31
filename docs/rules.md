@@ -15,6 +15,7 @@ The rule format is new and may change between releases. `jouet rule schema` alwa
 ```output
 $ jouet rule list
 sleep-poll          enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+ci-rerun            enabled  deny    builtin  builtin  2026-10-31  Rerunning CI blind wastes a run on a real failure; `jouet ci explain` says whether the failure is flaky, infrastructure or real, and reruns only the first two.
 review-threads      enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
 python-edit         enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
 git-add-all         enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
@@ -240,6 +241,7 @@ jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expecte
 ```output
 $ jouet rule test --all
 ok    sleep-poll          12 examples passed
+ok    ci-rerun            16 examples passed
 ok    review-threads      7 examples passed
 ok    python-edit         7 examples passed
 ok    git-add-all         14 examples passed
@@ -266,7 +268,7 @@ ok    reread              12 examples passed
 ok    large-read          11 examples passed
 ok    unbudgeted-search   23 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
-26 of 27 rules passed their examples
+27 of 28 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:

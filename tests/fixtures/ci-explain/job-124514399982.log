@@ -1,0 +1,65 @@
+2026-10-31T10:34:56.0852353Z ##[endgroup]
+2026-10-31T10:34:56.0853559Z ##[group]Fetching the repository
+2026-10-31T10:34:56.6108871Z ##[endgroup]
+2026-10-31T10:34:56.6110838Z ##[group]Determining the checkout info
+2026-10-31T10:34:56.6112886Z ##[endgroup]
+2026-10-31T10:34:56.6202172Z ##[group]Checking out the ref
+2026-10-31T10:34:56.6778016Z ##[endgroup]
+2026-10-31T10:34:56.6849644Z ##[group]Removing auth
+2026-10-31T10:34:56.7999115Z ##[endgroup]
+2026-10-31T10:34:56.8800481Z ##[group]Run taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
+2026-10-31T10:34:56.8832514Z ##[endgroup]
+2026-10-31T10:34:56.8914983Z ##[start-action display=Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh";id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action]
+2026-10-31T10:34:56.8981507Z ##[group]Run bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"
+2026-10-31T10:34:56.9039952Z ##[endgroup]
+2026-10-31T10:34:56.9159473Z ##[warning]tag ref should start with 'refs/tags/': 'refs/pull/73/merge'; this action only supports events from tag or release by default; see <https://github.com/taiki-e/upload-rust-binary-action#supported-events> for more (downgraded error to info because action is running in dry-run mode)
+2026-10-31T10:35:01.3560852Z [1m[92m  Downloaded[0m proc-macro-error-attr v1.0.4
+2026-10-31T10:35:01.3918872Z [1m[92m  Downloaded[0m thiserror v1.0.31
+2026-10-31T10:35:01.3957607Z [1m[92m  Downloaded[0m thiserror-impl v1.0.31
+2026-10-31T10:35:01.4135063Z [1m[92m  Downloaded[0m proc-macro-error v1.0.4
+2026-10-31T10:35:06.8165101Z [1m[92m   Compiling[0m proc-macro-error-attr v1.0.4
+2026-10-31T10:35:06.9322992Z [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-10-31T10:35:11.8888220Z [1m[92m   Compiling[0m thiserror-impl v1.0.31
+2026-10-31T10:35:16.1688173Z [1m[92m   Compiling[0m thiserror v1.0.31
+2026-10-31T10:36:26.5688073Z [1m[92m   Compiling[0m thiserror v2.0.21
+2026-10-31T10:36:29.6480753Z [1m[92m   Compiling[0m thiserror-impl v2.0.21
+2026-10-31T10:38:05.1743832Z [1m[92m   Compiling[0m usage-config v7.1.4
+2026-10-31T10:38:08.4603157Z [1m[92m   Compiling[0m usage-derive v7.1.4
+2026-10-31T10:38:09.3663614Z [1m[92m   Compiling[0m jouet-search v0.0.1 (/project/crates/jouet-search)
+2026-10-31T10:38:15.6958742Z [1m[92m   Compiling[0m jouet-audit v0.0.1 (/project/crates/jouet-audit)
+2026-10-31T10:38:19.0456173Z [1m[92m   Compiling[0m usage-rs v7.1.4
+2026-10-31T10:38:19.0837676Z [1m[92m   Compiling[0m jouet-wait v0.0.1 (/project/crates/jouet-wait)
+2026-10-31T10:38:24.0928451Z [1m[92m   Compiling[0m rusqlite v0.41.1
+2026-10-31T10:38:26.0138752Z [1m[92m   Compiling[0m jouet-graph v0.0.1 (/project/crates/jouet-graph)
+2026-10-31T10:38:36.1468665Z [1m[92m   Compiling[0m mlua v0.12.2
+2026-10-31T10:38:38.3065487Z [1m[92m   Compiling[0m jouet-routines v0.0.1 (/project/crates/jouet-routines)
+2026-10-31T10:38:38.3073600Z [1m[92m   Compiling[0m jouet-rules v0.0.1 (/project/crates/jouet-rules)
+2026-10-31T10:38:51.7154504Z [1m[92m   Compiling[0m jouet v0.0.1 (/project)
+2026-10-31T10:38:55.5008253Z [1m[33mwarning[0m[1m: linker stderr: + set -euo pipefail[0m
+2026-10-31T10:38:55.5029044Z          [1m+ main -Wl,--fix-cortex-a53-843419 /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crt1.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crti.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtbegin.o /target/aarch64-unknown-linux-musl/release/deps/joue-b8d73245cf26eb65.joue.ee063603d3c6582f-cgu.0.rcgu.o -Wl,--as-needed -Wl,-Bstatic -lunwind -lc /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/libcompiler_builtins-29674cca14587d3c.rlib -L /target/aarch64-unknown-linux-musl/release/deps/rustcnEsAeZ/raw-dylibs -Wl,-Bdynamic -Wl,--eh-frame-hdr -Wl,-z,noexecstack -nostartfiles -L /target/aarch64-unknown-linux-musl/release/build/zstd-sys-75ad504b81900898/out -L /target/aarch64-unknown-linux-musl/release/build/ring-4b20e7a187bee448/out -L /target/aarch64-unknown-linux-musl/release/build/libsqlite3-sys-10e958ca27fd921c/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-5962b545c2397feb/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-c-31ffbe8cdcf1ddf0/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-cpp-ccd97b8301084a28/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-go-d7203cbe4ea5c0ba/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-java-c4c1407c327f7bc5/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-javascript-afce8f743c278da4/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-python-e8564699d661399e/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-ruby-5bb25e7c2cdb6033/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-rust-978abee2ac7214a4/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-typescript-c455bb06b2d0232b/out -L /target/aarch64-unknown-linux-musl/release/build/mlua-sys-e247eb4f5a0fcf2c/out/luau-build -L /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained -L /rust/lib/rustlib/aarch64-unknown-linux-musl/lib -o /target/aarch64-unknown-linux-musl/release/deps/joue-b8d73245cf26eb65 -Wl,--gc-sections -static -no-pie -Wl,-z,relro,-z,now -Wl,-O1 -Wl,--strip-all -nodefaultlibs /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtend.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o[0m
+2026-10-31T10:38:55.5045610Z          [1m+ local release=[0m
+2026-10-31T10:38:55.5046442Z          [1m++ rustc -Vv[0m
+2026-10-31T10:38:55.5047617Z          [1m++ grep '^release:'[0m
+2026-10-31T10:38:55.5048449Z          [1m++ cut -d : -f2[0m
+2026-10-31T10:38:55.5049143Z          [1m+ release=' 1.99.1'[0m
+2026-10-31T10:38:55.5049781Z          [1m+ local minor=[0m
+2026-10-31T10:38:55.5050373Z          [1m++ echo ' 1.99.1'[0m
+2026-10-31T10:38:55.5050916Z          [1m++ cut -d . -f2[0m
+2026-10-31T10:38:55.5051429Z          [1m+ minor=99[0m
+2026-10-31T10:38:55.5051928Z          [1m+ ((  minor >= 48  ))[0m
+2026-10-31T10:38:55.5069251Z          [1m+ aarch64-linux-musl-gcc -Wl,--fix-cortex-a53-843419 /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crt1.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crti.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtbegin.o /target/aarch64-unknown-linux-musl/release/deps/joue-b8d73245cf26eb65.joue.ee063603d3c6582f-cgu.0.rcgu.o -Wl,--as-needed -Wl,-Bstatic -lunwind -lc /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/libcompiler_builtins-29674cca14587d3c.rlib -L /target/aarch64-unknown-linux-musl/release/deps/rustcnEsAeZ/raw-dylibs -Wl,-Bdynamic -Wl,--eh-frame-hdr -Wl,-z,noexecstack -nostartfiles -L /target/aarch64-unknown-linux-musl/release/build/zstd-sys-75ad504b81900898/out -L /target/aarch64-unknown-linux-musl/release/build/ring-4b20e7a187bee448/out -L /target/aarch64-unknown-linux-musl/release/build/libsqlite3-sys-10e958ca27fd921c/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-5962b545c2397feb/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-c-31ffbe8cdcf1ddf0/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-cpp-ccd97b8301084a28/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-go-d7203cbe4ea5c0ba/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-java-c4c1407c327f7bc5/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-javascript-afce8f743c278da4/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-python-e8564699d661399e/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-ruby-5bb25e7c2cdb6033/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-rust-978abee2ac7214a4/out -L /target/aarch64-unknown-linux-musl/release/build/tree-sitter-typescript-c455bb06b2d0232b/out -L /target/aarch64-unknown-linux-musl/release/build/mlua-sys-e247eb4f5a0fcf2c/out/luau-build -L /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained -L /rust/lib/rustlib/aarch64-unknown-linux-musl/lib -o /target/aarch64-unknown-linux-musl/release/deps/joue-b8d73245cf26eb65 -Wl,--gc-sections -static -no-pie -Wl,-z,relro,-z,now -Wl,-O1 -Wl,--strip-all -nodefaultlibs /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtend.o /rust/lib/rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o[0m
+2026-10-31T10:38:55.5079483Z   [1m[94m|[0m
+2026-10-31T10:38:55.5079839Z   [1m[94m= [0m[1mnote[0m: `#[warn(linker_messages)]` on by default
+2026-10-31T10:38:55.5080109Z 
+2026-10-31T10:38:55.5164157Z [1m[33mwarning[0m: `jouet` (bin "joue") generated 1 warning
+2026-10-31T10:38:55.5747167Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:38:55.5748493Z    [1m[94m--> [0msrc/guide.rs:243:17
+2026-10-31T10:38:55.5749117Z     [1m[94m|[0m
+2026-10-31T10:38:55.5750194Z [1m[94m243[0m [1m[94m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:38:55.5751202Z     [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:38:55.5751600Z 
+2026-10-31T10:38:59.7321544Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:38:59.7814231Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:38:59.9255766Z ##[error]Process completed with exit code 101.
+2026-10-31T10:38:59.9290458Z ##[end-action id=__taiki-e_upload-rust-binary-action.upload-rust-binary-action;outcome=failure;conclusion=failure;duration_ms=243037]
+2026-10-31T10:38:59.9484636Z Post job cleanup.

@@ -3,11 +3,12 @@
 
 - **Usage:** `jouet ci <SUBCOMMAND>`
 
-Run GitHub Actions jobs on this machine
+Run GitHub Actions jobs here, or say whether a failure on GitHub is flaky
 
 ## Flags
 - **`-h --help`** — Print help
 
 ## Subcommands
 
+- [`jouet ci explain [FLAGS] [TARGET]`](/cli/ci/explain.md)
 - [`jouet ci run [FLAGS] [WORKFLOW] [-- ARGS]…`](/cli/ci/run.md)
