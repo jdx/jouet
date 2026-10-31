@@ -42,14 +42,14 @@ Detection comes before the terminal check on purpose: a terminal does not prove 
 
 - Field names are `snake_case`.
 - Fields that are `null`, `false` or empty are left out, to keep documents short. A missing field means its zero value.
-- Documents carry no schema version. Fields are added, not renamed or removed, except in a new major version of jouet, so the jouet version is the schema version.
+- Documents carry no schema version. Fields are added, not renamed or removed, except in a new major version of jouet, so the jouet version is the schema version. [Stability and deprecations](/stability) says what else counts as breaking.
 - Only `human` mode pretty-prints. Every mode emits the same fields.
 
 The `code` of an error is always one of the names in the [exit code table](#exit-codes).
 
 ## stdout and stderr
 
-Only the result goes to stdout. Without `--json`, an error that stops a command is printed to stderr as `jouet: <message>`.
+Only the result goes to stdout. Without `--json`, an error that stops a command is printed to stderr as `jouet: <message>`. So is a [deprecation note](/stability#deprecations), with or without `--json`.
 
 ## Exit codes
 

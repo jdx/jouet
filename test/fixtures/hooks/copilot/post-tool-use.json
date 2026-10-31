@@ -1,0 +1,1 @@
+{"sessionId":"5b1c0d2e-7f3a-4e8b-9c1d-2a3b4c5d6e7f","timestamp":1793450040000,"cwd":"/work/app","toolName":"bash","toolArgs":"{\"command\":\"cargo test --workspace\",\"description\":\"Run the tests\",\"mode\":\"sync\"}","toolResult":{"resultType":"success","textResultForLlm":"test result: FAILED. 1 passed; 1 failed\n<exited with exit code 101>"}}

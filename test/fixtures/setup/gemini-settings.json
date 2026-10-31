@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "name": "jouet-session-start",
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini session-start'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "^(run_shell_command|read_file|grep_search|search_file_content|replace|write_file)$",
+        "hooks": [
+          {
+            "name": "jouet-pre-tool-use",
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini pre-tool-use'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "^(run_shell_command|read_file|grep_search|search_file_content|replace|write_file)$",
+        "hooks": [
+          {
+            "name": "jouet-post-tool-use",
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-tool-use'",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "^(replace|write_file)$",
+        "hooks": [
+          {
+            "name": "jouet-post-edit",
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-edit'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "jouet-stop",
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

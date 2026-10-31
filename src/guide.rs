@@ -156,6 +156,389 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("completion", None),
 ];
 
+/// What `jouet agent-help COMMAND` prints by default: the invocations agents
+/// use, each with what it does, and what `--full` adds. Reading the whole
+/// guide before every first use cost agents up to 7 kB a command. Every
+/// command with a `WHEN` line has one (a test checks), and every flag a line
+/// names must exist on the command it names.
+struct Usage {
+    command: &'static str,
+    lines: &'static [(&'static str, &'static str)],
+    /// What `--full` adds, so the agent knows when it needs it.
+    more: &'static str,
+}
+
+const USAGE: &[Usage] = &[
+    Usage {
+        command: "search",
+        lines: &[
+            (
+                "jouet search <PATTERN> [<PATHS>...] [--glob GLOB]",
+                "regex search, matches grouped by the function they are in",
+            ),
+            (
+                "jouet search <PATTERN> --fixed-strings --ignore-case",
+                "literal text, any case",
+            ),
+            (
+                "jouet search <PATTERN> --files-with-matches",
+                "only the files, with their match counts",
+            ),
+            (
+                "jouet search --structural --lang LANG '<PAT>' [<PATHS>...]",
+                "a code pattern (ast-grep), such as 'foo($$$ARGS)'",
+            ),
+            (
+                "jouet search <PATTERN> --again",
+                "also the matches this session was already shown",
+            ),
+        ],
+        more: "the byte budgets, --callers-of and --impact from the code graph, hidden files",
+    },
+    Usage {
+        command: "read",
+        lines: &[
+            (
+                "jouet read <PATH> --outline",
+                "a long file's definitions with their line ranges",
+            ),
+            (
+                "jouet read <PATH> --symbol NAME",
+                "one definition: NAME, KIND NAME or Scope::NAME",
+            ),
+            ("jouet read <PATH> --range A:B", "lines A to B"),
+            (
+                "jouet read --map [--budget TOKENS]",
+                "a new repository's most important definitions",
+            ),
+        ],
+        more: "--max-lines, --again, --focus and how --map ranks definitions",
+    },
+    Usage {
+        command: "docs",
+        lines: &[
+            (
+                "jouet docs <PACKAGE>",
+                "outline a dependency's API at the version the lockfile names",
+            ),
+            (
+                "jouet docs <PACKAGE> <SYMBOL>",
+                "one definition's signature, doc and source",
+            ),
+        ],
+        more: "--lang, --private, --budget and how the version is found",
+    },
+    Usage {
+        command: "deps",
+        lines: &[
+            (
+                "jouet deps info <PACKAGES>...",
+                "cargo:NAME, npm:NAME, pypi:NAME, go:MODULE or a bare NAME: whether it exists, its latest version, licence and advisories",
+            ),
+            ("jouet deps audit", "every locked version against OSV"),
+        ],
+        more: "--ecosystem, --refresh and what each check reads",
+    },
+    Usage {
+        command: "edit",
+        lines: &[
+            (
+                "jouet edit replace <PATHS>... --old TEXT --new TEXT",
+                "exactly one match in each file; repeat --old/--new pairs, applied in order, all or nothing",
+            ),
+            (
+                "jouet edit replace <PATHS>... --old TEXT --new TEXT --all",
+                "every match, at least one in each file (--count N for an exact count)",
+            ),
+            (
+                "jouet edit [--spec FILE]",
+                "search/replace blocks, a patch or JSON from stdin; `=== PATH#SYMBOL` replaces a whole definition",
+            ),
+            (
+                "jouet edit --pattern '<PAT>' --rewrite '<REPL>' --lang LANG <PATHS>... --dry-run",
+                "every match of a code pattern (ast-grep), previewed",
+            ),
+            (
+                "jouet edit ... --check CMD --revert-on-fail",
+                "run CMD after writing, and restore every file if it fails",
+            ),
+        ],
+        more: "spec formats, symbol edits, pattern syntax, --callers-of, --impact, --diag, --expect-hash",
+    },
+    Usage {
+        command: "diag",
+        lines: &[
+            (
+                "jouet diag check --changed",
+                "hk's errors and warnings in just the files you changed",
+            ),
+            (
+                "jouet diag delta --changed",
+                "only the ones your edit introduced",
+            ),
+            ("jouet diag fix --changed", "run hk's fixes on them"),
+        ],
+        more: "--max, --step, --dry-run; without hk.pkl it exits 4",
+    },
+    Usage {
+        command: "wait",
+        lines: &[
+            (
+                "jouet wait ci [<PR>] [--all]",
+                "a PR's (or the branch's) checks; failing logs are shown; --all waits for every check after a failure",
+            ),
+            (
+                "jouet wait pr [<PR>] --until CONDITION",
+                "mergeable, merged, approved, ready, ...",
+            ),
+            (
+                "jouet wait http <URL> | port <ADDR> | file <PATH> | log <PATH> --match REGEX",
+                "a server, a file or a log line",
+            ),
+            (
+                "jouet wait job <ID>",
+                "a `jouet job` to end (--until ready for ready)",
+            ),
+            (
+                "jouet wait --timeout DUR ...",
+                "give up after DUR (default 30m): exit 124, run it again to keep waiting",
+            ),
+        ],
+        more: "every condition and flag: run, pid, cmd, daemon, --required, --check, --log-lines",
+    },
+    Usage {
+        command: "job",
+        lines: &[
+            (
+                "jouet job start <ID> --port N -- CMD...",
+                "run CMD in the background; returns once it is ready (also --http URL, --output REGEX)",
+            ),
+            ("jouet wait job <ID>", "block until it ends"),
+            ("jouet job logs <ID>", "its log"),
+            (
+                "jouet job ls / jouet job stop <IDS>...",
+                "list or stop jobs",
+            ),
+        ],
+        more: "--timeout, --replace, --lines, --grace and how readiness is judged",
+    },
+    Usage {
+        command: "ci",
+        lines: &[
+            (
+                "jouet ci explain [<TARGET>] [--run ID]",
+                "whether each failed job is flaky, infrastructure or real, with the evidence",
+            ),
+            (
+                "jouet ci explain [<TARGET>] --rerun",
+                "rerun only when every failure is a flake or infrastructure",
+            ),
+            (
+                "jouet ci run [<WORKFLOW>] --check NAME",
+                "run the job behind a check here, with jactionlint",
+            ),
+        ],
+        more: "--job, --event, --secrets-from, --log-lines and how a failure is classified",
+    },
+    Usage {
+        command: "pr",
+        lines: &[
+            (
+                "jouet pr threads [<PR>] [--context N] [--full]",
+                "the unresolved review threads, with N lines of code around each",
+            ),
+            (
+                "jouet pr threads reply <ID> [<PR>] --body TEXT --resolve",
+                "reply to a thread and resolve it",
+            ),
+            (
+                "jouet pr status [<PRS>...] [--mine]",
+                "where PRs stand and why any need attention",
+            ),
+            ("jouet pr next [<PR>]", "the one thing a PR needs next"),
+            (
+                "jouet pr land [<PR>] --yes",
+                "merge it once ready (--dry-run first)",
+            ),
+        ],
+        more: "thread filters, resolve, apply, --method, --settle",
+    },
+    Usage {
+        command: "commit",
+        lines: &[
+            (
+                "jouet commit <PATHS>... --message MSG",
+                "commit exactly these paths, with the configured trailers; hooks run",
+            ),
+            (
+                "jouet commit <PATHS>... --dry-run",
+                "show what would be committed",
+            ),
+        ],
+        more: "--file, --trailer, --no-trailers, --allow-secret and what it refuses",
+    },
+    Usage {
+        command: "secrets",
+        lines: &[
+            (
+                "jouet secrets scan [<PATHS>...]",
+                "API keys, tokens and private keys in files, with gitleaks' rules",
+            ),
+            (
+                "jouet secrets scan --staged",
+                "only the lines the index adds: what `git commit` would record",
+            ),
+            (
+                "jouet secrets scan --diff REF",
+                "the lines each commit in REF..HEAD adds",
+            ),
+        ],
+        more: "false positives (gitleaks:allow, .gitleaksignore, .gitleaks.toml) and the --json fingerprints",
+    },
+    Usage {
+        command: "review-package",
+        lines: &[(
+            "jouet review-package <BASE> [<HEAD>] [--output FILE]",
+            "the commits, a diffstat and the full diff in one file",
+        )],
+        more: "--context and the ranges it refuses",
+    },
+    Usage {
+        command: "handoff",
+        lines: &[(
+            "jouet handoff [--output FILE]",
+            "record the branch, uncommitted files, PR, test runs and jobs for the next session",
+        )],
+        more: "--no-pr, --session and what it records",
+    },
+    Usage {
+        command: "pickup",
+        lines: &[(
+            "jouet pickup [<FILE>]",
+            "print the last handoff and check it still holds",
+        )],
+        more: "what it checks",
+    },
+    Usage {
+        command: "stack",
+        lines: &[
+            (
+                "jouet stack status",
+                "each layer's PR and whether it really contains the layer below",
+            ),
+            (
+                "jouet stack sync --dry-run",
+                "what merging each layer up to date would do",
+            ),
+            (
+                "jouet stack sync [--push]",
+                "merge each layer up to date and verify it",
+            ),
+        ],
+        more: "--no-fetch and how a layer is checked",
+    },
+    Usage {
+        command: "test",
+        lines: &[
+            (
+                "jouet test",
+                "the full suite (the project's test task, or its runner)",
+            ),
+            (
+                "jouet test --affected",
+                "only the tests your changes affect, with why each was picked",
+            ),
+            (
+                "jouet test --cmd -- CMD...",
+                "any other test, e2e or build command",
+            ),
+            (
+                "jouet test ... --budget BYTES",
+                "failure text to show (default 4000); the full log's path is printed",
+            ),
+        ],
+        more: "--since, --adapter, --dry-run, the runners it finds and how failures are cut",
+    },
+    Usage {
+        command: "rule",
+        lines: &[
+            ("jouet rule list", "every rule and whether it runs"),
+            (
+                "jouet rule test [<RULE>] [--command CMD]",
+                "run a rule's examples, or a rule against a command",
+            ),
+            (
+                "jouet rule new <NAME> [--from-note ID]",
+                "write a rule of yours, in warn mode",
+            ),
+            ("jouet rule schema", "the rule file's JSON schema"),
+        ],
+        more: "promote, log, gap, types and the payload and replay options",
+    },
+    Usage {
+        command: "run",
+        lines: &[
+            ("joue --list", "every routine and what it reaches"),
+            ("joue NAME --help", "a routine's arguments"),
+            (
+                "joue land [PR] / joue sweep / joue ship-check",
+                "the built-in routines; one that writes needs --yes (without: a preview and exit 4)",
+            ),
+        ],
+        more: "--trust, run test and run types",
+    },
+    Usage {
+        command: "wind",
+        lines: &[
+            ("jouet wind show <ID>", "read a note or proposal"),
+            ("jouet wind dismiss <ID>", "drop it"),
+            (
+                "jouet wind review [<SESSION>] [--last]",
+                "a prompt and digest for a subagent to review a session",
+            ),
+        ],
+        more: "adopt, digest, propose and their filters",
+    },
+    Usage {
+        command: "claim",
+        lines: &[
+            (
+                "jouet claim <PATHS>... --note TEXT",
+                "tell other sessions these files are yours (for 2h; --for DUR)",
+            ),
+            ("jouet claim ls", "who claims what"),
+            ("jouet claim release [<PATHS>...]", "give them back"),
+        ],
+        more: "how the hooks use claims",
+    },
+    Usage {
+        command: "graph",
+        lines: &[
+            (
+                "jouet graph index",
+                "build the graph, or bring it up to date",
+            ),
+            (
+                "jouet graph callers <SYMBOL> | callees <SYMBOL> | impact <SYMBOL>",
+                "what calls it, what it calls, what a change could break",
+            ),
+            (
+                "jouet graph explore <QUERY>...",
+                "the code that answers a question",
+            ),
+            (
+                "jouet graph affected [<FILES>...]",
+                "the test files that depend on changed files",
+            ),
+        ],
+        more: "symbols, status, prune, --depth, budgets and pages",
+    },
+];
+
+fn usage_of(name: &str) -> Option<&'static Usage> {
+    USAGE.iter().find(|u| u.command == name)
+}
+
 /// Subcommands an agent is told about where it needs them, in a line jouet
 /// prints (a proposal's note, the review prompt), so the overview leaves
 /// them out. `jouet agent-help COMMAND` still lists them.
@@ -313,24 +696,77 @@ pub(crate) fn overview() -> String {
     out
 }
 
-/// The guide for one command and its subcommands.
+/// The guide for one command: what `jouet agent-help COMMAND` prints. A
+/// command family with a usage block gets just that, ending with what
+/// `--full` adds; anything else, a subcommand such as `pr threads` included,
+/// gets the whole guide.
 pub(crate) fn command<S: AsRef<str>>(path: &[S]) -> Option<String> {
+    let usage = match path {
+        [name] => usage_of(name.as_ref()),
+        _ => None,
+    };
+    let Some(usage) = usage else {
+        return full(path);
+    };
+    let meta = lookup(path)?;
+    let mut out = heading(usage.command, meta);
+    usage_block(&mut out, usage);
+    let _ = writeln!(
+        out,
+        "more: `jouet agent-help {} --full` ({})",
+        usage.command, usage.more
+    );
+    let codes: Vec<String> = Exit::ALL
+        .iter()
+        .map(|e| format!("{} {}", e.code(), e.name()))
+        .collect();
+    let _ = writeln!(out, "Exit codes: {}.", codes.join(", "));
+    Some(out)
+}
+
+/// The whole guide for a command: its usage block, if it has one, then every
+/// subcommand, nested ones included, with all their flags and details.
+pub(crate) fn full<S: AsRef<str>>(path: &[S]) -> Option<String> {
     let meta = lookup(path)?;
     let words: Vec<&str> = path.iter().map(AsRef::as_ref).collect();
     let name = format!("jouet {}", words.join(" "));
-    let mut out = format!("{name}: {}\n", meta.about.unwrap_or(""));
-    if let Some(when) = words.first().and_then(|w| when(w)) {
-        let _ = writeln!(out, "when: {when}");
+    let mut out = heading(&words.join(" "), meta);
+    if let [only] = words.as_slice()
+        && let Some(usage) = usage_of(only)
+    {
+        usage_block(&mut out, usage);
+        out.push_str("\n--- details ---\n");
     }
     describe(&mut out, &name, meta);
-    for sub in meta.subcommands.iter().filter(|s| !s.hide) {
-        out.push('\n');
-        let _ = writeln!(out, "{name} {}: {}", sub.cmd.name, sub.about.unwrap_or(""));
-        describe(&mut out, &format!("{name} {}", sub.cmd.name), sub);
-    }
+    subcommands(&mut out, &name, meta);
     out.push('\n');
     out.push_str(&conventions());
     Some(out)
+}
+
+fn heading(words: &str, meta: &CommandMeta<'_>) -> String {
+    let mut out = format!("jouet {words}: {}\n", meta.about.unwrap_or(""));
+    if let Some(when) = words.split(' ').next().and_then(when) {
+        let _ = writeln!(out, "when: {when}");
+    }
+    out
+}
+
+fn usage_block(out: &mut String, usage: &Usage) {
+    out.push_str("usage:\n");
+    for (line, what) in usage.lines {
+        let _ = writeln!(out, "  {line}  # {what}");
+    }
+}
+
+fn subcommands(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
+    for sub in meta.subcommands.iter().filter(|s| !s.hide) {
+        let name = format!("{name} {}", sub.cmd.name);
+        out.push('\n');
+        let _ = writeln!(out, "{name}: {}", sub.about.unwrap_or(""));
+        describe(out, &name, sub);
+        subcommands(out, &name, sub);
+    }
 }
 
 fn describe(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
@@ -379,7 +815,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
         })
         .collect();
     let mut out = format!(
-        "jouet is installed, a CLI toolkit for coding agents: {}. If a task fits one, `jouet agent-help COMMAND` says when to use it and its flags.\n",
+        "jouet is installed, a CLI toolkit for coding agents: {}.\n",
         names.join(", ")
     );
     let usage: Vec<String> = PRIMED
@@ -387,10 +823,15 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
         .filter_map(|(path, flags)| short_synopsis(path, flags))
         .map(|s| format!("`{s}`"))
         .collect();
-    if let [commit, edit, reply] = usage.as_slice() {
+    // Codex read `agent-help test` and `agent-help commit` before nearly
+    // every first use, so these say they need no lookup.
+    let tests: Vec<&str> = usage_of("test")
+        .map(|u| u.lines.iter().take(3).map(|(line, _)| *line).collect())
+        .unwrap_or_default();
+    if let ([commit, edit, reply], [suite, affected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let _ = writeln!(
             out,
-            "Commit only the paths you name with {commit}. Edit with your own edit tool or with {edit}, which takes several files and --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}."
+            "Test with `{suite}` (the full suite), `{affected}` (what your changes affect) or `{cmd}` (any other test or build). Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs in one call; never with a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -559,7 +1000,7 @@ mod tests {
     fn subcommands_left_out_of_the_overview_exist() {
         for (name, sub) in PROMPTED {
             assert!(crate::spec::has_command(&[name, sub]), "{name} {sub}");
-            let guide = command(&[name]).unwrap();
+            let guide = full(&[name]).unwrap();
             assert!(guide.contains(&format!("jouet {name} {sub}")), "{guide}");
             assert!(!overview().contains(&format!("jouet {name} {sub}")));
         }
@@ -619,6 +1060,8 @@ mod tests {
             text.contains("`jouet pr threads reply <ID> [PR] --body TEXT --resolve`"),
             "{text}"
         );
+        assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
+        assert!(text.contains("These need no lookup"), "{text}");
         assert!(
             text.contains(
                 "python-edit (use `jouet edit`), git-stash, print-secrets, secret-files (use `fnox exec`)."
@@ -636,11 +1079,94 @@ mod tests {
     }
 
     #[test]
-    fn a_command_guide_lists_its_flags() {
-        let text = command(&["edit"]).unwrap();
+    fn a_full_command_guide_lists_its_flags() {
+        let text = full(&["edit"]).unwrap();
         assert!(text.contains("--expect-hash PATH=SHA256"), "{text}");
         assert!(text.contains("jouet edit hash"), "{text}");
         assert!(!text.contains("--json  "), "{text}");
+        // The usage block leads, then the details after a break.
+        let usage = text.find("usage:\n").unwrap();
+        let details = text.find("--- details ---").unwrap();
+        assert!(usage < details, "{text}");
+        // Nested subcommands are in the whole guide too.
+        let pr = full(&["pr"]).unwrap();
+        assert!(pr.contains("jouet pr threads reply <ID>"), "{pr}");
         assert_eq!(command(&["nope"]), None);
+        assert_eq!(full(&["nope"]), None);
+    }
+
+    #[test]
+    fn every_agent_command_has_a_short_usage_block() {
+        for (meta, _) in agent_commands() {
+            let name = meta.cmd.name;
+            assert!(
+                usage_of(name).is_some(),
+                "add `{name}` to USAGE in src/guide.rs"
+            );
+            let text = command(&[name]).unwrap();
+            assert!(
+                text.contains(&format!("more: `jouet agent-help {name} --full` (")),
+                "{text}"
+            );
+            // The point of the short page: an agent reads it before a first
+            // use, so it stays well under the whole guide.
+            assert!(text.len() <= 1600, "{name}: {} bytes:\n{text}", text.len());
+            assert!(text.len() < full(&[name]).unwrap().len(), "{name}");
+        }
+        for usage in USAGE {
+            assert!(
+                crate::spec::has_command(&[usage.command]),
+                "USAGE names `{}`, which jouet does not have",
+                usage.command
+            );
+        }
+        // A subcommand gets its whole guide.
+        assert_eq!(command(&["pr", "threads"]), full(&["pr", "threads"]));
+    }
+
+    /// Every flag a usage line names exists on the command it names, so a
+    /// renamed flag fails here instead of misleading an agent.
+    #[test]
+    fn usage_lines_name_real_commands_and_flags() {
+        for usage in USAGE {
+            for (line, _) in usage.lines {
+                let mut parent: Vec<&str> = Vec::new();
+                for segment in line.split(" | ").flat_map(|s| s.split(" / ")) {
+                    let words: Vec<&str> = segment.split_whitespace().collect();
+                    let words = match words.first() {
+                        // Routines' own arguments are theirs, not jouet's.
+                        Some(&"joue") => continue,
+                        Some(&"jouet") => words[1..].to_vec(),
+                        _ => parent.iter().copied().chain(words).collect(),
+                    };
+                    let mut path: Vec<&str> = Vec::new();
+                    for word in &words {
+                        let next: Vec<&str> = path.iter().copied().chain([*word]).collect();
+                        if lookup(&next).is_none() {
+                            break;
+                        }
+                        path = next;
+                    }
+                    assert!(!path.is_empty(), "`{line}` names no jouet command");
+                    parent = path[..path.len() - 1].to_vec();
+                    for word in &words {
+                        let flag = word.trim_matches(|c| "[]'\"".contains(c));
+                        let Some(long) = flag.strip_prefix("--").filter(|l| !l.is_empty()) else {
+                            continue;
+                        };
+                        let known = (0..=path.len()).any(|n| {
+                            lookup(&path[..n]).is_some_and(|m| {
+                                m.flags.iter().any(|f| f.flag.longs.contains(&long))
+                            })
+                        });
+                        assert!(
+                            known,
+                            "`{line}`: `jouet {}` has no --{long}",
+                            path.join(" ")
+                        );
+                    }
+                }
+            }
+        }
     }
 }

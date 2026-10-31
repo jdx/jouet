@@ -65,6 +65,28 @@ impl Script {
     }
 }
 
+/// Whether `pipefail` is on after `commands` run, taking each `set` in order:
+/// `-o pipefail` (also in a cluster, as in `-euo pipefail`) turns it on and
+/// `+o pipefail` turns it off again.
+fn pipefail_before(commands: &[Command]) -> bool {
+    let mut on = false;
+    for c in commands.iter().filter(|c| c.program() == Some("set")) {
+        let argv = c.argv();
+        for (i, word) in argv.iter().enumerate().skip(1) {
+            let option = |prev: &str| prev.len() > 1 && prev[1..].contains('o');
+            if word == "pipefail" && i > 1 {
+                let prev = argv[i - 1].as_str();
+                if prev.starts_with('-') && option(prev) {
+                    on = true;
+                } else if prev.starts_with('+') && option(prev) {
+                    on = false;
+                }
+            }
+        }
+    }
+    on
+}
+
 /// What a script exiting with `exit_code` says about each top-level command.
 ///
 /// This errs toward a missed run, never an invented one:
@@ -76,11 +98,13 @@ impl Script {
 ///   echo done` failing says nothing about the tests).
 /// - In a final `&&` chain, an earlier command may be the one that failed, so
 ///   a failure counts only when every command before the last pipeline is a
-///   `cd` or `pushd`: `cd crate && cargo test` counts, `cargo build && cargo
+///   `cd`, `pushd` or `set`: `cd crate && cargo test` counts, `cargo build && cargo
 ///   test` does not.
 /// - Success belongs to every command in the final `&&` chain, because all
 ///   of them ran and succeeded, except a first pipeline that follows `||`,
-///   which may not have run at all.
+///   which may not have run at all, and, without `pipefail`, a command whose
+///   output is piped into another: `cargo test | tail` exits with tail's 0
+///   whatever the tests did.
 /// - A script that ends in the background says nothing about anything.
 pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     let mut out = vec![None; commands.len()];
@@ -98,6 +122,7 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     while pipeline > start && commands[pipeline - 1].op == Some(Op::Pipe) {
         pipeline -= 1;
     }
+    let pipefail = pipefail_before(&commands[..pipeline]);
     if exit_code == 0 {
         let mut first = start;
         if start > 0 && commands[start - 1].op == Some(Op::Or) {
@@ -107,23 +132,19 @@ pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
             }
             first += 1;
         }
-        for status in out.iter_mut().skip(first) {
-            *status = Some(0);
+        for (status, command) in out.iter_mut().zip(commands).skip(first) {
+            if pipefail || command.op != Some(Op::Pipe) {
+                *status = Some(0);
+            }
         }
         return out;
     }
     let only_cd = commands[start..pipeline]
         .iter()
-        .all(|c| matches!(c.program(), Some("cd" | "pushd")));
+        .all(|c| matches!(c.program(), Some("cd" | "pushd" | "set")));
     if !only_cd {
         return out;
     }
-    let pipefail = commands[..start].iter().any(|c| {
-        c.program() == Some("set")
-            && c.argv()
-                .iter()
-                .any(|w| w == "pipefail" || w == "-o pipefail")
-    });
     let blamed = if pipefail {
         pipeline
     } else {
@@ -748,6 +769,15 @@ mod tests {
             status_of("set -euo pipefail\ncargo test | tail", 101),
             [None, Some(101), None]
         );
+        // Set in the final chain, and turned off again.
+        assert_eq!(
+            status_of("set -o pipefail && pytest | tail", 1),
+            [None, Some(1), None]
+        );
+        assert_eq!(
+            status_of("set -o pipefail; set +o pipefail; pytest | tail", 1),
+            [None, None, None, Some(1)]
+        );
     }
 
     #[test]
@@ -761,9 +791,34 @@ mod tests {
 
     #[test]
     fn success_belongs_to_the_final_chain() {
+        // Without pipefail, tail's 0 says nothing about the tests.
         assert_eq!(
             status_of("cd x; cargo build && cargo test | tail -5", 0),
+            [None, Some(0), None, Some(0)]
+        );
+        assert_eq!(
+            status_of("set -o pipefail; cargo build && cargo test | tail -5", 0),
             [None, Some(0), Some(0), Some(0)]
+        );
+        // pipefail set in the final chain counts, and so does turning it off.
+        assert_eq!(
+            status_of("set -o pipefail && pytest | tail", 0),
+            [Some(0), Some(0), Some(0)]
+        );
+        assert_eq!(
+            status_of("set -o pipefail; set +o pipefail; pytest | tail", 0),
+            [None, None, None, Some(0)]
+        );
+        assert_eq!(
+            status_of("set -euo pipefail; pytest | tail", 0),
+            [None, Some(0), Some(0)]
+        );
+        assert_eq!(
+            status_of(
+                "jouet test --cmd -- cargo test --workspace 2>&1 | head -3",
+                0
+            ),
+            [None, Some(0)]
         );
         // Either side may be the one that ran.
         assert_eq!(status_of("cargo test || true", 0), [None, None]);
