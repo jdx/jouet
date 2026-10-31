@@ -12,6 +12,8 @@
 use super::target::{Repo, Target};
 use crate::Client;
 use crate::entire::{Brief, CHECK, Gate, Gates};
+use crate::forge::Forge;
+use crate::host::Host;
 use jouet_output::time;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -75,6 +77,20 @@ pub enum Lookup {
         id: String,
         after: Option<String>,
     },
+    /// The open PRs the token's user opened in a repository on GitLab or
+    /// Forgejo, which have no search like GitHub's.
+    Mine(Repo),
+}
+
+impl Lookup {
+    /// The repository a lookup is in, when it names one.
+    pub fn repo(&self) -> Option<&Repo> {
+        match self {
+            Self::Pr(target) => Some(target.repo()),
+            Self::Mine(repo) => Some(repo),
+            Self::Search { .. } | Self::Threads { .. } | Self::Contexts { .. } => None,
+        }
+    }
 }
 
 /// Builds the query and variables for a batch of lookups.
@@ -152,6 +168,8 @@ pub(crate) fn query(lookups: &[Lookup]) -> (String, Value) {
                      nodes {{ ... on CheckRun {{ name conclusion }} ... on StatusContext {{ context state }} }} }} }} }}"
                 );
             }
+            // Never sent to GitHub, whose `--mine` is a search.
+            Lookup::Mine(_) => {}
         }
     }
     // GraphQL rejects a document that defines a fragment it does not use.
@@ -341,6 +359,10 @@ impl Fetched {
         (&self.status.repo, self.status.number)
     }
 
+    pub fn status(&self) -> &PrStatus {
+        &self.status
+    }
+
     pub fn is_open(&self) -> bool {
         matches!(self.status.state, State::Open | State::Draft)
     }
@@ -350,8 +372,22 @@ impl Fetched {
     }
 
     pub fn target(&self) -> Option<Target> {
-        let repo = Repo::parse(&self.status.repo)?;
-        Some(Target::Number(repo, self.status.number))
+        Some(Target::Number(
+            self.status.repository()?,
+            self.status.number,
+        ))
+    }
+
+    /// A PR read from a forge other than GitHub, which needs no further
+    /// pages.
+    pub(crate) fn new(status: PrStatus) -> Self {
+        Self {
+            id: String::new(),
+            status,
+            threads_after: None,
+            rollup_id: None,
+            contexts_after: None,
+        }
     }
 
     /// The follow-up lookups this PR still needs.
@@ -475,9 +511,9 @@ pub fn fetch(client: &mut Client, lookups: Vec<Lookup>) -> Result<FetchResult, S
     }
 }
 
-/// Re-queries open PRs whose mergeable state is still unknown until GitHub
-/// settles it or `settle` runs out.
-pub fn settle(client: &mut Client, prs: &mut [Fetched], settle: Duration) -> Result<(), String> {
+/// Re-queries open PRs whose mergeable state is still unknown until the
+/// forge settles it or `settle` runs out.
+pub fn settle(host: &mut dyn Host, prs: &mut [Fetched], settle: Duration) -> Result<(), String> {
     let deadline = Instant::now() + settle;
     let mut wait = Duration::from_secs(1);
     let mut announced = false;
@@ -494,15 +530,16 @@ pub fn settle(client: &mut Client, prs: &mut [Fetched], settle: Duration) -> Res
         if !announced {
             let names: Vec<String> = unknown.iter().map(Target::to_string).collect();
             eprintln!(
-                "jouet: waiting up to {}s for GitHub to compute mergeability of {}",
+                "jouet: waiting up to {}s for {} to compute mergeability of {}",
                 left.as_secs(),
+                host.forge().name(),
                 names.join(", ")
             );
             announced = true;
         }
         std::thread::sleep(wait.min(left));
         wait = (wait + Duration::from_secs(1)).min(Duration::from_secs(5));
-        let again = fetch(client, unknown.into_iter().map(Lookup::Pr).collect())?;
+        let again = host.fetch(unknown.into_iter().map(Lookup::Pr).collect())?;
         for fresh in again.prs {
             if let Some(pr) = prs.iter_mut().find(|p| p.key() == fresh.key()) {
                 *pr = fresh;
@@ -564,7 +601,7 @@ fn read_prs(
                     });
                 }
             }
-            Lookup::Threads { .. } | Lookup::Contexts { .. } => {}
+            Lookup::Threads { .. } | Lookup::Contexts { .. } | Lookup::Mine(_) => {}
         }
     }
     Ok(more)
@@ -574,7 +611,7 @@ fn read_page(pr: &mut Fetched, lookup: &Lookup, entry: &Value) -> Result<(), Str
     match lookup {
         Lookup::Threads { .. } => pr.add_threads(parse(&entry["reviewThreads"], "review threads")?),
         Lookup::Contexts { .. } => pr.add_contexts(parse(&entry["contexts"], "checks")?),
-        Lookup::Pr(_) | Lookup::Search { .. } => {}
+        Lookup::Pr(_) | Lookup::Search { .. } | Lookup::Mine(_) => {}
     }
     Ok(())
 }
@@ -637,6 +674,8 @@ pub(crate) fn read_pr(value: &Value) -> Result<Fetched, String> {
             head: raw.head_ref_name,
             head_sha: raw.head_ref_oid.chars().take(10).collect(),
             head_oid: raw.head_ref_oid,
+            forge: None,
+            host: None,
             pushed_at,
             mergeable,
             merge_state: raw.merge_state_status.to_ascii_lowercase(),
@@ -730,6 +769,12 @@ impl Checks {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PrStatus {
     pub repo: String,
+    /// `gitlab` or `forgejo` for a PR that is not on GitHub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forge: Option<&'static str>,
+    /// The host of a PR that is not on GitHub, as in [`Repo::host`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
     pub number: u64,
     pub title: String,
     pub url: String,
@@ -828,6 +873,32 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
+impl PrStatus {
+    /// The repository, with its host.
+    pub fn repository(&self) -> Option<Repo> {
+        match &self.host {
+            None => Repo::parse(&self.repo),
+            Some(host) => Repo::on(host, &self.repo),
+        }
+    }
+
+    /// The forge the PR is on.
+    pub fn forge_kind(&self) -> Forge {
+        self.repository()
+            .and_then(|r| r.forge())
+            .unwrap_or(Forge::GitHub)
+    }
+
+    /// `HOST/OWNER/NAME#N`, or `OWNER/NAME#N` on GitHub: what a jouet
+    /// command takes back.
+    pub fn name(&self) -> String {
+        match &self.host {
+            None => format!("{}#{}", self.repo, self.number),
+            Some(host) => format!("{host}/{}#{}", self.repo, self.number),
+        }
+    }
+}
+
 /// The reasons an open PR needs attention, in a fixed order. Merged and
 /// closed PRs need none.
 fn attention(pr: &PrStatus, now: i64) -> Vec<Attention> {
@@ -836,14 +907,19 @@ fn attention(pr: &PrStatus, now: i64) -> Vec<Attention> {
         return out;
     }
     let mut add = |code, message: String| out.push(Attention { code, message });
+    let forge = pr.forge_kind();
     if pr.mergeable == Mergeability::Conflicting {
-        add(
-            "conflict",
-            format!(
+        let message = match forge {
+            Forge::GitHub => format!(
                 "Conflicts with {}; pull_request workflows will not run until it is rebased",
                 pr.base
             ),
-        );
+            _ => format!(
+                "Conflicts with {}; it cannot merge until it is rebased",
+                pr.base
+            ),
+        };
+        add("conflict", message);
     }
     // A failing Entire Gates check is reported by its gates below, not as a
     // failing check of its own.
@@ -932,7 +1008,10 @@ fn attention(pr: &PrStatus, now: i64) -> Vec<Attention> {
     if pr.mergeable == Mergeability::Unknown {
         add(
             "mergeable_unknown",
-            "GitHub has not finished computing mergeability; run again shortly".into(),
+            format!(
+                "{} has not finished computing mergeability; run again shortly",
+                forge.name()
+            ),
         );
     }
     out

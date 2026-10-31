@@ -83,6 +83,11 @@ pub(crate) struct RuleDecl {
     /// only runs where one of them is in the call's directory or a
     /// directory above it. Its examples run as if one were.
     pub requires: Option<Requires>,
+    /// Whether the session-start primer names a `deny` rule, so the agent
+    /// avoids the call it denies; `true` if omitted. `false` for a rule
+    /// that denies on what a call would change rather than on how it looks,
+    /// which naming saves no call.
+    pub primer: Option<bool>,
     /// What the agent is told when the rule matches. Required unless a
     /// `script` decides.
     pub message: Option<String>,
@@ -393,6 +398,23 @@ pub(crate) struct CaseTable {
     /// Where `jouet.stack.layer()` places the current branch in a stack;
     /// omitted, it has no answer.
     pub stack: Option<StackCase>,
+    /// What `jouet.secrets.scan()` finds, for any scope; omitted, it has no
+    /// answer.
+    pub secrets: Option<Vec<SecretCase>>,
+}
+
+/// A secret `jouet.secrets.scan()` finds in an example's diff.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExampleSecret")]
+pub(crate) struct SecretCase {
+    /// The gitleaks rule, such as `github-pat`.
+    pub rule: String,
+    /// Relative to the repository's root.
+    pub path: String,
+    pub line: u64,
+    /// The commit that adds it, for an outgoing scan.
+    pub commit: Option<String>,
 }
 
 /// A claim in an example's repository, as `jouet claim` would keep it.

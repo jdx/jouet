@@ -10,6 +10,7 @@
 //! and its attention codes and messages, so the two commands never disagree.
 
 use super::status::{PrStatus, State};
+use crate::forge::Forge;
 use serde::Serialize;
 
 /// Whose move it is.
@@ -110,7 +111,9 @@ const MERGEABLE_STATES: [&str; 3] = ["clean", "unstable", "has_hooks"];
 /// `pr` must have been finished by `Fetched::finish`, which fills in its
 /// attention codes.
 pub fn next(pr: &PrStatus) -> Next {
-    let name = format!("{}#{}", pr.repo, pr.number);
+    let name = pr.name();
+    let forge = pr.forge_kind();
+    let qualified = name.rsplit_once('#').map_or("", |(r, _)| r).to_string();
     let attention = |code: &str| {
         pr.attention
             .iter()
@@ -139,7 +142,15 @@ pub fn next(pr: &PrStatus) -> Next {
         return step(
             Action::Draft,
             reason,
-            Some(format!("gh pr ready {} --repo {}", pr.number, pr.repo)),
+            match forge {
+                Forge::GitHub => Some(format!("gh pr ready {} --repo {}", pr.number, pr.repo)),
+                Forge::GitLab => Some(format!(
+                    "glab mr update {} --ready -R {qualified}",
+                    pr.number
+                )),
+                // A Forgejo draft is a `WIP:` title, which no command clears.
+                Forge::Forgejo => None,
+            },
         );
     }
     if let Some(reason) = attention("conflict") {
@@ -216,31 +227,41 @@ pub fn next(pr: &PrStatus) -> Next {
     if pr.merge_state == "unknown" {
         return step(
             Action::MergeableUnknown,
-            "GitHub has not finished computing the merge state; run again shortly".into(),
+            format!(
+                "{} has not finished computing the merge state; run again shortly",
+                forge.name()
+            ),
             Some(format!("jouet wait pr {name} --until mergeable")),
         );
     }
     if !MERGEABLE_STATES.contains(&pr.merge_state.as_str()) {
         return step(
             Action::Blocked,
-            format!(
-                "GitHub reports the merge as {} by branch protection or a ruleset",
-                pr.merge_state
-            ),
+            match forge {
+                Forge::GitHub => format!(
+                    "GitHub reports the merge as {} by branch protection or a ruleset",
+                    pr.merge_state
+                ),
+                _ => format!("{} reports the merge as {}", forge.name(), pr.merge_state),
+            },
             Some(format!("jouet wait pr {name} --until any-change")),
         );
     }
     if pr.auto_merge {
         return step(
             Action::AutoMerge,
-            "Auto-merge is enabled; GitHub will merge it".into(),
+            format!("Auto-merge is enabled; {} will merge it", forge.name()),
             Some(format!("jouet wait pr {name} --until merged")),
         );
     }
     step(
         Action::ReadyToMerge,
         ready_reason(pr),
-        Some(format!("jouet pr land {name}")),
+        Some(match forge {
+            Forge::GitHub => format!("jouet pr land {name}"),
+            Forge::GitLab => format!("glab mr merge {} -R {qualified}", pr.number),
+            Forge::Forgejo => format!("tea pulls merge {} --repo {}", pr.number, pr.repo),
+        }),
     )
 }
 

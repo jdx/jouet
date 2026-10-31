@@ -101,9 +101,13 @@ pub struct Entire {
     reads: Mutex<HashMap<Vec<String>, Result<Value, String>>>,
 }
 
-/// Entire's selector for a repository: `gh/OWNER/NAME`.
+/// Entire's selector for a repository: `gh/OWNER/NAME` on GitHub, else
+/// its clone URL, which Entire takes for any forge.
 pub fn selector(repo: &Repo) -> String {
-    format!("gh/{repo}")
+    match &repo.host {
+        None => format!("gh/{repo}"),
+        Some(host) => format!("https://{host}/{repo}.git"),
+    }
 }
 
 impl Entire {
@@ -353,5 +357,19 @@ impl Run {
             Self::TimedOut(t) => format!("entire took longer than {}s", t.as_secs()),
             Self::Failed(m) => m.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_repository_is_named_for_entire_by_its_forge() {
+        assert_eq!(selector(&Repo::parse("jdx/mise").unwrap()), "gh/jdx/mise");
+        assert_eq!(
+            selector(&Repo::parse("gitlab.com/group/sub/app").unwrap()),
+            "https://gitlab.com/group/sub/app.git"
+        );
     }
 }

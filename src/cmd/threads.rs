@@ -5,8 +5,8 @@ use super::Output;
 use super::entire::{self, Wanted};
 use crate::config::Config;
 use crate::{ApplyArgs, ReplyArgs, ResolveArgs, ThreadsArgs, ThreadsCmd, UnresolveArgs, git};
-use jouet_github::Client;
 use jouet_github::entire::Change;
+use jouet_github::host::{self, Feature, Host};
 use jouet_github::pr::target::{self, Arg, Repo, Target};
 use jouet_github::pr::threads::condense::{self, condense};
 use jouet_github::pr::threads::write::{self, Entry, Options, Outcome};
@@ -53,9 +53,11 @@ pub(crate) fn run(args: ThreadsArgs, out: &Output) -> Exit {
 fn target(pr: Option<&str>, repo: Option<&str>) -> Result<Target, Stop> {
     let usage = |m: String| Stop::new(Exit::Usage, m);
     let repo = match repo {
-        Some(r) => Some(
-            Repo::parse(r).ok_or_else(|| usage(format!("--repo takes OWNER/NAME, not `{r}`")))?,
-        ),
+        Some(r) => Some(Repo::parse(r).ok_or_else(|| {
+            usage(format!(
+                "--repo takes OWNER/NAME or HOST/OWNER/NAME, not `{r}`"
+            ))
+        })?),
         None => None,
     };
     let repo_for = |what: &str| {
@@ -83,13 +85,18 @@ fn config() -> Result<Config, Stop> {
     Config::load().map_err(|e| Stop::new(Exit::Usage, e))
 }
 
+/// The host the PR is on.
+fn connect(target: &Target) -> Result<Box<dyn Host>, Stop> {
+    host::connect(target.repo()).map_err(|e| Stop::new(Exit::Precondition, e))
+}
+
 fn fetch(
-    client: &mut Client,
+    host: &mut dyn Host,
     target: &Target,
     extra: bool,
     bots: &[String],
 ) -> Result<PrThreads, Stop> {
-    threads::fetch(client, target, extra, bots)
+    host.threads(target, extra, bots)
         .map_err(|e| Stop::new(Exit::Remote, e))?
         .ok_or_else(|| Stop::new(Exit::NotFound, format!("no PR {target}")))
 }
@@ -128,11 +135,11 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         _ => None,
     };
     let probe = entire::Probe::start();
-    let mut client = Client::from_env();
+    let mut host = connect(&target)?;
     let bots = config.bots();
-    let pr = fetch(&mut client, &target, args.include_reviews, &bots)?;
+    let pr = fetch(host.as_mut(), &target, args.include_reviews, &bots)?;
     let since = match args.since.as_deref().and_then(|s| s.strip_prefix('@')) {
-        Some(sha) => Some(push_time(&mut client, &pr, sha)?),
+        Some(sha) => Some(push_time(host.as_mut(), &pr, sha)?),
         None => since_time,
     };
     let filter = Filter {
@@ -159,7 +166,7 @@ fn list(args: &ThreadsArgs, out: &Output) -> Result<Exit, Stop> {
         }
     }
     if let Some(n) = args.context {
-        add_context(&mut client, &pr, &mut shown, n);
+        add_context(host.as_mut(), &pr, &mut shown, n);
     }
     let unresolved = shown.iter().any(|t| t.kind == Kind::Thread && !t.resolved);
     let entire = entire::list(probe, &pr.repo, &pr.head_ref, &filter, args.full, MAX_LINES);
@@ -189,16 +196,17 @@ fn flag(yes: bool, no: bool) -> Option<bool> {
     }
 }
 
-fn push_time(client: &mut Client, pr: &PrThreads, sha: &str) -> Result<i64, Stop> {
-    let pushed = threads::pushed_at(client, pr, sha).map_err(|e| match e {
+fn push_time(host: &mut dyn Host, pr: &PrThreads, sha: &str) -> Result<i64, Stop> {
+    let pushed = host.pushed_at(pr, sha).map_err(|e| match e {
         Lookup::NotFound(m) => Stop::new(Exit::NotFound, format!("--since @{sha}: {m}")),
         Lookup::Usage(m) => Stop::new(Exit::Usage, format!("--since @{sha}: {m}")),
         Lookup::Remote(m) => Stop::new(Exit::Remote, m),
     })?;
     if pushed.estimated {
         eprintln!(
-            "jouet: found no push of {} in GitHub's activity log; using its commit time, which can only be earlier",
-            &pushed.oid[..pushed.oid.len().min(7)]
+            "jouet: found no push of {} in {}'s push log; using its commit time, which can only be earlier",
+            &pushed.oid[..pushed.oid.len().min(7)],
+            host.forge().name()
         );
     }
     Ok(pushed.at)
@@ -206,10 +214,10 @@ fn push_time(client: &mut Client, pr: &PrThreads, sha: &str) -> Result<i64, Stop
 
 /// Adds lines of the file around each current thread's line. A thread on
 /// the head's side reads the working tree when HEAD is the PR's head and the
-/// file is unchanged, else the head from GitHub. A thread on the base's side
-/// (a deleted or replaced line) reads the merge base, which is what GitHub's
+/// file is unchanged, else the head from the forge. A thread on the base's
+/// side (a deleted or replaced line) reads the merge base, which is what the
 /// diff shows on that side. A file that cannot be read gets no context.
-fn add_context(client: &mut Client, pr: &PrThreads, shown: &mut [Thread], n: u32) {
+fn add_context(host: &mut dyn Host, pr: &PrThreads, shown: &mut [Thread], n: u32) {
     let paths = |side: Side| {
         let mut paths: Vec<String> = shown
             .iter()
@@ -234,10 +242,10 @@ fn add_context(client: &mut Client, pr: &PrThreads, shown: &mut [Thread], n: u32
             None => remote.push(path),
         }
     }
-    fetch_files(client, pr, &pr.head_oid, Side::Right, &remote, &mut files);
+    fetch_files(host, pr, &pr.head_oid, Side::Right, &remote, &mut files);
     if !left.is_empty() {
-        match merge_base(client, pr) {
-            Ok(oid) => fetch_files(client, pr, &oid, Side::Left, &left, &mut files),
+        match host.merge_base(pr) {
+            Ok(oid) => fetch_files(host, pr, &oid, Side::Left, &left, &mut files),
             Err(e) => eprintln!("jouet: could not find the PR's merge base for --context ({e})"),
         }
     }
@@ -253,7 +261,7 @@ fn add_context(client: &mut Client, pr: &PrThreads, shown: &mut [Thread], n: u32
 
 /// Adds `paths` at commit `oid`, for threads on `side`, to `files`.
 fn fetch_files(
-    client: &mut Client,
+    host: &mut dyn Host,
     pr: &PrThreads,
     oid: &str,
     side: Side,
@@ -263,55 +271,10 @@ fn fetch_files(
     if paths.is_empty() {
         return;
     }
-    match remote_files(client, pr, oid, paths) {
+    match host.files(pr, oid, paths) {
         Ok(fetched) => files.extend(fetched.into_iter().map(|(p, text)| ((side, p), text))),
         Err(e) => eprintln!("jouet: could not fetch files for --context ({e})"),
     }
-}
-
-/// The commit the PR's diff is taken against.
-fn merge_base(client: &mut Client, pr: &PrThreads) -> Result<String, String> {
-    let path = format!(
-        "/repos/{}/compare/{}...{}?per_page=1",
-        pr.repo, pr.base_oid, pr.head_oid
-    );
-    let compare = client
-        .rest_get(&path)?
-        .ok_or("GitHub could not compare the PR's base and head")?;
-    compare["merge_base_commit"]["sha"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| "GitHub's comparison names no merge base".into())
-}
-
-/// Reads files at commit `oid`, all in one query.
-fn remote_files(
-    client: &mut Client,
-    pr: &PrThreads,
-    oid: &str,
-    paths: &[String],
-) -> Result<Vec<(String, String)>, String> {
-    let mut q = String::from("query($o: String!, $r: String!");
-    let mut body = String::new();
-    let mut vars = serde_json::json!({ "o": pr.repo.owner, "r": pr.repo.name });
-    for (i, path) in paths.iter().enumerate() {
-        let _ = write!(q, ", $e{i}: String!");
-        let _ = write!(
-            body,
-            " f{i}: object(expression: $e{i}) {{ ... on Blob {{ text }} }}"
-        );
-        vars[format!("e{i}")] = format!("{oid}:{path}").into();
-    }
-    let _ = write!(q, ") {{ repository(owner: $o, name: $r) {{{body} }} }}");
-    let data = client.graphql(&q, &vars)?;
-    Ok(paths
-        .iter()
-        .enumerate()
-        .filter_map(|(i, path)| {
-            let text = data["repository"][format!("f{i}")]["text"].as_str()?;
-            Some((path.clone(), text.to_string()))
-        })
-        .collect())
 }
 
 /// Lines `start - n ..= end + n` of `text`, clamped to the file.
@@ -793,11 +756,14 @@ fn write_threads(
         .any(|r| r.contains("{sha}"));
     let sha = if uses_sha { git::short_head() } else { None };
     let footer = config.reply_footer();
-    let mut client = Client::from_env();
-    // A branch's findings need nothing from GitHub.
-    let pr = match (&target, entries.is_empty() && !uses_sha) {
+    // A branch's findings need nothing from the forge.
+    let mut host = match (&target, entries.is_empty() && !uses_sha) {
         (Target::Branch(..), true) => None,
-        _ => Some(fetch(&mut client, &target, false, &config.bots())?),
+        _ => Some(connect(&target)?),
+    };
+    let pr = match host.as_mut() {
+        Some(host) => Some(fetch(host.as_mut(), &target, false, &config.bots())?),
+        None => None,
     };
     let (repo, branch) = match (&pr, &target) {
         (Some(pr), _) => (pr.repo.clone(), pr.head_ref.clone()),
@@ -815,14 +781,23 @@ fn write_threads(
         };
         results =
             write::plan(entries, pr, &options).map_err(|e| Stop(e.exit, e.message, e.hint))?;
+        if results.iter().any(Outcome::changes_resolution)
+            && let Some(reason) = host.as_mut().and_then(|h| h.lacks(Feature::Resolve))
+        {
+            return Err(Stop(
+                Exit::Precondition,
+                format!("{reason}; nothing was posted"),
+                Some("reply without --resolve, or resolve it on the web".into()),
+            ));
+        }
     }
     let finding_sha = wanted
         .iter()
         .any(|w| w.message.as_deref().is_some_and(|m| m.contains("{sha}")));
-    if let Some(pr) = &pr
+    if let (Some(pr), Some(host)) = (&pr, host.as_mut())
         && (results.iter().any(Outcome::posts_sha) || finding_sha)
     {
-        check_pushed(&mut client, pr)?;
+        check_pushed(host.as_mut(), pr)?;
     }
     let wanted: Vec<Wanted> = wanted
         .iter()
@@ -841,11 +816,13 @@ fn write_threads(
             w
         })
         .collect();
-    let mut ok = if dry_run {
-        write::dry_run(&mut results);
-        true
-    } else {
-        write::execute(&mut client, &mut results)
+    let mut ok = match (&pr, host.as_mut()) {
+        _ if dry_run => {
+            write::dry_run(&mut results);
+            true
+        }
+        (Some(pr), Some(host)) => write::execute(host.as_mut(), pr, &mut results),
+        _ => true,
     };
     let mut changed = None;
     if let Some(entire) = &entire
@@ -866,9 +843,9 @@ fn write_threads(
     Ok(if ok { Exit::Ok } else { Exit::Remote })
 }
 
-/// Refuses unless HEAD is on the PR's branch on GitHub, so `{sha}` never
+/// Refuses unless HEAD is on the PR's branch on the forge, so `{sha}` never
 /// names a commit reviewers cannot see.
-fn check_pushed(client: &mut Client, pr: &PrThreads) -> Result<(), Stop> {
+fn check_pushed(host: &mut dyn Host, pr: &PrThreads) -> Result<(), Stop> {
     let short = |s: &str| s[..s.len().min(7)].to_string();
     let head = git::head().ok_or_else(|| {
         Stop::new(
@@ -881,13 +858,9 @@ fn check_pushed(client: &mut Client, pr: &PrThreads) -> Result<(), Stop> {
     } else if let Some(known) = git::is_ancestor(&head, &pr.head_oid) {
         known
     } else {
-        // The PR's head is not in this clone: ask GitHub.
-        let repo = pr.head_repo.as_ref().unwrap_or(&pr.repo);
-        let path = format!("/repos/{repo}/compare/{head}...{}", pr.head_oid);
-        let compare = client
-            .rest_get(&path)
-            .map_err(|e| Stop::new(Exit::Remote, e))?;
-        compare.is_some_and(|c| matches!(c["status"].as_str(), Some("ahead" | "identical")))
+        // The PR's head is not in this clone: ask the forge.
+        host.on_branch(pr, &head)
+            .map_err(|e| Stop::new(Exit::Remote, e))?
     };
     if on_branch {
         return Ok(());

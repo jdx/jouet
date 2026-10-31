@@ -5,13 +5,14 @@ use crate::{
     WaitArgs, WaitCiArgs, WaitCmd, WaitCmdArgs, WaitDaemonArgs, WaitFileArgs, WaitHttpArgs,
     WaitJobArgs, WaitLogArgs, WaitPidArgs, WaitPrArgs, WaitRunArgs,
 };
-use jouet_github::Client;
+use jouet_github::host::Feature;
 use jouet_github::pr::target::{self, Arg, Repo, Target};
 use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_wait::checks::Selection;
 use jouet_wait::ci::{self, CiWait};
 use jouet_wait::daemon::{self, Answer, DaemonWait};
+use jouet_wait::host::Remote;
 use jouet_wait::job;
 use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
 use jouet_wait::pr::{PrWait, Until};
@@ -43,15 +44,29 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     let reporter = |label: String| Reporter::new(out.mode, out.json, args.jsonl, args.quiet, label);
     match args.cmd {
         WaitCmd::Ci(a) => match ci_wait(&a, confirm_conflict) {
-            Ok((t, sha, options)) => watch(reporter, &timing, &mut Client::from_env(), |c| {
-                let (repo, number) = ci::resolve(c, t)?;
+            Ok((t, sha, options)) => watch(reporter, &timing, &t.repo().clone(), |r| {
+                if options.selection.required
+                    && let Some(message) = r.host().lacks(Feature::RequiredChecks)
+                {
+                    return Err(Halt::Stop(Stop {
+                        exit: Exit::Precondition,
+                        message,
+                    }));
+                }
+                let (repo, number) = r.resolve(t)?;
                 Ok(CiWait::new(repo, number, sha, options))
             }),
             Err(message) => out.error(Exit::Usage, &message),
         },
         WaitCmd::Run(a) => {
             match run_args(&a) {
-                Ok((repo, id, lines)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
+                Ok((repo, id, lines)) => watch(reporter, &timing, &repo.clone(), |r| {
+                    if let Some(message) = r.host().lacks(Feature::Runs) {
+                        return Err(Halt::Stop(Stop {
+                            exit: Exit::Precondition,
+                            message,
+                        }));
+                    }
                     Ok(RunWait::new(repo, id, lines)
                         .local_runner(crate::guide::on_path("jactionlint")))
                 }),
@@ -59,7 +74,7 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
             }
         }
         WaitCmd::Pr(a) => match pr_args(&a) {
-            Ok((t, until)) => watch(reporter, &timing, &mut Client::from_env(), |_| {
+            Ok((t, until)) => watch(reporter, &timing, &t.repo().clone(), |_| {
                 Ok(PrWait::new(t, until, confirm_conflict))
             }),
             Err(message) => out.error(Exit::Usage, &message),
@@ -165,18 +180,27 @@ fn local(
     }
 }
 
-/// Builds a GitHub wait (which can need a request, such as finding a
-/// branch's PR) and runs it.
+/// Builds a wait on the forge `repo` is on (which can need a request, such
+/// as finding a branch's PR) and runs it.
 fn watch<W: Watch>(
     reporter: impl Fn(String) -> Reporter,
     timing: &Timing,
-    client: &mut Client,
-    build: impl FnOnce(&mut Client) -> Result<W, Halt>,
+    repo: &Repo,
+    build: impl FnOnce(&mut Remote) -> Result<W, Halt>,
 ) -> Exit {
-    match build(client) {
+    let mut remote = match Remote::connect(repo) {
+        Ok(remote) => remote,
+        Err(message) => {
+            return reporter(String::new()).fail(&Stop {
+                exit: Exit::Precondition,
+                message,
+            });
+        }
+    };
+    match build(&mut remote) {
         Ok(mut w) => {
             let mut reporter = reporter(w.label());
-            remote::run(&mut w, client, timing, &mut reporter)
+            remote::run(&mut w, &mut remote, timing, &mut reporter)
         }
         Err(halt) => {
             let stop = match halt {
@@ -199,7 +223,8 @@ fn github_failure(reset: i64) -> String {
 /// defaulting to the current branch's PR.
 pub(crate) fn target(pr: Option<&str>, repo: Option<&str>) -> Result<Target, String> {
     let repo = || match repo {
-        Some(r) => Repo::parse(r).ok_or_else(|| format!("--repo takes OWNER/NAME, not `{r}`")),
+        Some(r) => Repo::parse(r)
+            .ok_or_else(|| format!("--repo takes OWNER/NAME or HOST/OWNER/NAME, not `{r}`")),
         None => target::repo_from_git()
             .ok_or_else(|| "no --repo given and no GitHub remote here".to_string()),
     };
@@ -255,13 +280,16 @@ fn ci_wait(
 }
 
 fn run_args(a: &WaitRunArgs) -> Result<(Repo, u64, Option<usize>), String> {
-    let (in_url, id) = run_wait::parse_run(&a.run)
-        .ok_or_else(|| format!("`{}` is not a run ID or an Actions run URL", a.run))?;
+    let (in_url, id) = run_wait::parse_run(&a.run).ok_or_else(|| {
+        format!(
+            "`{}` is not a run ID, an Actions run URL or a GitLab pipeline URL",
+            a.run
+        )
+    })?;
     let repo = match (in_url, a.repo.as_deref()) {
         (Some(repo), _) => repo,
-        (None, Some(r)) => {
-            Repo::parse(r).ok_or_else(|| format!("--repo takes OWNER/NAME, not `{r}`"))?
-        }
+        (None, Some(r)) => Repo::parse(r)
+            .ok_or_else(|| format!("--repo takes OWNER/NAME or HOST/OWNER/NAME, not `{r}`"))?,
         (None, None) => {
             target::repo_from_git().ok_or("no --repo given and no GitHub remote here")?
         }

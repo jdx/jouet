@@ -1,8 +1,8 @@
 [package]
 name = "jouet-github"
 version = "0.0.1"
-description = "jouet's GitHub client and the pull request model behind its pr and wait commands"
-keywords = ["agents", "github"]
+description = "jouet's GitHub, GitLab and Forgejo clients and the pull request model behind its pr and wait commands"
+keywords = ["agents", "github", "gitlab", "forgejo"]
 categories = ["development-tools"]
 edition.workspace = true
 rust-version.workspace = true

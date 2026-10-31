@@ -1,0 +1,62 @@
+[
+  {
+    "id": "6a9c1750b37d513a43987b574953fceb50b03ce7",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 1126, "type": "DiffNote", "body": "Should this reject an empty client ID too?",
+        "author": { "username": "reviewer" }, "created_at": "2026-10-30T12:10:00.000Z",
+        "system": false, "resolvable": true, "resolved": false,
+        "position": {
+          "base_sha": "c2544a91621d99803bff37be58a17eff33778e3e", "head_sha": "5b1cfff77c89ad3e77bbac0235d0b51ada2c79cf",
+          "start_sha": "c2544a91621d99803bff37be58a17eff33778e3e", "position_type": "text",
+          "old_path": "internal/oauth/flow.go", "new_path": "internal/oauth/flow.go",
+          "old_line": null, "new_line": 42
+        }
+      },
+      {
+        "id": 1127, "type": "DiffNote", "body": "It does, two lines down.",
+        "author": { "username": "author" }, "created_at": "2026-10-30T12:20:00.000Z",
+        "system": false, "resolvable": true, "resolved": false
+      }
+    ]
+  },
+  {
+    "id": "87805b7c09016a7058e91bdbe7b29d1f284a39e6",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 1130, "type": "DiffNote", "body": "This branch can go.",
+        "author": { "username": "reviewer" }, "created_at": "2026-10-29T09:00:00.000Z",
+        "system": false, "resolvable": true, "resolved": true,
+        "position": {
+          "base_sha": "c2544a91621d99803bff37be58a17eff33778e3e", "head_sha": "0b1d2c3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c",
+          "start_sha": "c2544a91621d99803bff37be58a17eff33778e3e", "position_type": "text",
+          "old_path": "cmd/auth.go", "new_path": "cmd/auth.go", "old_line": 10, "new_line": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "3c4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e",
+    "individual_note": true,
+    "notes": [
+      {
+        "id": 1135, "type": null, "body": "added 1 commit",
+        "author": { "username": "author" }, "created_at": "2026-10-30T11:00:00.000Z",
+        "system": true, "resolvable": false
+      }
+    ]
+  },
+  {
+    "id": "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e",
+    "individual_note": true,
+    "notes": [
+      {
+        "id": 1140, "type": null, "body": "Thanks, looks close.",
+        "author": { "username": "maintainer" }, "created_at": "2026-10-30T13:00:00.000Z",
+        "system": false, "resolvable": false
+      }
+    ]
+  }
+]

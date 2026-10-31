@@ -1,0 +1,20 @@
+[
+  {
+    "id": 26805350,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "body": "Got this to function on the older revision I applied the patch to, gonna try and update to `forgejo` now.",
+    "created_at": "2026-10-29T23:19:35+01:00",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26805350"
+  },
+  {
+    "id": 26805770,
+    "user": {
+      "login": "ApolloFops"
+    },
+    "body": "Okay, that was actually pretty easy to get working lol. Theoretically just have to get tests done and maybe clean things up a bit and this should be ready for review.",
+    "created_at": "2026-10-29T23:30:51+01:00",
+    "html_url": "https://codeberg.org/forgejo/forgejo/pulls/15077#issuecomment-26805770"
+  }
+]

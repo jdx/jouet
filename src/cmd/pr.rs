@@ -49,7 +49,7 @@ fn run_status(args: &StatusArgs, out: &Output) -> Exit {
     };
     let lookups = match lookups(&selection) {
         Ok(lookups) => lookups,
-        Err(e) => return out.error(Exit::Usage, &e),
+        Err((exit, e)) => return out.error(exit, &e),
     };
     let report = match fetch(&mut Client::from_env(), lookups, settle) {
         Ok(report) => report,

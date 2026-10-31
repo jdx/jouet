@@ -99,7 +99,7 @@ pub(crate) struct Check {
 }
 
 impl Check {
-    fn new(name: String, state: State) -> Self {
+    pub(crate) fn new(name: String, state: State) -> Self {
         Self {
             name,
             workflow: None,

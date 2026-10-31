@@ -16,7 +16,12 @@
 //! poll comes back as a 304 that costs nothing against the rate limit.
 
 pub mod entire;
+pub mod forge;
+pub mod forgejo;
+pub mod gitlab;
+pub mod host;
 pub mod pr;
+pub mod rest;
 pub mod tls;
 
 use serde::Deserialize;
@@ -502,7 +507,7 @@ fn gh_auth_token() -> Option<String> {
 }
 
 /// `500ms · 2^(attempt-1)` plus up to 250ms of jitter.
-fn backoff(attempt: u32) -> Duration {
+pub(crate) fn backoff(attempt: u32) -> Duration {
     let jitter = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.subsec_millis() % 250);
@@ -510,14 +515,14 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 /// The `message` of a GitHub error body, or the body itself.
-fn message(text: &str) -> String {
+pub(crate) fn message(text: &str) -> String {
     serde_json::from_str::<Value>(text)
         .ok()
         .and_then(|v| v.get("message")?.as_str().map(str::to_string))
         .unwrap_or_else(|| text.trim().chars().take(200).collect())
 }
 
-fn join_and(items: &[&str]) -> String {
+pub(crate) fn join_and(items: &[&str]) -> String {
     match items {
         [] => String::new(),
         [one] => (*one).to_string(),

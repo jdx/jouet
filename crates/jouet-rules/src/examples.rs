@@ -102,6 +102,8 @@ pub struct Case {
     pub git_ahead: Option<u32>,
     /// What `jouet.stack.layer()` answers.
     pub stack: Option<serde_json::Value>,
+    /// What `jouet.secrets.scan()` answers, for any scope.
+    pub secrets: Option<serde_json::Value>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -278,6 +280,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         git_branch: None,
         git_ahead: None,
         stack: None,
+        secrets: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -450,6 +453,25 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
                 "parent_merged": s.parent_merged,
             })
         }),
+        secrets: t.secrets.as_ref().map(|found| {
+            found
+                .iter()
+                .map(|f| {
+                    let mut fingerprint = format!("{}:{}:{}", f.path, f.rule, f.line);
+                    if let Some(commit) = &f.commit {
+                        fingerprint = format!("{commit}:{fingerprint}");
+                    }
+                    serde_json::json!({
+                        "rule": f.rule,
+                        "path": f.path,
+                        "line": f.line,
+                        "commit": f.commit,
+                        "redacted": "****",
+                        "fingerprint": fingerprint,
+                    })
+                })
+                .collect()
+        }),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -539,6 +561,9 @@ impl Engine {
             }
             if let Some(claims) = &case.claims {
                 self.stub("claims", claims.clone());
+            }
+            if let Some(secrets) = &case.secrets {
+                self.stub("secrets:*", secrets.clone());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {

@@ -1,11 +1,11 @@
 //! `wait pr --until ...`: wait for a PR to reach a state, through the same
 //! batched query and attention codes as `pr status`.
 
+use super::host::Remote;
 use super::remote::{Halt, Poll, Watch};
 use super::watch::{CONFIRMING, ConflictCheck, now_ms, short};
 use super::{Event, Reporter};
-use jouet_github::Client;
-use jouet_github::pr::status::{self, Attention, Lookup, Mergeability, PrStatus, State};
+use jouet_github::pr::status::{Attention, Lookup, Mergeability, PrStatus, State};
 use jouet_github::pr::target::Target;
 use jouet_output::exit::Exit;
 use jouet_output::time::elapsed;
@@ -209,6 +209,9 @@ pub struct PrWait {
 #[derive(Debug, Serialize)]
 pub struct Doc {
     pub(crate) repo: String,
+    /// The host of a PR that is not on GitHub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) host: Option<String>,
     pub(crate) pr: u64,
     pub(crate) until: &'static str,
     /// `met`, `failed` or `timeout`.
@@ -243,6 +246,7 @@ impl PrWait {
         };
         Doc {
             repo,
+            host: self.target.repo().host.clone(),
             pr,
             until: self.until.as_str(),
             result,
@@ -263,12 +267,14 @@ impl Watch for PrWait {
 
     fn poll(
         &mut self,
-        client: &mut Client,
+        remote: &mut Remote,
         _interval: Duration,
         events: &mut Vec<Event>,
     ) -> Result<Poll<Doc>, Halt> {
-        let fetched =
-            status::fetch(client, vec![Lookup::Pr(self.target.clone())]).map_err(|message| {
+        let fetched = remote
+            .host()
+            .fetch(vec![Lookup::Pr(self.target.clone())])
+            .map_err(|message| {
                 Halt::Stop(super::Stop {
                     exit: Exit::Remote,
                     message,
@@ -280,9 +286,7 @@ impl Watch for PrWait {
         let pr = pr.finish(jouet_output::time::now());
         // Once the PR is known by number, a branch that gets a newer PR
         // does not switch the wait to it.
-        if let Some(target) = jouet_github::pr::target::Repo::parse(&pr.repo)
-            .map(|repo| Target::Number(repo, pr.number))
-        {
+        if let Some(target) = pr.repository().map(|repo| Target::Number(repo, pr.number)) {
             self.target = target;
         }
         let key = Key::of(&pr);
@@ -318,7 +322,7 @@ impl Watch for PrWait {
         })
     }
 
-    fn timed_out(&mut self, _client: &mut Client) -> Doc {
+    fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
         let state = match &self.last {
             Some(pr) if self.until != Until::AnyChange => match judge(self.until, pr) {
                 Judgement::Met(s) | Judgement::Failed(s) | Judgement::Pending(s) => s,
@@ -379,6 +383,8 @@ mod tests {
             head: "feat".into(),
             head_sha: "3f2a1bc9e0".into(),
             head_oid: "3f2a1bc9e0".into(),
+            forge: None,
+            host: None,
             pushed_at: None,
             mergeable: Mergeability::Unknown,
             merge_state: "unknown".into(),

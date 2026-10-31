@@ -3,10 +3,12 @@
 //! the routines' `github.prs` share it, so they always select the same PRs.
 
 use super::entire;
-use super::status::{self, Incomplete, Lookup, PrStatus};
+use super::status::{self, Fetched, Incomplete, Lookup, PrStatus};
 use super::target::{self, Arg, Repo, Target};
-use crate::Client;
 use crate::entire::Availability;
+use crate::forge::{self, Forge};
+use crate::{Client, host};
+use jouet_output::exit::Exit;
 use jouet_output::time;
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -69,8 +71,8 @@ pub fn fetch(
     lookups: Vec<Lookup>,
     settle: Duration,
 ) -> Result<Report, String> {
-    let mut fetched = status::fetch(client, lookups)?;
-    status::settle(client, &mut fetched.prs, settle)?;
+    let mut fetched = host::fetch(client, lookups)?;
+    settle_each(client, &mut fetched.prs, settle)?;
     let entire = entire::add(&mut fetched.prs);
     let now = time::now();
     Ok(Report {
@@ -81,24 +83,70 @@ pub fn fetch(
     })
 }
 
+/// Settles the PRs of each host through that host.
+fn settle_each(client: &mut Client, prs: &mut [Fetched], settle: Duration) -> Result<(), String> {
+    let mut hosts: Vec<Option<String>> = Vec::new();
+    for pr in prs.iter() {
+        if !hosts.contains(&pr_host(pr)) {
+            hosts.push(pr_host(pr));
+        }
+    }
+    for h in hosts {
+        let (index, mut group): (Vec<usize>, Vec<Fetched>) = prs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| pr_host(p) == h)
+            .map(|(i, p)| (i, p.clone()))
+            .unzip();
+        let Some(repo) = group.first().and_then(|p| p.status().repository()) else {
+            continue;
+        };
+        host::with(&repo, client, |host| {
+            status::settle(host, &mut group, settle)
+        })?;
+        for (i, pr) in index.into_iter().zip(group) {
+            prs[i] = pr;
+        }
+    }
+    Ok(())
+}
+
+fn pr_host(pr: &Fetched) -> Option<String> {
+    pr.status().host.clone()
+}
+
+/// Why a selection cannot be fetched: its exit code and message.
+pub type Refused = (Exit, String);
+
 /// Turns the arguments and selectors into lookups, in the order given.
-pub fn lookups(args: &Selection<'_>) -> Result<Vec<Lookup>, String> {
+/// Arguments that do not parse are usage errors (2); a host jouet does not
+/// know, or `--search` on a forge without GitHub's search, is refused (4).
+pub fn lookups(args: &Selection<'_>) -> Result<Vec<Lookup>, Refused> {
+    let usage = |m: String| (Exit::Usage, m);
     let repos = args
         .repo
         .iter()
-        .map(|r| Repo::parse(r).ok_or_else(|| format!("--repo takes OWNER/NAME, not `{r}`")))
+        .map(|r| {
+            Repo::parse(r).ok_or_else(|| {
+                usage(format!(
+                    "--repo takes OWNER/NAME or HOST/OWNER/NAME, not `{r}`"
+                ))
+            })
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let git_repo = std::cell::OnceCell::new();
     let git_repo = || git_repo.get_or_init(|| args.checkout.repo()).clone();
     let repo_for = |arg: &str| match repos.as_slice() {
         [repo] => Ok(repo.clone()),
         [] => git_repo().ok_or_else(|| {
-            format!("no --repo given and no GitHub remote here, so `{arg}` names no repository")
+            usage(format!(
+                "no --repo given and no GitHub remote here, so `{arg}` names no repository"
+            ))
         }),
-        _ => Err(format!(
+        _ => Err(usage(format!(
             "`{arg}` is ambiguous with {} --repo values; write it as OWNER/REPO#N",
             repos.len()
-        )),
+        ))),
     };
     let mut lookups = Vec::new();
     for arg in args.prs {
@@ -116,22 +164,46 @@ pub fn lookups(args: &Selection<'_>) -> Result<Vec<Lookup>, String> {
     } else {
         repos.clone()
     };
+    let (on_github, elsewhere): (Vec<Repo>, Vec<Repo>) =
+        scope.into_iter().partition(|r| r.host.is_none());
     if args.mine {
-        lookups.push(search("is:open author:@me", &scope));
+        // GitLab and Forgejo have no search: each repository is asked.
+        if !on_github.is_empty() || elsewhere.is_empty() {
+            lookups.push(search("is:open author:@me", &on_github));
+        }
+        lookups.extend(elsewhere.iter().cloned().map(Lookup::Mine));
     }
     if let Some(query) = args.search {
         let scoped = ["repo:", "org:", "user:"]
             .iter()
             .any(|q| query.split_whitespace().any(|w| w.starts_with(q)));
-        lookups.push(search(query, if scoped { &[] } else { &scope }));
+        if !scoped && let Some(repo) = elsewhere.first() {
+            let forge = repo.forge().map_or("another forge", Forge::name);
+            return Err((
+                Exit::Precondition,
+                format!(
+                    "--search takes GitHub's search syntax, and {} is on {forge}, which has no equivalent; name the PRs, or use --mine",
+                    repo.qualified()
+                ),
+            ));
+        }
+        lookups.push(search(query, if scoped { &[] } else { &on_github }));
     }
     if lookups.is_empty() {
         let branch = args
             .checkout
             .branch()
-            .ok_or("not on a branch: name a PR, or use --mine or --search")?;
+            .ok_or_else(|| usage("not on a branch: name a PR, or use --mine or --search".into()))?;
         let repo = repo_for(&branch)?;
         lookups.push(Lookup::Pr(Target::Branch(repo, branch)));
+    }
+    if let Some(host) = lookups
+        .iter()
+        .filter_map(Lookup::repo)
+        .find(|r| r.forge().is_none())
+        .and_then(|r| r.host.as_deref())
+    {
+        return Err((Exit::Precondition, forge::unknown(host)));
     }
     Ok(lookups)
 }

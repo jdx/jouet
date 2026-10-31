@@ -22,6 +22,28 @@ pub(crate) fn git_with_input(
     input: Option<Vec<u8>>,
     timeout: Duration,
 ) -> Result<String, String> {
+    let out = run(dir, args, input, timeout, None)?.ok_or("git's output has no end")?;
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// [`git`]'s output as bytes, or `None` when it is longer than `limit`:
+/// git is stopped once it has written that much.
+pub(crate) fn git_capped(
+    dir: Option<&Path>,
+    args: &[&str],
+    timeout: Duration,
+    limit: usize,
+) -> Result<Option<Vec<u8>>, String> {
+    run(dir, args, None, timeout, Some(limit))
+}
+
+fn run(
+    dir: Option<&Path>,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+    limit: Option<usize>,
+) -> Result<Option<Vec<u8>>, String> {
     let mut command = Command::new("git");
     if let Some(dir) = dir {
         command.arg("-C").arg(dir);
@@ -45,29 +67,40 @@ pub(crate) fn git_with_input(
             let _ = stdin.write_all(&input);
         });
     }
-    let mut stdout = child.stdout.take().ok_or("git has no stdout")?;
+    let stdout = child.stdout.take().ok_or("git has no stdout")?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut out = Vec::new();
-        let _ = tx.send(stdout.read_to_end(&mut out).map(|_| out));
+        let read = match limit {
+            Some(limit) => stdout.take(limit as u64 + 1).read_to_end(&mut out),
+            None => {
+                let mut stdout = stdout;
+                stdout.read_to_end(&mut out)
+            }
+        };
+        let _ = tx.send(read.map(|_| out));
     });
+    // The first word that is not a global option, for messages.
+    let name = args
+        .iter()
+        .find(|a| !a.starts_with('-') && !a.contains('='))
+        .unwrap_or(&args[0]);
     let Ok(out) = rx.recv_timeout(timeout) else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!(
-            "`git {}` did not finish within the budget",
-            args[0]
-        ));
+        return Err(format!("`git {name}` did not finish within the budget"));
     };
-    let status = child.wait().map_err(|e| format!("running git: {e}"))?;
     let out = out.map_err(|e| format!("reading git's output: {e}"))?;
-    if !status.success() {
-        return Err(format!(
-            "`git {}` failed: not in a git repository?",
-            args[0]
-        ));
+    if limit.is_some_and(|limit| out.len() > limit) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Ok(None);
     }
-    Ok(String::from_utf8_lossy(&out).into_owned())
+    let status = child.wait().map_err(|e| format!("running git: {e}"))?;
+    if !status.success() {
+        return Err(format!("`git {name}` failed: not in a git repository?"));
+    }
+    Ok(Some(out))
 }
 
 /// The branch, its upstream and how far apart they are, and whether the
@@ -107,7 +140,9 @@ pub(crate) fn repo(dir: Option<&Path>, timeout: Duration) -> Result<Value, Strin
         left,
     )
     .unwrap_or_default();
-    if let Some(github) = jouet_github::pr::target::pick_remote(&config) {
+    if let Some(github) =
+        jouet_github::pr::target::pick_remote(&config).filter(|r| r.host.is_none())
+    {
         repo["owner"] = github.owner.as_str().into();
         repo["name"] = github.name.as_str().into();
         repo["repo"] = github.to_string().into();

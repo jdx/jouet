@@ -5,6 +5,7 @@ use crate::ci::explain::{self, short_list};
 use crate::ci::{self, Report};
 use crate::{CiArgs, CiCmd, CiExplainArgs, CiRunArgs};
 use jouet_github::Client;
+use jouet_github::host::Feature;
 use jouet_github::pr::target::{self, Repo};
 use jouet_output::display::Mode;
 use jouet_output::exit::Exit;
@@ -28,6 +29,17 @@ fn run_explain(a: &CiExplainArgs, out: &Output) -> Exit {
         Ok(t) => t,
         Err(message) => return out.error(Exit::Usage, &message),
     };
+    let repo = match &target {
+        explain::Target::Pr(t) => t.repo(),
+        explain::Target::Run(repo, _) | explain::Target::Job(repo, _) => repo,
+    };
+    if repo.host.is_some() {
+        let reason = jouet_github::host::connect(repo)
+            .map(|mut host| host.lacks(Feature::Explain))
+            .unwrap_or_else(Some)
+            .unwrap_or_else(|| "`ci explain` reads GitHub Actions only".into());
+        return out.error(Exit::Precondition, &reason);
+    }
     let req = explain::Request {
         target,
         rerun: a.rerun,
@@ -45,7 +57,8 @@ fn run_explain(a: &CiExplainArgs, out: &Output) -> Exit {
 /// What to explain: `--run`, `--job`, an Actions URL, or a PR.
 fn explain_target(a: &CiExplainArgs) -> Result<explain::Target, String> {
     let repo = || match &a.repo {
-        Some(r) => Repo::parse(r).ok_or_else(|| format!("--repo takes OWNER/NAME, not `{r}`")),
+        Some(r) => Repo::parse(r)
+            .ok_or_else(|| format!("--repo takes OWNER/NAME or HOST/OWNER/NAME, not `{r}`")),
         None => target::repo_from_git()
             .ok_or_else(|| "no --repo given and no GitHub remote here".into()),
     };

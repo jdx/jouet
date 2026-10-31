@@ -90,7 +90,8 @@ FAIL release  step "Require auto-merge on the release PR"  required
 - **Checks that will never come.** A conflicted PR returns `conflict` with exit `4`, because `pull_request` workflows do not run until it is rebased. jouet believes a conflict once GitHub reports it again at least 10 seconds later: for a moment after a push, GitHub's API still answers for the old head, so a conflict that a rebase just fixed can look unfixed. If no checks appear on the commit within `--appear-timeout` (default `3m`), the result is `no_checks` with exit `1`. Use `wait pr --until checks-registered` right after pushing if you only want to know that CI has started.
 - **Failure logs.** For each failed GitHub Actions job, jouet fetches that job's log, which GitHub serves once the job is done even while the rest of the run is in progress. It cuts out the failed step, strips timestamps and ANSI colours, and keeps the step's last `--log-lines` lines (default `60`; `0` keeps the whole step), plus earlier lines matching `error|FAILED|panicked|assert` with two lines of context. Every gap is marked `... N lines skipped`. The full log is saved once to `<log dir>/<owner>-<repo>-job-<id>.log`, and its path is printed. Checks that are not Actions jobs report their name, conclusion and URL only. `--no-logs` skips all of this.
 - **Run it here.** When jactionlint is installed, each failed Actions job ends with `locally: jouet ci run WORKFLOW --check NAME`, which runs that job on this machine with [`jouet ci run`](/commands/ci), so a fix can be tried before pushing it.
-- **Base branch moved.** When new commits on the base branch touch files this PR changes, a `base_touched` event names the files. The wait keeps going.
+- **Base branch moved.** When new commits on the base branch touch files this PR changes, a `base_touched` event names the files. The wait keeps going. (GitHub only so far.)
+- **GitLab and Forgejo.** On GitLab the checks are the head's commit statuses, which hold its pipeline jobs: a job allowed to fail counts as skipped, every other job is required, and a failed job's trace is excerpted like an Actions log. On Forgejo the checks are the head's commit statuses, where Forgejo Actions reports; its API has no job logs, so a failed check keeps its URL. `--json` adds `host` for a PR on either. See [GitLab and Forgejo](/forges).
 
 The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CONFLICT` or `NO_CHECKS`. `--json` prints `repo`, `pr`, `head_sha`, `head_changed`, `result` (`success`, `failure`, `timeout`, `conflict` or `no_checks`), `elapsed_s`, `counts` and `checks`; failed checks also carry `failed_step`, `log_excerpt`, `log_truncated`, `log_path` and, with jactionlint installed, `local`. The Entire Gates check carries its gates under `entire`, and `counts.derived` counts it when it only repeats other failures.
 
@@ -122,7 +123,7 @@ Run long waits as background tasks where the harness supports it (Claude Code's 
 
 ## `wait run`
 
-`wait run RUN` waits for one GitHub Actions run. It returns when the run completes, or on its first failed job, with the same log excerpts as `wait ci`.
+`wait run RUN` waits for one GitHub Actions run or GitLab pipeline. It returns when the run completes, or on its first failed job, with the same log excerpts as `wait ci`. On Forgejo it exits 4, since Forgejo Actions is read only through the commit statuses `wait ci` follows.
 
 ## `wait pr`
 

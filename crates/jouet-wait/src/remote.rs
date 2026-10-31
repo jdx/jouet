@@ -1,4 +1,4 @@
-//! The loop for the subjects that poll GitHub: `wait ci`, `wait run` and
+//! The loop for the subjects that poll a forge: `wait ci`, `wait run` and
 //! `wait pr`.
 //!
 //! It times checks like the local loop, and adds what talking to GitHub
@@ -7,8 +7,9 @@
 //! sleeps until it resets when that is before `--timeout`, and otherwise
 //! exits 5.
 
+use super::host::Remote;
 use super::{Event, Reporter, Stop, Timing};
-use jouet_github::{Client, Failure};
+use jouet_github::Failure;
 use jouet_output::exit::Exit;
 use jouet_output::time::{age, now};
 use serde::Serialize;
@@ -48,6 +49,14 @@ impl Halt {
             message,
         })
     }
+
+    /// The forge has no equivalent of what was asked.
+    pub(crate) fn refused(message: String) -> Self {
+        Self::Stop(Stop {
+            exit: Exit::Precondition,
+            message,
+        })
+    }
 }
 
 pub trait Watch {
@@ -57,12 +66,12 @@ pub trait Watch {
     /// Looks once, adding anything that happened to `events`.
     fn poll(
         &mut self,
-        client: &mut Client,
+        remote: &mut Remote,
         interval: Duration,
         events: &mut Vec<Event>,
     ) -> Result<Poll<Self::Doc>, Halt>;
     /// The result when `--timeout` expires.
-    fn timed_out(&mut self, client: &mut Client) -> Self::Doc;
+    fn timed_out(&mut self, remote: &mut Remote) -> Self::Doc;
     fn text(&self, doc: &Self::Doc, reporter: &Reporter) -> String;
     fn exit(&self, doc: &Self::Doc) -> Exit;
 }
@@ -71,11 +80,11 @@ pub trait Watch {
 /// exit code.
 pub fn run<W: Watch>(
     w: &mut W,
-    client: &mut Client,
+    remote: &mut Remote,
     timing: &Timing,
     reporter: &mut Reporter,
 ) -> Exit {
-    match wait(w, client, timing, reporter) {
+    match wait(w, remote, timing, reporter) {
         Ok(doc) => {
             let text = w.text(&doc, reporter);
             reporter.finish_doc(&doc, &text);
@@ -90,7 +99,7 @@ pub fn run<W: Watch>(
 /// from it. A timeout is a document, not an error.
 pub fn wait<W: Watch>(
     w: &mut W,
-    client: &mut Client,
+    remote: &mut Remote,
     timing: &Timing,
     reporter: &mut Reporter,
 ) -> Result<W::Doc, Stop> {
@@ -100,7 +109,7 @@ pub fn wait<W: Watch>(
     let mut last_state: Option<String> = None;
     loop {
         let mut events = Vec::new();
-        let polled = w.poll(client, interval, &mut events);
+        let polled = w.poll(remote, interval, &mut events);
         for event in &events {
             reporter.event(start.elapsed(), event);
         }
@@ -147,7 +156,7 @@ pub fn wait<W: Watch>(
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Ok(w.timed_out(client));
+            return Ok(w.timed_out(remote));
         }
         let state = last_state.clone().unwrap_or_default();
         reporter.pause(interval.min(left), start, &state);
