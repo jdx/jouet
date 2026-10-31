@@ -254,6 +254,13 @@ TOML
 	assert_line --regexp '^pack-rule +enabled +deny +pack:acme +'
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'curl x')"
 	assert_output --partial 'from the repo'
+
+	# There is no .jouet/rules, and the session reaches the repository through
+	# a symlink (as macOS's /var is one): it is still the one trusted.
+	ln -s "$BATS_TEST_TMPDIR/work" "$BATS_TEST_TMPDIR/link"
+	cd "$BATS_TEST_TMPDIR/link/repo"
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'curl x')"
+	assert_output --partial 'from the repo'
 }
 
 @test "an enforced rule runs whatever the user's settings say" {

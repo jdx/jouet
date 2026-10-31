@@ -110,10 +110,22 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// The key a directory is trusted under.
+/// The key a directory is trusted under: its canonical path, through the
+/// nearest directory above it that exists when it does not (a repository
+/// may pin packs with no `.jouet/rules`), so a symlink above it, such as
+/// macOS's `/var`, gives one key whichever way it is reached.
 pub(crate) fn key(dir: &Path) -> String {
-    dir.canonicalize()
-        .unwrap_or_else(|_| dir.to_path_buf())
+    let canonical = dir.ancestors().find_map(|above| {
+        let rest = dir.strip_prefix(above).ok()?;
+        let above = above.canonicalize().ok()?;
+        Some(if rest.as_os_str().is_empty() {
+            above
+        } else {
+            above.join(rest)
+        })
+    });
+    canonical
+        .unwrap_or_else(|| dir.to_path_buf())
         .display()
         .to_string()
 }
@@ -390,6 +402,20 @@ mod tests {
         let second = digests.of(&rules, None).unwrap();
         assert_ne!(second, first);
         assert_eq!(second, digest(&rules).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_not_there_yet_has_one_key_through_a_symlink_above_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("link")).unwrap();
+        let missing = Path::new(".jouet").join("rules");
+        assert_eq!(
+            key(&dir.path().join("link").join(&missing)),
+            key(&real.join(&missing))
+        );
     }
 
     #[test]
