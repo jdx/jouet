@@ -100,6 +100,11 @@ The built-in rules:
 | `job-logs` | warns on `tail -f` of a `*.log` or `*.out` file, and on reading `nohup.out` | `jouet job logs ID -n 50` |
 | `job-stop` | warns on `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall` of a dev server, `fuser -k` and `kill-port` | `jouet job stop ID` |
 | `claimed-path` | warns (does not deny) on an edit (Edit, Write, MultiEdit, NotebookEdit), `git commit`, `jouet commit` or `jouet edit replace` that touches a path another live session [claims](/commands/claim), naming that session, its worktree and branch | leaving the path to that session, or coordinating first |
+| `pitchfork-start` | starting by hand a daemon the project's pitchfork config declares: a command that is a daemon's `run` command (arguments added or not), or a server told to listen on a daemon's port | `pitchfork start ID`, with the daemon named |
+| `pitchfork-stop` | `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall`, `fuser -k` or `kill-port` aimed at a declared daemon's port or command line | `pitchfork stop ID` or `pitchfork restart ID` |
+| `pitchfork-logs` | warns on `pitchfork logs --follow` | `pitchfork logs ID -n 50` |
+
+The `pitchfork-start` and `pitchfork-stop` rules run only in a project with a pitchfork config (`pitchfork.toml`, `pitchfork.local.toml`, `.config/pitchfork.toml` or `.config/pitchfork.local.toml` in the call's directory or one above it), and read the daemons it declares from the files, without running pitchfork. They run before the `job-*` rules, so a declared daemon goes to pitchfork and anything else to `jouet job`; elsewhere the session-start primer leaves them out. The stop hook leaves pitchfork daemons alone: they are meant to keep running.
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.
 

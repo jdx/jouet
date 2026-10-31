@@ -1,0 +1,28 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "pitchfork-logs"
+why = "Following a daemon's log with `pitchfork logs --follow` never returns to the agent; `-n` prints the end of it and returns."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["wait", "daemon"]
+suggest = "pitchfork logs ID -n 50"
+message = "It prints the end of the daemon's log and returns, where following it never does. To wait for the daemon to be ready, or to stop, `jouet wait daemon ID` (`jouet agent-help wait`)."
+
+[[rule.match]]
+command = "pitchfork logs"
+flags = ["-t", "-f", "--tail", "--follow"]
+
+[rule.examples]
+fires = [
+  "pitchfork logs api --follow",
+  "pitchfork logs api -f",
+  "pitchfork logs -t",
+]
+quiet = [
+  "pitchfork logs api -n 50",
+  "pitchfork logs api --raw",
+  "tail -f server.log",
+  "echo 'pitchfork logs -f'",
+]

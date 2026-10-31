@@ -79,6 +79,10 @@ pub(crate) struct RuleDecl {
     /// the rule stays off until the installed jouet has it.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// The project files the rule is about, such as `pitchfork.toml`: it
+    /// only runs where one of them is in the call's directory or a
+    /// directory above it. Its examples run as if one were.
+    pub requires: Option<Requires>,
     /// What the agent is told when the rule matches. Required unless a
     /// `script` decides.
     pub message: Option<String>,
@@ -97,6 +101,16 @@ pub(crate) struct RuleDecl {
     pub script: Option<ScriptPath>,
     /// Calls the rule must fire on, and near misses it must leave alone.
     pub examples: Option<ExamplesDecl>,
+}
+
+/// Where a rule applies.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Requires {
+    /// Files of which one must be in the call's directory or a directory
+    /// above it, such as `pitchfork.toml` or `.config/pitchfork.toml`.
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 /// Which calls a rule matches. Every key given must hold; a list in a key

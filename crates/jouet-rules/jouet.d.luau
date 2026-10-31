@@ -19,8 +19,9 @@
 -- into a `[[rule]]` table.
 --
 -- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
--- `jouet.cargo`, `jouet.test`, `jouet.repo`, `jouet.env`) only read. Each is
--- cached for the rest of the hook call, and runs inside the caller's budget.
+-- `jouet.cargo`, `jouet.test`, `jouet.pitchfork`, `jouet.repo`, `jouet.env`)
+-- only read. Each is cached for the rest of the hook call, and runs inside
+-- the caller's budget.
 -- Most return `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)`
 -- when there is nothing to report. The GitHub probes (`jouet.pr`) are off in
 -- hooks unless the `rules.network` setting is on.
@@ -233,6 +234,19 @@ export type JouetClaim = {
 	expires_at: string,
 }
 
+-- A daemon a project's pitchfork config declares.
+export type JouetPitchforkDaemon = {
+	-- Its name in `[daemons.NAME]`: what `pitchfork start NAME` takes.
+	name: string,
+	-- Its `run` command, as one line.
+	run: string,
+	-- The ports it is said to listen on: `port`, `expected_port` and
+	-- `ready_port`, templates left out.
+	ports: { number },
+	-- The config file that declares it.
+	file: string,
+}
+
 export type JouetRepo = {
 	-- The work tree's root.
 	root: string,
@@ -335,6 +349,14 @@ declare jouet: {
 		-- inside it, as a pathspec does. Empty when none do; nil outside a
 		-- repository.
 		held: (paths: { string }) -> ({ JouetClaim }?, string?),
+	},
+	pitchfork: {
+		-- The daemons declared in the pitchfork config files from the
+		-- filesystem root down to the call's directory (`pitchfork.toml`,
+		-- `pitchfork.local.toml` and their `.config/` forms), a nearer file
+		-- winning; read from the files, without running pitchfork. nil when
+		-- none declares any.
+		daemons: () -> ({ JouetPitchforkDaemon }?, string?),
 	},
 	-- The work tree's root and its GitHub repository.
 	repo: () -> (JouetRepo?, string?),

@@ -1,0 +1,28 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "pitchfork-start"
+why = "Starting by hand a server the project's pitchfork config declares runs a second copy beside pitchfork's, without its ready check, log or restarts; `pitchfork start` runs the declared one."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["wait", "daemon"]
+requires = { files = ["pitchfork.toml", "pitchfork.local.toml", ".config/pitchfork.toml", ".config/pitchfork.local.toml"] }
+# No matcher: a daemon's `run` can be any command. `requires` keeps the
+# script to projects with a pitchfork config, where it compares each
+# command with the daemons the config declares.
+script = "pitchfork-start.luau"
+
+[rule.examples]
+fires = [
+  { command = "npm run dev", action = "deny" },
+  "cd web && pnpm run dev -- --port 5173 &",
+  "nohup python3 -m http.server 8000 > s.log 2>&1 &",
+]
+quiet = [
+  "pitchfork start web",
+  "npm run build",
+  "cargo test",
+  "echo 'npm run dev'",
+  "jouet job start dev -- npm run dev",
+]

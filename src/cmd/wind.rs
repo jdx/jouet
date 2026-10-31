@@ -57,6 +57,9 @@ struct WindReport<'a> {
     /// Sessions the stop hook found worth a review.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     reviews: Vec<&'a wind::review::Queued>,
+    /// Sequences a mise task may replace, and tasks drafted for them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tasks: Vec<&'a wind::tasks::Proposal>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +104,12 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
             .iter()
             .filter(|q| q.status == Status::Pending)
             .collect(),
+        tasks: state
+            .tasks
+            .proposals
+            .iter()
+            .filter(|p| p.status == Status::Pending)
+            .collect(),
     };
     out.result(&doc, || {
         let mut text = format!("read {} ledger entries", report.read);
@@ -110,12 +119,33 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
         if !report.promoted.is_empty() {
             let _ = write!(text, "; promoted {} to deny", report.promoted.join(", "));
         }
+        if !report.noticed.is_empty() {
+            let _ = write!(
+                text,
+                "; noticed {} for a mise task",
+                report.noticed.join(", ")
+            );
+        }
         text.push('\n');
         for note in &doc.pending {
             let _ = writeln!(text, "{}  {}  {}", note.id, note.rule, note.why);
         }
         for p in &doc.proposals {
             let _ = writeln!(text, "{}  {}  {}", p.id, p.kind.name(), p.title);
+        }
+        for p in &doc.tasks {
+            match &p.task {
+                Some(t) => {
+                    let _ = writeln!(text, "{}  task  {}: {}", p.id, t.name, t.run);
+                }
+                None => {
+                    let _ = writeln!(
+                        text,
+                        "{}  task  `{}`: `jouet task propose` in that repository drafts it",
+                        p.id, p.shape
+                    );
+                }
+            }
         }
         for q in &doc.reviews {
             let _ = writeln!(
@@ -134,6 +164,31 @@ fn wind_now(paths: &Paths, out: &Output) -> Exit {
 
 fn show(paths: &Paths, id: &str, out: &Output) -> Exit {
     let state = wind::State::load(&paths.state);
+    if let Some(p) = state.tasks.proposal(id) {
+        out.result(p, || match &p.task {
+            Some(t) => format!(
+                "{} ({}): mise task `{}`, ran {} times in {} sessions\nrun: {}\nsuggest: {}: {}\napply: jouet task apply {} --file local|shared, after asking the user which\n",
+                p.id,
+                p.status.name(),
+                t.name,
+                t.evidence.runs,
+                t.evidence.sessions,
+                t.run,
+                t.suggest.file.config(),
+                t.suggest.reasons.join("; "),
+                p.id
+            ),
+            None => format!(
+                "{} ({}): `{}` ran {} times in {} sessions in one repository; `jouet task propose` there drafts a mise task for it\n",
+                p.id,
+                p.status.name(),
+                p.shape,
+                p.seen_runs,
+                p.seen_sessions
+            ),
+        });
+        return Exit::Ok;
+    }
     if let Some(p) = state.reviews.proposal(id) {
         out.result(p, || {
             let mut text = format!(
@@ -210,6 +265,14 @@ fn adopt(paths: &Paths, id: &str, out: &Output) -> Exit {
             Exit::Usage,
             &format!(
                 "`{id}` is a drafted rule; adopt it with `jouet rule new NAME --from-note {id}`"
+            ),
+        );
+    }
+    if state.tasks.proposal(id).is_some() {
+        return out.error(
+            Exit::Usage,
+            &format!(
+                "`{id}` is a mise task; add it with `jouet task apply {id} --file local|shared`"
             ),
         );
     }
@@ -411,8 +474,83 @@ struct UnwindReport {
     proposals: Vec<retire::Proposal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     retired: Vec<wind::rulefile::Change>,
+    /// Mise tasks jouet added that no session runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tasks: Vec<UnusedTask>,
+    /// The ones `--apply` removed, as `mise tasks rm --json` reported them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    removed_tasks: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct UnusedTask {
+    task: String,
+    path: String,
+    reason: String,
+    #[serde(skip)]
+    root: String,
+}
+
+/// The tasks jouet added that no session has run, and that still run what
+/// jouet wrote: one someone changed is theirs now.
+fn unused_tasks(paths: &Paths, now: u64) -> Vec<UnusedTask> {
+    let state = wind::State::load(&paths.state);
+    let mut out = Vec::new();
+    for a in state.tasks.unused(now) {
+        let root = std::path::Path::new(&a.root);
+        let Ok(existing) = crate::mise::tasks(root) else {
+            continue;
+        };
+        let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let unchanged = existing
+            .iter()
+            .any(|t| t.name == a.name && t.run.iter().map(|r| squash(r)).eq([squash(&a.run)]));
+        if !unchanged {
+            continue;
+        }
+        let days = now.saturating_sub(a.at) / (24 * 60 * 60);
+        out.push(UnusedTask {
+            task: a.name.clone(),
+            path: a.path.clone(),
+            reason: format!(
+                "jouet task apply added it {days} days ago ({}), and no agent session has run it since",
+                a.proposal
+            ),
+            root: a.root.clone(),
+        });
+    }
+    out
+}
+
+/// Removes each task with `mise tasks rm`, and forgets it.
+fn remove_tasks(paths: &Paths, tasks: &[UnusedTask]) -> (Vec<serde_json::Value>, Vec<String>) {
+    let mut removed = Vec::new();
+    let mut errors = Vec::new();
+    for t in tasks {
+        let args: Vec<String> = ["tasks", "rm", "--json", "--yes", "--path", &t.path, &t.task]
+            .iter()
+            .map(|a| (*a).to_string())
+            .collect();
+        match crate::mise::json(std::path::Path::new(&t.root), &args) {
+            Ok(value) => {
+                let _ = wind::update(&paths.state, |state| {
+                    state
+                        .tasks
+                        .applied
+                        .retain(|a| !(a.root == t.root && a.name == t.task));
+                });
+                // One report per task removed.
+                match value {
+                    serde_json::Value::Array(reports) => removed.extend(reports),
+                    other => removed.push(other),
+                }
+            }
+            Err(problem) => errors.push(format!("removing task {}: {}", t.task, problem.message())),
+        }
+    }
+    (removed, errors)
 }
 
 pub(crate) fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
@@ -425,21 +563,45 @@ pub(crate) fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
     loaded.engine.load_scripts();
     let stats = stats::compute(&wind::reader::read_all(&paths.ledger));
     let proposals = retire::proposals(&loaded.engine, &stats);
-    let (retired, errors) = if args.apply {
-        retire::apply(&paths, &proposals, "user", crate::wind::now())
+    let now = crate::wind::now();
+    let tasks = unused_tasks(&paths, now);
+    let (retired, mut errors) = if args.apply {
+        retire::apply(&paths, &proposals, "user", now)
     } else {
         (Vec::new(), Vec::new())
+    };
+    let removed_tasks = if args.apply {
+        let (removed, task_errors) = remove_tasks(&paths, &tasks);
+        errors.extend(task_errors);
+        removed
+    } else {
+        Vec::new()
     };
     let report = UnwindReport {
         proposals,
         retired,
+        tasks,
+        removed_tasks,
         errors,
     };
     out.result(&report, || {
-        if report.proposals.is_empty() {
-            return "nothing to unwind: no rule of yours is noisy, nearly always overridden or broken\n".into();
+        if report.proposals.is_empty() && report.tasks.is_empty() {
+            return "nothing to unwind: no rule of yours is noisy, nearly always overridden or broken, and no task jouet added goes unused\n".into();
         }
         let mut text = String::new();
+        for t in &report.tasks {
+            let field = |r: &serde_json::Value, key: &str| {
+                r.get(key).and_then(serde_json::Value::as_str).map(str::to_string)
+            };
+            let done = report.removed_tasks.iter().any(|r| {
+                field(r, "task").as_ref() == Some(&t.task) && field(r, "path").as_ref() == Some(&t.path)
+            });
+            let mark = if done { "removed " } else { "propose " };
+            let _ = writeln!(text, "{mark} task {} ({})  {}", t.task, t.path, t.reason);
+        }
+        if !args.apply && !report.tasks.is_empty() {
+            text.push_str("run `jouet unwind --apply` to remove the tasks listed (`mise tasks rm`), after asking the user\n");
+        }
         for p in &report.proposals {
             let done = report.retired.iter().any(|c| c.rule == p.rule);
             let mark = match (done, p.can_apply) {
