@@ -132,6 +132,7 @@ fn a_bare_number_belongs_to_the_repository_named_before_it() {
 fn jouet_commands_and_rule_overrides_are_read_from_code_spans() {
     let c = claims(
         "Use `jouet read --outline/--symbol` and `jouet wind show <ID>`.\n\n\
+         Roadmap: no MCP, jdx skipped `jouet mcp` for now.\n\n\
          The `git-stash` rule denies wrongly here, so override it with `git stash push -m x`.\n\n\
          Never use `no-verify` tricks; `git-stash` is fine.\n\n\
          ```\njouet frobnicate\n```\n",

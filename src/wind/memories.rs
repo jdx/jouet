@@ -399,6 +399,11 @@ static RELEASE_WAIT: LazyLock<Regex> = LazyLock::new(|| {
 /// often about something else.
 static UNRELEASED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bunreleased\b").expect("valid regex"));
+/// A sentence saying a command is not there, or not yet.
+static ABSENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:no|not|never|skipped|skips|without|removed|dropped|renamed|planned|proposed|would|instead\ of)\b|n't\b")
+        .expect("valid regex")
+});
 static OVERRIDE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:overrid\w*|bypass\w*|work\s?around|disable[sd]?|turn\w* off|wrongly|false positive)")
         .expect("valid regex")
@@ -646,9 +651,12 @@ pub(crate) fn claims(body: &str, repo: Option<&str>, rules: &[String]) -> Claims
             if release && let Some(i) = last {
                 out.references[i].awaits_release = true;
             }
+            // "jdx skipped `jouet mcp`" knows it is not there.
+            let absent = ABSENT.is_match(sentence);
             for span in sentence.split('`').skip(1).step_by(2) {
                 let words: Vec<&str> = span.split_whitespace().collect();
                 if words.first() == Some(&"jouet")
+                    && !absent
                     && words.len() > 1
                     && !span.contains(['<', '>', '|', '[', '{', '…', '$', '*'])
                     && !span.contains("...")
