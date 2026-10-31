@@ -101,8 +101,9 @@ pub(crate) struct RuleDecl {
 
 /// Which calls a rule matches. Every key given must hold; a list in a key
 /// matches if any of its items does (`text` excepted: every pattern must
-/// match). Every key but `tool`, `paths`, `input`, `unless_input`, `seen`
-/// and `min_read_lines` is about a command, and needs `command`.
+/// match). Every key but `tool`, `paths`, `unless_paths`, `input`,
+/// `unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is
+/// about a command, and needs `command`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Matcher {
@@ -196,6 +197,30 @@ pub(crate) struct Matcher {
     /// read with `cat`, `head`, `tail`, `sed -n` or `nl`. jouet's hook counts
     /// them; set it in an example with `read_lines`.
     pub min_read_lines: Option<u32>,
+    /// For file tools: the path matches none of these patterns, read as in
+    /// `paths`.
+    #[serde(default, deserialize_with = "one_or_many")]
+    #[schemars(with = "OneOrMany<String>")]
+    pub unless_paths: Vec<Glob>,
+    /// Whether the call runs in a project that uses fnox: a `fnox.toml`,
+    /// `.fnox.toml` or `.config/fnox.toml` in the working directory or
+    /// above it. In an example, set it with `fnox = {}`.
+    pub fnox: Option<bool>,
+    /// The call reads a file that a fnox `plain` provider reads secrets
+    /// from: a file tool's path, or with `command`, one of the command's
+    /// arguments. In an example, list them in `fnox = { files = [...] }`.
+    pub secret_files: Option<bool>,
+    /// The command expands, outside single quotes, a variable the
+    /// project's fnox config defines as a secret: `$NAME` or `${NAME}`. In
+    /// an example, list them in `fnox = { secrets = [...] }`.
+    pub secret_vars: Option<bool>,
+    /// One of the command's arguments is the name of a secret the project's
+    /// fnox config defines, as in `printenv NAME`.
+    pub secret_args: Option<bool>,
+    /// Whether the command's standard output reaches the transcript: it is
+    /// not redirected to a file, piped into another command, or captured
+    /// with `$(...)`.
+    pub prints: Option<bool>,
 }
 
 impl Matcher {
@@ -208,6 +233,9 @@ impl Matcher {
             unless_input: _,
             seen: _,
             min_read_lines: _,
+            unless_paths: _,
+            fnox: _,
+            secret_files: _,
             command,
             via,
             flags,
@@ -221,6 +249,9 @@ impl Matcher {
             text,
             with,
             unless_with,
+            secret_vars,
+            secret_args,
+            prints,
         } = self;
         !command.is_empty()
             || !via.is_empty()
@@ -235,6 +266,9 @@ impl Matcher {
             || !text.is_empty()
             || with.is_some()
             || unless_with.is_some()
+            || secret_vars.is_some()
+            || secret_args.is_some()
+            || prints.is_some()
     }
 
     /// What is wrong with it, beyond what its types check.
@@ -245,10 +279,13 @@ impl Matcher {
             || !self.unless_input.is_empty()
             || self.seen.is_some()
             || self.min_read_lines.is_some()
+            || !self.unless_paths.is_empty()
+            || self.fnox.is_some()
+            || self.secret_files.is_some()
             || self.with.is_some()
             || self.unless_with.is_some();
         if nested && not_command {
-            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `with` or `unless_with`".into());
+            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `fnox`, `secret_files`, `with` or `unless_with`".into());
         }
         if self.command.is_empty() && self.about_a_command() {
             return Some("it says how a command looks, but not which: add `command`".into());
@@ -318,6 +355,24 @@ pub(crate) struct CaseTable {
     /// How many lines of files the call reads, as jouet's hook would count
     /// them.
     pub read_lines: Option<u32>,
+    /// The call runs in a project that uses fnox, whose config defines
+    /// these secrets and files; omitted, it does not.
+    pub fnox: Option<FnoxCase>,
+}
+
+/// An example's fnox project, as jouet's hook would read it from the
+/// project's config.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExampleFnox")]
+pub(crate) struct FnoxCase {
+    /// The secret names the config defines.
+    #[serde(default)]
+    pub secrets: Vec<String>,
+    /// The files its `plain` providers read secrets from, from the working
+    /// directory.
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -333,7 +388,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen` or `read_lines`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines` or `fnox`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

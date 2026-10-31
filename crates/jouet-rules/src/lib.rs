@@ -66,6 +66,8 @@ const BUILTIN: &[(&str, &str)] = &[
     ("git-stash", include_str!("../rules/git-stash.toml")),
     ("no-verify", include_str!("../rules/no-verify.toml")),
     ("force-push", include_str!("../rules/force-push.toml")),
+    ("print-secrets", include_str!("../rules/print-secrets.toml")),
+    ("secret-files", include_str!("../rules/secret-files.toml")),
     ("push-untested", include_str!("../rules/push-untested.toml")),
     ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
     (
@@ -315,6 +317,19 @@ pub struct Call {
     pub seen: Option<bool>,
     /// How many lines of files the call reads; worked out by the caller.
     pub read_lines: Option<u32>,
+    /// The project's fnox config, when the call runs in a project that uses
+    /// fnox; worked out by the caller.
+    pub fnox: Option<Fnox>,
+}
+
+/// What a project's fnox config defines, for the matchers that ask: names
+/// and paths, never values.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Fnox {
+    /// Every secret name the config defines, in any profile.
+    pub secrets: Vec<String>,
+    /// The plaintext files a `plain` provider reads secrets from.
+    pub files: Vec<String>,
 }
 
 impl Call {
@@ -355,6 +370,7 @@ impl Call {
             input: payload.get("tool_input").cloned(),
             seen: None,
             read_lines: None,
+            fnox: None,
         }
     }
 }

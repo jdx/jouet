@@ -7,6 +7,7 @@ mod ci;
 mod cmd;
 mod config;
 mod diag;
+mod fnox;
 mod git;
 mod guide;
 mod ledger;
@@ -111,7 +112,10 @@ enum Cmd {
 /// co-author line (Claude Code) and the AI disclosure, with the tool and
 /// version from AI_AGENT. Warns about a subject that is not a conventional
 /// commit when the repository checks them. Hooks always run; when one fails,
-/// the end of its output is shown and the whole of it kept in a log.
+/// the end of its output is shown and the whole of it kept in a log. In a
+/// project that uses fnox, `fnox scan --values` first checks exactly what
+/// would be committed, and a secret's value there refuses the commit (exit
+/// 1), naming the secret and file, never the value.
 #[derive(Args)]
 pub struct CommitArgs {
     /// The files and directories to commit
@@ -1101,7 +1105,9 @@ pub enum CiCmd {
 /// WORKFLOW is a file of .github/workflows (the extension is optional), a
 /// path, or a workflow's `name:`. --check takes a check's name as `wait ci`
 /// prints it and runs the job behind it. Arguments after `--` go to
-/// `jactionlint run` as they are, such as `--secret NAME=VALUE`. It shows
+/// `jactionlint run` as they are, such as `--secret NAME=VALUE`.
+/// `--secrets-from fnox` resolves the `secrets.*` the jobs read through
+/// fnox and passes them in a temporary file, never on the command line. It shows
 /// what happens on this machine, not whether GitHub will pass: jobs for
 /// another OS are skipped. Exits 1 when a job failed, 3 when no workflow or
 /// job matches, 4 when jactionlint is missing or the run could not start.
@@ -1122,6 +1128,9 @@ pub struct CiRunArgs {
     /// Lines of each failed step to show (default 60; 0 shows all of it)
     #[usage(long, value_name = "N")]
     log_lines: Option<usize>,
+    /// Give the jobs the secrets they read, resolved through this tool
+    #[usage(long, value_name = "SOURCE", choices("fnox"))]
+    secrets_from: Option<String>,
     /// Arguments for `jactionlint run`, after `--`
     #[usage(double_dash = "required", value_name = "ARGS")]
     args: Vec<String>,

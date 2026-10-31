@@ -241,3 +241,53 @@ stop_reason() {
 	run grep -cE 'acme|deploy-prod|101' "$ledger"
 	assert_output 0
 }
+
+# A tool call in a project that uses fnox: `$PWD/app`, whose fnox.toml
+# defines STRIPE_KEY and reads secrets.env through a plain provider.
+fnox_payload() {
+	mkdir -p app
+	printf '[providers.file]\ntype = "plain"\nfile = "secrets.env"\nformat = "env"\n\n[secrets]\nSTRIPE_KEY = { provider = "file", value = "STRIPE_KEY" }\n' >app/fnox.toml
+	jq -cn --arg cwd "$PWD/app" --arg tool "$1" --arg arg "$2" \
+		'{session_id: "s1", cwd: $cwd, tool_name: $tool, tool_input: (if $tool == "Bash" then {command: $arg} else {file_path: $arg} end)}'
+}
+
+@test "in a fnox project, commands that print secrets are denied and fnox exec is suggested" {
+	# shellcheck disable=SC2016 # the variables are for the hook to read, not to expand
+	for command in env printenv 'echo "$STRIPE_KEY"' 'fnox get STRIPE_KEY' 'cat .env' 'cat ../app/secrets.env'; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(fnox_payload Bash "$command")"
+		assert_success
+		run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
+		assert_line --index 0 deny
+		assert_line --index 1 --partial "Run \`fnox exec -- <command>\` instead."
+	done
+
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(fnox_payload Read "$PWD/app/.env.local")"
+	run jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$output"
+	assert_output --partial '[jouet rule: secret-files]'
+
+	# shellcheck disable=SC2016
+	for command in 'env FOO=bar cargo test' 'echo "$HOME"' 'fnox exec -- npm test' 'cat .env.example'; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(fnox_payload Bash "$command")"
+		assert_success
+		assert_output ""
+	done
+}
+
+@test "outside a fnox project, env and .env files are left alone" {
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(jq -cn --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: "env; cat .env"}}')"
+
+	assert_success
+	assert_output ""
+}
+
+@test "session-start says when the project uses fnox, and when the agent runs under its proxy" {
+	fnox_payload Bash ls >/dev/null
+	run --separate-stderr jouet hook claude session-start <<<"$(jq -cn --arg cwd "$PWD/app" '{session_id: "s1", source: "startup", cwd: $cwd}')"
+	assert_success
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial 'jouet: this project keeps its secrets in fnox.'
+
+	FNOX_PROXY_MCP=1 run --separate-stderr jouet hook claude session-start <<<"$(jq -cn --arg cwd "$PWD/app" '{session_id: "s1", source: "startup", cwd: $cwd}')"
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial "jouet: this session runs under \`fnox proxy run\`"
+}

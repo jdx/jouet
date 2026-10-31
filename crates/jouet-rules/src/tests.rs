@@ -543,6 +543,7 @@ return {
             input: None,
             seen: None,
             read_lines: None,
+            fnox: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine

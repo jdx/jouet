@@ -138,7 +138,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `input`, `unless_input`, `seen`\nand `min_read_lines` is about a command, and needs `command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is\nabout a command, and needs `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -233,6 +233,30 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "unless_paths": {
+          "description": "For file tools: the path matches none of these patterns, read as in\n`paths`.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
+        "fnox": {
+          "description": "Whether the call runs in a project that uses fnox: a `fnox.toml`,\n`.fnox.toml` or `.config/fnox.toml` in the working directory or\nabove it. In an example, set it with `fnox = {}`.",
+          "type": "boolean"
+        },
+        "secret_files": {
+          "description": "The call reads a file that a fnox `plain` provider reads secrets\nfrom: a file tool's path, or with `command`, one of the command's\narguments. In an example, list them in `fnox = { files = [...] }`.",
+          "type": "boolean"
+        },
+        "secret_vars": {
+          "description": "The command expands, outside single quotes, a variable the\nproject's fnox config defines as a secret: `$NAME` or `${NAME}`. In\nan example, list them in `fnox = { secrets = [...] }`.",
+          "type": "boolean"
+        },
+        "secret_args": {
+          "description": "One of the command's arguments is the name of a secret the project's\nfnox config defines, as in `printenv NAME`.",
+          "type": "boolean"
+        },
+        "prints": {
+          "description": "Whether the command's standard output reaches the transcript: it is\nnot redirected to a file, piped into another command, or captured\nwith `$(...)`.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -348,6 +372,10 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "fnox": {
+          "description": "The call runs in a project that uses fnox, whose config defines\nthese secrets and files; omitted, it does not.",
+          "$ref": "#/$defs/ExampleFnox"
         }
       },
       "additionalProperties": false
@@ -366,6 +394,29 @@
         "lint",
         "build"
       ]
+    },
+    "ExampleFnox": {
+      "description": "An example's fnox project, as jouet's hook would read it from the\nproject's config.",
+      "type": "object",
+      "properties": {
+        "secrets": {
+          "description": "The secret names the config defines.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "files": {
+          "description": "The files its `plain` providers read secrets from, from the working\ndirectory.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -11,7 +11,8 @@ setup() {
 	printf '#!/bin/sh\n' >"$BATS_TEST_TMPDIR/bin/bd"
 	chmod +x "$BATS_TEST_TMPDIR/bin/bd"
 
-	run --separate-stderr jouet agent-help
+	# Only the companion this test installs, whatever else this machine has.
+	PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet agent-help
 
 	assert_success
 	# The cap is a budget to defend, not a ceiling to fill. It counts jouet's

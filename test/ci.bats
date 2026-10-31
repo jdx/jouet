@@ -111,3 +111,115 @@ hint: mise use -g jactionlint"
 	assert_equal "$stderr" "jouet: this jactionlint cannot run workflows: it has no \`run\` command
 hint: upgrade it: mise up jactionlint"
 }
+
+# A workflow whose jobs read secrets, and a jactionlint that plans it and
+# keeps a copy of the --secret-file it is given, with its mode.
+secrets_workflow() {
+	cat >.github/workflows/ci.yml <<'YAML'
+name: CI
+on: push
+env:
+  REGISTRY: ${{ secrets.REGISTRY_TOKEN }}
+jobs:
+  build:
+    steps:
+      - run: make
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH: ${{ secrets.GITHUB_TOKEN }}
+  deploy:
+    needs: build
+    steps:
+      - run: ./deploy
+        env:
+          KEY: ${{ secrets['DEPLOY_KEY'] }}
+          CERT: ${{ secrets.CERT }}
+YAML
+	printf '[secrets]\nREGISTRY_TOKEN = {}\nNPM_TOKEN = {}\nCERT = {}\n[profiles.prod.secrets]\nDEPLOY_KEY = {}\n' >fnox.toml
+	cat >"$BATS_TEST_TMPDIR/bin/jactionlint" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$BATS_TEST_TMPDIR/jactionlint.args"
+case "$*" in
+"run --version") echo "jactionlint run, runner behavior version 1" ;;
+"run --list --json"*)
+	deploy=true
+	[[ "$*" == *"-j build"* ]] && deploy=false
+	printf '[{"workflow": ".github/workflows/ci.yml", "name": "CI", "event": "push", "jobs": [
+  {"id": "build", "stage": 1, "selected": true, "cells": [{"name": "build"}]},
+  {"id": "deploy", "stage": 2, "selected": %s, "needs": ["build"], "cells": [{"name": "deploy"}]}]}]\n' "$deploy"
+	;;
+*)
+	args=("$@")
+	for i in "${!args[@]}"; do
+		if [[ "${args[i]}" == --secret-file ]]; then
+			file="${args[i + 1]}"
+			cp "$file" "$BATS_TEST_TMPDIR/secret-file.copy"
+			ls -l "$file" | cut -c1-10 >"$BATS_TEST_TMPDIR/secret-file.mode"
+			printf '%s\n' "$file" >"$BATS_TEST_TMPDIR/secret-file.path"
+		fi
+	done
+	printf '[job] build\n  [step 1] Run make\n  [step 1] success\n[job] build: success\n'
+	;;
+esac
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/jactionlint"
+}
+
+@test "--secrets-from fnox passes the secrets the jobs read in a 0600 file, deleted afterwards" {
+	secrets_workflow
+	fake_fnox
+	cat >"$BATS_TEST_TMPDIR/fnox.env" <<'ENV'
+FAKE_FNOX_VAL_REGISTRY_TOKEN=reg-value-1
+FAKE_FNOX_VAL_NPM_TOKEN='npm value 2'
+FAKE_FNOX_VAL_CERT='line one\nline two'
+FAKE_FNOX_VAL_DEPLOY_KEY=deploy-value-3
+FAKE_FNOX_UNDEFINED=DEPLOY_KEY
+ENV
+
+	run --separate-stderr jouet ci run ci --secrets-from fnox --display agent
+
+	assert_success
+	assert_line "  secrets from fnox: given NPM_TOKEN, REGISTRY_TOKEN; missing DEPLOY_KEY, GITHUB_TOKEN; multi-line, not given CERT"
+	refute_output --partial "value"
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/secret-file.copy")" 'NPM_TOKEN="npm value 2"
+REGISTRY_TOKEN="reg-value-1"'
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/secret-file.mode")" "-rw-------"
+	assert [ ! -e "$(cat "$BATS_TEST_TMPDIR/secret-file.path")" ]
+	# Values never reach jactionlint's command line.
+	run grep -c value "$BATS_TEST_TMPDIR/jactionlint.args"
+	assert_output 0
+	# All at once, then one by one after an unknown name failed the batch.
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/fnox.log")" "export --format json CERT DEPLOY_KEY NPM_TOKEN REGISTRY_TOKEN
+export --format json CERT
+export --format json DEPLOY_KEY
+export --format json NPM_TOKEN
+export --format json REGISTRY_TOKEN"
+}
+
+@test "--secrets-from fnox only resolves what the selected jobs read, and reports it in --json" {
+	secrets_workflow
+	fake_fnox
+	printf 'FAKE_FNOX_VAL_NPM_TOKEN=npm-value\nFAKE_FNOX_VAL_REGISTRY_TOKEN=reg-value\n' >"$BATS_TEST_TMPDIR/fnox.env"
+
+	run --separate-stderr jouet ci run ci -j build --secrets-from fnox --json
+
+	assert_success
+	run jq -c '.secrets' <<<"$output"
+	assert_output '{"from":"fnox","given":["NPM_TOKEN","REGISTRY_TOKEN"],"missing":["GITHUB_TOKEN"]}'
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/fnox.log")" "export --format json NPM_TOKEN REGISTRY_TOKEN"
+}
+
+@test "--secrets-from fnox refuses without fnox, or beside a --secret-file of yours" {
+	secrets_workflow
+
+	PATH="$BATS_TEST_TMPDIR/bin:/usr/bin:/bin" run --separate-stderr jouet ci run ci --secrets-from fnox
+	assert_failure 4
+	assert_equal "${stderr_lines[0]}" "jouet: --secrets-from fnox needs fnox, and it is not installed"
+
+	fake_fnox
+	run --separate-stderr jouet ci run ci --secrets-from fnox -- --secret-file mine.env
+	assert_failure 2
+
+	run --separate-stderr jouet ci run ci --secrets-from vault
+	assert_failure 2
+}
