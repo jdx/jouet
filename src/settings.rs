@@ -89,6 +89,9 @@ pub(crate) struct WindSettings {
     /// User corrections in a session that make it worth a review
     #[usage(env = "JOUET_WIND_REVIEW_CORRECTIONS", default = 2)]
     pub review_corrections: u64,
+    /// Check your agents' memories once a day for workarounds whose bug looks fixed, and note them at session start
+    #[usage(env = "JOUET_WIND_MEMORIES", default = true)]
+    pub memories: bool,
     /// A gitleaks config whose rules also redact digests; ~/.config/jouet/gitleaks.toml when it exists
     #[usage(env = "JOUET_WIND_GITLEAKS")]
     pub gitleaks: Option<String>,

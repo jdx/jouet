@@ -43,6 +43,10 @@ pub(crate) enum Kind {
     Rule,
     AgentsMd,
     Memory,
+    /// A change to a memory the agent already has, named by `target`.
+    MemoryUpdate,
+    /// Deleting a memory the agent has, named by `target`.
+    MemoryDelete,
     /// A change to jouet itself, for its maintainers: recorded as an idea
     /// for `jouet share`, never as a pending proposal.
     Jouet,
@@ -57,6 +61,8 @@ impl Kind {
             Self::Rule => "rule",
             Self::AgentsMd => "agents_md",
             Self::Memory => "memory",
+            Self::MemoryUpdate => "memory_update",
+            Self::MemoryDelete => "memory_delete",
             Self::Jouet => "jouet",
             Self::Nothing => "nothing",
         }
@@ -69,6 +75,8 @@ impl Kind {
             Self::Rule => "a rule",
             Self::AgentsMd => "an AGENTS.md note",
             Self::Memory => "a memory note",
+            Self::MemoryUpdate => "an update to a memory",
+            Self::MemoryDelete => "deleting a memory",
             Self::Jouet => "a change to jouet",
             Self::Nothing => "nothing",
         }
@@ -88,6 +96,10 @@ impl Kind {
             }
             Self::AgentsMd => "ask the user before adding it to the project's AGENTS.md",
             Self::Memory => "save it to your memory if the user agrees",
+            Self::MemoryUpdate => "ask the user, then rewrite the memory with the draft",
+            Self::MemoryDelete => {
+                "ask the user, then delete the memory and its line in the index (MEMORY.md)"
+            }
             Self::Jouet | Self::Nothing => "",
         }
     }
@@ -96,7 +108,9 @@ impl Kind {
     fn scopes(self) -> &'static [&'static str] {
         match self {
             Self::Task => &["local", "project", "global"],
-            Self::Routine | Self::Rule | Self::Memory => &["user", "project"],
+            Self::Routine | Self::Rule | Self::Memory | Self::MemoryUpdate | Self::MemoryDelete => {
+                &["user", "project"]
+            }
             Self::AgentsMd => &["project"],
             Self::Jouet => &["maintainers"],
             Self::Nothing => &[""],
@@ -117,6 +131,9 @@ pub(crate) struct Proposal {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<String>,
     pub scope: String,
+    /// The memory a `memory_update` or `memory_delete` changes: its path.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub target: String,
     pub draft: String,
     pub status: Status,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -383,8 +400,13 @@ fn queued_line(q: &Queued, now: u64) -> String {
 }
 
 fn proposal_line(p: &Proposal) -> String {
+    let target = if p.target.is_empty() {
+        String::new()
+    } else {
+        format!(" `{}`", p.target)
+    };
     format!(
-        "jouet wind review proposed {} ({}): {} `jouet wind show {}` for why and the draft; {}; then `jouet wind adopt {}`, or `jouet wind dismiss {}` to drop it.",
+        "jouet wind review proposed {}{target} ({}): {} `jouet wind show {}` for why and the draft; {}; then `jouet wind adopt {}`, or `jouet wind dismiss {}` to drop it.",
         p.kind.label(),
         p.id,
         sentence(&p.title),
@@ -424,6 +446,8 @@ pub(crate) struct Draft {
     #[serde(default)]
     pub scope: Option<String>,
     #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
     pub draft: String,
 }
 
@@ -449,8 +473,16 @@ pub(crate) struct Skipped {
     pub reason: String,
 }
 
+/// The memory a draft changes, as one of `targets` (their paths, with the
+/// home directory as `~`), when it names one.
+fn target_of(d: &Draft, targets: &[String]) -> Option<String> {
+    let t = d.target.as_deref()?.trim();
+    let t = super::memories::tilde(std::path::Path::new(t));
+    targets.iter().find(|known| **known == t).cloned()
+}
+
 /// Why a draft cannot be recorded, if it cannot.
-fn problem(d: &Draft) -> Option<String> {
+fn problem(d: &Draft, targets: &[String]) -> Option<String> {
     if d.title.trim().is_empty() || d.why.trim().is_empty() || d.draft.trim().is_empty() {
         return Some("a proposal needs a title, a why and a draft".into());
     }
@@ -465,6 +497,13 @@ fn problem(d: &Draft) -> Option<String> {
             d.kind.label(),
             d.kind.scopes().join(", ")
         ));
+    }
+    if matches!(d.kind, Kind::MemoryUpdate | Kind::MemoryDelete) && target_of(d, targets).is_none()
+    {
+        return Some(match d.target.as_deref() {
+            None => format!("{} needs a target: the memory's path", d.kind.label()),
+            Some(t) => format!("`{t}` is not one of the memories the review listed"),
+        });
     }
     let span = |e: &str| {
         let e = e.strip_prefix('L').unwrap_or("");
@@ -483,8 +522,16 @@ fn problem(d: &Draft) -> Option<String> {
 
 /// Records a review's proposals as pending, within the limits, and its
 /// changes to jouet itself as ideas for `jouet share`.
-pub(crate) fn record(paths: &Paths, reply: Reply, now: u64) -> std::io::Result<Recorded> {
-    let (mut out, ideas) = super::update(&paths.state, |state| record_in(state, reply, now))?;
+/// `targets` are the memories a `memory_update` or `memory_delete` may
+/// name, by path.
+pub(crate) fn record(
+    paths: &Paths,
+    reply: Reply,
+    now: u64,
+    targets: &[String],
+) -> std::io::Result<Recorded> {
+    let (mut out, ideas) =
+        super::update(&paths.state, |state| record_in(state, reply, now, targets))?;
     if let Some(gaps) = crate::share::gaps_path() {
         for (title, body) in ideas {
             out.ideas
@@ -494,7 +541,12 @@ pub(crate) fn record(paths: &Paths, reply: Reply, now: u64) -> std::io::Result<R
     Ok(out)
 }
 
-fn record_in(state: &mut State, reply: Reply, now: u64) -> (Recorded, Vec<(String, String)>) {
+fn record_in(
+    state: &mut State,
+    reply: Reply,
+    now: u64,
+    targets: &[String],
+) -> (Recorded, Vec<(String, String)>) {
     let r = &mut state.reviews;
     let today = jouet_output::time::date(now);
     let mut budget = MAX_PROPOSALS_PER_DAY.saturating_sub(
@@ -515,7 +567,7 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> (Recorded, Vec<(Strin
             title: d.title.clone(),
             reason,
         };
-        if let Some(reason) = problem(&d) {
+        if let Some(reason) = problem(&d, targets) {
             out.skipped.push(skip(reason));
             continue;
         }
@@ -524,10 +576,14 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> (Recorded, Vec<(Strin
             ideas.push((d.title.trim().to_string(), body));
             continue;
         }
-        let duplicate = r
-            .proposals
-            .iter()
-            .any(|p| p.kind == d.kind && p.title.trim().eq_ignore_ascii_case(d.title.trim()));
+        let target = target_of(&d, targets)
+            .filter(|_| matches!(d.kind, Kind::MemoryUpdate | Kind::MemoryDelete))
+            .unwrap_or_default();
+        let duplicate = r.proposals.iter().any(|p| {
+            p.kind == d.kind
+                && (p.title.trim().eq_ignore_ascii_case(d.title.trim())
+                    || (!target.is_empty() && p.target == target))
+        });
         if duplicate {
             out.skipped.push(skip("already proposed".into()));
             continue;
@@ -554,6 +610,7 @@ fn record_in(state: &mut State, reply: Reply, now: u64) -> (Recorded, Vec<(Strin
             why: d.why.trim().to_string(),
             evidence: d.evidence,
             scope: d.scope.unwrap_or_else(|| d.kind.scopes()[0].to_string()),
+            target,
             draft: d.draft,
             status: Status::Pending,
             shown: Vec::new(),
@@ -583,7 +640,7 @@ pub(crate) fn prompt(contribute: bool) -> String {
     }
     PROMPT.replace(
         "\n- \"nothing\":",
-        "\n- \"jouet\": a change to jouet itself, for its maintainers: it crashed, exited with an odd code, printed malformed JSON, its flags confused the agent, or its output was abandoned for raw `gh` or `git` (see \"jouet itself\" in the digest). The draft is the report, with no private values. It is recorded as an idea for `jouet share`, which posts only after the user agrees.\n- \"nothing\":",
+        "\n- \"jouet\": a change to jouet itself, for its maintainers: it crashed, exited with an odd code, printed malformed JSON, its flags confused the agent, or its output was abandoned for raw `gh` or `git` (see \"jouet itself\" in the digest). The draft is the report, with no private values. It is recorded as an idea for `jouet share`, which posts only after the user agrees. A memory that works around jouet is such a report too, beside a \"memory_delete\" for the memory.\n- \"nothing\":",
     )
 }
 
@@ -604,6 +661,8 @@ For each improvement, choose one kind:
 - "rule": a jouet rule that steers the agent's own tool calls, such as warning about a command and naming the task or command to use instead. Always warn mode.
 - "agents_md": a line or two for the project's AGENTS.md: knowledge every agent in this repository needs.
 - "memory": a note for the harness's memory: this user's preference, across projects.
+- "memory_update": a memory listed under "Memories" that the session contradicts: the bug it works around did not happen, the user corrected a step it prescribes, or what it says is out of date. "target" is its path as listed; the draft is its new text.
+- "memory_delete": a listed memory that is wrong or no longer needed. "target" is its path; the draft says why. A memory that works around jouet itself (a rule that misfires, a jouet command that fails) is a jouet bug, not a memory: propose deleting it.
 - "nothing": nothing is worth changing. Most sessions need nothing; say so rather than invent a change. A one-off slip is not a pattern.
 
 Propose at most three, each grounded in spans from the digest. Never put a secret, a token or a private value in a proposal.
@@ -618,6 +677,7 @@ Record them by piping this JSON to `jouet wind propose`; if you cannot run comma
 - why: one or two sentences: what went wrong, and how the change prevents it.
 - draft: the change itself: the task's TOML, the rule, a sketch of the routine, the AGENTS.md lines, the memory note.
 - scope: as above for a task; "user" or "project" for a rule, routine or memory note; "project" for AGENTS.md.
+- target: for memory_update and memory_delete only, the memory's path exactly as listed.
 
 Recording changes nothing: jouet shows each proposal at a later session start, and the agent there asks the user before applying it.
 "#;

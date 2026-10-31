@@ -11,6 +11,7 @@
 
 pub(crate) mod detect;
 pub(crate) mod draft;
+pub(crate) mod memories;
 pub(crate) mod reader;
 pub(crate) mod replay;
 pub(crate) mod review;
@@ -138,6 +139,9 @@ pub(crate) struct State {
     /// Mise tasks: sequences noticed, tasks drafted, and the ones applied.
     #[serde(default)]
     pub tasks: tasks::Tasks,
+    /// Memory upkeep: what memories wait on, and the stale ones noticed.
+    #[serde(default)]
+    pub memories: memories::Memories,
 }
 
 impl State {
@@ -374,12 +378,14 @@ pub(crate) fn note_line(note: &Note, session: &str) -> String {
     )
 }
 
-/// Sets the status of a note, a proposal, a queued review or a task
-/// proposal; false when there is no such one.
+/// Sets the status of a note, a proposal, a queued review, a task
+/// proposal or a memory note; false when there is no such one.
 pub(crate) fn set_status(paths: &Paths, id: &str, status: Status) -> bool {
     update(&paths.state, |state| {
         let Some(note) = state.notes.iter_mut().find(|n| n.id == id) else {
-            return state.reviews.set_status(id, status) || state.tasks.set_status(id, status);
+            return state.reviews.set_status(id, status)
+                || state.tasks.set_status(id, status)
+                || state.memories.set_status(id, status);
         };
         note.status = status;
         true

@@ -3,10 +3,10 @@
 
 - **Usage:** `jouet wind adopt <ID>`
 
-Mark a review's proposal as applied
+Mark a review's proposal or a memory note as dealt with
 
 ## Arguments
-- **`<ID>`** — The id of a note (n3), a proposal (p2), a suggested review (r1) or a mise task (t1)
+- **`<ID>`** — The id of a note (n3), a proposal (p2), a suggested review (r1), a mise task (t1) or a memory note (m1)
 
 ## Flags
 - **`-h --help`** — Print help
