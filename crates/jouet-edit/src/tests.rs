@@ -552,3 +552,65 @@ fn symbol_and_search_edits_to_one_file_apply_in_order() {
         "impl Vfox {\n    fn download(&self) {\n        get(url);\n    }\n\n    fn other(&self) -> u8 {\n        1\n    }\n}\n"
     );
 }
+
+fn spans(original: &str, spans: &[(usize, usize, &str)]) -> Edit {
+    Edit::Spans {
+        original: original.to_string(),
+        spans: spans
+            .iter()
+            .map(|(s, e, n)| (*s, *e, n.to_string()))
+            .collect(),
+    }
+}
+
+fn spans_spec(f: &Fixture, edit: Edit) -> Spec {
+    Spec {
+        ops: vec![FileOp::Update {
+            path: f.path("a.rs"),
+            edits: vec![edit],
+            move_to: None,
+        }],
+    }
+}
+
+#[test]
+fn spans_replace_byte_ranges_of_the_file_they_were_computed_on() {
+    let text = "f(1);\nf(2);\n";
+    let f = Fixture::new(&[("a.rs", text)]);
+    let mut plan = plan(
+        &spans_spec(&f, spans(text, &[(8, 9, "20"), (2, 3, "10")])),
+        &with_braces(),
+    )
+    .unwrap();
+    assert!(plan.report.ok());
+    assert_eq!(plan.report.files[0].edits[0].lines, [1, 2]);
+    write(&mut plan).unwrap();
+    assert_eq!(f.read("a.rs"), "f(10);\nf(20);\n");
+}
+
+#[test]
+fn spans_are_refused_when_the_file_changed_overlap_or_break_the_syntax() {
+    let text = "fn a() {}\n";
+    let f = Fixture::new(&[("a.rs", text)]);
+    let refused = |edit| {
+        let plan = plan(&spans_spec(&f, edit), &with_braces()).unwrap();
+        plan.report.files[0].edits[0].status
+    };
+    assert_eq!(
+        refused(spans("fn b() {}\n", &[(0, 2, "x")])),
+        EditStatus::NoMatch
+    );
+    assert_eq!(
+        refused(spans(text, &[(0, 4, "x"), (2, 6, "y")])),
+        EditStatus::Unsupported
+    );
+    assert_eq!(
+        refused(spans(text, &[(0, 99, "x")])),
+        EditStatus::Unsupported
+    );
+    assert_eq!(
+        refused(spans(text, &[(8, 9, "")])),
+        EditStatus::DoesNotParse
+    );
+    assert_eq!(f.read("a.rs"), text);
+}

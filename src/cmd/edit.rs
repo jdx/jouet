@@ -9,6 +9,7 @@ use jouet_edit::{
     self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
 };
 use jouet_output::exit::Exit;
+use jouet_search::structural::Structural;
 use jouet_search::symbols::{self, SelectError, Selector};
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -16,9 +17,21 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
+    if args.pattern.is_none()
+        && (!args.paths.is_empty() || args.rewrite.is_some() || args.lang.is_some())
+    {
+        return out.error(
+            Exit::Usage,
+            "paths, --rewrite and --lang go with --pattern; a spec names its own files",
+        );
+    }
     let spec = match &args.cmd {
         Some(EditCmd::Hash(hash)) => return run_hash(hash, out),
         Some(EditCmd::Replace(replace)) => replace_spec(replace),
+        None if args.pattern.is_some() => match pattern_spec(&args) {
+            Ok(spec) => Ok(spec),
+            Err((exit, message)) => return out.error(exit, &message),
+        },
         None => read_spec(&args),
     };
     let spec = match spec {
@@ -419,6 +432,60 @@ fn callers(report: &Report) -> Vec<Callers> {
         });
     }
     out
+}
+
+/// `--pattern`, `--rewrite` and `--lang`: every match of the pattern under
+/// the paths, rewritten, as one edit per file.
+fn pattern_spec(args: &EditArgs) -> Result<Spec, (Exit, String)> {
+    let usage = |m: &str| (Exit::Usage, m.to_string());
+    let pattern = args.pattern.as_deref().unwrap_or_default();
+    let (Some(rewrite), Some(lang)) = (args.rewrite.as_deref(), args.lang.as_deref()) else {
+        return Err(usage("--pattern needs --rewrite and --lang"));
+    };
+    if args.spec.is_some() || args.format.is_some() {
+        return Err(usage(
+            "--pattern rewrites code itself; it takes no --spec or --format",
+        ));
+    }
+    let structural =
+        Structural::new(pattern, lang, Some(rewrite)).map_err(|e| usage(&e.to_string()))?;
+    let paths: Vec<PathBuf> = if args.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        args.paths.iter().map(PathBuf::from).collect()
+    };
+    if let Some(missing) = paths.iter().find(|p| !p.exists()) {
+        return Err((
+            Exit::NotFound,
+            format!("{}: no such file or directory", missing.display()),
+        ));
+    }
+    let (files, read) = structural.search_files(&paths);
+    if files.is_empty() {
+        return Err((
+            Exit::Precondition,
+            format!(
+                "the pattern matched nothing in {read} {lang} {}; nothing was written (`jouet agent-help edit` has pattern examples)",
+                if read == 1 { "file" } else { "files" }
+            ),
+        ));
+    }
+    let ops = files
+        .into_iter()
+        .map(|f| FileOp::Update {
+            path: f.path.to_string_lossy().into_owned(),
+            edits: vec![Edit::Spans {
+                spans: f
+                    .matches
+                    .into_iter()
+                    .map(|m| (m.start, m.end, m.replacement.unwrap_or_default()))
+                    .collect(),
+                original: f.source,
+            }],
+            move_to: None,
+        })
+        .collect();
+    Ok(Spec { ops })
 }
 
 /// The callers the code graph has for the definition a symbol edit

@@ -13,6 +13,15 @@ const BUDGET: usize = 6000;
 const FILE_BUDGET: usize = 1500;
 
 pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
+    if args.structural != args.lang.is_some() {
+        return out.error(Exit::Usage, "--structural and --lang go together");
+    }
+    if args.structural && (args.fixed_strings || args.ignore_case || args.word_regexp) {
+        return out.error(
+            Exit::Usage,
+            "-F, -i and -w are for text patterns, not --structural ones",
+        );
+    }
     let options = Options {
         pattern: args.pattern.clone(),
         paths: args.paths.iter().map(PathBuf::from).collect(),
@@ -27,6 +36,7 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
             per_file: args.file_budget.unwrap_or(FILE_BUDGET),
         },
         cache: jouet_output::paths::cache_dir().map(|d| d.join("defs")),
+        structural: args.lang.clone(),
     };
     let mut memory = if args.again || args.files_with_matches {
         Memory::none()

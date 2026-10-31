@@ -771,6 +771,60 @@ fn apply_symbol(
     (out, report)
 }
 
+/// Replaces the byte ranges `spans` of a file that must still be
+/// `original`. The ranges must not overlap.
+fn apply_spans(
+    path: &Path,
+    text: &str,
+    original: &str,
+    spans: &[(usize, usize, String)],
+    index: usize,
+    symbols: Option<&dyn Symbols>,
+) -> (String, EditReport) {
+    let mut report = edit_report(index);
+    report.expected = Count::All;
+    report.found = spans.len();
+    if text != original {
+        report.status = EditStatus::NoMatch;
+        report.message =
+            Some("the file changed after the pattern was matched; run the edit again".into());
+        return (text.to_string(), report);
+    }
+    let mut sorted: Vec<&(usize, usize, String)> = spans.iter().collect();
+    sorted.sort_by_key(|(start, _, _)| *start);
+    let in_bounds = sorted.iter().all(|(s, e, _)| {
+        s <= e && *e <= text.len() && text.is_char_boundary(*s) && text.is_char_boundary(*e)
+    });
+    if !in_bounds || sorted.windows(2).any(|w| w[0].1 > w[1].0) {
+        report.status = EditStatus::Unsupported;
+        report.message = Some("the matches overlap or fall outside the file".into());
+        return (text.to_string(), report);
+    }
+    report.lines = sorted.iter().map(|(s, _, _)| line_of(text, *s)).collect();
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (start, end, new) in &sorted {
+        out.push_str(&text[at..*start]);
+        out.push_str(new);
+        at = *end;
+    }
+    out.push_str(&text[at..]);
+    if let Some(symbols) = symbols
+        && let (Some(before), Some(after)) = (
+            symbols.syntax_errors(path, text),
+            symbols.syntax_errors(path, &out),
+        )
+        && after > before
+    {
+        report.status = EditStatus::DoesNotParse;
+        report.message = Some(format!(
+            "the rewrite would leave {after} syntax errors where there are {before}: check that it is a whole expression or statement, like the pattern"
+        ));
+        return (text.to_string(), report);
+    }
+    (out, report)
+}
+
 /// `new` moved to `indent`: its common leading whitespace removed, and every
 /// line after the first indented, as the first takes the definition's place
 /// after its indentation. Trailing newlines are dropped, so what followed the
@@ -810,6 +864,7 @@ fn apply_edit(
     let mut report = edit_report(index);
     match edit {
         Edit::Symbol { selector, new } => apply_symbol(path, text, selector, new, index, symbols),
+        Edit::Spans { original, spans } => apply_spans(path, text, original, spans, index, symbols),
         Edit::Replace {
             old,
             new,
