@@ -1,0 +1,4 @@
+2026-10-31T10:44:09.2760446Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-31T10:44:10.4538328Z ##[group]Run rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+2026-10-31T10:44:17.5454203Z ##[group]Run Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+2026-10-31T10:44:20.6460425Z ##[group]Run cargo check --locked --workspace --all-targets

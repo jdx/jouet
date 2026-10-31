@@ -51,17 +51,21 @@ pub(crate) fn held(claims: &Value, paths: &[String], dir: Option<&Path>) -> Valu
 
 /// The files a commit would take, as absolute paths: what is staged
 /// (`staged`), or every change to a tracked file (`tracked`, as `git commit
-/// -a` takes).
+/// -a` takes). It runs one git, since starting one can take tens of
+/// milliseconds on a busy machine.
 pub(crate) fn changed(dir: Option<&Path>, scope: &str, timeout: Duration) -> Result<Value, String> {
     let args: &[&str] = match scope {
         "staged" => &["diff", "--cached", "--name-only", "-z", "--no-renames"],
         _ => &["diff", "HEAD", "--name-only", "-z", "--no-renames"],
     };
-    let started = std::time::Instant::now();
-    let root = super::git::git(dir, &["rev-parse", "--show-toplevel"], timeout)?;
-    let left = timeout.saturating_sub(started.elapsed());
-    let out = super::git::git(dir, args, left)?;
-    let root = Path::new(root.trim());
+    // git prints the names relative to the work tree's root, which is found
+    // without running git.
+    let here = match dir {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::current_dir().map_err(|e| e.to_string())?,
+    };
+    let root = jouet_output::paths::work_tree(&here).ok_or("not in a git work tree")?;
+    let out = super::git::git(dir, args, timeout)?;
     Ok(out
         .split('\0')
         .filter(|p| !p.is_empty())

@@ -15,6 +15,7 @@ The rule format is new and may change between releases. `jouet rule schema` alwa
 ```output
 $ jouet rule list
 sleep-poll          enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
+ci-rerun            enabled  deny    builtin  builtin  2026-10-31  Rerunning CI blind wastes a run on a real failure; `jouet ci explain` says whether the failure is flaky, infrastructure or real, and reruns only the first two.
 review-threads      enabled  deny    builtin  builtin  2026-10-30  Raw `reviewThreads` GraphQL is long and easy to get wrong; `jouet pr threads` lists, replies to and resolves threads.
 python-edit         enabled  deny    builtin  builtin  2026-10-30  A Python heredoc that calls `.replace(` and writes the file back never checks that the text matched; `jouet edit` does.
 git-add-all         enabled  deny    builtin  builtin  2026-10-30  `git add -A` and `git add .` stage everything, including caches, scratch files and other sessions' work.
@@ -241,6 +242,7 @@ jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expecte
 ```output
 $ jouet rule test --all
 ok    sleep-poll          12 examples passed
+ok    ci-rerun            16 examples passed
 ok    review-threads      7 examples passed
 ok    python-edit         7 examples passed
 ok    git-add-all         14 examples passed
@@ -384,7 +386,7 @@ check = function(call)
 end,
 ```
 
-Every probe is cached for the rest of the hook call, so asking twice costs nothing, and runs inside the rule's budget. A probe gets whatever time the rule has left, and one that cannot answer in time fails open like the rule. `git` probes run without taking git's optional locks, so they never get in the way of the agent's own git.
+Every probe is cached for the rest of the hook call, so asking twice costs nothing. The probes a check asks have 200 ms between them, apart from the rule's own 50 ms, so waiting on a `git` process that is slow to start on a busy machine does not run the rule out of time. A probe gets whatever is left of those 200 ms, and one that cannot answer in time returns `nil` and the reason, which the rule can act on or ignore. `git` probes run without taking git's optional locks, so they never get in the way of the agent's own git.
 
 **The GitHub probes are off in hooks.** A hook runs before every tool call, and a round trip to GitHub would slow every one of them, so `jouet.pr.status` and `jouet.pr.next` return `nil` and say so. To turn them on, set this in `~/.config/jouet/config.toml`, or set `JOUET_RULES_NETWORK=true`:
 
@@ -393,7 +395,7 @@ Every probe is cached for the rest of the hook call, so asking twice costs nothi
 network = true
 ```
 
-A probe still has to answer within the rule's 50 ms. [Routines](/routines) reach GitHub through their own primitives instead.
+A probe still has to answer within the probes' 200 ms. [Routines](/routines) reach GitHub through their own primitives instead.
 
 The hooks record which work tree each run was in, by a hash of its root rather than its path, so `jouet.ci.last_run` passes over runs from other repositories.
 
@@ -402,6 +404,6 @@ The hooks record which work tree each run was in, by a hash of its root rather t
 Each script runs in a sandboxed Luau VM:
 
 - **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). Running jouet's commands and writing are for [routines](/routines), not rules. Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
-- **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
+- **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget for its own work, 200 ms for the [probes](#probes) it waits on, and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
 - **Failing open.** A rule that does not load, or a script that does not compile, throws, runs out of budget or returns something unexpected, says nothing. jouet reports it and carries on with the other rules.
 - **Compiled-script cache.** Compiled scripts are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.

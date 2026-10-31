@@ -1,0 +1,41 @@
+2026-10-31T10:35:19.3361553Z ##[group]Run cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+2026-10-31T10:35:19.3430789Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-31T10:35:19.3431129Z env:
+2026-10-31T10:35:19.3431294Z   MBX_DISABLE: 1
+2026-10-31T10:35:19.3431496Z   CARGO_TERM_COLOR: always
+2026-10-31T10:35:19.3431709Z   RUST_BACKTRACE: 1
+2026-10-31T10:35:19.3431906Z   CACHE_ON_FAILURE: false
+2026-10-31T10:35:19.3432113Z   CARGO_INCREMENTAL: 0
+2026-10-31T10:35:19.3432318Z ##[endgroup]
+2026-10-31T10:35:21.5198087Z [1m[92m    Updating[0m crates.io index
+2026-10-31T10:35:32.4401011Z [1m[92m    Checking[0m jouet-output v0.0.1 (D:\a\jouet\jouet\crates\jouet-output)
+2026-10-31T10:35:32.4519163Z [1m[92m    Checking[0m jouet-edit v0.0.1 (D:\a\jouet\jouet\crates\jouet-edit)
+2026-10-31T10:35:32.4522581Z [1m[92m    Checking[0m jouet-audit v0.0.1 (D:\a\jouet\jouet\crates\jouet-audit)
+2026-10-31T10:35:32.4523751Z [1m[92m    Checking[0m jouet-search v0.0.1 (D:\a\jouet\jouet\crates\jouet-search)
+2026-10-31T10:35:40.3257142Z [1m[92m    Checking[0m jouet-github v0.0.1 (D:\a\jouet\jouet\crates\jouet-github)
+2026-10-31T10:35:40.3258181Z [1m[92m    Checking[0m jouet-git v0.0.1 (D:\a\jouet\jouet\crates\jouet-git)
+2026-10-31T10:35:40.4529497Z [1m[92m    Checking[0m jouet-graph v0.0.1 (D:\a\jouet\jouet\crates\jouet-graph)
+2026-10-31T10:35:41.8339943Z [1m[92m    Checking[0m jouet-routines v0.0.1 (D:\a\jouet\jouet\crates\jouet-routines)
+2026-10-31T10:35:41.9629239Z [1m[92m    Checking[0m jouet-rules v0.0.1 (D:\a\jouet\jouet\crates\jouet-rules)
+2026-10-31T10:35:42.0707157Z [1m[92m    Checking[0m jouet-wait v0.0.1 (D:\a\jouet\jouet\crates\jouet-wait)
+2026-10-31T10:35:44.0518114Z [1m[92m    Checking[0m jouet v0.0.1 (D:\a\jouet\jouet)
+2026-10-31T10:35:52.7089450Z [1m[91merror[E0425][0m[1m[97m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:35:52.7090792Z    [1m[96m--> [0msrc\guide.rs:243:17
+2026-10-31T10:35:52.7091271Z     [1m[96m|[0m
+2026-10-31T10:35:52.7091907Z [1m[96m243[0m [1m[96m|[0m                 lowercase_first(other.about.unwrap_or(""))
+2026-10-31T10:35:52.7092857Z     [1m[96m|[0m                 [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
+2026-10-31T10:35:52.7093359Z 
+2026-10-31T10:35:58.0049712Z [1m[97mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:35:58.0422256Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:35:58.0423418Z [1m[93mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:35:59.1605348Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:35:59.2895043Z ##[error]Process completed with exit code 1.
+2026-10-31T10:35:59.3201550Z Post job cleanup.
+2026-10-31T10:35:59.5144697Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-31T10:35:59.5488327Z git version 2.56.0.windows.4
+2026-10-31T10:35:59.5558914Z Temporarily overriding HOME='D:\a\_temp\89d3ef7c-f1a1-449b-9d66-3e545e9dc833' before making global git config changes
+2026-10-31T10:35:59.5560234Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:35:59.5569214Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\jouet\jouet
+2026-10-31T10:35:59.5930961Z Removing SSH command configuration
+2026-10-31T10:35:59.5941056Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:35:59.6340544Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""

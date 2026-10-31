@@ -285,13 +285,13 @@ fn pr_probes_are_off_without_the_network_and_say_so() {
 }
 
 #[test]
-fn a_probe_that_runs_past_the_budget_fails_the_rule_open() {
+fn a_probe_that_runs_past_the_probes_budget_gives_up_and_says_why() {
     let probes = Probes::new(None, None, true).with_github(|_| {
         std::thread::sleep(Duration::from_millis(300));
         Ok(Some(view(1)))
     });
     let budget = Budget {
-        time: Duration::from_millis(50),
+        probes: Duration::from_millis(50),
         ..Budget::default()
     };
     let e = engine(
@@ -300,12 +300,51 @@ fn a_probe_that_runs_past_the_budget_fails_the_rule_open() {
     );
     e.set_probes(probes);
     let started = std::time::Instant::now();
-    let outcome = e.evaluate(&bash());
+    let said = said(&e);
     assert!(started.elapsed() < Duration::from_millis(250));
-    // The probe gave up within the budget; the rule had no time left after
-    // it, so it said nothing.
-    assert!(outcome.deny.is_none());
-    assert!(outcome.errors[0].contains("budget"), "{:?}", outcome.errors);
+    assert_eq!(said, "nil GitHub did not answer within the budget");
+}
+
+#[test]
+fn waiting_on_a_probe_is_not_charged_to_the_rules_own_time() {
+    // A git process on a busy machine can take longer than the rule's
+    // whole budget; the rule still gets the answer and decides.
+    let probes = Probes::new(None, None, true).with_github(|_| {
+        std::thread::sleep(Duration::from_millis(60));
+        Ok(Some(view(7)))
+    });
+    let budget = Budget {
+        time: Duration::from_millis(20),
+        ..Budget::default()
+    };
+    let e = engine(
+        "(function() local s, err = jouet.pr.status(); return `{s.number} {err}` end)()",
+        budget,
+    );
+    e.set_probes(probes);
+    assert_eq!(said(&e), "7 nil");
+}
+
+#[test]
+fn the_probes_share_one_budget_per_check() {
+    let probes = Probes::new(None, None, true).with_github(|_| {
+        std::thread::sleep(Duration::from_millis(70));
+        Ok(Some(view(7)))
+    });
+    let budget = Budget {
+        probes: Duration::from_millis(100),
+        ..Budget::default()
+    };
+    let e = engine(
+        r#"(function()
+            local s = jouet.pr.status()
+            local other, err = jouet.pr.status("9")
+            return `{s.number} {other} {err}`
+        end)()"#,
+        budget,
+    );
+    e.set_probes(probes);
+    assert_eq!(said(&e), "7 nil GitHub did not answer within the budget");
 }
 
 #[test]

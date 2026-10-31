@@ -57,6 +57,7 @@ const PRELUDE: &str = include_str!("prelude.luau");
 /// The built-in rules, embedded in the binary, in the order they run.
 const BUILTIN: &[(&str, &str)] = &[
     ("sleep-poll", include_str!("../rules/sleep-poll.toml")),
+    ("ci-rerun", include_str!("../rules/ci-rerun.toml")),
     (
         "review-threads",
         include_str!("../rules/review-threads.toml"),
@@ -548,7 +549,12 @@ pub struct Outcome {
 /// loaded).
 #[derive(Debug, Clone, Copy)]
 pub struct Budget {
+    /// The rule's own time: its Luau, not the probes it waits on.
     pub time: Duration,
+    /// The probes' time, in all: a `git` or GitHub answer the rule waits
+    /// for. Starting one git process can take tens of milliseconds on a busy
+    /// machine, and this keeps that from running the rule out of `time`.
+    pub probes: Duration,
     /// Luau has no instruction counter; this counts its interrupts, which it
     /// raises at every function call and loop iteration.
     pub interrupts: u32,
@@ -560,6 +566,7 @@ impl Default for Budget {
     fn default() -> Self {
         Self {
             time: Duration::from_millis(50),
+            probes: Duration::from_millis(200),
             interrupts: 1_000_000,
             memory: 32 * 1024 * 1024,
         }
@@ -587,6 +594,8 @@ pub(crate) struct Shared {
     gaps: RefCell<Vec<Gap>>,
     deadline: Cell<Option<Instant>>,
     interrupts: Cell<u32>,
+    /// The probes' time spent in the current budget.
+    probe_time: Cell<Duration>,
     budget: Budget,
     /// What the probes read; None until a caller sets them up.
     probes: RefCell<Option<Probes>>,
@@ -595,16 +604,31 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
-    /// What is left of the current budget's time.
+    /// What is left of the current budget's time for the rule itself.
     fn remaining(&self) -> Duration {
         self.deadline.get().map_or(self.budget.time, |deadline| {
             deadline.saturating_duration_since(Instant::now())
         })
     }
 
+    /// What is left of the probes' time.
+    fn probe_time_left(&self) -> Duration {
+        self.budget.probes.saturating_sub(self.probe_time.get())
+    }
+
+    /// Counts `spent` waiting on a probe against the probes' time, and gives
+    /// it back to the rule, whose clock ran meanwhile.
+    fn spent_on_probe(&self, spent: Duration) {
+        self.probe_time.set(self.probe_time.get() + spent);
+        if let Some(deadline) = self.deadline.get() {
+            self.deadline.set(Some(deadline + spent));
+        }
+    }
+
     /// Starts the budget afresh, as at the start of a rule's `check`.
     fn restart_budget(&self) {
         self.interrupts.set(0);
+        self.probe_time.set(Duration::ZERO);
         self.deadline.set(Some(Instant::now() + self.budget.time));
     }
 }
@@ -626,6 +650,7 @@ impl Vm {
             gaps: RefCell::new(Vec::new()),
             deadline: Cell::new(None),
             interrupts: Cell::new(0),
+            probe_time: Cell::new(Duration::ZERO),
             budget,
             probes: RefCell::new(None),
             cache: RefCell::new(HashMap::new()),

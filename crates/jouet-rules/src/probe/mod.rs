@@ -10,9 +10,9 @@
 //! Every probe:
 //! - only reads;
 //! - is cached for the rest of the hook call that first asked for it;
-//! - runs inside the caller's budget: it gets whatever time the rule has
-//!   left, and a probe that cannot answer in that time returns nil with the
-//!   reason, as does any other failure;
+//! - runs inside the probes' budget, apart from the rule's own time: it
+//!   gets whatever is left of it, and a probe that cannot answer in that
+//!   time returns nil with the reason, as does any other failure;
 //! - returns `(value, nil)`, `(nil, reason)` or `(nil, nil)` when there is
 //!   simply nothing to report, such as no ledger yet.
 //!
@@ -170,9 +170,10 @@ fn bounded<T: Send + 'static>(
 
 type Answer = Result<Option<serde_json::Value>, String>;
 
-/// Looks a probe up in the cache, or runs it with the time the caller has
-/// left and caches what it says. A rule's example may put an answer in the
-/// cache when no probes are set up.
+/// Looks a probe up in the cache, or runs it with what is left of the
+/// probes' time and caches what it says. The wait is not charged to the
+/// rule's own time. A rule's example may put an answer in the cache when no
+/// probes are set up.
 fn cached(
     shared: &Shared,
     key: &str,
@@ -185,11 +186,16 @@ fn cached(
     let Some(probes) = probes else {
         return Ok(Err("probes are not available here".into()));
     };
-    let left = shared.remaining();
-    if left.is_zero() {
+    if shared.remaining().is_zero() {
         return Err(mlua::Error::runtime("exceeded its time budget"));
     }
+    let left = shared.probe_time_left();
+    if left.is_zero() {
+        return Ok(Err("the probes have used their time budget".into()));
+    }
+    let started = std::time::Instant::now();
     let answer = probe(&probes, left);
+    shared.spent_on_probe(started.elapsed());
     shared
         .cache
         .borrow_mut()

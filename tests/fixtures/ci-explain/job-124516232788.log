@@ -1,0 +1,49 @@
+2026-10-31T10:44:24.8483855Z ##[group]Run rustup component add rustfmt clippy
+2026-10-31T10:44:24.8492396Z ##[endgroup]
+2026-10-31T10:44:24.8893746Z ##[group]Run mise x hk -- hk check --all
+2026-10-31T10:44:24.8901826Z ##[endgroup]
+2026-10-31T10:44:33.2961008Z   cargo-clippy – [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:44:35.3086680Z   cargo-clippy – [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:44:35.3232962Z   cargo-clippy – [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:44:36.1723964Z   cargo-clippy – [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:44:36.1816999Z [1m[91merror[E0425][0m[1m: cannot find function `lowercase_first` in this scope[0m
+2026-10-31T10:44:36.1818028Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+2026-10-31T10:44:36.1818346Z [1m[91merror[0m: could not compile `jouet` (bin "jouet") due to 1 previous error
+2026-10-31T10:44:36.1818593Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-10-31T10:44:36.1818883Z [1m[91merror[0m: could not compile `jouet` (bin "jouet" test) due to 1 previous error
+2026-10-31T10:44:36.1819197Z hk ERROR To fix, run: cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged -- -D warnings
+2026-10-31T10:44:36.1819408Z 
+2026-10-31T10:44:36.1819508Z See /home/runner/work/jouet/jouet/.git/hk/output.log for full command output
+2026-10-31T10:44:36.1825430Z ##[error]Process completed with exit code 101.
+2026-10-31T10:44:36.1904980Z Post job cleanup.
+2026-10-31T10:44:36.2796923Z Post job cleanup.
+2026-10-31T10:44:36.3187042Z [command]/usr/bin/git version
+2026-10-31T10:44:36.3203636Z git version 2.55.0
+2026-10-31T10:44:36.3217686Z Temporarily overriding HOME='/home/runner/work/_temp/565b9f4b-f777-4582-98bd-0ce21d27adb4' before making global git config changes
+2026-10-31T10:44:36.3218029Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-31T10:44:36.3220140Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/jouet/jouet
+2026-10-31T10:44:36.3233467Z Removing SSH command configuration
+2026-10-31T10:44:36.3235985Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-31T10:44:36.3248742Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-31T10:44:36.3327321Z Entering 'test/bats'
+2026-10-31T10:44:36.3343897Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:44:36.3360180Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:44:36.3379017Z Removing HTTP extra header
+2026-10-31T10:44:36.3380924Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-31T10:44:36.3393178Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-31T10:44:36.3468651Z Entering 'test/bats'
+2026-10-31T10:44:36.3484745Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:44:36.3504370Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:44:36.3523066Z Removing includeIf entries pointing to credentials config files
+2026-10-31T10:44:36.3525673Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:44:36.3536806Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-31T10:44:36.3615645Z Entering 'test/bats'
+2026-10-31T10:44:36.3622352Z file:/home/runner/work/jouet/jouet/.git/modules/test/bats/config	remote.origin.url
+2026-10-31T10:44:36.3629736Z Entering 'test/test_helper/bats-assert'
+2026-10-31T10:44:36.3636831Z file:/home/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-assert/config	remote.origin.url
+2026-10-31T10:44:36.3643943Z Entering 'test/test_helper/bats-support'
+2026-10-31T10:44:36.3650774Z file:/home/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-support/config	remote.origin.url
+2026-10-31T10:44:36.3661388Z [command]/usr/bin/git config --file /home/runner/work/jouet/jouet/.git/modules/test/bats/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:44:36.3673153Z [command]/usr/bin/git config --file /home/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-assert/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:44:36.3684360Z [command]/usr/bin/git config --file /home/runner/work/jouet/jouet/.git/modules/test/test_helper/bats-support/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-31T10:44:36.3767790Z Cleaning up orphan processes

@@ -1,0 +1,41 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "ci-rerun"
+why = "Rerunning CI blind wastes a run on a real failure; `jouet ci explain` says whether the failure is flaky, infrastructure or real, and reruns only the first two."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["ci", "explain"]
+suggest = "jouet ci explain"
+message = "It reads the failed jobs' logs and the workflow's history and says whether each is flaky, infrastructure or real; `--rerun` (with `--run ID` or a PR) reruns only a flake or an infrastructure failure, since a real one fails again (`jouet agent-help ci`)."
+
+[[rule.match]]
+command = "gh run rerun"
+unless_flags = ["--help", "-h"]
+
+[[rule.match]]
+command = "gh api"
+text = 'actions/(runs|jobs)/[0-9]+/rerun'
+
+[rule.examples]
+fires = [
+  "gh run rerun 41193844808",
+  "gh run rerun 41193844808 --failed",
+  "gh run rerun --job 124515918002",
+  "gh run rerun 41193844808 --failed --repo jdx/jouet",
+  "gh api -X POST repos/jdx/jouet/actions/runs/41193844808/rerun-failed-jobs",
+  "gh api --method POST /repos/jdx/jouet/actions/jobs/124515918002/rerun",
+  "gh run view 1 --log-failed && gh run rerun 1 --failed",
+]
+quiet = [
+  "gh run rerun --help",
+  "gh run rerun -h",
+  "gh run view 41193844808",
+  "gh run view 41193844808 --log-failed",
+  "gh run list --limit 5",
+  "gh api repos/jdx/jouet/actions/runs/41193844808",
+  "jouet ci explain --run 41193844808 --rerun",
+  "echo 'gh run rerun 1'",
+  "git commit -m 'gh run rerun 1 --failed'",
+]

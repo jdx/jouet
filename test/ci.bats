@@ -223,3 +223,68 @@ export --format json REGISTRY_TOKEN"
 	run --separate-stderr jouet ci run ci --secrets-from vault
 	assert_failure 2
 }
+
+# `jouet ci explain` from responses recorded from jdx/jouet (see
+# tests/ci_explain.rs), put in its cache as if a first explain had fetched
+# them, with GitHub out of reach: a second explain sends no request.
+seed_explain_cache() {
+	local cache="$XDG_STATE_HOME/jouet/ci/jdx-jouet"
+	mkdir -p "$cache"
+	cp "$PROJECT_ROOT"/tests/fixtures/ci-explain/* "$cache/"
+	export JOUET_GITHUB_API_URL="http://127.0.0.1:9" JOUET_GITHUB_TOKEN=test-token
+}
+
+@test "ci explain calls a macOS-only timing failure flaky, naming the OSes, from the cache" {
+	seed_explain_cache
+	run --separate-stderr jouet ci explain --run 41193844808 --repo jdx/jouet --display agent --log-lines 6
+
+	assert_success
+	assert_line --index 0 "FLAKY jdx/jouet  1 flaky, 9 following"
+	assert_line 'FLAKY trusted / test-macos (macos)  step "Run mise run test"'
+	assert_line "  failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5"
+	assert_line "  - passed on linux on this commit (trusted / test); failed on macos"
+	assert_line "  - a failure on one OS can be a real macos bug: if a rerun fails the same way on this commit, it is real"
+	assert_line "rerun: allowed, every failed job is flaky or infrastructure: jouet ci explain --run 41193844808 --repo jdx/jouet --rerun"
+	assert_line "GitHub: 0 requests, 9 from the cache"
+}
+
+@test "ci explain calls a compile error main also had real, and --rerun refuses it with exit 4" {
+	seed_explain_cache
+	run --separate-stderr jouet --json ci explain --run 41193332714 --repo jdx/jouet
+
+	assert_failure 1
+	assert_equal "$(jq -r .result <<<"$output")" real
+	assert_equal "$(jq '[.runs[0].jobs[] | select(.verdict == "real" and .main_broken)] | length' <<<"$output")" 11
+	assert_equal "$(jq -r '.runs[0].jobs[0].errors[0]' <<<"$output")" "error[E0425]: cannot find function \`lowercase_first\` in this scope"
+	assert_equal "$(jq -r '[.runs[0].following[].name] | join(",")' <<<"$output")" "trusted / final,final"
+
+	run --separate-stderr jouet ci explain --run 41193332714 --repo jdx/jouet --rerun
+	assert_failure 4
+	assert_output ""
+	assert_equal "${stderr_lines[0]}" "jouet: not rerunning: a rerun repeats a real failure: trusted / test (real), trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest) (real), trusted / msrv (real) and 8 more"
+}
+
+@test "ci explain takes one target, and an unreachable GitHub is a remote failure" {
+	run --separate-stderr jouet ci explain 7 --run 1 --repo jdx/jouet
+	assert_failure 2
+
+	JOUET_GITHUB_API_URL="http://127.0.0.1:9" JOUET_GITHUB_TOKEN=test-token \
+		run --separate-stderr jouet --json ci explain --run 1 --repo jdx/jouet
+	assert_failure 5
+	assert_equal "$(jq -r .error.code <<<"$output")" remote
+}
+
+@test "the ci-rerun rule steers gh run rerun to ci explain, and leaves gh run view alone" {
+	bash_payload() {
+		jq -cn --arg c "$1" '{session_id: "s1", tool_name: "Bash", tool_input: {command: $c}}'
+	}
+	for cmd in 'gh run rerun 41193844808' 'gh run rerun 41193844808 --failed' 'gh api -X POST repos/jdx/jouet/actions/runs/1/rerun-failed-jobs'; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload "$cmd")"
+		assert_equal "$(jq -r .hookSpecificOutput.permissionDecision <<<"$output")" deny
+		assert_equal "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$output" | cut -d'`' -f2)" "jouet ci explain"
+	done
+	for cmd in 'gh run view 41193844808 --log-failed' 'gh run rerun --help'; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload "$cmd")"
+		assert_output ""
+	done
+}
