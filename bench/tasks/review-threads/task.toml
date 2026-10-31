@@ -19,6 +19,13 @@ stdout_contains = "subtotal"
 tool = "jouet"
 args = ["pr", "threads", "reply", "55501", "12", "--body", "Renamed to `subtotal` in {sha}.", "--resolve", "--json"]
 
+# A reply, then a listing that must still read every thread.
+[[probe]]
+tool = "jouet"
+before = [["pr", "threads", "reply", "55501", "12", "--body", "Renamed to `subtotal`.", "--resolve"]]
+args = ["pr", "threads", "12", "--all", "--json"]
+stdout_contains = "Renamed to `subtotal`."
+
 [[probe]]
 tool = "gh"
 args = ["pr", "view", "12", "--comments"]
