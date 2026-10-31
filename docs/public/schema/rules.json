@@ -157,7 +157,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is\nabout a command, and needs `command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox` and\n`secret_files` is about a command, and needs `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -249,6 +249,12 @@
         },
         "min_read_lines": {
           "description": "The call puts at least this many lines of files in the context:\nClaude Code's Read (up to 2,000 lines without a `limit`), or a shell\nread with `cat`, `head`, `tail`, `sed -n` or `nl`. jouet's hook counts\nthem; set it in an example with `read_lines`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_code_lines": {
+          "description": "Like `min_read_lines`, counting only source files `jouet read\n--outline` can outline, so a long log or command output read whole\ndoes not count. Set it in an example with `code_lines`.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -388,6 +394,12 @@
         },
         "read_lines": {
           "description": "How many lines of files the call reads, as jouet's hook would count\nthem.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "code_lines": {
+          "description": "How many of those lines are in source files `jouet read --outline`\ncan outline.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0

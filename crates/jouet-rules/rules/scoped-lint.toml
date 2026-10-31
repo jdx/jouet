@@ -40,9 +40,17 @@ fires = [
   "mise run lint",
   "cd crate && mise run lint",
   { command = "cargo clippy --workspace 2>&1 | head -20", git = { dirty = true } },
+  { command = "cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' | head -40", git = { dirty = true } },
+  { command = "cargo fmt --all && cargo clippy -- -D warnings 2>&1 | tail -20", git = { dirty = true } },
 ]
 quiet = [
   { command = "cargo clippy --workspace --all-targets -- -D warnings 2>&1 | head -20", git = { dirty = false } },
+  # The full check, as CI runs it, before pushing.
+  { command = "cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | grep -vE '^mbx' | tail -5", git = { dirty = true } },
+  { command = "cargo clippy --all-targets --all-features -- -Dwarnings | tail", git = { dirty = true } },
+  # A lint in the same call as the test suite.
+  { command = "cargo clippy --workspace 2>&1 | tail -3; cargo test --workspace 2>&1 | tail -3", git = { dirty = true } },
+  { command = "mise run lint; mise run test:e2e", git = { dirty = true } },
   { command = "mise run lint", git = { dirty = false } },
   { command = "npx eslint .", git = { dirty = false } },
   "cargo clippy -p jouet-diag 2>&1 | head",

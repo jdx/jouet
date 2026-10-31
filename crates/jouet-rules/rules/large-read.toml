@@ -1,7 +1,7 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "large-read"
-why = "Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that."
+why = "Reading a long source file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that."
 mode = "warn"
 scope = "builtin"
 author = "builtin"
@@ -10,29 +10,37 @@ needs = ["read"]
 suggest = "jouet read FILE --outline"
 message = "It lists the file's definitions with their line ranges; `jouet read FILE --symbol NAME` then prints just the one you need (`jouet agent-help read`)."
 
+# Only source files count (`min_code_lines`): a log, a command's saved
+# output or a document has no outline, and reading it whole is the point.
+
 # Claude Code's Read with no offset or limit: up to 2,000 lines.
 [[rule.match]]
 tool = "Read"
 unless_input = ["offset", "limit"]
-min_read_lines = 400
+min_code_lines = 400
 
 [[rule.match]]
 command = ["cat", "nl"]
-min_read_lines = 400
+min_code_lines = 400
 
 [rule.examples]
 fires = [
-  { tool = "Read", path = "src/backend/mod.rs", read_lines = 2000 },
-  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs" }, read_lines = 650 },
-  { command = "cat src/backend/mod.rs", read_lines = 9339 },
-  { command = "nl -ba src/lib.rs", read_lines = 400 },
+  { tool = "Read", path = "src/backend/mod.rs", read_lines = 2000, code_lines = 2000 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs" }, read_lines = 650, code_lines = 650 },
+  { command = "cat src/backend/mod.rs", read_lines = 9339, code_lines = 9339 },
+  { command = "nl -ba src/lib.rs", read_lines = 400, code_lines = 400 },
+  { command = "cat build.log src/lib.rs", read_lines = 5400, code_lines = 400 },
 ]
 quiet = [
-  { tool = "Read", path = "src/main.rs", read_lines = 120 },
-  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", offset = 300, limit = 80 }, read_lines = 80 },
-  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", limit = 1000 }, read_lines = 1000 },
-  { command = "cat src/lib.rs", read_lines = 399 },
-  { command = "sed -n '1,80p' src/lib.rs", read_lines = 80 },
+  { tool = "Read", path = "src/main.rs", read_lines = 120, code_lines = 120 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", offset = 300, limit = 80 }, read_lines = 80, code_lines = 80 },
+  { tool = "Read", path = "src/lib.rs", input = { file_path = "src/lib.rs", limit = 1000 }, read_lines = 1000, code_lines = 1000 },
+  { command = "cat src/lib.rs", read_lines = 399, code_lines = 399 },
+  { command = "sed -n '1,80p' src/lib.rs", read_lines = 80, code_lines = 80 },
   { command = "cat src/backend/mod.rs" },
-  { command = "jouet read src/backend/mod.rs --outline", read_lines = 9339 },
+  { command = "jouet read src/backend/mod.rs --outline", read_lines = 9339, code_lines = 9339 },
+  # Logs, saved output and documents: no outline to read instead.
+  { command = "cat /tmp/tasks/b45rlfx5a.output", read_lines = 2400, code_lines = 0 },
+  { command = "until grep -q '^exit' run.log; do sleep 3; done; cat run.log", read_lines = 900, code_lines = 0 },
+  { tool = "Read", path = "docs/rules.md", read_lines = 1200, code_lines = 0 },
 ]

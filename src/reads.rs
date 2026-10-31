@@ -284,6 +284,17 @@ pub(crate) fn line_count(reads: &[Read]) -> Option<u32> {
     })
 }
 
+/// [`line_count`] over the reads of source files `jouet read --outline` can
+/// outline, leaving out logs, command output and other text.
+pub(crate) fn code_line_count(reads: &[Read]) -> Option<u32> {
+    let code: Vec<Read> = reads
+        .iter()
+        .filter(|r| jouet_graph::extract::language_for_path(&r.path.to_string_lossy()).is_some())
+        .cloned()
+        .collect();
+    line_count(&code)
+}
+
 /// Remembers that the session was shown what the reads cover.
 pub(crate) fn record(memory: &mut Memory, reads: &[Read]) {
     for read in reads {

@@ -40,7 +40,7 @@ job-stop            enabled  warn    builtin  builtin  2026-10-31  Killing a ser
 claimed-path        enabled  warn    builtin  builtin  2026-10-31  Two sessions changing the same files on one machine overwrite or commit each other's work; `jouet claim` says who is working where.
 checks              enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
 reread              enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
-large-read          enabled  warn    builtin  builtin  2026-10-30  Reading a long file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
+large-read          enabled  warn    builtin  builtin  2026-10-30  Reading a long source file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
 unbudgeted-search   enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
 ```
 
@@ -120,7 +120,7 @@ A rule's keys:
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is about a command, and needs `command`.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox` and `secret_files` is about a command, and needs `command`.
 
 | Key | Matches |
 |---|---|
@@ -143,6 +143,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `unless_input` | The tool's input has none of these fields, such as `head_limit`. |
 | `seen` | Whether the session was already shown everything the call reads, every line, in files unchanged since. The hook works it out from what the session read (Claude Code's Read tool, shell calls made only of `cat`, `head`, `tail`, `sed -n` and `nl`) and what `jouet search` showed it. Any other call is unseen. |
 | `min_read_lines` | The call puts at least this many lines of files in the context: Claude Code's Read (up to 2,000 lines without a `limit`), or a shell read with `cat`, `head`, `tail`, `sed -n` or `nl`. The hook counts them. |
+| `min_code_lines` | Like `min_read_lines`, counting only source files `jouet read --outline` can outline, so a long log, a command's saved output or a document read whole does not count. |
 | `unless_paths` | For a file tool, the path matches none of these patterns, read as in `paths`. |
 | `prints` | Whether the command's standard output reaches the transcript: it is not redirected to a file (`>`, `>>`, `&>`), piped into another command, or captured with `$(...)`. `>&2` still reaches it. |
 | `fnox` | Whether the call runs in a project that uses [fnox](https://fnox.jdx.dev): a `fnox.toml`, `.fnox.toml` or `.config/fnox.toml` in the working directory or above it. |
@@ -203,6 +204,7 @@ fires = [
 | `input` | The tool's input: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`, or `{ command = "npm run dev", input = { run_in_background = true } }` for a `Bash` call. |
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
 | `read_lines` | How many lines of files the call reads, as the hook would count them. |
+| `code_lines` | How many of those lines are in source files `jouet read --outline` can outline. |
 | `fnox` | The call runs in a fnox project whose config defines these names: `fnox = {}`, or `fnox = { secrets = ["STRIPE_KEY"], files = ["secrets.env"] }`. Omitted, it does not. |
 | `git` | What `jouet.git.state()` reports for a script: `git = { dirty = false }` for a work tree with nothing uncommitted, `true` for one with changes. Omitted, the probe has no answer, as every other probe in an example. |
 
@@ -254,7 +256,7 @@ ok    rebase-merged-base  12 examples passed
 ok    print-secrets       44 examples passed
 ok    secret-files        25 examples passed
 ok    push-untested       13 examples passed
-ok    scoped-lint         21 examples passed
+ok    scoped-lint         27 examples passed
 ok    affected-tests      22 examples passed
 ok    piped-test-output   34 examples passed
 ok    pitchfork-start     8 examples passed
@@ -267,7 +269,7 @@ ok    job-stop            15 examples passed
 ok    claimed-path        18 examples passed
 ok    checks              74 examples passed
 ok    reread              12 examples passed
-ok    large-read          11 examples passed
+ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
 28 of 29 rules passed their examples

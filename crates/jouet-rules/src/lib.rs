@@ -385,6 +385,9 @@ pub struct Call {
     pub seen: Option<bool>,
     /// How many lines of files the call reads; worked out by the caller.
     pub read_lines: Option<u32>,
+    /// How many of them are in source files `jouet read --outline` can
+    /// outline; worked out by the caller.
+    pub code_lines: Option<u32>,
     /// The project's fnox config, when the call runs in a project that uses
     /// fnox; worked out by the caller.
     pub fnox: Option<Fnox>,
@@ -439,6 +442,7 @@ impl Call {
             input: payload.get("tool_input").cloned(),
             seen: None,
             read_lines: None,
+            code_lines: None,
             fnox: None,
         }
     }

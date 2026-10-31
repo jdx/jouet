@@ -60,7 +60,7 @@ With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:
 
 An outline is an `outline` list of `kind`, `name`, `start` and `end`, with `more_definitions` when it was cut. A section has `more` for lines a cut left out, and `already_shown` instead of `text` for lines the session already has.
 
-The built-in `large-read` [rule](/rules) warns when the agent reads 400 lines or more of a file at once, with Claude Code's Read and no `offset` or `limit`, or with `cat` or `nl`, and suggests the outline.
+The built-in `large-read` [rule](/rules) warns when the agent reads 400 lines or more of source code at once, with Claude Code's Read and no `offset` or `limit`, or with `cat` or `nl`, and suggests the outline. Only files the outline can read count: a log, a command's saved output or a document read whole does not.
 
 ## The repository map
 

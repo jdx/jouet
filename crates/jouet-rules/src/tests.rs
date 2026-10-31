@@ -543,6 +543,7 @@ return {
             input: None,
             seen: None,
             read_lines: None,
+            code_lines: None,
             fnox: None,
             git_dirty: None,
             session: None,
