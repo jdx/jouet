@@ -4,7 +4,7 @@ description: What jouet promises not to break, what it may change in any release
 
 # Stability and deprecations
 
-jouet is pre-1.0. Until 1.0, any release may break anything on this page, and there are no deprecations: a breaking change removes the old flag, field or behaviour outright, with no alias or fallback. It is still marked as breaking, so the release notes say what changed. At 1.0 the promise below starts to hold, and deprecations with it.
+jouet is pre-1.0. Until 1.0, any release may change anything on this page and remove the old form, with no deprecation or warning first. At 1.0 the promise below starts to hold, and deprecations with it.
 
 ## What jouet promises
 
@@ -68,4 +68,4 @@ jouet: deprecated [wait-poll]: `--poll` is now `--interval` (removed in jouet 2.
 - The note names the release it is removed in.
 - The [changelog](https://github.com/jdx/jouet/blob/main/CHANGELOG.md) lists the deprecation when it starts, and lists the removal as a breaking change when it happens.
 
-Something deprecated is removed in the first major release at least 12 months after the release that started warning. Before 1.0 nothing is deprecated: the old form is removed in the release that changes it.
+Something deprecated is removed in the first major release at least 12 months after the release that started warning.

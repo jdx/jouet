@@ -59,10 +59,8 @@ removing or renaming a command, flag, JSON field, config key, environment
 variable or built-in rule, changing a field's type, or changing what an exit
 code means.
 
-Before 1.0, a breaking change removes the old form outright: no alias, no
-fallback, no code that reads what an older jouet wrote. Mark the commit and
-the pull request title with `!` and add a `BREAKING CHANGE:` footer that says
-what changed, so the release notes carry it.
+Before 1.0, none of this applies: change what you need and remove the old
+code, with no alias, fallback or warning.
 
 From 1.0 on, keep the old form working where you can, and warn where it is
 read:
