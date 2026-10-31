@@ -472,3 +472,154 @@ fn test_affected_falls_back_to_the_graph_for_go() {
     );
     assert_eq!(suite["command"], json!(["go", "test", "./cart"]));
 }
+
+/// A real repository with two committed files, and a second worktree of it
+/// beside it, both under one temporary directory.
+fn worktrees(env: &Env) -> (std::path::PathBuf, std::path::PathBuf) {
+    let main = env.root().join("main");
+    std::fs::remove_dir(env.root().join(".git")).unwrap();
+    std::fs::create_dir(&main).unwrap();
+    std::fs::write(main.join("a.py"), "def one():\n    return 1\n").unwrap();
+    std::fs::write(
+        main.join("b.py"),
+        "from a import one\n\n\ndef two():\n    return one()\n",
+    )
+    .unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    let wt = env.root().join("wt");
+    git(
+        &main,
+        &["worktree", "add", "-q", "--detach", wt.to_str().unwrap()],
+    );
+    (main, wt)
+}
+
+fn index_in(env: &Env, dir: &Path) -> Value {
+    let out = env
+        .command(&["--json", "graph", "index"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+#[test]
+fn a_new_worktree_starts_from_its_siblings_graph() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    let first = index_in(&env, &main);
+    assert_eq!(first["indexed"], 2);
+    assert!(first.get("seeded").is_none());
+
+    // A file differs in the new worktree: only it is extracted.
+    std::fs::write(
+        wt.join("b.py"),
+        "from a import one\n\n\ndef three():\n    return one()\n",
+    )
+    .unwrap();
+    let seeded = index_in(&env, &wt);
+    assert_eq!(seeded["seeded"], true, "{seeded}");
+    assert_eq!(seeded["indexed"], 1, "{seeded}");
+    assert_eq!(seeded["files"], 2);
+    assert_ne!(seeded["db"], first["db"]);
+    // The copy is this worktree's, not a view of the sibling's.
+    let callers = env
+        .command(&["--json", "graph", "callers", "one"])
+        .current_dir(&wt)
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&callers.stdout).unwrap();
+    assert_eq!(doc["symbols"][0]["items"][0]["name"], "three", "{doc}");
+    let main_callers = env
+        .command(&["--json", "graph", "callers", "one"])
+        .current_dir(&main)
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&main_callers.stdout).unwrap();
+    assert_eq!(doc["symbols"][0]["items"][0]["name"], "two", "{doc}");
+}
+
+#[test]
+fn a_sibling_graph_from_another_schema_is_not_copied() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    let first = index_in(&env, &main);
+    let conn = rusqlite::Connection::open(first["db"].as_str().unwrap()).unwrap();
+    conn.execute(
+        "UPDATE meta SET value = '0' WHERE key = 'schema_version'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let built = index_in(&env, &wt);
+    assert!(built.get("seeded").is_none(), "{built}");
+    assert_eq!(built["indexed"], 2);
+}
+
+#[test]
+fn prune_deletes_only_graphs_whose_worktree_is_gone() {
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    index_in(&env, &main);
+    let wt_db = index_in(&env, &wt)["db"].as_str().unwrap().to_string();
+    git(
+        &main,
+        &["worktree", "remove", "--force", wt.to_str().unwrap()],
+    );
+    let pruned = env.json(&["graph", "prune"]);
+    assert_eq!(pruned["removed"].as_array().unwrap().len(), 1, "{pruned}");
+    assert!(
+        pruned["removed"][0].as_str().unwrap().ends_with("wt"),
+        "{pruned}"
+    );
+    assert_eq!(pruned["kept"], 1);
+    assert!(!Path::new(&wt_db).exists());
+    let again = env.json(&["graph", "prune"]);
+    assert!(
+        again
+            .get("removed")
+            .is_none_or(|r| r.as_array().unwrap().is_empty())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prune_keeps_a_graph_whose_root_cannot_be_checked() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new();
+    let (main, wt) = worktrees(&env);
+    index_in(&env, &main);
+    index_in(&env, &wt);
+    let parent = env.root();
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root ignores permissions; then there is nothing to test.
+    let blind = std::fs::metadata(wt.join("a.py")).is_err();
+    let out = env
+        .command(&["--json", "graph", "prune"])
+        .current_dir(env.home.path())
+        .output()
+        .unwrap();
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pruned: Value = serde_json::from_slice(&out.stdout).unwrap();
+    if blind {
+        assert!(
+            pruned
+                .get("removed")
+                .is_none_or(|r| r.as_array().unwrap().is_empty()),
+            "{pruned}"
+        );
+        assert_eq!(pruned["kept"], 2);
+    }
+}

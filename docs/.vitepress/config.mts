@@ -129,6 +129,7 @@ export default defineConfig({
                   { text: "affected", link: "/cli/graph/affected" },
                   { text: "index", link: "/cli/graph/index/" },
                   { text: "status", link: "/cli/graph/status" },
+                  { text: "prune", link: "/cli/graph/prune" },
                 ],
               },
               { text: "handoff", link: "/cli/handoff" },

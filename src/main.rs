@@ -897,13 +897,27 @@ pub enum GraphCmd {
     Explore(GraphExploreArgs),
     /// List the test files that depend on changed files
     Affected(GraphAffectedArgs),
+    /// Delete the graphs of worktrees that no longer exist
+    Prune(GraphPruneArgs),
 }
+
+/// Delete the graphs of worktrees that no longer exist
+///
+/// Each worktree's graph records its root. This deletes every graph in
+/// $XDG_CACHE_HOME/jouet/graph whose root is gone, and keeps one whose root
+/// exists or cannot be checked. Querying a graph also does this, at most
+/// once a day.
+#[derive(Args)]
+pub struct GraphPruneArgs {}
 
 /// Build the graph, or bring it up to date
 ///
 /// Lists the work tree's source files (honouring .gitignore), and extracts
 /// only the files whose content changed since the last index. Files larger
-/// than 1 MiB or not UTF-8 are recorded without symbols.
+/// than 1 MiB or not UTF-8 are recorded without symbols. A worktree with no
+/// graph yet starts from a copy of the graph of a sibling worktree of the
+/// same repository, the one whose HEAD is nearest, so only the files that
+/// differ are extracted.
 #[derive(Args)]
 pub struct GraphIndexArgs {
     /// Drop the graph and index everything from scratch

@@ -25,9 +25,11 @@ mod index;
 mod link;
 mod query;
 mod store;
+mod worktrees;
 
 pub use index::Refresh;
 pub use query::{Affected, AffectedTest, Explored, MAX_RESULTS, Reach, SymbolQuery, is_test_path};
+pub use worktrees::Pruned;
 
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -61,6 +63,7 @@ pub struct Graph {
     conn: Connection,
     root: PathBuf,
     db: PathBuf,
+    seeded: bool,
 }
 
 /// A symbol in the graph.
@@ -133,6 +136,15 @@ pub fn db_path_for(repo_key: &str) -> Option<PathBuf> {
     jouet_output::paths::cache_dir().map(|d| d.join("graph").join(format!("{repo_key}.db")))
 }
 
+/// Deletes the graphs in jouet's cache whose worktree no longer exists
+/// (`jouet graph prune`; [`Graph::open`] also does it once a day).
+pub fn prune() -> Result<Pruned, Error> {
+    match jouet_output::paths::cache_dir() {
+        Some(dir) => worktrees::prune(&dir.join("graph")),
+        None => Ok(Pruned::default()),
+    }
+}
+
 impl Graph {
     /// Like [`Graph::open`], but `None` when the work tree has no graph yet,
     /// so a hook never builds one nobody asked for.
@@ -157,7 +169,23 @@ impl Graph {
         let key = jouet_output::paths::repo_key(&root).ok_or_else(not_a_work_tree)?;
         let db = db_path_for(&key)
             .ok_or_else(|| Error("no cache directory: set HOME or XDG_CACHE_HOME".into()))?;
-        Graph::open_at(&root, &db)
+        // A new worktree starts from a sibling worktree's graph, when the
+        // repository has one, rather than from nothing.
+        let seeded = !db.exists()
+            && worktrees::seed(&root, &db, |sibling| {
+                jouet_output::paths::repo_key(sibling).and_then(|k| db_path_for(&k))
+            });
+        if let Some(dir) = db.parent() {
+            worktrees::maybe_prune(dir);
+        }
+        let mut graph = Graph::open_at(&root, &db)?;
+        graph.seeded = seeded;
+        Ok(graph)
+    }
+
+    /// Whether this graph was just copied from a sibling worktree's.
+    pub fn seeded(&self) -> bool {
+        self.seeded
     }
 
     /// Opens the graph of the work tree at `root`, at `db`, creating an
@@ -169,6 +197,7 @@ impl Graph {
             conn,
             root,
             db: db.to_path_buf(),
+            seeded: false,
         })
     }
 

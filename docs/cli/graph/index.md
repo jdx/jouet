@@ -5,7 +5,7 @@
 
 Build the graph, or bring it up to date
 
-Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF-8 are recorded without symbols.
+Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF-8 are recorded without symbols. A worktree with no graph yet starts from a copy of the graph of a sibling worktree of the same repository, the one whose HEAD is nearest, so only the files that differ are extracted.
 
 ## Flags
 - **`--full`** — Drop the graph and index everything from scratch

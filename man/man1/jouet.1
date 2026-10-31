@@ -63,6 +63,9 @@ Find the code that answers a question, with its source and neighbours
 \fBgraph affected\fR
 List the test files that depend on changed files
 .TP
+\fBgraph prune\fR
+Delete the graphs of worktrees that no longer exist
+.TP
 \fBhandoff\fR
 Record the facts about this checkout for the next session
 .TP
@@ -385,7 +388,7 @@ Print help
 .SH "JOUET GRAPH INDEX"
 Build the graph, or bring it up to date
 
-Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF\-8 are recorded without symbols.
+Lists the work tree's source files (honouring .gitignore), and extracts only the files whose content changed since the last index. Files larger than 1 MiB or not UTF\-8 are recorded without symbols. A worktree with no graph yet starts from a copy of the graph of a sibling worktree of the same repository, the one whose HEAD is nearest, so only the files that differ are extracted.
 .PP
 \fBUsage:\fR jouet graph index [OPTIONS]
 .PP
@@ -559,6 +562,18 @@ Print help
 .TP
 \fB<FILES>\fR
 The changed files
+.SH "JOUET GRAPH PRUNE"
+Delete the graphs of worktrees that no longer exist
+
+Each worktree's graph records its root. This deletes every graph in $XDG_CACHE_HOME/jouet/graph whose root is gone, and keeps one whose root exists or cannot be checked. Querying a graph also does this, at most once a day.
+.PP
+\fBUsage:\fR jouet graph prune [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET HANDOFF"
 Record the facts about this checkout for the next session
 
