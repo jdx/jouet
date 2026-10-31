@@ -158,6 +158,11 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("audit", None),
     ("skill", None),
     ("setup", None),
+    // A person's decision, not an agent's: what a repository or a plugin
+    // may run. The `trust` rule denies the first and `plugin add` to agents.
+    ("trust", None),
+    ("untrust", None),
+    ("plugin", None),
     ("stats", None),
     ("completion", None),
 ];
@@ -513,7 +518,7 @@ const USAGE: &[Usage] = &[
                 "the built-in routines; one that writes needs --yes (without: a preview and exit 4)",
             ),
         ],
-        more: "--trust, run test and run types",
+        more: "run test and run types",
     },
     Usage {
         command: "wind",
@@ -578,11 +583,6 @@ const PROMPTED: &[(&str, &str)] = &[
     ("diag", "delta"),
     ("diag", "fix"),
 ];
-
-/// Subcommands for a person's decision, not an agent's, which the overview
-/// leaves out as it leaves out `jouet setup`: trusting a repository's rules.
-/// `jouet agent-help COMMAND` still lists them.
-const PEOPLE: &[(&str, &str)] = &[("rule", "trust"), ("rule", "untrust")];
 
 /// Tools jouet works alongside rather than reimplementing, mentioned when
 /// they are installed.
@@ -715,7 +715,7 @@ fn head(name: &str, meta: &CommandMeta<'_>) -> String {
         .iter()
         .filter(|s| {
             let at = (name, s.cmd.name);
-            !s.hide && !PROMPTED.contains(&at) && !PEOPLE.contains(&at)
+            !s.hide && !PROMPTED.contains(&at)
         })
         .map(|s| s.cmd.name)
         .collect();

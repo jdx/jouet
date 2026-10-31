@@ -43,7 +43,7 @@ setup() {
 	assert_success
 	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
-	assert_line '30 of 30 rules passed their examples'
+	assert_line '31 of 31 rules passed their examples'
 
 	cat >"$RULES/no-rm.toml" <<'TOML'
 [[rule]]
@@ -62,12 +62,12 @@ TOML
 	assert_line '            - expected: quiet'
 	assert_line '            + actual:   deny: rm deletes for good'
 	assert_line --regexp '^FAIL  bare +it has no examples$'
-	assert_line '30 of 32 rules passed their examples'
+	assert_line '31 of 33 rules passed their examples'
 	refute_line --partial 'echo rm'
 
 	run --separate-stderr jouet rule test --all --json
 	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
-	assert_output '[30,2,[2,1]]'
+	assert_output '[31,2,[2,1]]'
 
 	run --separate-stderr jouet rule test
 	assert_failure 2
@@ -320,7 +320,7 @@ TOML
 
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +untrusted +deny +repo:untrusted +unknown +a team rule$'
-	assert_line --partial 'is not trusted, so its rules do not run'
+	assert_line --partial 'is not trusted, so its rules and routines do not run'
 
 	# Tested before trusting, it behaves as it will once trusted: a
 	# repository rule, denying by default, and `scope = "repo"` is valid.
@@ -331,9 +331,9 @@ TOML
 	assert_output 'deny: no'
 	rm .jouet/rules/scoped.toml
 
-	run --separate-stderr jouet rule trust --yes
+	run --separate-stderr jouet trust --yes
 	assert_success
-	assert_output --partial '(1 rules)'
+	assert_output --partial '(1 rules, 0 routines)'
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^team +enabled +deny +repo:trusted'
 
@@ -344,7 +344,7 @@ TOML
 	assert_line --regexp '^team +untrusted'
 	assert_line --partial 'changed since it was trusted'
 
-	run --separate-stderr jouet rule untrust
+	run --separate-stderr jouet untrust
 	assert_output --partial 'no longer trusting'
 }
 

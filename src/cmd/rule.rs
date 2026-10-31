@@ -1,10 +1,8 @@
-//! `jouet rule list|test|schema|types|trust|untrust|pack|new|promote|log`.
-
-mod pack;
-mod trust;
+//! `jouet rule list|test|schema|types|new|promote|log`.
 
 use super::Output;
-use crate::rules::{self, Kind, Set};
+use crate::rules;
+use crate::sources::{self, Kind, Set};
 use crate::wind::{self, Paths, Status, replay, rulefile};
 use crate::{
     RuleArgs, RuleCmd, RuleGapArgs, RuleLogArgs, RuleNewArgs, RulePromoteArgs, RuleTestArgs,
@@ -35,9 +33,6 @@ pub(crate) fn run(args: &RuleArgs, out: &Output) -> Exit {
             out.result(&serde_json::json!({ "text": text }), || text.to_string());
             Exit::Ok
         }
-        RuleCmd::Trust(trust_args) => trust::trust(trust_args, &cwd, out),
-        RuleCmd::Untrust(_) => trust::untrust(&cwd, out),
-        RuleCmd::Pack(pack_args) => pack::run(pack_args, &cwd, out),
         RuleCmd::New(new_args) => new(new_args, out),
         RuleCmd::Promote(promote_args) => promote(promote_args, out),
         RuleCmd::Log(log_args) => log(log_args, out),
@@ -56,13 +51,16 @@ struct ListedRule<'a> {
     created: &'a str,
     source: String,
     /// For a rule from outside: whether its set runs. trusted, changed or
-    /// untrusted for a repository's or the system's, admin for a
-    /// root-owned system directory, verified or mismatch for a pack.
+    /// untrusted for a repository's; enforced or writable for the
+    /// system's; verified, mismatch or needs for a plugin's.
     #[serde(skip_serializing_if = "Option::is_none")]
     trust: Option<&'static str>,
-    /// The rule pack it comes from.
+    /// The plugin it comes from.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pack: Option<&'a str>,
+    plugin: Option<&'a str>,
+    /// The scope column, with the plugin and the trust state.
+    #[serde(skip)]
+    scope_text: String,
     event: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
     why: &'a str,
@@ -89,7 +87,7 @@ fn list(cwd: &Path, out: &Output) -> Exit {
     // the broken ones.
     loaded.engine.load_scripts();
     let mut notes = loaded.errors.clone();
-    notes.extend(set_notes(&loaded.sets));
+    notes.extend(sources::notes(&loaded.sets));
     let disabled = crate::settings::Settings::load()
         .rules
         .disable
@@ -111,7 +109,10 @@ fn list(cwd: &Path, out: &Output) -> Exit {
                 trust: set
                     .filter(|s| s.kind != Kind::User)
                     .map(|s| s.status.name()),
-                pack: set.and_then(|s| s.name.as_deref()),
+                plugin: set.and_then(|s| s.name.as_deref()),
+                scope_text: set
+                    .filter(|s| s.kind != Kind::User)
+                    .map_or_else(|| rule.scope.name().to_string(), Set::scope),
                 event: rule.event.name(),
                 why: &rule.why,
                 format: rule.format,
@@ -177,56 +178,6 @@ fn set_of<'a>(sets: &'a [Set], rule: &Rule) -> Option<&'a Set> {
     sets.iter().find(|s| s.holds(path))
 }
 
-/// The scope column: the scope, the pack, and whether its set runs, such
-/// as `repo:trusted`, `pack:acme`, `pack:acme:mismatch` or `enforced`.
-fn scope_text(r: &ListedRule) -> String {
-    let mut text = r.scope.name().to_string();
-    if let Some(pack) = r.pack {
-        text.push(':');
-        text.push_str(pack);
-    }
-    if let Some(trust) = r.trust.filter(|t| !matches!(*t, "enforced" | "verified")) {
-        text.push(':');
-        text.push_str(trust);
-    }
-    text
-}
-
-/// What to do about each set of rules from outside that does not run.
-fn set_notes(sets: &[Set]) -> Vec<String> {
-    sets.iter()
-        .filter_map(|s| {
-            let dir = s.dir.display();
-            Some(match &s.status {
-                rules::Status::Untrusted => format!(
-                    "{dir} is not trusted, so its rules do not run; review them, then run `jouet rule trust`"
-                ),
-                rules::Status::Changed => format!(
-                    "{dir} changed since it was trusted, so its rules do not run; review them, then run `jouet rule trust`"
-                ),
-                rules::Status::Writable => format!(
-                    "{}, so the enforced rules in {dir} do not run until only its owner can write them",
-                    s.why.as_deref().unwrap_or_default()
-                ),
-                rules::Status::Missing => format!(
-                    "{} ({}) is not fetched, so its rules do not run; run `jouet rule pack sync`",
-                    s.label(),
-                    s.pin.as_ref().map(rules::packs::Pin::source).unwrap_or_default()
-                ),
-                rules::Status::Mismatch => format!(
-                    "{}: the rules kept in {dir} do not match its pin, so they do not run; run `jouet rule pack sync`",
-                    s.label()
-                ),
-                rules::Status::Invalid(problem) => format!("{}: {problem}", s.label()),
-                rules::Status::Own
-                | rules::Status::Enforced
-                | rules::Status::Trusted
-                | rules::Status::Verified => return None,
-            })
-        })
-        .collect()
-}
-
 fn state_text(state: &State) -> String {
     match state {
         State::Enabled => "enabled".into(),
@@ -252,7 +203,7 @@ fn list_text(report: &List) -> String {
                 r.name.to_string(),
                 state_text(r.state),
                 mode.to_string(),
-                scope_text(r),
+                r.scope_text.clone(),
                 r.author.to_string(),
                 r.created.to_string(),
                 r.why.to_string(),
@@ -956,7 +907,7 @@ fn engine_for(rule: &str, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, St
         .iter()
         .find(|r| r.name == rule && r.state == State::Untrusted)
         .map(|r| r.origin.clone());
-    // Keep it a repository's, pack's or system rule, so its scope and
+    // Keep it a repository's, plugin's or system rule, so its scope and
     // default mode are the ones it will have once trusted.
     let Some(origin) = untrusted else {
         return Ok((loaded.engine, vec![rule.to_string()]));

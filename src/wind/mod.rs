@@ -187,6 +187,7 @@ pub(crate) fn user_engine(rules_dir: &Path) -> Engine {
         dir: rules_dir.to_path_buf(),
         origin: jouet_rules::Origin::User,
         trusted: true,
+        namespace: None,
     }]);
     Engine::new(
         sources,

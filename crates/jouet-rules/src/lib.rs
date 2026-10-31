@@ -117,7 +117,7 @@ const BUILTIN: &[(&str, &str)] = &[
         include_str!("../rules/unbudgeted-search.toml"),
     ),
     ("curl-json", include_str!("../rules/curl-json.toml")),
-    ("trust-rules", include_str!("../rules/trust-rules.toml")),
+    ("trust", include_str!("../rules/trust.toml")),
 ];
 
 /// The scripts built-in rules name.
@@ -205,8 +205,8 @@ pub enum Origin {
     Builtin,
     User(PathBuf),
     Repo(PathBuf),
-    /// A file in an installed rule pack.
-    Pack(PathBuf),
+    /// A file in an installed plugin.
+    Plugin(PathBuf),
     /// A file in the system directory.
     Enforced(PathBuf),
 }
@@ -217,7 +217,7 @@ impl Origin {
             Self::Builtin => Scope::Builtin,
             Self::User(_) => Scope::User,
             Self::Repo(_) => Scope::Repo,
-            Self::Pack(_) => Scope::Pack,
+            Self::Plugin(_) => Scope::Plugin,
             Self::Enforced(_) => Scope::Enforced,
         }
     }
@@ -226,7 +226,7 @@ impl Origin {
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::Builtin => None,
-            Self::User(path) | Self::Repo(path) | Self::Pack(path) | Self::Enforced(path) => {
+            Self::User(path) | Self::Repo(path) | Self::Plugin(path) | Self::Enforced(path) => {
                 Some(path)
             }
         }
@@ -265,6 +265,8 @@ pub struct Source {
     /// not to be read from beside the file: the built-in rules', and a
     /// draft's.
     pub scripts: Vec<(String, String)>,
+    /// A plugin's name, which its rules' names start with: `acme/no-curl`.
+    pub namespace: Option<String>,
 }
 
 impl Source {
@@ -277,6 +279,7 @@ impl Source {
             trusted: true,
             format: Format::Toml,
             scripts: Vec::new(),
+            namespace: None,
         }
     }
 
@@ -820,6 +823,8 @@ pub struct RuleDir {
     pub origin: fn(PathBuf) -> Origin,
     /// False to list its rules without running them.
     pub trusted: bool,
+    /// A plugin's name, which its rules' names start with.
+    pub namespace: Option<String>,
 }
 
 /// Every rule source: built-in, then each directory's in order, marked
@@ -852,6 +857,7 @@ pub fn discover(dirs: &[RuleDir]) -> (Vec<Source>, Vec<String>) {
             sources.push(Source {
                 trusted: dir.trusted,
                 format,
+                namespace: dir.namespace.clone(),
                 ..Source::toml(name, (dir.origin)(path), code)
             });
         }
@@ -1031,7 +1037,10 @@ impl Engine {
             rule_problem(&d, event)
         };
         let mut rule = Rule {
-            name: d.name.0,
+            name: match &source.namespace {
+                Some(namespace) => format!("{namespace}/{}", d.name.0),
+                None => d.name.0,
+            },
             origin: source.origin.clone(),
             why: d.why,
             mode: d.mode.unwrap_or(scope.default_mode()),
@@ -1145,6 +1154,9 @@ impl Engine {
         if let Err(e) = apply_header(&mut rule, &header) {
             rule.state = State::Broken(e);
             return rule;
+        }
+        if let Some(namespace) = &source.namespace {
+            rule.name = format!("{namespace}/{}", rule.name);
         }
         if !source.trusted {
             rule.state = State::Untrusted;
@@ -1262,7 +1274,7 @@ impl Engine {
 
     /// The rules from files in `dir` or below it that load but do not pass
     /// their examples of both kinds, and why: a rule from outside, a
-    /// repository's, a pack's or the system's, must, before it runs.
+    /// repository's, a plugin's or the system's, must, before it runs.
     pub fn unproven(&self, dir: &Path) -> Vec<(String, String)> {
         self.rules
             .iter()

@@ -29,8 +29,8 @@ pub enum Scope {
     Builtin,
     User,
     Repo,
-    /// From a rule pack, pinned by its content and, from git, its commit.
-    Pack,
+    /// From a plugin, pinned by its content and, from git, its commit.
+    Plugin,
     /// From the system directory, `/etc/jouet`: the settings cannot turn it
     /// off.
     Enforced,
@@ -42,7 +42,7 @@ impl Scope {
             Self::Builtin => "builtin",
             Self::User => "user",
             Self::Repo => "repo",
-            Self::Pack => "pack",
+            Self::Plugin => "plugin",
             Self::Enforced => "enforced",
         }
     }
@@ -52,15 +52,16 @@ impl Scope {
     pub fn default_mode(self) -> Mode {
         match self {
             Self::User => Mode::Warn,
-            Self::Builtin | Self::Repo | Self::Pack | Self::Enforced => Mode::Deny,
+            Self::Builtin | Self::Repo | Self::Plugin | Self::Enforced => Mode::Deny,
         }
     }
 
     /// Whether a rule that says it has scope `declared` may live here. A
-    /// pack or the system directory may hold rules written for a
+    /// plugin or the system directory may hold rules written for a
     /// repository.
     pub(crate) fn accepts(self, declared: Self) -> bool {
-        declared == self || (declared == Self::Repo && matches!(self, Self::Pack | Self::Enforced))
+        declared == self
+            || (declared == Self::Repo && matches!(self, Self::Plugin | Self::Enforced))
     }
 }
 

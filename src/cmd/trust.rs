@@ -1,9 +1,11 @@
-//! `jouet rule trust|untrust`: which repositories' and system directories'
-//! rules run.
+//! `jouet trust` and `jouet untrust`: whether this repository's rules,
+//! routines and plugins run.
 
-use super::super::Output;
-use crate::RuleTrustArgs;
-use crate::rules::{self, Kind, Load, Set, packs};
+use super::Output;
+use crate::TrustArgs;
+use crate::plugins;
+use crate::rules::{self, Load};
+use crate::sources::{self, Kind, Set};
 use jouet_output::exit::Exit;
 use jouet_rules::{Engine, State};
 use serde::Serialize;
@@ -87,6 +89,25 @@ pub(super) fn checked_text(rules: &[Checked]) -> String {
     text
 }
 
+/// The current directory, or the exit for when it cannot be read.
+pub(super) fn cwd(out: &Output) -> Result<PathBuf, Exit> {
+    std::env::current_dir()
+        .map_err(|e| out.error(Exit::Failed, &format!("reading the current directory: {e}")))
+}
+
+/// The names of the routines in a directory, as `joue` runs them.
+fn routines(dir: &Path, namespace: Option<&str>) -> Vec<String> {
+    jouet_routines::routine::luau_files(dir)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| p.file_stem())
+        .map(|stem| match namespace {
+            Some(ns) => format!("{ns}/{}", stem.to_string_lossy()),
+            None => stem.to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct Trusted {
     dir: String,
@@ -94,79 +115,108 @@ struct Trusted {
     trusted: bool,
     rules: Vec<Checked>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    packs: Vec<String>,
+    routines: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    plugins: Vec<String>,
 }
 
-/// The repository's set of rules.
+/// This repository's set.
 fn target(cwd: &Path) -> Result<Set, (Exit, String)> {
     let mut errors = Vec::new();
-    let sets = rules::sets(cwd, None, &mut rules::digests(), &mut errors);
+    let sets = sources::sets(cwd, None, &mut sources::digests(), &mut errors);
     sets.into_iter()
         .find(|s| s.kind == Kind::Repo)
         .ok_or_else(|| {
             (
-                Exit::NotFound,
-                "no .jouet/rules directory or .jouet/packs.toml at the root of this repository"
-                    .into(),
-            )
+            Exit::NotFound,
+            "no .jouet/rules, .jouet/routines or .jouet/plugins.toml at the root of this repository"
+                .into(),
+        )
         })
 }
 
-pub(super) fn trust(args: &RuleTrustArgs, cwd: &Path, out: &Output) -> Exit {
+pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
+    let cwd = match cwd(out) {
+        Ok(cwd) => cwd,
+        Err(exit) => return exit,
+    };
     if args.list {
-        return list(cwd, out);
+        return list(&cwd, out);
     }
-    let set = match target(cwd) {
+    let set = match target(&cwd) {
         Ok(set) => set,
         Err((exit, message)) => return out.error(exit, &message),
     };
-    if let Some(exit) = needs_person(args.yes, "trusting rules", out) {
+    if let Some(exit) = needs_person(args.yes, "trusting a repository's rules and routines", out) {
         return exit;
     }
-    let dir = set.dir.display().to_string();
-    // The packs it pins are part of what is trusted: fetch them first.
-    let mut digests = rules::digests();
-    let pinned = match set.pins.as_deref().map(packs::read).transpose() {
+    let dir = set.root.display().to_string();
+    // The plugins it pins are part of what is trusted: fetch them first.
+    let mut digests = sources::digests();
+    let pinned = match set.pins().map(|p| plugins::read(&p)).transpose() {
         Ok(pinned) => pinned.unwrap_or_default(),
         Err(e) => return out.error(Exit::Failed, &e),
     };
-    for (name, pin) in &pinned.pack {
-        if let Err(e) = packs::sync(pin, &mut digests) {
-            return out.error(Exit::Remote, &format!("fetching rule pack {name}: {e}"));
+    for (name, pin) in &pinned.plugin {
+        if let Err(e) = plugins::sync(pin, &mut digests) {
+            return out.error(Exit::Remote, &format!("fetching plugin {name}: {e}"));
         }
     }
     let mut loaded = rules::load_with(
-        cwd,
+        &cwd,
         &Load {
-            assume: Some(&set.dir),
+            assume: Some(&set.root),
             ungated: true,
         },
     );
     loaded.engine.load_scripts();
-    let pack_dirs: Vec<PathBuf> = loaded
+    let plugins: Vec<&Set> = loaded
         .sets
         .iter()
-        .filter(|s| s.kind == Kind::Pack && s.pinned_by == Some(set.kind))
-        .map(|s| s.dir.clone())
+        .filter(|s| s.kind == Kind::Plugin && s.pinned_by == Some(Kind::Repo))
         .collect();
-    let mut dirs: Vec<&Path> = vec![&set.dir];
-    dirs.extend(pack_dirs.iter().map(PathBuf::as_path));
+    // A plugin that could not be kept as pinned is not trusted blind.
+    if let Some(bad) = plugins.iter().find(|s| !s.status.runs()) {
+        return out.error(
+            Exit::Failed,
+            &format!(
+                "{} is {}, so it cannot be checked",
+                bad.label(),
+                bad.status.name()
+            ),
+        );
+    }
+    let mut rule_dirs = vec![set.rules_dir()];
+    rule_dirs.extend(plugins.iter().map(|s| s.rules_dir()));
+    let dirs: Vec<&Path> = rule_dirs.iter().map(PathBuf::as_path).collect();
     let checked = check(&loaded.engine, &dirs);
+    let mut routine_names = routines(&set.routines_dir(), None);
+    for plugin in &plugins {
+        routine_names.extend(routines(&plugin.routines_dir(), plugin.name.as_deref()));
+    }
     let failed = checked.iter().any(|r| r.problem.is_some());
     // What was checked must be what is trusted.
-    let digest = rules::digests().of(&set.dir, set.pins.as_deref());
+    let digest = sources::digests().of(&set.root, sources::ENTRIES);
     let changed = digest.as_ref().ok() != set.digest.as_ref();
     let report = Trusted {
         dir,
         trusted: !failed && !changed,
         rules: checked,
-        packs: pinned.pack.keys().cloned().collect(),
+        routines: routine_names,
+        plugins: pinned.plugin.keys().cloned().collect(),
+    };
+    let reviewed = |report: &Trusted| {
+        let mut text = checked_text(&report.rules);
+        if !report.routines.is_empty() {
+            let _ = writeln!(text, "routines: {}", report.routines.join(", "));
+        }
+        text
     };
     if failed {
         out.result(&report, || {
             format!(
                 "{}not trusting {}: every rule must load and pass its examples of both kinds first\n",
-                checked_text(&report.rules),
+                reviewed(&report),
                 report.dir
             )
         });
@@ -181,27 +231,28 @@ pub(super) fn trust(args: &RuleTrustArgs, cwd: &Path, out: &Output) -> Exit {
             );
         }
     };
-    if let Err(e) = rules::trust_store().trust_digest(&set.dir, digest.clone()) {
+    if let Err(e) = sources::trust_store().trust(&set.root, digest.clone()) {
         return out.error(
             Exit::Failed,
             &format!("updating trust for {}: {e}", report.dir),
         );
     }
-    rules::remember_proven(&digest, &[]);
-    for pin in pinned.pack.values() {
-        rules::remember_proven(&pin.digest, &[]);
+    rules::remember_proven(&digest);
+    for pin in pinned.plugin.values() {
+        rules::remember_proven(&pin.digest);
     }
     out.result(&report, || {
-        let packs = if report.packs.is_empty() {
+        let plugins = if report.plugins.is_empty() {
             String::new()
         } else {
-            format!(" and the packs {}", report.packs.join(", "))
+            format!(" and the plugins {}", report.plugins.join(", "))
         };
         format!(
-            "{}trusted {} ({} rules{packs}); a change to any of them needs trusting again\n",
-            checked_text(&report.rules),
+            "{}trusted {} ({} rules, {} routines{plugins}); a change to any of them needs trusting again\n",
+            reviewed(&report),
             report.dir,
-            report.rules.len()
+            report.rules.len(),
+            report.routines.len()
         )
     });
     Exit::Ok
@@ -213,22 +264,26 @@ struct Untrusted {
     trusted: bool,
 }
 
-pub(super) fn untrust(cwd: &Path, out: &Output) -> Exit {
-    let set = match target(cwd) {
+pub(crate) fn untrust(out: &Output) -> Exit {
+    let cwd = match cwd(out) {
+        Ok(cwd) => cwd,
+        Err(exit) => return exit,
+    };
+    let set = match target(&cwd) {
         Ok(set) => set,
         Err((exit, message)) => return out.error(exit, &message),
     };
-    let was = match rules::trust_store().untrust(&set.dir) {
+    let was = match sources::trust_store().untrust(&set.root) {
         Ok(was) => was,
         Err(e) => {
             return out.error(
                 Exit::Failed,
-                &format!("updating trust for {}: {e}", set.dir.display()),
+                &format!("updating trust for {}: {e}", set.root.display()),
             );
         }
     };
     let report = Untrusted {
-        dir: set.dir.display().to_string(),
+        dir: set.root.display().to_string(),
         trusted: false,
     };
     out.result(&report, || {
@@ -243,9 +298,9 @@ pub(super) fn untrust(cwd: &Path, out: &Output) -> Exit {
 
 #[derive(Serialize)]
 struct Listed {
-    /// This repository's rules and the system's, and whether they run.
+    /// This repository's set and the system's, and whether they run.
     here: Vec<Here>,
-    /// Every directory trusted, and how many versions of its rules.
+    /// Every directory trusted, and how many versions of its files.
     trusted: Vec<Entry>,
 }
 
@@ -266,22 +321,18 @@ struct Entry {
 
 fn list(cwd: &Path, out: &Output) -> Exit {
     let mut errors = Vec::new();
-    let sets = rules::sets(cwd, None, &mut rules::digests(), &mut errors);
+    let sets = sources::sets(cwd, None, &mut sources::digests(), &mut errors);
     let here = sets
         .iter()
         .filter(|s| matches!(s.kind, Kind::Repo | Kind::System))
         .map(|s| Here {
-            kind: if s.kind == Kind::Repo {
-                "repo"
-            } else {
-                "system"
-            },
-            dir: s.dir.display().to_string(),
+            kind: s.kind.name(),
+            dir: s.root.display().to_string(),
             state: s.status.name(),
             why: s.why.clone(),
         })
         .collect();
-    let store = rules::trust_store();
+    let store = sources::trust_store();
     let report = Listed {
         here,
         trusted: store

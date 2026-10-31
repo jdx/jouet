@@ -18,6 +18,7 @@ pub(crate) mod http;
 pub(crate) mod job;
 pub(crate) mod land;
 pub(crate) mod next;
+pub(crate) mod plugin;
 pub(crate) mod pr;
 pub(crate) mod read;
 pub(crate) mod review;
@@ -35,6 +36,7 @@ pub(crate) mod stats;
 pub(crate) mod task;
 pub(crate) mod test;
 pub(crate) mod threads;
+pub(crate) mod trust;
 pub(crate) mod wait;
 pub(crate) mod wind;
 

@@ -337,11 +337,13 @@ fn discovery_layers_user_and_trusted_repository_rules() {
                 dir: user_dir.clone(),
                 origin: Origin::User,
                 trusted: true,
+                namespace: None,
             },
             RuleDir {
                 dir: repo_dir.clone(),
                 origin: Origin::Repo,
                 trusted,
+                namespace: None,
             },
         ]
     };
@@ -355,6 +357,41 @@ fn discovery_layers_user_and_trusted_repository_rules() {
 
     let (sources, _) = discover(&dirs(true));
     assert!(sources.iter().find(|s| s.name == "team").unwrap().trusted);
+}
+
+#[test]
+fn a_plugins_rules_are_named_after_it_so_they_take_no_other_rules_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mine, plugin) = (dir.path().join("mine"), dir.path().join("acme"));
+    let rule = "[[rule]]\nname = \"no-ls\"\nwhy = \"w\"\nmessage = \"no\"\nmatch = { command = \"ls\" }\nexamples = { fires = [\"ls\"], quiet = [\"pwd\"] }\n";
+    for d in [&mine, &plugin] {
+        std::fs::create_dir(d).unwrap();
+        std::fs::write(d.join("no-ls.toml"), rule).unwrap();
+    }
+    let (sources, errors) = discover(&[
+        RuleDir {
+            dir: mine,
+            origin: Origin::User,
+            trusted: true,
+            namespace: None,
+        },
+        RuleDir {
+            dir: plugin,
+            origin: Origin::Plugin,
+            trusted: true,
+            namespace: Some("acme".into()),
+        },
+    ]);
+    assert!(errors.is_empty());
+    let engine = engine(sources);
+    for name in ["no-ls", "acme/no-ls"] {
+        assert_eq!(engine.rule(name).unwrap().state, State::Enabled, "{name}");
+    }
+    assert_eq!(engine.rule("acme/no-ls").unwrap().scope, Scope::Plugin);
+    // Yours warns, as a rule of yours does by default; the plugin's denies.
+    let outcome = engine.evaluate(&bash("ls"));
+    assert_eq!(outcome.deny.unwrap().rule, "acme/no-ls");
+    assert_eq!(outcome.warnings[0].rule, "no-ls");
 }
 
 #[test]
@@ -376,9 +413,11 @@ fn the_settings_cannot_turn_off_an_enforced_rule() {
         );
         assert!(engine.evaluate(&bash("ls")).deny.is_some());
 
-        // A pack's rule, written for a repository, is turned off as usual.
+        // A plugin's rule, written for a repository, is turned off as usual.
         let engine = engine_with(
-            vec![source(Origin::Pack(PathBuf::from("/packs/x/org.toml")))],
+            vec![source(Origin::Plugin(PathBuf::from(
+                "/plugins/x/rules/org.toml",
+            )))],
             Budget::default(),
             disabled,
         );
@@ -1035,6 +1074,7 @@ quiet = ["rm -r a", "ls a b c d"]
         dir: rules.clone(),
         origin: Origin::User,
         trusted: true,
+        namespace: None,
     }];
     let (sources, errors) = discover(&user_rules);
     assert!(errors.is_empty());

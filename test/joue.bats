@@ -138,24 +138,27 @@ LUAU
 	[[ "$stderr" == *"bare writes, so it needs examples that \`joue test\` can run"* ]]
 }
 
-@test "repository routines run only once trusted" {
+@test "repository routines run only once trusted, with its rules" {
 	mkdir -p repo/.git repo/.jouet/routines
 	cd repo
 	printf -- '--- about: a team routine\nreturn { run = function() return "team ran" end }\n' >.jouet/routines/team.luau
 
 	run --separate-stderr joue --list
 	assert_line --regexp '^team +a team routine \(untrusted\)$'
-	assert_line --partial 'is not trusted, so its routines do not run'
+	assert_line --regexp ' +from .*/repo/\.jouet/routines/team\.luau \(repo:untrusted\)$'
+	# shellcheck disable=SC2016 # backticks in expected output are Markdown
+	assert_line --partial 'is not trusted, so its rules and routines do not run; review them, then run `jouet trust`'
 	run --separate-stderr joue team
 	assert_failure 4
 
-	run --separate-stderr joue --trust
-	assert_output --partial '(1 routines)'
+	run --separate-stderr jouet trust --yes
+	assert_line 'routines: team'
+	assert_output --partial '(0 rules, 1 routines)'
 	run --separate-stderr joue team
 	assert_success
 	assert_output 'team ran'
 
-	run --separate-stderr joue --untrust
+	run --separate-stderr jouet untrust
 	assert_output --partial 'no longer trusting'
 }
 

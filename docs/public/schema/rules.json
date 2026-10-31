@@ -121,9 +121,9 @@
           ]
         },
         {
-          "description": "From a rule pack, pinned by its content and, from git, its commit.",
+          "description": "From a plugin, pinned by its content and, from git, its commit.",
           "type": "string",
-          "const": "pack"
+          "const": "plugin"
         },
         {
           "description": "From the system directory, `/etc/jouet`: the settings cannot turn it\noff.",

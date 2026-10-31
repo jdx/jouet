@@ -19,6 +19,7 @@ use crate::reads;
 use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
+use crate::sources::Status;
 use crate::verify::{self, State};
 use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
@@ -518,42 +519,47 @@ fn load_all(payload: &Value) -> Option<rules::Loaded> {
     Some(loaded)
 }
 
-/// One line on rules here that do not run until the user trusts them or
-/// fetches them. It never asks the agent to trust them: the rules are the
-/// ones that would be steering it.
+/// One line on rules and routines here that do not run until the user
+/// trusts them or fetches them. It never asks the agent to trust them: the
+/// rules are the ones that would be steering it.
 fn untrusted_note(loaded: &rules::Loaded) -> Option<String> {
     let mut untrusted = Vec::new();
     let mut unfetched = Vec::new();
     for set in &loaded.sets {
-        let count = loaded
-            .engine
-            .rules()
-            .iter()
-            .filter(|r| r.origin.path().is_some_and(|p| set.holds(p)))
-            .count();
         match set.status {
-            rules::Status::Untrusted | rules::Status::Changed => {
-                let changed = if set.status == rules::Status::Changed {
+            Status::Untrusted | Status::Changed => {
+                let rules = loaded
+                    .engine
+                    .rules()
+                    .iter()
+                    .filter(|r| r.origin.path().is_some_and(|p| set.holds(p)))
+                    .count();
+                let routines = jouet_routines::routine::luau_files(&set.routines_dir())
+                    .map_or(0, |files| files.len());
+                let changed = if set.status == Status::Changed {
                     ", changed since they were trusted"
                 } else {
                     ""
                 };
-                untrusted.push(format!("{count} in {}{changed}", set.dir.display()));
+                untrusted.push(format!(
+                    "{rules} rules and {routines} routines in {}{changed}",
+                    set.root.display()
+                ));
             }
-            rules::Status::Missing | rules::Status::Mismatch => unfetched.push(set.label()),
+            Status::Missing | Status::Mismatch => unfetched.push(set.label()),
             _ => {}
         }
     }
     let mut parts = Vec::new();
     if !untrusted.is_empty() {
         parts.push(format!(
-            "rules here are not trusted, so they do not run ({}); trusting them is the user's decision, in their own terminal (`jouet rule trust`), not yours",
+            "this repository's rules and routines are not trusted, so they do not run ({}); trusting them is the user's decision, in their own terminal (`jouet trust`), not yours",
             untrusted.join("; ")
         ));
     }
     if !unfetched.is_empty() {
         parts.push(format!(
-            "{} not fetched as pinned; `jouet rule pack sync` fetches it",
+            "{} not fetched as pinned; `jouet plugin sync` fetches it",
             unfetched.join(", ")
         ));
     }

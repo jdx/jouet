@@ -150,17 +150,44 @@ fn an_untrusted_repository_routine_is_listed_but_not_ready() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hello.luau"), "--- about: hi\nreturn {}").unwrap();
     std::fs::write(dir.path().join("notes.txt"), "not a routine").unwrap();
-    let (sources, errors) = discover(None, Some(dir.path()), false);
+    let repo = |trusted| {
+        [RoutineDir {
+            dir: dir.path().to_path_buf(),
+            origin: Origin::Repo,
+            trusted,
+            namespace: None,
+        }]
+    };
+    let (sources, errors) = discover(&repo(false));
     assert!(errors.is_empty());
     let catalog = Catalog::new(sources);
     let hello = catalog.get("hello").unwrap();
     assert_eq!(hello.state, State::Untrusted);
     assert!(matches!(hello.origin, Origin::Repo(_)));
-    let (sources, _) = discover(None, Some(dir.path()), true);
+    let (sources, _) = discover(&repo(true));
     assert_eq!(
         Catalog::new(sources).get("hello").unwrap().state,
         State::Ready
     );
+}
+
+#[test]
+fn a_plugins_routine_is_named_after_it_and_takes_no_built_in_name() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("land.luau"), "--- about: hi\nreturn {}").unwrap();
+    let (sources, errors) = discover(&[RoutineDir {
+        dir: dir.path().to_path_buf(),
+        origin: Origin::Plugin,
+        trusted: true,
+        namespace: Some("acme".into()),
+    }]);
+    assert!(errors.is_empty());
+    let catalog = Catalog::new(sources);
+    assert_eq!(catalog.get("acme/land").unwrap().state, State::Ready);
+    assert!(matches!(
+        catalog.get("land").unwrap().origin,
+        Origin::Builtin
+    ));
 }
 
 #[test]
