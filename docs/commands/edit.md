@@ -109,6 +109,31 @@ use crate::http::HTTP_FETCH;
 
 Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
 
+### Structural rewrites
+
+`jouet edit --pattern PAT --rewrite REPL --lang LANG [PATH]...` rewrites every match of a code pattern under the paths (the current directory by default), instead of reading a spec. Matching is [ast-grep](https://ast-grep.github.io)'s (`ast-grep-core`, MIT), on the same grammars as symbol targets:
+
+```output
+$ jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app
+ok          app/main.py  1 edit  +2 -2
+1 of 1 file written
+```
+
+- **All or nothing, as any edit.** `--dry-run`, `--diff`, `--check` and `--revert-on-fail` work as with a spec. A rewrite that would add syntax errors to a file is refused, and so is a file that changed after the pattern matched it.
+- **No match, no write.** A pattern that matches nothing exits 4 and says how many files of the language it read.
+- **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c` and `cpp`. Only files in that language are read.
+
+Agents often write patterns that match nothing. The rules that matter most:
+
+- **Quote patterns in single quotes.** In double quotes the shell expands `$X`, so `"$X.unwrap()"` becomes `.unwrap()`.
+- **`$X` matches one node, `$$$X` any number.** `foo($A)` matches only calls with one argument; `foo($$$ARGS)` matches every call. Metavariable names are uppercase, and `$_` matches without capturing.
+- **A pattern is whole code in the language.** `client.get($URL)` matches, `get($URL` is refused. A Rust call pattern matches the call itself, not a `?` or `;` after it, so `$C.get($URL).send()?` matches the whole `?` expression.
+- **A name used twice must match the same text:** `$A == $A`.
+- **The rewrite is text** with the pattern's metavariables filled in. Its indentation follows the match.
+- **Try it first** with `jouet search --structural --lang LANG 'PAT'`, which shows each match under the function it is in.
+
+These rules and worked examples are also in `jouet agent-help edit`.
+
 ### Codex-style patch
 
 The format used by OpenAI Codex's `apply_patch`, accepted as is:

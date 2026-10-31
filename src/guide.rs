@@ -26,7 +26,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "edit",
         Some(
-            "changing files: exact replacements, or whole definitions by name (`=== PATH#SYMBOL`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
+            "changing files: exact replacements, whole definitions by name (`=== PATH#SYMBOL`), or every match of a code pattern (`--pattern --rewrite --lang`), that all land or none do, instead of python/sed rewrites or a string of separate edits",
         ),
     ),
     (

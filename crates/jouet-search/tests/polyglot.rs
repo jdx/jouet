@@ -556,3 +556,81 @@ fn syntax_errors_are_counted() {
         None
     );
 }
+
+fn structural(
+    pattern: &str,
+    lang: &str,
+    file: &str,
+    rewrite: Option<&str>,
+) -> Vec<(u32, String, Option<String>)> {
+    let st = jouet_search::structural::Structural::new(pattern, lang, rewrite).unwrap();
+    let path = Path::new(FIXTURE).join(file);
+    assert!(st.applies_to(&path), "{file}");
+    st.find(&std::fs::read_to_string(&path).unwrap())
+        .into_iter()
+        .map(|m| (m.line, m.text, m.replacement))
+        .collect()
+}
+
+#[test]
+fn structural_patterns_match_code_in_each_language() {
+    assert_eq!(
+        structural(
+            "fetch_bytes($U)",
+            "rust",
+            "src/lib.rs",
+            Some("fetch_bytes($U, 3)")
+        ),
+        [(
+            14,
+            "fetch_bytes(&url)".to_string(),
+            Some("fetch_bytes(&url, 3)".to_string())
+        )]
+    );
+    assert_eq!(
+        structural("_request($$$ARGS)", "python", "app/client.py", None),
+        [(6, "_request(self.base + path)".to_string(), None)]
+    );
+    assert_eq!(
+        structural("new $C($$$)", "javascript", "web/index.js", None)
+            .iter()
+            .map(|m| m.0)
+            .collect::<Vec<_>>(),
+        [4]
+    );
+    assert_eq!(
+        structural("return listen($A)", "go", "go/server.go", None)
+            .iter()
+            .map(|m| m.0)
+            .collect::<Vec<_>>(),
+        [12]
+    );
+}
+
+#[test]
+fn a_pattern_must_be_whole_code_in_a_known_language() {
+    use jouet_search::structural::{Error, Structural};
+    assert!(matches!(
+        Structural::new("f($A", "rust", None),
+        Err(Error::Pattern(_))
+    ));
+    assert!(matches!(
+        Structural::new("f($A)", "cobol", None),
+        Err(Error::UnknownLanguage(_))
+    ));
+    let st = Structural::new("f($A)", "ts", None).unwrap();
+    assert!(st.applies_to(Path::new("a.ts")));
+    assert!(!st.applies_to(Path::new("a.tsx")) && !st.applies_to(Path::new("a.rs")));
+}
+
+#[test]
+fn a_structural_search_groups_and_budgets_like_a_text_one() {
+    let mut o = options("$X.base");
+    o.structural = Some("rust".into());
+    let (report, text) = run(&o);
+    assert_eq!(report.files_searched, 2, "only Rust files are read");
+    assert!(
+        text.starts_with("tests/fixtures/polyglot/src/lib.rs\n  method download (12-15)\n"),
+        "{text}"
+    );
+}

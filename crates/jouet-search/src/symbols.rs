@@ -258,6 +258,9 @@ fn line_text(source: &[u8], starts: &[usize], line: u32) -> String {
 }
 
 #[cfg(feature = "grammars")]
+pub(crate) use imp::{Lang, language, source_language};
+
+#[cfg(feature = "grammars")]
 mod imp {
     use super::{Def, FileSymbols, Located, Ref, line_of, line_starts, line_text};
     use std::cell::RefCell;
@@ -279,8 +282,8 @@ mod imp {
         "typescript",
     ];
 
-    #[derive(Clone, Copy)]
-    pub(super) enum Lang {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Lang {
         C,
         Cpp,
         Go,
@@ -293,7 +296,7 @@ mod imp {
         Tsx,
     }
 
-    pub(super) fn language(path: &Path) -> Option<Lang> {
+    pub(crate) fn language(path: &Path) -> Option<Lang> {
         let ext = path.extension()?.to_str()?;
         Some(match ext {
             "c" | "h" => Lang::C,
@@ -373,7 +376,7 @@ mod imp {
         }
     }
 
-    fn source_language(lang: Lang) -> tree_sitter::Language {
+    pub(crate) fn source_language(lang: Lang) -> tree_sitter::Language {
         match lang {
             Lang::C => tree_sitter_c::LANGUAGE.into(),
             Lang::Cpp => tree_sitter_cpp::LANGUAGE.into(),

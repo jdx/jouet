@@ -15,7 +15,7 @@
 
 - [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet commit [FLAGS] [PATHS]…`](/cli/commit.md)
-- [`jouet edit [FLAGS] [SUBCOMMAND]`](/cli/edit.md)
+- [`jouet edit [FLAGS] [PATHS]… [SUBCOMMAND]`](/cli/edit.md)
 - [`jouet edit replace <FLAGS> <PATH>`](/cli/edit/replace.md)
 - [`jouet edit hash [PATHS]…`](/cli/edit/hash.md)
 - [`jouet handoff [FLAGS]`](/cli/handoff.md)

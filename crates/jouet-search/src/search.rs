@@ -3,6 +3,7 @@
 //! markers, and matches the session has already been shown collapsed.
 
 use crate::memory::{self, Memory, Stamp};
+use crate::structural::Structural;
 use crate::symbols;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::sinks::Lossy;
@@ -39,6 +40,9 @@ pub struct Options {
     /// Where each file's definitions are cached, by size and modification
     /// time; without one, every file is parsed afresh.
     pub cache: Option<PathBuf>,
+    /// Match the pattern as code in this language, with ast-grep, rather
+    /// than as a regular expression.
+    pub structural: Option<String>,
 }
 
 /// Byte budgets for the output; `0` is no limit.
@@ -136,13 +140,25 @@ impl std::fmt::Display for Error {
 /// Runs a search, skipping matches `memory` says were already shown and
 /// recording the ones shown now.
 pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
-    let matcher = RegexMatcherBuilder::new()
-        .case_insensitive(options.ignore_case)
-        .word(options.word)
-        .fixed_strings(options.fixed_strings)
-        .line_terminator(Some(b'\n'))
-        .build(&options.pattern)
-        .map_err(|e| Error::Usage(format!("invalid pattern: {e}")))?;
+    let structural = options
+        .structural
+        .as_deref()
+        .map(|lang| Structural::new(&options.pattern, lang, None))
+        .transpose()
+        .map_err(|e| Error::Usage(e.to_string()))?;
+    let matcher = match &structural {
+        Some(_) => None,
+        None => Some(
+            RegexMatcherBuilder::new()
+                .case_insensitive(options.ignore_case)
+                .word(options.word)
+                .fixed_strings(options.fixed_strings)
+                .line_terminator(Some(b'\n'))
+                .build(&options.pattern)
+                .map_err(|e| Error::Usage(format!("invalid pattern: {e}")))?,
+        ),
+    };
+    let structural = structural.as_ref();
     let paths = if options.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -187,11 +203,17 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
             .build();
         let found = &found;
         let searched = &searched;
+        let note = Note {
+            keep,
+            memory: memory_ref,
+        };
         Box::new(move |entry| {
             let Ok(entry) = entry else {
                 return WalkState::Continue;
             };
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
+            if !entry.file_type().is_some_and(|t| t.is_file())
+                || structural.is_some_and(|s| !s.applies_to(entry.path()))
+            {
                 return WalkState::Continue;
             }
             searched.fetch_add(1, Ordering::Relaxed);
@@ -209,27 +231,25 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                 already_shown: 0,
             };
             let mut kept = 0usize;
-            let result = searcher.search_path(
-                &matcher,
-                path,
-                Lossy(|line, text| {
-                    collected.matches += 1;
-                    let line = u32::try_from(line).unwrap_or(u32::MAX);
-                    if memory_ref.active() {
-                        let key = key.get_or_insert_with(|| memory::key(path));
-                        if memory_ref.shown(key, stamp, line) {
-                            collected.already_shown += 1;
-                            return Ok(true);
-                        }
+            let result = match (structural, &matcher) {
+                (Some(structural), _) => std::fs::read_to_string(path).map(|source| {
+                    for m in structural.find(&source) {
+                        note.add(&mut collected, &mut key, &mut kept, m.line, &m.text);
                     }
-                    if kept < keep || collected.fresh.is_empty() {
-                        let text = clip(text.trim());
-                        kept += text.len() + 8;
-                        collected.fresh.push((line, text));
-                    }
-                    Ok(true)
                 }),
-            );
+                (None, Some(matcher)) => searcher
+                    .search_path(
+                        matcher,
+                        path,
+                        Lossy(|line, text| {
+                            let line = u32::try_from(line).unwrap_or(u32::MAX);
+                            note.add(&mut collected, &mut key, &mut kept, line, text);
+                            Ok(true)
+                        }),
+                    )
+                    .map(|_| ()),
+                (None, None) => Ok(()),
+            };
             if result.is_ok() && collected.matches > 0 {
                 collected.key = key.unwrap_or_default();
                 if let Ok(mut found) = found.lock() {
@@ -253,6 +273,39 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
         lay_out(&mut report, found, options, memory);
     }
     Ok(report)
+}
+
+/// How the walker keeps a file's matches: at most `keep` bytes of lines
+/// (always the first), skipping lines the session was already shown.
+#[derive(Clone, Copy)]
+struct Note<'m> {
+    keep: usize,
+    memory: &'m Memory,
+}
+
+impl Note<'_> {
+    fn add(
+        &self,
+        c: &mut Collected,
+        key: &mut Option<String>,
+        kept: &mut usize,
+        line: u32,
+        text: &str,
+    ) {
+        c.matches += 1;
+        if self.memory.active() {
+            let key = key.get_or_insert_with(|| memory::key(&c.path));
+            if self.memory.shown(key, c.stamp, line) {
+                c.already_shown += 1;
+                return;
+            }
+        }
+        if *kept < self.keep || c.fresh.is_empty() {
+            let text = clip(text.trim());
+            *kept += text.len() + 8;
+            c.fresh.push((line, text));
+        }
+    }
 }
 
 /// Shows each file's matches, in order, until the budgets run out.
