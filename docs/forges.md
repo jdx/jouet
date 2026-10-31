@@ -28,20 +28,27 @@ Name the host in `~/.config/jouet/config.toml`:
 
 ```toml
 [forges."git.example.com"]
-kind = "gitlab"                              # or "forgejo"; "gitea" is the same API
-api_url = "https://git.example.com/api/v4"   # optional: the default for kind
+kind = "gitlab"                 # or "forgejo"; "gitea" is the same API
+token_env = "CORP_GITLAB_TOKEN" # optional: the variable holding this host's token
 ```
+
+The API root is `https://HOST/api/v4` for GitLab and `https://HOST/api/v1` for Forgejo. Set `api_url` in the table only when the server is somewhere else.
 
 A host that is neither known nor configured is refused with exit 4, and the message names the table to add. A self-hosted GitHub Enterprise server is still set with `JOUET_GITHUB_API_URL`.
 
 ## Tokens
 
-| Forge | Tried in order |
-|---|---|
-| GitLab | `JOUET_GITLAB_TOKEN`, `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, then the host's `token` in glab's `config.yml` |
-| Forgejo, Gitea | `JOUET_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, `GITEA_TOKEN`, then the token of tea's login for the host |
+Each token is sent only to the host it belongs to, so a token for one server never reaches another of the same kind:
 
-A token the forge rejects (401) moves on to the next source. With no token at all, requests are sent without one. That is enough for public Forgejo repositories, but gitlab.com wants a token even for a public MR's discussions and checks. Errors name the source of a rejected token, such as `GITLAB_TOKEN` or `glab's config`, and never its value. A glab token kept in the system keyring is not read; set `GITLAB_TOKEN` instead.
+| Token | Sent to |
+|---|---|
+| `JOUET_GITLAB_TOKEN`, `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` | the host in `GITLAB_HOST`, as glab reads it, else gitlab.com |
+| `JOUET_FORGEJO_TOKEN`, `FORGEJO_TOKEN` | codeberg.org |
+| `GITEA_TOKEN` | gitea.com |
+| the variable a host's `token_env` names | that host |
+| the host's `token` in glab's `config.yml`, or tea's login for its URL | that host |
+
+The config's `token_env` is tried first, then the variables, then the CLI's config. A token the forge rejects (401) moves on to the next source. With no token at all, requests are sent without one. That is enough for public Forgejo repositories, but gitlab.com wants a token even for a public MR's discussions and checks. Errors name the source of a rejected token, such as `GITLAB_TOKEN` or `glab's config`, and never its value. A glab token kept in the system keyring is not read; set `GITLAB_TOKEN` instead.
 
 ## What maps to what
 
@@ -66,6 +73,7 @@ Each of these exits 4 with the reason:
 - **`pr land`** merges GitHub PRs only so far. Use `glab mr merge` or `tea pulls merge`.
 - **`ci explain`** judges a failure by GitHub Actions' run history, which jouet does not read on the other forges.
 - **`wait run` on Forgejo:** jouet sees Forgejo Actions only through the commit statuses it posts. Use `wait ci` on the PR.
+- **`wait ci --required` on Forgejo:** its API does not say which checks branch protection requires. Name them with `--check`.
 - **`jouet stack`** works with GitHub PRs only.
 
 ```output

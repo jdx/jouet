@@ -2574,13 +2574,16 @@ fn main() -> ExitCode {
         return exit;
     }
     let cli = Jouet::parse();
+    // Hooks too, so a rule's PR probe knows the configured hosts. The config
+    // is read only when an unknown host comes up, and an unreadable one names
+    // no hosts, so a bad config cannot make a hook fail.
+    jouet_github::forge::configure(config::forges);
     // Before the output mode is chosen: a bad JOUET_DISPLAY must not make a
     // hook exit 2, which a harness reads as "block".
     if let Cmd::Hook(args) = &cli.cmd {
         return cmd::hook::run(args).into();
     }
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
-    jouet_github::forge::configure(config::forges);
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Claim(args) => cmd::claim::run(args, &out),

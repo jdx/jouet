@@ -45,6 +45,14 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     match args.cmd {
         WaitCmd::Ci(a) => match ci_wait(&a, confirm_conflict) {
             Ok((t, sha, options)) => watch(reporter, &timing, &t.repo().clone(), |r| {
+                if options.selection.required
+                    && let Some(message) = r.host().lacks(Feature::RequiredChecks)
+                {
+                    return Err(Halt::Stop(Stop {
+                        exit: Exit::Precondition,
+                        message,
+                    }));
+                }
                 let (repo, number) = r.resolve(t)?;
                 Ok(CiWait::new(repo, number, sha, options))
             }),

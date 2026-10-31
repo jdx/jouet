@@ -28,6 +28,8 @@ struct ForgeConfig {
     /// `gitlab` or `forgejo` (`gitea` is the same API).
     kind: String,
     api_url: Option<String>,
+    /// The environment variable that holds the host's token.
+    token_env: Option<String>,
 }
 
 /// The hosts the config names, for [`forge::configure`]. A table jouet
@@ -44,6 +46,7 @@ pub(crate) fn forges() -> Vec<forge::Configured> {
                 host,
                 forge,
                 api_url: table.api_url,
+                token_env: table.token_env,
             }),
             Some(Forge::GitHub) => {
                 eprintln!(

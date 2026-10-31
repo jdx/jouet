@@ -45,15 +45,6 @@ impl Forge {
         }
     }
 
-    /// The environment variables a token is read from, in order.
-    pub(crate) fn token_vars(self) -> &'static [&'static str] {
-        match self {
-            Self::GitHub => &["JOUET_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
-            Self::GitLab => &["JOUET_GITLAB_TOKEN", "GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN"],
-            Self::Forgejo => &["JOUET_FORGEJO_TOKEN", "FORGEJO_TOKEN", "GITEA_TOKEN"],
-        }
-    }
-
     fn api_url_var(self) -> &'static str {
         match self {
             Self::GitHub => "JOUET_GITHUB_API_URL",
@@ -69,6 +60,8 @@ pub struct Configured {
     pub host: String,
     pub forge: Forge,
     pub api_url: Option<String>,
+    /// The environment variable holding this host's token.
+    pub token_env: Option<String>,
 }
 
 static LOADER: OnceLock<fn() -> Vec<Configured>> = OnceLock::new();
@@ -118,6 +111,51 @@ pub fn of_host(host: &str) -> Option<Forge> {
     }
 }
 
+/// The environment variables whose token may be sent to `host`, in order.
+/// Each belongs to one host, so a token meant for one server never reaches
+/// another of the same kind:
+///
+/// - `JOUET_GITLAB_TOKEN`, `GITLAB_TOKEN` and `GITLAB_ACCESS_TOKEN` go to
+///   the host in `GITLAB_HOST`, as glab reads it, else to gitlab.com;
+/// - `JOUET_FORGEJO_TOKEN` and `FORGEJO_TOKEN` go to codeberg.org, and
+///   `GITEA_TOKEN` to gitea.com;
+/// - a configured host's `token_env` goes to that host alone, first.
+pub(crate) fn token_vars(forge: Forge, host: &str) -> Vec<String> {
+    let host = normalize(host);
+    let mut vars: Vec<String> = configured(&host)
+        .and_then(|c| c.token_env.clone())
+        .into_iter()
+        .collect();
+    let gitlab_host = std::env::var("GITLAB_HOST")
+        .ok()
+        .map(|h| {
+            let h = h.split_once("://").map_or(h.as_str(), |(_, rest)| rest);
+            normalize(h.split('/').next().unwrap_or_default())
+        })
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "gitlab.com".into());
+    let shared: &[(&str, &str)] = match forge {
+        Forge::GitLab => &[
+            ("JOUET_GITLAB_TOKEN", &gitlab_host),
+            ("GITLAB_TOKEN", &gitlab_host),
+            ("GITLAB_ACCESS_TOKEN", &gitlab_host),
+        ],
+        Forge::Forgejo => &[
+            ("JOUET_FORGEJO_TOKEN", "codeberg.org"),
+            ("FORGEJO_TOKEN", "codeberg.org"),
+            ("GITEA_TOKEN", "gitea.com"),
+        ],
+        Forge::GitHub => &[],
+    };
+    vars.extend(
+        shared
+            .iter()
+            .filter(|(_, owner)| *owner == host)
+            .map(|(var, _)| (*var).to_string()),
+    );
+    vars
+}
+
 /// Why a host cannot be used, for a host jouet does not know.
 pub fn unknown(host: &str) -> String {
     format!(
@@ -155,6 +193,16 @@ mod tests {
         assert_eq!(of_host("GitLab.com"), Some(Forge::GitLab));
         assert_eq!(of_host("www.codeberg.org"), Some(Forge::Forgejo));
         assert_eq!(of_host("git.example.com"), None);
+    }
+
+    #[test]
+    fn shared_token_variables_belong_to_one_host() {
+        assert_eq!(
+            token_vars(Forge::Forgejo, "codeberg.org"),
+            ["JOUET_FORGEJO_TOKEN", "FORGEJO_TOKEN"]
+        );
+        assert_eq!(token_vars(Forge::Forgejo, "gitea.com"), ["GITEA_TOKEN"]);
+        assert!(token_vars(Forge::Forgejo, "git.example.com").is_empty());
     }
 
     #[test]

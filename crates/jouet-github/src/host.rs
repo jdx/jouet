@@ -28,6 +28,8 @@ pub enum Feature {
     Runs,
     /// The history `ci explain` judges a failure by.
     Explain,
+    /// Which checks branch protection requires: `wait ci --required`.
+    RequiredChecks,
 }
 
 pub trait Host {

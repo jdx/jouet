@@ -314,10 +314,18 @@ fn gitlab_trace(trace: &str) -> String {
             line
         };
         let line = line.trim_start_matches("\u{1b}[0K");
-        // A line of escapes alone, such as the colour reset after an error.
-        let bare = line.chars().all(|c| {
-            c == '\u{1b}' || c == '[' || c == ';' || c.is_ascii_digit() || c == 'm' || c == 'K'
-        });
+        // A line of escapes alone, such as the colour reset after an error;
+        // a line of digits is output.
+        let bare = line.is_empty()
+            || line.contains('\u{1b}')
+                && line.chars().all(|c| {
+                    c == '\u{1b}'
+                        || c == '['
+                        || c == ';'
+                        || c.is_ascii_digit()
+                        || c == 'm'
+                        || c == 'K'
+                });
         if !bare {
             out.push_str(line);
             out.push('\n');
@@ -438,10 +446,10 @@ mod tests {
 
     #[test]
     fn gitlab_traces_lose_their_section_markers() {
-        let trace = "section_start:1:prepare\r\u{1b}[0K\u{1b}[0K\u{1b}[36;1mPreparing\u{1b}[0;m\n$ cargo test\nerror: boom\nsection_end:2:step_script\r\u{1b}[0K\n\u{1b}[0;m\n";
+        let trace = "section_start:1:prepare\r\u{1b}[0K\u{1b}[0K\u{1b}[36;1mPreparing\u{1b}[0;m\n$ cargo test\n404\nerror: boom\nsection_end:2:step_script\r\u{1b}[0K\n\u{1b}[0;m\n";
         assert_eq!(
             gitlab_trace(trace),
-            "\u{1b}[36;1mPreparing\u{1b}[0;m\n$ cargo test\nerror: boom\n"
+            "\u{1b}[36;1mPreparing\u{1b}[0;m\n$ cargo test\n404\nerror: boom\n"
         );
     }
 }

@@ -267,7 +267,7 @@ impl Host for GitLab {
             Feature::Land => Some(
                 "`pr land` merges GitHub PRs only so far; merge the MR with `glab mr merge` or on the web".into(),
             ),
-            Feature::Resolve | Feature::Runs => None,
+            Feature::Resolve | Feature::Runs | Feature::RequiredChecks => None,
         }
     }
 

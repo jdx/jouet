@@ -378,6 +378,10 @@ impl Host for Forgejo {
                 // An unknown version is tried; the server says if it cannot.
                 None => None,
             },
+            Feature::RequiredChecks => Some(
+                "Forgejo's API does not say which checks branch protection requires, so --required would select none; name them with --check"
+                    .into(),
+            ),
             Feature::Land => Some(
                 "`pr land` merges GitHub PRs only so far; merge the PR with `tea pulls merge` or on the web".into(),
             ),

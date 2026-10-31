@@ -535,6 +535,60 @@ fn glabs_config_supplies_the_token_and_a_config_names_a_self_hosted_gitlab() {
 }
 
 #[test]
+fn a_token_goes_only_to_the_host_it_belongs_to() {
+    let dir = tmp();
+    // GITEA_TOKEN is for gitea.com: codeberg.org never sees it.
+    let fake = serve(forgejo(FORGEJO_16));
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[("GITEA_TOKEN", GOOD)],
+        &["pr", "status", PR, "--settle", "0", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(5), "{}", stdout(&out));
+    assert!(fake.requests().iter().all(|r| r.token.is_empty()));
+    let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
+    assert!(
+        message.contains("codeberg.org needs a token: set JOUET_FORGEJO_TOKEN or FORGEJO_TOKEN"),
+        "{message}"
+    );
+
+    // GITLAB_TOKEN is for gitlab.com; a self-hosted GitLab takes the
+    // variable its table names.
+    let jouet_config = dir.path().join("config/jouet");
+    std::fs::create_dir_all(&jouet_config).unwrap();
+    std::fs::write(
+        jouet_config.join("config.toml"),
+        "[forges.\"git.example.com\"]\nkind = \"gitlab\"\ntoken_env = \"CORP_GITLAB_TOKEN\"\n",
+    )
+    .unwrap();
+    let fake = serve(gitlab);
+    let mr = "git.example.com/group/sub/project!4266";
+    let args = ["pr", "status", mr, "--settle", "0", "--json"];
+    let out = jouet(&fake, dir.path(), &[("GITLAB_TOKEN", GOOD)], &args);
+    assert_eq!(out.status.code(), Some(5), "{}", stdout(&out));
+    assert!(fake.requests().iter().all(|r| r.token.is_empty()));
+    let fake = serve(gitlab);
+    let out = jouet(&fake, dir.path(), &[("CORP_GITLAB_TOKEN", GOOD)], &args);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(fake.requests().iter().all(|r| r.token == GOOD));
+}
+
+#[test]
+fn wait_ci_required_on_forgejo_is_refused() {
+    let fake = serve(forgejo(FORGEJO_16));
+    let dir = tmp();
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[("FORGEJO_TOKEN", GOOD)],
+        &["wait", "ci", PR, "--required", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(4), "{}", stdout(&out));
+    assert!(fake.requests().is_empty());
+}
+
+#[test]
 fn a_forgejo_pr_reports_like_a_github_one() {
     let fake = serve(forgejo(FORGEJO_16));
     let dir = tmp();
@@ -639,7 +693,7 @@ fn gitea_resolves_and_forgejo_replies_on_the_threads_line() {
             "threads",
             "reply",
             "26828843",
-            PR,
+            "gitea.com/forgejo/forgejo#15077",
             "--body",
             "Done",
             "--resolve",

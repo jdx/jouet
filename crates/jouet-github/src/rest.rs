@@ -3,11 +3,14 @@
 //! a 5xx or a dropped connection, and pages followed through the `Link`
 //! header.
 //!
-//! GitLab tokens come from `JOUET_GITLAB_TOKEN`, `GITLAB_TOKEN`,
-//! `GITLAB_ACCESS_TOKEN`, then glab's `config.yml`; Forgejo and Gitea
-//! tokens from `JOUET_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, `GITEA_TOKEN`, then
-//! tea's `config.yml`. With no token at all a request goes without one, which
-//! public projects answer. Messages name a token's source, never its value.
+//! A host's tokens come from the environment variables that belong to it
+//! ([`forge::token_vars`](crate::forge): GitLab's to `GITLAB_HOST` or
+//! gitlab.com, `FORGEJO_TOKEN` to codeberg.org, `GITEA_TOKEN` to gitea.com,
+//! a configured host's `token_env` to that host), then from glab's or tea's
+//! `config.yml`, which keep a token per host. No token is ever sent to a
+//! host it does not belong to. With no token at all a request goes without
+//! one, which public projects answer. Messages name a token's source, never
+//! its value.
 //!
 //! [`Client`]: crate::Client
 
@@ -36,9 +39,9 @@ pub struct Rest {
     rejected: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Source {
-    Env(&'static str),
+    Env(String),
     /// glab's or tea's `config.yml`.
     Cli,
     /// Every source used up: requests go without a token.
@@ -70,10 +73,9 @@ impl Rest {
             .user_agent(concat!("jouet/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();
-        let sources = forge
-            .token_vars()
-            .iter()
-            .map(|v| Source::Env(v))
+        let sources = forge::token_vars(forge, host)
+            .into_iter()
+            .map(Source::Env)
             .chain([Source::Cli])
             .collect();
         Self {
@@ -199,7 +201,7 @@ impl Rest {
                 if token.value.is_none() {
                     return Err(Failure::Other(self.no_token()));
                 }
-                self.rejected.push(self.source_name(token.source));
+                self.rejected.push(self.source_name(&token.source));
                 continue;
             }
             if !self.rejected.is_empty() && token.value.is_some() {
@@ -210,7 +212,7 @@ impl Rest {
                     "jouet: {} {verb} rejected by {} (401); using {}",
                     join_and(&names),
                     self.host,
-                    self.source_name(token.source)
+                    self.source_name(&token.source)
                 );
             }
             self.token = Some(token);
@@ -223,7 +225,7 @@ impl Rest {
     fn next_token(&mut self) -> Token {
         while !self.sources.is_empty() {
             let source = self.sources.remove(0);
-            let value = match source {
+            let value = match &source {
                 Source::Env(var) => std::env::var(var).ok(),
                 Source::Cli => cli_token(self.forge, &self.host),
                 Source::Anonymous => None,
@@ -249,7 +251,7 @@ impl Rest {
         }
     }
 
-    fn source_name(&self, source: Source) -> String {
+    fn source_name(&self, source: &Source) -> String {
         match (source, self.forge) {
             (Source::Env(var), _) => var.to_string(),
             (Source::Cli, Forge::GitLab) => "glab's config".into(),
@@ -260,7 +262,15 @@ impl Rest {
 
     /// Why a request that needed a token got none, naming what was tried.
     fn no_token(&self) -> String {
-        let vars = join_or(self.forge.token_vars());
+        let vars = forge::token_vars(self.forge, &self.host);
+        let vars = if vars.is_empty() {
+            format!(
+                "the variable named by token_env in [forges.\"{}\"]",
+                self.host
+            )
+        } else {
+            join_or(&vars.iter().map(String::as_str).collect::<Vec<_>>())
+        };
         let cli = match self.forge {
             Forge::GitLab => "run `glab auth login`",
             _ => "run `tea login add`",
