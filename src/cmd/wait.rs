@@ -96,6 +96,7 @@ fn daemon_wait(a: WaitDaemonArgs) -> Result<Box<dyn Subject>, String> {
             url,
             status: None,
             contains: None,
+            expect: Vec::new(),
         })?),
         (None, None) => None,
     };
@@ -320,11 +321,14 @@ fn log(a: WaitLogArgs) -> Result<Box<dyn Subject>, String> {
 }
 
 fn http(a: WaitHttpArgs) -> Result<Box<dyn Subject>, String> {
-    if !(a.url.starts_with("http://") || a.url.starts_with("https://")) {
-        return Err(format!("`{}` is not an http:// or https:// URL", a.url));
-    }
+    jouet_wait::http::check_url(&a.url)?;
     let contains = regex("--contains", a.contains.as_deref())?;
-    Ok(Box::new(HttpWait::new(a.url, a.status, contains)))
+    let expect = a
+        .expect
+        .iter()
+        .map(|e| jouet_wait::http::Assertion::parse(e))
+        .collect::<Result<_, _>>()?;
+    Ok(Box::new(HttpWait::new(a.url, a.status, contains, expect)))
 }
 
 fn pid(a: &WaitPidArgs) -> Result<Box<dyn Subject>, String> {

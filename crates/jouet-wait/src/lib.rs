@@ -10,6 +10,7 @@
 pub mod checks;
 pub mod ci;
 pub mod daemon;
+pub mod http;
 pub mod job;
 pub mod joblog;
 pub mod local;

@@ -42,6 +42,7 @@ checks              enabled  record  builtin  builtin  2026-10-30  Records test,
 reread              enabled  warn    builtin  builtin  2026-10-30  Reading lines this session has already read, from a file unchanged since, puts the same text in the context twice.
 large-read          enabled  warn    builtin  builtin  2026-10-30  Reading a long source file whole to find one thing puts hundreds of lines in the context; its outline, then one definition, costs a fraction of that.
 unbudgeted-search   enabled  warn    builtin  builtin  2026-10-30  A search of the whole tree with no limit can print thousands of lines into the context; `jouet search` stops at a budget and says what it left out.
+curl-json           enabled  warn    builtin  builtin  2026-10-31  Piping curl into jq or a Python one-liner to read a few JSON fields costs a script per call, and a wrong path or an error page prints the whole response; `jouet http --select` prints only those paths, with the status, within a budget.
 trust-rules         enabled  deny    builtin  builtin  2026-10-31  A repository's rules put text in front of the agent, so an agent that could trust them could be talked into trusting them; trusting rules and adding a rule pack are the user's decisions.
 ```
 
@@ -335,9 +336,10 @@ ok    checks              85 examples passed
 ok    reread              12 examples passed
 ok    large-read          15 examples passed
 ok    unbudgeted-search   23 examples passed
+ok    curl-json           15 examples passed
 ok    trust-rules         20 examples passed
 FAIL  no-rm-rf            it has no `quiet` examples: near misses it must leave alone
-29 of 30 rules passed their examples
+30 of 31 rules passed their examples
 ```
 
 It also runs a rule against one command or a recorded hook payload. The result is then what jouet would enforce, after the mode:

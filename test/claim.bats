@@ -59,8 +59,10 @@ hook() {
 }
 
 @test "claims lapse when they expire or their worktree goes, and release takes only your own" {
-	CLAUDE_CODE_SESSION_ID=s1 jouet claim docs/ --for 1s >/dev/null
+	# The short claim comes last: claiming prunes lapsed claims, so a slow
+	# second claim could otherwise remove docs/ before `ls --all` shows it.
 	(cd ../wt && CLAUDE_CODE_SESSION_ID=s2 jouet claim src/b.rs >/dev/null)
+	CLAUDE_CODE_SESSION_ID=s1 jouet claim docs/ --for 1s >/dev/null
 	sleep 1.2
 	run --separate-stderr jouet claim ls --all --json
 	assert_equal "$(jq -r '.[] | [.pattern, .lapsed // "live"] | join(" ")' <<<"$output")" $'docs/ expired\nsrc/b.rs live'
