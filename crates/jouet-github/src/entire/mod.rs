@@ -19,6 +19,7 @@ pub mod gates;
 pub use findings::{Brief, Finding, Trail};
 pub use gates::{CHECK, Gate, Gates};
 
+use crate::forge::Forge;
 use crate::pr::target::Repo;
 use serde::Serialize;
 use serde_json::Value;
@@ -101,11 +102,13 @@ pub struct Entire {
     reads: Mutex<HashMap<Vec<String>, Result<Value, String>>>,
 }
 
-/// Entire's selector for a repository: `gh/OWNER/NAME` on GitHub, else
-/// its clone URL, which Entire takes for any forge.
+/// Entire's selector for a repository: `gh/OWNER/NAME` on GitHub,
+/// `et/PROJECT/NAME` for one hosted on Entire, else its clone URL, which
+/// Entire takes for any other forge.
 pub fn selector(repo: &Repo) -> String {
     match &repo.host {
         None => format!("gh/{repo}"),
+        Some(_) if repo.forge() == Some(Forge::Entire) => format!("et/{repo}"),
         Some(host) => format!("https://{host}/{repo}.git"),
     }
 }
@@ -241,8 +244,15 @@ impl Entire {
         self.run(&args).map(|_| ()).map_err(|e| e.message())
     }
 
-    /// A read, made once per process.
-    fn read(&self, args: &[&str]) -> Result<Value, String> {
+    /// `entire ARGS`, uncached, returning what it printed: a write, or a
+    /// read that must see changes, as a wait's polls must.
+    pub fn output(&self, args: &[&str]) -> Result<String, String> {
+        self.run(args).map_err(|e| e.message())
+    }
+
+    /// A read, made once per process: `entire ARGS`, which prints one JSON
+    /// document.
+    pub fn read(&self, args: &[&str]) -> Result<Value, String> {
         let key: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
         if let Some(done) = self.reads.lock().ok().and_then(|r| r.get(&key).cloned()) {
             return done;
@@ -370,6 +380,10 @@ mod tests {
         assert_eq!(
             selector(&Repo::parse("gitlab.com/group/sub/app").unwrap()),
             "https://gitlab.com/group/sub/app.git"
+        );
+        assert_eq!(
+            selector(&Repo::parse("entire.com/jdx/app").unwrap()),
+            "et/jdx/app"
         );
     }
 }

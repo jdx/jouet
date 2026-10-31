@@ -150,6 +150,10 @@ pub fn next(pr: &PrStatus) -> Next {
                 )),
                 // A Forgejo draft is a `WIP:` title, which no command clears.
                 Forge::Forgejo => None,
+                Forge::Entire => Some(format!(
+                    "entire trail update --branch {} --status open --repo et/{}",
+                    pr.head, pr.repo
+                )),
             },
         );
     }
@@ -261,6 +265,7 @@ pub fn next(pr: &PrStatus) -> Next {
             Forge::GitHub => format!("jouet pr land {name}"),
             Forge::GitLab => format!("glab mr merge {} -R {qualified}", pr.number),
             Forge::Forgejo => format!("tea pulls merge {} --repo {}", pr.number, pr.repo),
+            Forge::Entire => format!("open {} and merge it there", pr.url),
         }),
     )
 }

@@ -16,6 +16,7 @@
 //! poll comes back as a 304 that costs nothing against the rate limit.
 
 pub mod entire;
+pub mod entire_forge;
 pub mod forge;
 pub mod forgejo;
 pub mod gitlab;

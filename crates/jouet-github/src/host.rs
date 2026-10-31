@@ -1,5 +1,5 @@
 //! The host trait: what jouet's PR commands ask of a forge, answered by
-//! GitHub, GitLab or Forgejo in the same model types, so `pr status`,
+//! GitHub, GitLab, Forgejo or Entire in the same model types, so `pr status`,
 //! `pr threads` and the waits print the same output and exit the same way
 //! whichever forge a repository is on.
 //!
@@ -7,6 +7,7 @@
 //! [`Host::lacks`] before anything is sent, and the command exits 4 with
 //! that reason rather than approximating it.
 
+use crate::entire_forge::EntireForge;
 use crate::forge::{self, Forge};
 use crate::pr::status::{self, FetchResult, Lookup};
 use crate::pr::target::{Repo, Target};
@@ -83,11 +84,12 @@ pub trait Host {
 }
 
 /// The host a repository is on: `github` for GitHub, else a new client for
-/// its GitLab or Forgejo host. `Err` names a host jouet does not know.
+/// its GitLab, Forgejo or Entire host. `Err` names a host jouet does not know.
 pub fn connect(repo: &Repo) -> Result<Box<dyn Host>, String> {
     match (repo.forge(), &repo.host) {
         (Some(Forge::GitLab), Some(host)) => Ok(Box::new(gitlab::GitLab::new(host))),
         (Some(Forge::Forgejo), Some(host)) => Ok(Box::new(forgejo::Forgejo::new(host))),
+        (Some(Forge::Entire), Some(_)) => Ok(Box::new(EntireForge::new())),
         (_, Some(host)) if repo.forge().is_none() => Err(forge::unknown(host)),
         _ => Ok(Box::new(Client::from_env())),
     }

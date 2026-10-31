@@ -48,8 +48,11 @@ impl Repo {
         }
         let path = path.trim_matches('/');
         let path = path.strip_suffix(".git").unwrap_or(path);
-        let (owner, name) = path.rsplit_once('/')?;
         let known = forge::of_host(&host);
+        if known == Some(Forge::Entire) {
+            return Self::on_entire(host, path);
+        }
+        let (owner, name) = path.rsplit_once('/')?;
         let nested = owner.contains('/');
         if (nested && matches!(known, Some(Forge::GitHub | Forge::Forgejo)))
             || !owner.split('/').all(valid)
@@ -61,6 +64,23 @@ impl Repo {
             owner: owner.into(),
             name: name.into(),
             host: (known != Some(Forge::GitHub)).then_some(host),
+        })
+    }
+
+    /// A path on Entire: `et/PROJECT/REPO` (or `PROJECT/REPO`, as
+    /// [`Repo::qualified`] writes it) is hosted on Entire, and
+    /// `gh/OWNER/REPO` is the GitHub repository Entire mirrors.
+    fn on_entire(host: String, path: &str) -> Option<Self> {
+        let parts: Vec<&str> = path.split('/').collect();
+        let (owner, name, host) = match parts.as_slice() {
+            ["gh", owner, name] => (*owner, *name, None),
+            ["et", owner, name] | [owner, name] => (*owner, *name, Some(host)),
+            _ => return None,
+        };
+        (valid(owner) && valid(name)).then(|| Self {
+            owner: owner.into(),
+            name: name.into(),
+            host,
         })
     }
 
@@ -138,7 +158,8 @@ impl Arg {
 }
 
 /// The repository and number in a PR URL, after its scheme:
-/// `HOST/OWNER/NAME/pull/N` (GitHub), `HOST/OWNER/NAME/pulls/N` (Forgejo) or
+/// `HOST/OWNER/NAME/pull/N` (GitHub), `HOST/OWNER/NAME/pulls/N` (Forgejo),
+/// `HOST/et/PROJECT/NAME/trails/N` (Entire) or
 /// `HOST/GROUP/.../NAME/-/merge_requests/N` (GitLab), each with anything
 /// after it.
 fn pr_url(rest: &str) -> Option<(Repo, u64)> {
@@ -154,6 +175,8 @@ fn pr_url(rest: &str) -> Option<(Repo, u64)> {
     } else {
         match parts.as_slice() {
             [owner, name, "pull" | "pulls", n, ..] => (format!("{owner}/{name}"), n),
+            // An Entire trail; a GitHub repository's trail is not its PR.
+            ["et", owner, name, "trails", n, ..] => (format!("et/{owner}/{name}"), n),
             _ => return None,
         }
     };
@@ -399,6 +422,39 @@ mod tests {
         // A host jouet does not know parses, and has no forge.
         let unknown = Repo::parse("git.example.com/a/b").unwrap();
         assert_eq!(unknown.forge(), None);
+    }
+
+    #[test]
+    fn entire_hosted_repositories_and_mirrors() {
+        let native = Repo::parse("entire.com/jdx/jouet-entire-forge-test").unwrap();
+        assert_eq!(native.forge(), Some(Forge::Entire));
+        assert_eq!(native.owner, "jdx");
+        assert_eq!(native.qualified(), "entire.com/jdx/jouet-entire-forge-test");
+        for url in [
+            "entire://aws-us-east-2.entire.io/et/jdx/jouet-entire-forge-test",
+            "entire://aws-eu-central-1.entire.io/et/jdx/jouet-entire-forge-test.git",
+        ] {
+            assert_eq!(remote_repo(url).as_ref(), Some(&native), "{url}");
+        }
+        assert_eq!(
+            Arg::parse("https://entire.com/et/jdx/jouet-entire-forge-test/trails/3/changes"),
+            Arg::InRepo(native.clone(), 3)
+        );
+        assert_eq!(
+            Arg::parse("entire.com/jdx/jouet-entire-forge-test#3"),
+            Arg::InRepo(native, 3)
+        );
+        // A GitHub repository served through Entire is still GitHub's, and
+        // its trail numbers are not PR numbers.
+        assert_eq!(
+            remote_repo("entire://aws-us-east-2.entire.io/gh/jdx/mise"),
+            Some(repo("jdx/mise"))
+        );
+        assert!(matches!(
+            Arg::parse("https://entire.com/gh/jdx/mise/trails/424"),
+            Arg::Branch(_)
+        ));
+        assert_eq!(Repo::parse("entire.com/et/a/b/c"), None);
     }
 
     #[test]

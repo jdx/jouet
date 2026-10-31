@@ -1,6 +1,7 @@
 //! Which forge a host runs, where its API is, and which tokens it takes.
 //!
-//! github.com, gitlab.com, codeberg.org and gitea.com are known. A
+//! github.com, gitlab.com, codeberg.org, gitea.com and Entire (entire.com,
+//! and the *.entire.io clusters its git is served from) are known. A
 //! self-hosted GitLab or Forgejo is named in jouet's config, which the
 //! binary hands over with [`configure`] and which is read only when a host
 //! jouet does not know comes up:
@@ -23,6 +24,9 @@ pub enum Forge {
     GitLab,
     /// Forgejo and Gitea, which share one API.
     Forgejo,
+    /// Repositories hosted on Entire itself (`/et/PROJECT/REPO`), read
+    /// through the `entire` CLI.
+    Entire,
 }
 
 impl Forge {
@@ -42,14 +46,17 @@ impl Forge {
             Self::GitHub => "GitHub",
             Self::GitLab => "GitLab",
             Self::Forgejo => "Forgejo",
+            Self::Entire => "Entire",
         }
     }
 
-    fn api_url_var(self) -> &'static str {
+    /// Entire has no API URL of jouet's own: the `entire` CLI dials it.
+    fn api_url_var(self) -> Option<&'static str> {
         match self {
-            Self::GitHub => "JOUET_GITHUB_API_URL",
-            Self::GitLab => "JOUET_GITLAB_API_URL",
-            Self::Forgejo => "JOUET_FORGEJO_API_URL",
+            Self::GitHub => Some("JOUET_GITHUB_API_URL"),
+            Self::GitLab => Some("JOUET_GITLAB_API_URL"),
+            Self::Forgejo => Some("JOUET_FORGEJO_API_URL"),
+            Self::Entire => None,
         }
     }
 }
@@ -96,6 +103,10 @@ pub(crate) fn normalize(host: &str) -> String {
     match host.as_str() {
         "ssh.github.com" => "github.com".into(),
         "altssh.gitlab.com" => "gitlab.com".into(),
+        // Entire serves its web pages from entire.com and its git from a
+        // cluster such as aws-us-east-2.entire.io; all name one repository.
+        "entire.io" => "entire.com".into(),
+        h if h.ends_with(".entire.io") => "entire.com".into(),
         _ => host,
     }
 }
@@ -107,6 +118,7 @@ pub fn of_host(host: &str) -> Option<Forge> {
         "github.com" => Some(Forge::GitHub),
         "gitlab.com" => Some(Forge::GitLab),
         "codeberg.org" | "gitea.com" => Some(Forge::Forgejo),
+        "entire.com" => Some(Forge::Entire),
         _ => configured(&host).map(|c| c.forge),
     }
 }
@@ -145,7 +157,7 @@ pub(crate) fn token_vars(forge: Forge, host: &str) -> Vec<String> {
             ("FORGEJO_TOKEN", "codeberg.org"),
             ("GITEA_TOKEN", "gitea.com"),
         ],
-        Forge::GitHub => &[],
+        Forge::GitHub | Forge::Entire => &[],
     };
     vars.extend(
         shared
@@ -167,8 +179,9 @@ pub fn unknown(host: &str) -> String {
 /// The API root of a GitLab or Forgejo host: the forge's environment
 /// variable, else the config's `api_url`, else the forge's usual path.
 pub(crate) fn api_url(forge: Forge, host: &str) -> String {
-    if let Some(url) = std::env::var(forge.api_url_var())
-        .ok()
+    if let Some(url) = forge
+        .api_url_var()
+        .and_then(|var| std::env::var(var).ok())
         .filter(|u| !u.is_empty())
     {
         return url.trim_end_matches('/').to_string();
@@ -180,6 +193,7 @@ pub(crate) fn api_url(forge: Forge, host: &str) -> String {
         Forge::GitHub => "https://api.github.com".into(),
         Forge::GitLab => format!("https://{host}/api/v4"),
         Forge::Forgejo => format!("https://{host}/api/v1"),
+        Forge::Entire => format!("https://{host}"),
     }
 }
 
@@ -193,6 +207,9 @@ mod tests {
         assert_eq!(of_host("GitLab.com"), Some(Forge::GitLab));
         assert_eq!(of_host("www.codeberg.org"), Some(Forge::Forgejo));
         assert_eq!(of_host("git.example.com"), None);
+        assert_eq!(of_host("entire.com"), Some(Forge::Entire));
+        assert_eq!(of_host("aws-us-east-2.entire.io"), Some(Forge::Entire));
+        assert_eq!(normalize("aws-eu-central-1.entire.io"), "entire.com");
     }
 
     #[test]
