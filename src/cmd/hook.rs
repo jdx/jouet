@@ -9,6 +9,7 @@
 
 use crate::HookArgs;
 use crate::cmd;
+use crate::fnox;
 use crate::guide;
 use crate::ledger::{self, Entry};
 use crate::reads;
@@ -99,7 +100,11 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             log.append(log.entry("session-start"));
             let engine = load(payload).filter(|_| hooks.prime)?;
             let primer = session_start(&engine, hooks.steer, hooks.verify);
-            let notes = wind_notes(settings, log.session, log.repo.as_deref());
+            let mut notes = wind_notes(settings, log.session, log.repo.as_deref());
+            notes.extend(fnox_note(
+                payload.get("cwd").and_then(Value::as_str).map(Path::new),
+                fnox::under_proxy(),
+            ));
             Some(with_notes(primer, &notes))
         }
         "pre-tool-use" if hooks.steer => {
@@ -107,6 +112,10 @@ fn handle(harness: Harness, event: &str, payload: &Value, settings: &Settings) -
             let mut call = Call::from_hook(payload, harness.name());
             call.seen = seen(&call, log.session);
             call.read_lines = reads::of(&call).and_then(|r| reads::line_count(&r));
+            call.fnox = call
+                .cwd
+                .as_deref()
+                .and_then(|cwd| fnox::context(cwd.as_ref()));
             let (output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);
@@ -401,6 +410,21 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
     })
 }
 
+/// What the session should know about fnox: that it runs under `fnox proxy
+/// run`, or that the project keeps its secrets in fnox.
+fn fnox_note(cwd: Option<&Path>, proxied: bool) -> Option<String> {
+    if proxied {
+        return Some(
+            "jouet: this session runs under `fnox proxy run`: its secret variables hold placeholders, and fnox puts the real values only into the HTTPS requests its rules allow. A placeholder is not a broken credential; don't try to read the real value."
+                .into(),
+        );
+    }
+    cwd.and_then(fnox::Project::find).map(|_| {
+        "jouet: this project keeps its secrets in fnox. Run what needs them with `fnox exec -- CMD`, and keep their values out of the transcript: no `env`, `printenv`, `fnox get` or reading `.env` files."
+            .to_string()
+    })
+}
+
 /// Denies a call a rule denies; otherwise passes on any warnings. Also
 /// returns what the rules decided, for the ledger. `setup` sends only shell
 /// commands here, but a rule matching a file tool's `paths` runs for any
@@ -675,6 +699,23 @@ mod tests {
         assert_eq!(
             context.contains("sleep-poll"),
             crate::spec::has_command(&["wait", "ci"])
+        );
+    }
+
+    #[test]
+    fn the_primer_mentions_fnox_where_it_matters() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(fnox_note(Some(dir.path()), false), None);
+        assert!(
+            fnox_note(None, true)
+                .unwrap()
+                .contains("runs under `fnox proxy run`")
+        );
+        std::fs::write(dir.path().join("fnox.toml"), "[secrets]\n").unwrap();
+        assert!(
+            fnox_note(Some(dir.path()), false)
+                .unwrap()
+                .contains("`fnox exec -- CMD`")
         );
     }
 }

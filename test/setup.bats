@@ -268,3 +268,14 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert_success
 	assert_line "note: jouet is not on PATH here, so the hooks will do nothing until it is"
 }
+
+@test "setup recommends fnox proxy run in a repository that uses fnox" {
+	git init -q repo
+	printf '[secrets]\n' >repo/fnox.toml
+	cd repo
+
+	run --separate-stderr jouet setup claude --project --dry-run
+
+	assert_success
+	assert_output --partial "note: this repository uses fnox: start the agent with \`fnox proxy run -- claude\`"
+}

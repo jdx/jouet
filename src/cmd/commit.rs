@@ -3,29 +3,45 @@
 use super::Output;
 use crate::CommitArgs;
 use crate::config::Config;
+use crate::fnox;
 use jouet_git::Git;
 use jouet_git::agent::Agent;
-use jouet_git::commit::{self, Report, Request};
+use jouet_git::commit::{self, Report, Request, ScanStatus, Scanner};
 use jouet_output::exit::Exit;
 use std::fmt::Write as _;
 use std::io::Read as _;
 
 pub(crate) fn run(args: &CommitArgs, out: &Output) -> Exit {
-    let req = match request(args) {
+    let (req, secret_scan) = match request(args) {
         Ok(req) => req,
         Err((message, hint)) => return out.error_with_hint(Exit::Usage, &message, hint),
     };
-    let report = match commit::run(&Git::here(), &req) {
+    // A fnox project's commits are scanned for its secrets' values, when
+    // fnox is here to resolve them.
+    let fnox_project = secret_scan && fnox::Project::find(std::path::Path::new(".")).is_some();
+    let fnox_installed = fnox_project && fnox::installed();
+    let scan = fnox::Scan { dir: ".".into() };
+    let scanner: Option<&dyn Scanner> = fnox_installed.then_some(&scan as &dyn Scanner);
+    let mut report = match commit::run_scanned(&Git::here(), &req, scanner) {
         Ok(report) => report,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    if fnox_project && !fnox_installed && !req.dry_run {
+        report.secret_scan = Some(fnox::skipped_scan());
+    }
+    if let Some(scan) = &report.secret_scan
+        && scan.status == ScanStatus::Skipped
+        && let Some(reason) = &scan.reason
+    {
+        report.warnings.push(reason.clone());
+    }
     if !out.json {
         for w in &report.warnings {
             eprintln!("jouet: warning: {w}");
         }
     }
     out.result(&report, || render(&report));
-    if report.failure.is_some() {
+    if report.failure.is_some() || report.secret_found() {
         Exit::Failed
     } else {
         Exit::Ok
@@ -34,7 +50,8 @@ pub(crate) fn run(args: &CommitArgs, out: &Output) -> Exit {
 
 type Refusal = (String, Option<&'static str>);
 
-fn request(args: &CommitArgs) -> Result<Request, Refusal> {
+/// The request, and whether a fnox project's commit is to be scanned.
+fn request(args: &CommitArgs) -> Result<(Request, bool), Refusal> {
     if args.all {
         return Err((
             "jouet commit does not take -A or --all".into(),
@@ -68,7 +85,8 @@ fn request(args: &CommitArgs) -> Result<Request, Refusal> {
         config.commit_trailers(&agent)
     };
     trailers.extend(args.trailer.iter().map(|t| agent.expand(t)));
-    Ok(Request {
+    let secret_scan = config.commit_secret_scan().map_err(|e| (e, None))?;
+    let req = Request {
         paths: args.paths.clone(),
         message,
         trailers,
@@ -76,7 +94,8 @@ fn request(args: &CommitArgs) -> Result<Request, Refusal> {
         types: config.commit_types(),
         dry_run: args.dry_run,
         log_dir: jouet_output::paths::log_dir(),
-    })
+    };
+    Ok((req, secret_scan))
 }
 
 fn read_message(file: &str) -> Result<String, String> {
@@ -113,6 +132,30 @@ fn render(report: &Report) -> String {
         let _ = writeln!(s, "  full log: {}", failure.log_path);
         return s;
     }
+    if let Some(scan) = report
+        .secret_scan
+        .as_ref()
+        .filter(|_| report.secret_found())
+    {
+        let _ = writeln!(
+            s,
+            "commit refused: {} found the value of a secret in what would be committed; nothing was committed and nothing was left staged",
+            scan.tool
+        );
+        let width = scan
+            .findings
+            .iter()
+            .map(|f| f.secret.len())
+            .max()
+            .unwrap_or(0);
+        for f in &scan.findings {
+            let _ = writeln!(s, "  {:<width$}  {}:{}", f.secret, f.path, f.line);
+        }
+        s.push_str(
+            "  remove the value from those files; read it from the environment, with `fnox exec -- CMD`, instead\n",
+        );
+        return s;
+    }
     if report.dry_run {
         let _ = writeln!(
             s,
@@ -140,6 +183,19 @@ fn render(report: &Report) -> String {
             let _ = write!(line, "  +{a} -{r}");
         }
         let _ = writeln!(s, "{}", line.trim_end());
+    }
+    if let Some(scan) = report
+        .secret_scan
+        .as_ref()
+        .filter(|s| s.status == ScanStatus::Clean)
+    {
+        let files = scan.files_scanned.map_or(String::new(), |n| {
+            format!(" in {n} {}", if n == 1 { "file" } else { "files" })
+        });
+        let _ = writeln!(s, "  {} found no secret values{files}", scan.tool);
+    }
+    for note in report.secret_scan.iter().flat_map(|s| &s.notes) {
+        let _ = writeln!(s, "  fnox: {note}");
     }
     if report.dry_run {
         s.push_str("message:\n");

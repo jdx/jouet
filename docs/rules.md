@@ -21,6 +21,8 @@ git-add-all        enabled  deny    builtin  builtin  2026-10-30  `git add -A` a
 git-stash          enabled  deny    builtin  builtin  2026-10-30  Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work.
 no-verify          enabled  deny    builtin  builtin  2026-10-30  Skipping git hooks with `--no-verify` hides what they would have caught.
 force-push         enabled  deny    builtin  builtin  2026-10-30  A plain force push overwrites commits pushed since you last fetched; `--force-with-lease` refuses instead.
+print-secrets      enabled  deny    builtin  builtin  2026-10-31  Printing secret values puts them in the transcript, which leaves the machine with every turn and outlives the session.
+secret-files       enabled  deny    builtin  builtin  2026-10-31  Reading a plaintext secrets file puts every value in it in the transcript, which leaves the machine with every turn and outlives the session.
 push-untested      enabled  warn    builtin  builtin  2026-10-30  Pushing a tree that no full test run has passed at hands CI and reviewers untested code; a partial run does not count.
 affected-tests     enabled  warn    builtin  builtin  2026-10-30  Running the whole test suite again after each small change spends minutes per run; while iterating, `jouet test --affected` runs only the tests the change affects.
 checks             enabled  record  builtin  builtin  2026-10-30  Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran.
@@ -104,7 +106,7 @@ A rule's keys:
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `input`, `unless_input`, `seen` and `min_read_lines` is about a command, and needs `command`.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `fnox` and `secret_files` is about a command, and needs `command`.
 
 | Key | Matches |
 |---|---|
@@ -126,6 +128,12 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `unless_input` | The tool's input has none of these fields, such as `head_limit`. |
 | `seen` | Whether the session was already shown everything the call reads, every line, in files unchanged since. The hook works it out from what the session read (Claude Code's Read tool, shell calls made only of `cat`, `head`, `tail`, `sed -n` and `nl`) and what `jouet search` showed it. Any other call is unseen. |
 | `min_read_lines` | The call puts at least this many lines of files in the context: Claude Code's Read (up to 2,000 lines without a `limit`), or a shell read with `cat`, `head`, `tail`, `sed -n` or `nl`. The hook counts them. |
+| `unless_paths` | For a file tool, the path matches none of these patterns, read as in `paths`. |
+| `prints` | Whether the command's standard output reaches the transcript: it is not redirected to a file (`>`, `>>`, `&>`), piped into another command, or captured with `$(...)`. `>&2` still reaches it. |
+| `fnox` | Whether the call runs in a project that uses [fnox](https://fnox.jdx.dev): a `fnox.toml`, `.fnox.toml` or `.config/fnox.toml` in the working directory or above it. |
+| `secret_vars` | The command expands, outside single quotes, a variable the project's fnox config defines as a secret: `$NAME` or `${NAME}`. |
+| `secret_args` | One of its arguments is the name of a secret the project's fnox config defines, as in `printenv NAME`. |
+| `secret_files` | The call reads a file a fnox `plain` provider reads secrets from: a file tool's path, or with `command`, one of its arguments, compared as paths from the working directory. |
 
 For example, the built-in `force-push` rule:
 
@@ -149,7 +157,7 @@ The command is read the way a shell reads it, so a rule never has to pick apart 
 - **Quoted text, here-document bodies and comments are data.** In `git commit -m "never git add -A"`, the only command is `git commit`.
 - **Commands are split at `;`, `&&`, `||`, `|` and newlines.** Leading reserved words such as `do` and `then` are dropped, along with variable assignments and redirections.
 - **Commands inside `$(...)` and in scripts passed to `sh -c` or `bash -lc` match too.**
-- **Wrappers are looked through:** `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --` are skipped, `via` records them, and the program is the basename of what runs.
+- **Wrappers are looked through:** `env FOO=1`, `sudo`, `timeout 60`, `nohup`, `rtk` and `mise x tool --` are skipped, `via` records them, and the program is the basename of what runs. A wrapper with nothing to run, such as a bare `env`, is the program itself.
 
 `setup` sends Claude Code's hooks shell commands and its Read and Grep tools, and Codex's shell commands only. A `tool` or `paths` matcher for another tool fires under `jouet rule test`, and in a hook for whatever other tools a harness is set up to send.
 
@@ -180,6 +188,7 @@ fires = [
 | `input` | The tool's input, for a tool other than `Bash`: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`. |
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
 | `read_lines` | How many lines of files the call reads, as the hook would count them. |
+| `fnox` | The call runs in a fnox project whose config defines these names: `fnox = {}`, or `fnox = { secrets = ["STRIPE_KEY"], files = ["secrets.env"] }`. Omitted, it does not. |
 
 Every rule needs at least one example of each kind:
 

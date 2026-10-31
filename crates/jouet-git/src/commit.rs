@@ -11,6 +11,11 @@
 //! Hooks run as they would for `git commit`; `--no-verify` is never passed.
 //! git's output, hooks included, goes to a log, and a failed commit reports
 //! the end of it.
+//!
+//! A [`Scanner`] may look at the content first: [`run_scanned`] builds a
+//! temporary index holding HEAD plus the named paths, exactly what `git
+//! commit --only` will record, and refuses the commit when the scanner
+//! finds a secret there. The real index is never touched.
 
 use crate::conventional::{self, Policy};
 use crate::{Error, Git, nul_fields};
@@ -83,6 +88,63 @@ pub struct Report {
     pub warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<Failure>,
+    /// What the secret scan found, when one ran or was skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_scan: Option<SecretScan>,
+}
+
+impl Report {
+    /// Whether the secret scan found a secret, so nothing was committed.
+    pub fn secret_found(&self) -> bool {
+        self.secret_scan
+            .as_ref()
+            .is_some_and(|s| s.status == ScanStatus::Found)
+    }
+}
+
+/// A secret scan of the content a commit would record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SecretScan {
+    /// The program that scanned, such as `fnox`.
+    pub tool: String,
+    pub status: ScanStatus,
+    /// How many files it read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_scanned: Option<u64>,
+    /// Where a secret's value was found. Never the value itself.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<SecretFinding>,
+    /// Why the scan was skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// What the scanner warned about, such as secrets it could not check.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanStatus {
+    Clean,
+    Found,
+    Skipped,
+}
+
+/// One secret's value, found in one file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SecretFinding {
+    /// The secret's name.
+    pub secret: String,
+    pub path: String,
+    pub line: u64,
+}
+
+/// Scans the content a commit would record.
+pub trait Scanner {
+    /// `index` is a git index file holding exactly what the commit will
+    /// record: HEAD plus the named paths. Point `GIT_INDEX_FILE` at it and
+    /// read the staged content.
+    fn scan(&self, top: &Path, index: &Path) -> Result<SecretScan, Error>;
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -92,6 +154,17 @@ fn is_zero(n: &usize) -> bool {
 /// Checks the request, then commits (or, for a dry run, reports what would
 /// be committed). A commit git refuses is `Ok` with `failure` set.
 pub fn run(git: &Git, req: &Request) -> Result<Report, Error> {
+    run_scanned(git, req, None)
+}
+
+/// [`run`], with `scanner` reading the content before it is committed. A
+/// secret it finds is `Ok` with `secret_scan` saying so, and nothing is
+/// committed or left staged. A dry run does not scan.
+pub fn run_scanned(
+    git: &Git,
+    req: &Request,
+    scanner: Option<&dyn Scanner>,
+) -> Result<Report, Error> {
     let top = git.toplevel()?;
     if req.paths.is_empty() {
         return Err(no_paths());
@@ -162,6 +235,13 @@ pub fn run(git: &Git, req: &Request) -> Result<Report, Error> {
     };
     if req.dry_run {
         return Ok(report);
+    }
+    if let Some(scanner) = scanner {
+        let scan = scan(git, &top, head.as_deref(), &req.paths, scanner)?;
+        report.secret_scan = Some(scan);
+        if report.secret_found() {
+            return Ok(report);
+        }
     }
 
     if !untracked.is_empty() {
@@ -427,6 +507,47 @@ fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Runs `scanner` over a temporary index of HEAD plus `paths` as they are in
+/// the working tree, which is what `git commit --only` records.
+fn scan(
+    git: &Git,
+    top: &Path,
+    head: Option<&str>,
+    paths: &[String],
+    scanner: &dyn Scanner,
+) -> Result<SecretScan, Error> {
+    let io =
+        |e: std::io::Error| Error::new(Exit::Failed, format!("preparing the secret scan: {e}"));
+    let dir = tempfile::tempdir().map_err(io)?;
+    let index = dir.path().join("index");
+    let run = |args: &[String]| -> Result<(), Error> {
+        let out = git
+            .command(args)
+            .env("GIT_INDEX_FILE", &index)
+            .output()
+            .map_err(|e| Error::new(Exit::Failed, format!("running git: {e}")))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        Err(Error::new(
+            Exit::Failed,
+            format!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        ))
+    };
+    match head {
+        Some(head) => run(&["read-tree".into(), head.into()])?,
+        None => run(&["read-tree".into(), "--empty".into()])?,
+    }
+    let mut add = vec!["add".to_string(), "--".to_string()];
+    add.extend(paths.iter().cloned());
+    run(&add)?;
+    scanner.scan(top, &index)
 }
 
 /// `git commit --only -F MESSAGE -- PATHS`, its output to a log. `None`

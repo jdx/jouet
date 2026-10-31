@@ -205,8 +205,8 @@ fn outdated(doc: &serde_json::Value, harness: Harness) -> bool {
 }
 
 /// What someone installing should know: that the hooks are inert without
-/// jouet on `PATH`, who else gets them, what git would pick up, and Codex's
-/// trust step.
+/// jouet on `PATH`, who else gets them, what git would pick up, Codex's
+/// trust step, and in a fnox project, its credential proxy.
 fn install_notes(
     harness: Harness,
     scope: Scope,
@@ -251,7 +251,23 @@ fn install_notes(
                 .to_string(),
         );
     }
+    notes.extend(fnox_note(harness, project, crate::fnox::under_proxy()));
     notes
+}
+
+/// In a project that uses fnox, a recommendation to start the agent under
+/// `fnox proxy run`.
+fn fnox_note(harness: Harness, project: &Path, proxied: bool) -> Option<String> {
+    crate::fnox::Project::find(project)?;
+    let agent = harness.name();
+    Some(if proxied {
+        "this repository uses fnox, and this shell already runs under `fnox proxy run`: an agent started from here gets placeholder credentials"
+            .to_string()
+    } else {
+        format!(
+            "this repository uses fnox: start the agent with `fnox proxy run -- {agent}` so it holds only placeholder credentials, and fnox puts the real values into the HTTPS requests its [[proxy.rules]] allow (https://fnox.jdx.dev/guide/proxy)"
+        )
+    })
 }
 
 /// Whether `program` is on `PATH`, as the hooks' `command -v` would find it.
@@ -506,5 +522,22 @@ mod tests {
         assert!(!stamped_by_jouet(&skill.replace("body", "my notes")));
         assert!(!stamped_by_jouet("---\nname: jouet\n---\n\nmy own skill\n"));
         assert!(!stamped_by_jouet(""));
+    }
+
+    #[test]
+    fn a_fnox_project_is_pointed_at_the_proxy() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(fnox_note(Harness::Claude, dir.path(), false), None);
+        std::fs::write(dir.path().join("fnox.toml"), "[secrets]\n").unwrap();
+        assert!(
+            fnox_note(Harness::Codex, dir.path(), false)
+                .unwrap()
+                .contains("`fnox proxy run -- codex`")
+        );
+        assert!(
+            fnox_note(Harness::Claude, dir.path(), true)
+                .unwrap()
+                .contains("already runs under `fnox proxy run`")
+        );
     }
 }
