@@ -545,6 +545,7 @@ return {
             seen: None,
             read_lines: None,
             code_lines: None,
+            tracked_files: None,
             fnox: None,
             git_dirty: None,
             session: None,

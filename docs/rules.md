@@ -97,7 +97,7 @@ A rule's keys:
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox` and `secret_files` is about a command, and needs `command`.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `fnox` and `secret_files` is about a command, and needs `command`.
 
 | Key | Matches |
 |---|---|
@@ -121,6 +121,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `seen` | Whether the session was already shown everything the call reads, every line, in files unchanged since. The hook works it out from what the session read (Claude Code's Read tool, shell calls made only of `cat`, `head`, `tail`, `sed -n` and `nl`) and what `jouet search` showed it. Any other call is unseen. |
 | `min_read_lines` | The call puts at least this many lines of files in the context: Claude Code's Read (up to 2,000 lines without a `limit`), or a shell read with `cat`, `head`, `tail`, `sed -n` or `nl`. The hook counts them. |
 | `min_code_lines` | Like `min_read_lines`, counting only source files `jouet read --outline` can outline, so a long log, a command's saved output or a document read whole does not count. |
+| `min_tracked_files` | The work tree tracks at least this many files (`git ls-files`), so a search of all of it can print a lot. jouet's hook counts them only for the Grep tool and commands that run grep or rg. Outside a repository the count is unknown, and the key holds. |
 | `unless_paths` | For a file tool, the path matches none of these patterns, read as in `paths`. |
 | `prints` | Whether the command's standard output reaches the transcript: it is not redirected to a file (`>`, `>>`, `&>`), piped into another command, or captured with `$(...)`. `>&2` still reaches it. |
 | `fnox` | Whether the call runs in a project that uses [fnox](https://fnox.jdx.dev): a `fnox.toml`, `.fnox.toml` or `.config/fnox.toml` in the working directory or above it. |
@@ -182,6 +183,7 @@ fires = [
 | `seen` | Whether the session already saw what the call reads, as the hook would work it out; `false` if omitted. |
 | `read_lines` | How many lines of files the call reads, as the hook would count them. |
 | `code_lines` | How many of those lines are in source files `jouet read --outline` can outline. |
+| `tracked_files` | How many files the work tree tracks. Omitted, the count is unknown, as outside a repository. |
 | `fnox` | The call runs in a fnox project whose config defines these names: `fnox = {}`, or `fnox = { secrets = ["STRIPE_KEY"], files = ["secrets.env"] }`. Omitted, it does not. |
 | `git` | What `jouet.git.state()` reports for a script: `git = { dirty = false }` for a work tree with nothing uncommitted, `true` for one with changes. Omitted, the probe has no answer, as every other probe in an example. |
 

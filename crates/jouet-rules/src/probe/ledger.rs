@@ -40,7 +40,8 @@ pub(crate) fn last_run(
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if entry["event"] != "post-tool-use" {
+        // A `test-run` is a `jouet test` run, recorded by itself.
+        if entry["event"] != "post-tool-use" && entry["event"] != "test-run" {
             continue;
         }
         let Some((rule, recorded, recorded_scope)) = record(&entry, kind, scope) else {

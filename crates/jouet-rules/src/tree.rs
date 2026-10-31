@@ -19,6 +19,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// How many files the work tree containing `dir` tracks, from `git ls-files`,
+/// or why it cannot tell: not a repository, or `timeout` passing.
+pub fn tracked_files(dir: Option<&Path>, timeout: Duration) -> Result<u32, String> {
+    let listed = git(dir, &["ls-files", "-z"], timeout)?;
+    Ok(u32::try_from(listed.matches('\0').count()).unwrap_or(u32::MAX))
+}
+
 /// The tree of the work tree containing `dir` (this process's directory
 /// when None), or why there is none: not a repository, a merge in
 /// progress, or `timeout` passing.

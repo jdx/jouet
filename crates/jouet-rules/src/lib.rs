@@ -407,6 +407,9 @@ pub struct Call {
     /// How many of them are in source files `jouet read --outline` can
     /// outline; worked out by the caller.
     pub code_lines: Option<u32>,
+    /// How many files the work tree tracks; worked out by the caller, and
+    /// only for a call a `min_tracked_files` matcher could be about.
+    pub tracked_files: Option<u32>,
     /// The project's fnox config, when the call runs in a project that uses
     /// fnox; worked out by the caller.
     pub fnox: Option<Fnox>,
@@ -462,6 +465,7 @@ impl Call {
             seen: None,
             read_lines: None,
             code_lines: None,
+            tracked_files: None,
             fnox: None,
         }
     }

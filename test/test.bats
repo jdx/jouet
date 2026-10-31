@@ -461,6 +461,26 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
+@test "jouet test records its own run, so a piped one still counts" {
+	mkdir -p tests
+	printf 'import unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.fail("no")\n' >tests/test_a.py
+	git add -A
+
+	# head exits 0, and the hooks cannot see past it.
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s9 jouet test --cmd -- python3 -m unittest discover -s tests 2>&1 | head -1'
+	assert_success
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code, .full]' "$XDG_STATE_HOME/jouet/sessions/s9.json"
+	assert_output '["jouet test --cmd -- python3 -m unittest discover -s tests",1,true]'
+	# The ledger keeps it too, for push-untested and pr land.
+	run --separate-stderr jq -c 'select(.event == "test-run") | [.session, .exit_code, .decisions[0].action, .decisions[0].scope]' \
+		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_output '["s9",1,"record:test","full"]'
+
+	# A dry run ran nothing, so it records nothing.
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s10 jouet test --cmd --dry-run -- python3 -m unittest'
+	assert [ ! -e "$XDG_STATE_HOME/jouet/sessions/s10.json" ]
+}
+
 @test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
 	ran 'jouet test --cmd -- python3 -m unittest' 0
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"

@@ -159,6 +159,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         }
     }
     report.ok = exit == Exit::Ok;
+    // Kept by the run itself, since a pipe hides its exit status from the
+    // hooks.
+    if !args.dry_run && jobs.iter().any(Option::is_some) {
+        super::hook::record_own_run(&cwd, &own_command(), i32::from(exit.code()));
+    }
     if out.json {
         out.result(&report, String::new);
     } else if args.affected && !args.dry_run && jobs.iter().any(Option::is_some) {
@@ -167,6 +172,26 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         );
     }
     exit
+}
+
+/// How this `jouet test` was called, as a shell command: what the rules
+/// classify, as they would the hook's.
+fn own_command() -> String {
+    let words: Vec<String> = std::env::args()
+        .skip(1)
+        .map(|word| {
+            let plain = !word.is_empty()
+                && word
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c));
+            if plain {
+                word
+            } else {
+                format!("'{}'", word.replace('\'', "'\\''"))
+            }
+        })
+        .collect();
+    format!("jouet {}", words.join(" "))
 }
 
 /// A new log for the `i`th suite of this run. The first also removes the

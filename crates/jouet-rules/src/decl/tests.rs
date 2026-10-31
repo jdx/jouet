@@ -111,6 +111,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "max_args",
             "min_code_lines",
             "min_read_lines",
+            "min_tracked_files",
             "paths",
             "prints",
             "secret_args",
@@ -149,7 +150,8 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "seen",
             "session",
             "stack",
-            "tool"
+            "tool",
+            "tracked_files"
         ]
     );
     let mut required: Vec<&str> = defs["Rule"]["required"]

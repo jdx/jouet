@@ -44,7 +44,8 @@ pub(crate) struct Entry {
     /// path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
-    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `override`,
+    /// `session-start`, `pre-tool-use`, `post-tool-use`, `test-run` (a
+    /// `jouet test` run, recorded by itself), `stop`, `override`,
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// or `deprecated` (a command used something on its way out).
@@ -253,7 +254,7 @@ pub(crate) fn full_test_run(dir: &Path, tree: &str) -> Option<bool> {
         .filter(|line| line.contains(&needle))
         .filter_map(|line| serde_json::from_str::<Entry>(line).ok())
         .find(|entry| {
-            entry.event == "post-tool-use"
+            matches!(entry.event.as_str(), "post-tool-use" | "test-run")
                 && entry
                     .decisions
                     .iter()

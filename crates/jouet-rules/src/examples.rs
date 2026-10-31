@@ -86,6 +86,8 @@ pub struct Case {
     pub read_lines: Option<u32>,
     /// How many of them are in source files jouet can outline.
     pub code_lines: Option<u32>,
+    /// How many files the work tree tracks, if known.
+    pub tracked_files: Option<u32>,
     /// The fnox project the call runs in, if any.
     pub fnox: Option<crate::Fnox>,
     /// Whether `jouet.git.state()` reports a dirty work tree; None when it
@@ -126,6 +128,9 @@ pub struct Example {
     /// How many of them are in source files jouet can outline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_lines: Option<u32>,
+    /// How many files the work tree tracks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tracked_files: Option<u32>,
     /// The call runs in a project that uses fnox.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub fnox: bool,
@@ -169,6 +174,9 @@ impl Example {
         }
         if let Some(lines) = self.code_lines {
             extra.push(format!("{lines} lines of code"));
+        }
+        if let Some(files) = self.tracked_files {
+            extra.push(format!("{files} tracked files"));
         }
         if self.fnox {
             extra.push("fnox project".into());
@@ -273,6 +281,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         seen: None,
         read_lines: None,
         code_lines: None,
+        tracked_files: None,
         fnox: None,
         git_dirty: None,
         session: None,
@@ -421,6 +430,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
         seen: t.seen,
         read_lines: t.read_lines,
         code_lines: t.code_lines,
+        tracked_files: t.tracked_files,
         fnox: t.fnox.as_ref().map(|f| crate::Fnox {
             secrets: f.secrets.clone(),
             files: f.files.clone(),
@@ -546,6 +556,7 @@ impl Engine {
                 seen: case.seen,
                 read_lines: case.read_lines,
                 code_lines: case.code_lines,
+                tracked_files: case.tracked_files,
                 fnox: case.fnox.clone(),
             };
             // Each example is a call of its own: probes are asked afresh.
@@ -593,6 +604,7 @@ impl Engine {
                 seen: case.seen == Some(true),
                 read_lines: case.read_lines,
                 code_lines: case.code_lines,
+                tracked_files: case.tracked_files,
                 fnox: case.fnox.is_some(),
                 tree: case.git_dirty.map(|d| if d { "dirty" } else { "clean" }),
                 expected: match &case.scope {

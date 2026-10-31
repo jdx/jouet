@@ -161,7 +161,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `fnox` and\n`secret_files` is about a command, and needs `command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `min_code_lines`,\n`min_tracked_files`, `fnox` and `secret_files` is about a command, and\nneeds `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -259,6 +259,12 @@
         },
         "min_code_lines": {
           "description": "Like `min_read_lines`, counting only source files `jouet read\n--outline` can outline, so a long log or command output read whole\ndoes not count. Set it in an example with `code_lines`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_tracked_files": {
+          "description": "The work tree the call runs in tracks at least this many files, as\n`git ls-files` lists them, so a search of all of it can print a lot.\nOutside a repository the count is unknown, and the key holds. Set\nit in an example with `tracked_files`.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -404,6 +410,12 @@
         },
         "code_lines": {
           "description": "How many of those lines are in source files `jouet read --outline`\ncan outline.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "tracked_files": {
+          "description": "How many files the work tree tracks; omitted, the count is unknown,\nas outside a repository.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
