@@ -182,6 +182,34 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a run after a cd counts for the work tree it went to" {
+	git init -q repo
+	git init -q other
+	echo 'fn main() {}' >other/main.rs
+	git -C other add main.rs
+
+	# From ./repo, the session tests ./other: its full run counts there, and
+	# part of the suite after it asks for nothing.
+	ran "cd $PWD/other && cargo test --workspace" 0
+	ran "cd $PWD/other && bats test/a.bats" 0
+	run stop_reason
+	assert_output ""
+
+	# After the tree there changes, part of the suite asks for the whole,
+	# naming the tree.
+	echo 'fn main() { todo!() }' >other/main.rs
+	ran "cd $PWD/other && bats test/a.bats" 0
+	run stop_reason
+	assert_output --partial "In $(cd other && pwd -P): The tree has changed since the last full test run"
+
+	# A cd it cannot follow records nothing, in either tree.
+	ran "cd $PWD/other && cargo test --workspace" 0
+	# shellcheck disable=SC2016 # the $DIR is the command's, unexpanded
+	ran 'cd "$DIR" && cargo test --workspace' 101
+	run stop_reason
+	assert_output ""
+}
+
 @test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs

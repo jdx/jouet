@@ -271,9 +271,12 @@ fn handoff_and_pickup_round_trip() {
     s.write("notes.txt", "n\n");
     let session = s.dir.path().join("home/.local/state/jouet/sessions");
     std::fs::create_dir_all(&session).unwrap();
+    // Recorded for this worktree, keyed as the hooks key it.
+    let root = s.repo().canonicalize().unwrap();
+    let key = serde_json::to_string(&root.to_string_lossy()).unwrap();
     std::fs::write(
         session.join("s1.json"),
-        r#"{"runs":{"test":{"command":"cargo test","exit_code":0}}}"#,
+        format!(r#"{{"trees":{{{key}:{{"runs":{{"test":{{"command":"cargo test","exit_code":0}}}}}}}}}}"#),
     )
     .unwrap();
 

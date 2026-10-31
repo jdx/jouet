@@ -645,12 +645,49 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<String>) {
         return (records, None);
     }
     // The command has finished, so the tree now is the one it ran against,
-    // unless the command itself changed tracked files.
-    let tree = work_tree(payload);
+    // unless the command itself changed tracked files. Each run counts for
+    // the work tree it ran in, after any `cd` before it.
+    let cwd = session_dir(payload);
+    let mut dirs: Vec<Option<&str>> = Vec::new();
+    for record in &records {
+        if !dirs.contains(&record.dir.as_deref()) {
+            dirs.push(record.dir.as_deref());
+        }
+    }
+    let trees: Vec<(Option<&str>, String, Option<String>)> = dirs
+        .into_iter()
+        .map(|dir| {
+            let at = run_dir(cwd.as_deref(), dir);
+            let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            let tree = jouet_rules::tree::work_tree(at.as_deref(), TREE_TIMEOUT).ok();
+            (dir, root, tree)
+        })
+        .collect();
     let _ = verify::update(&path, |state| {
-        state.record(records.clone(), tree.as_deref());
+        for (dir, root, tree) in &trees {
+            let here = records.iter().filter(|r| r.dir.as_deref() == *dir).cloned();
+            state.record(root, here, tree.as_deref());
+        }
     });
+    let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
     (records, tree)
+}
+
+/// The directory the session's commands start in.
+fn session_dir(payload: &Value) -> Option<PathBuf> {
+    payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+}
+
+/// Where a run recorded with `dir` ran, from the session's directory.
+fn run_dir(cwd: Option<&Path>, dir: Option<&str>) -> Option<PathBuf> {
+    match (cwd, dir) {
+        (Some(cwd), Some(dir)) => Some(jouet_rules::resolve_dir(cwd, dir)),
+        (None, Some(dir)) => Some(jouet_rules::resolve_dir(Path::new("."), dir)),
+        (cwd, None) => cwd.map(Path::to_path_buf),
+    }
 }
 
 /// The session's work tree, hashed; None outside a repository.
@@ -684,23 +721,35 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
             .and_then(Value::as_str)
             .map(|t| verify::codex_commands(t.as_ref()))
             .filter(|commands| !commands.is_empty())
-            .and_then(|commands| Some(codex_state(&load(payload)?, commands))),
+            .and_then(|commands| Some(codex_state(&load(payload)?, payload, commands))),
     }
     .unwrap_or_default();
     let tree = std::cell::OnceCell::new();
     let now = || tree.get_or_init(|| work_tree(payload)).clone();
-    let root = payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .and_then(|cwd| Path::new(cwd).ancestors().find(|d| d.join(".git").exists()))
-        .map(Path::to_path_buf);
-    let hk_repo = root.as_deref().and_then(crate::diag::hk_config).is_some();
+    let home = session_dir(payload)
+        .as_deref()
+        .map(verify::root_of)
+        .unwrap_or_default();
+    // The session's own tree is hashed once; another is hashed only when
+    // its checks need it.
+    let tree_of = |root: &str| {
+        if root == home {
+            now()
+        } else if root.is_empty() {
+            None
+        } else {
+            jouet_rules::tree::work_tree(Some(Path::new(root)), TREE_TIMEOUT).ok()
+        }
+    };
+    let hk_repo =
+        |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
     let jouet = if verify {
-        state.block_reason(now, hk_repo)
+        state.block_reason(&home, tree_of, hk_repo)
     } else {
         None
     };
-    let hk = if hk_stop.is_empty() || state.hk_passed_at(now) {
+    let hk_passed = state.checks(&home).is_some_and(|c| c.hk_passed_at(now));
+    let hk = if hk_stop.is_empty() || hk_passed {
         None
     } else {
         run_hk_stop(hk_stop, payload)
@@ -813,8 +862,9 @@ fn fix_after_edit(
 
 /// Runs a Codex session's finished commands through the post-tool-use
 /// rules, oldest first.
-fn codex_state(engine: &Engine, commands: Vec<(String, i32)>) -> State {
+fn codex_state(engine: &Engine, payload: &Value, commands: Vec<(String, i32)>) -> State {
     let mut state = State::default();
+    let cwd = session_dir(payload);
     for (command, exit_code) in commands {
         let call = Call {
             event: Some(Event::PostToolUse),
@@ -827,7 +877,11 @@ fn codex_state(engine: &Engine, commands: Vec<(String, i32)>) -> State {
             ..Call::default()
         };
         // The transcript does not say what tree each command saw.
-        state.record(evaluate(engine, &call).records, None);
+        for record in evaluate(engine, &call).records {
+            let at = run_dir(cwd.as_deref(), record.dir.as_deref());
+            let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            state.record(&root, [record], None);
+        }
     }
     state
 }
@@ -924,42 +978,47 @@ mod tests {
         let engine = engine(Vec::new());
         let failing = codex_state(
             &engine,
+            &json!({}),
             vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
         );
-        assert!(failing.block_reason(|| None, false).is_some());
+        assert!(failing.block_reason("", |_| None, |_| false).is_some());
         let fixed = codex_state(
             &engine,
+            &json!({}),
             vec![
                 ("cargo test --workspace".into(), 101),
                 ("cargo test --workspace".into(), 0),
             ],
         );
-        assert_eq!(fixed.block_reason(|| None, false), None);
+        assert_eq!(fixed.block_reason("", |_| None, |_| false), None);
         // A partial pass leaves the full failure standing.
         let partial = codex_state(
             &engine,
+            &json!({}),
             vec![
                 ("cargo test --workspace".into(), 101),
                 ("cargo test -p jouet --lib".into(), 0),
             ],
         );
-        let why = partial.block_reason(|| None, false).unwrap();
+        let why = partial.block_reason("", |_| None, |_| false).unwrap();
         assert!(why.contains("only a full test run clears it"), "{why}");
         // A refusal, such as `diag check` with no hk config, is not a
         // failed lint, and does not clear one either.
         let refused = codex_state(
             &engine,
+            &json!({}),
             vec![("/usr/bin/zsh -lc 'jouet diag check a.py'".into(), 4)],
         );
-        assert_eq!(refused.block_reason(|| None, false), None);
+        assert_eq!(refused.block_reason("", |_| None, |_| false), None);
         let still = codex_state(
             &engine,
+            &json!({}),
             vec![
                 ("jouet diag check a.py".into(), 1),
                 ("jouet diag check a.py".into(), 4),
             ],
         );
-        assert!(still.block_reason(|| None, false).is_some());
+        assert!(still.block_reason("", |_| None, |_| false).is_some());
     }
 
     #[test]

@@ -341,8 +341,10 @@ declare jouet: {
 	-- `status`, for the check before the agent stops. Ignored when `status`
 	-- is nil; any other kind is an error. `scope` is "full" when the run
 	-- covered the whole project and "partial" otherwise (nil is partial), and
-	-- `selector` says what a partial run selected, such as "-p jouet".
-	record: (kind: string, command: JouetCommand, scope: string?, selector: string?) -> (),
+	-- `selector` says what a partial run selected, such as "-p jouet". `dir`
+	-- is where a `cd` before the command moved it (relative, absolute, or
+	-- under `~` or `$HOME`), so the run counts for that work tree.
+	record: (kind: string, command: JouetCommand, scope: string?, selector: string?, dir: string?) -> (),
 	-- Parse a script the way `call.commands` is built; with an exit code,
 	-- top-level commands get a `status`.
 	parse: (script: string, exit_code: number?) -> { JouetCommand },

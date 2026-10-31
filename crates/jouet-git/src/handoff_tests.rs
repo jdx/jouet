@@ -281,11 +281,12 @@ fn checks_come_from_the_session_file() {
     let repo = Repo::new();
     repo.commit(&[("a.txt", "a\n")], "init");
     let sessions = tempfile::tempdir().unwrap();
-    std::fs::write(
-        sessions.path().join("s1.json"),
-        r#"{"runs":{"lint":{"command":"mise run lint","exit_code":0}}}"#,
-    )
-    .unwrap();
+    let root = repo.dir.path().canonicalize().unwrap();
+    let key = serde_json::to_string(&root.to_string_lossy()).unwrap();
+    let state = format!(
+        r#"{{"trees":{{{key}:{{"runs":{{"lint":{{"command":"mise run lint","exit_code":0}}}}}}}}}}"#
+    );
+    std::fs::write(sessions.path().join("s1.json"), state).unwrap();
     let mut o = opts();
     o.session = Some((sessions.path().to_path_buf(), "s1".into()));
     let h = collect(&repo.git_handle(), &o).unwrap();

@@ -310,7 +310,7 @@ pub(crate) fn install(
                     Some(dir) => dir.clone(),
                     None => std::env::current_dir().map_err(|e| e.to_string())?,
                 };
-                cargo::workspace(&base.join(dir.as_deref().unwrap_or(".")))
+                cargo::workspace(&crate::resolve_dir(&base, dir.as_deref().unwrap_or(".")))
             })?;
             answer(lua, found)
         })?,
