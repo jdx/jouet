@@ -45,6 +45,8 @@ struct Edit {
     /// Only Entire Gates fails, ready but for its findings: not a draft,
     /// mergeable, every other check passing.
     findings_only: bool,
+    /// The check's summary is in a form jouet does not know.
+    new_summary: bool,
 }
 
 fn github(edit: Edit) -> Fake {
@@ -74,6 +76,11 @@ fn respond(edit: Edit, request: &Request) -> (u16, String) {
         return (200, contexts.to_string());
     }
     let mut pr: Value = serde_json::from_str(PR).unwrap();
+    if edit.new_summary {
+        pr["data"]["l0"]["pullRequest"]["commits"]["nodes"][0]["commit"]["checkSuites"]["nodes"]
+            [0]["checkRuns"]["nodes"][0]["summary"] =
+            json!("| Gate | Status |\n|---|---|\n| Checks | failed |\n| Findings | failed |");
+    }
     if edit.findings_only {
         let node = &mut pr["data"]["l0"]["pullRequest"];
         node["isDraft"] = json!(false);
@@ -253,6 +260,7 @@ fn without_entire_the_gates_still_show_and_json_says_why() {
 fn pr_next_names_the_finding_to_fix() {
     let fake = github(Edit {
         findings_only: true,
+        ..Edit::default()
     });
     let dir = tempfile::tempdir().unwrap();
     let args = ["pr", "next", "jdx/mise#13958", "--settle", "0"];
@@ -348,4 +356,38 @@ fn pr_threads_lists_findings_apart_from_threads() {
         doc["entire"],
         json!({ "available": false, "reason": "entire is not on PATH" })
     );
+}
+
+#[test]
+fn a_summary_jouet_cannot_read_is_not_guessed_at() {
+    let fake = github(Edit {
+        new_summary: true,
+        ..Edit::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let out = jouet(&fake, dir.path(), true, &[], STATUS);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains(
+            "\n  entire: checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity (trail #424)\n  (jouet could not read the Entire Gates check's summary, so its gates come from `entire trail show`)\n    [entire:01M4C997EA] "
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        calls(dir.path()),
+        "auth status --json\n\
+         trail show --branch claude/project-thread-htk77e-5-experimental --json --repo gh/jdx/mise\n\
+         trail finding --trail 424 --json -n 100 --repo gh/jdx/mise\n"
+    );
+
+    // Without entire, it says it could not read the summary, and why.
+    let mut args = STATUS.to_vec();
+    args.push("--json");
+    let doc = json(&jouet(&fake, dir.path(), false, &[], &args));
+    let attention = doc["prs"][0]["attention"].as_array().unwrap();
+    assert!(attention.iter().any(|a| a["code"] == "entire_gates"
+        && a["message"]
+            == "Entire Gates: 2 blocking gates not passing (jouet could not read the check's summary)"));
+    assert!(attention.iter().all(|a| a["code"] != "entire_findings"));
 }

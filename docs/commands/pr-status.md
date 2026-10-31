@@ -114,7 +114,7 @@ GitHub computes mergeability lazily, so a pull request that has not been looked 
 - `review` is GitHub's review decision, lowercased: `approved`, `changes_requested` or `review_required`.
 - `pushed_at` is the later of the head commit's committer date and the last force push, because GitHub's API records no time for a plain push.
 - `incomplete` lists searches that matched more pull requests than GitHub lists (1,000), with how many matched and how many were listed.
-- `entire`, on a pull request with an Entire Gates check, holds the check's `state` (`passed`, `failed`, `pending` or `neutral`), its `title`, each of its `gates` with `gate`, `status` and `reason`, the `trail` number and `url`, and, when the findings gate fails, the open `findings` (`id`, `handle`, `severity`, `path`, `line`, `title`). `findings_incomplete` says Entire listed more than it let jouet read, and `error` why `entire` could not be asked.
+- `entire`, on a pull request with an Entire Gates check, holds the check's `state` (`passed`, `failed`, `pending` or `neutral`), its `title`, each of its `gates` with `gate`, `status` and `reason`, the `trail` number and `url`, and, when the findings gate fails, the open `findings` (`id`, `handle`, `severity`, `path`, `line`, `title`). `findings_incomplete` says Entire listed more than it let jouet read, `error` why `entire` could not be asked, and `note` that the gates came from `entire trail show` because the check's summary was in a form jouet does not know.
 - `entire` at the top level, present when some pull request's findings gate fails, is `{"available": true}` or `{"available": false, "reason": "..."}`.
 
 ## GitHub access

@@ -5,6 +5,7 @@
 //! and separate from any review thread on the forge: resolving one never
 //! resolves the other.
 
+use super::Gate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -208,6 +209,9 @@ pub struct Trail {
     pub branch: String,
     /// `draft`, `open`, `merged` or `closed`.
     pub status: String,
+    /// The blocking gates, as Entire last evaluated them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<Gate>,
 }
 
 impl Trail {
@@ -220,6 +224,19 @@ impl Trail {
                 .or_else(|| s(&doc["original_branch"]))
                 .unwrap_or_default(),
             status: s(&doc["status"]).unwrap_or_default(),
+            gates: doc["mergeability"]["gates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|g| g["blocking"] == true)
+                .filter_map(|g| {
+                    Some(Gate {
+                        gate: s(&g["gate_key"])?,
+                        status: s(&g["status"])?,
+                        reason: s(&g["rationale"]),
+                    })
+                })
+                .collect(),
         })
     }
 }
@@ -272,6 +289,15 @@ mod tests {
         assert_eq!(t.number, 87);
         assert_eq!(t.branch, "fix/cmd-through-wrappers");
         assert_eq!(t.status, "open");
+        assert_eq!(
+            t.gates
+                .iter()
+                .find(|g| g.gate == "up_to_date")
+                .unwrap()
+                .reason
+                .as_deref(),
+            Some("Merge conflicts")
+        );
         let merged = serde_json::json!({"number": 86, "branch": "", "original_branch": "fix/x", "status": "merged"});
         assert_eq!(Trail::parse(&merged).unwrap().branch, "fix/x");
     }

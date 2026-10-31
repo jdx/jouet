@@ -815,6 +815,10 @@
                           }
                         }
                       ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
                     }
                   }
                 }
@@ -1079,6 +1083,10 @@
               }
             }
           ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
         }
       }
     }

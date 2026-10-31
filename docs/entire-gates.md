@@ -12,7 +12,7 @@ Entire sits beside the forge rather than inside it. Trail numbers are not pull r
 
 ## What needs the `entire` CLI
 
-The gates are read from the check's summary with the GitHub token jouet already uses, so `pr status`, `pr next`, `wait ci` and `ci explain` always say which gate fails and why.
+The gates are read from the check's summary with the GitHub token jouet already uses, so `pr status`, `pr next`, `wait ci` and `ci explain` always say which gate fails and why. A summary in a form jouet does not know is never guessed at. `pr status` and `pr next` then take the gates from `entire trail show`, and say so. Without the CLI, and in `wait ci` and `ci explain`, the check's title is shown with `(jouet could not read the check's summary)`, and the failure counts as one of its own.
 
 The findings themselves come from the `entire` CLI, and only when it is on PATH and logged in (`entire auth status`). Without it, commands carry on: text output names the failing gates and nothing more, and `--json` says why under `entire`:
 

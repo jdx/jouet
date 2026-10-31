@@ -111,11 +111,13 @@ pub struct Entire {
     reads: Mutex<HashMap<Vec<String>, Result<Value, String>>>,
 }
 
-/// Entire's selector for a repository: `gh/OWNER/NAME` on GitHub, else
-/// its clone URL, which Entire takes for any forge.
+/// Entire's selector for a repository: `gh/OWNER/NAME` on GitHub,
+/// `et/OWNER/NAME` on Entire's own forge (which takes no clone URL), else
+/// its clone URL, which Entire takes for other forges.
 pub fn selector(repo: &Repo) -> String {
-    match &repo.host {
+    match repo.host.as_deref() {
         None => format!("gh/{repo}"),
+        Some("entire.com") => format!("et/{repo}"),
         Some(host) => format!("https://{host}/{repo}.git"),
     }
 }
@@ -374,6 +376,10 @@ mod tests {
         assert_eq!(
             selector(&Repo::parse("gitlab.com/group/sub/app").unwrap()),
             "https://gitlab.com/group/sub/app.git"
+        );
+        assert_eq!(
+            selector(&Repo::parse("entire.com/jdx/notes").unwrap()),
+            "et/jdx/notes"
         );
     }
 }

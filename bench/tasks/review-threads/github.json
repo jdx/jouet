@@ -219,6 +219,10 @@
               }
             }
           ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
         }
       },
       "pullRequests": {
@@ -325,6 +329,10 @@
                           }
                         }
                       ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
                     }
                   }
                 }

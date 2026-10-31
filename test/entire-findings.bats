@@ -110,8 +110,7 @@ writes() {
 	run --separate-stderr jouet pr threads reply entire:01M4C997EA "$BRANCH" --repo jdx/mise --body "Looking"
 
 	assert_failure 2
-	assert_equal "$stderr" "jouet: entire:01M4C997EA is an Entire finding, which takes no reply of its own; nothing was changed
-hint: add --resolve or --dismiss: the reply becomes the reason recorded on Entire"
+	assert_equal "$stderr" "jouet: entire:01M4C997EA is an Entire finding, which takes a reason only when resolved or dismissed: add --resolve, or --resolve --dismiss; nothing was changed"
 }
 
 @test "resolved and dismissed findings are left as they are, and unresolve reopens" {

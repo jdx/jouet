@@ -182,6 +182,9 @@ fn entire_lines(s: &mut String, p: &PrStatus, name: &str) {
         s.push_str("; repeats what is reported above");
     }
     s.push('\n');
+    if let Some(note) = &e.note {
+        let _ = writeln!(s, "  ({note})");
+    }
     for f in e.findings.iter().take(FINDINGS) {
         let _ = write!(s, "    [{}] {}", f.handle, f.location);
         if let Some(severity) = &f.severity {
