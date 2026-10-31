@@ -178,9 +178,13 @@ impl Store {
         if self.state(job) == State::Running {
             return false;
         }
-        let old = std::fs::metadata(self.path(&job.id, "json"))
-            .and_then(|m| m.modified())
-            .ok()
+        // When it last did anything: its exit file is written as it ends,
+        // its log as it runs, and its JSON when it starts or is stopped.
+        let old = ["exit", "log", "json"]
+            .iter()
+            .filter_map(|ext| std::fs::metadata(self.path(&job.id, ext)).ok())
+            .filter_map(|m| m.modified().ok())
+            .max()
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > KEEP_FINISHED);
         if old {

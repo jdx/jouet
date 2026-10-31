@@ -1282,6 +1282,16 @@ fn job_start_names_the_job_and_its_ready_check() {
         advice("npm run build &"),
         "jouet job start build -- npm run build"
     );
+    // Run in the harness's background, a pipe's reader is not the server.
+    let piped = Call {
+        input: Some(serde_json::json!({ "run_in_background": true })),
+        ..bash("npm run dev 2>&1 | tee dev.log")
+    };
+    let message = engine.evaluate(&piped).warnings.remove(0).message.unwrap();
+    assert!(
+        message.starts_with("Run `jouet job start dev -- npm run dev`"),
+        "{message}"
+    );
 }
 
 /// A user rule that denies `serve`, only where `marker.toml` is.

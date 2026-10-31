@@ -250,7 +250,7 @@ ok    affected-tests     22 examples passed
 ok    pitchfork-start    8 examples passed
 ok    pitchfork-stop     9 examples passed
 ok    pitchfork-logs     7 examples passed
-ok    job-start          25 examples passed
+ok    job-start          26 examples passed
 ok    job-ready          12 examples passed
 ok    job-logs           11 examples passed
 ok    job-stop           15 examples passed

@@ -8,7 +8,7 @@ author = "builtin"
 created = "2026-10-31"
 needs = ["job", "start"]
 suggest = "jouet job start ID --http URL -- CMD"
-message = "It starts the server in the background and returns once URL answers, or fails with the end of the server's log. For a server that is already running, `jouet wait http URL` waits for it (`jouet agent-help job`)."
+message = "It starts the server in the background and returns once URL answers, or fails with the end of the server's log. For a server that is already running, `jouet wait http URL` waits for it, or `jouet wait port PORT` for one that does not speak HTTP, such as a database (`jouet agent-help job`)."
 
 # A fetch of a local address in the same call as a sleep: `sleep 5 &&
 # curl ...`, or a loop that sleeps until it answers.
