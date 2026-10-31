@@ -108,6 +108,86 @@ fn a_reformatted_line_is_shown_as_the_closest_match() {
 }
 
 #[test]
+fn a_search_holding_part_of_a_line_says_which_line_holds_it() {
+    let text = "intro\n- **Docs.** `docs/benchmarks.md` now recommends it.\nend\n";
+    let f = Fixture::new(&[("a.rs", text)]);
+    let (report, _) = f.run(
+        &block(
+            "a.rs",
+            "- **Docs.** `docs/benchmarks.md` now recommends\n",
+            "x\n",
+        ),
+        Format::Blocks,
+    );
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::NoMatch);
+    assert_eq!(
+        edit.near_miss,
+        Some(NearMiss::InsideLine {
+            lines: vec![2],
+            multiline: false
+        })
+    );
+    // Text that ends inside a later line spans lines.
+    let (report, _) = f.run(
+        &block("a.rs", "intro\n- **Docs.**\n", "x\n"),
+        Format::Blocks,
+    );
+    assert_eq!(
+        report.files[0].edits[0].near_miss,
+        Some(NearMiss::InsideLine {
+            lines: vec![1],
+            multiline: true
+        })
+    );
+    // Every line the text is inside, once each.
+    let f = Fixture::new(&[("a.rs", "a.b a.b\nx\nfoo(a.b)\n")]);
+    let (report, _) = f.run(&block("a.rs", "a.b\n", "x\n"), Format::Blocks);
+    assert_eq!(
+        report.files[0].edits[0].near_miss,
+        Some(NearMiss::InsideLine {
+            lines: vec![1, 3],
+            multiline: false
+        })
+    );
+    // Text found nowhere has no near miss, and `jouet edit replace`'s
+    // edits match inside lines anyway.
+    let (report, _) = f.run(&block("a.rs", "nowhere\n", "x\n"), Format::Blocks);
+    assert_eq!(report.files[0].edits[0].near_miss, None);
+    let json = r#"[{"path": "{a.rs}", "old": "nowhere", "new": "x"}]"#;
+    let (report, _) = f.run(json, Format::Json);
+    assert_eq!(report.files[0].edits[0].near_miss, None);
+}
+
+#[test]
+fn a_search_with_other_indentation_is_a_whitespace_near_miss() {
+    let f = Fixture::new(&[("a.rs", "fn a() {\n\tone();\n\ttwo();  \n}\n")]);
+    let (report, _) = f.run(
+        &block("a.rs", "    one();\n    two();\n", "x\n"),
+        Format::Blocks,
+    );
+    let edit = &report.files[0].edits[0];
+    assert_eq!(edit.status, EditStatus::NoMatch);
+    assert_eq!(
+        edit.near_miss,
+        Some(NearMiss::Whitespace { lines: vec![2] })
+    );
+    // Missing indentation is a whitespace difference, not text inside a line.
+    let (report, _) = f.run(&block("a.rs", "one();\n", "x\n"), Format::Blocks);
+    assert_eq!(
+        report.files[0].edits[0].near_miss,
+        Some(NearMiss::Whitespace { lines: vec![2] })
+    );
+    // Patch hunks get the same hint.
+    let spec = "*** Begin Patch\n*** Update File: {a.rs}\n-  one();\n+  uno();\n*** End Patch\n";
+    let (report, _) = f.run(spec, Format::Patch);
+    assert_eq!(
+        report.files[0].edits[0].near_miss,
+        Some(NearMiss::Whitespace { lines: vec![2] })
+    );
+}
+
+#[test]
 fn too_many_matches_lists_every_line() {
     let f = Fixture::new(&[("a.rs", "x\ny\nx\nx\n")]);
     let (report, _) = f.run(&block("a.rs", "x\n", "z\n"), Format::Blocks);

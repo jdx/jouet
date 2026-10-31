@@ -408,6 +408,42 @@ fn push_untested_warns_until_the_full_suite_passed_at_this_tree() {
 }
 
 #[test]
+fn scoped_lint_is_quiet_on_a_clean_work_tree() {
+    let dir = repo();
+    let work = dir.path().join("work");
+    let engine = Engine::new(
+        crate::builtin()
+            .into_iter()
+            .filter(|s| s.name == "scoped-lint")
+            .collect(),
+        Options {
+            has_command: Box::new(|_| true),
+            disabled: Vec::new(),
+            budget: Budget {
+                time: Duration::from_secs(10),
+                ..Budget::default()
+            },
+            cache_dir: None,
+        },
+    );
+    engine.set_probes(Probes::new(Some(work.clone()), None, false));
+    let lint = Call {
+        command: Some("cargo clippy --workspace -- -D warnings 2>&1 | head -20".into()),
+        ..bash()
+    };
+    // A freshly merged or checked-out tree: nothing to iterate on.
+    assert!(engine.evaluate(&lint).warnings.is_empty());
+    std::fs::write(work.join("a.txt"), "edited\n").unwrap();
+    let warned = engine.evaluate(&lint);
+    let why = warned.warnings[0].message.as_deref().unwrap();
+    assert!(why.contains("jouet diag check --changed"), "{why}");
+    // An untracked file is a change too.
+    git(&work, &["checkout", "-q", "a.txt"]);
+    std::fs::write(work.join("b.txt"), "new\n").unwrap();
+    assert_eq!(engine.evaluate(&lint).warnings.len(), 1);
+}
+
+#[test]
 fn test_adapters_come_from_the_detector_the_binary_gives() {
     let expr = r#"(function()
         local found, err = jouet.test.adapters()

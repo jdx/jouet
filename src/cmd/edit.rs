@@ -6,7 +6,8 @@ use crate::diag::{self, Status, delta};
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
 use jouet_edit::{
-    self as edit, Callers, EditStatus, FileStatus, Options, Reference, Report, Span, SymbolError,
+    self as edit, Callers, EditStatus, FileStatus, NearMiss, Options, Reference, Report, Span,
+    SymbolError,
 };
 use jouet_output::exit::Exit;
 use jouet_search::structural::Structural;
@@ -693,9 +694,23 @@ fn edit_problem(e: &edit::EditReport) -> String {
     };
     match e.status {
         EditStatus::Ok => "ok".into(),
-        EditStatus::NoMatch => match &e.symbol {
-            Some(symbol) => format!("no definition matches `{symbol}`"),
-            None => "no match".into(),
+        EditStatus::NoMatch => match (&e.symbol, &e.near_miss) {
+            (Some(symbol), _) => format!("no definition matches `{symbol}`"),
+            (None, Some(NearMiss::InsideLine { lines, multiline })) => {
+                let at = if *multiline {
+                    format!("at {}, but starts or ends inside a line", line_list(lines))
+                } else {
+                    format!("inside {}", line_list(lines))
+                };
+                format!(
+                    "no match as whole lines; the text occurs {at} (SEARCH blocks hold whole lines, or use `jouet edit replace` for text inside a line)"
+                )
+            }
+            (None, Some(NearMiss::Whitespace { lines })) => format!(
+                "no match; the text matches at {} once indentation and trailing whitespace are ignored (copy the file's whitespace exactly)",
+                line_list(lines)
+            ),
+            (None, None) => "no match".into(),
         },
         EditStatus::TooManyMatches if e.symbol.is_some() => format!(
             "{} definitions match `{}`, at lines {}; add a kind or a scope, such as `fn download` or `Vfox::download`",
@@ -724,6 +739,21 @@ fn edit_problem(e: &edit::EditReport) -> String {
             "the new `{}` does not parse",
             e.symbol.as_deref().unwrap_or("")
         ),
+    }
+}
+
+/// `line 13`, `lines 13 and 40`, or the first few and how many more.
+fn line_list(lines: &[usize]) -> String {
+    const SHOWN: usize = 5;
+    let mut shown: Vec<String> = lines.iter().take(SHOWN).map(usize::to_string).collect();
+    let more = lines.len().saturating_sub(SHOWN);
+    if more > 0 {
+        shown.push(format!("{more} more"));
+    }
+    match shown.as_slice() {
+        [one] => format!("line {one}"),
+        [rest @ .., last] => format!("lines {} and {last}", rest.join(", ")),
+        [] => String::new(),
     }
 }
 

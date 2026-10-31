@@ -93,7 +93,7 @@ The built-in rules:
 | `push-untested` | warns (does not deny) on `git push` and `gh pr create` when no full test run has passed at the current tree | running the full suite first, or saying why it is not needed |
 | `print-secrets` | in a [fnox project](#fnox): bare `env`, `printenv`, `export -p` and `set`, `printenv NAME` and `echo $NAME` for a secret its `fnox.toml` defines; anywhere: `fnox get`, `fnox export` without `-o`, `fnox list -V` and `fnox env --json`, unless redirected, piped or captured | `fnox exec -- <command>` |
 | `secret-files` | in a fnox project: reading `.env` or `.env.*` (not `.env.example`, `.sample`, `.template` or `.dist`), and the files fnox's `plain` providers read, with Read, `cat`, `grep`, `sed -n` and similar | `fnox exec -- <command>` |
-| `scoped-lint` | warns (does not deny) on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint` | `jouet diag check --changed` while iterating, and the full lint once at the end |
+| `scoped-lint` | warns (does not deny) on `cargo clippy` piped into `head` or `tail`, `eslint .`, and a bare `mise run lint`, unless the work tree has nothing uncommitted (a check after a merge, pull or checkout) | `jouet diag check --changed` while iterating, and the full lint once at the end |
 | `affected-tests` | warns (does not deny) on a whole-suite `pytest`, `jest`, `vitest run`, `npm test` or `mise run test` within 30 minutes of the last whole-suite run, in a repository where `jouet test --affected` can select | `jouet test --affected` while iterating, keeping the full run for the end |
 
 A rule that names a jouet command is only active when the installed jouet has that command, so the hooks never suggest something that is not there.

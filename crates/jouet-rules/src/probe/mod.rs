@@ -156,19 +156,20 @@ fn bounded<T: Send + 'static>(
 type Answer = Result<Option<serde_json::Value>, String>;
 
 /// Looks a probe up in the cache, or runs it with the time the caller has
-/// left and caches what it says.
+/// left and caches what it says. A rule's example may put an answer in the
+/// cache when no probes are set up.
 fn cached(
     shared: &Shared,
     key: &str,
     probe: impl FnOnce(&Probes, Duration) -> Answer,
 ) -> mlua::Result<Answer> {
+    if let Some(hit) = shared.cache.borrow().get(key) {
+        return Ok(hit.clone());
+    }
     let probes = shared.probes.borrow().clone();
     let Some(probes) = probes else {
         return Ok(Err("probes are not available here".into()));
     };
-    if let Some(hit) = shared.cache.borrow().get(key) {
-        return Ok(hit.clone());
-    }
     let left = shared.remaining();
     if left.is_zero() {
         return Err(mlua::Error::runtime("exceeded its time budget"));

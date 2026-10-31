@@ -306,6 +306,10 @@ pub struct StatsArgs {
 /// patch, or JSON. Every edit is checked before any file is written, so a
 /// failed edit leaves every file as it was.
 ///
+/// A SEARCH block holds whole lines, indentation included: one that holds
+/// part of a line matches nothing, and the failure says which line the text
+/// is inside. `jouet edit replace` matches text anywhere, inside a line too.
+///
 /// A blocks section headed `=== PATH#SYMBOL` replaces a whole definition,
 /// found with tree-sitter, so a formatter reflowing its text cannot break
 /// the match. SYMBOL is a name, a kind and a name (`fn download`), or a
