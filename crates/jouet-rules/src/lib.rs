@@ -63,6 +63,7 @@ const BUILTIN: &[(&str, &str)] = &[
         include_str!("../rules/review-threads.toml"),
     ),
     ("python-edit", include_str!("../rules/python-edit.toml")),
+    ("sed-line-edit", include_str!("../rules/sed-line-edit.toml")),
     ("git-add-all", include_str!("../rules/git-add-all.toml")),
     ("git-stash", include_str!("../rules/git-stash.toml")),
     ("no-verify", include_str!("../rules/no-verify.toml")),
@@ -126,6 +127,10 @@ const BUILTIN: &[(&str, &str)] = &[
 
 /// The scripts built-in rules name.
 const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
+    (
+        "sed-line-edit.luau",
+        include_str!("../rules/sed-line-edit.luau"),
+    ),
     (
         "committed-secrets.luau",
         include_str!("../rules/committed-secrets.luau"),
