@@ -129,7 +129,7 @@ fn variants() -> Vec<(&'static str, Value)> {
             }),
         ),
         (
-            "entire gate jouet does not know",
+            "entire waiting on an approval",
             gates(
                 base(),
                 "- ❌ **Approvals**: failed — No reviewers have approved this trail\n\n[Trail #424 on Entire](https://entire.io/gh/jdx/mise/trails/424)",

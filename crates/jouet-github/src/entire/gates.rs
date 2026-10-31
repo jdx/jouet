@@ -12,8 +12,9 @@
 //!
 //! Two of the gates only repeat what is already known elsewhere: `checks`
 //! fails because another check failed, and `up_to_date` because the branch
-//! is behind its base or conflicts with it. Only `findings` (and any gate
-//! jouet does not know) is a failure of its own.
+//! is behind its base or conflicts with it. `approvals` waits on a person,
+//! not on CI. Only `findings` (and any gate jouet does not know) is a
+//! failure of its own.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub const CHECK: &str = "Entire Gates";
 
 /// Gates whose failure repeats something already reported elsewhere.
 const DERIVED: [&str; 2] = ["checks", "up_to_date"];
+/// Gates that wait on a reviewer: an approval on the trail.
+const REVIEW: [&str; 1] = ["approvals"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gate {
@@ -104,17 +107,37 @@ impl Gates {
     /// whose summary names no failing gate is not derived: there is nothing
     /// to point at instead.
     pub fn derived(&self) -> bool {
+        self.only(&[&DERIVED])
+    }
+
+    /// Whether the check failed for nothing CI did: derived gates, or an
+    /// approval on the trail still to come. A wait for CI does not count it.
+    pub fn not_ci(&self) -> bool {
+        self.only(&[&DERIVED, &REVIEW])
+    }
+
+    fn only(&self, groups: &[&[&str]]) -> bool {
         self.failed()
             && self.failing().next().is_some()
-            && self.failing().all(|g| DERIVED.contains(&g.gate.as_str()))
+            && self
+                .failing()
+                .all(|g| groups.iter().any(|group| group.contains(&g.gate.as_str())))
+    }
+
+    /// Whether the summary was read: a failed check names its failing
+    /// gates. One that names none is in a form jouet does not know, and is
+    /// never guessed at.
+    pub fn read(&self) -> bool {
+        !self.failed() || self.failing().next().is_some()
     }
 
     /// The failing gates, as `findings: Unresolved findings: 2 medium
-    /// severity; checks: CI checks have not passed`, or the check's title
-    /// when its summary names none.
+    /// severity; checks: CI checks have not passed`, or, when the summary
+    /// names none, the check's title and that jouet could not read it.
     pub fn failing_text(&self) -> String {
         if self.failing().next().is_none() {
-            return self.title.clone().unwrap_or_else(|| self.state.clone());
+            let title = self.title.clone().unwrap_or_else(|| self.state.clone());
+            return format!("{title} (jouet could not read the check's summary)");
         }
         self.failing()
             .map(|g| match &g.reason {
@@ -212,6 +235,27 @@ mod tests {
         let checks = Gates::parse("COMPLETED", Some("FAILURE"), None, Some(CHECKS), None);
         assert_eq!(checks.trail, Some(1176));
         assert!(checks.derived());
+        let approval = Gates::parse(
+            "completed",
+            Some("failure"),
+            None,
+            Some(
+                "- ✅ **Checks**: passed — CI checks have passed\n- ❌ **Approvals**: failed — No reviewers have approved this trail",
+            ),
+            None,
+        );
+        assert!(!approval.derived(), "nothing else reports it");
+        assert!(approval.not_ci());
+        assert!(
+            !Gates::parse(
+                "completed",
+                Some("failure"),
+                None,
+                Some(CHECKS_AND_FINDINGS),
+                None
+            )
+            .not_ci()
+        );
         let behind = Gates::parse("completed", Some("failure"), None, Some(UP_TO_DATE), None);
         assert!(behind.fails("up_to_date"));
         assert!(behind.derived());
@@ -226,6 +270,20 @@ mod tests {
         let g = Gates::parse("completed", Some("failure"), None, None, None);
         assert!(g.failed());
         assert!(!g.derived());
+        assert!(!g.read());
+        // A summary in a form jouet does not know is not misread.
+        let changed = Gates::parse(
+            "completed",
+            Some("failure"),
+            Some("1 blocking gate not passing"),
+            Some("| Gate | Status |\n|---|---|\n| Findings | failed |"),
+            None,
+        );
+        assert!(changed.gates.is_empty() && !changed.read() && !changed.derived());
+        assert_eq!(
+            changed.failing_text(),
+            "1 blocking gate not passing (jouet could not read the check's summary)"
+        );
         let evaluating = Gates::parse(
             "in_progress",
             None,

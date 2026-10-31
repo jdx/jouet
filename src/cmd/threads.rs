@@ -485,10 +485,12 @@ fn reply(args: &ThreadsArgs, a: &ReplyArgs, out: &Output) -> Result<Exit, Stop> 
             (true, _) => Change::Dismiss,
             (false, true) => Change::Resolve,
             (false, false) => {
-                return Err(Stop(
+                return Err(Stop::new(
                     Exit::Usage,
-                    format!("{} is an Entire finding, which takes no reply of its own; nothing was changed", a.id),
-                    Some("add --resolve or --dismiss: the reply becomes the reason recorded on Entire".into()),
+                    format!(
+                        "{} is an Entire finding, which takes a reason only when resolved or dismissed: add --resolve, or --resolve --dismiss; nothing was changed",
+                        a.id
+                    ),
                 ));
             }
         };

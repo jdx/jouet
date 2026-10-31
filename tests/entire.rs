@@ -21,18 +21,19 @@ const TOKEN: &str = "good-token";
 
 /// The fake `entire`: logs its arguments to `entire.log` beside it and
 /// answers from test/fixtures/entire. `FAKE_ENTIRE_AUTH=out` is logged out.
+/// PATH holds only its directory, so it names `cat` by its path.
 const FAKE_ENTIRE: &str = r#"#!/bin/sh
-printf '%s\n' "$*" >>"$(dirname "$0")/entire.log"
+printf '%s\n' "$*" >>"${0%/*}/entire.log"
 fx="$FAKE_ENTIRE_FIXTURES"
 case "$*" in
 "auth status --json")
-	if [ "${FAKE_ENTIRE_AUTH:-}" = out ]; then echo '{"logged_in": false}'; else cat "$fx/auth-status.json"; fi ;;
+	if [ "${FAKE_ENTIRE_AUTH:-}" = out ]; then /bin/cat "$fx/auth-logged-out.json"; else /bin/cat "$fx/auth-ok.json"; fi ;;
 "trail show 424 --json --repo gh/jdx/mise"|"trail show --branch "*" --json --repo gh/jdx/mise")
-	cat "$fx/show.json" ;;
+	/bin/cat "$fx/show.json" ;;
 "trail finding --trail 424 --json -n 100 --repo gh/jdx/mise")
-	cat "$fx/finding-open.json" ;;
+	/bin/cat "$fx/finding-open.json" ;;
 "trail finding --trail 424 --json -n 100 --repo gh/jdx/mise --status any --freshness any --include-dismissed")
-	cat "$fx/finding-any.json" ;;
+	/bin/cat "$fx/finding-any.json" ;;
 *)
 	echo "fake entire: unexpected call: $*" >&2; exit 64 ;;
 esac
@@ -44,6 +45,8 @@ struct Edit {
     /// Only Entire Gates fails, ready but for its findings: not a draft,
     /// mergeable, every other check passing.
     findings_only: bool,
+    /// The check's summary is in a form jouet does not know.
+    new_summary: bool,
 }
 
 fn github(edit: Edit) -> Fake {
@@ -73,6 +76,11 @@ fn respond(edit: Edit, request: &Request) -> (u16, String) {
         return (200, contexts.to_string());
     }
     let mut pr: Value = serde_json::from_str(PR).unwrap();
+    if edit.new_summary {
+        pr["data"]["l0"]["pullRequest"]["commits"]["nodes"][0]["commit"]["checkSuites"]["nodes"]
+            [0]["checkRuns"]["nodes"][0]["summary"] =
+            json!("| Gate | Status |\n|---|---|\n| Checks | failed |\n| Findings | failed |");
+    }
     if edit.findings_only {
         let node = &mut pr["data"]["l0"]["pullRequest"];
         node["isDraft"] = json!(false);
@@ -107,20 +115,15 @@ fn jouet(fake: &Fake, dir: &Path, entire: bool, env: &[(&str, &str)], args: &[&s
             "FAKE_ENTIRE_FIXTURES",
             Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/entire"),
         )
-        .env(
-            "JOUET_ENTIRE",
-            if entire {
-                program.to_str().unwrap()
-            } else {
-                "/nonexistent/entire"
-            },
-        );
+        // Only the fake on PATH, or nothing at all.
+        .env("PATH", if entire { bin } else { dir.join("empty") });
     for var in [
         "GH_TOKEN",
         "GITHUB_TOKEN",
         "JOUET_DISPLAY",
         "JOUET_REPLY_FOOTER",
-        "JOUET_ENTIRE_TIMEOUT",
+        "JOUET_ENTIRE",
+        "JOUET_ENTIRE_TIMEOUT_MS",
         "HTTPS_PROXY",
         "https_proxy",
     ] {
@@ -223,7 +226,7 @@ fn without_entire_the_gates_still_show_and_json_says_why() {
     let doc = json(&jouet(&fake, dir.path(), false, &[], &args));
     assert_eq!(
         doc["entire"],
-        json!({ "available": false, "reason": "/nonexistent/entire was not found" })
+        json!({ "available": false, "reason": "entire is not on PATH" })
     );
     let finding = doc["prs"][0]["attention"]
         .as_array()
@@ -257,6 +260,7 @@ fn without_entire_the_gates_still_show_and_json_says_why() {
 fn pr_next_names_the_finding_to_fix() {
     let fake = github(Edit {
         findings_only: true,
+        ..Edit::default()
     });
     let dir = tempfile::tempdir().unwrap();
     let args = ["pr", "next", "jdx/mise#13958", "--settle", "0"];
@@ -350,6 +354,40 @@ fn pr_threads_lists_findings_apart_from_threads() {
     ));
     assert_eq!(
         doc["entire"],
-        json!({ "available": false, "reason": "/nonexistent/entire was not found" })
+        json!({ "available": false, "reason": "entire is not on PATH" })
     );
+}
+
+#[test]
+fn a_summary_jouet_cannot_read_is_not_guessed_at() {
+    let fake = github(Edit {
+        new_summary: true,
+        ..Edit::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let out = jouet(&fake, dir.path(), true, &[], STATUS);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains(
+            "\n  entire: checks: CI checks have not passed; findings: Unresolved findings: 2 medium severity (trail #424)\n  (jouet could not read the Entire Gates check's summary, so its gates come from `entire trail show`)\n    [entire:01M4C997EA] "
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        calls(dir.path()),
+        "auth status --json\n\
+         trail show --branch claude/project-thread-htk77e-5-experimental --json --repo gh/jdx/mise\n\
+         trail finding --trail 424 --json -n 100 --repo gh/jdx/mise\n"
+    );
+
+    // Without entire, it says it could not read the summary, and why.
+    let mut args = STATUS.to_vec();
+    args.push("--json");
+    let doc = json(&jouet(&fake, dir.path(), false, &[], &args));
+    let attention = doc["prs"][0]["attention"].as_array().unwrap();
+    assert!(attention.iter().any(|a| a["code"] == "entire_gates"
+        && a["message"]
+            == "Entire Gates: 2 blocking gates not passing (jouet could not read the check's summary)"));
+    assert!(attention.iter().all(|a| a["code"] != "entire_findings"));
 }

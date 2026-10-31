@@ -7,12 +7,13 @@
 | Checks | Another check failed | Treats it as derived: the failed checks are the cause, and are reported instead |
 | Findings | Findings on the trail are open | Lists them, with their location, and names the first one to fix |
 | Up to date | The branch is behind its base, or conflicts with it | Treats it as derived: reports `behind_base` with the command that merges the base |
+| Approvals | The trail needs an approval it does not have yet | Reports it as `entire_gates`, a wait. `wait ci` and `ci explain` do not count it as a CI failure |
 
 Entire sits beside the forge rather than inside it. Trail numbers are not pull request numbers, and a finding's lifecycle is Entire's own: resolving a finding leaves every GitHub review thread as it was, and resolving a thread leaves the findings.
 
 ## What needs the `entire` CLI
 
-The gates are read from the check's summary with the GitHub token jouet already uses, so `pr status`, `pr next`, `wait ci` and `ci explain` always say which gate fails and why.
+The gates are read from the check's summary with the GitHub token jouet already uses, so `pr status`, `pr next`, `wait ci` and `ci explain` always say which gate fails and why. A summary in a form jouet does not know is never guessed at. `pr status` and `pr next` then take the gates from `entire trail show`, and say so. Without the CLI, and in `wait ci` and `ci explain`, the check's title is shown with `(jouet could not read the check's summary)`, and the failure counts as one of its own.
 
 The findings themselves come from the `entire` CLI, and only when it is on PATH and logged in (`entire auth status`). Without it, commands carry on: text output names the failing gates and nothing more, and `--json` says why under `entire`:
 
@@ -20,7 +21,7 @@ The findings themselves come from the `entire` CLI, and only when it is on PATH 
 "entire": { "available": false, "reason": "entire is not on PATH" }
 ```
 
-jouet runs `entire` to read and change findings and never handles its credentials. Every call has a timeout (15 seconds, or `JOUET_ENTIRE_TIMEOUT`), and one command asks about each trail once. `pr status` and `pr next` start `entire` only for a pull request whose findings gate fails, so a repository without Entire never runs it. `JOUET_ENTIRE` names another program to run, and `JOUET_ENTIRE=off` turns Entire off.
+jouet runs `entire` to read and change findings and never handles its credentials. Every call has a timeout (`[entire] timeout_ms`, 5 seconds by default, or `JOUET_ENTIRE_TIMEOUT_MS`), and one command asks about each trail once. `pr status` and `pr next` start `entire` only for a pull request whose findings gate fails, so a repository without Entire never runs it. `JOUET_ENTIRE=false` (`[entire] enabled = false`) turns Entire off, as it does for [`pickup` and `sessions`](/commands/handoff).
 
 The trail is the one the check links to, else the one tracking the pull request's head branch (`entire trail show --branch`), else, for a merged pull request, the newest trail that tracked it.
 

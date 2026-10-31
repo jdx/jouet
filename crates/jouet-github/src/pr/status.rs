@@ -823,6 +823,9 @@ pub struct EntireStatus {
     /// Why `entire` could not say more, when it was asked and failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Where the gates came from, when not the check's summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl From<Gates> for EntireStatus {
@@ -832,6 +835,7 @@ impl From<Gates> for EntireStatus {
             findings: Vec::new(),
             findings_incomplete: false,
             error: None,
+            note: None,
         }
     }
 }

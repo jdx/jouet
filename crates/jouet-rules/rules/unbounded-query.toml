@@ -1,0 +1,48 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "unbounded-query"
+why = "`sqlite3` or `psql -c` printing a SELECT with no LIMIT puts every row, and every long value, in the context; `jouet db query` prints the first 50 rows and counts the rest."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-10-31"
+needs = ["db"]
+# The matchers find a SELECT (or `.dump`) whose output reaches the
+# transcript; the script lets through one with a LIMIT, or an aggregate
+# with no GROUP BY, which prints one row.
+script = "unbounded-query.luau"
+
+[[rule.match]]
+command = "sqlite3"
+text = '(?i)^\s*(select|with|table)\b|^\.dump\b'
+prints = true
+
+[[rule.match]]
+command = "psql"
+flags = ["-c", "--command"]
+text = '(?i)^(--command=)?\s*(select|with|table)\b'
+prints = true
+
+[rule.examples]
+fires = [
+  "sqlite3 app.db 'select * from users'",
+  "sqlite3 -header -column data/dev.sqlite3 'SELECT id, payload FROM events ORDER BY id DESC'",
+  "sqlite3 app.db .dump",
+  "psql -c 'select * from orders'",
+  "psql \"$DATABASE_URL\" -c \"SELECT * FROM audit_log WHERE user_id = 7\"",
+  "psql -d app --command='select * from users'",
+  "psql -c 'select status, count(*) from jobs group by status'",
+]
+quiet = [
+  "sqlite3 app.db 'select * from users limit 10'",
+  "sqlite3 app.db 'select count(*) from users'",
+  "psql -c 'SELECT max(created_at) FROM orders'",
+  "psql -c 'select * from orders' | head -20",
+  "sqlite3 app.db 'select * from users' > users.txt",
+  "sqlite3 app.db .dump > backup.sql",
+  "psql -c 'delete from sessions'",
+  "sqlite3 app.db .tables",
+  "psql -f migrate.sql",
+  "jouet db query 'select * from users'",
+  "echo \"sqlite3 app.db 'select * from t'\"",
+]

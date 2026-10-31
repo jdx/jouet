@@ -240,8 +240,8 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
 
 [entire]
-enabled = true         # JOUET_ENTIRE: read Entire where it is set up (pickup, sessions, --why)
-timeout_ms = 5000      # JOUET_ENTIRE_TIMEOUT_MS: each `entire` call for status, sessions and checkpoints
+enabled = true         # JOUET_ENTIRE: read Entire where it is set up (pickup, sessions, --why, pr findings)
+timeout_ms = 5000      # JOUET_ENTIRE_TIMEOUT_MS: each `entire` call for status, sessions, checkpoints, trails and findings
 why_timeout_ms = 15000 # JOUET_ENTIRE_WHY_TIMEOUT_MS: each `entire why` for --why
 ```
 

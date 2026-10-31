@@ -563,6 +563,10 @@ fn entire_gates(gh: &mut Gh<'_>, n: u64, pr: &Value, failed_jobs: bool) -> Optio
             g.reason.as_deref().unwrap_or("behind or conflicting")
         ));
     }
+    if gates.fails("approvals") {
+        parts
+            .push("it waits for an approval on the Entire trail, which a rerun cannot give".into());
+    }
     if gates.fails("findings") {
         parts.push(format!(
             "it has open findings, which a rerun cannot fix: jouet pr threads {name}"

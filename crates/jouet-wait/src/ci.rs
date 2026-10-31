@@ -368,7 +368,7 @@ fn entire_lines(doc: &Doc) -> String {
         if c.derived() {
             let _ = writeln!(
                 out,
-                "\n{} fails only because of what is reported elsewhere: {}",
+                "\n{} fails for nothing CI did: {}",
                 c.name,
                 g.failing_text()
             );
@@ -390,6 +390,9 @@ fn entire_lines(doc: &Doc) -> String {
                     out,
                     "  update the branch: git fetch origin {base} && git merge origin/{base}"
                 );
+            }
+            if g.fails("approvals") {
+                out.push_str("  it waits for an approval on the Entire trail\n");
             }
         } else if g.fails("findings") {
             let _ = writeln!(

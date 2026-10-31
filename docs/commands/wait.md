@@ -97,7 +97,7 @@ The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CO
 
 ### Entire Gates
 
-An [Entire Gates](/entire-gates) check that fails only because other checks failed, or because the branch is behind or conflicting with its base, is derived: it is not a failure of its own. It does not end the wait, so a rerun of the real failures is waited for rather than cut short by the old gate result. It is counted as `derived`, gets no `FAIL` block, and a closing line points at the real cause:
+An [Entire Gates](/entire-gates) check that fails only because other checks failed, because the branch is behind or conflicting with its base, or because the trail still waits for an approval, is derived: it is not a failure of CI. It does not end the wait, so a rerun of the real failures is waited for rather than cut short by the old gate result. It is counted as `derived`, gets no `FAIL` block, and a closing line points at the real cause:
 
 ```text
 FAIL jdx/mise#15220 @ abaf9ac  52 pass, 1 fail, 31 skipped, 0 pending, 1 derived  (1s)
@@ -105,7 +105,7 @@ FAIL jdx/mise#15220 @ abaf9ac  52 pass, 1 fail, 31 skipped, 0 pending, 1 derived
 FAIL release  step "Require auto-merge on the release PR"  required
   ...
 
-Entire Gates fails only because of what is reported elsewhere: checks: CI checks have not passed
+Entire Gates fails for nothing CI did: checks: CI checks have not passed
   the failed checks above are the cause
 ```
 
