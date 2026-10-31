@@ -528,7 +528,7 @@ fn url_id(url: &str) -> Option<u64> {
         .ok()
 }
 
-fn is_bot(login: &str, bots: &[String]) -> bool {
+pub(crate) fn is_bot(login: &str, bots: &[String]) -> bool {
     login.ends_with("[bot]") || bots.iter().any(|b| b.eq_ignore_ascii_case(login))
 }
 
@@ -660,12 +660,7 @@ pub struct Pushed {
 /// PR: one of its commits, or a head it had before a force-push. `Err` says
 /// why `sha` names no such commit.
 pub fn pushed_at(client: &mut Client, pr: &PrThreads, sha: &str) -> Result<Pushed, Lookup> {
-    let sha = sha.to_ascii_lowercase();
-    if sha.len() < 4 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Lookup::Usage(format!(
-            "`{sha}` is not a commit SHA (give at least 4 hex digits)"
-        )));
-    }
+    let sha = sha_prefix(sha)?;
     let commits = commits(client, pr).map_err(Lookup::Remote)?;
     let repo = pr.head_repo.as_ref().unwrap_or(&pr.repo);
     let path = format!(
@@ -680,9 +675,30 @@ pub fn pushed_at(client: &mut Client, pr: &PrThreads, sha: &str) -> Result<Pushe
             Vec::new()
         }
     };
-    let oid = find_commit(&commits, &activity, &sha)?;
+    pushed_from(&commits, &activity, &sha)
+}
+
+/// `sha` lowercased, when it is at least 4 hex digits.
+pub(crate) fn sha_prefix(sha: &str) -> Result<String, Lookup> {
+    let sha = sha.to_ascii_lowercase();
+    if sha.len() < 4 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Lookup::Usage(format!(
+            "`{sha}` is not a commit SHA (give at least 4 hex digits)"
+        )));
+    }
+    Ok(sha)
+}
+
+/// When the commit `sha` (a lowercase prefix) names reached the PR, from
+/// its commits (oldest first, with their commit times) and a log of pushes.
+pub(crate) fn pushed_from(
+    commits: &[(String, i64)],
+    activity: &[Activity],
+    sha: &str,
+) -> Result<Pushed, Lookup> {
+    let oid = find_commit(commits, activity, sha)?;
     let oids: Vec<&str> = commits.iter().map(|(o, _)| o.as_str()).collect();
-    Ok(match push_time(&activity, &oids, &oid) {
+    Ok(match push_time(activity, &oids, &oid) {
         Some(at) => Pushed {
             oid,
             at,

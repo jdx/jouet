@@ -630,8 +630,10 @@ pub enum PrCmd {
 
 /// Show where PRs stand and why any need attention
 ///
-/// Prints one line per PR, then a summary. All PRs are fetched in one batched
-/// GraphQL query. Each PR lists fixed attention codes: conflict,
+/// Prints one line per PR, then a summary. GitHub PRs are fetched in one
+/// batched GraphQL query; GitLab merge requests and Forgejo or Gitea PRs
+/// (named HOST/OWNER/NAME#N, by URL, or through a remote on that forge) are
+/// read through their REST APIs. Each PR lists fixed attention codes: conflict,
 /// checks_failing, checks_missing, changes_requested, unresolved_threads,
 /// behind_base, draft and mergeable_unknown.
 #[derive(Args)]
@@ -1092,7 +1094,7 @@ pub struct WaitArgs {
 pub enum WaitCmd {
     /// Wait for a PR's checks, and show why any failed
     Ci(WaitCiArgs),
-    /// Wait for a GitHub Actions run
+    /// Wait for a GitHub Actions run or a GitLab pipeline
     Run(WaitRunArgs),
     /// Wait for a PR to become mergeable, merged, approved, ready, ...
     Pr(WaitPrArgs),
@@ -1124,8 +1126,10 @@ pub enum WaitCmd {
 /// for the old head); no checks within --appear-timeout returns `no_checks`
 /// (exit 1).
 /// For each
-/// failed Actions job, the failed step's log is excerpted and the full log
-/// saved. Waits on the same PR share their state, so they poll GitHub once.
+/// failed Actions job or GitLab job, the failed step's log is excerpted and
+/// the full log saved. On GitLab the checks are the head's pipeline jobs and
+/// commit statuses, on Forgejo its commit statuses. Waits on the same PR share
+/// their state, so they poll the forge once.
 #[derive(Args)]
 pub struct WaitCiArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
@@ -1162,13 +1166,14 @@ pub struct WaitCiArgs {
     appear_timeout: Option<String>,
 }
 
-/// Wait for a GitHub Actions run
+/// Wait for a GitHub Actions run or a GitLab pipeline
 ///
 /// Returns when the run completes, or on its first failed job, with the
-/// failed step's log excerpted as for `wait ci`.
+/// failed step's log excerpted as for `wait ci`. Forgejo has no runs jouet
+/// can read, so it exits 4 there.
 #[derive(Args)]
 pub struct WaitRunArgs {
-    /// The run ID, or its Actions URL
+    /// The run ID, or its Actions or GitLab pipeline URL
     run: String,
     /// The repository for a bare run ID. Defaults to the git remote
     #[usage(long, value_name = "OWNER/NAME")]
@@ -2320,7 +2325,9 @@ pub struct HookArgs {
 ///
 /// Lists unresolved threads by default, outdated ones included and marked.
 /// Each thread is addressed by its first comment's ID, the number in the web
-/// UI's `#discussion_r` links. Bodies are condensed: HTML comments and badges
+/// UI's `#discussion_r` links (`#note_` on GitLab, `#issuecomment-` on
+/// Forgejo). Forgejo cannot resolve threads through its API, so resolving
+/// there exits 4 before anything is posted. Bodies are condensed: HTML comments and badges
 /// are removed, `<details>` collapse to their summary and each comment is cut
 /// at 30 lines with a marker; suggestion blocks are always kept whole.
 #[derive(Args)]
@@ -2482,6 +2489,7 @@ fn main() -> ExitCode {
         return cmd::hook::run(args).into();
     }
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
+    jouet_github::forge::configure(config::forges);
     let exit = match cli.cmd {
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Claim(args) => cmd::claim::run(args, &out),

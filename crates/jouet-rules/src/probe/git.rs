@@ -107,7 +107,9 @@ pub(crate) fn repo(dir: Option<&Path>, timeout: Duration) -> Result<Value, Strin
         left,
     )
     .unwrap_or_default();
-    if let Some(github) = jouet_github::pr::target::pick_remote(&config) {
+    if let Some(github) =
+        jouet_github::pr::target::pick_remote(&config).filter(|r| r.host.is_none())
+    {
         repo["owner"] = github.owner.as_str().into();
         repo["name"] = github.name.as_str().into();
         repo["repo"] = github.to_string().into();

@@ -1,6 +1,7 @@
 //! The shared, resumable state of a PR being watched by `wait ci`.
 //!
-//! Each PR has one state file, `<owner>-<repo>-<pr>.json` under
+//! Each PR has one state file, `<owner>-<repo>-<pr>.json` under (with the
+//! host first for a PR not on GitHub)
 //! [`paths::watch_dir`], guarded by a lock file beside it. A wait takes the
 //! lock, and polls GitHub only when the state is older than its own
 //! interval; otherwise it reads what another wait (in this session or
@@ -30,7 +31,8 @@ const MAX_EVENTS: usize = 1000;
 /// Pages of check runs or files read at most (100 each).
 const MAX_PAGES: u32 = 30;
 
-/// The PR fields a wait needs, from `GET /repos/{o}/{r}/pulls/{n}`.
+/// The PR fields a wait needs, from `GET /repos/{o}/{r}/pulls/{n}` or the
+/// other forges' equivalents.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Pr {
     pub(crate) number: u64,
@@ -182,8 +184,8 @@ pub(crate) fn now_ms() -> u64 {
 /// The state file for a PR, or for one pinned commit of it.
 pub(crate) fn state_path(repo: &Repo, number: u64, pinned: Option<&str>) -> PathBuf {
     let name = match pinned {
-        Some(sha) => format!("{}-{}-{number}-{sha}.json", repo.owner, repo.name),
-        None => format!("{}-{}-{number}.json", repo.owner, repo.name),
+        Some(sha) => format!("{}-{number}-{sha}.json", repo.slug()),
+        None => format!("{}-{number}.json", repo.slug()),
     };
     jouet_output::paths::watch_dir().join(name)
 }
@@ -362,20 +364,7 @@ pub(crate) fn poll(
         )))
     })?;
     let sha = pinned.map_or_else(|| pr.head_sha.clone(), str::to_string);
-    if let Some(old) = snap.sha.as_deref()
-        && old != sha
-    {
-        let (from, to) = (old.to_string(), sha.clone());
-        snap.events.clear();
-        snap.checks.clear();
-        snap.required_known.clear();
-        snap.required.clear();
-        let text = format!("head moved from {} to {}", short(&from), short(&to));
-        snap.log("head_changed", json!({ "from": from, "to": to }), text);
-        // The old commit's responses will not be asked for again.
-        snap.cache.retain(|k, _| !k.contains(&from));
-    }
-    snap.sha = Some(sha.clone());
+    follow(snap, &sha);
     let checks = fetch_checks(client, &base, &sha, &mut snap.cache)?;
     update_required(client, repo, number, &sha, &checks, snap);
     let checks: Vec<Check> = checks
@@ -390,6 +379,35 @@ pub(crate) fn poll(
     check_base(client, &base, &pr, snap)?;
     snap.pr = Some(pr);
     Ok(())
+}
+
+/// Follows the commit `sha`: when it is a new head, the old one's events,
+/// checks and cached responses are dropped and `head_changed` is logged.
+fn follow(snap: &mut Snapshot, sha: &str) {
+    if let Some(old) = snap.sha.as_deref()
+        && old != sha
+    {
+        let (from, to) = (old.to_string(), sha.to_string());
+        snap.events.clear();
+        snap.checks.clear();
+        snap.required_known.clear();
+        snap.required.clear();
+        let text = format!("head moved from {} to {}", short(&from), short(&to));
+        snap.log("head_changed", json!({ "from": from, "to": to }), text);
+        // The old commit's responses will not be asked for again.
+        snap.cache.retain(|k, _| !k.contains(&from));
+    }
+    snap.sha = Some(sha.to_string());
+}
+
+/// Records a poll of a forge that says which checks are required as it
+/// lists them, and has no base-branch events: the PR, the commit followed
+/// and its checks, logging what changed.
+pub(crate) fn record(snap: &mut Snapshot, pr: Pr, sha: String, checks: Vec<Check>) {
+    follow(snap, &sha);
+    log_check_changes(snap, &checks);
+    snap.checks = checks;
+    snap.pr = Some(pr);
 }
 
 pub(crate) fn short(sha: &str) -> &str {

@@ -78,10 +78,16 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
                 .map(|r| r.git.get("repo").cloned().unwrap_or_default());
             let repo = match recorded {
                 Some(repo) => repo,
-                None => match jouet_github::pr::target::repo_from_git() {
-                    Some(r) => json!({ "owner": r.owner, "name": r.name, "repo": r.to_string() }),
-                    None => serde_json::Value::Null,
-                },
+                // `github.repo` is the GitHub repository, so a GitLab or
+                // Forgejo remote is none.
+                None => {
+                    match jouet_github::pr::target::repo_from_git().filter(|r| r.host.is_none()) {
+                        Some(r) => {
+                            json!({ "owner": r.owner, "name": r.name, "repo": r.to_string() })
+                        }
+                        None => serde_json::Value::Null,
+                    }
+                }
             };
             to_lua(lua, &repo)
         })?,
@@ -258,7 +264,7 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
                     },
                 };
                 let lookups =
-                    select::lookups(&selection).map_err(|e| Fail::new(Exit::Usage, e).raise())?;
+                    select::lookups(&selection).map_err(|(exit, e)| Fail::new(exit, e).raise())?;
                 let report = select::fetch(&mut ctx.client(), lookups, settle).map_err(remote)?;
                 let value = serde_json::to_value(&report).map_err(mlua::Error::runtime)?;
                 to_lua(lua, &value)

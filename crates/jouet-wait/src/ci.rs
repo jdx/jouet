@@ -1,6 +1,7 @@
 //! `wait ci`: wait for a PR's checks, fail fast, and show why they failed.
 
 use super::checks::{self, Check, Counts, Selection, Verdict};
+use super::host::Remote;
 use super::joblog::{self, Step};
 use super::remote::{Halt, Poll, Watch};
 use super::watch::{self, PollError, Snapshot, short};
@@ -54,6 +55,9 @@ pub struct CiWait {
 #[derive(Debug, Serialize)]
 pub struct Doc {
     pub(crate) repo: String,
+    /// The host of a PR that is not on GitHub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) host: Option<String>,
     pub(crate) pr: u64,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) head_sha: String,
@@ -112,9 +116,9 @@ impl CiWait {
         }
     }
 
-    /// The state, polled from GitHub unless another wait polled it within
-    /// `interval`.
-    fn snapshot(&mut self, client: &mut Client, interval: Duration) -> Result<Snapshot, Halt> {
+    /// The state, polled from the forge unless another wait polled it
+    /// within `interval`.
+    fn snapshot(&mut self, remote: &mut Remote, interval: Duration) -> Result<Snapshot, Halt> {
         let (repo, number, pinned) = (&self.repo, self.number, self.pinned.as_deref());
         let fresh_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
         let replay_until = &mut self.replay_until;
@@ -130,7 +134,7 @@ impl CiWait {
                 return Err(Halt::RateLimited { reset });
             }
             snap.rate_limited_until = None;
-            match watch::poll(client, repo, number, pinned, snap) {
+            match remote.ci().poll(repo, number, pinned, snap) {
                 Ok(()) => {
                     snap.polled_at_ms = now_ms;
                     Ok(snap.clone())
@@ -188,6 +192,7 @@ impl CiWait {
         let sha = self.sha.clone().unwrap_or_default();
         Doc {
             repo: self.repo.to_string(),
+            host: self.repo.host.clone(),
             pr: self.number,
             head_changed: self.first_sha.as_ref().is_some_and(|f| *f != sha),
             head_sha: sha,
@@ -229,11 +234,11 @@ impl Watch for CiWait {
 
     fn poll(
         &mut self,
-        client: &mut Client,
+        remote: &mut Remote,
         interval: Duration,
         events: &mut Vec<Event>,
     ) -> Result<Poll<Doc>, Halt> {
-        let snap = self.snapshot(client, interval)?;
+        let snap = self.snapshot(remote, interval)?;
         self.new_events(&snap, events);
         let sha = snap.sha.clone().unwrap_or_default();
         if self.sha.as_deref() != Some(&sha) {
@@ -253,8 +258,13 @@ impl Watch for CiWait {
         if self.conflict.confirmed(conflicted.is_some(), polled_at)
             && let Some(pr) = conflicted
         {
+            let why = if self.repo.host.is_none() {
+                "pull_request workflows will not run until it is rebased"
+            } else {
+                "it cannot merge until it is rebased"
+            };
             let message = format!(
-                "{}#{} conflicts with {}; pull_request workflows will not run until it is rebased",
+                "{}#{} conflicts with {}; {why}",
                 self.repo, self.number, pr.base_ref
             );
             return Ok(Poll::Done(self.doc("conflict", selected, Some(message))));
@@ -281,9 +291,10 @@ impl Watch for CiWait {
             Verdict::Failure => {
                 let mut selected = selected;
                 if let Some(lines) = self.options.log_lines {
-                    attach_logs(client, &self.repo, &mut selected, lines);
+                    remote.ci().attach_logs(&self.repo, &mut selected, lines);
                 }
-                if self.options.local_runner {
+                // jactionlint runs GitHub Actions workflows only.
+                if self.options.local_runner && self.repo.host.is_none() {
                     checks::suggest_local(&mut selected, None);
                 }
                 Poll::Done(self.doc("failure", selected, None))
@@ -292,7 +303,7 @@ impl Watch for CiWait {
         })
     }
 
-    fn timed_out(&mut self, _client: &mut Client) -> Doc {
+    fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
         self.doc("timeout", self.selected(&self.last), None)
     }
 
@@ -378,7 +389,7 @@ fn attach_log(
         .or_else(|| job["workflow_name"].as_str().map(str::to_string));
     check.run_id = check.run_id.or_else(|| job["run_id"].as_u64());
     let dir = jouet_output::paths::log_dir();
-    let path = dir.join(format!("{}-{}-job-{job_id}.log", repo.owner, repo.name));
+    let path = dir.join(format!("{}-job-{job_id}.log", repo.slug()));
     // A finished job's log never changes, so it is fetched once.
     let log = match std::fs::read_to_string(&path) {
         Ok(log) => log,
