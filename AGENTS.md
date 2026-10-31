@@ -34,7 +34,7 @@ same commands. mise wraps `cargo` with mbx; see CONTRIBUTING.md.
 mise run build        # cargo build --workspace --all-targets
 mise run test         # cargo test --workspace --all-targets, then the bats tests in test/
 mise run test:bats    # only the bats tests
-mise run lint         # cargo fmt --all --check + clippy --workspace --all-targets --all-features -D warnings
+mise run lint         # cargo fmt --all --check + clippy --workspace --all-targets --all-features -D warnings + cargo-shear
 mise run lint-fix     # auto-fix what can be auto-fixed
 mise run ci           # build + test + lint
 ```
@@ -94,7 +94,10 @@ Pester tests stay at the root, since they run the binary.
 - **No lint exclusions.** Never add `#[allow(clippy::...)]`, `#[expect(clippy::...)]`, or a
   Cargo lint level set to `allow`. Refactor until clippy passes with `-D warnings`.
 - **No dead code.** Clippy runs with `-D warnings`, so an unused function, field or module fails
-  CI. Add code together with the command that uses it, not ahead of it.
+  CI. Add code together with the command that uses it, not ahead of it. The same goes for
+  dependencies: cargo-shear (`mise run lint:deps`) fails on one no code uses, in a crate or in
+  `[workspace.dependencies]`, and on a `.rs` file no crate compiles. A crate depended on only for
+  a feature goes in that crate's `[package.metadata.cargo-shear] ignored`, with a comment why.
 - **The CLI is declared with usage-rs** (`#[derive(Cli)]`), not clap. Shell completions and the
   CLI reference are generated from that one declaration, and the built binary serves its spec at
   `jouet __usage_spec__`.

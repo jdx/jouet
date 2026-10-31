@@ -1,6 +1,8 @@
 //! `jouet edit`, `jouet edit replace` and `jouet edit hash`.
 
 use super::Output;
+use super::diag as diag_cmd;
+use crate::diag::{self, Status, delta};
 use crate::{EditArgs, EditCmd, HashArgs, ReplaceArgs};
 use jouet_edit::spec::{self, Count, Edit, FileOp, Format, Spec};
 use jouet_edit::{
@@ -9,6 +11,7 @@ use jouet_edit::{
 use jouet_output::exit::Exit;
 use jouet_search::structural::Structural;
 use jouet_search::symbols::{self, SelectError, Selector};
+use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -49,8 +52,8 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             }
         }
     }
-    if args.revert_on_fail && args.check.is_none() {
-        return out.error(Exit::Usage, "--revert-on-fail needs --check");
+    if args.revert_on_fail && args.check.is_none() && !args.diag {
+        return out.error(Exit::Usage, "--revert-on-fail needs --check or --diag");
     }
     let options = Options {
         expect_hashes,
@@ -70,14 +73,57 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
         } else {
             Exit::Precondition
         };
-        print_report(out, &plan.report);
+        print_report(out, &plan.report, None, None);
         return exit;
     }
     if args.dry_run {
         plan.report.dry_run = true;
-        print_report(out, &plan.report);
+        print_report(out, &plan.report, None, None);
         return Exit::Ok;
     }
+    let settings = crate::settings::Settings::load();
+    let after_edit = if args.diag || settings.edit.fix_after {
+        let named: Vec<String> = plan
+            .report
+            .files
+            .iter()
+            .flat_map(|f| [Some(f.path.clone()), f.moved_to.clone()])
+            .flatten()
+            .collect();
+        match diag_cmd::target(&named, false) {
+            Ok(target) => Some(target),
+            // Without --diag, a path the fixers cannot take (outside the
+            // repository) only means nothing is formatted.
+            Err(e) if args.diag => return out.error(Exit::Usage, &e),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    // --diag compares with the files as they are now, so that is checked
+    // first; a check that cannot run refuses the edit before anything is
+    // written.
+    let before = match (&after_edit, args.diag) {
+        (Some((root, files)), true) => {
+            let existing: Vec<String> = files
+                .iter()
+                .filter(|f| root.join(f).is_file())
+                .cloned()
+                .collect();
+            let report = baseline(root, existing);
+            if matches!(report.status, Status::Refused | Status::Unavailable) {
+                return out.error(
+                    Exit::Precondition,
+                    &format!(
+                        "--diag cannot check these files, so nothing was written: {}",
+                        report.reason.as_deref().unwrap_or("no checker")
+                    ),
+                );
+            }
+            Some(report)
+        }
+        _ => None,
+    };
     let journal = match edit::write(&mut plan) {
         Ok(journal) => journal,
         Err(e) => {
@@ -87,9 +133,27 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             );
         }
     };
+    let written = |root: &std::path::Path, files: &[String]| -> Vec<String> {
+        files
+            .iter()
+            .filter(|f| root.join(f).is_file())
+            .cloned()
+            .collect()
+    };
+    let fixed = match &after_edit {
+        Some((root, files)) if settings.edit.fix_after => {
+            let steps = settings.edit.fix_steps.clone().unwrap_or_default();
+            let timeout = std::time::Duration::from_millis(settings.edit.fix_timeout_ms);
+            let fixed = diag::fix::run(root, &written(root, files), &steps, timeout);
+            crate::ledger::record_fix(root, None, "cli", None, &fixed);
+            Some(fixed)
+        }
+        _ => None,
+    };
     let mut exit = Exit::Ok;
+    let mut failed = false;
     if let Some(command) = &args.check {
-        let mut check = match edit::run_check(command, &jouet_output::paths::log_dir()) {
+        let check = match edit::run_check(command, &jouet_output::paths::log_dir()) {
             Ok(check) => check,
             Err(e) => {
                 // The files are already written, so a check that cannot run
@@ -110,27 +174,124 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
                 };
             }
         };
-        if !check.passed {
-            exit = Exit::Failed;
-            if args.revert_on_fail {
-                if let Err(e) = edit::revert(&journal) {
-                    return out.error(
-                        Exit::Failed,
-                        &format!("the check failed and restoring the files failed too: {e}"),
-                    );
-                }
-                check.reverted = true;
-                plan.report.applied = false;
-                plan.report.files_written = 0;
-                for f in &mut plan.report.files {
-                    f.status = FileStatus::Reverted;
-                }
-            }
-        }
+        failed |= !check.passed;
         plan.report.check = Some(check);
     }
-    print_report(out, &plan.report);
+    // A check after writing that cannot run leaves the edit unverified: exit
+    // 4, and with --revert-on-fail the files are restored, as when --check
+    // cannot start.
+    let mut unverified = false;
+    let diagnosed = match (&after_edit, &before) {
+        (Some((root, files)), Some(before)) => {
+            let after = diag_cmd::checked(root, written(root, files));
+            let outcome = DiagOutcome::of(before, &after, &renames(root, &plan.report));
+            match outcome.status {
+                "introduced" => failed = true,
+                "refused" | "unavailable" => {
+                    exit = Exit::Precondition;
+                    unverified = true;
+                }
+                _ => {}
+            }
+            Some(outcome)
+        }
+        _ => None,
+    };
+    if failed {
+        exit = Exit::Failed;
+    }
+    if (failed || unverified) && args.revert_on_fail {
+        if let Err(e) = edit::revert(&journal) {
+            return out.error(
+                Exit::Failed,
+                &format!("the check failed and restoring the files failed too: {e}"),
+            );
+        }
+        if let Some(check) = &mut plan.report.check {
+            check.reverted = true;
+        }
+        plan.report.applied = false;
+        plan.report.files_written = 0;
+        for f in &mut plan.report.files {
+            f.status = FileStatus::Reverted;
+        }
+    }
+    print_report(out, &plan.report, fixed.as_ref(), diagnosed.as_ref());
     exit
+}
+
+/// What `--diag` found: the delta between the files before and after.
+#[derive(Serialize)]
+struct DiagOutcome {
+    /// clean, introduced, refused or unavailable.
+    status: &'static str,
+    #[serde(flatten)]
+    delta: delta::Delta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log_path: Option<String>,
+}
+
+impl DiagOutcome {
+    fn of(before: &diag::Report, after: &diag::Report, renamed: &[(String, String)]) -> Self {
+        let (status, delta) = match after.status {
+            Status::Refused => ("refused", delta::Delta::default()),
+            Status::Unavailable => ("unavailable", delta::Delta::default()),
+            Status::Clean | Status::Findings => {
+                let d = delta::between(before, after, renamed);
+                (
+                    if d.introduced() {
+                        "introduced"
+                    } else {
+                        "clean"
+                    },
+                    d,
+                )
+            }
+        };
+        Self {
+            status,
+            delta,
+            reason: after.reason.clone(),
+            log_path: after.log_path.clone(),
+        }
+    }
+}
+
+/// Each moved file's path before and after, relative to `root`.
+fn renames(root: &std::path::Path, report: &Report) -> Vec<(String, String)> {
+    let Ok(cwd) = std::env::current_dir().and_then(|d| d.canonicalize()) else {
+        return Vec::new();
+    };
+    report
+        .files
+        .iter()
+        .filter_map(|f| {
+            let to = f.moved_to.as_ref()?;
+            let pair = diag::resolve(root, &cwd, &[f.path.clone(), to.clone()]).ok()?;
+            match pair.as_slice() {
+                [from, to] => Some((from.clone(), to.clone())),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// The files' findings as they are now: from the cache when every file was
+/// checked at exactly this content, else from a check.
+fn baseline(root: &std::path::Path, files: Vec<String>) -> diag::Report {
+    if let Some(path) = delta::cache_path(root) {
+        let cache = delta::Cache::load(&path);
+        let seen: Option<Vec<&delta::Seen>> = files
+            .iter()
+            .map(|f| cache.at(f, &delta::hash(root, f)?))
+            .collect();
+        if let Some(seen) = seen.filter(|s| !s.is_empty()) {
+            return diag::Report::from_cache(files, &seen);
+        }
+    }
+    diag_cmd::checked(root, files)
 }
 
 /// Finds definitions for symbol edits with tree-sitter.
@@ -373,8 +534,58 @@ fn run_hash(args: &HashArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
-fn print_report(out: &Output, report: &Report) {
-    out.result(report, || render(report));
+#[derive(Serialize)]
+struct EditOutput<'a> {
+    #[serde(flatten)]
+    report: &'a Report,
+    /// What `[edit] fix_after` formatted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<&'a diag::fix::Fixed>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diag: Option<&'a DiagOutcome>,
+}
+
+fn print_report(
+    out: &Output,
+    report: &Report,
+    fix: Option<&diag::fix::Fixed>,
+    diag: Option<&DiagOutcome>,
+) {
+    let doc = EditOutput { report, fix, diag };
+    out.result(&doc, || {
+        let mut text = render(report);
+        if let Some(line) = fix.and_then(diag::fix::Fixed::summary) {
+            let _ = writeln!(text, "{line}");
+        }
+        if let Some(d) = diag {
+            text.push_str(&render_diag(d));
+        }
+        text
+    });
+}
+
+fn render_diag(d: &DiagOutcome) -> String {
+    let mut s = String::new();
+    match d.status {
+        "refused" | "unavailable" => {
+            let _ = writeln!(
+                s,
+                "diag: could not check the edited files: {}",
+                d.reason.as_deref().unwrap_or("")
+            );
+        }
+        _ => {
+            s.push_str(&diag_cmd::delta_lines(&d.delta, 0, d.log_path.as_deref()));
+            let _ = writeln!(
+                s,
+                "diag: {} new, {} kept, {} fixed",
+                d.delta.new.len(),
+                d.delta.kept,
+                d.delta.fixed
+            );
+        }
+    }
+    s
 }
 
 fn status_word(status: FileStatus) -> &'static str {

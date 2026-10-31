@@ -118,14 +118,25 @@ sha2.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 toml.workspace = true
+# Not used by name: it turns on usage-config's `toml` feature behind usage-rs's
+# `config`, without which `usage_rs::config::FileLayer` does not exist.
 usage-config.workspace = true
 usage-rs = { workspace = true, features = ["config", "completions"] }
+
+# `mise run lint:deps` fails on a dependency no code uses.
+[package.metadata.cargo-shear]
+# Enabled only for its `toml` feature (see [dependencies]).
+ignored = ["usage-config"]
 
 [features]
 default = ["grammars"]
 # Tree-sitter grammars for symbols, outlines and the repository map. Without
 # them, `jouet search` is plain search and `jouet read --map` is unavailable.
 grammars = ["jouet-search/grammars"]
+
+[target.'cfg(unix)'.dependencies]
+# Asks hk to stop its own steps (SIGTERM) when a check runs past its time.
+libc.workspace = true
 
 [profile.release]
 lto = true

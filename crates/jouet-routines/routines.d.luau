@@ -83,6 +83,11 @@ declare jouet: {
 	pr_reply: (args: { [any]: any }?) -> Ran,
 	pr_resolve: (args: { [any]: any }?) -> Ran,
 	pr_land: (args: { [any]: any }?) -> Ran,
+	-- fs.read: the project's hk checks on files, or the changed files
+	diag_check: (args: { [any]: any }?) -> Ran,
+	diag_delta: (args: { [any]: any }?) -> Ran,
+	-- fs.write: hk's fixers (`hk run fix --safe`); with --yes when joue was, else --dry-run
+	diag_fix: (args: { [any]: any }?) -> Ran,
 }
 
 declare edit: {

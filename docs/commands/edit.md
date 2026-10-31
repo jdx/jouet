@@ -8,7 +8,7 @@ description: Exact, checked, all-or-nothing text edits across files, from search
 
 ```text
 jouet edit [--spec FILE] [--format blocks|patch|json] [--dry-run] [--diff]
-           [--check CMD] [--revert-on-fail] [--expect-hash PATH=SHA256]...
+           [--check CMD] [--diag] [--revert-on-fail] [--expect-hash PATH=SHA256]...
 jouet edit replace PATH --old TEXT --new TEXT [--count N | --all]
 jouet edit hash PATH...
 ```
@@ -231,6 +231,22 @@ jouet: running --check: No such file or directory (os error 2); every edited fil
 
 This is what mutation testing needs: an edit that does not apply, or does not compile, can never be mistaken for a surviving mutation.
 
+## Fail only on new diagnostics with `--diag`
+
+`--diag` checks the edited files with the project's hk checks before writing them and again after, and fails (exit `1`) only when the edit **introduced** a finding, or made a step that reports no diagnostics fail. Findings that were already there, including ones the edit moved to other lines, do not count; [`jouet diag delta`](/commands/diag#only-what-an-edit-introduced) explains the matching. With `--revert-on-fail`, a new finding restores the files:
+
+```output
+$ jouet edit replace notes.txt --old zero --new 'TODO zero' --diag --revert-on-fail
+reverted    notes.txt  1 edit  +1 -1
+0 of 1 file written
+new: notes.txt:1:1: warning: TODO left in [todo] (todo)
+diag: 1 new, 1 kept, 0 fixed
+```
+
+When the files were checked at exactly their current contents before, by `jouet diag check` or an earlier `--diag`, that result is the baseline and only the check after writing runs. When hk refuses to check (`--safe` rejects a command whose effect is unknown or destructive) or nothing can check the files, nothing is written and the exit code is `4`. If the check after writing cannot run, for example because the edit created a file no checker covers, the exit code is also `4`: the edit is unverified, and `--revert-on-fail` restores the files.
+
+With `[edit] fix_after = true` in the [config file](/setup#settings), the project's hk fixers format the written files first, so a formatting-only finding never fails the edit; see [formatting after edits](/commands/diag#formatting-after-edits).
+
 ## Guard against stale reads with `--expect-hash`
 
 An agent that read a file a while ago may be editing a version that has since changed. `jouet edit hash` prints SHA-256 hashes to pass back later:
@@ -299,6 +315,8 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `files[].edits[]` | One entry per edit: `index` (from 0), `status` (`ok`, `no_match`, `too_many_matches`, `too_few_matches`, `anchor_not_found`, `unsupported` or `does_not_parse`), `expected`, `found`, the 1-based `lines` of each match, the missing `anchor`, and the `closest` region for a search that matched nothing. A symbol edit adds its `symbol`, the `candidates` it could have meant, a `message` when refused, and a `signature` (`name`, `before`, `after`) when it changed the definition's first line |
 | `callers` | For each definition whose signature changed: its `symbol`, `references` (`path`, `line`) in files the edit does not change, and how many `more` were left out of the list |
 | `check` | The `--check` result: `command`, `exit_code`, `passed`, the last lines of `output`, `output_truncated`, `log_path` and `reverted` |
+| `diag` | The `--diag` result: `status` (`clean`, `introduced`, `refused` or `unavailable`), the `new` findings, `new_failed_steps`, and the `kept` and `fixed` counts |
+| `fix` | What `[edit] fix_after` did: `status`, the `formatted` files, `failed_steps` |
 
 `jouet edit hash --json` prints `{"files":[{"path":"…","sha256":"…"}]}`.
 
@@ -306,10 +324,10 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 
 | Code | When |
 |---|---|
-| 0 | Every edit applied, and the check passed if there was one |
-| 1 | The check failed or could not start (the files are restored with `--revert-on-fail` and kept otherwise), or reading or writing a file failed |
+| 0 | Every edit applied, and the check passed if there was one, and `--diag` found nothing new |
+| 1 | The check failed or could not start, or `--diag` found a new finding (the files are restored with `--revert-on-fail` and kept otherwise), or reading or writing a file failed |
 | 2 | A malformed spec or bad flags |
 | 3 | Every failure was a missing file to update or delete |
-| 4 | Nothing was written: a match count was wrong, an anchor was missing, a hash did not match, a file to create already exists, or a file is not UTF-8 text |
+| 4 | Nothing was written: a match count was wrong, an anchor was missing, a hash did not match, a file to create already exists, a file is not UTF-8 text, or `--diag` could not check the files before writing. Also when `--diag` could not check them after writing: the files are restored with `--revert-on-fail` and kept otherwise |
 
 These are the [shared exit codes](/conventions#exit-codes).

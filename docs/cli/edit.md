@@ -39,7 +39,8 @@ Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 - **`--dry-run`** — Report what would change without writing anything
 - **`--diff`** — Include a unified diff of each changed file
 - **`--check <CMD>`** — Run CMD through the shell after writing
-- **`--revert-on-fail`** — Restore every edited file if --check fails
+- **`--diag`** — Fail if the edit introduced diagnostics: the edited files are checked through hk (`jouet diag`) before and after writing, and only new findings count
+- **`--revert-on-fail`** — Restore every edited file if --check or --diag fails
 - **`--expect-hash <PATH=SHA256>`** — Refuse unless PATH's contents have this SHA-256 hash. Repeatable
 
 ## Flags
