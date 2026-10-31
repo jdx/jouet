@@ -21,6 +21,9 @@ pub(crate) fn run(args: &GraphArgs, out: &Output) -> Exit {
         Ok(cwd) => cwd,
         Err(e) => return out.error(Exit::Precondition, &format!("no current directory: {e}")),
     };
+    if let GraphCmd::Prune(_) = &args.cmd {
+        return prune(out);
+    }
     let mut graph = match Graph::open(&cwd) {
         Ok(g) => g,
         Err(e) => return out.error(Exit::Precondition, &e.to_string()),
@@ -41,6 +44,7 @@ pub(crate) fn run(args: &GraphArgs, out: &Output) -> Exit {
         GraphCmd::Impact(a) => traverse(&graph, a, Direction::Impact, out),
         GraphCmd::Explore(a) => explore(&graph, a, out),
         GraphCmd::Affected(a) => affected(&graph, a, out),
+        GraphCmd::Prune(_) => unreachable!("handled before opening a graph"),
     };
     result.unwrap_or_else(|e| out.error(Exit::Failed, &e.to_string()))
 }
@@ -504,6 +508,9 @@ fn affected(
 #[derive(Serialize)]
 struct IndexReport<'a> {
     db: String,
+    /// The graph started as a copy of a sibling worktree's.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    seeded: bool,
     #[serde(flatten)]
     refresh: &'a Refresh,
     #[serde(flatten)]
@@ -526,11 +533,17 @@ fn index(graph: &mut Graph, args: &GraphIndexArgs, out: &Output) -> Exit {
     };
     let report = IndexReport {
         db: graph.db_path().display().to_string(),
+        seeded: graph.seeded(),
         refresh: &refresh,
         status: &status,
     };
     out.result(&report, || {
-        let mut s = format!(
+        let mut s = String::new();
+        if report.seeded {
+            s.push_str("started from a sibling worktree's graph\n");
+        }
+        let _ = write!(
+            s,
             "indexed {} of {} files in {} ms ({} unchanged",
             refresh.indexed,
             refresh.checked,
@@ -678,4 +691,26 @@ pub(crate) fn reindex(cwd: &Path, paths: &[PathBuf]) {
     if let Ok(Some(mut graph)) = Graph::open_existing(cwd) {
         let _ = graph.reindex_paths(paths, Some(AFTER_EDIT_BUDGET));
     }
+}
+
+fn prune(out: &Output) -> Exit {
+    let pruned = match jouet_graph::prune() {
+        Ok(p) => p,
+        Err(e) => return out.error(Exit::Failed, &e.to_string()),
+    };
+    out.result(&pruned, || {
+        let mut s = String::new();
+        for root in &pruned.removed {
+            let _ = writeln!(s, "removed the graph of {root}");
+        }
+        let _ = writeln!(
+            s,
+            "{} removed ({}), {} kept",
+            pruned.removed.len(),
+            super::audit::bytes(pruned.bytes),
+            pruned.kept
+        );
+        s
+    });
+    Exit::Ok
 }

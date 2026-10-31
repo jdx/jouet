@@ -13,6 +13,7 @@ jouet graph callers|callees|impact SYMBOL [--depth N] [--budget BYTES] [--page N
 jouet graph affected FILE...
 jouet graph index [--full]
 jouet graph status
+jouet graph prune
 ```
 
 The flags are listed in the [CLI reference](/cli/graph/).
@@ -75,6 +76,12 @@ There is no file watcher and no background process:
 - **`jouet graph index`** lists the work tree's source files, honouring `.gitignore`, and extracts only the files whose content changed since the last index. A file whose timestamp changed but whose content did not is only re-stamped. `--full` drops the database and starts again.
 - **Every query** runs the same check first, and builds the graph if there is none, so a graph that was built once stays current.
 - **jouet's post-tool-use hook** re-indexes the files an agent just edited, through Claude Code's file tools or a Codex patch, and `jouet edit` re-indexes what it wrote. Both spend at most a quarter of a second; anything left over is picked up by the next query. The hook only updates a graph that exists, and never builds one. Turn it off with `hooks.graph = false` or `JOUET_HOOKS_GRAPH=0`.
+
+## Worktrees
+
+Every git worktree has its own graph. A worktree with none yet starts from a copy of a sibling worktree's graph (found through `git worktree list`): the one whose HEAD is nearest its own (the same commit first, then the fewest commits apart), else the most recently written. The graph stores relative paths and tracks each file by its content hash, so the first refresh after the copy only re-hashes files whose timestamps differ and re-extracts the ones whose content does. On mise, a fresh worktree's first `jouet graph index` takes 0.3 s instead of 2.0 s cold, and re-extracts nothing. The copy is a SQLite `VACUUM INTO` inside one read transaction, so a sibling writing at the same time cannot tear it. A sibling graph from another schema version is not copied; the worktree builds its own.
+
+Each graph records the root it was built for, and `jouet graph prune` deletes the graphs whose root no longer exists, which short-lived agent worktrees would otherwise leave behind. Any query does the same at most once a day. A graph whose root exists, or cannot be checked (a permission error, say), is kept.
 
 Files larger than 1 MiB, or not UTF-8, are recorded without symbols. Directories such as `node_modules`, `vendor` and `target` are skipped even when nothing ignores them. A file with syntax errors is still indexed, as tree-sitter recovered it, and `status` counts such files.
 

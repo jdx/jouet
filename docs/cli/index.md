@@ -31,6 +31,7 @@
 - [`jouet graph impact [FLAGS] <SYMBOL>`](/cli/graph/impact.md)
 - [`jouet graph explore [FLAGS] [QUERY]…`](/cli/graph/explore.md)
 - [`jouet graph affected [FILES]…`](/cli/graph/affected.md)
+- [`jouet graph prune`](/cli/graph/prune.md)
 - [`jouet handoff [FLAGS]`](/cli/handoff.md)
 - [`jouet pickup [FILE]`](/cli/pickup.md)
 - [`jouet stats [FLAGS]`](/cli/stats.md)

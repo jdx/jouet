@@ -18,5 +18,6 @@ The graph is built with tree-sitter from Rust, Python, TypeScript and JavaScript
 - [`jouet graph explore [FLAGS] [QUERY]…`](/cli/graph/explore.md)
 - [`jouet graph impact [FLAGS] <SYMBOL>`](/cli/graph/impact.md)
 - [`jouet graph index [--full]`](/cli/graph/index.md)
+- [`jouet graph prune`](/cli/graph/prune.md)
 - [`jouet graph status`](/cli/graph/status.md)
 - [`jouet graph symbols [FLAGS] [QUERY]`](/cli/graph/symbols.md)
