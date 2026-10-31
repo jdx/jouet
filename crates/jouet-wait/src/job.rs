@@ -598,7 +598,7 @@ mod sys {
         let Ok(pid) = libc::pid_t::try_from(job.pid) else {
             return false;
         };
-        if pid <= 0 || !crate::os::process_running(job.pid) {
+        if pid <= 0 || !crate::os::process_running(job.pid) || zombie(job.pid) {
             return false;
         }
         // SAFETY: getpgid only reads.
@@ -677,9 +677,42 @@ mod sys {
         })
     }
 
+    /// Without `/proc`, `ps` says which processes are in the group and
+    /// whether each is a zombie.
     #[cfg(not(target_os = "linux"))]
-    fn only_zombies(_pgid: libc::pid_t) -> bool {
+    fn only_zombies(pgid: libc::pid_t) -> bool {
+        let Ok(out) = Command::new("ps")
+            .args(["-A", "-o", "pgid=,stat="])
+            .stdin(Stdio::null())
+            .output()
+        else {
+            return false;
+        };
+        !String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next().and_then(|g| g.parse::<libc::pid_t>().ok()) == Some(pgid)
+                && fields.next().is_some_and(|stat| !stat.starts_with('Z'))
+        })
+    }
+
+    /// Whether the process has exited and waits to be reaped. Linux's
+    /// `process_running` already says so.
+    #[cfg(target_os = "linux")]
+    fn zombie(_pid: u32) -> bool {
         false
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn zombie(pid: u32) -> bool {
+        Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .stdin(Stdio::null())
+            .output()
+            .is_ok_and(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .trim_start()
+                    .starts_with('Z')
+            })
     }
 
     /// When the process started, in the OS's own terms: clock ticks since
