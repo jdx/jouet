@@ -505,3 +505,31 @@ fn an_unborn_branch_is_scanned_too() {
     assert!(report.secret_found(), "{report:?}");
     assert!(repo.git_handle().head().is_none());
 }
+
+/// hk and other fixers rewrite files in pre-commit and stage the fix. With
+/// `--only`, git commits the fix but writes the paths into the real index
+/// as they were before the hook, so the work tree and the index disagreed
+/// with HEAD, and the report said they were still uncommitted.
+#[cfg(unix)]
+#[test]
+fn a_fix_a_hook_stages_leaves_the_index_at_the_commit() {
+    let repo = Repo::new();
+    let logs = tempfile::tempdir().unwrap();
+    repo.commit(&[("a.txt", "a\n")], "init");
+    repo.hook(
+        "pre-commit",
+        "#!/bin/sh\nprintf 'a2\\n' > a.txt\ngit add a.txt\n",
+    );
+    repo.write("a.txt", "a2 \n");
+
+    let report = run(
+        &repo.git_handle(),
+        &request(&["a.txt"], "change", logs.path()),
+    )
+    .unwrap();
+
+    assert!(report.committed, "{report:?}");
+    assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "a2");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+    assert_eq!(report.left, Some(Vec::new()));
+}
