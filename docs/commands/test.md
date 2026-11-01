@@ -202,6 +202,7 @@ A Rust workspace's tests, by crate: in Rust, compiling dominates, so the saving 
 - **Found by** a `Cargo.toml` with a `[package]` or a `[workspace]`.
 - **Selection:** `cargo metadata --no-deps --offline` gives the workspace's members and their path dependencies on each other. A changed file belongs to the member whose directory holds it (the deepest, when one crate sits in another's directory), and the crates picked are the changed ones and every member that depends on one, directly or through others, dev-dependencies included. Each pick shows the chain of crates that reaches a changed one.
 - **Runner:** `cargo test -p A -p B ...`, with the words after `--` passed on.
+- **Other languages in a crate:** a changed file of a language cargo builds no tests from (`.py`, `.bats`, `.js`, `.ts`, `.go`, `.rb` and the like) still picks its crate, but a note names it, since `cargo test` leaves its own tests alone: `note: cargo runs no tests of test/stack.bats, bench/jbench/costs.py: run their own tests too`. Other files, such as `.luau` or `.toml`, can reach a test through `include_str!` and stay the crate's.
 - **Traces** every file inside a member's directory except its `target/`, since a test can read a fixture with `include_str!`.
 - **The whole suite for** the workspace manifest, `.cargo/config.toml`, `rust-toolchain(.toml)` and `Cargo.lock` (`cargo test --workspace`), and a file outside every member.
 

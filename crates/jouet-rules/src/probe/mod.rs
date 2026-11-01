@@ -321,9 +321,15 @@ pub(crate) fn install(
     let s = shared.clone();
     git_table.set(
         "state",
-        lua.create_function(move |lua, ()| {
-            let found = cached(&s, "git", |p, left| {
-                git::state(p.dir.as_deref(), left).map(Some)
+        lua.create_function(move |lua, dir: Option<String>| {
+            // The call's own directory keeps the key examples stub.
+            let key = match &dir {
+                Some(dir) => format!("git:{dir}"),
+                None => "git".to_string(),
+            };
+            let found = cached(&s, &key, |p, left| {
+                let at = p.at(dir.as_deref());
+                git::state(at.as_deref(), left).map(Some)
             })?;
             answer(lua, found)
         })?,
@@ -459,18 +465,21 @@ pub(crate) fn install(
     let s = shared.clone();
     git_table.set(
         "ahead",
-        lua.create_function(move |lua, (branch, of): (String, String)| {
-            // An example answers for any branch.
-            let stubbed = s.cache.borrow().get("ahead:*").cloned();
-            if let Some(answer_) = stubbed {
-                return answer(lua, answer_);
-            }
-            let key = format!("ahead:{branch}:{of}");
-            let found = cached(&s, &key, |p, left| {
-                stack::ahead(p.dir.as_deref(), &branch, &of, left)
-            })?;
-            answer(lua, found)
-        })?,
+        lua.create_function(
+            move |lua, (branch, of, dir): (String, String, Option<String>)| {
+                // An example answers for any branch.
+                let stubbed = s.cache.borrow().get("ahead:*").cloned();
+                if let Some(answer_) = stubbed {
+                    return answer(lua, answer_);
+                }
+                let key = format!("ahead:{branch}:{of}:{}", dir.as_deref().unwrap_or(""));
+                let found = cached(&s, &key, |p, left| {
+                    let at = p.at(dir.as_deref());
+                    stack::ahead(at.as_deref(), &branch, &of, left)
+                })?;
+                answer(lua, found)
+            },
+        )?,
     )?;
 
     let secrets_table = lua.create_table()?;

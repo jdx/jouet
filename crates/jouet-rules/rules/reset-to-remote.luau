@@ -24,8 +24,9 @@ local function positional(args: { string }): { string }
 	return out
 end
 
--- The branch a command would move and where to, or nil.
-local function target(command: JouetCommand): (string?, string?)
+-- The branch a command would move and where to, or nil. `dir` is where a
+-- `cd` before it went (see `jouet.dirs`), nil for the call's directory.
+local function target(command: JouetCommand, dir: string?): (string?, string?)
 	local sub, args = jouet.git(command)
 	local named = positional(args)
 	if sub == "checkout" or sub == "switch" or sub == "branch" then
@@ -37,7 +38,7 @@ local function target(command: JouetCommand): (string?, string?)
 		-- deliberate step back, not a restack.
 		local start = named[1]
 		if start and (string.match(start, "^origin/") or string.match(start, "^upstream/")) then
-			local state = jouet.git.state()
+			local state = jouet.git.state(dir)
 			return state and state.branch, start
 		end
 	end
@@ -46,10 +47,17 @@ end
 
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
-		for _, command in call.commands do
-			local branch, start = target(command)
+		local dirs = jouet.dirs(call.commands)
+		for i, command in call.commands do
+			-- After a `cd` it cannot follow, the repository is unknown, and
+			-- the call's own would be the wrong one to ask.
+			local dir = dirs[i]
+			local branch: string?, start: string? = nil, nil
+			if dir ~= false then
+				branch, start = target(command, dir)
+			end
 			if branch and start then
-				local lost = jouet.git.ahead(branch, start)
+				local lost = jouet.git.ahead(branch, start, dir or nil)
 				if lost and lost > 0 then
 					local s = if lost == 1 then "" else "s"
 					return jouet.warn(

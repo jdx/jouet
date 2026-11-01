@@ -185,6 +185,12 @@ hook() {
 	assert_output --partial 'This drops 1 commit on the local `b`'
 	run --separate-stderr hook 'git reset --hard HEAD^'
 	assert_output ''
+	# After a `cd`, the branch is the one checked out where it went.
+	run --separate-stderr hook 'cd ../wt-a && git reset --hard origin/a'
+	assert_output ''
+	cd ../wt-a
+	run --separate-stderr hook 'cd ../wt-b && git reset --hard origin/b'
+	assert_output --partial 'This drops 1 commit on the local `b`'
 }
 
 @test "rebasing a layer whose prerequisite merged warns, pointing at stack sync" {
