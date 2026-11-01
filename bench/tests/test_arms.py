@@ -1,0 +1,26 @@
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from jbench import arms
+
+
+class ResolveTest(unittest.TestCase):
+    def test_inactive_mise_shim_falls_back_to_next_path_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shim_dir = root / "shims"
+            bin_dir = root / "bin"
+            shim_dir.mkdir()
+            bin_dir.mkdir()
+            mise = root / "mise"
+            mise.write_text("#!/bin/sh\nexit 1\n")
+            mise.chmod(0o755)
+            (shim_dir / "python3").symlink_to(mise)
+            python = bin_dir / "python3"
+            python.write_text("#!/bin/sh\nexit 0\n")
+            python.chmod(0o755)
+            with patch.dict(os.environ, {"PATH": os.pathsep.join((str(shim_dir), str(bin_dir)))}):
+                self.assertEqual(arms.resolve("python3"), python.resolve())

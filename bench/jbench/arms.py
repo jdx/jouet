@@ -53,16 +53,18 @@ ARMS = {
 
 def resolve(tool: str) -> Path | None:
     """The real binary behind `tool`, looking through mise shims."""
-    found = shutil.which(tool)
-    if not found:
-        return None
-    real = Path(found).resolve()
-    if real.name == "mise" and shutil.which("mise"):
-        proc = subprocess.run(["mise", "which", tool], capture_output=True, text=True)
-        if proc.returncode != 0 or not proc.stdout.strip():
-            return None
-        return Path(proc.stdout.strip()).resolve()
-    return real
+    for directory in os.get_exec_path():
+        found = shutil.which(tool, path=directory or os.curdir)
+        if not found:
+            continue
+        real = Path(found).resolve()
+        if real.name != "mise":
+            return real
+        proc = subprocess.run([str(real), "which", tool], capture_output=True, text=True)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return Path(proc.stdout.strip()).resolve()
+        # An inactive mise shim can fall through to a later PATH entry.
+    return None
 
 
 def wrapper(path: Path, target: Path, env: dict[str, str]) -> None:
