@@ -281,6 +281,33 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a work tree the session left committed and idle for an hour is not asked about" {
+	git init -q repo
+	git init -q other
+	commit() { git -C other -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "$1"; }
+	echo 'fn main() {}' >other/main.rs
+	git -C other add main.rs
+	commit init
+	ran "cd $PWD/other && cargo test --workspace" 0
+
+	# Its branch moves on (merged, pulled): clean, but not the tree that
+	# passed. Two hours later, the session stops in its own tree.
+	echo 'fn main() { println!() }' >other/main.rs
+	git -C other add main.rs
+	commit merged
+	local state="$XDG_STATE_HOME/jouet/sessions/s1.json" root
+	root=$(cd other && pwd -P)
+	jq --arg r "$root" --argjson t "$(($(date +%s) - 7200))" '.trees[$r].last_run = $t' "$state" >"$state.new"
+	mv "$state.new" "$state"
+	run stop_reason
+	assert_output ""
+
+	# With something left uncommitted there, it is asked about.
+	echo 'fn main() { todo!() }' >other/main.rs
+	run stop_reason
+	assert_output --partial "In $root: Files changed after the last test run passed"
+}
+
 @test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs

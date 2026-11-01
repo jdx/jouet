@@ -200,16 +200,24 @@ pub(crate) fn judge(sig: &Signature, f: &Facts) -> Judged {
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        match (f.os, other_os.is_empty()) {
+        // Passing only on other OSes is no evidence of a flake: a test that
+        // meets an OS difference fails on every run on that OS.
+        let same_os = f
+            .passed_on_commit
+            .iter()
+            .any(|(_, os)| os.is_none() || *os == f.os);
+        match (f.os, same_os) {
             (Some(os), false) => {
                 evidence.push(format!(
-                    "passed on {} on this commit ({}); failed on {os}",
+                    "fails only on {os}: {} passed on {} on this commit ({})",
+                    what(sig),
                     other_os.join(", "),
                     join_and(&jobs)
                 ));
                 evidence.push(format!(
-                    "a failure on one OS can be a real {os} bug: if a rerun fails the same way on this commit, it is real"
+                    "most likely a {os} difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit"
                 ));
+                return done(Verdict::Real, evidence, false);
             }
             _ => evidence.push(format!(
                 "{} passed on this commit in {}",
@@ -308,19 +316,32 @@ mod tests {
     }
 
     #[test]
-    fn a_test_that_passed_on_another_os_is_flaky_and_says_where() {
+    fn a_test_that_passed_only_on_other_oses_is_an_os_difference_not_a_flake() {
         let mut f = facts();
         f.passed_on_commit = vec![
             ("trusted / test".into(), Some("linux")),
             ("trusted / test-windows".into(), Some("windows")),
         ];
         let j = judge(&test_sig("a"), &f);
-        assert_eq!(j.verdict, Verdict::Flaky);
+        assert_eq!(j.verdict, Verdict::Real);
+        assert!(!j.verdict.rerunnable());
         assert_eq!(
             j.evidence[0],
-            "passed on linux, windows on this commit (trusted / test and trusted / test-windows); failed on macos"
+            "fails only on macos: `a` passed on linux, windows on this commit (trusted / test and trusted / test-windows)"
         );
-        assert!(j.evidence[1].contains("if a rerun fails the same way on this commit, it is real"));
+        assert!(j.evidence[1].starts_with("most likely a macos difference"));
+
+        // Another job on the same OS passing it is a flake.
+        f.passed_on_commit
+            .push(("trusted / test-macos-arm".into(), Some("macos")));
+        let j = judge(&test_sig("a"), &f);
+        assert_eq!(j.verdict, Verdict::Flaky);
+        assert_eq!(
+            j.evidence,
+            [
+                "`a` passed on this commit in trusted / test, trusted / test-windows and trusted / test-macos-arm"
+            ]
+        );
     }
 
     #[test]

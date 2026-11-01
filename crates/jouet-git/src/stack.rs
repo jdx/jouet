@@ -8,6 +8,12 @@
 //! the parent's change, merged into the child's version of the file, must
 //! leave it as it is.
 //!
+//! A layer may still change the parent's lines on purpose, in a commit of
+//! its own made on top of them. A file whose version comes from such
+//! commits is not flagged; one a merge made is. The cost: a rebase that
+//! resolves a conflict by dropping the parent's lines inside one of the
+//! layer's own commits looks the same as a deliberate edit.
+//!
 //! Which branches form the stack, and which PRs have merged, is the
 //! caller's to say (gh-stack's metadata, or the PRs' bases on GitHub); this
 //! module only reads git. Refs are read as they are: nothing is fetched.
@@ -260,20 +266,16 @@ pub fn missing_changes(
     let differs = names(git, to, tip)?;
     let mut problems = Vec::new();
     for path in changed.iter().filter(|p| differs.contains(p)) {
-        let base = blob(git, from, path);
-        let theirs = blob(git, to, path);
-        let mine = blob(git, tip, path);
-        let problem = if mine == base {
-            Some(Problem::Reverted)
-        } else {
-            match (&theirs, &mine) {
-                // The child deleted a file the parent changed, or kept one
-                // the parent deleted.
-                (Some(_), None) | (None, Some(_)) => Some(Problem::Missing),
-                (Some(theirs), Some(mine)) => merge_check(git, mine, base.as_deref(), theirs)?,
-                (None, None) => None,
-            }
+        let change = Change {
+            path,
+            base: blob(git, from, path),
+            theirs: blob(git, to, path),
         };
+        let mine = blob(git, tip, path);
+        let problem = change.lacked_by(git, mine.as_deref())?;
+        if problem.is_some() && own_edit(git, &change, to, tip)? {
+            continue;
+        }
         if let Some(problem) = problem {
             let undone = undone_commit(git, from, to, path, mine.as_deref());
             problems.push(FileProblem {
@@ -288,6 +290,66 @@ pub fn missing_changes(
         }
     }
     Ok(problems)
+}
+
+/// One of the parent's file changes: the file before it, and after.
+struct Change<'a> {
+    path: &'a str,
+    base: Option<String>,
+    theirs: Option<String>,
+}
+
+impl Change<'_> {
+    /// What is wrong with `mine`, a version of the file (None when there is
+    /// none), if it lacks this change.
+    fn lacked_by(&self, git: &Git, mine: Option<&str>) -> Result<Option<Problem>, Error> {
+        if mine == self.base.as_deref() {
+            return Ok(Some(Problem::Reverted));
+        }
+        Ok(match (self.theirs.as_deref(), mine) {
+            // The child deleted a file the parent changed, or kept one the
+            // parent deleted.
+            (Some(_), None) | (None, Some(_)) => Some(Problem::Missing),
+            (Some(theirs), Some(mine)) => merge_check(git, mine, self.base.as_deref(), theirs)?,
+            (None, None) => None,
+        })
+    }
+}
+
+/// Whether `tip`'s version of the file comes from the child layer's own
+/// edits, made after it had the parent's change: the newest of its commits
+/// past `to` (the parent's tip) that touched the file is not a merge, and
+/// the version it started from had the change, or came the same way.
+///
+/// A merge is where a restack loses a change, so a version a merge made is
+/// never excused. Neither is a tree that is not a commit yet, such as the
+/// one `stack sync` checks before committing its merge.
+fn own_edit(git: &Git, change: &Change<'_>, to: &str, tip: &str) -> Result<bool, Error> {
+    let mut at = tip.to_string();
+    loop {
+        // `--full-history` keeps a merge that took either side's version.
+        let Ok(log) = git.text(&[
+            "log",
+            "-1",
+            "--topo-order",
+            "--full-history",
+            "--format=%H %P",
+            &format!("{to}..{at}"),
+            "--",
+            change.path,
+        ]) else {
+            return Ok(false);
+        };
+        let mut fields = log.split_whitespace();
+        let (Some(_), Some(before), None) = (fields.next(), fields.next(), fields.next()) else {
+            return Ok(false);
+        };
+        let version = blob(git, before, change.path);
+        if change.lacked_by(git, version.as_deref())?.is_none() {
+            return Ok(true);
+        }
+        at = before.to_string();
+    }
 }
 
 /// The newest of the parent's commits in `from..to` touching `path` that

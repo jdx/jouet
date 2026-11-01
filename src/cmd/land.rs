@@ -12,7 +12,7 @@ use super::pr;
 use crate::cli::LandArgs;
 use jouet_github::Client;
 use jouet_github::host::Feature;
-use jouet_github::pr::land::{self, Method, Refused};
+use jouet_github::pr::land::{self, Async, Method, Refused};
 use jouet_github::pr::next::{self, Action, Next};
 use jouet_github::pr::status::{Lookup, PrStatus};
 use jouet_github::pr::target::{Repo, Target};
@@ -35,6 +35,9 @@ const APPEAR_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const LOG_LINES: usize = 60;
 /// How long GitHub may take to push the merge commit of an update.
 const HEAD_MOVE_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a stacked PR's asynchronous merge is waited for. GitHub says
+/// a stack can take a few minutes.
+const ASYNC_MERGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// How many times a merge is looked for after GitHub accepted it.
 const CONFIRM_TRIES: u32 = 5;
 
@@ -169,6 +172,7 @@ fn land(
     let name = format!("{}#{}", pr.repo, pr.number);
     let update = gate(&pr, &next, options.update)?;
     let repo = Repo::parse(&pr.repo).expect("GitHub names repositories OWNER/NAME");
+    let mut stack = stack_of(client, &repo, pr.number, &name)?;
     let mut landed = Landed {
         repo: pr.repo.clone(),
         pr: pr.number,
@@ -177,7 +181,7 @@ fn land(
         method: options.method.as_str(),
         head_sha: pr.head_sha.clone(),
         updated: false,
-        plan: plan(&pr, update, options),
+        plan: plan(&pr, update, stack, options),
         merge_commit: None,
         ci: None,
         ci_text: String::new(),
@@ -223,10 +227,17 @@ fn land(
             .hint(format!("jouet pr next {name}")));
         }
         gate(&fresh, &next, false)?;
+        // The stack may have changed while the checks ran, such as a PR
+        // put below this one, which the merge would take along.
+        stack = stack_of(client, &repo, fresh.number, &name)?;
         pr = fresh;
     }
     eprintln!("jouet: {} {name} at {}", verb(options.method), pr.head_sha);
-    let reported = match land::merge(client, &repo, pr.number, &pr.head_oid, options.method) {
+    let merged = match stack {
+        Some(_) => merge_stacked(client, &repo, pr.number, &pr.head_oid, options.method),
+        None => land::merge(client, &repo, pr.number, &pr.head_oid, options.method),
+    };
+    let reported = match merged {
         Ok(sha) => sha,
         // The merge may have happened before the connection dropped, so
         // GitHub is asked.
@@ -289,7 +300,87 @@ fn gate(pr: &PrStatus, next: &Next, update: bool) -> Result<bool, Stop> {
     Err(stop)
 }
 
-fn plan(pr: &PrStatus, update: bool, options: &Options) -> Vec<String> {
+/// The number of the GitHub stack the PR is in, if any. A stacked PR is
+/// merged together with every PR below it, so one with an open PR below is
+/// refused: only the PR that was checked is ever merged.
+fn stack_of(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    name: &str,
+) -> Result<Option<u64>, Stop> {
+    let pull = land::pull(client, repo, number).map_err(|r| refused(name, "read", r))?;
+    let Some(stack) = pull.stack else {
+        return Ok(None);
+    };
+    if pull.base != stack.base {
+        return Err(Stop::new(
+            Exit::Precondition,
+            format!(
+                "{name} is in stack {} above a PR that is not merged yet ({}), and GitHub \
+                 would merge that PR with it; nothing was merged",
+                stack.number, pull.base
+            ),
+        )
+        .hint(format!(
+            "land the PR from {} first, or the whole stack with `gh stack merge {}`",
+            pull.base, stack.number
+        )));
+    }
+    Ok(Some(stack.number))
+}
+
+/// Merges a stacked PR through GitHub's asynchronous merge endpoint, and
+/// waits for its result. Once GitHub has accepted the merge, a poll that
+/// fails says nothing about it, so the merge is left to `confirmed`.
+fn merge_stacked(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    head_oid: &str,
+    method: Method,
+) -> Result<Option<String>, Refused> {
+    let deadline = Instant::now() + ASYNC_MERGE_TIMEOUT;
+    let mut state = land::merge_async(client, repo, number, head_oid, method)?;
+    loop {
+        match state {
+            Async::Merged(sha) => return Ok(sha),
+            Async::Failed(message) => return Err(Refused::Rejected(message)),
+            Async::Enqueued => {
+                return Err(Refused::Rejected(
+                    "GitHub added it to the merge queue rather than merging it".into(),
+                ));
+            }
+            // A merge still running at the deadline is left to `confirmed`,
+            // which reports it as not merged.
+            Async::Pending(_) if Instant::now() >= deadline => return Ok(None),
+            Async::Pending(uuid) if uuid.is_empty() => {
+                eprintln!(
+                    "jouet: GitHub gave no id to follow the merge by; checking whether it merged"
+                );
+                return Ok(None);
+            }
+            Async::Pending(uuid) => {
+                std::thread::sleep(Duration::from_secs(1));
+                state = match land::merge_async_result(client, repo, number, &uuid) {
+                    Ok(state) => state,
+                    Err(r) => {
+                        let why = match r {
+                            Refused::Rejected(m) | Refused::NotFound(m) => m,
+                            Refused::Failed(f) => f.message(),
+                        };
+                        eprintln!(
+                            "jouet: following the merge failed ({why}); checking whether it merged"
+                        );
+                        return Ok(None);
+                    }
+                };
+            }
+        }
+    }
+}
+
+fn plan(pr: &PrStatus, update: bool, stack: Option<u64>, options: &Options) -> Vec<String> {
     let name = format!("{}#{}", pr.repo, pr.number);
     let mut plan = Vec::new();
     let head = if update {
@@ -305,8 +396,12 @@ fn plan(pr: &PrStatus, update: bool, options: &Options) -> Vec<String> {
     } else {
         pr.head_sha.clone()
     };
+    let api = match stack {
+        Some(n) => format!("GitHub's asynchronous merge API (it is the bottom of stack {n})"),
+        None => "the API".to_string(),
+    };
     plan.push(format!(
-        "{} {name} at {head} through the API, honouring branch protection",
+        "{} {name} at {head} through {api}, honouring branch protection",
         verb(options.method)
     ));
     plan.push(format!("confirm {name} is merged"));
@@ -416,7 +511,7 @@ fn confirmed(
     reported: Option<String>,
 ) -> Result<String, Stop> {
     for attempt in 1..=CONFIRM_TRIES {
-        let merged = land::merged(client, repo, number)
+        let merged = land::pull(client, repo, number)
             .map_err(|r| refused(&format!("{repo}#{number}"), "read", r))?;
         if merged.merged {
             return merged

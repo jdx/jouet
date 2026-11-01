@@ -37,6 +37,15 @@ struct World {
     update_to: (&'static str, &'static str),
     /// Answer the next GraphQL request with an exhausted rate limit.
     rate_limited: bool,
+    /// The GitHub stack the PR is in: its number, and the PR's own base
+    /// (the stack targets `main`).
+    stack: Option<(u64, &'static str)>,
+    /// What an asynchronous merge ends in: merged, or failed and why.
+    async_result: Result<(), &'static str>,
+    /// Polling the asynchronous merge fails, though it merges.
+    async_poll_lost: bool,
+    /// What an update moves the PR's stack to.
+    stack_after_update: Option<(u64, &'static str)>,
 }
 
 impl Default for World {
@@ -56,6 +65,10 @@ impl Default for World {
             merge_reply: (200, ""),
             update_to: (SHA_B, "CLEAN"),
             rate_limited: false,
+            stack: None,
+            async_result: Ok(()),
+            async_poll_lost: false,
+            stack_after_update: None,
         }
     }
 }
@@ -154,8 +167,13 @@ fn respond(world: &mut World, request: &Request) -> (u16, String) {
             "number": 7, "state": if world.merged { "closed" } else { "open" },
             "merged": world.merged,
             "merge_commit_sha": if world.merged { Some(MERGE_SHA) } else { None },
-            "head": { "sha": world.head, "ref": "feat" }, "base": { "ref": "main" },
+            "head": { "sha": world.head, "ref": "feat" },
+            "base": { "ref": world.stack.map_or("main", |(_, base)| base) },
             "mergeable": true, "mergeable_state": world.merge_state.to_ascii_lowercase(),
+            "stack": world.stack.map(|(number, _)| json!({
+                "id": 9000 + number, "number": number, "size": 3, "position": 1,
+                "base": { "ref": "main", "sha": SHA_B },
+            })),
         })),
         ("GET", Some("/files")) => ok(json!([{ "filename": "src/a.rs" }])),
         ("PUT", Some("/update-branch")) => {
@@ -166,8 +184,43 @@ fn respond(world: &mut World, request: &Request) -> (u16, String) {
                 );
             }
             (world.head, world.merge_state) = world.update_to;
+            if world.stack_after_update.is_some() {
+                world.stack = world.stack_after_update;
+            }
             (202, r#"{"message":"Updating pull request branch."}"#.into())
         }
+        ("PUT", Some("/merge")) if world.stack.is_some() => (
+            405,
+            r#"{"message":"Merging stacked PRs via this endpoint is not supported. Use the asynchronous merge endpoint instead."}"#.into(),
+        ),
+        ("PUT", Some("/merge-async")) => {
+            if request.body["sha"] != world.head {
+                return (
+                    400,
+                    r#"{"status":"failed","details":{"message":"Head branch was modified."}}"#
+                        .into(),
+                );
+            }
+            let body = json!({ "status": "pending", "details": {
+                "message": "Merge request enqueued.", "uuid": "u-1",
+                "merge_method": request.body["merge_method"], "merge_action": "direct_merge",
+                "expected_head_sha": world.head,
+            } });
+            (202, body.to_string())
+        }
+        ("GET", Some("/merge-async/u-1")) if world.async_poll_lost => {
+            world.merged = true;
+            (404, r#"{"message":"Not Found"}"#.into())
+        }
+        ("GET", Some("/merge-async/u-1")) => match world.async_result {
+            Ok(()) => {
+                world.merged = true;
+                ok(json!({ "status": "merged", "details": {
+                    "message": "Pull request was merged.", "sha": MERGE_SHA,
+                } }))
+            }
+            Err(message) => ok(json!({ "status": "failed", "details": { "message": message } })),
+        },
         ("PUT", Some("/merge")) => {
             if request.body["sha"] != world.head {
                 return (
@@ -460,10 +513,136 @@ fn branch_protection_rejecting_the_merge_is_a_refusal() {
             .contains("never bypasses branch protection"),
         "{error}"
     );
-    // The merge was asked for once, and not confirmed or retried.
+    // The merge was asked for once, and not confirmed or retried: the PR
+    // was read only before it, for its stack.
     let requests = fake.requests();
     assert_eq!(requests.iter().filter(|r| r.method == "PUT").count(), 1);
-    assert!(!requests.iter().any(|r| r.method == "GET" && r.path == PR));
+    let reads = requests
+        .iter()
+        .filter(|r| r.method == "GET" && r.path == PR);
+    assert_eq!(reads.count(), 1);
+}
+
+#[test]
+fn a_stacked_pr_is_merged_through_the_asynchronous_endpoint() {
+    // GitHub refuses the merge endpoint for a PR in one of its stacks.
+    let dir = tempfile::tempdir().unwrap();
+    let stacked = || World {
+        stack: Some((50, "main")),
+        ..World::default()
+    };
+    let (fake, _) = github(stacked());
+    let out = land(&fake, dir.path(), &["--yes", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json(&out);
+    assert_eq!(doc["result"], "merged");
+    assert_eq!(doc["merge_commit"], MERGE_SHA);
+    assert!(
+        doc["plan"][0]
+            .as_str()
+            .unwrap()
+            .contains("through GitHub's asynchronous merge API (it is the bottom of stack 50)"),
+        "{doc}"
+    );
+    assert_eq!(writes(&fake), [format!("PUT {PR}/merge-async")]);
+    let merge = fake
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "PUT")
+        .unwrap();
+    // At the checked head, merged directly rather than queued.
+    assert_eq!(
+        merge.body,
+        json!({ "merge_method": "squash", "merge_action": "direct_merge", "sha": SHA_A })
+    );
+    assert!(
+        fake.requests()
+            .iter()
+            .any(|r| r.method == "GET" && r.path == format!("{PR}/merge-async/u-1"))
+    );
+
+    // A branch rule GitHub applies while merging is a refusal.
+    let (fake, _) = github(World {
+        async_result: Err("Required status check \"e2e\" is expected."),
+        ..stacked()
+    });
+    let out = land(&fake, dir.path(), &["--yes", "--json"]);
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
+    assert_eq!(
+        json(&out)["error"]["message"],
+        "GitHub refused to merge jdx/demo#7: Required status check \"e2e\" is expected."
+    );
+}
+
+#[test]
+fn a_stacked_merge_whose_poll_fails_is_confirmed_by_asking() {
+    // GitHub accepted the merge, so a failed poll says nothing about it.
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, _) = github(World {
+        stack: Some((50, "main")),
+        async_poll_lost: true,
+        ..World::default()
+    });
+    let out = land(&fake, dir.path(), &["--yes", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(json(&out)["merge_commit"], MERGE_SHA);
+    assert!(
+        stderr(&out).contains("following the merge failed"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(writes(&fake), [format!("PUT {PR}/merge-async")]);
+}
+
+#[test]
+fn a_stack_that_changed_during_an_update_is_checked_again() {
+    // While the checks ran, a PR was put below this one.
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World {
+        merge_state: "BEHIND",
+        stack: Some((50, "main")),
+        stack_after_update: Some((50, "feat-below")),
+        ..World::default()
+    };
+    world
+        .checks
+        .insert(SHA_B, vec![("unit", "completed", Some("success"))]);
+    let (fake, _) = github(world);
+    let out = land(
+        &fake,
+        dir.path(),
+        &["--yes", "--update", "--interval", "100ms", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
+    let message = json(&out)["error"]["message"].to_string();
+    assert!(
+        message.contains("above a PR that is not merged yet (feat-below)"),
+        "{message}"
+    );
+    assert_eq!(writes(&fake), [format!("PUT {PR}/update-branch")]);
+}
+
+#[test]
+fn a_stacked_pr_above_an_open_one_is_refused_before_any_write() {
+    // GitHub would merge the PR below it too, which nobody checked.
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, _) = github(World {
+        stack: Some((50, "feat-below")),
+        ..World::default()
+    });
+    let out = land(&fake, dir.path(), &["--yes", "--json"]);
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
+    let error = &json(&out)["error"];
+    assert_eq!(
+        error["message"],
+        "jdx/demo#7 is in stack 50 above a PR that is not merged yet (feat-below), and GitHub \
+         would merge that PR with it; nothing was merged"
+    );
+    assert_eq!(
+        error["hint"],
+        "land the PR from feat-below first, or the whole stack with `gh stack merge 50`"
+    );
+    assert!(writes(&fake).is_empty());
 }
 
 #[test]

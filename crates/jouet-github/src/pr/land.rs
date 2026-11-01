@@ -7,6 +7,12 @@
 //! updating merges the base into the branch on GitHub. Merging asks for the
 //! same merge a person gets from the button, so branch protection applies
 //! and nothing here asks to bypass it.
+//!
+//! A PR in one of GitHub's native stacks cannot go through the merge
+//! endpoint: GitHub only merges it through the asynchronous one, which
+//! takes the same head SHA guard, merges in the background, and is polled
+//! for its result. It merges every PR below the one named as well, so
+//! callers use it only for the bottom PR of a stack.
 
 use super::target::Repo;
 use crate::{Client, Failure, Rest};
@@ -95,23 +101,133 @@ pub fn merge(
     }
 }
 
-/// Whether GitHub reports the PR as merged, and its merge commit.
-pub fn merged(client: &mut Client, repo: &Repo, number: u64) -> Result<Merged, Refused> {
+/// Asks GitHub to merge a stacked PR in the background through the
+/// asynchronous merge endpoint, if its head is still `head_oid`. Like the
+/// merge endpoint, it applies branch protection; `direct_merge` keeps it from
+/// queueing the PR instead. It merges the PRs below this one too.
+pub fn merge_async(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    head_oid: &str,
+    method: Method,
+) -> Result<Async, Refused> {
+    let path = format!("{}/merge-async", pulls(repo, number));
+    let body = json!({
+        "merge_method": method.as_str(),
+        "merge_action": "direct_merge",
+        "sha": head_oid,
+    });
+    let resp = client.put(&path, &body)?;
+    match resp.status {
+        200 | 202 => Ok(Async::read(&read(&resp)?)),
+        // Not mergeable, such as closed or a draft.
+        400 => Err(Refused::Rejected(Async::message(&resp))),
+        409 => Err(Refused::Rejected(format!(
+            "GitHub already has a merge request for it, which may use other options: {}",
+            Async::message(&resp)
+        ))),
+        // GitHub sends 404 both when the asynchronous merge, which a
+        // stacked PR needs, is not available and when the PR is not found.
+        404 => Err(Refused::Rejected(format!(
+            "GitHub's asynchronous merge is not available for {repo}, or {repo}#{number} was not found: {}",
+            Async::message(&resp)
+        ))),
+        _ => Err(refusal(repo, number, &resp)),
+    }
+}
+
+/// Where an asynchronous merge GitHub accepted as `uuid` stands now.
+pub fn merge_async_result(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    uuid: &str,
+) -> Result<Async, Refused> {
+    let path = format!("{}/merge-async/{uuid}", pulls(repo, number));
+    let resp = client.get(&path, None)?;
+    match resp.status {
+        200 => Ok(Async::read(&read(&resp)?)),
+        _ => Err(refusal(repo, number, &resp)),
+    }
+}
+
+/// Where an asynchronous merge stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Async {
+    /// Running in the background; poll it by this id.
+    Pending(String),
+    /// Merged, with the merge commit GitHub reports.
+    Merged(Option<String>),
+    /// Added to the base branch's merge queue instead.
+    Enqueued,
+    /// Not merged (a conflict, an unmet branch rule), and why. The merge is
+    /// atomic, so nothing in the stack was merged.
+    Failed(String),
+}
+
+impl Async {
+    fn read(v: &Value) -> Self {
+        let details = &v["details"];
+        let text = |key: &str| details[key].as_str().map(str::to_string);
+        match v["status"].as_str() {
+            Some("pending") => Self::Pending(text("uuid").unwrap_or_default()),
+            Some("merged") => Self::Merged(text("sha")),
+            Some("enqueued") => Self::Enqueued,
+            _ => Self::Failed(text("message").unwrap_or_else(|| v.to_string())),
+        }
+    }
+
+    /// The message of a refused request, which comes either as the result
+    /// object or as GitHub's usual error.
+    fn message(resp: &Rest) -> String {
+        let v = serde_json::from_str::<Value>(&resp.body).unwrap_or_default();
+        v["details"]["message"]
+            .as_str()
+            .or(v["message"].as_str())
+            .map_or_else(|| resp.body.trim().to_string(), str::to_string)
+    }
+}
+
+/// The PR as the REST API reads it: whether it is merged, its merge commit,
+/// its base, and the stack it is in.
+pub fn pull(client: &mut Client, repo: &Repo, number: u64) -> Result<Pull, Refused> {
     let resp = client.get(&pulls(repo, number), None)?;
     if resp.status != 200 {
         return Err(refusal(repo, number, &resp));
     }
     let pr = read(&resp)?;
-    Ok(Merged {
+    let stack = &pr["stack"];
+    Ok(Pull {
         merged: pr["merged"].as_bool().unwrap_or(false),
         merge_commit: pr["merge_commit_sha"].as_str().map(str::to_string),
+        base: pr["base"]["ref"].as_str().unwrap_or_default().to_string(),
+        stack: stack["number"].as_u64().map(|number| Stack {
+            number,
+            base: stack["base"]["ref"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        }),
     })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Merged {
+pub struct Pull {
     pub merged: bool,
     pub merge_commit: Option<String>,
+    /// The branch the PR targets.
+    pub base: String,
+    pub stack: Option<Stack>,
+}
+
+/// A GitHub native stack a PR is in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stack {
+    pub number: u64,
+    /// The branch the whole stack targets. Only the bottom open PR targets
+    /// it directly; the others target the branch of the PR below them.
+    pub base: String,
 }
 
 fn read(resp: &Rest) -> Result<Value, Failure> {

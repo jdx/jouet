@@ -6,15 +6,16 @@
 //! that failed, compile and lint errors, runner and network trouble. A job
 //! that only failed because another did (a `needs:` job reporting the
 //! result, a fail-fast cancel) follows that job and gets no verdict of its
-//! own. Jobs with the same signature are judged once, from what history
-//! shows of it, in this order:
+//! own. Jobs with the same signature (and, for failed tests, the same OS)
+//! are judged once, from what history shows of it, in this order:
 //!
 //! 1. the same job on the same commit, in another attempt or run: passed is
 //!    flaky, failed the same way again is real;
 //! 2. the default branch: failing the same way there is real, and not the
 //!    change's fault (for a compile error, across every workflow);
-//! 3. the other jobs of the run: a test that passed on another OS on this
-//!    commit is flaky, the evidence naming the OSes;
+//! 3. the other jobs of the run: a test that passed on this commit in a job
+//!    on the same OS is flaky; one that passed only on other OSes is real,
+//!    most likely an OS difference, since that fails every run there;
 //! 4. the workflow's other recent runs: a test that failed on another
 //!    branch that passed later is a known flake.
 //!
@@ -792,7 +793,7 @@ fn explain_run(
     // Jobs that failed the same way are judged once.
     let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
     for (i, r) in reads.iter().enumerate() {
-        let key = r.sig.group_key();
+        let key = r.sig.group_key(r.job.os);
         match groups.iter_mut().find(|(k, _)| key.is_some() && *k == key) {
             Some((_, members)) => members.push(i),
             None => groups.push((key, vec![i])),

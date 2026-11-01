@@ -19,6 +19,8 @@ The flags are listed in the [CLI reference](/cli/pr/land). `PR` is a number, a U
 2. **Update, with `--update`.** A branch that is behind its base is updated on GitHub with the update-branch endpoint, which merges the base into it. jouet never rebases or force-pushes. The request names the head that was checked, so a push in between makes GitHub refuse it.
 3. **Wait for checks.** After an update, it waits for the new head's checks with the same waiting as [`jouet wait ci`](/commands/wait), up to `--timeout` (default `30m`). A failed check stops it. Then the pull request goes through step 1 again, since an update can dismiss an approval.
 4. **Merge.** It merges with `--method` (default `squash`) through the merge endpoint, naming the head SHA it checked. This is the merge a person gets from the button: branch protection applies, and nothing asks to bypass it. If GitHub refuses, jouet reports GitHub's reason and exits `4`.
+
+   A pull request in one of GitHub's native stacks (the ones `gh stack` makes) cannot use the merge endpoint, so jouet merges it through GitHub's [asynchronous merge endpoint](https://github.github.com/gh-stack/reference/merge-api/) instead, with the same head SHA, as a direct merge rather than through a merge queue, and waits for the result. That endpoint merges every pull request below the one named as well, so jouet lands only the bottom open pull request of a stack: one whose base is still another pull request's branch is refused with exit `4`. Land the one below it first, or the whole stack with `gh stack merge`.
 5. **Confirm.** It reads the pull request back until GitHub reports it merged, and prints the merge commit. If the response to the merge was lost, this step finds out whether it happened; the merge itself is never sent twice.
 
 ```text
@@ -78,6 +80,6 @@ After `--update`, `updated` is `true`, `head_sha` is the new head, and `ci` is t
 | `1` | The checks failed after `--update`; nothing was merged |
 | `2` | Bad arguments, or neither `--yes` nor `--dry-run` with no person to ask |
 | `3` | The pull request was not found |
-| `4` | Refused: not ready to merge, no full test pass recorded at the head, not confirmed at the prompt, the head moved, or GitHub refused the update or the merge (branch protection, a method the repository does not allow, missing permission). Nothing was merged |
+| `4` | Refused: not ready to merge, no full test pass recorded at the head, not confirmed at the prompt, the head moved, a stacked pull request above one that is not merged, or GitHub refused the update or the merge (branch protection, a method the repository does not allow, missing permission). Nothing was merged |
 | `5` | Authentication, network or rate-limit failure, or GitHub did not report the merge |
 | `124` | The checks after `--update` were still running at `--timeout` |
