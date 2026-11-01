@@ -606,7 +606,7 @@ fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
             ),
         ),
         Category::ProcessPolling => (
-            "jouet wait pid|log|port|cmd",
+            "a longer tool wait",
             "a longer wait may replace consecutive short checks of the same job",
             Saving::new(
                 acc.waits.avoidable_input_tokens as f64,
@@ -967,6 +967,7 @@ mod tests {
             .iter()
             .find(|s| s.category == Category::ProcessPolling)
             .unwrap();
+        assert_eq!(saving.fix, "a longer tool wait");
         assert_eq!(saving.saving.as_ref().unwrap().input_tokens, 100);
         assert!(
             !serde_json::to_string(report)

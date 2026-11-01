@@ -75,11 +75,7 @@ impl Reader for Codex {
             t.lines += 1;
             state.line = t.lines;
             let found = |k: &&[u8]| memchr::memmem::find(line, k).is_some();
-            if !(RELEVANT.iter().any(found)
-                || state.detail && DETAIL.iter().any(found)
-                || memchr::memmem::find(line, b"\"role\":\"assistant\"").is_some()
-                    && memchr::memmem::find(line, b"\"phase\":\"analysis\"").is_none())
-            {
+            if !(RELEVANT.iter().any(found) || state.detail && DETAIL.iter().any(found)) {
                 return true;
             }
             let parsed: Line = match serde_json::from_slice(line) {
@@ -163,7 +159,7 @@ const RELEVANT: [&[u8]; 8] = [
     b"function_call",
     b"\"token_count\"",
     b"\"CommandExecution\"",
-    b"\"role\":\"user\"",
+    b"\"role\"",
     b"\"turn_aborted\"",
 ];
 
@@ -824,7 +820,7 @@ mod tests {
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"1\",\"output\":\"Wall time: 1 seconds\\nProcess running with session ID 7\\nOutput:\\n\"}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":\"Working\"}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"write_stdin\",\"call_id\":\"2\",\"arguments\":\"{\\\"session_id\\\":7,\\\"yield_time_ms\\\":1000}\"}}\n",
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Older transcript reply\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\" : \"assistant\",\"content\":\"Older transcript reply\"}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"write_stdin\",\"call_id\":\"3\",\"arguments\":\"{\\\"session_id\\\":7,\\\"yield_time_ms\\\":1000}\"}}\n",
         );
         let source = Source {
