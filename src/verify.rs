@@ -91,7 +91,13 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
-        if ran == wanted || without_names(ran, wanted) {
+        if ran == wanted {
+            return true;
+        }
+        // Selections leave out the runner, which these two read words by.
+        if same_runner(&self.command, &failed.command)
+            && (without_names(ran, wanted) || wider_filter(&failed.command, ran, wanted))
+        {
             return true;
         }
         let words = |s: &str| -> Option<Vec<String>> {
@@ -103,6 +109,22 @@ impl Run {
         };
         !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
     }
+}
+
+/// Whether two commands ran the same test runner: their program, and for
+/// cargo its subcommand (`cargo test` and `cargo nextest` select alike, but
+/// not as vitest does).
+fn same_runner(a: &str, b: &str) -> bool {
+    let runner = |command: &str| -> Vec<String> {
+        let words: Vec<&str> = command.split_whitespace().collect();
+        match words.as_slice() {
+            ["cargo", sub, ..] => vec!["cargo".into(), (*sub).into()],
+            [program, ..] => vec![(*program).into()],
+            [] => Vec::new(),
+        }
+    };
+    let (a, b) = (runner(a), runner(b));
+    !a.is_empty() && a == b
 }
 
 /// Whether `wanted` is `ran` with plain names after it: words that are
@@ -117,6 +139,29 @@ fn without_names(ran: &str, wanted: &str) -> bool {
         && wanted.starts_with(&ran)
         && !ran.last().is_some_and(option)
         && !wanted[ran.len()..].iter().any(option)
+}
+
+/// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
+/// cut to part of it: cargo and nextest run every test whose name holds the
+/// filter, so `affected::` runs all that `affected::cargo` does. Not with
+/// `--exact`, which matches whole names.
+fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
+    if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
+        return false;
+    }
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let (Some((r, ran_rest)), Some((w, wanted_rest))) = (ran.split_last(), wanted.split_last())
+    else {
+        return false;
+    };
+    let option = |w: &&str| w.starts_with('-');
+    ran_rest == wanted_rest
+        && !option(r)
+        && !option(w)
+        && !ran_rest.last().is_some_and(option)
+        && !ran_rest.contains(&"--exact")
+        && w.contains(r)
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -170,6 +215,64 @@ pub(crate) struct Checks {
     /// it, and read as long ago.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run: Option<i64>,
+    /// Files a formatter or a commit's hooks rewrote, as the trees before
+    /// and after, oldest first: what passed at the first counts at the
+    /// second, so `cargo fmt` after the tests asks for no second run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formatted: Vec<(String, String)>,
+    /// The tree when such a call started, until it ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatting: Option<String>,
+}
+
+/// How many rewrites [`Checks::formatted`] keeps.
+const FORMATTED_KEPT: usize = 20;
+
+/// Whether a Bash call only formats files or commits them: every command in
+/// it is a formatter (`cargo fmt`, `prettier --write`, `hk fix`, ...), a
+/// commit, whose hooks may fix what they check, `git add`, or `git status`,
+/// with pipes into `tail` or `head`. A `cd` makes it something else, since
+/// the files it changed are elsewhere.
+pub(crate) fn formats(command: &str) -> bool {
+    let bare = command
+        .replace("2>&1", "")
+        .replace("1>&2", "")
+        .replace(">&2", "")
+        .replace("2>/dev/null", "")
+        .replace(">/dev/null", "");
+    // Anything still redirected writes a file: `git status > src/a.rs`. A
+    // substitution runs a command of its own: `git status $(sed -i ...)`.
+    if bare.contains('>') || bare.contains("$(") || bare.contains('`') || bare.contains("<(") {
+        return false;
+    }
+    let segments: Vec<&str> = bare
+        .split(['\n', ';', '|', '&'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    !segments.is_empty()
+        && segments.iter().all(|segment| {
+            let words: Vec<&str> = segment.split_whitespace().collect();
+            let words = match words.as_slice() {
+                ["mise", "x", rest @ ..] => match rest.iter().position(|w| *w == "--") {
+                    Some(i) => &rest[i + 1..],
+                    None => rest,
+                },
+                all => all,
+            };
+            let has = |flag: &str| words.contains(&flag);
+            match words {
+                ["cargo", "fmt", ..] | ["rustfmt", ..] | ["gofmt", ..] | ["go", "fmt", ..] => true,
+                ["black", ..] | ["ruff", "format", ..] | ["hk", "fix", ..] => true,
+                ["prettier", ..] | ["npx", "prettier", ..] => has("--write") || has("-w"),
+                ["git", "commit", ..]
+                | ["jouet", "commit", ..]
+                | ["git", "add", ..]
+                | ["git", "status", ..] => true,
+                ["tail", ..] | ["head", ..] | ["true"] => true,
+                _ => false,
+            }
+        })
 }
 
 /// A command as the unverifiable failures key it: `jouet test` without
@@ -298,6 +401,11 @@ impl State {
             .entry(root.to_string())
             .or_default()
             .record(records, tree);
+    }
+
+    /// The checks run in the work tree at `root`, made when there are none.
+    pub(crate) fn checks_mut(&mut self, root: &str) -> &mut Checks {
+        self.trees.entry(root.to_string()).or_default()
     }
 
     /// The checks run in the work tree at `root`.
@@ -491,8 +599,45 @@ impl Checks {
     /// ran at the tree `now` gives.
     pub(crate) fn hk_passed_at(&self, now: impl Fn() -> Option<String>) -> bool {
         self.hk.as_ref().is_some_and(|run| {
-            run.passed() && run.covers_changes() && run.tree.is_some() && run.tree == now()
+            run.passed()
+                && run.covers_changes()
+                && self.same_files(run.tree.as_deref(), now().as_deref())
         })
+    }
+
+    /// Whether the files at `now` are those at `ran`, or what formatting or
+    /// a commit's hooks made of them since. An unknown tree is never the
+    /// same.
+    fn same_files(&self, ran: Option<&str>, now: Option<&str>) -> bool {
+        let (Some(ran), Some(mut at)) = (ran, now) else {
+            return false;
+        };
+        for _ in 0..=self.formatted.len() {
+            if at == ran {
+                return true;
+            }
+            match self.formatted.iter().rev().find(|(_, to)| to == at) {
+                Some((from, _)) => at = from,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// A call that formats or commits ([`formats`]) started, at `tree`.
+    pub(crate) fn formatting_started(&mut self, tree: Option<&str>) {
+        self.formatting = tree.map(str::to_string);
+    }
+
+    /// That call ended, at `tree`: what it changed was formatting.
+    pub(crate) fn formatting_ended(&mut self, tree: Option<&str>) {
+        if let (Some(from), Some(to)) = (self.formatting.take(), tree)
+            && from != to
+        {
+            self.formatted.push((from, to.to_string()));
+            let over = self.formatted.len().saturating_sub(FORMATTED_KEPT);
+            self.formatted.drain(..over);
+        }
     }
 
     /// The reasons to stop waiting, as [`Checks::reasons`] lists them, that
@@ -579,7 +724,7 @@ impl Checks {
                 shown(&hk.command)
             ));
         }
-        if hk.tree == tree() {
+        if self.same_files(hk.tree.as_deref(), tree().as_deref()) {
             return None;
         }
         Some(format!(
@@ -605,7 +750,7 @@ impl Checks {
         let passed_now = self.passes.get(&Kind::Test).is_some_and(|passes| {
             passes
                 .iter()
-                .any(|p| p.tree.as_deref() == Some(now.as_str()))
+                .any(|p| self.same_files(p.tree.as_deref(), Some(now.as_str())))
         });
         if passed_now {
             return None;
@@ -1033,6 +1178,51 @@ mod tests {
     }
 
     #[test]
+    fn files_a_formatter_rewrote_after_a_pass_count_as_tested() {
+        let mut state = Checks::default();
+        state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        state.formatting_started(Some("t1"));
+        state.formatting_ended(Some("t2"));
+        assert_eq!(reason(&state, "t2"), None);
+        // An edit after that is not formatting.
+        assert!(reason(&state, "t3").is_some());
+        // Nor are files a formatter rewrote that had not passed.
+        state.formatting_started(Some("t3"));
+        state.formatting_ended(Some("t4"));
+        assert!(reason(&state, "t4").is_some());
+        // A formatter that changed nothing keeps nothing.
+        state.formatting_started(Some("t4"));
+        state.formatting_ended(Some("t4"));
+        assert_eq!(state.formatted.len(), 2);
+    }
+
+    #[test]
+    fn only_formatting_and_committing_calls_count_as_formatting() {
+        for yes in [
+            "cargo fmt",
+            "cargo fmt --all 2>&1 | tail -3",
+            "mise x -- cargo fmt -p a && jouet commit src/a.rs --message m",
+            "prettier --write src && git add src/a.ts && git commit -qm m",
+            "hk fix; git status --short",
+        ] {
+            assert!(formats(yes), "{yes}");
+        }
+        for no in [
+            "cargo fmt && cargo test",
+            "prettier --check src",
+            "cd sub && cargo fmt",
+            "sed -i s/a/b/ src/a.rs && cargo fmt",
+            "git status > src/main.rs",
+            "git status $(sed -i s/a/b/ src/main.rs)",
+            "git commit -m `sed -i s/a/b/ src/main.rs`",
+            "cargo fmt &> out.txt",
+            "",
+        ] {
+            assert!(!formats(no), "{no}");
+        }
+    }
+
+    #[test]
     fn a_pass_over_more_names_clears_a_failure() {
         let mut state = Checks::default();
         state.record([test("mise run test", 0, "full")], Some("t1"));
@@ -1072,6 +1262,72 @@ mod tests {
         state.record([cargo("-p a -- --exact name", 101)], Some("t1"));
         state.record([cargo("-p a --", 0)], Some("t1"));
         assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_pass_of_another_runner_never_widens_to_cover_a_failure() {
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        state.record(
+            [test(
+                "cargo test --bin jouet affected::cargo",
+                101,
+                "--bin jouet affected::cargo",
+            )],
+            Some("t1"),
+        );
+        // A vitest run whose selection reads like a shorter filter.
+        state.record(
+            [test(
+                "vitest --bin jouet affected::",
+                0,
+                "--bin jouet affected::",
+            )],
+            Some("t1"),
+        );
+        assert!(reason(&state, "t1").is_some());
+        state.record(
+            [test(
+                "cargo test --bin jouet affected::",
+                0,
+                "--bin jouet affected::",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+        // Nor does dropping the names cross runners.
+        state.record([test("cargo test -p a name", 101, "-p a name")], Some("t1"));
+        state.record([test("pytest -p a", 0, "-p a")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        assert!(same_runner("cargo test -p a", "cargo test --workspace"));
+        assert!(!same_runner("cargo test -p a", "cargo nextest run -p a"));
+    }
+
+    #[test]
+    fn a_shorter_cargo_name_filter_covers_a_longer_one() {
+        let c = "cargo test --bin jouet affected::cargo";
+        assert!(wider_filter(
+            c,
+            "--bin jouet affected::",
+            "--bin jouet affected::cargo"
+        ));
+        // Another filter, another target, a whole-name match, another runner.
+        assert!(!wider_filter(
+            c,
+            "--bin jouet verify::",
+            "--bin jouet affected::cargo"
+        ));
+        assert!(!wider_filter(
+            c,
+            "--lib affected::",
+            "--bin jouet affected::cargo"
+        ));
+        assert!(!wider_filter(c, "-- --exact a", "-- --exact ab"));
+        assert!(!wider_filter(
+            "mise run test:e2e test_ab",
+            "test:e2e test_a",
+            "test:e2e test_ab"
+        ));
     }
 
     #[test]

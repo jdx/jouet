@@ -185,6 +185,36 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "files a formatter rewrote after a passing run need no second run" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	about_to() {
+		jq -cn --arg c "$1" --arg cwd "$PWD/repo" \
+			'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' |
+			jouet hook claude pre-tool-use >/dev/null
+	}
+
+	ran 'cargo test --workspace wait_github' 0
+	# `cargo fmt` reformats main.rs between its two hooks.
+	about_to 'cargo fmt --all'
+	echo 'fn main() { }' >repo/main.rs
+	ran 'cargo fmt --all' 0
+	run stop_reason
+	assert_output ""
+	# An edit afterwards is still a change.
+	echo 'fn main() { todo!() }' >repo/main.rs
+	run stop_reason
+	assert_output --partial 'Files changed after the last test run passed ('
+	# With steering off, no rule runs before a call, but the tree is kept.
+	ran 'cargo test --workspace wait_github' 0
+	JOUET_HOOKS_STEER=false about_to 'cargo fmt --all'
+	echo 'fn main() { todo!(); }' >repo/main.rs
+	ran 'cargo fmt --all' 0
+	run stop_reason
+	assert_output ""
+}
+
 @test "a failure is raised once per tree and runs, not at every turn's stop" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
