@@ -130,8 +130,10 @@ jobs:
 
   # Builds every release target the way release.yml does, so a change one of
   # them cannot build (Luau's C++ on an old cross image, say) fails here and
-  # not at release time. Compiles and links only; nothing is uploaded.
+  # not at release time. Compiles and links only; nothing is uploaded. Skipped
+  # on pull requests, where it is the most expensive job; it runs on main.
   release-build:
+    if: ${{ github.event_name != 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
@@ -200,6 +202,7 @@ jobs:
           needs.test-macos.result != 'success' ||
           needs.test-windows.result != 'success' ||
           needs.msrv.result != 'success' ||
-          needs.release-build.result != 'success'
+          (needs.release-build.result != 'success' &&
+           !(github.event_name == 'pull_request' && needs.release-build.result == 'skipped'))
         run: exit 1
       - run: echo "All CI jobs completed successfully"
