@@ -24,7 +24,7 @@ mod report;
 pub mod run;
 mod watch;
 
-pub use joblog::{Excerpt, trim as trim_excerpt};
+pub use joblog::{Excerpt, fold_backtraces, trim as trim_excerpt};
 pub use report::Reporter;
 /// How long a conflict GitHub reports must persist before a wait believes
 /// it: right after a push, GitHub can still answer for the old head.

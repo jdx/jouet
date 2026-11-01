@@ -1,0 +1,100 @@
+SUCCESS: [mise ls --installed --json dummy] '"version": "1.1.12"' is in output
+mise by @jdx – installing 1 tool
+mise ✓ dummy@1.1.1  500ms
+DEBUG: $ mise uninstall dummy@latest
+Error: 
+   0: dummy@latest is not installed
+
+Location:
+   src/cli/uninstall.rs:118
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ BACKTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                                ⋮ 5 frames hidden ⋮
+   6: mise::cli::uninstall::Uninstall::get_requested_tool_versions::{{closure}}<unknown>
+      at /home/coder/work/src/cli/uninstall.rs:118
+   7: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:407
+   8: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:408
+   9: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:409
+  10: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:410
+  11: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:411
+  12: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:412
+  13: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:413
+  14: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:414
+  15: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:415
+  16: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:416
+  17: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:417
+  18: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:418
+  19: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:419
+  20: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:420
+  21: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:421
+  22: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:422
+  23: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:423
+  24: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:424
+  25: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:425
+  26: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:426
+  27: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:427
+  28: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:428
+  29: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:429
+  30: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:430
+  31: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:431
+  32: mise::cli::run::{closure#0}::<core[d9d7920998197ade]::future::Ready<()>><unknown>
+      at /home/coder/work/src/cli/mod.rs:432
+  33: std[dcc5f7e57a96086e]::panicking::catch_unwind::do_call::<&dyn core[d9d7920998197ade]::ops::function::Fn<(), Output = i32>, i32><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panicking.rs:573
+  34: std[dcc5f7e57a96086e]::panicking::catch_unwind::<i32, &dyn core[d9d7920998197ade]::ops::function::Fn<(), Output = i32> + core[d9d7920998197ade]::panic::unwind_safe::RefUnwindSafe + core[d9d7920998197ade]::marker::Sync><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panicking.rs:541
+  35: std[dcc5f7e57a96086e]::panic::catch_unwind::<&dyn core[d9d7920998197ade]::ops::function::Fn<(), Output = i32> + core[d9d7920998197ade]::panic::unwind_safe::RefUnwindSafe + core[d9d7920998197ade]::marker::Sync, i32><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panic.rs:359
+  36: std[dcc5f7e57a96086e]::rt::lang_start_internal::{closure#0}<unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/rt.rs:175
+  37: std[dcc5f7e57a96086e]::panicking::catch_unwind::do_call::<std[dcc5f7e57a96086e]::rt::lang_start_internal::{closure#0}, isize><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panicking.rs:573
+  38: std[dcc5f7e57a96086e]::panicking::catch_unwind::<isize, std[dcc5f7e57a96086e]::rt::lang_start_internal::{closure#0}><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panicking.rs:541
+  39: std[dcc5f7e57a96086e]::panic::catch_unwind::<std[dcc5f7e57a96086e]::rt::lang_start_internal::{closure#0}, isize><unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/panic.rs:359
+  40: std[dcc5f7e57a96086e]::rt::lang_start_internal<unknown>
+      at /rustc/fd8e211ae301c84a86d13cf52a6d3ce08c589e2e/library/std/src/rt.rs:171
+  41: std[dcc5f7e57a96086e]::rt::lang_start::<std[dcc5f7e57a96086e]::process::ExitCode><unknown>
+      at /home/coder/.rustup/toolchains/beta-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205
+  42: main<unknown>
+      at <unknown source file>:<unknown line>
+  43: __libc_start_main<unknown>
+      at <unknown source file>:<unknown line>
+  44: _start<unknown>
+      at <unknown source file>:<unknown line>
+
+Run with COLORBT_SHOW_HIDDEN=1 environment variable to disable frame filtering.
+Run with RUST_BACKTRACE=full to include source snippets.
+ERROR: E2E assertion failed: [mise uninstall dummy@latest] command failed with status 1
+cli/test_uninstall: 6s
+ERROR: E2E test cli/test_uninstall failed: exited with status code 1
+Test environment can be examined in /tmp/jb-svadubdc/mise-uninstall-prefix.claude.jouet.r2/test_uninstall.tzhVgR
+
+Finished in 9.88s
+[test:e2e] ERROR task failed

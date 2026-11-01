@@ -420,3 +420,27 @@ fn rustfmt_check_names_each_place_with_its_diff() {
         ["     let x = 1;", "-    f(a,b);", "+    f(a, b);"]
     );
 }
+
+#[test]
+fn a_panics_backtrace_folds_so_its_message_is_shown() {
+    // A mise e2e run whose command failed with color-eyre's report, and no
+    // runner jouet knows: the message sits above some 40 frames.
+    let d = digest_with(&fixture("mise-e2e-eyre"), true, DEFAULT_BUDGET, &[]);
+    let lines = &d.failures[0].lines;
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.trim() == "0: dummy@latest is not installed"),
+        "{lines:#?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.ends_with("backtrace lines skipped")),
+        "{lines:#?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("[mise uninstall dummy@latest] command failed")),
+        "{lines:#?}"
+    );
+}

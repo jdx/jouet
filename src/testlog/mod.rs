@@ -641,7 +641,7 @@ fn same(a: &str, b: &str) -> bool {
 /// last lines.
 fn shape(name: &str, lines: Vec<String>) -> Vec<String> {
     let own = name.rsplit(' ').next().unwrap_or(name);
-    let lines: Vec<String> = lines
+    let lines: Vec<String> = jouet_wait::fold_backtraces(lines)
         .into_iter()
         .filter(|l| !RUST_NOISE.is_match(l) && l.trim() != own)
         .map(cap)
