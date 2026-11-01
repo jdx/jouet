@@ -141,7 +141,8 @@ fn file_mode(path: &Path) -> Option<&'static str> {
 }
 
 /// Whether the work tree at `dir` has anything uncommitted: a staged or
-/// unstaged change, or an untracked file that is not ignored.
+/// unstaged change, an untracked file that is not ignored, or a submodule
+/// with either or with a commit the index does not record.
 pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
     let status = git(
         Some(dir),
@@ -150,7 +151,7 @@ pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
             "--porcelain",
             "-z",
             "--untracked-files=normal",
-            "--ignore-submodules=all",
+            "--ignore-submodules=none",
         ],
         timeout,
     )?;
@@ -239,7 +240,32 @@ mod tests {
         std::fs::remove_file(dir.join("new.rs")).unwrap();
         std::fs::write(dir.join("a.rs"), "changed").unwrap();
         assert_eq!(uncommitted(dir, T), Ok(true));
+        run(dir, &["checkout", "-q", "a.rs"]);
         assert!(uncommitted(&dir.join("missing"), T).is_err());
+
+        // A change inside a submodule counts too.
+        let source = tempfile::tempdir().unwrap();
+        run(source.path(), &["init", "-q"]);
+        std::fs::write(source.path().join("lib.rs"), "one").unwrap();
+        run(source.path(), &["add", "lib.rs"]);
+        run(source.path(), &["commit", "-qm", "lib"]);
+        let url = source.path().to_str().unwrap();
+        run(
+            dir,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                url,
+                "sub",
+            ],
+        );
+        run(dir, &["commit", "-qm", "sub"]);
+        assert_eq!(uncommitted(dir, T), Ok(false));
+        std::fs::write(dir.join("sub/lib.rs"), "changed").unwrap();
+        assert_eq!(uncommitted(dir, T), Ok(true));
     }
 
     #[test]

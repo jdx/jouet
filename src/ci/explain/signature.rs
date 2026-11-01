@@ -230,13 +230,19 @@ impl Signature {
     }
 
     /// The key two jobs with the same failure share, so they are reported
-    /// together; `None` for a failure nothing recognised.
-    pub(crate) fn group_key(&self) -> Option<String> {
+    /// together and judged once; `None` for a failure nothing recognised.
+    /// A failed test's verdict depends on the OS the job ran on (a pass on
+    /// another OS is not a pass on its own), so jobs on different OSes that
+    /// failed only tests are kept apart.
+    pub(crate) fn group_key(&self, os: Option<&str>) -> Option<String> {
         if let Some(infra) = self.infrastructure() {
             return Some(format!("infra:{}", infra.cause));
         }
         let mut parts: Vec<&str> = self.errors.iter().map(String::as_str).collect();
         parts.extend(self.tests.iter().map(|t| t.name.as_str()));
+        if self.errors.is_empty() && !self.tests.is_empty() {
+            parts.push(os.unwrap_or("unknown os"));
+        }
         (!parts.is_empty()).then(|| parts.join("\n"))
     }
 }
@@ -280,6 +286,30 @@ mod tests {
             .iter()
             .map(|t| (t.framework, t.name.as_str()))
             .collect()
+    }
+
+    #[test]
+    fn a_failed_test_groups_by_os_and_a_compile_error_does_not() {
+        let failed = Signature::of(
+            Some("Run mise run test"),
+            &lines("[test:cargo] test a ... FAILED"),
+        );
+        assert_eq!(
+            failed.group_key(Some("linux")),
+            failed.group_key(Some("linux"))
+        );
+        assert_ne!(
+            failed.group_key(Some("linux")),
+            failed.group_key(Some("macos"))
+        );
+        let error = Signature {
+            errors: vec!["error[E0425]: x".into()],
+            ..failed
+        };
+        assert_eq!(
+            error.group_key(Some("linux")),
+            error.group_key(Some("macos"))
+        );
     }
 
     #[test]

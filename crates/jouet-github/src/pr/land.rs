@@ -127,8 +127,11 @@ pub fn merge_async(
             "GitHub already has a merge request for it, which may use other options: {}",
             Async::message(&resp)
         ))),
+        // GitHub sends 404 both when the asynchronous merge, which a
+        // stacked PR needs, is not available and when the PR is not found.
         404 => Err(Refused::Rejected(format!(
-            "GitHub's asynchronous merge, which a stacked PR needs, is not available for {repo}"
+            "GitHub's asynchronous merge is not available for {repo}, or {repo}#{number} was not found: {}",
+            Async::message(&resp)
         ))),
         _ => Err(refusal(repo, number, &resp)),
     }

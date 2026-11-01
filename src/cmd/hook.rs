@@ -1079,10 +1079,15 @@ fn fix_after_edit(
 
 /// Runs a Codex session's finished commands through the post-tool-use
 /// rules, oldest first.
-fn codex_state(engine: &Engine, payload: &Value, commands: Vec<(String, i32)>) -> State {
+fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> State {
     let mut state = State::default();
     let cwd = session_dir(payload);
-    for (command, exit_code) in commands {
+    for verify::Ran {
+        command,
+        exit_code,
+        at: when,
+    } in commands
+    {
         let call = Call {
             event: Some(Event::PostToolUse),
             harness: "codex".into(),
@@ -1098,6 +1103,11 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<(String, i32)>) -
             let at = run_dir(cwd.as_deref(), record.dir.as_deref());
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
             state.record(&root, [record], None);
+            // Read again at every stop: dated now, a run in another work
+            // tree would never be left behind (see `set_aside_settled`).
+            if let Some(when) = when {
+                state.ran_at(&root, when);
+            }
         }
     }
     state
@@ -1219,21 +1229,52 @@ mod tests {
         assert_eq!(tracked_files(&call("cd .. && rg TODO")), None);
     }
 
+    fn ran(command: &str, exit_code: i32) -> verify::Ran {
+        verify::Ran {
+            command: command.into(),
+            exit_code,
+            at: None,
+        }
+    }
+
+    #[test]
+    fn codex_commands_keep_the_time_they_ran() {
+        // Replayed at every stop, a run keeps its transcript time, so a
+        // work tree left an hour ago can be set aside.
+        let other = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(other.path())
+            .status()
+            .unwrap();
+        let root = verify::root_of(other.path());
+        let command = format!("cd {root} && cargo test --workspace");
+        let state = codex_state(
+            &engine(Vec::new()),
+            &json!({}),
+            vec![verify::Ran {
+                at: Some(1_000),
+                ..ran(&command, 101)
+            }],
+        );
+        assert_eq!(state.checks(&root).and_then(|c| c.last_run), Some(1_000));
+    }
+
     #[test]
     fn codex_commands_replay_through_the_post_tool_use_rules() {
         let engine = engine(Vec::new());
         let failing = codex_state(
             &engine,
             &json!({}),
-            vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
+            vec![ran("cargo test --workspace", 101), ran("ls", 0)],
         );
         assert!(failing.block("", |_| None, |_| false, |_| true).is_some());
         let fixed = codex_state(
             &engine,
             &json!({}),
             vec![
-                ("cargo test --workspace".into(), 101),
-                ("cargo test --workspace".into(), 0),
+                ran("cargo test --workspace", 101),
+                ran("cargo test --workspace", 0),
             ],
         );
         assert_eq!(fixed.block("", |_| None, |_| false, |_| true), None);
@@ -1242,8 +1283,8 @@ mod tests {
             &engine,
             &json!({}),
             vec![
-                ("cargo test --workspace".into(), 101),
-                ("cargo test -p jouet --lib".into(), 0),
+                ran("cargo test --workspace", 101),
+                ran("cargo test -p jouet --lib", 0),
             ],
         );
         let why = partial
@@ -1256,15 +1297,15 @@ mod tests {
         let refused = codex_state(
             &engine,
             &json!({}),
-            vec![("/usr/bin/zsh -lc 'jouet diag check a.py'".into(), 4)],
+            vec![ran("/usr/bin/zsh -lc 'jouet diag check a.py'", 4)],
         );
         assert_eq!(refused.block("", |_| None, |_| false, |_| true), None);
         let still = codex_state(
             &engine,
             &json!({}),
             vec![
-                ("jouet diag check a.py".into(), 1),
-                ("jouet diag check a.py".into(), 4),
+                ran("jouet diag check a.py", 1),
+                ran("jouet diag check a.py", 4),
             ],
         );
         assert!(still.block("", |_| None, |_| false, |_| true).is_some());

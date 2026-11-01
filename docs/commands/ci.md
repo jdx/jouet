@@ -177,7 +177,7 @@ Each failed job's log is cut to its failed step, as in `wait ci`, and read with 
 - **compile and lint errors:** rustc and clippy diagnostics, rustfmt diffs, TypeScript and Go compile errors;
 - **runner and network trouble:** a lost or shut-down runner, a full disk, DNS and connection failures, registry and download errors, rate limits, a service container that did not start, the cache service, and a failure of the runner's own steps (`Set up job`, `Initialize containers`).
 
-Jobs that failed the same way are reported together and judged once:
+Jobs that failed the same way are reported together and judged once. Jobs that failed only tests are grouped only with jobs on the same OS, since a pass on another OS does not make a test flaky:
 
 | Verdict | When |
 |---|---|

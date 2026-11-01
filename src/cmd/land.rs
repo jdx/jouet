@@ -172,7 +172,7 @@ fn land(
     let name = format!("{}#{}", pr.repo, pr.number);
     let update = gate(&pr, &next, options.update)?;
     let repo = Repo::parse(&pr.repo).expect("GitHub names repositories OWNER/NAME");
-    let stack = stack(client, &repo, pr.number, &name)?;
+    let mut stack = stack_of(client, &repo, pr.number, &name)?;
     let mut landed = Landed {
         repo: pr.repo.clone(),
         pr: pr.number,
@@ -227,6 +227,9 @@ fn land(
             .hint(format!("jouet pr next {name}")));
         }
         gate(&fresh, &next, false)?;
+        // The stack may have changed while the checks ran, such as a PR
+        // put below this one, which the merge would take along.
+        stack = stack_of(client, &repo, fresh.number, &name)?;
         pr = fresh;
     }
     eprintln!("jouet: {} {name} at {}", verb(options.method), pr.head_sha);
@@ -300,7 +303,12 @@ fn gate(pr: &PrStatus, next: &Next, update: bool) -> Result<bool, Stop> {
 /// The number of the GitHub stack the PR is in, if any. A stacked PR is
 /// merged together with every PR below it, so one with an open PR below is
 /// refused: only the PR that was checked is ever merged.
-fn stack(client: &mut Client, repo: &Repo, number: u64, name: &str) -> Result<Option<u64>, Stop> {
+fn stack_of(
+    client: &mut Client,
+    repo: &Repo,
+    number: u64,
+    name: &str,
+) -> Result<Option<u64>, Stop> {
     let pull = land::pull(client, repo, number).map_err(|r| refused(name, "read", r))?;
     let Some(stack) = pull.stack else {
         return Ok(None);
@@ -323,7 +331,8 @@ fn stack(client: &mut Client, repo: &Repo, number: u64, name: &str) -> Result<Op
 }
 
 /// Merges a stacked PR through GitHub's asynchronous merge endpoint, and
-/// waits for its result.
+/// waits for its result. Once GitHub has accepted the merge, a poll that
+/// fails says nothing about it, so the merge is left to `confirmed`.
 fn merge_stacked(
     client: &mut Client,
     repo: &Repo,
@@ -345,9 +354,27 @@ fn merge_stacked(
             // A merge still running at the deadline is left to `confirmed`,
             // which reports it as not merged.
             Async::Pending(_) if Instant::now() >= deadline => return Ok(None),
+            Async::Pending(uuid) if uuid.is_empty() => {
+                eprintln!(
+                    "jouet: GitHub gave no id to follow the merge by; checking whether it merged"
+                );
+                return Ok(None);
+            }
             Async::Pending(uuid) => {
                 std::thread::sleep(Duration::from_secs(1));
-                state = land::merge_async_result(client, repo, number, &uuid)?;
+                state = match land::merge_async_result(client, repo, number, &uuid) {
+                    Ok(state) => state,
+                    Err(r) => {
+                        let why = match r {
+                            Refused::Rejected(m) | Refused::NotFound(m) => m,
+                            Refused::Failed(f) => f.message(),
+                        };
+                        eprintln!(
+                            "jouet: following the merge failed ({why}); checking whether it merged"
+                        );
+                        return Ok(None);
+                    }
+                };
             }
         }
     }

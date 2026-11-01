@@ -6,8 +6,8 @@
 //! that failed, compile and lint errors, runner and network trouble. A job
 //! that only failed because another did (a `needs:` job reporting the
 //! result, a fail-fast cancel) follows that job and gets no verdict of its
-//! own. Jobs with the same signature are judged once, from what history
-//! shows of it, in this order:
+//! own. Jobs with the same signature (and, for failed tests, the same OS)
+//! are judged once, from what history shows of it, in this order:
 //!
 //! 1. the same job on the same commit, in another attempt or run: passed is
 //!    flaky, failed the same way again is real;
@@ -793,7 +793,7 @@ fn explain_run(
     // Jobs that failed the same way are judged once.
     let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
     for (i, r) in reads.iter().enumerate() {
-        let key = r.sig.group_key();
+        let key = r.sig.group_key(r.job.os);
         match groups.iter_mut().find(|(k, _)| key.is_some() && *k == key) {
             Some((_, members)) => members.push(i),
             None => groups.push((key, vec![i])),

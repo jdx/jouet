@@ -42,6 +42,10 @@ struct World {
     stack: Option<(u64, &'static str)>,
     /// What an asynchronous merge ends in: merged, or failed and why.
     async_result: Result<(), &'static str>,
+    /// Polling the asynchronous merge fails, though it merges.
+    async_poll_lost: bool,
+    /// What an update moves the PR's stack to.
+    stack_after_update: Option<(u64, &'static str)>,
 }
 
 impl Default for World {
@@ -63,6 +67,8 @@ impl Default for World {
             rate_limited: false,
             stack: None,
             async_result: Ok(()),
+            async_poll_lost: false,
+            stack_after_update: None,
         }
     }
 }
@@ -178,6 +184,9 @@ fn respond(world: &mut World, request: &Request) -> (u16, String) {
                 );
             }
             (world.head, world.merge_state) = world.update_to;
+            if world.stack_after_update.is_some() {
+                world.stack = world.stack_after_update;
+            }
             (202, r#"{"message":"Updating pull request branch."}"#.into())
         }
         ("PUT", Some("/merge")) if world.stack.is_some() => (
@@ -198,6 +207,10 @@ fn respond(world: &mut World, request: &Request) -> (u16, String) {
                 "expected_head_sha": world.head,
             } });
             (202, body.to_string())
+        }
+        ("GET", Some("/merge-async/u-1")) if world.async_poll_lost => {
+            world.merged = true;
+            (404, r#"{"message":"Not Found"}"#.into())
         }
         ("GET", Some("/merge-async/u-1")) => match world.async_result {
             Ok(()) => {
@@ -559,6 +572,54 @@ fn a_stacked_pr_is_merged_through_the_asynchronous_endpoint() {
         json(&out)["error"]["message"],
         "GitHub refused to merge jdx/demo#7: Required status check \"e2e\" is expected."
     );
+}
+
+#[test]
+fn a_stacked_merge_whose_poll_fails_is_confirmed_by_asking() {
+    // GitHub accepted the merge, so a failed poll says nothing about it.
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, _) = github(World {
+        stack: Some((50, "main")),
+        async_poll_lost: true,
+        ..World::default()
+    });
+    let out = land(&fake, dir.path(), &["--yes", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(json(&out)["merge_commit"], MERGE_SHA);
+    assert!(
+        stderr(&out).contains("following the merge failed"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(writes(&fake), [format!("PUT {PR}/merge-async")]);
+}
+
+#[test]
+fn a_stack_that_changed_during_an_update_is_checked_again() {
+    // While the checks ran, a PR was put below this one.
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World {
+        merge_state: "BEHIND",
+        stack: Some((50, "main")),
+        stack_after_update: Some((50, "feat-below")),
+        ..World::default()
+    };
+    world
+        .checks
+        .insert(SHA_B, vec![("unit", "completed", Some("success"))]);
+    let (fake, _) = github(world);
+    let out = land(
+        &fake,
+        dir.path(),
+        &["--yes", "--update", "--interval", "100ms", "--json"],
+    );
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
+    let message = json(&out)["error"]["message"].to_string();
+    assert!(
+        message.contains("above a PR that is not merged yet (feat-below)"),
+        "{message}"
+    );
+    assert_eq!(writes(&fake), [format!("PUT {PR}/update-branch")]);
 }
 
 #[test]

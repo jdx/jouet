@@ -331,6 +331,14 @@ impl State {
         })
     }
 
+    /// Dates the newest run in the work tree at `root` to `at`, for runs
+    /// recorded after the fact, such as a Codex transcript's.
+    pub(crate) fn ran_at(&mut self, root: &str, at: i64) {
+        if let Some(checks) = self.trees.get_mut(root) {
+            checks.last_run = Some(at);
+        }
+    }
+
     /// Drops the checks of work trees that are gone, such as a removed
     /// worktree: nothing is left there to check.
     pub(crate) fn prune_gone(&mut self) {
@@ -740,13 +748,22 @@ pub(crate) fn prune_sessions() {
 /// How much of a Codex transcript is read, from the end.
 const TRANSCRIPT_TAIL: u64 = 8 * 1024 * 1024;
 
+/// A command a Codex transcript says finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Ran {
+    pub command: String,
+    pub exit_code: i32,
+    /// When, from the line's `timestamp`, in seconds since the Unix epoch.
+    pub at: Option<i64>,
+}
+
 /// The finished commands at the end of a Codex session transcript, oldest
 /// first, with their exit codes.
 ///
 /// The transcript format is Codex's own and undocumented; lines this does not
 /// recognise are skipped, so a format change means no blocking, not false
 /// blocking.
-pub(crate) fn codex_commands(path: &Path) -> Vec<(String, i32)> {
+pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
     let Ok(mut file) = std::fs::File::open(path) else {
         return Vec::new();
     };
@@ -770,7 +787,7 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<(String, i32)> {
 
 /// A finished command from one transcript line: `item_completed` events for
 /// a `CommandExecution` item, or older `exec_command_end` events.
-fn codex_command(line: &str) -> Option<(String, i32)> {
+fn codex_command(line: &str) -> Option<Ran> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let payload = value.get("payload")?;
     let event = match payload.get("type")?.as_str()? {
@@ -792,7 +809,14 @@ fn codex_command(line: &str) -> Option<(String, i32)> {
         [_, flag, script] if flag.starts_with('-') && flag.contains('c') => script.to_string(),
         words => words.join(" "),
     };
-    Some((script, exit_code))
+    Some(Ran {
+        command: script,
+        exit_code,
+        at: value
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(jouet_output::time::parse_rfc3339),
+    })
 }
 
 #[cfg(test)]
@@ -1522,7 +1546,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rollout.jsonl");
         let item = |cmd: &str, code: i32| {
-            serde_json::json!({"type": "event_msg", "payload": {"type": "item_completed",
+            serde_json::json!({"timestamp": "2026-11-01T10:00:00.123Z",
+                "type": "event_msg", "payload": {"type": "item_completed",
                 "item": {"type": "CommandExecution", "command": ["/usr/bin/zsh", "-lc", cmd],
                     "status": "completed", "exit_code": code}}})
             .to_string()
@@ -1534,9 +1559,21 @@ mod tests {
             r#"{"type":"event_msg","payload":{"type":"exec_command_end","command":["ls"],"exit_code":0}}"#.to_string(),
         ];
         std::fs::write(&path, lines.join("\n")).unwrap();
+        let ran = |command: &str, exit_code, at| Ran {
+            command: command.into(),
+            exit_code,
+            at,
+        };
         assert_eq!(
             codex_commands(&path),
-            [("cargo test".to_string(), 101), ("ls".to_string(), 0)]
+            [
+                ran(
+                    "cargo test",
+                    101,
+                    jouet_output::time::parse_utc("2026-11-01T10:00:00Z")
+                ),
+                ran("ls", 0, None)
+            ]
         );
         assert!(codex_commands(&dir.path().join("missing")).is_empty());
     }
