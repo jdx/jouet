@@ -250,7 +250,8 @@ pub(super) fn compare(
         let key = command_key(job, root);
         let kept = known::lookup(root, &base.merge_base, &key);
         let outcome = match (kept, mode) {
-            (Some(known::Outcome::Unnamed { .. }), Mode::Retry) | (None, Mode::Run | Mode::Retry) => {
+            (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
+            | (None, Mode::Run | Mode::Retry) => {
                 let tree = checkout.tree()?.to_path_buf();
                 let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
                 let at_base = Job {
