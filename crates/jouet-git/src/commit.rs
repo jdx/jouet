@@ -612,6 +612,12 @@ fn commit(
         .map_err(|e| Error::new(Exit::Failed, format!("running git commit: {e}")))?;
     if status.success() {
         let _ = std::fs::remove_file(&log_path);
+        // A hook that fixed and staged a path (hk's fixers) changed the
+        // commit, but git wrote the path into the real index as it was
+        // before the hook. The commit is what the index should hold.
+        let mut reset = vec!["reset".to_string(), "-q".into(), "--".into()];
+        reset.extend(paths.iter().cloned());
+        let _ = git.text(&reset);
         return Ok(None);
     }
     let text = String::from_utf8_lossy(&std::fs::read(&log_path).unwrap_or_default()).into_owned();
