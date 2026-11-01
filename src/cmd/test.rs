@@ -193,7 +193,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     };
     // A failing full suite is run at the merge base, once per merge base; any
     // other failing run uses only what an earlier one kept.
-    let mode = if args.baseline || !args.cmd {
+    let mode = if args.baseline {
+        baseline::Mode::Retry
+    } else if !args.cmd {
         baseline::Mode::Run
     } else {
         baseline::Mode::Kept

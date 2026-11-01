@@ -681,7 +681,8 @@ TOML
 @test "--baseline does not call failures new when the merge base's run names none, or reaches far fewer tests" {
 	# At the merge base the runner dies before any test, as when a tool it
 	# needs is missing from that checkout.
-	printf 'echo "mise ERROR No version is set for shim: fnox"\nexit 1\n' >run.sh
+	export RETRY_MARKER="$BATS_TEST_TMPDIR/runner-ready"
+	printf 'if [ -e "$RETRY_MARKER" ]; then echo 1..3; echo "ok 1 a"; echo "ok 2 b"; echo "not ok 3 keychain"; else echo "mise ERROR No version is set for shim: fnox"; fi\nexit 1\n' >run.sh
 	git add run.sh
 	git commit -q -m base
 	git checkout -q -b work
@@ -692,6 +693,13 @@ TOML
 	assert_failure 1
 	assert_output --partial 'baseline: the run at main failed (exit 1) without naming a failing test, so the failures could not be compared'
 	refute_output --partial 'new'
+
+	# Once the environment is fixed, an explicit retry replaces the cached
+	# inconclusive result and can compare the same failures.
+	touch "$RETRY_MARKER"
+	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
+	assert_success
+	assert_output --partial 'the failure also fails at main'
 
 	# At the merge base one test ran, against three here: the failure may
 	# never have run there.
