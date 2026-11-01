@@ -605,3 +605,36 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	run --separate-stderr jq -c '.trees[].runs.test.command' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '"jouet test --cmd -- python3 -m unittest"'
 }
+
+@test "a declared format names a runner's failures, and one that cannot work is said" {
+	export XDG_CONFIG_HOME="$BATS_TEST_TMPDIR/config"
+	mkdir -p "$XDG_CONFIG_HOME/jouet/formats"
+	cat >"$XDG_CONFIG_HOME/jouet/formats/e2e.toml" <<'TOML'
+failed = ['^ERROR: E2E test (?<name>\S+) failed']
+start = ['^>>> E2E (\S+)$']
+excerpt = ['^ERROR: E2E assertion failed: ']
+TOML
+	printf 'failed = ["^FAIL"]\n' >"$XDG_CONFIG_HOME/jouet/formats/broken.toml"
+	printf '>>> E2E cli/test_a\nnoise\nERROR: E2E assertion failed: expected x\nERROR: E2E test cli/test_a failed\n' >out.txt
+	git init -q repo
+	cd repo
+
+	run --separate-stderr jouet test --dry-run --cmd -- true
+	assert_success
+	assert_line 'failure formats: e2e'
+	assert_stderr --partial 'broken.toml'
+	assert_stderr --partial 'needs a group that names the test'
+
+	run --separate-stderr jouet test --cmd -- sh -c 'cat ../out.txt; exit 1'
+	assert_failure 1
+	assert_line 'FAIL cli/test_a'
+	assert_line '  ERROR: E2E assertion failed: expected x'
+	refute_line '  noise'
+
+	# A repository's formats need trusting first.
+	rm "$XDG_CONFIG_HOME/jouet/formats/e2e.toml"
+	mkdir -p .jouet/formats
+	printf "failed = ['^ERROR: E2E test (?<name>\\\\S+) failed']\n" >.jouet/formats/e2e.toml
+	run --separate-stderr jouet test --cmd -- sh -c 'cat ../out.txt; exit 1'
+	refute_line 'FAIL cli/test_a'
+}

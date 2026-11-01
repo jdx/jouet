@@ -8,7 +8,7 @@ jouet's own [rules](/rules) and [routines](/routines), and yours in `~/.config/j
 
 | Source | Where | Runs |
 |---|---|---|
-| A repository's | `.jouet/rules`, `.jouet/routines`, and the plugins `.jouet/plugins.toml` pins | once you [trust](#trusting-a-repository) the repository with `jouet trust` |
+| A repository's | `.jouet/rules`, `.jouet/routines`, `.jouet/formats`, and the plugins `.jouet/plugins.toml` pins | once you [trust](#trusting-a-repository) the repository with `jouet trust` |
 | A [plugin](#plugins) you pin | the plugins `~/.config/jouet/plugins.toml` pins | once fetched as pinned |
 | The system's ([enforced](#enforced-rules-and-routines)) | `/etc/jouet/rules`, `/etc/jouet/routines`, the plugins `/etc/jouet/plugins.toml` pins, and those in `/etc/jouet/plugins/` | always, unless its group or others can write it; your settings cannot turn them off |
 
@@ -22,7 +22,7 @@ Plugins and trust are new, and their files may change between releases.
 
 ## Trusting a repository
 
-A repository's rules can deny commands and put text in front of the agent, and its routines run commands, so they run only once you trust the repository, the way `mise trust` works for a mise config. One trust covers `.jouet/rules`, `.jouet/routines` and the plugins `.jouet/plugins.toml` pins, together:
+A repository's rules can deny commands and put text in front of the agent, and its routines run commands, so they run only once you trust the repository, the way `mise trust` works for a mise config. One trust covers `.jouet/rules`, `.jouet/routines`, `.jouet/formats` (the [failure formats](/commands/test#your-own-runners-formats) `jouet test` reads) and the plugins `.jouet/plugins.toml` pins, together:
 
 ```output
 $ jouet trust
@@ -40,7 +40,7 @@ trusted /src/app/.jouet (2 rules, 1 routines); a change to any of them needs tru
 
 ## Plugins
 
-A plugin is a named set of rules and routines that several repositories or people share: a git repository, or a directory, with a manifest and a `rules/` directory, a `routines/` one, or both:
+A plugin is a named set of rules and routines that several repositories or people share: a git repository, or a directory, with a manifest and a `rules/` directory, a `routines/` one, a `formats/` one of [failure formats](/commands/test#your-own-runners-formats), or any of them together:
 
 ```text
 jouet-plugin.toml

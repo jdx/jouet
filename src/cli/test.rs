@@ -30,8 +30,10 @@ use usage_rs::Args;
 /// rather than running it again. For a person at a terminal, the output
 /// streams as it runs. Failures are recognised in the output of cargo test
 /// and nextest, rustc, tsc, go test and go build, pytest, unittest, jest,
-/// vitest and TAP (bats); for any other output, a failing run shows the end
-/// of it.
+/// vitest and TAP (bats), and in the formats declared in a formats/
+/// directory (your config's, a trusted repository's .jouet/, a plugin's)
+/// for other runners; for any other output, a failing run shows the end of
+/// it.
 ///
 /// With --baseline, a failing run is run again in a temporary worktree of
 /// the merge base with the upstream or default branch (or --since REF). If

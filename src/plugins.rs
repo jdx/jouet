@@ -20,10 +20,10 @@ use std::process::Command;
 pub(crate) const MANIFEST: &str = "jouet-plugin.toml";
 
 /// The kinds of thing a plugin ships, each in a directory of that name.
-const KINDS: &[&str] = &["rules", "routines"];
+const KINDS: &[&str] = &["rules", "routines", "formats"];
 
 /// The files a plugin's hash covers: its manifest and everything it ships.
-pub(crate) const ENTRIES: &[&str] = &[MANIFEST, "rules", "routines"];
+pub(crate) const ENTRIES: &[&str] = &[MANIFEST, "rules", "routines", "formats"];
 
 /// `jouet-plugin.toml`.
 #[derive(Debug, Clone, Deserialize)]
@@ -264,7 +264,10 @@ pub(crate) fn fetch(
         ));
     }
     if !KINDS.iter().any(|k| files.join(k).is_dir()) {
-        return Err(format!("{} ships no rules/ or routines/", manifest.name));
+        return Err(format!(
+            "{} ships no rules/, routines/ or formats/",
+            manifest.name
+        ));
     }
     let digest = Digests::load(None)
         .of(&files, ENTRIES)
@@ -361,7 +364,7 @@ fn classify(path: &str) -> Result<Entry, String> {
             .iter()
             .map(|k| format!("{k}/"))
             .collect::<Vec<_>>()
-            .join(" and ")
+            .join(", ")
     ))
 }
 
