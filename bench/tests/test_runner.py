@@ -8,6 +8,18 @@ from jbench import report, runner, stats, tasks
 from jbench.harness import HARNESSES
 
 
+def sample_wheel(root):
+    import zipfile
+
+    wheel = root / "bench_sample-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("bench_sample/__init__.py", "VALUE = 'installed'\n")
+        archive.writestr("bench_sample-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: bench-sample\nVersion: 1.0\n")
+        archive.writestr("bench_sample-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr("bench_sample-1.0.dist-info/RECORD", "")
+    return wheel
+
+
 class StatsTest(unittest.TestCase):
     def test_quantiles(self):
         self.assertEqual(stats.median([3, 1, 2]), 2)
@@ -262,18 +274,12 @@ class TasksTest(unittest.TestCase):
         import hashlib
         import os
         import subprocess
-        import zipfile
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             task_dir = root / "task"
             task_dir.mkdir()
-            wheel = root / "bench_sample-1.0-py3-none-any.whl"
-            with zipfile.ZipFile(wheel, "w") as archive:
-                archive.writestr("bench_sample/__init__.py", "VALUE = 'installed'\n")
-                archive.writestr("bench_sample-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: bench-sample\nVersion: 1.0\n")
-                archive.writestr("bench_sample-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
-                archive.writestr("bench_sample-1.0.dist-info/RECORD", "")
+            wheel = sample_wheel(root)
             requirements = task_dir / "requirements.lock"
             requirements.write_text(f"bench-sample==1.0 --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}\n")
             task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
@@ -303,6 +309,30 @@ class TasksTest(unittest.TestCase):
             with self.assertRaisesRegex(tasks.EnvironmentSetupError, "environment setup failed"):
                 tasks.setup_environment(task, other_env, workdir, root / "cache", root / "bad-setup.log")
             self.assertIn("hash", (root / "bad-setup.log").read_text().lower())
+
+    def test_reference_solution_and_check_use_task_dependencies(self):
+        import argparse
+        import contextlib
+        import dataclasses
+        import hashlib
+        import io
+        from unittest.mock import patch
+        import agents
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "initial").write_text("base\n")
+            wheel = sample_wheel(root)
+            digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            (task_dir / "requirements.lock").write_text(f"{wheel.as_uri()} --hash=sha256:{digest}\n")
+            (task_dir / "solve.py").write_text("import bench_sample\nfrom pathlib import Path\nPath('answer').write_text(bench_sample.VALUE)\n")
+            (task_dir / "check.py").write_text("import bench_sample\nfrom pathlib import Path\nassert Path('answer').read_text() == bench_sample.VALUE\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
+            with patch.object(tasks, "load", return_value=task), contextlib.redirect_stdout(io.StringIO()):
+                result = agents.cmd_check_tasks(argparse.Namespace(tasks=["sample"], jouet=root / "unused"))
+            self.assertEqual(result, 0)
 
     def test_python_environment_rejects_requirements_outside_task(self):
         import dataclasses
