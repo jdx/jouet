@@ -1,4 +1,6 @@
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,3 +26,14 @@ class ResolveTest(unittest.TestCase):
             python.chmod(0o755)
             with patch.dict(os.environ, {"PATH": os.pathsep.join((str(shim_dir), str(bin_dir)))}):
                 self.assertEqual(arms.resolve("python3"), python.resolve())
+
+    def test_login_shell_preserves_isolated_path(self):
+        shell = shutil.which("zsh")
+        if not shell:
+            self.skipTest("zsh is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp, "PATH": "/isolated/bin:/usr/bin:/bin"}
+            arms.login_shell_path(env)
+            result = subprocess.run([shell, "-lc", "printf %s \"$PATH\""], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, env["PATH"])
