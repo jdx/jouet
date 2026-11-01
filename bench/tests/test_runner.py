@@ -188,11 +188,20 @@ class SweepTest(unittest.TestCase):
         self.addCleanup(proc.kill)
         return proc
 
+    def test_macos_discovery_reports_a_timeout(self):
+        import subprocess
+        from unittest.mock import patch
+
+        with patch.object(runner.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 10)):
+            found, error = runner.cwd_processes(Path("/tmp/run"))
+        self.assertEqual(found, {})
+        self.assertIn("process discovery failed", error)
+
     @unittest.skipUnless(sys.platform == "darwin", "needs macOS lsof")
     def test_macos_stops_detached_process_in_run_but_not_neighbor(self):
         with tempfile.TemporaryDirectory() as d:
-            run_dir = Path(d) / "run1"
-            other = Path(d) / "run10"
+            run_dir = Path(d) / "run\\name"
+            other = Path(d) / "run\\name0"
             run_dir.mkdir()
             other.mkdir()
             inside = self.start(run_dir)

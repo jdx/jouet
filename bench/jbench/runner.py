@@ -236,6 +236,7 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
 
     found = {}
     stopped_session = None
+    discovery_error = None
     proc_dir = Path("/proc")
     if proc_dir.is_dir():
         under = str(run_dir)
@@ -256,7 +257,12 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
             if inside or (session is not None and sid == session):
                 found[int(entry.name)] = " ".join(args)[:200]
     else:
-        found.update(cwd_processes(run_dir))
+        matches, discovery_error = cwd_processes(run_dir)
+        found.update(matches)
+        if discovery_error:
+            import sys
+
+            print(f"benchmark cleanup: {discovery_error}", file=sys.stderr)
         if session is not None:
             try:
                 os.killpg(session, signal.SIGKILL)
@@ -277,10 +283,10 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
             time.sleep(0.1)
         if not alive:
             break
-    return list(found.values()) + ([stopped_session] if stopped_session else [])
+    return list(found.values()) + ([stopped_session] if stopped_session else []) + ([discovery_error] if discovery_error else [])
 
 
-def cwd_processes(run_dir: Path) -> dict[int, str]:
+def cwd_processes(run_dir: Path) -> tuple[dict[int, str], str | None]:
     """Find this user's processes whose working directory is inside a run."""
     import os
 
@@ -289,8 +295,10 @@ def cwd_processes(run_dir: Path) -> dict[int, str]:
             ["lsof", "-n", "-P", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fpn"],
             capture_output=True, text=True, timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {}, f"process discovery failed: {error}"
+    if proc.returncode:
+        return {}, f"process discovery failed: lsof exited {proc.returncode}"
     root = run_dir.resolve()
     found = {}
     pid = None
@@ -298,10 +306,12 @@ def cwd_processes(run_dir: Path) -> dict[int, str]:
         if line.startswith("p") and line[1:].isdigit():
             pid = int(line[1:])
         elif line.startswith("n") and pid and pid != os.getpid():
-            cwd = Path(line[1:])
+            # lsof doubles literal backslashes. Do not decode ambiguous
+            # control-character escapes into a potentially unrelated path.
+            cwd = Path(line[1:].replace("\\\\", "\\"))
             if cwd == root or root in cwd.parents:
                 found[pid] = f"pid {pid}: cwd {cwd}"
-    return found
+    return found, None
 
 
 def process_alive(pid: int) -> bool:
