@@ -237,7 +237,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if args.baseline && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
-                failed.push((job, baseline::failure_names(&output, &formats), ran));
+                failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
             }
             suite.digest = Some(digest);
             let suite_exit = (job.exit)(code);
