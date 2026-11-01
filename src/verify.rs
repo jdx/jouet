@@ -91,7 +91,12 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
-        if ran == wanted || without_names(ran, wanted) || wider_filter(&failed.command, ran, wanted)
+        if ran == wanted {
+            return true;
+        }
+        // Selections leave out the runner, which these two read words by.
+        if same_runner(&self.command, &failed.command)
+            && (without_names(ran, wanted) || wider_filter(&failed.command, ran, wanted))
         {
             return true;
         }
@@ -104,6 +109,22 @@ impl Run {
         };
         !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
     }
+}
+
+/// Whether two commands ran the same test runner: their program, and for
+/// cargo its subcommand (`cargo test` and `cargo nextest` select alike, but
+/// not as vitest does).
+fn same_runner(a: &str, b: &str) -> bool {
+    let runner = |command: &str| -> Vec<String> {
+        let words: Vec<&str> = command.split_whitespace().collect();
+        match words.as_slice() {
+            ["cargo", sub, ..] => vec!["cargo".into(), (*sub).into()],
+            [program, ..] => vec![(*program).into()],
+            [] => Vec::new(),
+        }
+    };
+    let (a, b) = (runner(a), runner(b));
+    !a.is_empty() && a == b
 }
 
 /// Whether `wanted` is `ran` with plain names after it: words that are
@@ -1238,6 +1259,45 @@ mod tests {
         state.record([cargo("-p a -- --exact name", 101)], Some("t1"));
         state.record([cargo("-p a --", 0)], Some("t1"));
         assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_pass_of_another_runner_never_widens_to_cover_a_failure() {
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        state.record(
+            [test(
+                "cargo test --bin jouet affected::cargo",
+                101,
+                "--bin jouet affected::cargo",
+            )],
+            Some("t1"),
+        );
+        // A vitest run whose selection reads like a shorter filter.
+        state.record(
+            [test(
+                "vitest --bin jouet affected::",
+                0,
+                "--bin jouet affected::",
+            )],
+            Some("t1"),
+        );
+        assert!(reason(&state, "t1").is_some());
+        state.record(
+            [test(
+                "cargo test --bin jouet affected::",
+                0,
+                "--bin jouet affected::",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+        // Nor does dropping the names cross runners.
+        state.record([test("cargo test -p a name", 101, "-p a name")], Some("t1"));
+        state.record([test("pytest -p a", 0, "-p a")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        assert!(same_runner("cargo test -p a", "cargo test --workspace"));
+        assert!(!same_runner("cargo test -p a", "cargo nextest run -p a"));
     }
 
     #[test]
