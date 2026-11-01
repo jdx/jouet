@@ -6,6 +6,7 @@ remote = false
 upstream = true
 timeout_s = 900
 check_timeout_s = 180
+python_requirements = "requirements.lock"
 prompt = """
 `--parse-metadata playlist_autonumber:track` reports that it could not
 interpret `playlist_autonumber` as `track`, rather than copying the

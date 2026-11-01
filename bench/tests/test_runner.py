@@ -35,6 +35,32 @@ class PlanTest(unittest.TestCase):
         again = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
         self.assertEqual([p.id for p in planned], [p.id for p in again])
 
+    def test_failed_environment_skips_only_that_task(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "bad", "codex", "plain"),
+                   runner.Planned(1, "bad", "codex", "jouet"),
+                   runner.Planned(1, "good", "codex", "plain")]
+
+        def execute(item, *_):
+            if item.task == "bad":
+                raise tasks.EnvironmentSetupError("missing dependency")
+            return {"id": item.id, "task": item.task, "success": True, "usage": {}}
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=execute):
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+        self.assertEqual([r["task"] for r in records], ["bad", "good"])
+        self.assertIn("EnvironmentSetupError", records[0]["error"])
+        self.assertTrue(records[1]["success"])
+        self.assertTrue(any("environment setup already failed" in message for message in messages))
+
 
 class StopTest(unittest.TestCase):
     """The cost controls, with a stand-in agent that prints Claude Code's events."""
@@ -231,6 +257,65 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_python_environment_is_isolated_and_available_to_the_run(self):
+        import dataclasses
+        import hashlib
+        import os
+        import subprocess
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            task_dir.mkdir()
+            wheel = root / "bench_sample-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("bench_sample/__init__.py", "VALUE = 'installed'\n")
+                archive.writestr("bench_sample-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: bench-sample\nVersion: 1.0\n")
+                archive.writestr("bench_sample-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+                archive.writestr("bench_sample-1.0.dist-info/RECORD", "")
+            requirements = task_dir / "requirements.lock"
+            requirements.write_text(f"bench-sample==1.0 --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
+            home = root / "home"
+            home.mkdir()
+            workdir = root / "work"
+            workdir.mkdir()
+            env = {"HOME": str(home), "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath)),
+                   "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": str(root)}
+            info = tasks.setup_environment(task, env, workdir, root / "cache", root / "setup.log")
+            venv = home / ".venv"
+            self.assertEqual(env["VIRTUAL_ENV"], str(venv))
+            self.assertEqual(Path(env["PATH"].split(os.pathsep)[0]), venv / ("Scripts" if os.name == "nt" else "bin"))
+            self.assertFalse((workdir / ".venv").exists())
+            self.assertEqual(info["requirements_sha256"], hashlib.sha256(requirements.read_bytes()).hexdigest())
+            result = subprocess.run(["python3", "-c", "import sys, bench_sample; print(sys.prefix); print(bench_sample.VALUE)"], env=env, capture_output=True, text=True, check=True)
+            prefix, value = result.stdout.splitlines()
+            self.assertEqual(Path(prefix).resolve(), venv.resolve())
+            self.assertEqual(value, "installed")
+
+            # A changed artifact must not silently enter another run.
+            requirements.write_text("bench-sample==1.0 --hash=sha256:" + "0" * 64 + "\n")
+            other_home = root / "other-home"
+            other_home.mkdir()
+            other_env = {**env, "HOME": str(other_home), "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath))}
+            other_env.pop("VIRTUAL_ENV")
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "environment setup failed"):
+                tasks.setup_environment(task, other_env, workdir, root / "cache", root / "bad-setup.log")
+            self.assertIn("hash", (root / "bad-setup.log").read_text().lower())
+
+    def test_python_environment_rejects_requirements_outside_task(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            task_dir.mkdir()
+            (root / "outside").write_text("")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="../outside")
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "inside the task directory"):
+                tasks.setup_environment(task, {}, root, root / "cache", root / "setup.log")
+
     def test_source_preserves_and_initializes_submodules(self):
         import dataclasses
         import os

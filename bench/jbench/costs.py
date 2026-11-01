@@ -29,7 +29,10 @@ NOTES_REF = "jouet-cost"
 
 
 def cache_path(task: tasks_mod.Task) -> Path:
-    key = json.dumps([task.name, task.source, task.cost_seed, socket.gethostname()])
+    data = [task.name, task.source, task.cost_seed, socket.gethostname()]
+    if task.python_requirements:
+        data.append(hashlib.sha256((task.dir / task.python_requirements).read_bytes()).hexdigest())
+    key = json.dumps(data)
     digest = hashlib.sha256(key.encode()).hexdigest()[:16]
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     return root / "jouet-bench" / "cost-seeds" / f"{task.name}-{digest}.txt"
@@ -54,6 +57,11 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
     env = arms_mod.base_env(run_dir, None, "jdx/demo", tmp)
     arms_mod.wrapper(run_dir / "bin" / "jouet", jouet_bin.resolve(), {})
     task.agent_env(env, run_dir / "bin", workdir)
+    try:
+        tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", run_dir / "environment.log")
+    except tasks_mod.EnvironmentSetupError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     for command in task.cost_seed:
         proc = subprocess.run(
             ["jouet", "test", "--cmd", "--", *shlex.split(command)],

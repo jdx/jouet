@@ -40,6 +40,7 @@ run and on every machine.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -62,6 +63,10 @@ GIT_ENV = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
+
+
+class EnvironmentSetupError(RuntimeError):
+    """A task's preflight failed before an agent started."""
 
 
 @dataclass
@@ -87,6 +92,8 @@ class Task:
     path: list[str] = field(default_factory=list)
     # Commands timed once for the cost note runs start with (see costs.py).
     cost_seed: list[str] = field(default_factory=list)
+    # A fully pinned pip requirements file, relative to the task directory.
+    python_requirements: str | None = None
 
     def agent_env(self, env: dict[str, str], bin_dir: Path, workdir: Path) -> None:
         """Adds the task's tools, variables and PATH entries to a run's environment."""
@@ -140,7 +147,48 @@ def load(name: str) -> Task:
         env=dict(raw.get("env", {})),
         path=list(raw.get("path", [])),
         cost_seed=list(raw.get("cost", {}).get("seed", [])),
+        python_requirements=raw.get("python_requirements"),
     )
+
+
+def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Path, log: Path) -> dict[str, str] | None:
+    """Create an isolated Python environment before an agent or check starts."""
+    if not task.python_requirements:
+        return None
+    requirements = (task.dir / task.python_requirements).resolve()
+    if not requirements.is_relative_to(task.dir.resolve()) or not requirements.is_file():
+        raise EnvironmentSetupError(f"{task.name}: Python requirements must be a file inside the task directory")
+    # Keep the environment out of the checkout even when .venv is not ignored.
+    venv = Path(env["HOME"]) / ".venv"
+    if venv.exists():
+        raise EnvironmentSetupError(f"{task.name}: refusing to replace an existing .venv")
+    python = shutil.which("python3", path=env["PATH"])
+    if not python:
+        raise EnvironmentSetupError(f"{task.name}: Python 3 is required for environment setup")
+    setup_env = {**env, "PIP_CONFIG_FILE": os.devnull, "PIP_CACHE_DIR": str(cache),
+                 "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PIP_NO_INPUT": "1"}
+    bin_dir = venv / ("Scripts" if os.name == "nt" else "bin")
+    venv_python = bin_dir / ("python.exe" if os.name == "nt" else "python")
+    commands = [
+        [python, "-m", "venv", str(venv)],
+        [str(venv_python), "-m", "pip", "install", "--require-hashes", "--requirement", str(requirements)],
+    ]
+    with log.open("w") as output:
+        for command in commands:
+            try:
+                proc = subprocess.run(command, cwd=workdir, env=setup_env, stdout=output, stderr=subprocess.STDOUT,
+                                      timeout=300)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise EnvironmentSetupError(f"{task.name}: Python environment setup failed: {error} (log: {log})") from error
+            if proc.returncode:
+                raise EnvironmentSetupError(f"{task.name}: Python environment setup failed (log: {log})")
+    env["VIRTUAL_ENV"] = str(venv)
+    env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
+    try:
+        version = subprocess.run([str(venv_python), "--version"], env=env, capture_output=True, text=True, check=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise EnvironmentSetupError(f"{task.name}: cannot read the Python version: {error}") from error
+    return {"python": version.stdout.strip(), "requirements_sha256": hashlib.sha256(requirements.read_bytes()).hexdigest()}
 
 
 def expand(value: str, workdir: Path) -> str:
