@@ -1,1 +1,2 @@
 {"v":1,"kind":"build","cmd":"mise run build","ms":39587,"exit":0,"host":"72ddf3aa9b69","ci":false,"cpus":32,"os":"linux","ts":1793555915}
+{"v":1,"kind":"lint","cmd":"mise run lint","ms":18754,"exit":0,"host":"72ddf3aa9b69","ci":false,"cpus":32,"os":"linux","ts":1793555933}
