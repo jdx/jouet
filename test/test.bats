@@ -682,7 +682,17 @@ TOML
 	# At the merge base the runner dies before any test, as when a tool it
 	# needs is missing from that checkout.
 	export RETRY_MARKER="$BATS_TEST_TMPDIR/runner-ready"
-	printf 'if [ -e "$RETRY_MARKER" ]; then echo 1..3; echo "ok 1 a"; echo "ok 2 b"; echo "not ok 3 keychain"; else echo "mise ERROR No version is set for shim: fnox"; fi\nexit 1\n' >run.sh
+	cat >run.sh <<'SCRIPT'
+if [ -e "$RETRY_MARKER" ]; then
+    echo 1..3
+    echo "ok 1 a"
+    echo "ok 2 b"
+    echo "not ok 3 keychain"
+else
+    echo "mise ERROR No version is set for shim: fnox"
+fi
+exit 1
+SCRIPT
 	git add run.sh
 	git commit -q -m base
 	git checkout -q -b work
