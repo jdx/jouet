@@ -41,6 +41,25 @@ struct Acc {
     failed: u64,
     categories: [CatAcc; Category::ALL.len()],
     patterns: [PatAcc; Pattern::ALL.len()],
+    waits: ProcessWaits,
+}
+
+/// Linked observations and the narrower set that could have been combined.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProcessWaits {
+    pub linked_checks: u64,
+    pub linked_sequences: u64,
+    pub longest_sequence_checks: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub longest_sequence_ms: Option<u64>,
+    pub opportunity_runs: u64,
+    pub opportunity_requests: u64,
+    pub opportunity_input_tokens: u64,
+    pub avoidable_input_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avoidable_cached_input_tokens: Option<u64>,
+    #[serde(skip)]
+    cached_unknown: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -156,6 +175,9 @@ impl Analyzer {
         let mut previous = 0u32;
         // The shape of the last command, when it failed.
         let mut last_failure: Option<String> = None;
+        let mut previous_wait: Option<(&crate::event::Wait, Option<u64>, bool, usize)> = None;
+        let mut sequence_checks = 0u64;
+        let mut sequence_start = None;
         for request in &transcript.requests {
             acc.requests += 1;
             let tokens = request.input_tokens.unwrap_or(0);
@@ -168,6 +190,72 @@ impl Analyzer {
                 .calls
                 .get(request.calls.clone())
                 .unwrap_or_default();
+            let current = if calls.len() == 1 && calls[0].tool == Tool::Poll {
+                calls[0].wait.as_ref().map(|w| (w, &calls[0]))
+            } else {
+                let linked = calls.iter().filter(|c| c.wait.is_some()).count() as u64;
+                acc.waits.linked_checks += linked;
+                acc.waits.linked_sequences += linked;
+                if linked > 0 {
+                    acc.waits.longest_sequence_checks = acc.waits.longest_sequence_checks.max(1);
+                }
+                None
+            };
+            if let Some((wait, call)) = current {
+                acc.waits.linked_checks += 1;
+                let same = previous_wait
+                    .as_ref()
+                    .is_some_and(|(p, _, _, end)| p.id == wait.id && *end == request.calls.start)
+                    && !call.wait_boundary;
+                if !same {
+                    acc.waits.linked_sequences += 1;
+                    sequence_checks = 0;
+                    sequence_start = call.at;
+                }
+                sequence_checks += 1;
+                let elapsed = sequence_start
+                    .zip(call.at)
+                    .and_then(|(start, end): (i64, i64)| {
+                        u64::try_from(end.checked_sub(start)?)
+                            .ok()?
+                            .checked_add(call.duration_ms?)
+                    });
+                if sequence_checks > acc.waits.longest_sequence_checks
+                    || sequence_checks == acc.waits.longest_sequence_checks
+                        && elapsed > acc.waits.longest_sequence_ms
+                {
+                    acc.waits.longest_sequence_checks = sequence_checks;
+                    acc.waits.longest_sequence_ms = elapsed;
+                }
+                let eligible =
+                    same && previous_wait.as_ref().is_some_and(|(p, _, _, _)| {
+                        p.short && p.running && p.quiet && wait.short && wait.quiet
+                    }) && previous_wait
+                        .as_ref()
+                        .is_some_and(|(_, tokens, _, _)| tokens.is_some())
+                        && request.input_tokens.is_some()
+                        && call.duration_ms.is_some_and(|ms| ms <= 2_000);
+                if eligible {
+                    let (_, prev_tokens, was_eligible, _) =
+                        previous_wait.as_ref().expect("same wait");
+                    if !was_eligible {
+                        acc.waits.opportunity_runs += 1;
+                        acc.waits.opportunity_requests += 1;
+                        acc.waits.opportunity_input_tokens += prev_tokens.unwrap_or(0);
+                    }
+                    acc.waits.opportunity_requests += 1;
+                    acc.waits.opportunity_input_tokens += request.input_tokens.unwrap_or(0);
+                    acc.waits.avoidable_input_tokens += request.input_tokens.unwrap_or(0);
+                    if let Some(cached) = request.cached_input_tokens {
+                        *acc.waits.avoidable_cached_input_tokens.get_or_insert(0) += cached;
+                    } else {
+                        acc.waits.cached_unknown = true;
+                    }
+                }
+                previous_wait = Some((wait, request.input_tokens, eligible, request.calls.end));
+            } else {
+                previous_wait = None;
+            }
             if calls.is_empty() {
                 let reply = &mut acc.categories[Category::Reply.index()];
                 reply.requests += 1.0;
@@ -293,6 +381,26 @@ impl Analyzer {
                 o.sessions.extend(t.sessions);
                 merge_example(&mut o.example, t.example);
             }
+            ours.waits.linked_checks += theirs.waits.linked_checks;
+            ours.waits.linked_sequences += theirs.waits.linked_sequences;
+            if (
+                theirs.waits.longest_sequence_checks,
+                theirs.waits.longest_sequence_ms,
+            ) > (
+                ours.waits.longest_sequence_checks,
+                ours.waits.longest_sequence_ms,
+            ) {
+                ours.waits.longest_sequence_checks = theirs.waits.longest_sequence_checks;
+                ours.waits.longest_sequence_ms = theirs.waits.longest_sequence_ms;
+            }
+            ours.waits.opportunity_runs += theirs.waits.opportunity_runs;
+            ours.waits.opportunity_requests += theirs.waits.opportunity_requests;
+            ours.waits.opportunity_input_tokens += theirs.waits.opportunity_input_tokens;
+            ours.waits.avoidable_input_tokens += theirs.waits.avoidable_input_tokens;
+            if let Some(cached) = theirs.waits.avoidable_cached_input_tokens {
+                *ours.waits.avoidable_cached_input_tokens.get_or_insert(0) += cached;
+            }
+            ours.waits.cached_unknown |= theirs.waits.cached_unknown;
         }
     }
 
@@ -431,6 +539,13 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
             failed_calls: acc.failed,
         },
         categories,
+        process_waits: (acc.waits.linked_checks > 0).then(|| {
+            let mut waits = acc.waits.clone();
+            if waits.cached_unknown {
+                waits.avoidable_cached_input_tokens = None;
+            }
+            waits
+        }),
         suggestions,
         patterns,
     }
@@ -475,6 +590,9 @@ fn top(shapes: &HashMap<String, ShapeAcc>, n: usize) -> Vec<ShapeCount> {
 /// The jouet command or rule for a category, with an estimate of what it
 /// would have saved where there is a defensible way to count one.
 fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
+    if category == Category::ProcessPolling && acc.waits.opportunity_runs == 0 {
+        return None;
+    }
     let repeat = |basis| Saving::new(c.repeat_tokens, acc.input_tokens, basis);
     let (fix, why, saving) = match category {
         Category::CiPolling => (
@@ -486,9 +604,11 @@ fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
         ),
         Category::ProcessPolling => (
             "jouet wait pid|log|port|cmd",
-            "one call blocks until the process exits, the log matches or the port opens",
-            repeat(
-                "requests that checked on a process right after a request that did; a wait would have made each run one call",
+            "a longer wait may replace consecutive short checks of the same job",
+            Saving::new(
+                acc.waits.avoidable_input_tokens as f64,
+                acc.input_tokens,
+                "consecutive short, quiet checks of the same still-running job; a longer wait might avoid these requests",
             ),
         ),
         Category::PrThreads => (
@@ -548,6 +668,8 @@ pub struct HarnessReport {
     pub ranked_by: &'static str,
     pub totals: Totals,
     pub categories: Vec<CategoryReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_waits: Option<ProcessWaits>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub suggestions: Vec<Suggestion>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -792,6 +914,183 @@ mod tests {
         // Two runs of polls: three in a row, then one after the push.
         assert_eq!(r.categories[0].runs, 2);
         assert_eq!(r.categories[0].requests, 4);
+    }
+
+    #[test]
+    fn process_savings_require_short_quiet_checks_of_the_same_job() {
+        use crate::event::Wait;
+        let mut t = Transcript::default();
+        let mut add = |id: &str,
+                       short: bool,
+                       running: bool,
+                       quiet: bool,
+                       boundary: bool,
+                       cached: Option<u64>| {
+            let mut call = Call::new(Tool::Poll);
+            call.wait = Some(Wait {
+                id: id.into(),
+                short,
+                running,
+                quiet,
+            });
+            call.wait_boundary = boundary;
+            call.duration_ms = Some(if short { 100 } else { 30_000 });
+            let n = t.calls.len();
+            t.calls.push(call);
+            t.requests.push(Request {
+                input_tokens: Some(100),
+                cached_input_tokens: cached,
+                calls: n..n + 1,
+                ..Default::default()
+            });
+        };
+        add("a", true, true, true, false, Some(80));
+        add("a", true, true, true, false, Some(70)); // one potential saving
+        add("b", true, true, true, false, Some(80)); // different job
+        add("b", true, true, true, true, Some(80)); // user-facing message
+        add("b", false, true, true, false, Some(80)); // blocking wait
+        add("b", true, true, true, false, Some(80));
+        add("b", true, true, false, false, Some(80)); // output matters
+        let mut a = Analyzer::default();
+        a.add("codex", &t);
+        let report = &a.report(3).harnesses[0];
+        let waits = report.process_waits.as_ref().unwrap();
+        assert_eq!((waits.linked_checks, waits.linked_sequences), (7, 3));
+        assert_eq!((waits.opportunity_runs, waits.opportunity_requests), (1, 2));
+        assert_eq!(waits.avoidable_input_tokens, 100);
+        assert_eq!(waits.avoidable_cached_input_tokens, Some(70));
+        let saving = report
+            .suggestions
+            .iter()
+            .find(|s| s.category == Category::ProcessPolling)
+            .unwrap();
+        assert_eq!(saving.saving.as_ref().unwrap().input_tokens, 100);
+        assert!(
+            !serde_json::to_string(report)
+                .unwrap()
+                .contains("session_id")
+        );
+    }
+
+    #[test]
+    fn unlinked_waits_do_not_claim_savings() {
+        let mut t = Transcript::default();
+        for _ in 0..3 {
+            let n = t.calls.len();
+            t.calls.push(Call::new(Tool::Poll));
+            t.requests.push(Request {
+                input_tokens: Some(100),
+                calls: n..n + 1,
+                ..Default::default()
+            });
+        }
+        let mut a = Analyzer::default();
+        a.add("codex", &t);
+        let report = &a.report(3).harnesses[0];
+        assert!(report.process_waits.is_none());
+        assert!(
+            !report
+                .suggestions
+                .iter()
+                .any(|s| s.category == Category::ProcessPolling)
+        );
+    }
+
+    #[test]
+    fn mixed_calls_and_missing_token_counts_are_not_savings() {
+        use crate::event::Wait;
+        let check = || {
+            let mut call = Call::new(Tool::Poll);
+            call.wait = Some(Wait {
+                id: "job".into(),
+                short: true,
+                running: true,
+                quiet: true,
+            });
+            call.duration_ms = Some(100);
+            call
+        };
+        let t = Transcript {
+            calls: vec![
+                check(),
+                check(),
+                Call::shell("git status"),
+                check(),
+                check(),
+            ],
+            requests: vec![
+                Request {
+                    input_tokens: Some(100),
+                    calls: 0..1,
+                    ..Default::default()
+                },
+                Request {
+                    input_tokens: Some(100),
+                    calls: 1..3,
+                    ..Default::default()
+                },
+                Request {
+                    input_tokens: None,
+                    calls: 3..4,
+                    ..Default::default()
+                },
+                Request {
+                    input_tokens: Some(100),
+                    calls: 4..5,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut a = Analyzer::default();
+        a.add("codex", &t);
+        let report = &a.report(3).harnesses[0];
+        let waits = report.process_waits.as_ref().unwrap();
+        assert_eq!(waits.linked_checks, 4);
+        assert_eq!(waits.opportunity_runs, 0);
+        assert!(
+            !report
+                .suggestions
+                .iter()
+                .any(|s| s.category == Category::ProcessPolling)
+        );
+    }
+
+    #[test]
+    fn omitted_requests_do_not_join_waits_across_other_calls() {
+        use crate::event::Wait;
+        let check = || {
+            let mut call = Call::new(Tool::Poll);
+            call.wait = Some(Wait {
+                id: "job".into(),
+                short: true,
+                running: true,
+                quiet: true,
+            });
+            call.duration_ms = Some(100);
+            call
+        };
+        let t = Transcript {
+            calls: vec![check(), Call::shell("git status"), check()],
+            requests: vec![
+                Request {
+                    input_tokens: Some(100),
+                    calls: 0..1,
+                    ..Default::default()
+                },
+                Request {
+                    input_tokens: Some(100),
+                    calls: 2..3,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut a = Analyzer::default();
+        a.add("codex", &t);
+        let report = &a.report(3).harnesses[0];
+        let waits = report.process_waits.as_ref().unwrap();
+        assert_eq!((waits.linked_sequences, waits.opportunity_runs), (2, 0));
     }
 
     #[test]

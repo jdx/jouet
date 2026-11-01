@@ -10,7 +10,7 @@
 
 use super::json::{LastStr, Num, Obj, Output, Str};
 use super::{Filter, Reader, Source, files_under, home, lines, sources};
-use crate::event::{Call, Message, MessageKind, Request, Tool, Transcript};
+use crate::event::{Call, Message, MessageKind, Request, Tool, Transcript, Wait};
 use crate::time::parse_timestamp;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -75,7 +75,12 @@ impl Reader for Codex {
             t.lines += 1;
             state.line = t.lines;
             let found = |k: &&[u8]| memchr::memmem::find(line, k).is_some();
-            if !(RELEVANT.iter().any(found) || state.detail && DETAIL.iter().any(found)) {
+            let assistant_message = memchr::memmem::find(line, b"\"role\":\"assistant\"").is_some()
+                && memchr::memmem::find(line, b"\"phase\":\"analysis\"").is_none();
+            if !(RELEVANT.iter().any(found)
+                || assistant_message
+                || state.detail && DETAIL.iter().any(found))
+            {
                 return true;
             }
             let parsed: Line = match serde_json::from_slice(line) {
@@ -111,11 +116,22 @@ impl Reader for Codex {
                 }
                 (_, Some("token_count")) => state.token_count(&mut t, at, payload),
                 (_, Some("item_completed")) => state.item(&mut t, payload),
-                (Some("response_item"), Some("message")) if state.detail => {
-                    state.message(&mut t, at, payload);
+                (Some("response_item"), Some("message")) => {
+                    if payload.role.as_deref() == Some("user")
+                        || payload.role.as_deref() == Some("assistant")
+                            && payload.phase.as_deref() != Some("analysis")
+                    {
+                        state.wait_boundary = true;
+                    }
+                    if state.detail {
+                        state.message(&mut t, at, payload);
+                    }
                 }
-                (Some("event_msg"), Some("turn_aborted")) if state.detail => {
-                    state.push(&mut t, at, MessageKind::Interrupt, String::new());
+                (Some("event_msg"), Some("turn_aborted")) => {
+                    state.wait_boundary = true;
+                    if state.detail {
+                        state.push(&mut t, at, MessageKind::Interrupt, String::new());
+                    }
                 }
                 _ => {}
             }
@@ -141,13 +157,15 @@ impl Reader for Codex {
 
 /// Substrings of the lines worth parsing; the rest (messages, reasoning,
 /// file changes) are skipped unread.
-const RELEVANT: [&[u8]; 6] = [
+const RELEVANT: [&[u8]; 8] = [
     b"\"session_meta\"",
     b"\"turn_context\"",
     b"tool_call",
     b"function_call",
     b"\"token_count\"",
     b"\"CommandExecution\"",
+    b"\"role\":\"user\"",
+    b"\"turn_aborted\"",
 ];
 
 /// More lines a digest reads: the user's messages and aborted turns.
@@ -169,6 +187,7 @@ struct State {
     commands: HashMap<String, usize>,
     /// Calls whose exit code and duration came from a `CommandExecution`.
     exact: Vec<bool>,
+    wait_boundary: bool,
 }
 
 impl State {
@@ -202,6 +221,9 @@ impl State {
         let name = p.name.as_deref().unwrap_or_default();
         let src = p.input.0.or(p.arguments.0).unwrap_or_default();
         let mut calls = calls_for(name, &src);
+        if let Some(first) = calls.first_mut() {
+            first.wait_boundary = std::mem::take(&mut self.wait_boundary);
+        }
         let start = t.calls.len();
         for call in &mut calls {
             call.at = at;
@@ -247,6 +269,15 @@ impl State {
             .copied();
         for &i in &indexes {
             let call = &mut t.calls[i];
+            if let Some(wait) = &mut call.wait {
+                wait.running = out.head.contains("Process running with session ID")
+                    || out.head.contains("Script running with cell ID");
+                wait.quiet = out.bytes <= out.head.len() as u64
+                    && out
+                        .head
+                        .split_once("Output:")
+                        .is_some_and(|(_, tail)| tail.trim().is_empty());
+            }
             call.output_bytes = out.bytes / n;
             call.rate_limited = out.rate_limited;
             if let Some(command) = &call.command {
@@ -271,6 +302,9 @@ impl State {
                 }
             } else {
                 call.duration_ms = wall.map(|w| w / n);
+            }
+            if let Some(wait) = &mut call.wait {
+                wait.short &= call.duration_ms.is_some_and(|ms| ms <= 2_000);
             }
         }
     }
@@ -317,6 +351,7 @@ impl State {
         t.requests.push(Request {
             at,
             input_tokens: last.input_tokens.u64(),
+            cached_input_tokens: last.cached_input_tokens.u64(),
             output_tokens: last.output_tokens.u64(),
             calls: self.request_start..t.calls.len(),
             // A token count carries no ID to recognise a copy by.
@@ -343,6 +378,7 @@ fn calls_for(name: &str, src: &str) -> Vec<Call> {
         "exec_command" | "shell" | "shell_command" | "local_shell" => {
             vec![shell_args(src).map_or_else(|| Call::new(Tool::Shell), Call::shell)]
         }
+        "write_stdin" | "wait" => vec![wait_call(name, src)],
         _ => vec![Call::new(tool_kind(name))],
     }
 }
@@ -399,7 +435,16 @@ pub(crate) fn exec_cell(src: &str) -> Vec<Call> {
                 calls.push(js_cmd(args).map_or_else(|| Call::new(Tool::Shell), Call::shell));
                 continue;
             }
-            "write_stdin" | "wait" => Tool::Poll,
+            "write_stdin" | "wait" => {
+                let mut call = wait_call(name, args);
+                // The surrounding JavaScript may also send a progress update
+                // or do other work we cannot reconstruct from the tool call.
+                if let Some(wait) = &mut call.wait {
+                    wait.short = false;
+                }
+                calls.push(call);
+                continue;
+            }
             "apply_patch" => Tool::Edit,
             "web__run" => Tool::Web,
             "view_image" => Tool::Read,
@@ -415,6 +460,96 @@ pub(crate) fn exec_cell(src: &str) -> Vec<Call> {
         calls.push(Call::new(Tool::Other));
     }
     calls
+}
+
+fn wait_call(name: &str, src: &str) -> Call {
+    let mut call = Call::new(Tool::Poll);
+    let Some(value) = serde_json::Deserializer::from_str(src)
+        .into_iter::<serde_json::Value>()
+        .next()
+        .and_then(Result::ok)
+        .or_else(|| flat_js_object(src))
+    else {
+        return call;
+    };
+    let key = if name == "wait" {
+        "cell_id"
+    } else {
+        "session_id"
+    };
+    let id = value.get(key).and_then(|v| {
+        v.as_str()
+            .map(str::to_string)
+            .or_else(|| v.as_u64().map(|n| n.to_string()))
+    });
+    if let Some(id) = id {
+        let no_input = name == "wait" || value.get("chars").is_none_or(|v| v.as_str() == Some(""));
+        let short = no_input
+            && value
+                .get("yield_time_ms")
+                .and_then(|v| v.as_u64())
+                .is_some_and(|n| n <= 2_000)
+            && !value
+                .get("terminate")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        call.wait = Some(Wait {
+            id: format!("{key}:{id}"),
+            short,
+            running: false,
+            quiet: false,
+        });
+    }
+    call
+}
+
+/// Parse the flat literal objects commonly passed to tools in exec cells.
+/// Variables, computed values, escapes and nested objects stay unknown.
+fn flat_js_object(src: &str) -> Option<serde_json::Value> {
+    let mut rest = src.trim_start().strip_prefix('{')?;
+    let mut map = serde_json::Map::new();
+    loop {
+        rest = rest.trim_start();
+        if rest.starts_with('}') {
+            return Some(serde_json::Value::Object(map));
+        }
+        let end = rest
+            .bytes()
+            .position(|b| !(b.is_ascii_alphanumeric() || b == b'_'))?;
+        if end == 0 {
+            return None;
+        }
+        let key = &rest[..end];
+        rest = rest[end..].trim_start().strip_prefix(':')?.trim_start();
+        let (value, tail) = if let Some(value) = rest.strip_prefix('\'') {
+            let end = value.find('\'')?;
+            let text = &value[..end];
+            if text.contains('\\') {
+                return None;
+            }
+            (
+                serde_json::Value::String(text.to_string()),
+                &value[end + 1..],
+            )
+        } else {
+            let mut stream =
+                serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>();
+            let value = stream.next()?.ok()?;
+            if !value.is_boolean() && !value.is_number() && !value.is_string() && !value.is_null() {
+                return None;
+            }
+            (value, &rest[stream.byte_offset()..])
+        };
+        if map.insert(key.to_string(), value).is_some() {
+            return None;
+        }
+        rest = tail.trim_start();
+        if let Some(after) = rest.strip_prefix(',') {
+            rest = after;
+        } else if !rest.starts_with('}') {
+            return None;
+        }
+    }
 }
 
 /// The `cmd` of an `exec_command` argument object: JSON, or a JavaScript
@@ -527,6 +662,8 @@ struct Payload {
     #[serde(default)]
     role: Str,
     #[serde(default)]
+    phase: Str,
+    #[serde(default)]
     content: Output,
     #[serde(default)]
     name: Str,
@@ -556,6 +693,8 @@ struct Info {
 struct Usage {
     #[serde(default)]
     input_tokens: Num,
+    #[serde(default)]
+    cached_input_tokens: Num,
     #[serde(default)]
     output_tokens: Num,
     #[serde(default)]
@@ -638,6 +777,119 @@ mod tests {
             kinds("await tools.mcp__codex_apps__github_fetch_pr({})"),
             [Tool::Github]
         );
+    }
+
+    #[test]
+    fn reads_literal_job_checks_and_leaves_computed_values_unknown() {
+        let direct = calls_for(
+            "write_stdin",
+            r#"{"session_id":42,"chars":"","yield_time_ms":1000}"#,
+        );
+        assert_eq!(direct[0].wait.as_ref().unwrap().id, "session_id:42");
+        assert!(direct[0].wait.as_ref().unwrap().short);
+        let cell =
+            exec_cell("await tools.write_stdin({session_id: 42, chars: '', yield_time_ms: 1000})");
+        assert_eq!(cell[0].wait.as_ref().unwrap().id, "session_id:42");
+        assert!(!cell[0].wait.as_ref().unwrap().short);
+        assert!(
+            exec_cell("await tools.write_stdin({session_id: task, chars: ''})")[0]
+                .wait
+                .is_none()
+        );
+        assert!(
+            !calls_for(
+                "write_stdin",
+                r#"{"session_id":42,"chars":"yes","yield_time_ms":1000}"#
+            )[0]
+            .wait
+            .as_ref()
+            .unwrap()
+            .short
+        );
+        assert!(
+            !calls_for(
+                "wait",
+                r#"{"cell_id":"x","yield_time_ms":1000,"terminate":true}"#
+            )[0]
+            .wait
+            .as_ref()
+            .unwrap()
+            .short
+        );
+    }
+
+    #[test]
+    fn reads_wait_results_and_user_facing_boundaries_without_detail() {
+        let text = concat!(
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"write_stdin\",\"call_id\":\"1\",\"arguments\":\"{\\\"session_id\\\":7,\\\"yield_time_ms\\\":1000}\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"1\",\"output\":\"Wall time: 1 seconds\\nProcess running with session ID 7\\nOutput:\\n\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":\"Working\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"write_stdin\",\"call_id\":\"2\",\"arguments\":\"{\\\"session_id\\\":7,\\\"yield_time_ms\\\":1000}\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Older transcript reply\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"write_stdin\",\"call_id\":\"3\",\"arguments\":\"{\\\"session_id\\\":7,\\\"yield_time_ms\\\":1000}\"}}\n",
+        );
+        let source = Source {
+            path: PathBuf::from("/tmp/rollout.jsonl"),
+            bytes: 0,
+            modified_ms: None,
+        };
+        let t = Codex {
+            root: PathBuf::from("/tmp"),
+        }
+        .read(&source, &mut text.as_bytes(), &Filter::default())
+        .unwrap()
+        .unwrap();
+        let first = t.calls[0].wait.as_ref().unwrap();
+        assert!(first.running && first.quiet && first.short);
+        assert!(t.calls[1].wait_boundary);
+        assert!(t.calls[2].wait_boundary);
+        assert!(t.messages.is_empty());
+    }
+
+    #[test]
+    fn audit_only_prices_linked_short_checks_without_an_intervening_reply() {
+        use crate::analyze::Analyzer;
+        let mut lines = Vec::new();
+        for n in 1..=3 {
+            if n == 3 {
+                lines.push(serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","content":"still running"}}).to_string());
+            }
+            lines.push(serde_json::json!({"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":format!("c{n}"),"arguments":"{\"session_id\":7654321,\"chars\":\"\",\"yield_time_ms\":1000}"}}).to_string());
+            lines.push(serde_json::json!({"type":"response_item","payload":{"type":"function_call_output","call_id":format!("c{n}"),"output":"Wall time: 1 seconds\nProcess running with session ID 7654321\nOutput:\n"}}).to_string());
+            lines.push(serde_json::json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":n*100},"last_token_usage":{"input_tokens":100,"cached_input_tokens":70,"output_tokens":1}}}}).to_string());
+        }
+        let text = lines.join("\n");
+        let source = Source {
+            path: PathBuf::from("/tmp/rollout.jsonl"),
+            bytes: 0,
+            modified_ms: None,
+        };
+        let t = Codex {
+            root: PathBuf::from("/tmp"),
+        }
+        .read(&source, &mut text.as_bytes(), &Filter::default())
+        .unwrap()
+        .unwrap();
+        let mut analyzer = Analyzer::default();
+        analyzer.add("codex", &t);
+        let report = analyzer.report(0);
+        let waits = report.harnesses[0].process_waits.as_ref().unwrap();
+        assert_eq!(
+            (
+                waits.linked_checks,
+                waits.linked_sequences,
+                waits.opportunity_runs
+            ),
+            (3, 2, 1)
+        );
+        assert_eq!(
+            (
+                waits.avoidable_input_tokens,
+                waits.avoidable_cached_input_tokens
+            ),
+            (100, Some(70))
+        );
+        assert!(!serde_json::to_string(&report).unwrap().contains("7654321"));
     }
 
     #[test]

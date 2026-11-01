@@ -348,6 +348,10 @@ pub struct KindBaseline {
     pub calls: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub failed: u64,
+    /// Process-wait runs were built from linked, eligible checks, not the
+    /// old category-wide grouping. Absent on saved older baselines.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked_waits: bool,
 }
 
 impl KindBaseline {
@@ -384,11 +388,33 @@ pub fn baseline(report: &HarnessReport, until: Option<u64>) -> Baseline {
                     .find(|c| c.category == kind.category())?;
                 Some(KindBaseline {
                     kind,
-                    runs: c.runs,
-                    requests: c.requests,
-                    input_tokens: c.input_tokens,
+                    runs: if kind == Kind::ProcessWait {
+                        report
+                            .process_waits
+                            .as_ref()
+                            .map_or(0, |w| w.opportunity_runs)
+                    } else {
+                        c.runs
+                    },
+                    requests: if kind == Kind::ProcessWait {
+                        report
+                            .process_waits
+                            .as_ref()
+                            .map_or(0, |w| w.opportunity_requests)
+                    } else {
+                        c.requests
+                    },
+                    input_tokens: if kind == Kind::ProcessWait {
+                        report
+                            .process_waits
+                            .as_ref()
+                            .map_or(0, |w| w.opportunity_input_tokens)
+                    } else {
+                        c.input_tokens
+                    },
                     calls: c.calls,
                     failed: c.failed,
+                    linked_waits: kind == Kind::ProcessWait,
                 })
             })
             .collect(),
@@ -444,6 +470,9 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                 return refuse(format!("the {harness} history records no token counts"));
             }
             let found = b.kinds.iter().find(|k| k.kind == kind);
+            if kind == Kind::ProcessWait && found.is_some_and(|k| !k.linked_waits) {
+                return refuse("the saved process-wait baseline has no linked job evidence; run `jouet stats` to refresh it".to_string());
+            }
             let before = found.map_or(0, |k| k.runs);
             if before < MIN_BASELINE_RUNS {
                 return refuse(format!(

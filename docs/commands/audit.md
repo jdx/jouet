@@ -28,9 +28,12 @@ A request to the model re-reads the whole context, so a request avoided saves it
 
 The categories are CI polling, process polling, PR threads, PR status, other GitHub, edits, build/test/lint, reads and searches, git, web, agents, replies and other. A shell command is categorized by what it runs, most specific first, so `sleep 30 && gh pr checks 12` is CI polling.
 
+The process-polling category includes blocking waits and other checks. Its attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.
+
 The savings are estimates and are labelled as such:
 
-- **Polling, PR threads and PR status:** requests that did the same kind of thing as the request just before them. One `jouet wait`, `pr threads` or `pr status` call would have replaced each run of them.
+- **Process waits:** consecutive short, quiet checks of the same linked job, where the previous check reported it was still running. A longer wait might have avoided later checks. Blocking waits, output, user-facing messages and unlinked calls are not counted as savings. The report also counts linked checks and sequences as observations, and shows cached input separately when available.
+- **CI polling, PR threads and PR status:** requests that did the same kind of thing as the request just before them. One `jouet wait`, `pr threads` or `pr status` call might have replaced each run of them.
 - **Edits:** requests whose edit failed and had to be redone.
 - **Builds and tests** cost time more than tokens; jouet has no command for them, and the report points to mbx.
 
@@ -63,13 +66,6 @@ Codex: 947 sessions (965 transcripts with subagents), 216,659 requests, 221,424 
   … 8 more categories (--top 0 lists all)
 
   what would cut it:
-  - process polling (37.2%): jouet wait pid|log|port|cmd — one call blocks until the process exits, the log matches or the port opens
-    estimate: 6.71B tokens (24.4%), counting requests that checked on a process right after a request that did; a wait would have made each run one call
-    top shapes:
-      sleep <n> (908 calls, 130.2M tokens)
-      sleep <n>; true (116 calls, 16.3M tokens)
-      pgrep -af <s> || true (74 calls, 11.9M tokens)
-      … 171 more shapes (--json lists 5)
   - CI polling (10.0%): jouet wait ci — one call blocks until the checks settle and shows why any failed, instead of a model turn per check (built-in rule `sleep-poll`)
     estimate: 846.4M tokens (3.1%), counting requests that polled CI right after a request that did; a wait would have made each run of polls one call
     top shapes:
