@@ -148,6 +148,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         }
         fixed.push("--");
         fixed.extend(rest);
+        let fixed: Vec<String> = fixed.into_iter().map(quote).collect();
         return out.error_with_hint(
             Exit::Usage,
             &format!(
@@ -178,6 +179,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     fixed.push("--");
                     fixed.extend(args.extra.iter().map(String::as_str));
                 }
+                let fixed: Vec<String> = fixed.into_iter().map(quote).collect();
                 let hint = e.hint.unwrap_or_else(|| fixed.join(" "));
                 return out.error_with_hint(e.exit, &e.message, Some(&hint));
             }
@@ -304,21 +306,24 @@ fn emit(text: &str) {
 /// How this `jouet test` was called, as a shell command: what the rules
 /// classify, as they would the hook's.
 fn own_command() -> String {
-    let words: Vec<String> = std::env::args()
-        .skip(1)
-        .map(|word| {
-            let plain = !word.is_empty()
-                && word
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c));
-            if plain {
-                word
-            } else {
-                format!("'{}'", word.replace('\'', "'\\''"))
-            }
-        })
-        .collect();
+    let words: Vec<String> = std::env::args().skip(1).map(|w| quote(&w)).collect();
     format!("jouet {}", words.join(" "))
+}
+
+/// `word` as a shell reads it back: alone when it is plain, else in single
+/// quotes. A `~` is plain past the first character (`HEAD~1`), where no
+/// shell expands it.
+fn quote(word: &str) -> String {
+    let plain = !word.is_empty()
+        && !word.starts_with('~')
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=+,@%~".contains(c));
+    if plain {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
 }
 
 /// A new log for the `i`th suite of this run. The first also removes the

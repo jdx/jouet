@@ -559,9 +559,9 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_equal "$output" ""
 	assert_stderr --partial "which is HEAD itself with nothing changed since"
 	assert_stderr --partial "jouet test --baseline --since HEAD~1"
-	run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests
+	run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests -k "test_env or x"
 	assert_failure 2
-	assert_stderr --partial "jouet test --baseline --since HEAD~1 --cmd -- python3 -m unittest discover -s tests"
+	assert_stderr --partial "jouet test --baseline --since HEAD~1 --cmd -- python3 -m unittest discover -s tests -k 'test_env or x'"
 
 	# The commit before the change is a base that tells something.
 	run --separate-stderr jouet test --baseline --since HEAD~1
