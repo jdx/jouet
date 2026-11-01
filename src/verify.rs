@@ -91,7 +91,8 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
-        if ran == wanted || without_names(ran, wanted) {
+        if ran == wanted || without_names(ran, wanted) || wider_filter(&failed.command, ran, wanted)
+        {
             return true;
         }
         let words = |s: &str| -> Option<Vec<String>> {
@@ -117,6 +118,29 @@ fn without_names(ran: &str, wanted: &str) -> bool {
         && wanted.starts_with(&ran)
         && !ran.last().is_some_and(option)
         && !wanted[ran.len()..].iter().any(option)
+}
+
+/// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
+/// cut to part of it: cargo and nextest run every test whose name holds the
+/// filter, so `affected::` runs all that `affected::cargo` does. Not with
+/// `--exact`, which matches whole names.
+fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
+    if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
+        return false;
+    }
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let (Some((r, ran_rest)), Some((w, wanted_rest))) = (ran.split_last(), wanted.split_last())
+    else {
+        return false;
+    };
+    let option = |w: &&str| w.starts_with('-');
+    ran_rest == wanted_rest
+        && !option(r)
+        && !option(w)
+        && !ran_rest.last().is_some_and(option)
+        && !ran_rest.contains(&"--exact")
+        && w.contains(r)
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -1072,6 +1096,33 @@ mod tests {
         state.record([cargo("-p a -- --exact name", 101)], Some("t1"));
         state.record([cargo("-p a --", 0)], Some("t1"));
         assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_shorter_cargo_name_filter_covers_a_longer_one() {
+        let c = "cargo test --bin jouet affected::cargo";
+        assert!(wider_filter(
+            c,
+            "--bin jouet affected::",
+            "--bin jouet affected::cargo"
+        ));
+        // Another filter, another target, a whole-name match, another runner.
+        assert!(!wider_filter(
+            c,
+            "--bin jouet verify::",
+            "--bin jouet affected::cargo"
+        ));
+        assert!(!wider_filter(
+            c,
+            "--lib affected::",
+            "--bin jouet affected::cargo"
+        ));
+        assert!(!wider_filter(c, "-- --exact a", "-- --exact ab"));
+        assert!(!wider_filter(
+            "mise run test:e2e test_ab",
+            "test:e2e test_a",
+            "test:e2e test_ab"
+        ));
     }
 
     #[test]
