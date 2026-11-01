@@ -44,6 +44,13 @@ pub(crate) fn is_docs(path: &str) -> bool {
     if is_requirements(name) {
         return false;
     }
+    // Test data, which tests read whatever its extension.
+    if ["fixtures", "testdata", "snapshots", "__snapshots__"]
+        .iter()
+        .any(|d| path.starts_with(&format!("{d}/")) || path.contains(&format!("/{d}/")))
+    {
+        return false;
+    }
     let ext = extension(path);
     if ["md", "mdx", "markdown", "rst", "adoc", "asciidoc", "txt"].contains(&ext.as_str()) {
         return true;
@@ -61,6 +68,8 @@ pub(crate) fn is_docs(path: &str) -> bool {
         "CONTRIBUTORS",
     ]
     .contains(&stem.as_str())
+        // `CHANGES`, not `changes.rs`.
+        && ext.is_empty()
     {
         return true;
     }
@@ -227,6 +236,10 @@ mod tests {
         for path in [
             "requirements.txt",
             "requirements-dev.txt",
+            "src/changes.rs",
+            "src/license.py",
+            "src/testlog/fixtures/go.txt",
+            "tests/testdata/notes.md",
             "src/app.py",
             "docs/conf.py",
             "fixture.json",

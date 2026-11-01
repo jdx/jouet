@@ -122,7 +122,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "test",
         Some(
-            "running tests or a build: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push (a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`). `jouet test --cmd -- CMD` runs any other test, e2e or build command. Each prints one line when it passes, or each failure with its error within --budget bytes, and saves the whole output to a log it names: read that instead of piping the run through head, tail or grep, or running it again",
+            "running tests or a build: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, cargo by crate, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, which still has to pass before you finish or push (a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`). `jouet test --cmd -- CMD` runs any other test, e2e or build command. Each prints one line when it passes, or each failure with its error within --budget bytes, and saves the whole output to a log it names: read that instead of piping the run through head, tail or grep, or running it again",
         ),
     ),
     (
@@ -853,7 +853,10 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 /// denied call to learn them. When to use each command and its flags are
 /// one `jouet agent-help COMMAND` away; listing them here as well made every
 /// session pay for them.
-pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
+/// `affected` is whether `jouet test --affected` can select tests where the
+/// session starts: without it, the primer leaves the flag out rather than
+/// send the agent to a command that exits 4.
+pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bool) -> String {
     let commands = agent_commands();
     let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
     // A group is one entry, as in the overview: `read/docs/deps/db`.
@@ -885,10 +888,17 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     let tests: Vec<&str> = usage_of("test")
         .map(|u| u.lines.iter().take(3).map(|(line, _)| *line).collect())
         .unwrap_or_default();
-    if let ([commit, edit, reply], [suite, affected, cmd]) = (usage.as_slice(), tests.as_slice()) {
+    if let ([commit, edit, reply], [suite, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
+        let test = if affected {
+            format!(
+                "Test with `{selected}` (what your changes affect) or `{cmd}` (any other test or build)."
+            )
+        } else {
+            format!("Test with `{cmd}` (the tests or build for what you changed).")
+        };
         let _ = writeln!(
             out,
-            "Test with `{affected}` (what your changes affect) or `{cmd}` (any other test or build). One run is enough. Run `{suite}` (the full suite) when the hooks ask. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} One run is enough. Run `{suite}` (the full suite) when the hooks ask. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1089,6 +1099,19 @@ mod tests {
     }
 
     #[test]
+    fn the_primer_leaves_out_affected_where_it_cannot_select() {
+        // In a repository with no runner --affected knows, it exits 4.
+        let text = summary(&[], true, false);
+        assert!(!text.contains("--affected"), "{text}");
+        assert!(
+            text.contains(
+                "Test with `jouet test --cmd -- CMD...` (the tests or build for what you changed)."
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn the_primer_is_short_and_needs_no_lookup_for_the_common_commands() {
         for (path, flags) in PRIMED {
             assert!(
@@ -1103,6 +1126,7 @@ mod tests {
                 ("print-secrets", Some("fnox exec")),
                 ("secret-files", Some("fnox exec")),
             ],
+            true,
             true,
         );
         assert!(

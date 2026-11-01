@@ -4,7 +4,7 @@ description: Run the full test suite, only the tests a change affects, or any te
 
 # jouet test
 
-`jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It is one command for every ecosystem: adapters hand the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data), or to jouet's code graph where there is none, and jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
+`jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It is one command for every ecosystem: adapters hand the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data, cargo's crate graph), or to jouet's code graph where there is none, and jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
 
 `jouet test` without `--affected` runs the full suite, and `jouet test --cmd -- CMD` runs any other test, e2e or build command. Every run keeps its whole output in a log and prints, for an agent, [only what it needs](#what-a-run-prints): one line when it passes, each failure with its error when it fails.
 
@@ -195,12 +195,21 @@ The fallback for languages without a native adapter, built on jouet's [code grap
 - **Runner:** `go test` on the selected tests' packages; `bundle exec rspec` on their files (with `.rspec` or a `spec/` directory), else minitest through `bundle exec ruby -Itest -Ilib`; `mvn test -Dtest=…` or `gradle test --tests …` on their classes, through `mvnw` or `gradlew` when the project has one.
 - **The whole suite for** `go.mod`, the `Gemfile`, `.rspec`, a spec or test helper, the Maven or Gradle build, test data, a deleted file (the graph cannot follow a file that is gone), and a file the graph could not index.
 
+### cargo
+
+A Rust workspace's tests, by crate: in Rust, compiling dominates, so the saving is in what is built.
+
+- **Found by** a `Cargo.toml` with a `[package]` or a `[workspace]`.
+- **Selection:** `cargo metadata --no-deps --offline` gives the workspace's members and their path dependencies on each other. A changed file belongs to the member whose directory holds it (the deepest, when one crate sits in another's directory), and the crates picked are the changed ones and every member that depends on one, directly or through others, dev-dependencies included. Each pick shows the chain of crates that reaches a changed one.
+- **Runner:** `cargo test -p A -p B ...`, with the words after `--` passed on.
+- **Traces** every file inside a member's directory except its `target/`, since a test can read a fixture with `include_str!`.
+- **The whole suite for** the workspace manifest, `.cargo/config.toml`, `rust-toolchain(.toml)` and `Cargo.lock` (`cargo test --workspace`), and a file outside every member.
+
 ### Planned
 
 These slot into the same adapter trait and are follow-ups:
 
 - **go:** `go list -deps` gives the package graph, on top of Go's own test cache.
-- **cargo:** narrowing what is built (`-p`) rather than which tests run, with `determinator`. In Rust, compiling dominates, so selecting tests saves little.
 - **Ruby:** best-effort, from coverage maps in the style of crystalball, or file naming conventions.
 
 ## The full suite

@@ -15,6 +15,7 @@
 //! so the full suite still has to pass before an agent claims done or
 //! pushes (`crate::verify`).
 
+mod cargo;
 mod changes;
 mod classify;
 mod codegraph;
@@ -215,6 +216,11 @@ pub(crate) const ADAPTERS: &[Known] = &[
         name: "unittest",
         detect: python::detect_unittest,
         load: |p| Box::new(python::Unittest::load(p)),
+    },
+    Known {
+        name: "cargo",
+        detect: cargo::detect,
+        load: |p| Box::new(cargo::Cargo::load(p)),
     },
     Known {
         name: "graph",
