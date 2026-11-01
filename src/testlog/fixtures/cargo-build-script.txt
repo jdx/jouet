@@ -1,0 +1,78 @@
+warning: zstd-sys@2.1.2+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+warning: zstd-sys@2.1.2+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+warning: zstd-sys@2.1.2+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+error: failed to run custom build command for `zstd-sys v2.1.2+zstd.1.5.7`
+
+Caused by:
+  process didn't exit successfully: `/work/target/check/debug/build/zstd-sys/e06a7d26dec69167/out/build_script_build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=ZSTD_SYS_USE_PKG_CONFIG
+  cargo:rerun-if-env-changed=ZSTD_SYS_NO_HIDE_SYMBOLS
+  cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+  CC_FORCE_DISABLE = None
+  cargo:rerun-if-env-changed=CC_x86_64-pc-windows-gnu
+  CC_x86_64-pc-windows-gnu = None
+  cargo:rerun-if-env-changed=CC_x86_64_pc_windows_gnu
+  CC_x86_64_pc_windows_gnu = None
+  cargo:rerun-if-env-changed=TARGET_CC
+  TARGET_CC = None
+  cargo:rerun-if-env-changed=CC
+  CC = None
+  cargo:rerun-if-env-changed=CROSS_COMPILE
+  CROSS_COMPILE = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+  cargo:rerun-if-env-changed=CPATH
+  cargo:rerun-if-env-changed=C_INCLUDE_PATH
+  cargo:rerun-if-env-changed=CPLUS_INCLUDE_PATH
+  cargo:rerun-if-env-changed=OBJC_INCLUDE_PATH
+  cargo:rerun-if-env-changed=OBJCPLUS_INCLUDE_PATH
+  cargo:rerun-if-env-changed=COMPILER_PATH
+  cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH
+  cargo:rerun-if-env-changed=GCC_EXEC_PREFIX
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CFLAGS
+  CFLAGS = None
+  cargo:rerun-if-env-changed=TARGET_CFLAGS
+  TARGET_CFLAGS = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64_pc_windows_gnu
+  CFLAGS_x86_64_pc_windows_gnu = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64-pc-windows-gnu
+  CFLAGS_x86_64-pc-windows-gnu = None
+  CFLAGS = None
+  TARGET_CFLAGS = None
+  CFLAGS_x86_64_pc_windows_gnu = None
+  CFLAGS_x86_64-pc-windows-gnu = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+  CRATE_CC_NO_DEFAULTS = None
+  CFLAGS = None
+  TARGET_CFLAGS = None
+  CFLAGS_x86_64_pc_windows_gnu = None
+  CFLAGS_x86_64-pc-windows-gnu = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+  CRATE_CC_NO_DEFAULTS = None
+  CFLAGS = None
+  TARGET_CFLAGS = None
+  CFLAGS_x86_64_pc_windows_gnu = None
+  CFLAGS_x86_64-pc-windows-gnu = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+  CRATE_CC_NO_DEFAULTS = None
+  CFLAGS = None
+  TARGET_CFLAGS = None
+  CFLAGS_x86_64_pc_windows_gnu = None
+  CFLAGS_x86_64-pc-windows-gnu = None
+
+  --- stderr
+
+
+  error occurred in cc-rs: failed to find tool "x86_64-w64-mingw32-gcc": No such file or directory (os error 2)
+
+
+warning: build failed, waiting for other jobs to finish...

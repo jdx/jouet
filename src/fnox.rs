@@ -6,7 +6,6 @@
 
 use jouet_git::Error;
 use jouet_git::commit::{ScanStatus, Scanner, SecretFinding, SecretScan};
-use jouet_output::exit::Exit;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -195,11 +194,21 @@ impl Scanner for Scan {
                 .env("FNOX_NON_INTERACTIVE", "1")
                 .stdin(Stdio::null());
         }
-        let out = command.output().map_err(|e| Error {
-            exit: Exit::Precondition,
-            message: format!("running fnox scan: {e}"),
-            hint: Some(DISABLE.into()),
-        })?;
+        let out = match command.output() {
+            Ok(out) => out,
+            Err(e) => {
+                return Ok(SecretScan {
+                    tool: "fnox".into(),
+                    status: ScanStatus::Skipped,
+                    files_scanned: None,
+                    findings: Vec::new(),
+                    reason: Some(format!(
+                        "fnox could not be run ({e}), so only gitleaks' rules checked the commit"
+                    )),
+                    notes: Vec::new(),
+                });
+            }
+        };
         let stderr = String::from_utf8_lossy(&out.stderr);
         read_scan(
             out.status.code(),
@@ -210,13 +219,13 @@ impl Scanner for Scan {
     }
 }
 
-const DISABLE: &str = "fix what fnox reports, or set [commit] secret_scan = false (JOUET_COMMIT_SECRET_SCAN=0) to commit without the scan";
-
 /// Reads `fnox scan --format json`'s result. fnox exits 1 both when it finds
 /// a secret and when it fails, so a finding is told apart by its report on
-/// stdout. A scan that failed refuses the commit, unless the agent runs
-/// under `fnox proxy run`: it was only given placeholders, and fnox there
-/// usually cannot resolve the real values.
+/// stdout. A scan that failed lets the commit go ahead with a warning that
+/// says why, as when fnox is not installed: gitleaks' rules still scanned it,
+/// and a check that could not run reports that rather than blocking the
+/// work. Under `fnox proxy run` the warning says the agent was only given
+/// placeholders, so fnox there usually cannot resolve the real values.
 fn read_scan(
     code: Option<i32>,
     stdout: &str,
@@ -266,20 +275,18 @@ fn read_scan(
         (Some(1), true) if !findings.is_empty() => Ok(scan(ScanStatus::Found, findings)),
         _ => {
             let why = failure(stderr, code);
-            if proxied {
-                return Ok(SecretScan {
-                    reason: Some(format!(
-                        "fnox scan failed ({why}); the agent runs under fnox proxy run, so it was only given placeholders"
-                    )),
-                    ..scan(ScanStatus::Skipped, Vec::new())
-                });
-            }
-            Err(Error {
-                exit: Exit::Precondition,
-                message: format!(
-                    "fnox could not scan the commit for secret values, so nothing was committed: {why}"
-                ),
-                hint: Some(DISABLE.into()),
+            let reason = if proxied {
+                format!(
+                    "fnox scan failed ({why}); the agent runs under fnox proxy run, so it was only given placeholders"
+                )
+            } else {
+                format!(
+                    "fnox could not scan the commit for secret values ({why}), so only gitleaks' rules checked it"
+                )
+            };
+            Ok(SecretScan {
+                reason: Some(reason),
+                ..scan(ScanStatus::Skipped, Vec::new())
             })
         }
     }
@@ -420,16 +427,16 @@ DEPLOY_TOKEN = { provider = "age", value = "YWdl" }
     }
 
     #[test]
-    fn a_failed_scan_refuses_unless_proxied() {
+    fn a_failed_scan_is_skipped_with_why() {
         let stderr = "Warning: 1 secret(s) have no value and were not checked: A\nError: fnox::config::error\n\n  × Configuration error: None of the profile's secrets could be resolved, so\n  │ nothing was scanned: A\n\n";
-        let err = read_scan(Some(1), "", stderr, false).unwrap_err();
-        assert_eq!(err.exit, Exit::Precondition);
+        let scan = read_scan(Some(1), "", stderr, false).unwrap();
+        assert_eq!(scan.status, ScanStatus::Skipped);
+        let reason = scan.reason.unwrap();
         assert!(
-            err.message.contains(
+            reason.contains(
                 "Configuration error: None of the profile's secrets could be resolved, so nothing was scanned: A (exit 1)"
             ),
-            "{}",
-            err.message
+            "{reason}"
         );
         let scan = read_scan(Some(1), "", stderr, true).unwrap();
         assert_eq!(scan.status, ScanStatus::Skipped);

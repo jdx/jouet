@@ -22,12 +22,16 @@ pub(super) struct Baseline {
     /// The failures the merge base does not have.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) new: Vec<String>,
+    /// The failures the merge base's run may not have reached: it ran far
+    /// fewer tests, so a test missing from its failures may not have run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) unknown: Vec<String>,
 }
 
 impl Baseline {
     /// Whether every failure was there at the merge base too.
     pub(super) fn none_new(&self) -> bool {
-        self.new.is_empty() && !self.pre_existing.is_empty()
+        self.new.is_empty() && self.unknown.is_empty() && !self.pre_existing.is_empty()
     }
 
     /// What it found, in a line or two.
@@ -57,17 +61,36 @@ impl Baseline {
                 list(&self.pre_existing)
             )
         } else {
-            let total = self.new.len() + self.pre_existing.len();
-            let new = match (self.new.len(), total) {
-                (1, 1) => "the failure is new".to_string(),
-                (1, total) => format!("1 of {total} failures is new"),
-                (n, total) if n == total => format!("all {n} failures are new"),
-                (n, total) => format!("{n} of {total} failures are new"),
+            let total = self.new.len() + self.pre_existing.len() + self.unknown.len();
+            let mut text = if self.new.is_empty() {
+                let which = match (self.unknown.len(), total) {
+                    (1, 1) => "the failure".to_string(),
+                    (n, total) if n == total => format!("all {n} failures"),
+                    (n, total) => format!("{n} of {total} failures"),
+                };
+                format!(
+                    "baseline: the run at {at} ran far fewer tests, so {which} could not be compared: {}\n",
+                    list(&self.unknown)
+                )
+            } else {
+                let new = match (self.new.len(), total) {
+                    (1, 1) => "the failure is new".to_string(),
+                    (1, total) => format!("1 of {total} failures is new"),
+                    (n, total) if n == total => format!("all {n} failures are new"),
+                    (n, total) => format!("{n} of {total} failures are new"),
+                };
+                let mut text = format!(
+                    "baseline: {new}, not failing at {at}: {}\n",
+                    list(&self.new)
+                );
+                if !self.unknown.is_empty() {
+                    text.push_str(&format!(
+                        "  not reached at {at}, which ran far fewer tests: {}\n",
+                        list(&self.unknown)
+                    ));
+                }
+                text
             };
-            let mut text = format!(
-                "baseline: {new}, not failing at {at}: {}\n",
-                list(&self.new)
-            );
             if !self.pre_existing.is_empty() {
                 text.push_str(&format!(
                     "  also failing at {at}: {}\n",
@@ -119,7 +142,7 @@ pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
-    failed: &[(&Job, BTreeSet<String>)],
+    failed: &[(&Job, BTreeSet<String>, u64)],
 ) -> Result<Baseline, String> {
     let tmp = tempfile::Builder::new()
         .prefix("jouet-baseline-")
@@ -145,7 +168,8 @@ pub(super) fn compare(
     }
     let mut pre_existing = BTreeSet::new();
     let mut new = BTreeSet::new();
-    for (i, (job, now)) in failed.iter().enumerate() {
+    let mut unknown = BTreeSet::new();
+    for (i, (job, now, ran)) in failed.iter().enumerate() {
         let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
         let at_base = Job {
             argv: job.argv.iter().map(|w| rebase(w, root, &tree)).collect(),
@@ -157,14 +181,30 @@ pub(super) fn compare(
         let log = log_path(failed.len() + i + 1);
         let (code, _) = execute(&at_base, &log, false)?;
         let output = std::fs::read(&log).unwrap_or_default();
+        let output = String::from_utf8_lossy(&output);
         let at_base: BTreeSet<String> = if code == 0 {
             BTreeSet::new()
         } else {
-            failure_names(&String::from_utf8_lossy(&output), formats).unwrap_or_default()
+            // A run that failed before naming any test, such as a tool it
+            // needs missing from the checkout, says nothing about them.
+            failure_names(&output, formats).ok_or_else(|| {
+                format!(
+                    "the run at {} failed (exit {code}) without naming a failing test, so the failures could not be compared (full log: {})",
+                    base.name,
+                    log.display()
+                )
+            })?
         };
+        let d = testlog::digest_with(&output, false, 0, formats);
+        // Far fewer tests at the merge base: one that is not among its
+        // failures may never have run there.
+        let reached = d.passed + d.failed + d.skipped;
+        let short = reached * 2 < *ran;
         for name in now {
             if at_base.contains(name) {
                 pre_existing.insert(name.clone());
+            } else if short {
+                unknown.insert(name.clone());
             } else {
                 new.insert(name.clone());
             }
@@ -174,6 +214,7 @@ pub(super) fn compare(
         base,
         pre_existing: pre_existing.into_iter().collect(),
         new: new.into_iter().collect(),
+        unknown: unknown.into_iter().collect(),
     })
 }
 

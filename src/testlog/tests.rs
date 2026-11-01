@@ -367,3 +367,48 @@ fn a_one_line_failure_keeps_its_line() {
     assert_eq!(names(&d), ["case_a"]);
     assert_eq!(d.failures[0].lines, ["FAIL case_a: expected 1, got 2"]);
 }
+
+#[test]
+fn a_go_package_that_fails_without_a_test_of_its_own_is_named() {
+    // TestMain gave up on a service it needed: no `--- FAIL` line.
+    let d = digest(&fixture("go-package"), true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["example.com/app/blob", "TestBuild"]);
+    assert_eq!(
+        d.failures[0].lines,
+        [
+            "2026/11/01 00:40:58 reached retry deadline: Get \"http://localhost:32768/minio/health/ready\": dial tcp [::1]:32768: connect: connection refused"
+        ]
+    );
+    assert_eq!(d.failed, 2);
+}
+
+#[test]
+fn a_failed_build_script_shows_how_it_exited_and_its_stderr() {
+    let d = digest(&fixture("cargo-build-script"), true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["build script zstd-sys v2.1.2+zstd.1.5.7"]);
+    let lines = &d.failures[0].lines;
+    assert!(
+        lines[0].starts_with("process didn't exit successfully:"),
+        "{lines:?}"
+    );
+    assert_eq!(
+        lines[1..],
+        [
+            "error occurred in cc-rs: failed to find tool \"x86_64-w64-mingw32-gcc\": No such file or directory (os error 2)"
+        ]
+    );
+}
+
+#[test]
+fn rustfmt_check_names_each_place_with_its_diff() {
+    let out = "Diff in /work/src/a.rs:12:\n     let x = 1;\n-    f(a,b);\n+    f(a, b);\n\nDiff in /work/src/b.rs at line 3:\n-use b;\n+use a;\n";
+    let d = digest(out, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        ["rustfmt /work/src/a.rs:12", "rustfmt /work/src/b.rs:3"]
+    );
+    assert_eq!(
+        d.failures[0].lines,
+        ["     let x = 1;", "-    f(a,b);", "+    f(a, b);"]
+    );
+}

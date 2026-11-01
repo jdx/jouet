@@ -670,3 +670,30 @@ TOML
 	run --separate-stderr jouet test --cmd -- sh -c 'cat ../out.txt; exit 1'
 	refute_line 'FAIL cli/test_a'
 }
+
+@test "--baseline does not call failures new when the merge base's run names none, or reaches far fewer tests" {
+	# At the merge base the runner dies before any test, as when a tool it
+	# needs is missing from that checkout.
+	printf 'echo "mise ERROR No version is set for shim: fnox"\nexit 1\n' >run.sh
+	git add run.sh
+	git commit -q -m base
+	git checkout -q -b work
+	printf 'echo 1..3\necho "ok 1 a"\necho "ok 2 b"\necho "not ok 3 keychain"\nexit 1\n' >run.sh
+	git commit -q -am change
+
+	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
+	assert_failure 1
+	assert_output --partial 'baseline: the run at main failed (exit 1) without naming a failing test, so the failures could not be compared'
+	refute_output --partial 'new'
+
+	# At the merge base one test ran, against three here: the failure may
+	# never have run there.
+	git checkout -q main
+	printf 'echo 1..1\necho "not ok 1 other"\nexit 1\n' >run.sh
+	git commit -q -am "base 2"
+	git checkout -q work
+	git merge -q -X ours main -m merge
+	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
+	assert_failure 1
+	assert_output --partial 'ran far fewer tests, so the failure could not be compared: keychain'
+}
