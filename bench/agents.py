@@ -252,6 +252,18 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
             for label, solve in (("unsolved", False), ("solved", True)):
                 workdir = root / label
                 shas = tasks.prepare(task, workdir)
+                # The reference solution and check use the same dependencies
+                # that an agent sees, in a fresh environment for each arm.
+                run_dir = root / f"{label}-run"
+                base = arms.base_env(run_dir, None, "jdx/demo")
+                task.agent_env(base, run_dir / "bin", workdir)
+                try:
+                    tasks.setup_environment(task, base, workdir, root / "python-cache", root / f"{label}-environment.log")
+                except (OSError, RuntimeError, ValueError) as error:
+                    log = root / f"{label}-environment.log"
+                    details = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+                    failures.append(f"{name}: environment setup failed: {error}\n{details}")
+                    continue
                 fixture = task.github_fixture(shas)
                 state = root / f"{label}-state.json"
                 fake = FakeGitHub(fixture, offset_s=10_000) if fixture is not None else None
@@ -259,7 +271,7 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                     fake.__enter__()
                 try:
                     if solve:
-                        env = {**os.environ, **tasks.GIT_ENV}
+                        env = {**base, **tasks.GIT_ENV}
                         if fake:
                             env["BENCH_GITHUB_URL"] = fake.url
                         proc = subprocess.run(
@@ -277,17 +289,6 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                 finally:
                     if fake:
                         fake.__exit__()
-                # The environment a run's check gets, with no agent before it.
-                run_dir = root / f"{label}-run"
-                base = arms.base_env(run_dir, None, "jdx/demo")
-                task.agent_env(base, run_dir / "bin", workdir)
-                try:
-                    tasks.setup_environment(task, base, workdir, root / "python-cache", root / f"{label}-environment.log")
-                except (OSError, RuntimeError, ValueError) as error:
-                    log = root / f"{label}-environment.log"
-                    details = log.read_text(errors="replace")[-4000:] if log.exists() else ""
-                    failures.append(f"{name}: environment setup failed: {error}\n{details}")
-                    continue
                 check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None))
                 runner.sweep(run_dir, None)
                 runner.sweep(workdir, None)
