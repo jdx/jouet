@@ -30,8 +30,8 @@ NOTES_REF = "jouet-cost"
 
 def cache_path(task: tasks_mod.Task) -> Path:
     data = [task.name, task.source, task.cost_seed, socket.gethostname()]
-    if task.python_requirements:
-        data.append(hashlib.sha256((task.dir / task.python_requirements).read_bytes()).hexdigest())
+    if requirements := tasks_mod.requirements_file(task):
+        data.append(hashlib.sha256(requirements.read_bytes()).hexdigest())
     key = json.dumps(data)
     digest = hashlib.sha256(key.encode()).hexdigest()[:16]
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
@@ -93,7 +93,11 @@ def seeds(planned: list[Any], jouet_bin: Path, work_root: Path, log: Callable[[s
     """Each planned task's cost note, by task name."""
     notes = {}
     for name in sorted({p.task for p in planned}):
-        note = seed(tasks_mod.load(name), jouet_bin, work_root, log)
+        try:
+            note = seed(tasks_mod.load(name), jouet_bin, work_root, log)
+        except tasks_mod.EnvironmentSetupError as error:
+            log(f"    {name}: cost seed setup failed ({error}); trials will retry setup")
+            continue
         if note:
             notes[name] = note
     return notes

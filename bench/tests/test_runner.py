@@ -448,6 +448,18 @@ class CostSeedTest(unittest.TestCase):
     """A task's seed commands run once, through `jouet test --cmd`, and every
     run starts with the note they left."""
 
+    def test_seed_setup_failure_leaves_trials_to_retry(self):
+        from unittest.mock import patch
+        from jbench import costs
+
+        planned = [runner.Planned(1, "broken", "codex", "plain")]
+        messages = []
+        with patch.object(costs.tasks_mod, "load", return_value=tasks.load("smoke")), \
+                patch.object(costs, "seed", side_effect=tasks.EnvironmentSetupError("network unavailable")):
+            notes = costs.seeds(planned, Path("jouet"), Path("work"), messages.append)
+        self.assertEqual(notes, {})
+        self.assertIn("trials will retry setup", messages[0])
+
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
         import os
 

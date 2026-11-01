@@ -151,13 +151,20 @@ def load(name: str) -> Task:
     )
 
 
-def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Path, log: Path) -> dict[str, str] | None:
-    """Create an isolated Python environment before an agent or check starts."""
+def requirements_file(task: Task) -> Path | None:
     if not task.python_requirements:
         return None
     requirements = (task.dir / task.python_requirements).resolve()
     if not requirements.is_relative_to(task.dir.resolve()) or not requirements.is_file():
         raise EnvironmentSetupError(f"{task.name}: Python requirements must be a file inside the task directory")
+    return requirements
+
+
+def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Path, log: Path) -> dict[str, str] | None:
+    """Create an isolated Python environment before an agent or check starts."""
+    requirements = requirements_file(task)
+    if requirements is None:
+        return None
     # Keep the environment out of the checkout even when .venv is not ignored.
     venv = Path(env["HOME"]) / ".venv"
     if venv.exists():
@@ -173,15 +180,15 @@ def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Pat
         [python, "-m", "venv", str(venv)],
         [str(venv_python), "-m", "pip", "install", "--require-hashes", "--requirement", str(requirements)],
     ]
-    with log.open("w") as output:
-        for command in commands:
-            try:
+    try:
+        with log.open("w") as output:
+            for command in commands:
                 proc = subprocess.run(command, cwd=workdir, env=setup_env, stdout=output, stderr=subprocess.STDOUT,
                                       timeout=300)
-            except (OSError, subprocess.TimeoutExpired) as error:
-                raise EnvironmentSetupError(f"{task.name}: Python environment setup failed: {error} (log: {log})") from error
-            if proc.returncode:
-                raise EnvironmentSetupError(f"{task.name}: Python environment setup failed (log: {log})")
+                if proc.returncode:
+                    raise EnvironmentSetupError(f"{task.name}: Python environment setup failed (log: {log})")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise EnvironmentSetupError(f"{task.name}: Python environment setup failed: {error} (log: {log})") from error
     env["VIRTUAL_ENV"] = str(venv)
     env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
     try:
