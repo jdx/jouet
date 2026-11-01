@@ -578,9 +578,10 @@ fn commit(
         file.path().as_os_str().to_owned(),
         "--".into(),
     ];
-    args.extend(paths.iter().map(Into::into));
+    args.extend(paths.iter().map(|p| crate::literal(p).into()));
+    // Not `--literal-pathspecs`, which would reach the hooks.
     let status = git
-        .command(&args)
+        .hooked_command(&args)
         .stdout(log.try_clone().map_err(io)?)
         .stderr(log)
         .status()

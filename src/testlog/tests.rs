@@ -369,6 +369,14 @@ fn a_one_line_failure_keeps_its_line() {
 }
 
 #[test]
+fn nested_mise_tasks_lose_every_prefix() {
+    let out = "[test:bats] [test:bats:libgit2] 1..2\n[test:bats] [test:bats:libgit2] ok 1 a\n[test:bats] [test:bats:libgit2] not ok 2 b\n[test:bats] [test:bats:libgit2] # it broke\n";
+    let d = digest(out, true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["b"]);
+    assert_eq!(d.failures[0].lines, ["it broke"]);
+}
+
+#[test]
 fn a_go_package_that_fails_without_a_test_of_its_own_is_named() {
     // TestMain gave up on a service it needed: no `--- FAIL` line.
     let d = digest(&fixture("go-package"), true, DEFAULT_BUDGET);
