@@ -24,7 +24,7 @@ static INTERESTING: LazyLock<Regex> =
 /// `   0: dummy@latest is not installed`, is not a frame.
 static FRAME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
-        r"^\s*(\d+: \S*(::|<unknown>)\S*.*",
+        r"^\s*(\d+: .*(::|<unknown>).*",
         // RUST_BACKTRACE=full's frames carry their address.
         r"|\d+:\s+0x[0-9a-f]+ - \S.*",
         r"|at .+:(\d+|<unknown line>)(:\d+)?",

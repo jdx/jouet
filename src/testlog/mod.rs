@@ -131,10 +131,14 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
     // Lines of libtest's that say nothing about a failure.
-    RUST_NOISE = r"^\s*(running \d+ tests?|failures:|test result: .*|test \S+ \.\.\. FAILED|note: run with `RUST_BACKTRACE=1`.*)$";
+    // mbx's build cache and savings lines too, which a cargo build through
+    // it prints last.
+    RUST_NOISE = r"^\s*(running \d+ tests?|failures:|test result: .*|test \S+ \.\.\. FAILED|note: run with `RUST_BACKTRACE=1`.*|mbx\[\w+\]: .*)$";
     // A line in the middle of a long failure worth keeping: an error, an
     // assertion, or a line of a diff.
-    TELLING = r"(?i)error|panicked|assert|expected|received|^\s*[-+]\s|^E\s";
+    // A numbered line is an error chain's (eyre's `0: x is not installed`):
+    // backtrace frames are folded before this is asked.
+    TELLING = r"(?i)error|panicked|assert|expected|received|^\s*[-+]\s|^E\s|^\s*\d+: \S";
     // A captured stream's header in nextest's output, new and old.
     SECTION = r"^\s*((stdout|stderr) ─+|--- (STDOUT|STDERR): .* ---)$";
     // cargo nextest.
