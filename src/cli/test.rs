@@ -40,7 +40,11 @@ use usage_rs::Args;
 /// every test that failed also fails there, the failures were there before
 /// the change, from the environment or an earlier commit, and the run passes,
 /// naming them; any new failure still fails it. It needs the output to name
-/// its failures, and costs one more run of the failed suites.
+/// its failures, and costs one more run of the failed suites. What the merge
+/// base did is kept, so a later failure of the same command compares with it
+/// without running it again. Without --baseline, a failing full suite is
+/// compared on its own, and a failing --cmd run with what is kept for it;
+/// `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.
 ///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
 /// no runner is found or installed.

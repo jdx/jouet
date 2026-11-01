@@ -184,8 +184,19 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 return out.error_with_hint(e.exit, &e.message, Some(&hint));
             }
         }
+    } else if auto_baseline(args) {
+        // Without --baseline, a failing run is still compared with the merge
+        // base when there is one to compare with; nothing is refused.
+        baseline::base(&root, args.since.as_deref()).ok()
     } else {
         None
+    };
+    // A failing full suite is run at the merge base, once per merge base; any
+    // other failing run uses only what an earlier one kept.
+    let mode = if args.baseline || !args.cmd {
+        baseline::Mode::Run
+    } else {
+        baseline::Mode::Kept
     };
     let planned = if args.cmd {
         Ok(given(&cwd, args))
@@ -235,7 +246,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
             let digest = testlog::digest_with(&output, code != 0, budget, &formats);
-            if args.baseline && code != 0 {
+            if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
             }
@@ -255,11 +266,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             .map(|(job, names, ran)| names.map(|names| (job, names, ran)))
             .collect();
         let found = match named {
-            None => Err("the output names no failing test, so there is nothing to compare at the merge base".to_string()),
-            Some(named) => baseline::compare(&root, base, &formats, &named),
+            // Said only when asked for: a failing build names no test.
+            None if !args.baseline => Ok(None),
+            None => Err(baseline::NotCompared::from(
+                "the output names no failing test, so there is nothing to compare at the merge base"
+                    .to_string(),
+            )),
+            Some(named) => baseline::compare(&root, base, &formats, &named, mode),
         };
         match found {
-            Ok(found) => {
+            Ok(None) => {}
+            Ok(Some(found)) => {
                 if !out.json {
                     emit(&found.text());
                 }
@@ -269,10 +286,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 report.baseline = Some(found);
             }
             Err(e) => {
+                if e.unverifiable && runs {
+                    super::hook::mark_unverifiable(&cwd, &own_command());
+                }
                 if out.json {
-                    eprintln!("jouet: baseline: {e}");
+                    eprintln!("jouet: baseline: {}", e.message);
                 } else {
-                    emit(&format!("baseline: {e}\n"));
+                    emit(&format!("baseline: {}\n", e.message));
                 }
             }
         }
@@ -292,6 +312,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         );
     }
     exit
+}
+
+/// Whether a failing run is compared with the merge base without
+/// --baseline: not an affected run, whose tests depend on the changes, nor
+/// a dry run, and not with `[test] baseline = "off"`.
+fn auto_baseline(args: &TestArgs) -> bool {
+    !args.affected && !args.dry_run && crate::settings::Settings::load().test.baseline != "off"
 }
 
 /// Writes `text` to stdout, ignoring a closed pipe: in `jouet test | head

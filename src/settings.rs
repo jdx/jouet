@@ -15,6 +15,9 @@
 //! [stats]
 //! summary = "plain"
 //!
+//! [test]
+//! baseline = "off"
+//!
 //! [wind]
 //! enabled = false
 //!
@@ -40,6 +43,17 @@ pub(crate) struct Settings {
     pub share: ShareSettings,
     #[usage(flatten)]
     pub entire: EntireSettings,
+    #[usage(flatten)]
+    pub test: TestSettings,
+}
+
+/// What `jouet test` does about a failing run.
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "test")]
+pub(crate) struct TestSettings {
+    /// When a failing run is compared with the merge base: auto runs a failing full suite there once per merge base, and compares any other failing run with what is kept; off only with --baseline
+    #[usage(env = "JOUET_TEST_BASELINE", default = "auto", choices("auto", "off"))]
+    pub baseline: String,
 }
 
 /// Reading Entire's sessions, checkpoints and line origins, where a

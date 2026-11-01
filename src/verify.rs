@@ -29,7 +29,7 @@
 
 use jouet_rules::{Kind, Record};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -129,6 +129,36 @@ pub(crate) struct Checks {
     /// it started, until it records its result: runs can overlap.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub running: Vec<Running>,
+    /// Commands (as [`same_run`] keys them) whose failures `jouet test`
+    /// could not compare with the merge base, which could not run them
+    /// either, until one of them passes.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub unverifiable: BTreeSet<String>,
+    /// Those whose failure the stop hook has raised: the agent has said
+    /// which failures are its own, and nothing here can tell more, so they
+    /// are not raised again whatever changes, until the command passes.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub answered: BTreeSet<String>,
+}
+
+/// A command as the unverifiable failures key it: `jouet test` without
+/// `--budget`, which only changes how much of a failure is shown.
+fn same_run(command: &str) -> String {
+    if !command.starts_with("jouet test") {
+        return command.to_string();
+    }
+    let mut words = Vec::new();
+    let mut skip = false;
+    for word in command.split_whitespace() {
+        if skip {
+            skip = false;
+        } else if word == "--budget" {
+            skip = true;
+        } else if !word.starts_with("--budget=") {
+            words.push(word);
+        }
+    }
+    words.join(" ")
 }
 
 /// A `jouet test` run in progress.
@@ -156,6 +186,10 @@ pub(crate) struct Raised {
     /// How many reasons were left for a later stop, past [`MAX_RAISED`].
     #[serde(skip)]
     pub more: usize,
+    /// The unverifiable commands whose failure these reasons raise, which
+    /// are then answered (see [`Checks::answered`]).
+    #[serde(skip)]
+    pub answering: Vec<String>,
 }
 
 /// The most reasons one stop raises; the rest wait for the next.
@@ -307,7 +341,21 @@ impl State {
     /// Keeps what a stop was blocked for, so the next stop at the same tree
     /// with no run since does not raise it again.
     pub(crate) fn raise(&mut self, block: &Block) {
-        self.trees.entry(block.root.clone()).or_default().raised = Some(block.raised.clone());
+        let checks = self.trees.entry(block.root.clone()).or_default();
+        checks.raised = Some(block.raised.clone());
+        checks
+            .answered
+            .extend(block.raised.answering.iter().cloned());
+    }
+
+    /// Marks `command`'s failures in the work tree at `root` as ones the
+    /// merge base could not run either.
+    pub(crate) fn mark_unverifiable(&mut self, root: &str, command: &str) {
+        self.trees
+            .entry(root.to_string())
+            .or_default()
+            .unverifiable
+            .insert(same_run(command));
     }
 
     pub(crate) fn load(path: &Path) -> Self {
@@ -362,6 +410,9 @@ impl Checks {
                 self.failures.remove(&kind);
             }
             if run.passed() {
+                let key = same_run(&run.command);
+                self.unverifiable.remove(&key);
+                self.answered.remove(&key);
                 let passes = self.passes.entry(kind).or_default();
                 passes.retain(|p| p.full != run.full || p.selection() != run.selection());
                 passes.push(run.clone());
@@ -415,11 +466,21 @@ impl Checks {
             return None;
         }
         let more = new.len().saturating_sub(MAX_RAISED);
-        raised.extend(new.into_iter().take(MAX_RAISED));
+        let new: Vec<String> = new.into_iter().take(MAX_RAISED).collect();
+        let answering = self
+            .failures
+            .iter()
+            .flat_map(|(kind, failures)| failures.iter().map(move |f| (*kind, f)))
+            .filter(|(_, f)| self.unverifiable.contains(&same_run(&f.command)))
+            .filter(|(kind, f)| new.contains(&self.failure_reason(*kind, f)))
+            .map(|(_, f)| same_run(&f.command))
+            .collect();
+        raised.extend(new);
         Some(Raised {
             reasons: raised,
             tree,
             more,
+            answering,
         })
     }
 
@@ -530,6 +591,7 @@ impl Checks {
                 let partial = failures.iter().rev().filter(|f| !f.full);
                 full.chain(partial)
                     .filter(|failed| !passed_now(kind, failed))
+                    .filter(|failed| !self.answered.contains(&same_run(&failed.command)))
                     .map(|failed| self.failure_reason(*kind, failed))
                     .collect::<Vec<_>>()
             })
@@ -537,11 +599,22 @@ impl Checks {
     }
 
     fn failure_reason(&self, kind: Kind, failed: &Run) -> String {
-        // A full suite that fails on tests the change did not touch is the
-        // costly case: point at the check that settles it.
-        let baseline = if kind == Kind::Test && failed.full {
+        if self.unverifiable.contains(&same_run(&failed.command)) {
+            return format!(
+                "The last {} run failed (`{}` exited {}), and the merge base could not run it either, so jouet cannot tell whether its failures were there before your change. Say which failures, if any, your change caused before you finish; this is asked once. [jouet: verify]",
+                kind.name(),
+                shown(&failed.command),
+                failed.exit_code
+            );
+        }
+        // A run that fails for reasons the change did not touch, such as a
+        // tool this machine lacks, is the costly case: point at the check
+        // that settles it. Its result is kept, so later runs of the same
+        // command compare with it without running the merge base again.
+        // Not a partial test run: that is most often a test written to fail.
+        let baseline = if kind == Kind::Build || (kind == Kind::Test && failed.full) {
             format!(
-                " If the failures are not from your change, `{}` runs the failed suite at the merge base too, and passes when each failure fails there as well.",
+                " If the failures are not from your change, `{}` runs it at the merge base too, and passes when each failure fails there as well.",
                 baseline_command(&failed.command)
             )
         } else {
@@ -1095,6 +1168,77 @@ mod tests {
         untested.raised = untested.block(|| Some("t2".into()), false, true);
         assert!(untested.raised.is_some());
         assert_eq!(untested.block(|| Some("t2".into()), false, true), None);
+    }
+
+    #[test]
+    fn budget_does_not_make_another_run() {
+        assert_eq!(same_run("jouet test --budget 300"), "jouet test");
+        assert_eq!(
+            same_run("jouet test --budget=40 --cmd -- cargo test"),
+            "jouet test --cmd -- cargo test"
+        );
+        assert_eq!(same_run("cargo test --budget 3"), "cargo test --budget 3");
+    }
+
+    #[test]
+    fn an_unverifiable_failure_is_raised_once_whatever_changes() {
+        let mut state = State::default();
+        let run = |budget: u32| test(&format!("jouet test --budget {budget}"), 1, "full");
+        state.record("/w", [run(1500)], Some("t1"));
+        // Without the mark, the usual reason, with --baseline offered.
+        let first = state
+            .block("/w", |_| Some("t1".into()), |_| false, |_| true)
+            .unwrap();
+        assert!(first.reason.contains("--baseline"), "{}", first.reason);
+        // jouet test marks a run whose merge base could not run it either.
+        state.mark_unverifiable("/w", "jouet test --budget 1500");
+        let block = state
+            .block("/w", |_| Some("t1".into()), |_| false, |_| true)
+            .unwrap();
+        assert!(
+            block
+                .reason
+                .contains("the merge base could not run it either"),
+            "{}",
+            block.reason
+        );
+        assert!(
+            block.reason.contains("this is asked once"),
+            "{}",
+            block.reason
+        );
+        state.raise(&block);
+        // Answered: not again at another tree, nor after the same failure
+        // with another --budget.
+        assert!(
+            state
+                .block("/w", |_| Some("t2".into()), |_| false, |_| true)
+                .is_none()
+        );
+        state.record("/w", [run(300)], Some("t3"));
+        assert!(
+            state
+                .block("/w", |_| Some("t3".into()), |_| false, |_| true)
+                .is_none()
+        );
+        // Until it passes: then a later failure is judged afresh.
+        state.record("/w", [test("jouet test", 0, "full")], Some("t4"));
+        let checks = &state.trees["/w"];
+        assert!(checks.unverifiable.is_empty() && checks.answered.is_empty());
+        state.record("/w", [run(400)], Some("t5"));
+        let again = state
+            .block("/w", |_| Some("t5".into()), |_| false, |_| true)
+            .unwrap();
+        assert!(
+            again.reason.starts_with("The last test run failed"),
+            "{}",
+            again.reason
+        );
+        assert!(
+            !again.reason.contains("could not run it either"),
+            "{}",
+            again.reason
+        );
     }
 
     #[test]

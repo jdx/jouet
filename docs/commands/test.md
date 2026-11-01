@@ -218,7 +218,7 @@ These slot into the same adapter trait and are follow-ups:
 
 ### Failures that were there before: `--baseline`
 
-A full suite can fail for reasons the change has nothing to do with: a test that needs a tool this machine lacks, or one already broken on the default branch. Fixing the environment to make it pass costs far more than the change did. `jouet test --baseline` settles it instead:
+A full suite can fail for reasons the change has nothing to do with: a test that needs a tool this machine lacks, or one already broken on the default branch. Fixing the environment to make it pass costs far more than the change did. A failing run is compared with the merge base instead, on its own for the full suite, and with `--baseline` for any run:
 
 ```console
 $ jouet test --baseline
@@ -230,7 +230,18 @@ baseline: the failure also fails at main (302afa77cd40), so none is from this ch
 
 When the run fails, it runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch (`--since REF` names another; an upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead), with any path into the checkout in the command pointed at the worktree, and compares the failures by name. If every one also fails there, the run passes (exit 0), and it names them; the stop gate counts it as a passing full run. A failure the merge base does not have still fails it (exit 1), listed as new. When the run at the merge base fails without naming any failing test, as when a tool it needs is missing from that checkout, nothing is compared and the run still fails; when it ran fewer than half as many tests, a failure it does not list may never have run there, so it is listed as not compared rather than new. The worktree is removed afterwards. It needs a runner whose failures jouet recognises by name, costs one more run of the failed suites, and cannot be combined with `--affected`, whose tests depend on the changes.
 
-When the merge base is HEAD and nothing has changed since it, as after committing on `main` itself with no upstream, a run there would be the same code, so `--baseline` refuses before running anything (exit 2). Name the commit the change started from with `--since`, such as `jouet test --baseline --since HEAD~1` for a change of one commit.
+**What the merge base did is kept**, by repository (every worktree of it shares it), merge base and command, for 14 days, in `$XDG_STATE_HOME/jouet/known/`. A later failure of the same command at the same merge base is compared with what is kept, without running the merge base again, so a failure that was already there stays known while you work.
+
+**Without `--baseline`:**
+
+- `jouet test`, the full suite, runs a failing suite at the merge base on its own, once per merge base and command.
+- `jouet test --cmd` compares a failing run with what is kept for its command, and runs nothing at the merge base: a test written to fail, or a build broken by the change, would only cost a second run. Run it once with `--baseline` to keep what the merge base does, as for a cross-compile that needs a tool this machine lacks.
+- `--affected` and `--dry-run` compare nothing.
+- `[test] baseline = "off"` in the config file, or `JOUET_TEST_BASELINE=off`, compares only with `--baseline`.
+
+When the merge base could not run the command either, the [stop hook](/setup#finishing-on-a-failing-check) asks about those failures once, and not again until the command passes: nothing on this machine can tell more.
+
+When the merge base is HEAD and nothing has changed since it, as after committing on `main` itself with no upstream, a run there would be the same code, so `--baseline` refuses before running anything (exit 2), and without it nothing is compared. Name the commit the change started from with `--since`, such as `jouet test --baseline --since HEAD~1` for a change of one commit.
 
 ### mise tasks
 
