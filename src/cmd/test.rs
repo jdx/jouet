@@ -227,6 +227,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
+    let mut timed = Vec::new();
     // Marked for the stop gate while it runs; a run that dies early leaves a
     // mark whose process is gone, which holds nothing up.
     if runs {
@@ -242,6 +243,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             };
             suite.exit_code = Some(code);
             suite.duration_ms = Some(ms);
+            // A job is one command; one that runs several checks is not
+            // split between them.
+            if let [record] = super::hook::checks(&job.dir, &command_line(&job.argv)).as_slice() {
+                timed.push(crate::cost::Sample::of(record, ms, code));
+            }
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
@@ -301,6 +307,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // Kept by the run itself, since a pipe hides its exit status from the
     // hooks.
     if runs {
+        crate::cost::record(&cwd, &timed);
         super::hook::record_own_run(&cwd, &own_command(), i32::from(exit.code()));
         super::hook::mark_own_run(&cwd, &own_command(), false);
     }
@@ -335,8 +342,13 @@ fn emit(text: &str) {
 /// How this `jouet test` was called, as a shell command: what the rules
 /// classify, as they would the hook's.
 fn own_command() -> String {
-    let words: Vec<String> = std::env::args().skip(1).map(|w| quote(&w)).collect();
-    format!("jouet {}", words.join(" "))
+    let words: Vec<String> = std::env::args().skip(1).collect();
+    format!("jouet {}", command_line(&words))
+}
+
+/// `argv` as a shell command line.
+fn command_line(argv: &[String]) -> String {
+    argv.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" ")
 }
 
 /// `word` as a shell reads it back: alone when it is plain, else in single

@@ -45,6 +45,18 @@ pub(crate) struct Settings {
     pub entire: EntireSettings,
     #[usage(flatten)]
     pub test: TestSettings,
+    #[usage(flatten)]
+    pub cost: CostSettings,
+}
+
+/// What builds, tests and lints cost here, kept as git notes (see
+/// [`crate::cost`]).
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "cost")]
+pub(crate) struct CostSettings {
+    /// Keep how long each build, test and lint run took as a git note on HEAD, under refs/notes/jouet-cost
+    #[usage(env = "JOUET_COST_RECORD", default = true)]
+    pub record: bool,
 }
 
 /// What `jouet test` does about a failing run.

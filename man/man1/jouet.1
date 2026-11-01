@@ -105,6 +105,15 @@ Show which agent sessions are working where on this machine
 \fBstats\fR
 Show what jouet saved: measured from its ledger, estimated from your history
 .TP
+\fBcost\fR
+Show what builds, tests and lints cost here, from timings kept in git notes
+.TP
+\fBcost fetch\fR
+Fetch the remote's timings and merge them with the ones here
+.TP
+\fBcost push\fR
+Push the timings here to the remote, merging in what it has; never forced
+.TP
 \fBpr\fR
 Inspect pull requests
 .TP
@@ -1015,6 +1024,51 @@ Print one line about what jouet saved, or nothing, for a stop hook. `[stats] sum
 .TP
 \fB\-h, \-\-help\fR
 Print help
+.SH "JOUET COST"
+Show what builds, tests and lints cost here, from timings kept in git notes
+
+`jouet test` and the hooks time each build, test and lint run and keep it as a git note on HEAD under refs/notes/jouet\-cost (`[cost] record` in the config file or JOUET_COST_RECORD turns it off). This lists each command, or each family of commands such as one e2e test, costliest first, read from up to 200 first\-parent commits back. Timings from other machines, such as CI's, are scaled to this one: by the median ratio of this machine's time to theirs over the commands timed in both places, or shown as they are when there are none. CI keeps its timings with `jouet cost push` after its runs; `jouet cost fetch` brings them here.
+.PP
+\fBUsage:\fR jouet cost [OPTIONS] [COMMAND]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-min\fR \fI<DUR>\fR
+List only the commands estimated to take at least DUR, such as 30s
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET COST FETCH"
+Fetch the remote's timings and merge them with the ones here
+.PP
+\fBUsage:\fR jouet cost fetch [OPTIONS] [<REMOTE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<REMOTE>\fR
+The remote (default origin)
+.SH "JOUET COST PUSH"
+Push the timings here to the remote, merging in what it has; never forced
+.PP
+\fBUsage:\fR jouet cost push [OPTIONS] [<REMOTE>]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<REMOTE>\fR
+The remote (default origin)
 .SH "JOUET PR"
 Inspect pull requests
 .PP

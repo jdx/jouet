@@ -10,6 +10,7 @@ mod ci;
 mod claim;
 mod commit;
 mod completion;
+mod cost;
 mod db;
 mod deps;
 mod diag;
@@ -47,6 +48,7 @@ pub(crate) use ci::*;
 pub(crate) use claim::*;
 pub(crate) use commit::*;
 pub(crate) use completion::*;
+pub(crate) use cost::*;
 pub(crate) use db::*;
 pub(crate) use deps::*;
 pub(crate) use diag::*;
@@ -125,6 +127,8 @@ pub(crate) enum Cmd {
     Sessions(SessionsArgs),
     /// Show what jouet saved: measured from its ledger, estimated from your history
     Stats(StatsArgs),
+    /// Show what builds, tests and lints cost here, from timings kept in git notes
+    Cost(CostArgs),
     /// Inspect pull requests
     Pr(PrArgs),
     /// Read a file by its outline, a symbol or a range, or the repository's map

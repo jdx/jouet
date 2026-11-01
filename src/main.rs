@@ -7,6 +7,7 @@ mod ci;
 mod cli;
 mod cmd;
 mod config;
+mod cost;
 mod db;
 mod deps;
 mod diag;
@@ -70,6 +71,7 @@ fn main() -> ExitCode {
         Cmd::ReviewPackage(args) => cmd::review::run(&args, &out),
         Cmd::Stack(args) => cmd::stack::run(args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
+        Cmd::Cost(args) => cmd::cost::run(&args, &out),
         Cmd::Pr(args) => return cmd::pr::run(args, &out),
         Cmd::Read(args) => cmd::read::run(&args, &out),
         Cmd::Docs(args) => cmd::docs::run(&args, &out),
