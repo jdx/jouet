@@ -21,6 +21,7 @@ jouet-git.workspace = true
 jouet-github.workspace = true
 jouet-output.workspace = true
 jouet-secrets.workspace = true
+memchr.workspace = true
 mlua.workspace = true
 regex.workspace = true
 schemars.workspace = true

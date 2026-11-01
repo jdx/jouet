@@ -20,7 +20,7 @@
 --
 -- Probes (`jouet.pr`, `jouet.ci`, `jouet.git.state`, `jouet.git.tree`,
 -- `jouet.cargo`, `jouet.test`, `jouet.pitchfork`, `jouet.secrets`, `jouet.repo`,
--- `jouet.env`)
+-- `jouet.file`, `jouet.env`)
 -- only read. Each is cached for the rest of the hook call, and runs inside
 -- the caller's budget.
 -- Most return `(value, nil)`, `(nil, reason)` on failure, or `(nil, nil)`
@@ -431,6 +431,12 @@ declare jouet: {
 		-- call is about to stage, are scanned too. nil and a reason when the
 		-- diff is over 1 MiB or the scan runs out of budget.
 		scan: (scope: string?, paths: { string }?) -> ({ JouetSecretFinding }?, string?),
+	},
+	file: {
+		-- Whether `path` (from the work tree's root when relative) holds
+		-- `text` exactly; nil and a reason when it cannot be read or is over
+		-- 4 MiB. It answers only true or false: the file is never shown.
+		contains: (path: string, text: string) -> (boolean?, string?),
 	},
 	stack: {
 		-- The current branch's layer in the gh-stack stack holding it, from

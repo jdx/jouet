@@ -796,6 +796,7 @@ dependencies = [
  "jouet-github",
  "jouet-output",
  "jouet-secrets",
+ "memchr",
  "mlua",
  "regex",
  "schemars",
