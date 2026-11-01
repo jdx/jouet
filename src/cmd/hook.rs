@@ -1381,8 +1381,11 @@ mod tests {
         // failures it had not caused pass, in each of six benchmark runs.
         // Then to 1600 for waiting in one call: about 25 tokens a request,
         // where each check on a long run in the background cost a request
-        // of 40k tokens or more.
-        assert!(context.len() <= 1600, "{} bytes:\n{context}", context.len());
+        // of 40k tokens or more. Then to 1700 for listing threads and for
+        // committing in the test run's call: in the benchmark's short tasks,
+        // agents guessed `pr threads list` and committed in a call of its
+        // own, a request of about 20k tokens each.
+        assert!(context.len() <= 1700, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");
