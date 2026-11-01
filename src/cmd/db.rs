@@ -29,7 +29,7 @@ pub(crate) fn run(args: &DbArgs, out: &Output) -> Exit {
 
 enum Open {
     Sqlite(rusqlite::Connection),
-    Postgres(db::postgres::Db),
+    Postgres(Box<db::postgres::Db>),
 }
 
 fn open(url: Option<&str>, remote: bool) -> Result<(Connection, Open), Error> {
@@ -37,7 +37,7 @@ fn open(url: Option<&str>, remote: bool) -> Result<(Connection, Open), Error> {
     let conn = db::connect(&cwd, &db::Options { url, remote })?;
     let open = match &conn.target {
         Target::Sqlite(path) => Open::Sqlite(db::sqlite::open(path)?),
-        Target::Postgres(url) => Open::Postgres(db::postgres::open(url, &conn.display)?),
+        Target::Postgres(url) => Open::Postgres(Box::new(db::postgres::open(url, &conn.display)?)),
     };
     Ok((conn, open))
 }
