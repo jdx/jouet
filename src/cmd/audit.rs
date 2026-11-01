@@ -341,6 +341,32 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
     if hidden > 0 {
         let _ = writeln!(s, "  … {hidden} more categories (--top 0 lists all)");
     }
+    if let Some(waits) = &h.process_waits {
+        let _ = writeln!(
+            s,
+            "\n  process waits: {} linked checks in {} sequences; {} sequences may benefit from a longer wait",
+            count(waits.linked_checks),
+            count(waits.linked_sequences),
+            count(waits.opportunity_runs)
+        );
+        if let Some(elapsed) = waits.longest_sequence_ms {
+            let _ = writeln!(
+                s,
+                "  longest linked sequence: {} checks over {}",
+                count(waits.longest_sequence_checks),
+                duration(elapsed)
+            );
+        }
+        if let Some(cached) = waits.avoidable_cached_input_tokens {
+            let _ = writeln!(
+                s,
+                "  potentially avoidable input: {} tokens ({} cached, {} not cached)",
+                tokens(waits.avoidable_input_tokens),
+                tokens(cached),
+                tokens(waits.avoidable_input_tokens.saturating_sub(cached))
+            );
+        }
+    }
 
     let shown: Vec<_> = h
         .suggestions

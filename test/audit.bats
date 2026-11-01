@@ -25,6 +25,8 @@ setup() {
 	assert_line --partial '- CI polling (24.3%): jouet wait ci'
 	assert_line '    estimate: 21k tokens (12.4%), counting requests that polled CI right after a request that did; a wait would have made each run of polls one call'
 	assert_line --regexp '^  process polling +51\.2% '
+	assert_output --partial 'linked checks in'
+	refute_output --partial '- process polling ('
 	assert_line --partial '- stale-token prefix: 1 call in 1 session, 12k tokens'
 	assert_line --partial "1 file could not be read in full:"
 	assert_line --partial "000000000003.jsonl.zst: incomplete frame (counted up to the error)"
@@ -53,6 +55,8 @@ setup() {
 	[[ "$(jq -r '.harnesses | map(.harness) | join(",")' <<<"$output")" == "claude,codex" ]]
 	[[ "$(jq '.scan.files' <<<"$output")" == 5 ]]
 	[[ "$(jq -r '.harnesses[1].categories[0].category' <<<"$output")" == process_polling ]]
+	[[ "$(jq '.harnesses[1].process_waits.linked_checks > 0' <<<"$output")" == true ]]
+	[[ "$(jq '[.harnesses[1].suggestions[]? | select(.category == "process_polling")] | length' <<<"$output")" == 0 ]]
 	[[ "$(jq '.harnesses[0].totals.input_tokens' <<<"$output")" == 169000 ]]
 	[[ "$(jq '[.harnesses[0].categories[] | select(.category == "reply") | has("calls")] | .[0]' <<<"$output")" == false ]]
 	[[ "$(jq -r '.scan.unreadable[0].partial' <<<"$output")" == true ]]

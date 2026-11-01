@@ -8,7 +8,7 @@
 
 use super::json::{Flag, Num, Obj, Output, Str};
 use super::{Filter, Reader, Source, files_under, home, lines, sources};
-use crate::event::{self, Call, MessageKind, Request, Tool, Transcript};
+use crate::event::{self, Call, MessageKind, Request, Tool, Transcript, Wait};
 use crate::time::parse_timestamp;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -174,6 +174,7 @@ struct State {
     message: Option<String>,
     /// Calls waiting for their result, by tool-use ID.
     pending: HashMap<String, usize>,
+    wait_boundary: bool,
 }
 
 /// What a refused call's result says, before the reason the user gave.
@@ -228,6 +229,18 @@ impl State {
         let Some(message) = line.message.0 else {
             return;
         };
+        if match (&line.kind.0, &message.content) {
+            (Some(kind), Content::Text) if kind == "user" && !line.is_meta.0 => true,
+            (Some(kind), Content::Blocks(blocks)) if kind == "user" && !line.is_meta.0 => {
+                blocks.iter().any(|b| b.kind.as_deref() == Some("text"))
+            }
+            (Some(kind), Content::Blocks(blocks)) if kind == "assistant" => {
+                blocks.iter().any(|b| b.kind.as_deref() == Some("text"))
+            }
+            _ => false,
+        } {
+            self.wait_boundary = true;
+        }
         match line.kind.as_deref() {
             Some("assistant") => self.assistant(t, at, message),
             Some("user") => self.user(t, at, message),
@@ -261,6 +274,7 @@ impl State {
             // Synthetic messages (errors, interruptions) report all zeros.
             if input > 0 && request.input_tokens.is_none() {
                 request.input_tokens = Some(input);
+                request.cached_input_tokens = usage.cache_read_input_tokens.u64();
             }
             if let Some(output) = usage.output_tokens.u64() {
                 request.output_tokens = Some(request.output_tokens.unwrap_or(0).max(output));
@@ -276,7 +290,26 @@ impl State {
             let name = block.name.as_deref().unwrap_or_default();
             let mut call = Call::new(tool_kind(name));
             call.at = at;
+            call.wait_boundary = std::mem::take(&mut self.wait_boundary);
             let input = block.input.0;
+            if call.tool == Tool::Poll
+                && let Some(input) = input.as_ref()
+            {
+                let id = input
+                    .task_id
+                    .0
+                    .as_ref()
+                    .map(|id| ("task", id))
+                    .or_else(|| input.bash_id.0.as_ref().map(|id| ("bash", id)));
+                if let Some((kind, id)) = id {
+                    call.wait = Some(Wait {
+                        id: format!("{kind}:{id}"),
+                        short: input.block.as_bool() == Some(false),
+                        running: false,
+                        quiet: false,
+                    });
+                }
+            }
             if self.detail {
                 call.line = self.line_no;
                 call.name = Some(name.to_string());
@@ -508,6 +541,12 @@ struct Input {
     pattern: Str,
     #[serde(default)]
     path: Str,
+    #[serde(default)]
+    task_id: Str,
+    #[serde(default)]
+    bash_id: Str,
+    #[serde(default)]
+    block: serde_json::Value,
 }
 
 impl Input {
@@ -557,6 +596,27 @@ mod tests {
         r#"{"type":"user","timestamp":"2026-10-30T10:00:41.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"ok"}]}]}}"#,
         "\n",
     );
+
+    #[test]
+    fn links_background_task_checks_without_exposing_ids() {
+        let text = concat!(
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"TaskOutput","input":{"task_id":"job-a","block":false}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"running"}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":"How is it going?"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Monitor","input":{"task_id":"job-a"}}]}}"#,
+            "\n",
+        );
+        let t = read(text, &Filter::default()).unwrap();
+        assert_eq!(t.calls[0].wait.as_ref().unwrap().id, "task:job-a");
+        assert_eq!(t.calls[1].wait.as_ref().unwrap().id, "task:job-a");
+        assert!(t.calls[0].wait.as_ref().unwrap().short);
+        assert!(!t.calls[0].wait.as_ref().unwrap().quiet);
+        assert!(t.calls[1].wait_boundary);
+        assert!(t.messages.is_empty());
+    }
 
     #[test]
     fn reads_requests_calls_tokens_and_durations() {

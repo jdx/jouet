@@ -61,6 +61,8 @@ pub struct Request {
     /// The context it read: every input token, cached or not, since a
     /// request is billed and timed by the whole context it re-reads.
     pub input_tokens: Option<u64>,
+    /// Input tokens served from the prompt cache, when reported.
+    pub cached_input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     /// The calls this request issued, as indexes into [`Transcript::calls`].
     pub calls: Range<usize>,
@@ -100,6 +102,22 @@ pub struct Call {
     /// The start of the output of a command that runs jouet, raw, so a
     /// digest can check jouet's own `--json`.
     pub output: Option<String>,
+    /// A process check's transcript-local identity and whether it was a
+    /// non-interactive check. Never included in reports.
+    pub wait: Option<Wait>,
+    /// A user-facing message occurred since the preceding call.
+    pub wait_boundary: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wait {
+    pub id: String,
+    /// The call did not send input and asked for a short check.
+    pub short: bool,
+    /// The result explicitly said the process was still running.
+    pub running: bool,
+    /// No process output was returned with the result.
+    pub quiet: bool,
 }
 
 impl Call {
@@ -118,6 +136,8 @@ impl Call {
             target: None,
             error: None,
             output: None,
+            wait: None,
+            wait_boundary: false,
         }
     }
 

@@ -15,6 +15,7 @@ fn kind(kind: Kind, runs: u64, requests: u64, input_tokens: u64) -> KindBaseline
         input_tokens,
         calls: requests,
         failed: 0,
+        linked_waits: false,
     }
 }
 
@@ -148,4 +149,91 @@ fn baselines_round_trip_through_json_for_the_stop_hook() {
     let json = serde_json::to_string(&[&b]).unwrap();
     let back: Vec<Baseline> = serde_json::from_str(&json).unwrap();
     assert_eq!(back, [b]);
+}
+
+#[test]
+fn legacy_process_wait_baselines_cannot_claim_savings() {
+    let old: Baseline = serde_json::from_str(r#"{"harness":"codex","sessions":30,"requests_with_tokens":100,"kinds":[{"kind":"process_wait","runs":25,"requests":100,"input_tokens":100000}]}"#).unwrap();
+    let estimate = per_run(&[old]);
+    let wait = estimate
+        .iter()
+        .find(|e| e.kind == Kind::ProcessWait)
+        .unwrap();
+    assert_eq!(wait.input_tokens, None);
+    assert!(
+        wait.refused
+            .as_deref()
+            .unwrap()
+            .contains("no linked job evidence")
+    );
+}
+
+#[test]
+fn linked_process_wait_baselines_can_be_used_after_enough_opportunities() {
+    let mut k = kind(Kind::ProcessWait, 25, 75, 7_500);
+    k.linked_waits = true;
+    let baseline = Baseline {
+        harness: "codex".into(),
+        sessions: 25,
+        requests_with_tokens: 75,
+        kinds: vec![k],
+        ..Default::default()
+    };
+    let estimates = per_run(&[baseline]);
+    let wait = estimates
+        .iter()
+        .find(|e| e.kind == Kind::ProcessWait)
+        .unwrap();
+    assert_eq!(wait.requests_avoided, Some(2.0));
+    assert_eq!(wait.input_tokens, Some(200));
+}
+
+#[test]
+fn baseline_uses_linked_opportunities_not_all_process_waits() {
+    use crate::analyze::Analyzer;
+    use crate::event::{Call, Request, Tool, Transcript, Wait};
+    let wait = || {
+        let mut call = Call::new(Tool::Poll);
+        call.wait = Some(Wait {
+            id: "job".into(),
+            short: true,
+            running: true,
+            quiet: true,
+        });
+        call.duration_ms = Some(100);
+        call
+    };
+    let transcript = Transcript {
+        calls: vec![wait(), wait(), Call::new(Tool::Poll)],
+        requests: vec![
+            Request {
+                input_tokens: Some(100),
+                calls: 0..1,
+                ..Default::default()
+            },
+            Request {
+                input_tokens: Some(200),
+                calls: 1..2,
+                ..Default::default()
+            },
+            Request {
+                input_tokens: Some(900),
+                calls: 2..3,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let mut analyzer = Analyzer::default();
+    analyzer.add("codex", &transcript);
+    let report = analyzer.report(0);
+    let b = baseline(&report.harnesses[0], None);
+    let kind = b
+        .kinds
+        .iter()
+        .find(|k| k.kind == Kind::ProcessWait)
+        .unwrap();
+    assert!(kind.linked_waits);
+    assert_eq!((kind.runs, kind.requests, kind.input_tokens), (1, 2, 300));
+    assert_eq!(kind.calls, 3);
 }

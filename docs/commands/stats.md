@@ -22,12 +22,14 @@ A request re-reads the whole context, so a request avoided saves its whole input
 | jouet command | Priced by |
 |---|---|
 | `jouet wait ci`, `wait run`, `wait pr` | CI waits before setup: the requests after the first in each run of CI polls |
-| `jouet wait file`, `log`, `port`, `http`, `pid`, `cmd` | process waits, the same way |
+| `jouet wait file`, `log`, `port`, `http`, `pid`, `cmd` | linked runs of short, quiet checks of the same still-running process |
 | `jouet pr status` | runs of PR status reads |
 | `jouet pr threads` | runs of review-thread calls |
 | `jouet edit` | the share of edits that failed and were redone |
 
 Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis, such as "6,450 CI waits before setup, averaging 1.7 requests each at 305k tokens per request". A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
+
+Process-wait estimates need at least 20 linked opportunities in that history. A previously cached baseline that only grouped calls by category cannot support one; run `jouet stats` to rebuild it from the available transcripts. Unlinked or blocking waits are not evidence of avoidable requests.
 
 ## Example
 
