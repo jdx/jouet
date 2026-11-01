@@ -39,6 +39,8 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
 - a short `PATH` whose first entry is a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm.
 
+The isolated home's login profiles restore that `PATH` after system profiles run. On macOS, `path_helper` otherwise puts system tools ahead of the run's tools and can expose host-installed programs to the plain arm.
+
 The user's own `~/.claude`, `~/.codex` and jouet ledger are never read or written. The one exception is authentication:
 
 - An API key or token in the environment (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; `OPENAI_API_KEY` or `CODEX_API_KEY`) is passed through. This is the dependable way to run a long suite. For Claude Code, `claude setup-token` prints a long-lived token for `CLAUDE_CODE_OAUTH_TOKEN`, and nothing then needs refreshing.

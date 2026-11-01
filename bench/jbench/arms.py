@@ -73,6 +73,14 @@ def wrapper(path: Path, target: Path, env: dict[str, str]) -> None:
     path.chmod(0o755)
 
 
+def login_shell_path(env: dict[str, str]) -> None:
+    """Restore the run's PATH after system-wide login shell profiles."""
+    home = Path(env["HOME"])
+    profile = f"export PATH={shlex.quote(env['PATH'])}\n"
+    for name in (".zprofile", ".bash_profile"):
+        (home / name).write_text(profile)
+
+
 def gh_env(fake_url: str, repo: str) -> dict[str, str]:
     """Points `gh` at the fake: `github.localhost` is the one host `gh`
     talks to over plain HTTP, and the fake is its proxy."""
