@@ -233,36 +233,6 @@ pub(crate) fn recent(dir: &Path, session: &str) -> Vec<Entry> {
         .collect()
 }
 
-/// Whether the newest full test run the ledger has for `tree` passed: None
-/// when there is none, in any work tree. Trees are hashes of content, so a
-/// run in another checkout of the same content counts.
-pub(crate) fn full_test_run(dir: &Path, tree: &str) -> Option<bool> {
-    let mut file = std::fs::File::open(dir.join("ledger.jsonl")).ok()?;
-    let len = file.metadata().map_or(0, |m| m.len());
-    let start = len.saturating_sub(TAIL);
-    let mut text = String::new();
-    file.seek(SeekFrom::Start(start)).ok()?;
-    file.read_to_string(&mut text).ok()?;
-    let needle = format!("\"tree\":{}", serde_json::Value::from(tree));
-    let mut lines = text.lines();
-    if start > 0 {
-        // Starts mid-line.
-        lines.next();
-    }
-    lines
-        .rev()
-        .filter(|line| line.contains(&needle))
-        .filter_map(|line| serde_json::from_str::<Entry>(line).ok())
-        .find(|entry| {
-            matches!(entry.event.as_str(), "post-tool-use" | "test-run")
-                && entry
-                    .decisions
-                    .iter()
-                    .any(|d| d.action == "record:test" && d.scope.as_deref() == Some("full"))
-        })
-        .map(|entry| entry.exit_code == Some(0))
-}
-
 /// The rules whose denial or warning this command repeats: the session
 /// denied or warned about a command of the same shape within
 /// [`OVERRIDE_WINDOW`], and this one is going ahead anyway.

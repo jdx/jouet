@@ -147,7 +147,7 @@ vitest (vitest's module graph): 2 test files
 	assert_line --regexp '^vitest: failed \(exit 1\) in [0-9.]+s: 1 failed(, [0-9]+ passed)?$'
 	assert_line --regexp '^FAIL test/fmt.test.js > '
 	assert_line --regexp '^full log: .+\.log$'
-	assert_line "This was a partial run. Run the full suite (\`jouet test\`) before you finish or push."
+	assert_line "This was a partial run, which is enough before you finish: the full suite runs on CI."
 	assert_output --partial '1 failed'
 
 	printf "export const shout = (s) => s + '!'\n" >src/fmt.js
@@ -312,7 +312,7 @@ ran() {
 		jouet hook claude "$([[ $2 == 0 ]] && echo post-tool-use || echo post-tool-use-failure)"
 }
 
-@test "the hooks record an affected run as partial, so the full suite is still asked for" {
+@test "the hooks record an affected run as partial, and a pass at the files now is enough to finish" {
 	project pytest
 	ran 'jouet test' 0
 	printf 'def shout(s):\n    return s\n' >src/calc/fmt.py
@@ -322,8 +322,13 @@ ran() {
 	assert_output '["jouet test --affected",false,"--affected"]'
 	stop=$(jq -cn --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}')
 	run --separate-stderr jouet hook claude stop <<<"$stop"
+	assert_output ""
+	# A change after it, with no test run since, is asked about (not back
+	# to the fixture's own text, which the full run passed at).
+	printf 'def shout(s):\n    return s + "?"\n' >src/calc/fmt.py
+	run --separate-stderr jouet hook claude stop <<<"$stop"
 	run jq -r '.reason' <<<"$output"
-	assert_output --partial "The tree has changed since the last full test run (\`jouet test\`)"
+	assert_output --partial "Files changed after the last test run passed (\`jouet test --affected\`)"
 }
 
 @test "running the whole suite again while iterating suggests --affected" {
@@ -340,7 +345,7 @@ ran() {
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "\`jouet test --affected\` (pytest) runs only the tests your changes affect"
-	assert_output --partial 'it still has to pass before you finish or push'
+	assert_output --partial 'The full suite runs on CI after you push.'
 
 	# After an affected run, a full run is the one that has to happen.
 	ran 'jouet test --affected' 0
@@ -612,7 +617,7 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_success
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code, .full]' "$XDG_STATE_HOME/jouet/sessions/s9.json"
 	assert_output '["jouet test --cmd -- python3 -m unittest discover -s tests",1,true]'
-	# The ledger keeps it too, for push-untested and pr land.
+	# The ledger keeps it too, for pr land.
 	run --separate-stderr jq -c 'select(.event == "test-run") | [.session, .exit_code, .decisions[0].action, .decisions[0].scope]' \
 		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	assert_output '["s9",1,"record:test","full"]'

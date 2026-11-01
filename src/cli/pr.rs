@@ -104,9 +104,8 @@ pub(crate) struct NextArgs {
 /// stderr are terminals and no coding agent is detected); anyone else must
 /// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
 ///
-/// While jouet's hooks keep a ledger, it also refuses (exit 4) unless they
-/// recorded a full test run passing at the PR head's tree; pass
-/// --skip-verify with a reason, which the ledger keeps, to land anyway.
+/// The PR's checks on GitHub, which `pr next` reads, are its tests: the
+/// full suite runs on CI, not here.
 #[derive(Args)]
 pub(crate) struct LandArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
@@ -140,8 +139,4 @@ pub(crate) struct LandArgs {
     /// (default 20s; 0 disables)
     #[usage(long, value_name = "DUR")]
     pub(crate) settle: Option<String>,
-    /// Land without a full test pass recorded at the PR head's tree, and
-    /// say why; the reason is kept in the hook ledger
-    #[usage(long, value_name = "REASON")]
-    pub(crate) skip_verify: Option<String>,
 }

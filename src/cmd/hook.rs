@@ -772,8 +772,8 @@ fn run_dir(cwd: Option<&Path>, dir: Option<&str>) -> Option<PathBuf> {
 /// (how it was called) exiting `exit_code` in `cwd`. The hooks cannot see
 /// its exit status when its output is piped (`jouet test | tail` exits with
 /// tail's), and Codex sends hooks none at all, so it keeps its own result:
-/// in the session's state for the stop gate, and in the ledger for
-/// `push-untested` and `pr land`. It goes through the same post-tool-use
+/// in the session's state for the stop gate, and in the ledger for `pr
+/// land`. It goes through the same post-tool-use
 /// rules as a hook's run, so a rule that would not record it records
 /// nothing here either.
 /// Marks this `jouet test` process as running in the session's state, or,
@@ -927,8 +927,10 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
     };
     let hk_repo =
         |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
+    let affected =
+        |root: &str| !root.is_empty() && !crate::affected::near(Path::new(root)).is_empty();
     let block = if verify {
-        state.block(&home, tree_of, hk_repo)
+        state.block(&home, tree_of, hk_repo, affected)
     } else {
         None
     };
@@ -1204,7 +1206,7 @@ mod tests {
             &json!({}),
             vec![("cargo test --workspace".into(), 101), ("ls".into(), 0)],
         );
-        assert!(failing.block("", |_| None, |_| false).is_some());
+        assert!(failing.block("", |_| None, |_| false, |_| true).is_some());
         let fixed = codex_state(
             &engine,
             &json!({}),
@@ -1213,7 +1215,7 @@ mod tests {
                 ("cargo test --workspace".into(), 0),
             ],
         );
-        assert_eq!(fixed.block("", |_| None, |_| false), None);
+        assert_eq!(fixed.block("", |_| None, |_| false, |_| true), None);
         // A partial pass leaves the full failure standing.
         let partial = codex_state(
             &engine,
@@ -1223,7 +1225,10 @@ mod tests {
                 ("cargo test -p jouet --lib".into(), 0),
             ],
         );
-        let why = partial.block("", |_| None, |_| false).unwrap().reason;
+        let why = partial
+            .block("", |_| None, |_| false, |_| true)
+            .unwrap()
+            .reason;
         assert!(why.contains("only a full test run clears it"), "{why}");
         // A refusal, such as `diag check` with no hk config, is not a
         // failed lint, and does not clear one either.
@@ -1232,7 +1237,7 @@ mod tests {
             &json!({}),
             vec![("/usr/bin/zsh -lc 'jouet diag check a.py'".into(), 4)],
         );
-        assert_eq!(refused.block("", |_| None, |_| false), None);
+        assert_eq!(refused.block("", |_| None, |_| false, |_| true), None);
         let still = codex_state(
             &engine,
             &json!({}),
@@ -1241,7 +1246,7 @@ mod tests {
                 ("jouet diag check a.py".into(), 4),
             ],
         );
-        assert!(still.block("", |_| None, |_| false).is_some());
+        assert!(still.block("", |_| None, |_| false, |_| true).is_some());
     }
 
     #[test]

@@ -225,18 +225,10 @@ local rule: JouetRule = {
 			if command.nested then
 				continue
 			end
-			-- `jouet test` already prints only what matters: the cut is
-			-- what to drop, and through a pipe it hides the exit status.
+			-- `jouet test` already prints only what matters, keeps the whole
+			-- output in its log, and records its own result for the hooks,
+			-- piped or not: a cut drops nothing the agent needs.
 			if jouet_test(command) then
-				local cut = cutter(call.commands, i)
-				if cut then
-					local status = if command.op == "pipe"
-						then ` Piped, the call exits with {cut.program}'s status, not the run's, so a failure is hidden and the run does not count as passing, unless \`set -o pipefail\` is on.`
-						else ""
-					return jouet.warn(
-						`Drop the {cut.program}: \`jouet test\` already prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes), and keeps the whole output in its log.{status}`
-					)
-				end
 				continue
 			end
 			if not runs(command) then

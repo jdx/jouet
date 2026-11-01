@@ -46,7 +46,7 @@ local rule: JouetRule = {
 		end
 		local which = if adapters and #adapters > 0 then ` ({table.concat(adapters, ", ")})` else ""
 		return jouet.warn(
-			`The whole test suite ran a few minutes ago. While you iterate, \`jouet test --affected\`{which} runs only the tests your changes affect, and \`--dry-run\` shows which and why. Keep the full run for the end: it still has to pass before you finish or push.`
+			`The whole test suite ran a few minutes ago. While you iterate, \`jouet test --affected\`{which} runs only the tests your changes affect, and \`--dry-run\` shows which and why. The full suite runs on CI after you push.`
 		)
 	end,
 }

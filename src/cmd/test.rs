@@ -288,7 +288,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         out.result(&report, String::new);
     } else if args.affected && !args.dry_run && jobs.iter().any(Option::is_some) {
         emit(
-            "This was a partial run. Run the full suite (`jouet test`) before you finish or push.\n",
+            "This was a partial run, which is enough before you finish: the full suite runs on CI.\n",
         );
     }
     exit

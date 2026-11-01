@@ -573,104 +573,24 @@ fn next_reports_a_rate_limit_as_remote() {
     assert!(stdout(&out).is_empty());
 }
 
-/// A git repository at `dir` with one commit, and that commit's SHA.
-fn repo_with_a_commit(dir: &Path) -> &'static str {
-    let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "git {args:?}");
-        String::from_utf8(out.stdout).unwrap().trim().to_string()
-    };
-    git(&["init", "-q"]);
-    std::fs::write(dir.join("lib.rs"), "fn main() {}").unwrap();
-    git(&["add", "lib.rs"]);
-    git(&["commit", "-qm", "a change"]);
-    git(&["rev-parse", "HEAD"]).leak()
-}
-
 #[test]
-fn land_needs_a_full_test_pass_at_the_head_or_a_reason() {
+fn the_prs_checks_not_a_local_run_decide() {
+    // The full suite runs on CI: a failed or missing local full run in the
+    // hook ledger does not hold a ready PR back.
     let dir = tempfile::tempdir().unwrap();
-    let head = repo_with_a_commit(dir.path());
-    let tree =
-        jouet_rules::tree::commit_tree(Some(dir.path()), head, Duration::from_secs(10)).unwrap();
     let ledger = dir.path().join("state/jouet/ledger/ledger.jsonl");
     std::fs::create_dir_all(ledger.parent().unwrap()).unwrap();
-    let add = |line: Value| {
-        let mut text = std::fs::read_to_string(&ledger).unwrap_or_default();
-        text.push_str(&format!("{line}\n"));
-        std::fs::write(&ledger, text).unwrap();
-    };
-    let test_run = |scope: &str, exit_code: i32, tree: &str| {
-        json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "shape": "cargo test",
-               "exit_code": exit_code, "tree": tree,
-               "decisions": [{"rule": "checks", "action": "record:test", "scope": scope}]})
-    };
-    let world = || World {
-        head,
-        checks: BTreeMap::from([(head, vec![("unit", "completed", Some("success"))])]),
-        ..World::default()
-    };
-    // git, on PATH, to read the head's tree.
-    let land_here = |extra: &[&str]| {
-        let (fake, _) = github(world());
-        let mut args = LAND.to_vec();
-        args.push("0");
-        args.extend_from_slice(extra);
-        let out = command(&fake, dir.path(), &args)
-            .env("PATH", std::env::var_os("PATH").unwrap())
-            .env("XDG_CONFIG_HOME", dir.path().join("config"))
-            .output()
-            .unwrap();
-        (out, writes(&fake))
-    };
-
-    add(json!({"ts": 1, "harness": "claude", "event": "session-start"}));
-    add(test_run("partial", 0, &tree));
-    add(test_run("full", 0, "another-tree"));
-    let (out, written) = land_here(&["--yes", "--json"]);
-    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
-    let message = json(&out)["error"]["message"].as_str().unwrap().to_string();
-    assert!(
-        message.contains("no full test run has passed at its head"),
-        "{message}"
-    );
-    assert!(written.is_empty());
-
-    add(test_run("full", 101, &tree));
-    let (out, _) = land_here(&["--yes"]);
-    assert_eq!(out.status.code(), Some(4));
-    assert!(
-        stderr(&out).contains("the last full test run at its head"),
-        "{}",
-        stderr(&out)
-    );
-
-    // A reason lands it, and is kept.
-    let (out, written) = land_here(&["--yes", "--skip-verify", "CI ran the suite"]);
+    let failed = json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "shape": "cargo test",
+        "exit_code": 101, "tree": "t1",
+        "decisions": [{"rule": "checks", "action": "record:test", "scope": "full"}]});
+    std::fs::write(&ledger, format!("{failed}\n")).unwrap();
+    let (fake, _) = github(World::default());
+    let mut args = LAND.to_vec();
+    args.extend_from_slice(&["0", "--yes"]);
+    let out = command(&fake, dir.path(), &args)
+        .env("XDG_CONFIG_HOME", dir.path().join("config"))
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
-    assert_eq!(written, [format!("PUT {PR}/merge")]);
-    let kept = std::fs::read_to_string(&ledger).unwrap();
-    let skip: Value = serde_json::from_str(kept.lines().last().unwrap()).unwrap();
-    assert_eq!(skip["event"], "skip-verify");
-    assert_eq!(skip["reason"], "CI ran the suite");
-    let (out, _) = land_here(&["--yes", "--skip-verify", " "]);
-    assert_eq!(out.status.code(), Some(2));
-
-    add(test_run("full", 0, &tree));
-    let (out, written) = land_here(&["--yes"]);
-    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
-    assert_eq!(written, [format!("PUT {PR}/merge")]);
+    assert_eq!(writes(&fake), [format!("PUT {PR}/merge")]);
 }

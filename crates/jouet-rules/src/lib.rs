@@ -82,7 +82,6 @@ const BUILTIN: &[(&str, &str)] = &[
         "committed-secrets",
         include_str!("../rules/committed-secrets.toml"),
     ),
-    ("push-untested", include_str!("../rules/push-untested.toml")),
     ("scoped-lint", include_str!("../rules/scoped-lint.toml")),
     (
         "affected-tests",
@@ -138,10 +137,6 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
     (
         "committed-secrets.luau",
         include_str!("../rules/committed-secrets.luau"),
-    ),
-    (
-        "push-untested.luau",
-        include_str!("../rules/push-untested.luau"),
     ),
     (
         "affected-tests.luau",
