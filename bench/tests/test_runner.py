@@ -287,3 +287,58 @@ class ReportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CostSeedTest(unittest.TestCase):
+    """A task's seed commands run once, through `jouet test --cmd`, and every
+    run starts with the note they left."""
+
+    def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
+        import os
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a.txt").write_text("a\n")
+            task = tasks.Task(
+                name="t",
+                dir=task_dir,
+                description="",
+                prompt="",
+                chore="",
+                rules=[],
+                timeout_s=60,
+                cost_seed=["cargo build", "cargo test -p a"],
+            )
+            # A stand-in jouet that keeps a line naming each command it ran.
+            calls = root / "calls"
+            stand_in = root / "jouet"
+            stand_in.write_text(
+                "#!/bin/sh\n"
+                f'echo "$*" >> {calls}\n'
+                "shift 3\n"
+                "line=$(printf '{\"cmd\":\"%s\"}' \"$*\")\n"
+                "old=$(git notes --ref jouet-cost show HEAD 2>/dev/null)\n"
+                'git notes --ref jouet-cost add -f -m "$(printf "%s\\n%s" "$old" "$line" | sed /^$/d)" HEAD\n'
+            )
+            stand_in.chmod(0o755)
+            os.environ["XDG_CACHE_HOME"] = str(root / "cache")
+            try:
+                note = costs.seed(task, stand_in, root / "work", lambda _: None)
+                again = costs.seed(task, stand_in, root / "work2", lambda _: None)
+            finally:
+                del os.environ["XDG_CACHE_HOME"]
+            self.assertEqual(note, '{"cmd":"cargo build"}\n{"cmd":"cargo test -p a"}\n')
+            self.assertEqual(again, note)
+            # Timed once: the second call read the cache.
+            self.assertEqual(
+                calls.read_text().splitlines(), ["test --cmd -- cargo build", "test --cmd -- cargo test -p a"]
+            )
+
+            run = root / "run"
+            shas = tasks.prepare(task, run)
+            costs.apply(run, note, shas["head_sha"])
+            self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)

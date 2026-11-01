@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import arms as arms_mod
+from . import costs as costs_mod
 from . import credentials
 from . import tasks as tasks_mod
 from .fake_github import FakeGitHub
@@ -298,6 +299,8 @@ def execute(
     keep = out_dir / "runs" / p.id
     keep.mkdir(parents=True, exist_ok=True)
     shas = tasks_mod.prepare(task, workdir)
+    if note := (opts.get("cost_notes") or {}).get(task.name):
+        costs_mod.apply(workdir, note, shas["head_sha"])
     fixture = task.github_fixture(shas)
     state_path = keep / "github-state.json"
 
@@ -450,6 +453,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     tmp_root = Path(tempfile.mkdtemp(prefix="jb-", dir="/tmp"))
     opts = {**opts, "jouet_bin": snapshot(opts["jouet_bin"], work_root), "tmp_root": tmp_root}
     records = []
+    opts["cost_notes"] = costs_mod.seeds(planned, opts["jouet_bin"], work_root, log)
     results_path = out_dir / "runs.jsonl"
     try:
         for n, p in enumerate(planned, 1):

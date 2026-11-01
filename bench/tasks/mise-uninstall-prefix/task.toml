@@ -54,3 +54,14 @@ mise = "~/.local/bin/mise"
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"
 MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py):
+# the builds and tests agents ran in the pilots, two e2e tests so they read as
+# one family.
+[cost]
+seed = [
+    "cargo test --bin mise uninstall",
+    "mise run build",
+    "mise run test:e2e test_uninstall",
+    "mise run test:e2e test_use",
+]
