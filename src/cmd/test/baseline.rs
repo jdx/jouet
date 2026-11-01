@@ -3,8 +3,8 @@
 //! earlier commit, does not count against it.
 
 use super::{Job, execute, log_path};
-use crate::affected;
 use crate::testlog::{self, Format};
+use crate::{affected, known};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -136,70 +136,168 @@ pub(super) fn base(root: &Path, since: Option<&str>) -> Result<affected::Base, a
     Ok(base)
 }
 
-/// Runs each failed job again in a worktree of `base`, and sorts the
-/// failures it had into those the merge base has too and the new ones.
+/// Whether [`compare`] may run a failed job at the merge base when nothing
+/// is kept for it ([`known`]), or only use what is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Mode {
+    Run,
+    Kept,
+}
+
+/// Why the failures could not be compared. `unverifiable` when the merge
+/// base could not run the command either, so nothing ever will be here:
+/// the stop gate then asks about the failures once, not at every turn.
+#[derive(Debug)]
+pub(super) struct NotCompared {
+    pub(super) message: String,
+    pub(super) unverifiable: bool,
+}
+
+impl From<String> for NotCompared {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            unverifiable: false,
+        }
+    }
+}
+
+/// A command as [`known`] keeps it: its words and directory, with paths
+/// into the checkout written from its root, so every worktree of the
+/// repository shares it.
+fn command_key(job: &Job, root: &Path) -> String {
+    let dot = Path::new(".");
+    let words: Vec<String> = job.argv.iter().map(|w| rebase(w, root, dot)).collect();
+    let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
+    format!("{} @{}", words.join(" "), dir.display())
+}
+
+/// A worktree of the merge base, checked out when a job first needs it.
+struct Checkout<'a> {
+    root: &'a Path,
+    base: &'a affected::Base,
+    tmp: Option<(tempfile::TempDir, PathBuf)>,
+}
+
+impl Checkout<'_> {
+    fn tree(&mut self) -> Result<&Path, String> {
+        if self.tmp.is_none() {
+            let tmp = tempfile::Builder::new()
+                .prefix("jouet-baseline-")
+                .tempdir()
+                .map_err(|e| format!("making a directory for the merge base: {e}"))?;
+            let tree = tmp.path().join("tree");
+            let tree_arg = tree.to_string_lossy().into_owned();
+            git(
+                self.root,
+                &[
+                    "worktree",
+                    "add",
+                    "--detach",
+                    "--quiet",
+                    &tree_arg,
+                    &self.base.merge_base,
+                ],
+            )
+            .map_err(|e| format!("checking out the merge base {}: {e}", self.base.merge_base))?;
+            if tree.join(".gitmodules").is_file() {
+                let _ = git(&tree, &["submodule", "update", "--init", "--quiet"]);
+            }
+            self.tmp = Some((tmp, tree));
+        }
+        Ok(&self.tmp.as_ref().expect("checked out above").1)
+    }
+}
+
+impl Drop for Checkout<'_> {
+    fn drop(&mut self) {
+        if let Some((_, tree)) = &self.tmp {
+            let tree = tree.to_string_lossy().into_owned();
+            let _ = git(self.root, &["worktree", "remove", "--force", &tree]);
+        }
+    }
+}
+
+/// Sorts each failed job's failures into those the merge base has too and
+/// the new ones, from what [`known`] keeps for the job at `base`, or, with
+/// [`Mode::Run`], by running it again in a worktree of `base` and keeping
+/// what came of it. None in [`Mode::Kept`] when a job has nothing kept.
 pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
     failed: &[(&Job, BTreeSet<String>, u64)],
-) -> Result<Baseline, String> {
-    let tmp = tempfile::Builder::new()
-        .prefix("jouet-baseline-")
-        .tempdir()
-        .map_err(|e| format!("making a directory for the merge base: {e}"))?;
-    let tree = tmp.path().join("tree");
-    let tree_arg = tree.to_string_lossy().into_owned();
-    git(
+    mode: Mode,
+) -> Result<Option<Baseline>, NotCompared> {
+    let mut checkout = Checkout {
         root,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            "--quiet",
-            &tree_arg,
-            &base.merge_base,
-        ],
-    )
-    .map_err(|e| format!("checking out the merge base {}: {e}", base.merge_base))?;
-    let _remove = Worktree { root, tree: &tree };
-    if tree.join(".gitmodules").is_file() {
-        let _ = git(&tree, &["submodule", "update", "--init", "--quiet"]);
-    }
+        base: &base,
+        tmp: None,
+    };
     let mut pre_existing = BTreeSet::new();
     let mut new = BTreeSet::new();
     let mut unknown = BTreeSet::new();
     for (i, (job, now, ran)) in failed.iter().enumerate() {
-        let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
-        let at_base = Job {
-            argv: job.argv.iter().map(|w| rebase(w, root, &tree)).collect(),
-            env: job.env.clone(),
-            dir: tree.join(dir),
-            exit: Box::new(|_| Exit::Ok),
+        let key = command_key(job, root);
+        let kept = known::lookup(root, &base.merge_base, &key);
+        let outcome = match (kept, mode) {
+            (Some(outcome), _) => outcome,
+            (None, Mode::Kept) => return Ok(None),
+            (None, Mode::Run) => {
+                let tree = checkout.tree()?.to_path_buf();
+                let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
+                let at_base = Job {
+                    argv: job.argv.iter().map(|w| rebase(w, root, &tree)).collect(),
+                    env: job.env.clone(),
+                    dir: tree.join(dir),
+                    exit: Box::new(|_| Exit::Ok),
+                };
+                // After this run's own logs, so pruning never takes one of them.
+                let log = log_path(failed.len() + i + 1);
+                let (code, _) = execute(&at_base, &log, false)?;
+                let output = std::fs::read(&log).unwrap_or_default();
+                let output = String::from_utf8_lossy(&output);
+                let outcome = if code == 0 {
+                    known::Outcome::Passed
+                } else {
+                    // A run that failed before naming any test, such as a
+                    // tool it needs missing from the checkout, says nothing
+                    // about them.
+                    match failure_names(&output, formats) {
+                        Some(names) => {
+                            let d = testlog::digest_with(&output, false, 0, formats);
+                            known::Outcome::Failed {
+                                names: names.into_iter().collect(),
+                                ran: d.passed + d.failed + d.skipped,
+                            }
+                        }
+                        None => known::Outcome::Unnamed {
+                            exit: code,
+                            log: Some(log.display().to_string()),
+                        },
+                    }
+                };
+                known::keep(root, &base.merge_base, &key, outcome.clone());
+                outcome
+            }
         };
-        // After this run's own logs, so pruning never takes one of them.
-        let log = log_path(failed.len() + i + 1);
-        let (code, _) = execute(&at_base, &log, false)?;
-        let output = std::fs::read(&log).unwrap_or_default();
-        let output = String::from_utf8_lossy(&output);
-        let at_base: BTreeSet<String> = if code == 0 {
-            BTreeSet::new()
-        } else {
-            // A run that failed before naming any test, such as a tool it
-            // needs missing from the checkout, says nothing about them.
-            failure_names(&output, formats).ok_or_else(|| {
-                format!(
-                    "the run at {} failed (exit {code}) without naming a failing test, so the failures could not be compared (full log: {})",
-                    base.name,
-                    log.display()
-                )
-            })?
+        let (at_base, reached): (BTreeSet<String>, u64) = match outcome {
+            known::Outcome::Passed => (BTreeSet::new(), u64::MAX),
+            known::Outcome::Failed { names, ran } => (names.into_iter().collect(), ran),
+            known::Outcome::Unnamed { exit, log } => {
+                let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
+                return Err(NotCompared {
+                    message: format!(
+                        "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared{log}",
+                        base.name
+                    ),
+                    unverifiable: true,
+                });
+            }
         };
-        let d = testlog::digest_with(&output, false, 0, formats);
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
-        let reached = d.passed + d.failed + d.skipped;
-        let short = reached * 2 < *ran;
+        let short = reached.saturating_mul(2) < *ran;
         for name in now {
             if at_base.contains(name) {
                 pre_existing.insert(name.clone());
@@ -210,12 +308,13 @@ pub(super) fn compare(
             }
         }
     }
-    Ok(Baseline {
+    drop(checkout);
+    Ok(Some(Baseline {
         base,
         pre_existing: pre_existing.into_iter().collect(),
         new: new.into_iter().collect(),
         unknown: unknown.into_iter().collect(),
-    })
+    }))
 }
 
 /// `word`, a command word, with a path into `root` (alone, or an option's
@@ -236,19 +335,6 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
             at(value).map_or_else(|| word.to_string(), |v| format!("{option}={v}"))
         }
         None => word.to_string(),
-    }
-}
-
-/// A worktree of the merge base, removed when dropped.
-struct Worktree<'a> {
-    root: &'a Path,
-    tree: &'a PathBuf,
-}
-
-impl Drop for Worktree<'_> {
-    fn drop(&mut self) {
-        let tree = self.tree.to_string_lossy().into_owned();
-        let _ = git(self.root, &["worktree", "remove", "--force", &tree]);
     }
 }
 
@@ -288,6 +374,26 @@ mod tests {
         ] {
             assert_eq!(rebase(word, root, tree), want, "{word}");
         }
+    }
+
+    #[test]
+    fn a_command_is_kept_the_same_from_every_worktree() {
+        let job = |root: &str| Job {
+            argv: vec![
+                "cargo".into(),
+                "test".into(),
+                format!("--manifest-path={root}/crates/a/Cargo.toml"),
+            ],
+            env: Vec::new(),
+            dir: Path::new(root).join("crates/a"),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        let here = command_key(&job("/src/app"), Path::new("/src/app"));
+        assert_eq!(
+            here,
+            "cargo test --manifest-path=./crates/a/Cargo.toml @crates/a"
+        );
+        assert_eq!(command_key(&job("/wt/app-2"), Path::new("/wt/app-2")), here);
     }
 
     #[test]

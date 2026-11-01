@@ -16,6 +16,7 @@ mod fnox;
 mod git;
 mod guide;
 mod harness;
+mod known;
 mod ledger;
 mod mise;
 mod plugins;

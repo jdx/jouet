@@ -803,6 +803,24 @@ pub(crate) fn mark_own_run(cwd: &Path, command: &str, running: bool) {
     });
 }
 
+/// Marks a `jouet test` run whose failures could not be compared with the
+/// merge base, which could not run the command either: the stop gate asks
+/// about them once, not at every turn, since nothing here can settle it.
+pub(crate) fn mark_unverifiable(cwd: &Path, command: &str) {
+    let settings = Settings::load();
+    if !settings.hooks.enabled || !settings.hooks.verify {
+        return;
+    }
+    let Some(path) = jouet_git::session::id_from_env()
+        .as_deref()
+        .and_then(verify::state_path)
+    else {
+        return;
+    };
+    let root = verify::root_of(cwd);
+    let _ = verify::update(&path, |state| state.mark_unverifiable(&root, command));
+}
+
 pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
     let settings = Settings::load();
     let hooks = &settings.hooks;

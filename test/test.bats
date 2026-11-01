@@ -736,3 +736,48 @@ TOML
 	assert_success
 	assert_line --partial 'cargo test --workspace'
 }
+
+@test "a failing full suite is compared with the merge base on its own, once per merge base" {
+	mkdir -p tests
+	# Each run of the test, here or at the merge base, leaves a line.
+	printf 'import unittest\nclass T(unittest.TestCase):\n    def test_env(self):\n        open("%s/runs", "a").write("x\\n")\n        self.fail("needs brew")\n' "$BATS_TEST_TMPDIR" >tests/test_a.py
+	git add tests/test_a.py
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+
+	# Without --baseline: the suite fails, runs at main, and passes.
+	run --separate-stderr jouet test
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 2
+
+	# Kept: the next failure compares with it, and main does not run again.
+	echo more >>notes.md
+	run --separate-stderr jouet test
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 3
+
+	# The suite's own command, run through --cmd, shares what is kept.
+	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests
+	assert_success
+	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 4
+	# Another command has nothing kept: --cmd does not run main on its own,
+	# and --baseline keeps what it finds for the next run.
+	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
+	assert_failure 1
+	refute_output --partial 'baseline:'
+	run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
+	assert_success
+	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+
+	# Off, a failing run stays failed.
+	JOUET_TEST_BASELINE=off run --separate-stderr jouet test
+	assert_failure 1
+	refute_output --partial 'baseline:'
+}
