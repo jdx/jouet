@@ -226,7 +226,7 @@ local rule: JouetRule = {
 							)
 						elseif found ~= true then
 							return jouet.deny(
-								"Run `jouet edit` instead. It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`)."
+								"Run `jouet edit` instead. It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`). To add code, replace a line next to where it goes with that line plus the new code."
 							)
 						end
 					end
