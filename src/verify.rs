@@ -240,8 +240,9 @@ pub(crate) fn formats(command: &str) -> bool {
         .replace(">&2", "")
         .replace("2>/dev/null", "")
         .replace(">/dev/null", "");
-    // Anything still redirected writes a file: `git status > src/a.rs`.
-    if bare.contains('>') {
+    // Anything still redirected writes a file: `git status > src/a.rs`. A
+    // substitution runs a command of its own: `git status $(sed -i ...)`.
+    if bare.contains('>') || bare.contains("$(") || bare.contains('`') || bare.contains("<(") {
         return false;
     }
     let segments: Vec<&str> = bare
@@ -1212,6 +1213,8 @@ mod tests {
             "cd sub && cargo fmt",
             "sed -i s/a/b/ src/a.rs && cargo fmt",
             "git status > src/main.rs",
+            "git status $(sed -i s/a/b/ src/main.rs)",
+            "git commit -m `sed -i s/a/b/ src/main.rs`",
             "cargo fmt &> out.txt",
             "",
         ] {
