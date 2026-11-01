@@ -116,6 +116,9 @@ fn read_message(file: &str) -> Result<String, String> {
     std::fs::read_to_string(file).map_err(|e| format!("reading the message from {file}: {e}"))
 }
 
+/// How many paths left uncommitted a commit names.
+const LEFT_SHOWN: usize = 8;
+
 fn render(report: &Report) -> String {
     let mut s = String::new();
     let on = report
@@ -241,6 +244,23 @@ fn render(report: &Report) -> String {
     }
     for note in report.secret_scan.iter().flat_map(|s| &s.notes) {
         let _ = writeln!(s, "  {note}");
+    }
+    // What `git status` would say now, so a check of it is not needed.
+    match report.left.as_deref() {
+        Some([]) => {
+            let _ = writeln!(s, "  nothing else is uncommitted");
+        }
+        Some(left) => {
+            let shown: Vec<&str> = left.iter().take(LEFT_SHOWN).map(String::as_str).collect();
+            let more = left.len() - shown.len();
+            let more = if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            };
+            let _ = writeln!(s, "  still uncommitted: {}{more}", shown.join(", "));
+        }
+        None => {}
     }
     if report.dry_run {
         s.push_str("message:\n");
