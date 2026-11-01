@@ -152,6 +152,20 @@ pub(crate) struct Raised {
     pub reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<String>,
+    /// How many reasons were left for a later stop, past [`MAX_RAISED`].
+    #[serde(skip)]
+    pub more: usize,
+}
+
+/// The most reasons one stop raises; the rest wait for the next.
+const MAX_RAISED: usize = 5;
+
+/// A command as a message shows it: cut to 80 characters.
+fn shown(command: &str) -> String {
+    match command.char_indices().nth(80) {
+        Some((i, _)) => format!("{}...", &command[..i]),
+        None => command.to_string(),
+    }
 }
 
 /// Why the stop hook blocks, from the checks of one work tree.
@@ -240,9 +254,20 @@ impl State {
         let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
         own.into_iter().chain(others).find_map(|(root, checks)| {
             let raised = checks.block(|| tree(root), hk_repo(root))?;
-            let reason = raised.reasons.last()?;
+            // Those raised now: the ones before were raised at this tree.
+            let before = match &checks.raised {
+                Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
+                _ => 0,
+            };
+            let mut reason = raised.reasons[before.min(raised.reasons.len())..].join("\n\n");
+            if raised.more > 0 {
+                reason.push_str(&format!(
+                    "\n\n({} more after these, at the next stop.)",
+                    raised.more
+                ));
+            }
             let reason = if root == home || root.is_empty() {
-                reason.clone()
+                reason
             } else {
                 format!("In {root}: {reason}")
             };
@@ -356,11 +381,11 @@ impl Checks {
         })
     }
 
-    /// The first reason to stop waiting, as [`Checks::reasons`] lists them,
-    /// that the stop hook has not already blocked for at the tree now, with
-    /// it added to those it has; None when every reason has been raised at
-    /// this tree with no run recorded since, so the agent has answered each
-    /// once. An unknown tree is never the same tree.
+    /// The reasons to stop waiting, as [`Checks::reasons`] lists them, that
+    /// the stop hook has not already blocked for at the tree now (up to
+    /// [`MAX_RAISED`] of them), added to those it has; None when every reason
+    /// has been raised at this tree with no run recorded since, so the agent
+    /// has answered each once. An unknown tree is never the same tree.
     pub(crate) fn block(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Option<Raised> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(&tree).clone();
@@ -370,11 +395,23 @@ impl Checks {
             Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
             _ => Vec::new(),
         };
-        let reason = reasons.into_iter().find(|r| !raised.contains(r))?;
-        raised.push(reason);
+        // Two runs whose commands are cut to the same text read as one
+        // reason, so they are raised, and counted, as one.
+        let mut new: Vec<String> = Vec::new();
+        for reason in reasons {
+            if !raised.contains(&reason) && !new.contains(&reason) {
+                new.push(reason);
+            }
+        }
+        if new.is_empty() {
+            return None;
+        }
+        let more = new.len().saturating_sub(MAX_RAISED);
+        raised.extend(new.into_iter().take(MAX_RAISED));
         Some(Raised {
             reasons: raised,
             tree,
+            more,
         })
     }
 
@@ -404,7 +441,7 @@ impl Checks {
         if !hk.covers_changes() {
             return Some(format!(
                 "The last hk check passed for only some files (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
-                hk.command
+                shown(&hk.command)
             ));
         }
         if hk.tree == tree() {
@@ -412,7 +449,7 @@ impl Checks {
         }
         Some(format!(
             "Files changed after the last hk check passed (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
-            hk.command
+            shown(&hk.command)
         ))
     }
 
@@ -422,8 +459,8 @@ impl Checks {
             return None;
         }
         let since = match &last.selector {
-            Some(selector) => format!("`{}`, selecting {selector}", last.command),
-            None => format!("`{}`", last.command),
+            Some(selector) => format!("`{}`, selecting {selector}", shown(&last.command)),
+            None => format!("`{}`", shown(&last.command)),
         };
         let Some(full) = self.full_passes.get(&Kind::Test) else {
             return Some(format!(
@@ -435,7 +472,7 @@ impl Checks {
         }
         Some(format!(
             "The tree has changed since the last full test run (`{}`), and only part of the suite has run since (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]",
-            full.command
+            shown(&full.command)
         ))
     }
 
@@ -491,11 +528,11 @@ impl Checks {
             return format!(
                 "The last {} run failed (`{}` exited {}). Fix it and run it again before you finish, or say plainly why it cannot pass.{baseline} [jouet: verify]",
                 kind.name(),
-                failed.command,
+                shown(&failed.command),
                 failed.exit_code
             );
         }
-        let since = last.map_or(String::new(), |l| format!(" (`{}`)", l.command));
+        let since = last.map_or(String::new(), |l| format!(" (`{}`)", shown(&l.command)));
         let clear = if failed.full {
             format!("only a full {} run clears it", kind.name())
         } else {
@@ -507,7 +544,7 @@ impl Checks {
         format!(
             "A {} run failed (`{}` exited {}), and the runs since{since} do not cover it: {clear}. Fix it and run it again before you finish, or say plainly why it cannot pass.{baseline} [jouet: verify]",
             kind.name(),
-            failed.command,
+            shown(&failed.command),
             failed.exit_code
         )
     }
@@ -1017,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn each_unresolved_reason_in_a_tree_is_raised_once() {
+    fn every_unresolved_reason_in_a_tree_is_raised_at_once() {
         let mut state = Checks::default();
         let lint = |command: &str, code: i32, scope: &str| record(Kind::Lint, command, code, scope);
         state.record(
@@ -1029,12 +1066,11 @@ mod tests {
             Some("t1"),
         );
         let now = || Some("t1".to_string());
-        let mut seen = Vec::new();
-        while let Some(raised) = state.block(now, false) {
-            seen.push(raised.reasons.last().unwrap().clone());
-            assert_eq!(raised.reasons, seen);
-            state.raised = Some(raised);
-        }
+        let raised = state.block(now, false).unwrap();
+        let seen = raised.reasons.clone();
+        assert_eq!(raised.more, 0);
+        state.raised = Some(raised);
+        assert_eq!(state.block(now, false), None);
         // Each failure once, the full test failure before the partial one.
         assert_eq!(seen.len(), 3, "{seen:?}");
         assert!(
@@ -1046,9 +1082,79 @@ mod tests {
             seen[2].contains("`cargo clippy --workspace` exited 1"),
             "{seen:?}"
         );
-        // At another tree, the first is raised again.
+        // At another tree, they are raised again.
         let raised = state.block(|| Some("t2".into()), false).unwrap();
-        assert_eq!(raised.reasons, &seen[..1]);
+        assert_eq!(raised.reasons, seen);
+    }
+
+    #[test]
+    fn past_five_reasons_the_rest_wait_for_the_next_stop() {
+        let mut state = State::default();
+        let failures: Vec<Record> = (0..7)
+            .map(|i| test(&format!("cargo test -p p{i}"), 101, &format!("-p p{i}")))
+            .collect();
+        state.record("/home", failures, Some("t1"));
+        let tree = |_: &str| Some("t1".to_string());
+        let block = state.block("/home", tree, |_| false).unwrap();
+        assert_eq!(block.raised.reasons.len(), 5);
+        assert!(
+            block
+                .reason
+                .ends_with("(2 more after these, at the next stop.)"),
+            "{}",
+            block.reason
+        );
+        state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
+        let block = state.block("/home", tree, |_| false).unwrap();
+        assert_eq!(
+            block.reason.matches("[jouet: verify]").count(),
+            2,
+            "{}",
+            block.reason
+        );
+        assert!(
+            !block.reason.contains("more after these"),
+            "{}",
+            block.reason
+        );
+    }
+
+    #[test]
+    fn reasons_that_read_the_same_are_raised_and_counted_once() {
+        let mut state = State::default();
+        let stem = format!("cargo test -p a {}", "x".repeat(80));
+        let mut failures: Vec<Record> = (0..6)
+            .map(|i| test(&format!("{stem} case{i}"), 101, &format!("{stem} case{i}")))
+            .collect();
+        failures.push(test("cargo test -p b", 101, "-p b"));
+        state.record("/home", failures, Some("t1"));
+        let tree = |_: &str| Some("t1".to_string());
+        let block = state.block("/home", tree, |_| false).unwrap();
+        // Six cut to one text, and the other.
+        assert_eq!(block.raised.reasons.len(), 2, "{}", block.reason);
+        assert_eq!(block.raised.more, 0);
+        state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
+        assert_eq!(state.block("/home", tree, |_| false), None);
+    }
+
+    #[test]
+    fn a_long_command_is_cut_in_the_message_but_whole_in_the_hint() {
+        let long = format!(
+            "python -m unittest {}",
+            "tests.test_a ".repeat(10).trim_end()
+        );
+        let mut state = Checks::default();
+        state.record([test(&long, 1, "full")], Some("t1"));
+        let why = reason(&state, "t1").unwrap();
+        assert!(
+            why.contains(&format!("(`{}` exited 1)", shown(&long))),
+            "{why}"
+        );
+        assert!(shown(&long).ends_with("..."));
+        assert!(
+            why.contains(&format!("`jouet test --baseline --cmd -- {long}`")),
+            "{why}"
+        );
     }
 
     #[test]

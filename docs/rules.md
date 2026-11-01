@@ -287,7 +287,7 @@ The script returns a table with a `check` function, which gets the tool call and
 
 A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
 
-`call.commands` is the command parsed the way a shell parses it, as for a matcher. Each command has its `words`, its `argv` without wrappers, its `program`, its `heredocs`, the wrappers it ran `via`, whether it is `nested`, and whether one of the rule's matchers `matched` it. The `jouet` module has helpers for the common cases:
+`call.commands` is the command parsed the way a shell parses it, as for a matcher. Each command has its `words`, its `argv` without wrappers, its `program`, its `heredocs`, the wrappers it ran `via`, whether it is `nested`, whether one of the rule's matchers `matched` it, and its `argv` joined with spaces, as `text` cut to 80 characters for messages and as `line` whole. The `jouet` module has helpers for the common cases:
 
 - `jouet.git(command)` returns git's subcommand and arguments, past global options such as `-C dir`. (`jouet.git` is also where the `jouet.git.state()` probe lives.)
 - `jouet.gh(command)` returns gh's arguments.

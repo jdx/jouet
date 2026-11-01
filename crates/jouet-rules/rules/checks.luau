@@ -547,6 +547,7 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 				nested = command.nested,
 				status = command.status,
 				text = command.text,
+				line = command.line,
 			}
 			local inner_kind, inner_scope = classify(inner, dir)
 			return inner_kind, inner_scope
