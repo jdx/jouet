@@ -203,7 +203,7 @@ run = "jouet test --affected"
 |---|---|
 | `0` | the tests passed, or nothing needed to run |
 | `1` | the tests failed (the runner exited non-zero), or the `--cmd` command exited non-zero |
-| `2` | a usage error: `--since` or `--adapter` without `--affected`, `--cmd` without a command or with `--affected`, an unknown adapter or ref, or pytest's or unittest's own usage error |
+| `2` | a usage error: `--since` or `--adapter` without `--affected`, `--cmd` without a command or with `--affected`, `--budget` after `--` (where it would go to the command), an unknown adapter or ref, or pytest's or unittest's own usage error |
 | `4` | no adapter or test task was found, the runner or the `--cmd` program is not installed, or not in a git repository |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.
