@@ -25,6 +25,8 @@ static INTERESTING: LazyLock<Regex> =
 static FRAME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"^\s*(\d+: \S*(::|<unknown>)\S*.*",
+        // RUST_BACKTRACE=full's frames carry their address.
+        r"|\d+:\s+0x[0-9a-f]+ - \S.*",
         r"|at .+:(\d+|<unknown line>)(:\d+)?",
         r"|⋮ \d+ frames? hidden ⋮",
         r"|━+ BACKTRACE ━+",
@@ -36,7 +38,7 @@ static FRAME: LazyLock<Regex> = LazyLock::new(|| {
 /// Of [`FRAME`]'s lines: a numbered frame, a location, and a line only a
 /// backtrace prints.
 static NUMBERED: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\d+: \S").expect("a valid regex"));
+    LazyLock::new(|| Regex::new(r"^\s*\d+:\s+\S").expect("a valid regex"));
 static LOCATION: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*at .+:(\d+|<unknown line>)(:\d+)?$").expect("a valid regex"));
 static MARKER: LazyLock<Regex> = LazyLock::new(|| {
@@ -161,6 +163,13 @@ pub fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
 /// lines that look like errors with a little context, as [`excerpt`] does
 /// for a GitHub log. `tail` 0 keeps them all.
 pub fn trim(lines: Vec<String>, tail: usize) -> Excerpt {
+    // 0 keeps every line as it is, backtraces too.
+    if tail == 0 {
+        return Excerpt {
+            lines,
+            truncated: false,
+        };
+    }
     let before = lines.len();
     let lines = fold_backtraces(lines);
     // Folded lines are left out too.
@@ -310,6 +319,20 @@ mod tests {
             .to_vec();
         assert_eq!(super::fold_backtraces(js.clone()), js);
         assert!(!super::trim(js, 20).truncated);
+        // RUST_BACKTRACE=full, and 0 keeping everything.
+        let full: Vec<String> = [
+            "   0:     0x55d1c2a3 - std::panicking::begin_panic_handler",
+            "                               at /rustc/abc/library/std/src/panicking.rs:665:5",
+            "   1:     0x55d1c2b4 - core::panicking::panic_fmt",
+            "                               at /rustc/abc/library/core/src/panicking.rs:74:14",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        assert_eq!(
+            super::fold_backtraces(full.clone()),
+            ["... 4 backtrace lines skipped"]
+        );
+        assert_eq!(super::trim(full.clone(), 0).lines, full);
     }
 
     use super::*;
