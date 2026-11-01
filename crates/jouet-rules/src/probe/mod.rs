@@ -39,6 +39,9 @@ use std::time::Duration;
 
 /// The variables `jouet.env` reads. Anything with TOKEN, SECRET, PASSWORD
 /// or KEY in its name is refused even under `JOUET_`.
+/// The largest file `jouet.file.contains` reads.
+const FILE_MAX: u64 = 4 * 1024 * 1024;
+
 const ENV_ALLOWED: &[&str] = &[
     "AI_AGENT",
     "CARGO_TARGET_DIR",
@@ -157,6 +160,23 @@ impl Probes {
             }
             None => self.dir.clone(),
         }
+    }
+
+    /// Whether the file at `path`, from the work tree when relative, holds
+    /// `text`.
+    fn contains(&self, path: &str, text: &str) -> Answer {
+        let base = self.dir.clone().or_else(|| std::env::current_dir().ok());
+        let path = match base {
+            Some(base) if !Path::new(path).is_absolute() => base.join(path),
+            _ => PathBuf::from(path),
+        };
+        let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if meta.len() > FILE_MAX {
+            return Err(format!("{} is over 4 MiB", path.display()));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let found = memchr::memmem::find(&bytes, text.as_bytes()).is_some();
+        Ok(Some(found.into()))
     }
 
     fn last_run(
@@ -480,6 +500,18 @@ pub(crate) fn install(
         })?,
     )?;
     jouet.set("secrets", secrets_table)?;
+
+    let file_table = lua.create_table()?;
+    let s = shared.clone();
+    file_table.set(
+        "contains",
+        lua.create_function(move |lua, (path, text): (String, String)| {
+            let key = format!("contains:{path}\0{text}");
+            let found = cached(&s, &key, |p, _| p.contains(&path, &text))?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("file", file_table)?;
 
     let s = shared.clone();
     jouet.set(

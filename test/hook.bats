@@ -443,3 +443,38 @@ fnox_payload() {
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "jouet: this session runs under \`fnox proxy run\`"
 }
+
+@test "python-edit lets a replace through when its text is in the file, and names text that is not" {
+	git init -q repo
+	mkdir -p repo/src
+	printf 'fn main() {\n    old();\n}\n' >repo/src/a.rs
+	edit() {
+		jq -cn --arg cwd "$PWD/repo" --arg c "$1" '{session_id: "s1", cwd: $cwd, tool_name: "Bash",
+			tool_input: {command: $c}}' |
+			jouet hook claude pre-tool-use
+	}
+	script() {
+		printf "python3 - <<'E'\np='src/a.rs'\ns=open(p).read()\ns=s.replace(\"\"\"%s\"\"\", \"new();\")\nopen(p,'w').write(s)\nE" "$1"
+	}
+
+	# The old text is in the file, across lines too: the edit lands.
+	run --separate-stderr edit "$(script '    old();\n}')"
+	assert_success
+	assert_output ""
+
+	# It is not: the script would change nothing, and the denial says why.
+	run --separate-stderr edit "$(script 'missing();')"
+	assert_success
+	assert_output --partial 'text '
+	assert_output --partial 'missing();'
+	assert_output --partial 'is not in src/a.rs, so this script would change nothing there'
+	assert_output --partial '[jouet rule: python-edit]'
+
+	# After a cd, the path is from there.
+	run --separate-stderr edit "cd src && python3 - <<'E'
+s=open('a.rs').read()
+open('a.rs','w').write(s.replace('old();', 'new();'))
+E"
+	assert_success
+	assert_output ""
+}

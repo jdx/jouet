@@ -33,6 +33,9 @@ quiet = [
   "pythonic --replace( write(",
   # Writing one file from another is not an edit.
   "python3 - <<'EOF'\nrows = open('data.csv').read().splitlines()\nopen('report.md', 'w').write('\\n'.join(rows))\nEOF",
+  # Code that stops on a miss cannot silently change nothing.
+  "python3 - <<'EOF'\np = 'a.rs'\ns = open(p).read()\nassert 'old' in s\nopen(p, 'w').write(s.replace('old', 'new'))\nEOF",
+  "python3 - <<'EOF'\nimport sys\ns = open('a.rs').read()\nif 'old' not in s: sys.exit('no match')\nopen('a.rs', 'w').write(s.replace('old', 'new'))\nEOF",
   # A structured rewrite, which `jouet edit` cannot do.
   "python3 - <<'EOF'\nimport json\np = 'package.json'\nd = json.load(open(p))\nd['version'] = '1.0.0'\njson.dump(d, open(p, 'w'), indent=2)\nEOF",
 ]
