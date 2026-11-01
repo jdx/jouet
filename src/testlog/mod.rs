@@ -177,6 +177,13 @@ regexes! {
     TAP_OK = r"^ok \d+ ";
     TAP_SKIP = r"(?i)^ok \d+ .*# skip\b";
     TAP_NOT_OK = r"^not ok \d+ (.+?)(?: # .*)?$";
+    // An e2e runner in mise's style (`e2e/run_test`): plain, coloured (its
+    // colour taken off) or as a GitHub Actions annotation.
+    E2E_START = r"^(?:>>> |::group::)E2E (\S+)$";
+    E2E_FAILED = r"^(?:ERROR: )?E2E test (\S+) failed: exited with status code \d+$";
+    E2E_ANNOTATION = r"^::error .*title=E2E test (\S+) failed::";
+    E2E_ASSERTION = r"^(?:ERROR: )?E2E assertion failed: |^::error .*title=E2E assertion failed::";
+    E2E_DURATION = r"^\S+: \d+s$";
 }
 
 /// What `text`, a run's whole output, says. `failed` is whether the run
@@ -195,6 +202,7 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
     jest(&lines, &mut parsed);
     vitest(&lines, &mut parsed);
     tap(&lines, &mut parsed);
+    e2e(&lines, &mut parsed);
     let mut found = merge(parsed.found);
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
@@ -492,6 +500,39 @@ fn tap(lines: &[String], out: &mut Parsed) {
         }
     }
     out.count(passed, failed, skipped);
+}
+
+/// mise's e2e runner: each failed test by its name, with its failed
+/// assertion and what follows it, or without one the test's own lines.
+fn e2e(lines: &[String], out: &mut Parsed) {
+    let mut start = 0;
+    let mut failed = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if E2E_START.is_match(line) {
+            start = i + 1;
+            continue;
+        }
+        let Some(c) = E2E_FAILED
+            .captures(line)
+            .or_else(|| E2E_ANNOTATION.captures(line))
+        else {
+            continue;
+        };
+        failed += 1;
+        let body = &lines[start.min(i)..i];
+        let from = body
+            .iter()
+            .rposition(|l| E2E_ASSERTION.is_match(l))
+            .unwrap_or(0);
+        let block = body[from..]
+            .iter()
+            .filter(|l| !E2E_DURATION.is_match(l))
+            .cloned()
+            .collect();
+        out.push(i, &c[1], block);
+        start = i + 1;
+    }
+    out.count(0, failed, 0);
 }
 
 /// The failures in the order the output first names them, each once: a

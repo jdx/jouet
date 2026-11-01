@@ -54,7 +54,7 @@ FAIL tests::unwraps_none
 full log: ~/.local/state/jouet/logs/test-1793449700778-936641-0.log
 ```
 
-Failures are recognised, by their lines rather than by the command, in the output of cargo test and nextest, rustc (errors by file and line; warnings are counted), tsc, go test and go build, pytest, unittest, jest, vitest and TAP, which bats prints. One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
+Failures are recognised, by their lines rather than by the command, in the output of cargo test and nextest, rustc (errors by file and line; warnings are counted), tsc, go test and go build, pytest, unittest, jest, vitest, TAP, which bats prints, and mise's e2e runner (`E2E test NAME failed`, with the failed assertion). One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
 
 This is for agents, and for plain display (pipes, redirects, CI). A person at a terminal sees the output as it runs, then the line with the counts and the log's path. `--json` puts the counts and failures in the document (see [JSON](#json)).
 

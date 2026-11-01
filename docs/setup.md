@@ -187,7 +187,7 @@ The same records guard what leaves the machine:
 Known false positives and misses:
 
 - A check you expected to fail, such as a test written to fail first or a failure that is already on the main branch, still blocks once. Say so in the reply and stop again; later turns are not asked again until the tree changes or a check runs.
-- A full pass of a different selection does not clear a partial failure unless it is a full run: `cargo test -p a` failing, then `cargo test -p a -p b` passing, still blocks once.
+- A pass of a different partial selection clears a partial failure only when it is the same command over more names, with no options in either: `mise run test:e2e test_b test_a` passing clears `mise run test:e2e test_a` failing, but `cargo test -p a -p b` passing does not clear `cargo test -p a` failing, which still blocks once.
 - A check piped through `head`, `tail` or `grep` exits with that command's status, not the check's, so without `set -o pipefail` it is not recorded at all: it neither clears an earlier failure nor fails one. Run it through `jouet test` instead, or with `pipefail`.
 - A command that changes tracked files and then runs the tests, such as a formatter in the same script, is recorded at the tree after it finished.
 - Runs in the background, and checks run through a script the hook cannot see into, are not recorded.

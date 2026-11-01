@@ -287,3 +287,27 @@ fn a_long_line_is_cut_and_says_by_how_much() {
     assert!(lines[1].ends_with(" ... 211 more bytes"), "{}", lines[1]);
     assert_eq!(lines[2], " right: \"b\"");
 }
+
+#[test]
+fn mise_e2e_failures_carry_their_assertion() {
+    let d = digest(&fixture("mise-e2e"), true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["backend/test_vfox_exec_env_cache"]);
+    let lines = &d.failures[0].lines;
+    assert!(
+        lines[0].starts_with("ERROR: E2E assertion failed: [mise env -s bash]"),
+        "{lines:?}"
+    );
+    assert_eq!(lines.len(), 2, "{lines:?}");
+}
+
+#[test]
+fn mise_e2e_failures_as_annotations() {
+    let text = "::group::E2E cli/test_a\nDEBUG: $ mise ls\n::error file=e2e/cli/test_a,title=E2E assertion failed::[mise ls] expected 'x'\n::endgroup::\n::error file=e2e/cli/test_a,title=E2E test cli/test_a failed::exited with status code 1\n";
+    let d = digest(text, true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["cli/test_a"]);
+    assert_eq!(
+        d.failures[0].lines[0],
+        "::error file=e2e/cli/test_a,title=E2E assertion failed::[mise ls] expected 'x'"
+    );
+}

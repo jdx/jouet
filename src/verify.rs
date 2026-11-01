@@ -71,6 +71,25 @@ impl Run {
     fn passed(&self) -> bool {
         self.exit_code == 0
     }
+
+    /// Whether this pass ran what `failed` selected: the same selection, or
+    /// the same command over more names (`test:e2e a b` covers `test:e2e
+    /// a`). An option can change what the words mean (pytest's `-k not x`),
+    /// so a selection with one must match exactly.
+    fn covers(&self, failed: &Run) -> bool {
+        let (ran, wanted) = (self.selection(), failed.selection());
+        if ran == wanted {
+            return true;
+        }
+        let words = |s: &str| -> Option<Vec<String>> {
+            let words: Vec<String> = s.split_whitespace().map(str::to_string).collect();
+            (!words.iter().any(|w| w.starts_with('-') && w != "--")).then_some(words)
+        };
+        let (Some(ran), Some(wanted)) = (words(ran), words(wanted)) else {
+            return false;
+        };
+        !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
+    }
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -290,7 +309,7 @@ impl Checks {
                 failures.clear();
                 self.full_passes.insert(kind, run.clone());
             } else if run.passed() {
-                failures.retain(|f| f.full || f.selection() != run.selection());
+                failures.retain(|f| f.full || !run.covers(f));
             } else {
                 failures.retain(|f| f.full != run.full || f.selection() != run.selection());
                 failures.push(run.clone());
@@ -424,8 +443,7 @@ impl Checks {
                         && self.passes.get(kind).is_some_and(|passes| {
                             passes.iter().any(|p| {
                                 p.tree.as_deref() == Some(now.as_str())
-                                    && (p.full
-                                        || (!failed.full && p.selection() == failed.selection()))
+                                    && (p.full || (!failed.full && p.covers(failed)))
                             })
                         })
                 })
@@ -459,7 +477,7 @@ impl Checks {
             format!("only a full {} run clears it", kind.name())
         } else {
             format!(
-                "a run of the same selection or a full {} run clears it",
+                "a run of the same selection, alone or with more names, or a full {} run clears it",
                 kind.name()
             )
         };
@@ -750,6 +768,30 @@ mod tests {
         both.record([test("go test ./...", 0, "full")], Some("fixed"));
         both.record([test("go test ./...", 1, "full")], Some("unfixed"));
         assert_eq!(reason(&both, "fixed"), None);
+    }
+
+    #[test]
+    fn a_pass_over_more_names_clears_a_failure() {
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        let e2e = |names: &str, code| {
+            test(
+                &format!("mise run test:e2e {names}"),
+                code,
+                &format!("test:e2e {names}"),
+            )
+        };
+        state.record([e2e("test_a", 1)], Some("t1"));
+        // Other names, or the same one run with an option, do not.
+        state.record([e2e("test_b test_c", 0)], Some("t1"));
+        state.record([test("pytest -k test_a", 0, "-k test_a")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([e2e("test_b test_a", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        // A selection with an option has to match exactly.
+        state.record([test("pytest -k x", 1, "-k x")], Some("t1"));
+        state.record([test("pytest -k not x", 0, "-k not x")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
     }
 
     #[test]
