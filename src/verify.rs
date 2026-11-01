@@ -105,6 +105,25 @@ pub(crate) struct Checks {
     /// What the stop hook last blocked for, until a run is recorded here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raised: Option<Raised>,
+    /// The `jouet test` runs still going here, as each marked itself when
+    /// it started, until it records its result: runs can overlap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub running: Vec<Running>,
+}
+
+/// A `jouet test` run in progress.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Running {
+    pub pid: u32,
+    pub command: String,
+}
+
+impl Running {
+    /// Whether its process has not exited: one killed before it recorded a
+    /// result holds nothing up.
+    fn alive(&self) -> bool {
+        jouet_wait::process_running(self.pid)
+    }
 }
 
 /// The reasons the stop hook blocked with, and the tree it saw then.
@@ -201,6 +220,28 @@ impl State {
                 raised,
             })
         })
+    }
+
+    /// Drops the checks of work trees that are gone, such as a removed
+    /// worktree: nothing is left there to check.
+    pub(crate) fn prune_gone(&mut self) {
+        self.trees
+            .retain(|root, _| root.is_empty() || Path::new(root).is_dir());
+    }
+
+    /// Marks a `jouet test` run as going in the work tree at `root`.
+    pub(crate) fn start_run(&mut self, root: &str, running: Running) {
+        let runs = &mut self.trees.entry(root.to_string()).or_default().running;
+        // Marks whose process is gone are dropped as new ones come.
+        runs.retain(|r| r.pid != running.pid && r.alive());
+        runs.push(running);
+    }
+
+    /// Clears the mark the run with process `pid` left in `root`.
+    pub(crate) fn end_run(&mut self, root: &str, pid: u32) {
+        if let Some(checks) = self.trees.get_mut(root) {
+            checks.running.retain(|r| r.pid != pid);
+        }
     }
 
     /// Keeps what a stop was blocked for, so the next stop at the same tree
@@ -312,8 +353,13 @@ impl Checks {
     /// gives the work tree now; it is only asked for when one of the last
     /// two could apply.
     pub(crate) fn reasons(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Vec<String> {
-        let mut reasons = self.failure_reasons(&tree);
-        reasons.extend(self.partial_test_reason(&tree));
+        // While a test run is still going, its result decides; the agent
+        // waiting for it is not finishing on a stale one.
+        let testing = self.running.iter().any(Running::alive);
+        let mut reasons = self.failure_reasons(&tree, testing);
+        if !testing {
+            reasons.extend(self.partial_test_reason(&tree));
+        }
         reasons.extend(self.hk_reason(&tree, hk_repo));
         reasons
     }
@@ -368,7 +414,7 @@ impl Checks {
     /// would clear it ran at the tree now: the files are back to ones that
     /// passed, as after checking that a test fails without a fix and putting
     /// the fix back. `tree` is only asked for when there is a failure.
-    fn failure_reasons(&self, tree: &impl Fn() -> Option<String>) -> Vec<String> {
+    fn failure_reasons(&self, tree: &impl Fn() -> Option<String>, skip_tests: bool) -> Vec<String> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(tree).clone();
         let passed_now = |kind: &Kind, failed: &Run| {
@@ -386,6 +432,7 @@ impl Checks {
         };
         self.failures
             .iter()
+            .filter(|(kind, _)| !(skip_tests && **kind == Kind::Test))
             .flat_map(|(kind, failures)| {
                 let full = failures.iter().rev().filter(|f| f.full);
                 let partial = failures.iter().rev().filter(|f| !f.full);
@@ -602,6 +649,82 @@ mod tests {
         assert!(why.contains("only a full test run clears it"), "{why}");
         state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn a_test_run_still_going_holds_back_test_reasons_only() {
+        let mut state = State::default();
+        let root = std::env::temp_dir().to_string_lossy().into_owned();
+        state.record(
+            &root,
+            [test("cargo test --workspace", 101, "full")],
+            Some("t1"),
+        );
+        state.record(
+            &root,
+            [record(Kind::Lint, "cargo clippy", 1, "full")],
+            Some("t1"),
+        );
+        let block = |state: &State| {
+            state
+                .block(&root, |_| Some("t1".into()), |_| false)
+                .map(|b| b.reason)
+        };
+        assert!(block(&state).unwrap().contains("test run"));
+        // This process is alive: the run it marks decides the tests.
+        let command = "jouet test".to_string();
+        let pid = std::process::id();
+        state.start_run(&root, Running { pid, command });
+        let why = block(&state).unwrap();
+        assert!(why.contains("lint run"), "{why}");
+        state.end_run(&root, pid);
+        // A run whose process is gone holds nothing back.
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        state.start_run(
+            &root,
+            Running {
+                pid: gone,
+                command: "jouet test".into(),
+            },
+        );
+        assert!(block(&state).unwrap().contains("test run"));
+        state.end_run(&root, gone);
+        assert!(state.trees[&root].running.is_empty());
+        // Of two overlapping runs, the one still going holds back tests
+        // after the other has ended.
+        state.start_run(
+            &root,
+            Running {
+                pid,
+                command: "jouet test".into(),
+            },
+        );
+        state.start_run(
+            &root,
+            Running {
+                pid: gone,
+                command: "jouet test --cmd".into(),
+            },
+        );
+        state.end_run(&root, gone);
+        assert!(block(&state).unwrap().contains("lint run"));
+    }
+
+    #[test]
+    fn a_work_tree_that_is_gone_is_not_judged() {
+        let mut state = State::default();
+        let gone = std::env::temp_dir().join("jouet-verify-gone-tree-that-does-not-exist");
+        let gone = gone.to_string_lossy().into_owned();
+        state.record(
+            &gone,
+            [test("cargo test --workspace", 101, "full")],
+            Some("t1"),
+        );
+        assert!(state.block("/home", |_| None, |_| false).is_some());
+        state.prune_gone();
+        assert!(state.block("/home", |_| None, |_| false).is_none());
     }
 
     #[test]

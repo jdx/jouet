@@ -16,6 +16,7 @@ pub mod job;
 pub mod joblog;
 pub mod local;
 mod os;
+pub use os::process_running;
 pub mod pitchfork;
 pub mod pr;
 pub mod remote;

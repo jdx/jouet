@@ -145,6 +145,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>)> = Vec::new();
+    let runs = !args.dry_run && jobs.iter().any(Option::is_some);
+    // Marked for the stop gate while it runs; a run that dies early leaves a
+    // mark whose process is gone, which holds nothing up.
+    if runs {
+        super::hook::mark_own_run(&cwd, &own_command(), true);
+    }
     if !args.dry_run {
         for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
@@ -207,8 +213,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     report.ok = exit == Exit::Ok;
     // Kept by the run itself, since a pipe hides its exit status from the
     // hooks.
-    if !args.dry_run && jobs.iter().any(Option::is_some) {
+    if runs {
         super::hook::record_own_run(&cwd, &own_command(), i32::from(exit.code()));
+        super::hook::mark_own_run(&cwd, &own_command(), false);
     }
     if out.json {
         out.result(&report, String::new);
