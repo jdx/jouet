@@ -150,7 +150,7 @@ fn handle(
         "session-start" => {
             log.append(log.entry("session-start"));
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
-            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify);
+            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify, harness);
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
             let mut notes = wind_notes(settings, log.session, log.repo.as_deref(), cwd);
             notes.extend(untrusted_note(&loaded));
@@ -588,7 +588,24 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
     outcome
 }
 
-fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
+/// How `harness` waits for a long command in one call, for the primer. Claude
+/// Code moves a Bash call past its 2-minute default timeout to the
+/// background, and Codex's exec returns after its yield time; either way the
+/// agent then spent a request on each check of it. In one benchmark run,
+/// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
+fn wait_hint(harness: Harness) -> Option<&'static str> {
+    match harness {
+        Harness::Claude => Some(
+            "Give a build or test that can take over 2 minutes a Bash `timeout` of 600000, so it ends in that call.",
+        ),
+        Harness::Codex => Some(
+            "Wait for a long command in one call (a large yield_time_ms, or a loop on write_stdin until it exits), not a call per poll.",
+        ),
+        Harness::Cursor | Harness::Gemini | Harness::Copilot => None,
+    }
+}
+
+fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -> Value {
     // Only the rules that deny: a warning costs the agent no call.
     let rules: Vec<(&str, Option<&str>)> = if steer {
         engine
@@ -608,7 +625,7 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
         Vec::new()
     };
     let affected = std::env::current_dir().is_ok_and(|cwd| !crate::affected::near(&cwd).is_empty());
-    let mut context = guide::summary(&rules, verify, affected);
+    let mut context = guide::summary(&rules, verify, affected, wait_hint(harness));
     // A deprecated Luau rule file: the agent can convert it.
     for note in engine
         .rules()
@@ -1313,7 +1330,7 @@ mod tests {
 
     #[test]
     fn winding_notes_follow_the_primer() {
-        let primer = session_start(&engine(Vec::new()), true, true);
+        let primer = session_start(&engine(Vec::new()), true, true, Harness::Claude);
         let before = primer["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap()
@@ -1341,10 +1358,16 @@ mod tests {
 
     #[test]
     fn the_primer_names_the_active_rules() {
-        let out = session_start(&engine(Vec::new()), true, true);
+        let out = session_start(&engine(Vec::new()), true, true, Harness::Claude);
         let context = out["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
+        // How to wait for a long run in one call, for this harness.
+        assert!(context.contains("a Bash `timeout` of 600000"), "{context}");
+        let codex = session_start(&engine(Vec::new()), true, true, Harness::Codex);
+        let codex = codex["hookSpecificOutput"]["additionalContext"].to_string();
+        assert!(codex.contains("loop on write_stdin"), "{codex}");
+        assert!(!codex.contains("Bash `timeout`"), "{codex}");
         assert!(context.contains("git-stash"), "{context}");
         assert!(
             context.contains("python-edit (use `jouet edit`)"),
@@ -1356,7 +1379,10 @@ mod tests {
         // printed 5.9 kB once each. Then to 1500 for `--baseline`: without it,
         // Codex changed the environment, outside its checkout, to make
         // failures it had not caused pass, in each of six benchmark runs.
-        assert!(context.len() <= 1500, "{} bytes:\n{context}", context.len());
+        // Then to 1600 for waiting in one call: about 25 tokens a request,
+        // where each check on a long run in the background cost a request
+        // of 40k tokens or more.
+        assert!(context.len() <= 1600, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");
