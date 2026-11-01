@@ -135,6 +135,31 @@ fn post_tool_use_rules_record_checks() {
 }
 
 #[test]
+fn a_long_check_is_recorded_whole() {
+    let long = format!(
+        "cargo test -p jouet {}",
+        "verify::tests::a_case ".repeat(6).trim_end()
+    );
+    assert!(long.len() > 80);
+    let call = Call {
+        event: Some(Event::PostToolUse),
+        exit_code: Some(101),
+        ..bash(&long)
+    };
+    let outcome = engine(builtin()).evaluate(&call);
+    assert_eq!(outcome.records[0].command, long);
+    // Through `jouet test --cmd` too.
+    let wrapped = format!("jouet test --cmd -- {long}");
+    let call = Call {
+        event: Some(Event::PostToolUse),
+        exit_code: Some(1),
+        ..bash(&wrapped)
+    };
+    let outcome = engine(builtin()).evaluate(&call);
+    assert_eq!(outcome.records[0].command, wrapped);
+}
+
+#[test]
 fn disabled_rules_and_missing_commands_do_not_run() {
     let engine = Engine::new(
         builtin(),

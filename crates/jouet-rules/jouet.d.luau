@@ -61,6 +61,8 @@ export type JouetCommand = {
 	status: number?,
 	-- `argv` joined with spaces, cut to 80 characters, for messages.
 	text: string,
+	-- `argv` joined with spaces, whole.
+	line: string,
 }
 
 export type JouetEvent = "pre-tool-use" | "post-tool-use"

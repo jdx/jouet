@@ -1805,7 +1805,10 @@ fn install_module(
                     records.records.borrow_mut().push(Record {
                         rule: String::new(),
                         kind,
-                        command: command.raw_get("text")?,
+                        // Whole, so what is suggested from it can run.
+                        command: command
+                            .raw_get::<Option<String>>("line")?
+                            .map_or_else(|| command.raw_get("text"), Ok)?,
                         exit_code: status,
                         full,
                         selector: selector.filter(|s| !full && !s.is_empty()),
@@ -1920,12 +1923,13 @@ fn command_table(
     t.set("nested", nested)?;
     t.set("status", status)?;
     t.set("matched", matched)?;
-    let text = argv.join(" ");
-    let text = match text.char_indices().nth(80) {
-        Some((i, _)) => format!("{}...", &text[..i]),
-        None => text,
+    let line = argv.join(" ");
+    let text = match line.char_indices().nth(80) {
+        Some((i, _)) => format!("{}...", &line[..i]),
+        None => line.clone(),
     };
     t.set("text", text)?;
+    t.set("line", line)?;
     Ok(t)
 }
 
