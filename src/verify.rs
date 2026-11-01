@@ -395,10 +395,14 @@ impl Checks {
             Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
             _ => Vec::new(),
         };
-        let new: Vec<String> = reasons
-            .into_iter()
-            .filter(|r| !raised.contains(r))
-            .collect();
+        // Two runs whose commands are cut to the same text read as one
+        // reason, so they are raised, and counted, as one.
+        let mut new: Vec<String> = Vec::new();
+        for reason in reasons {
+            if !raised.contains(&reason) && !new.contains(&reason) {
+                new.push(reason);
+            }
+        }
         if new.is_empty() {
             return None;
         }
@@ -468,7 +472,7 @@ impl Checks {
         }
         Some(format!(
             "The tree has changed since the last full test run (`{}`), and only part of the suite has run since (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]",
-            full.command
+            shown(&full.command)
         ))
     }
 
@@ -1113,6 +1117,24 @@ mod tests {
             "{}",
             block.reason
         );
+    }
+
+    #[test]
+    fn reasons_that_read_the_same_are_raised_and_counted_once() {
+        let mut state = State::default();
+        let stem = format!("cargo test -p a {}", "x".repeat(80));
+        let mut failures: Vec<Record> = (0..6)
+            .map(|i| test(&format!("{stem} case{i}"), 101, &format!("{stem} case{i}")))
+            .collect();
+        failures.push(test("cargo test -p b", 101, "-p b"));
+        state.record("/home", failures, Some("t1"));
+        let tree = |_: &str| Some("t1".to_string());
+        let block = state.block("/home", tree, |_| false).unwrap();
+        // Six cut to one text, and the other.
+        assert_eq!(block.raised.reasons.len(), 2, "{}", block.reason);
+        assert_eq!(block.raised.more, 0);
+        state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
+        assert_eq!(state.block("/home", tree, |_| false), None);
     }
 
     #[test]
