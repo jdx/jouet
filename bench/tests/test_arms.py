@@ -10,6 +10,14 @@ from jbench import arms
 
 
 class ResolveTest(unittest.TestCase):
+    def test_resolve_mise_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mise = Path(tmp) / "mise"
+            mise.write_text("#!/bin/sh\nexit 1\n")
+            mise.chmod(0o755)
+            with patch.dict(os.environ, {"PATH": tmp}):
+                self.assertEqual(arms.resolve("mise"), mise.resolve())
+
     def test_inactive_mise_shim_falls_back_to_next_path_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

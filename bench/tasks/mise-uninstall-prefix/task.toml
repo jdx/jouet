@@ -44,12 +44,6 @@ Fix this in mise, with a test, and commit.
 git = "~/src/mise"
 commit = "4ca796a0bf27f2dab88f8ec930eb7870a36b407d"
 
-# The user's Rust toolchain and mise, without the rest of ~/.local/bin (which
-# holds jouet). `mise run` installs the repository's own tools, mbx among
-# them, into the run's home.
-[tools]
-mise = "~/.local/bin/mise"
-
 [env]
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"

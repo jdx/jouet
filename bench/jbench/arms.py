@@ -35,7 +35,7 @@ from typing import Any
 from .harness import Harness
 
 # Tools linked into every run's bin/ when the machine has them.
-TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch")
+TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch", "mise")
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ def resolve(tool: str) -> Path | None:
         if not found:
             continue
         real = Path(found).resolve()
-        if real.name != "mise":
+        if real.name != "mise" or tool == "mise":
             return real
         proc = subprocess.run([str(real), "which", tool], capture_output=True, text=True)
         if proc.returncode == 0 and proc.stdout.strip():

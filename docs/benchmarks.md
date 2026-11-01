@@ -131,7 +131,7 @@ Results go to `bench/results/<timestamp>/`, which git ignores:
 
 The `bench agents` workflow never runs on its own. Someone dispatches it, and by default it is a dry run of the smoke task. Untick `dry_run` to run agents with the `BENCH_ANTHROPIC_API_KEY` and `BENCH_OPENAI_API_KEY` secrets. The summary goes to the job summary and the results directory to an artifact. `mise run test`, which CI runs, includes `test:bench` and never starts an agent.
 
-The workflow installs the harnesses from `mise.bench.toml`, at the versions `mise.bench.lock` pins, so a result names exactly what it measured. That file is loaded only with `MISE_ENV=bench`, so it never changes the `claude` or `codex` you run day to day in the repository. Bump them with `MISE_ENV=bench mise lock`, and run them locally with `MISE_ENV=bench mise run bench:agents`.
+The workflow installs the harnesses, Python and GitHub CLI from `mise.bench.toml`, at the versions `mise.bench.lock` pins. That file is loaded only with `MISE_ENV=bench`, so it does not change the tools you run day to day in the repository. Install the benchmark tools with `MISE_ENV=bench mise install`, then run the suite with `MISE_ENV=bench mise run bench:agents`. Bump the versions deliberately with `MISE_ENV=bench mise lock --bump`.
 
 ## Why it is built this way
 
