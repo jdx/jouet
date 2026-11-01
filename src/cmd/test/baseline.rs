@@ -144,7 +144,7 @@ pub(super) fn base(root: &Path, since: Option<&str>) -> Result<affected::Base, a
 }
 
 /// Whether [`compare`] may run a failed job at the merge base when nothing
-/// is kept for it ([`known`]), or only use what is kept.
+/// is kept for it ([`known`]), retry an inconclusive run, or only use what is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Mode {
     Run,
@@ -228,9 +228,10 @@ impl Drop for Checkout<'_> {
 }
 
 /// Sorts each failed job's failures into those the merge base has too and
-/// the new ones, from what [`known`] keeps for the job at `base`, or, with
-/// [`Mode::Run`], by running it again in a worktree of `base` and keeping
-/// what came of it. None in [`Mode::Kept`] when a job has nothing kept.
+/// the new ones, from what [`known`] keeps for the job at `base`, or by
+/// running it again in a worktree of `base` and keeping what came of it.
+/// [`Mode::Retry`] also retries an inconclusive cached run; [`Mode::Kept`]
+/// returns None when a job has nothing kept.
 pub(super) fn compare(
     root: &Path,
     base: affected::Base,
