@@ -115,13 +115,34 @@ def build(
     jouet_bin: Path,
     fake_url: str | None,
     repo: str,
+    tmp: Path | None = None,
 ) -> dict[str, str]:
     """Creates the run's home and returns the environment to run it in."""
+    env = base_env(run_dir, fake_url, repo, tmp)
+    bin_dir = run_dir / "bin"
+    config_dir = Path(env["HOME"]) / harness.default_config_dir
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / harness.binary).symlink_to(harness_bin)
+    if arm.jouet:
+        wrapper(bin_dir / "jouet", jouet_bin.resolve(), jouet_env(fake_url) if fake_url else {})
+    env[harness.config_dir_env] = str(config_dir)
+    env["DISABLE_AUTOUPDATER"] = "1"
+    for key in harness.auth_env:
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    return env
+
+
+def base_env(run_dir: Path, fake_url: str | None, repo: str, tmp: Path | None = None) -> dict[str, str]:
+    """A home, `bin/`, TMPDIR and environment of the run's own, with no
+    harness: what the agent runs in, less its harness, and what a check
+    runs in when there was no agent. TMPDIR is `tmp`, else `<run>/t`."""
     home = run_dir / "home"
     bin_dir = run_dir / "bin"
-    tmp = run_dir / "tmp"
-    config_dir = home / harness.default_config_dir
-    for d in (home, bin_dir, tmp, config_dir):
+    # Short, because a Unix socket's path has to fit in about 100 bytes and
+    # a project's tests make theirs several directories below TMPDIR.
+    tmp = tmp or run_dir / "t"
+    for d in (home, bin_dir, tmp):
         d.mkdir(parents=True, exist_ok=True)
     (home / ".gitconfig").write_text(
         "[user]\n\tname = Bench Agent\n\temail = agent@example.invalid\n[init]\n\tdefaultBranch = main\n"
@@ -131,7 +152,9 @@ def build(
         real = resolve(tool)
         if real:
             (bin_dir / tool).symlink_to(real)
-    (bin_dir / harness.binary).symlink_to(harness_bin)
+    # An agent with root can write anywhere; this one cannot.
+    (bin_dir / "sudo").write_text("#!/bin/sh\necho 'sudo is not available in the benchmark' >&2\nexit 1\n")
+    (bin_dir / "sudo").chmod(0o755)
 
     gh = resolve("gh")
     if gh and fake_url:
@@ -139,10 +162,7 @@ def build(
     elif gh:
         (bin_dir / "gh").symlink_to(gh)
 
-    if arm.jouet:
-        wrapper(bin_dir / "jouet", jouet_bin.resolve(), jouet_env(fake_url) if fake_url else {})
-
-    env = {
+    return {
         "PATH": f"{bin_dir}:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(home),
         "USER": os.environ.get("USER", "bench"),
@@ -153,14 +173,12 @@ def build(
         "XDG_CACHE_HOME": str(home / ".cache"),
         "XDG_DATA_HOME": str(home / ".local" / "share"),
         "XDG_STATE_HOME": str(home / ".local" / "state"),
-        harness.config_dir_env: str(config_dir),
         "GIT_TERMINAL_PROMPT": "0",
-        "DISABLE_AUTOUPDATER": "1",
+        # mise reads every mise.toml, and `.config/mise/config.toml`, in the
+        # directories above the one it runs in: above the run, those are the
+        # user's own. The ceiling itself is not searched.
+        "MISE_CEILING_PATHS": str(run_dir),
     }
-    for key in harness.auth_env:
-        if os.environ.get(key):
-            env[key] = os.environ[key]
-    return env
 
 
 def credential_files(harness: Harness) -> list[Path]:

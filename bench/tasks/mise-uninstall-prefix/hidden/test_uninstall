@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+export CLICOLOR=0
+
+echo "dummy latest" >.tool-versions
+
+assert_contains "mise ls dummy" "2.0.0 (missing)"
+
+mise i dummy@{1.0.0,1.1.0,2.0.0}
+assert_contains "mise ls dummy" "1.0.0"
+assert_contains "mise ls dummy" "1.1.0"
+assert_contains "mise ls dummy" "2.0.0"
+
+mise uninstall -a dummy@1
+assert_not_contains "mise ls dummy" "1.0.0"
+assert_not_contains "mise ls dummy" "1.1.0"
+assert_contains "mise ls dummy" "2.0.0"
+
+mise uninstall -a dummy
+assert_not_contains "mise ls dummy" "1.1.0"
+assert_not_contains "mise ls dummy" "2.0.1"
+assert_not_contains "mise ls dummy" "2.1.0"
+
+# Test: --dry-run-code should exit non-zero when there are tools to uninstall
+mise i dummy@1.0.0
+assert_fail_contains "mise uninstall dummy@1.0.0 --dry-run-code 2>&1" "uninstalled (dry-run)"
+# Verify the tool was NOT actually uninstalled
+assert_contains "mise ls --installed dummy" "1.0.0"
+
+# Test: --dry-run-code should exit 0 when the tool is not installed
+mise uninstall dummy@1.0.0
+assert_succeed "mise uninstall dummy@1.0.0 --dry-run-code 2>&1"
+
+# Test: a dry run reports each version once, naming every path it would remove
+mise i dummy@1.0.0 dummy@1.1.0
+mkdir -p "$(mise cache path 2>/dev/null || echo "$MISE_CACHE_DIR")/dummy/1.0.0" "$(mise cache path 2>/dev/null || echo "$MISE_CACHE_DIR")/dummy/1.1.0"
+out="$(mise uninstall --all --dry-run dummy 2>&1)"
+for v in 1.0.0 1.1.0; do
+  assert_contains_text "count=$(grep -c "dummy@$v .*remove" <<<"$out")" "count=1"
+  row="$(grep "dummy@$v .*remove" <<<"$out")"
+  assert_contains_text "$row" "installs/dummy/$v"
+  # the install path and the cache path
+  assert_contains_text "paths=$(grep -o "dummy/$v" <<<"$row" | wc -l | tr -d ' ')" "paths=2"
+done
+
+# Test: a version that is only a string prefix of another is not a match
+mise i dummy@1.1.1 dummy@1.1.12
+mise uninstall dummy@1.1.1
+assert_not_contains "mise ls --installed --json dummy" '"version": "1.1.1"'
+assert_contains "mise ls --installed --json dummy" '"version": "1.1.12"'
+# the second uninstall finds nothing named 1.1.1, so 1.1.12 stays
+assert_contains "mise uninstall dummy@1.1.1 2>&1" "is not installed"
+assert_contains "mise ls --installed --json dummy" '"version": "1.1.12"'
+# Test: latest removes only the newest installed version, not every version
+mise i dummy@1.1.1
+assert_succeed "mise uninstall dummy@latest"
+assert_contains "mise ls --installed --json dummy" '"version": "1.1.1"'
+assert_not_contains "mise ls --installed --json dummy" '"version": "1.1.12"'
+
+# Test: a backend's own matching applies; java accepts a + build after any query
+mkdir -p "$MISE_DATA_DIR/installs/java/temurin-21.0.1+12" "$MISE_DATA_DIR/installs/java/temurin-21.0.1+13"
+assert_fail_contains "mise uninstall java@temurin-21.0.1 2>&1" "multiple tools specified"
+assert_succeed "mise uninstall --all java@temurin-21.0.1"
+assert_not_contains "mise ls --installed --json java" "temurin-21.0.1"

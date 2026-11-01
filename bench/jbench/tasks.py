@@ -6,7 +6,9 @@ A task is a directory under `bench/tasks/`:
   a timeout, and optionally `branch` (checked out for the agent) and
   `untracked` (files left uncommitted in the work tree, such as another
   session's scratch output);
-- `repo/`: the files committed on `main`;
+- `repo/`: the files committed on `main`, or instead `[source]` in
+  `task.toml`: `git` (a local repository, read only) and `commit`, whose tree
+  is committed on `main` as the one commit, without its history;
 - `pr/` (optional): files committed on `branch` on top of `repo/`;
 - `github.json` (optional): the fake GitHub's fixture. `{{head_sha}}` and
   `{{base_sha}}` are replaced with the commits made here, and `{{head_short}}`
@@ -18,6 +20,19 @@ A task is a directory under `bench/tasks/`:
 - `solve.py`: a reference solution, run in a fresh work tree by
   `check-tasks` to prove `check.py` passes for a correct answer (and fails
   without one). It gets `BENCH_GITHUB_URL` for a task with a fake GitHub.
+
+A task on a real project also sets, in `task.toml`:
+
+- `opt_in = true`, so that it runs only when named with `--tasks`;
+- `remote = false`, for a repository with no forge remote, and
+  `upstream = true` to give it a local bare `origin` instead, holding the
+  base commit as `main`, which `main` tracks: an agent that commits on
+  `main` still has a branch to measure its change from, as in a clone;
+- `check_timeout_s`, for a check that builds the project;
+- `[tools]`: programs linked into the agent's `bin/` (name = path), and
+  `[env]`: variables set for the agent, such as a toolchain's home. A leading
+  `~/` is the user's home, and `{workdir}` is the work tree;
+- `path`: directories appended to the agent's `PATH`, after the tools.
 
 Commits use a fixed author and date, so a task's SHAs are the same in every
 run and on every machine.
@@ -62,6 +77,24 @@ class Task:
     branch: str | None = None
     untracked: dict[str, str] = field(default_factory=dict)
     probes: list[dict[str, Any]] = field(default_factory=list)
+    source: dict[str, str] | None = None
+    opt_in: bool = False
+    remote: bool = True
+    upstream: bool = False
+    check_timeout_s: int = 120
+    tools: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    path: list[str] = field(default_factory=list)
+
+    def agent_env(self, env: dict[str, str], bin_dir: Path, workdir: Path) -> None:
+        """Adds the task's tools, variables and PATH entries to a run's environment."""
+        for name, target in self.tools.items():
+            link = bin_dir / name
+            if not link.exists():
+                link.symlink_to(expand(target, workdir))
+        env.update({k: expand(v, workdir) for k, v in self.env.items()})
+        if self.path:
+            env["PATH"] = os.pathsep.join([env["PATH"], *(expand(p, workdir) for p in self.path)])
 
     @property
     def has_github(self) -> bool:
@@ -81,7 +114,7 @@ def load(name: str) -> Task:
     d = TASKS_DIR / name
     with (d / "task.toml").open("rb") as f:
         raw = tomllib.load(f)
-    for required in ("check.py", "solve.py", "repo"):
+    for required in ("check.py", "solve.py") if "source" in raw else ("check.py", "solve.py", "repo"):
         if not (d / required).exists():
             raise ValueError(f"task {name} has no {required}")
     return Task(
@@ -96,7 +129,21 @@ def load(name: str) -> Task:
         branch=raw.get("branch"),
         untracked=dict(raw.get("untracked", {})),
         probes=list(raw.get("probe", [])),
+        source=raw.get("source"),
+        opt_in=bool(raw.get("opt_in", False)),
+        remote=bool(raw.get("remote", True)),
+        upstream=bool(raw.get("upstream", False)),
+        check_timeout_s=int(raw.get("check_timeout_s", 120)),
+        tools=dict(raw.get("tools", {})),
+        env=dict(raw.get("env", {})),
+        path=list(raw.get("path", [])),
     )
+
+
+def expand(value: str, workdir: Path) -> str:
+    if value.startswith("~/"):
+        value = str(Path.home() / value[2:])
+    return value.replace("{workdir}", str(workdir))
 
 
 def all_names() -> list[str]:
@@ -112,9 +159,12 @@ def git(workdir: Path, *args: str) -> str:
 
 def prepare(task: Task, workdir: Path) -> dict[str, str]:
     """Builds the task's work tree in `workdir`; returns its SHAs."""
-    shutil.copytree(task.dir / "repo", workdir, ignore=IGNORE)
-    git(workdir, "init", "-q", "-b", "main")
-    git(workdir, "add", "-A")
+    if task.source:
+        copy_source(task.source, workdir)
+    else:
+        shutil.copytree(task.dir / "repo", workdir, ignore=IGNORE)
+        git(workdir, "init", "-q", "-b", "main")
+        git(workdir, "add", "-A")
     git(workdir, "commit", "-q", "-m", "initial commit")
     base = git(workdir, "rev-parse", "HEAD")
     if task.branch:
@@ -124,13 +174,51 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
         git(workdir, "add", "-A")
         git(workdir, "commit", "-q", "-m", f"work on {task.branch or 'main'}")
     head = git(workdir, "rev-parse", "HEAD")
-    # The remote jouet reads the repository from; nothing is ever pushed.
-    git(workdir, "remote", "add", "origin", "https://github.com/jdx/demo.git")
+    if task.remote:
+        # The remote jouet reads the repository from; nothing is ever pushed.
+        git(workdir, "remote", "add", "origin", "https://github.com/jdx/demo.git")
+    elif task.upstream:
+        origin = workdir.parent / "origin.git"
+        git(workdir.parent, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(workdir, "remote", "add", "origin", str(origin))
+        git(workdir, "push", "-q", "origin", f"{base}:refs/heads/main")
+        git(workdir, "fetch", "-q", "origin")
+        git(workdir, "branch", "-q", "--set-upstream-to=origin/main", "main")
+        git(workdir, "remote", "set-head", "origin", "main")
     for rel, text in task.untracked.items():
         path = workdir / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     return {"base_sha": base, "head_sha": head}
+
+
+def copy_source(source: dict[str, str], workdir: Path) -> None:
+    """Stages the tree of `source`'s commit in a new repository at `workdir`.
+
+    Every tracked file is staged by name, with `-f`, because a project can
+    track files its own `.gitignore` matches, which `git add -A` would drop."""
+    repo = Path(source["git"]).expanduser()
+    commit = source["commit"]
+    workdir.mkdir(parents=True)
+    archive = subprocess.run(["git", "-C", str(repo), "archive", commit], check=True, capture_output=True)
+    subprocess.run(["tar", "-x", "-C", str(workdir)], input=archive.stdout, check=True)
+    git(workdir, "init", "-q", "-b", "main")
+    names = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", "-z", "--name-only", commit], check=True, capture_output=True
+    ).stdout
+    env = {**os.environ, **GIT_ENV}
+    subprocess.run(
+        ["git", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        cwd=workdir,
+        env=env,
+        input=names,
+        check=True,
+        capture_output=True,
+    )
+    tree = git(workdir, "write-tree")
+    want = git(repo, "rev-parse", f"{commit}^{{tree}}")
+    if tree != want:
+        raise RuntimeError(f"the staged tree {tree} is not {commit}'s tree {want}")
 
 
 def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
@@ -140,9 +228,12 @@ def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
     return env
 
 
-def run_check(task: Task, workdir: Path, env: dict[str, str], timeout_s: int = 120) -> dict[str, Any]:
-    """Runs `check.py`; its exit code says whether the task succeeded."""
-    full = {**os.environ, **GIT_ENV, **env}
+def run_check(task: Task, workdir: Path, base: dict[str, str], env: dict[str, str]) -> dict[str, Any]:
+    """Runs `check.py` in `base`, the run's own environment, so that what it
+    builds and runs stays in the run's directory as the agent's did; its
+    exit code says whether the task succeeded."""
+    timeout_s = task.check_timeout_s
+    full = {**base, **GIT_ENV, **env}
     full.pop("PYTHONPATH", None)
     try:
         proc = subprocess.run(

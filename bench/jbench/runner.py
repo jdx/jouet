@@ -199,6 +199,9 @@ def run_agent(
         "exit_code": proc.returncode,
         "stopped": stopped[0] if stopped else None,
         "lines": lines,
+        # The agent leads a session of its own; what it started and left
+        # running is still in it, unless it started a session too.
+        "session": proc.pid,
     }
 
 
@@ -218,6 +221,67 @@ def kill(proc: subprocess.Popen[str]) -> None:
             continue
 
 
+def sweep(run_dir: Path, session: int | None) -> list[str]:
+    """Stops what a run left running, and returns each one's command line.
+
+    A run's processes are ours that are in the agent's session, or whose
+    working directory or arguments are in the run's directory: a test
+    suite's watchers can start sessions of their own and outlive both the
+    agent and the check. Without /proc (macOS) only the session is stopped.
+    """
+    import os
+    import signal
+
+    found = {}
+    proc_dir = Path("/proc")
+    if proc_dir.is_dir():
+        under = str(run_dir)
+        for entry in proc_dir.iterdir():
+            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                continue
+            try:
+                if entry.stat().st_uid != os.getuid():
+                    continue
+                stat = (entry / "stat").read_text()
+                args = [a.decode(errors="replace") for a in (entry / "cmdline").read_bytes().split(b"\0") if a]
+                cwd = os.readlink(entry / "cwd")
+            except OSError:
+                continue
+            # The fields after the name in parentheses: state, ppid, pgrp, session.
+            sid = int(stat.rsplit(")", 1)[1].split()[3])
+            inside = any(s.endswith(under) or under + "/" in s for s in [cwd, *args])
+            if inside or (session is not None and sid == session):
+                found[int(entry.name)] = " ".join(args)[:200]
+    elif session is not None:
+        try:
+            os.killpg(session, signal.SIGKILL)
+            return [f"session {session}"]
+        except (ProcessLookupError, PermissionError):
+            return []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        alive = []
+        for pid in found:
+            try:
+                os.kill(pid, sig)
+                alive.append(pid)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 5
+        while alive and time.monotonic() < deadline:
+            alive = [pid for pid in alive if Path(f"/proc/{pid}").exists() and not zombie(pid)]
+            time.sleep(0.1)
+        if not alive:
+            break
+    return list(found.values())
+
+
+def zombie(pid: int) -> bool:
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    except OSError:
+        return True
+
+
 def execute(
     p: Planned,
     opts: dict[str, Any],
@@ -230,6 +294,7 @@ def execute(
     arm = arms_mod.ARMS[p.arm]
     run_dir = work_root / p.id
     workdir = run_dir / "work"
+    tmp_dir = Path(opts["tmp_root"]) / p.id
     keep = out_dir / "runs" / p.id
     keep.mkdir(parents=True, exist_ok=True)
     shas = tasks_mod.prepare(task, workdir)
@@ -238,9 +303,17 @@ def execute(
 
     def go(fake_url: str | None) -> dict[str, Any]:
         env = arms_mod.build(
-            run_dir, harness, arm, opts["harness_bins"][harness.name], opts["jouet_bin"], fake_url, "jdx/demo"
+            run_dir,
+            harness,
+            arm,
+            opts["harness_bins"][harness.name],
+            opts["jouet_bin"],
+            fake_url,
+            "jdx/demo",
+            tmp_dir,
         )
-        setup = arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
+        task.agent_env(env, run_dir / "bin", workdir)
+        setup =arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
         if arm.jouet:
             # After setup, so that turning priming off here measures a
             # session without the primer rather than one with the skill.
@@ -276,8 +349,13 @@ def execute(
         ran = go(None)
         github = None
 
-    check = tasks_mod.run_check(task, workdir, tasks_mod.check_env(shas, state_path if fixture else None))
     env = ran["env"]
+    left = sweep(run_dir, ran["agent"]["session"]) + sweep(tmp_dir, None)
+    # The agent's environment without its credentials: the check builds and
+    # runs what the agent did, in the same home, cache and TMPDIR.
+    base = {k: v for k, v in env.items() if k not in harness.auth_env}
+    check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
+    left += sweep(run_dir, None) + sweep(tmp_dir, None)
     audit_report = audit(opts["jouet_bin"], harness, env)
     (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
     agent = ran["agent"]
@@ -299,13 +377,34 @@ def execute(
         "github": github,
         "setup": ran["setup"],
         "credentials": ran["credentials"],
+        "left_running": left,
     }
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
     copy_transcripts(ran["config_dir"], keep / "transcripts")
     if not opts.get("keep_work"):
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove(run_dir)
+        remove(tmp_dir)
     return record
+
+
+def remove(path: Path) -> None:
+    """Deletes a run's tree, including directories a project's tests left
+    without read or search permission (mise's leave `d-w-------` ones)."""
+
+    def unlock(_func: Any, failed: str, _exc: BaseException) -> None:
+        for p in (Path(failed).parent, Path(failed)):
+            try:
+                p.chmod(0o700)
+            except OSError:
+                pass
+        if Path(failed).is_dir():
+            shutil.rmtree(failed, onexc=unlock)
+        else:
+            Path(failed).unlink(missing_ok=True)
+
+    if path.exists():
+        shutil.rmtree(path, onexc=unlock)
 
 
 def snapshot(jouet_bin: Path, work_root: Path) -> Path:
@@ -340,8 +439,16 @@ def copy_transcripts(config_dir: Path, dest: Path) -> None:
 
 def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: Any) -> list[dict[str, Any]]:
     budget = Budget(opts.get("max_total_tokens"))
-    work_root = Path(tempfile.mkdtemp(prefix="jouet-bench-"))
-    opts = {**opts, "jouet_bin": snapshot(opts["jouet_bin"], work_root)}
+    # Work trees outside /tmp: a project's tests may refuse a checkout below a
+    # directory anyone can write to (mise's brew cask tests do). TMPDIR stays
+    # in /tmp, short for sockets, and away from configs above the run root.
+    import os
+
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    cache.mkdir(parents=True, exist_ok=True)
+    work_root = Path(tempfile.mkdtemp(prefix="jb-", dir=cache))
+    tmp_root = Path(tempfile.mkdtemp(prefix="jb-", dir="/tmp"))
+    opts = {**opts, "jouet_bin": snapshot(opts["jouet_bin"], work_root), "tmp_root": tmp_root}
     records = []
     results_path = out_dir / "runs.jsonl"
     try:
@@ -385,5 +492,6 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 break
     finally:
         if not opts.get("keep_work"):
-            shutil.rmtree(work_root, ignore_errors=True)
+            remove(work_root)
+            remove(tmp_root)
     return records
