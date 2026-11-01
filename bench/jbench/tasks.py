@@ -180,6 +180,14 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     if task.remote:
         # The remote jouet reads the repository from; nothing is ever pushed.
         git(workdir, "remote", "add", "origin", "https://github.com/jdx/demo.git")
+        if task.upstream:
+            # The refs a clone has, with no server to fetch them from: what
+            # the agent measures its change from.
+            branch = task.branch or "main"
+            git(workdir, "update-ref", "refs/remotes/origin/main", base)
+            git(workdir, "update-ref", f"refs/remotes/origin/{branch}", head)
+            git(workdir, "branch", "-q", f"--set-upstream-to=origin/{branch}", branch)
+            git(workdir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     elif task.upstream:
         origin = workdir.parent / "origin.git"
         git(workdir.parent, "init", "-q", "--bare", "-b", "main", str(origin))
