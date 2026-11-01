@@ -55,8 +55,11 @@ impl Sample {
         Self {
             v: 1,
             kind: record.kind.name().to_string(),
-            cmd: record.command.clone(),
-            family: family(&record.command, record.selector.as_deref()),
+            cmd: crate::redact::redact(&record.command),
+            family: family(
+                &crate::redact::redact(&record.command),
+                record.selector.as_deref(),
+            ),
             ms,
             exit,
             host: host(),
@@ -67,6 +70,14 @@ impl Sample {
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
         }
+    }
+
+    /// Whether its command reads as one: the primer and `jouet cost` print
+    /// it, and notes fetched from a remote are anyone's writing, so a line
+    /// break or a terminal escape, or a key past 200 characters, drops it.
+    fn plain(&self) -> bool {
+        let fits = |s: &str| s.chars().count() <= 200 && !s.chars().any(char::is_control);
+        fits(&self.cmd) && self.family.as_deref().is_none_or(fits)
     }
 
     /// The key estimates group it under: its family, else its command.
@@ -92,11 +103,32 @@ fn host() -> String {
         .find_map(|p| std::fs::read_to_string(p).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("HOSTNAME").ok())
         .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        // macOS has neither file, and a hook seldom has HOSTNAME.
+        .or_else(hostname)
         .unwrap_or_default();
     let digest = Sha256::digest(id.trim().as_bytes());
     digest.iter().take(6).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The host name, from the system.
+#[cfg(unix)]
+fn hostname() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: gethostname writes at most `buf.len()` bytes into `buf`.
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let name = String::from_utf8_lossy(&buf[..end]).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The host name, from the system.
+#[cfg(not(unix))]
+fn hostname() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok()
 }
 
 /// Keeps `samples` in the note on HEAD, unless `[cost] record` is off.
@@ -148,6 +180,7 @@ impl Costs {
             .into_iter()
             .flat_map(|(_, lines)| lines)
             .filter_map(|l| serde_json::from_str::<Sample>(&l).ok())
+            .filter(Sample::plain)
             .collect();
         Self::new(samples, host())
     }
@@ -265,7 +298,7 @@ pub(crate) fn primer_line(costs: &Costs) -> Option<String> {
         return None;
     }
     Some(format!(
-        "jouet: slow checks here: {} (`jouet cost` lists all). Finish the edits a slow run checks before starting it, so one run covers them.\n",
+        "jouet: slow checks here: {} (`jouet cost` lists all). Finish the edits a slow run checks before starting it, so one run covers them.",
         slow.join(", ")
     ))
 }
@@ -276,7 +309,11 @@ fn median(values: &[u64]) -> Option<u64> {
     match v.len() {
         0 => None,
         n if n % 2 == 1 => Some(v[n / 2]),
-        n => Some((v[n / 2 - 1] + v[n / 2]) / 2),
+        // Halved first: two values near u64::MAX would overflow.
+        n => {
+            let (a, b) = (v[n / 2 - 1], v[n / 2]);
+            Some(a / 2 + b / 2 + (a % 2 + b % 2) / 2)
+        }
     }
 }
 

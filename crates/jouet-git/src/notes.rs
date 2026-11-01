@@ -149,12 +149,31 @@ impl Notes {
     }
 
     /// Fetches `remote`'s notes and merges them into the local ones.
-    /// `Ok(false)` when the remote has none.
+    /// `Ok(false)` when the remote has none; an error when it cannot be
+    /// reached or read.
     pub fn fetch(&self, remote: &str) -> Result<bool, Error> {
-        let spec = format!("+{}:{}", self.reference(), self.remote_reference());
-        if !self.git.succeeds(&["fetch", "--quiet", remote, &spec]) {
-            return Ok(false);
+        let reference = self.reference();
+        let listed = self
+            .git
+            .command(&["ls-remote", "--exit-code", remote, &reference])
+            .output()
+            .map_err(|e| Error::new(Exit::Failed, format!("running git: {e}")))?;
+        match listed.status.code() {
+            Some(0) => {}
+            // --exit-code: the remote answered, without the ref.
+            Some(2) => return Ok(false),
+            _ => {
+                return Err(Error::new(
+                    Exit::Failed,
+                    format!(
+                        "reading {reference} from {remote}: {}",
+                        String::from_utf8_lossy(&listed.stderr).trim()
+                    ),
+                ));
+            }
         }
+        let spec = format!("+{reference}:{}", self.remote_reference());
+        self.git.text(&["fetch", "--quiet", remote, &spec])?;
         self.absorb()?;
         Ok(true)
     }
@@ -282,6 +301,18 @@ mod tests {
                 .along("HEAD", 10)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_fetch_says_whether_the_remote_has_notes_or_failed() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "-q", "--bare"]);
+        let local = tempfile::tempdir().unwrap();
+        repo(local.path(), 1);
+        let notes = Notes::new(Git::new(local.path()), "t");
+        assert!(!notes.fetch(remote.path().to_str().unwrap()).unwrap());
+        let gone = local.path().join("no-such-remote");
+        assert!(notes.fetch(gone.to_str().unwrap()).is_err());
     }
 
     #[test]

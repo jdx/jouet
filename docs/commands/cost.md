@@ -43,10 +43,6 @@ CI shares its timings by pushing the notes after its runs:
 - run: jouet cost push
 ```
 
-The push needs permission to write to the repository. It is never forced: when another job pushed first, it fetches their notes, merges them with git's `cat_sort_uniq` strategy and tries again, up to five times. `jouet cost fetch` brings the remote's timings here and merges them with the ones already here. To have every `git fetch` bring them too:
-
-```sh
-git config --add remote.origin.fetch '+refs/notes/jouet-cost:refs/notes/jouet-cost'
-```
+The push needs permission to write to the repository. It is never forced: when another job pushed first, it fetches their notes, merges them with git's `cat_sort_uniq` strategy and tries again, up to five times. `jouet cost fetch` brings the remote's timings here and merges them with the ones already here. Don't add the notes ref to `git fetch`'s refspecs instead: a fetch replaces a ref with the remote's rather than merging it, which would drop timings taken here and not yet pushed.
 
 This uses the same notes design as [tak](https://tak.jdx.dev).

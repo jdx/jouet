@@ -152,7 +152,12 @@ fn handle(
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let primer = session_start(&loaded.engine, hooks.steer, hooks.verify, harness);
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
-            let mut notes = wind_notes(settings, log.session, log.repo.as_deref(), cwd);
+            // The slow checks here, from the timings kept in git notes.
+            let mut notes: Vec<String> = cwd
+                .and_then(|cwd| crate::cost::primer_line(&crate::cost::Costs::load(cwd)))
+                .into_iter()
+                .collect();
+            notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
@@ -205,7 +210,9 @@ fn handle(
                 (Vec::new(), None)
             };
             log.post_tool_use(payload, &call, &records, ran);
-            keep_cost(payload, &call, &records);
+            if call.tool == "Bash" {
+                keep_cost(payload, &call, &records, hooks.verify);
+            }
             // A run of a mise task jouet added, for `jouet unwind`.
             if settings.wind.enabled
                 && let (Some(command), Some(cwd)) = (call.command.as_deref(), call.cwd.as_deref())
@@ -630,12 +637,6 @@ fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -
     };
     let affected = std::env::current_dir().is_ok_and(|cwd| !crate::affected::near(&cwd).is_empty());
     let mut context = guide::summary(&rules, verify, affected, wait_hint(harness));
-    if let Some(line) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::cost::primer_line(&crate::cost::Costs::load(&cwd)))
-    {
-        context.push_str(&line);
-    }
     // A deprecated Luau rule file: the agent can convert it.
     for note in engine
         .rules()
@@ -948,18 +949,47 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
 /// Keeps how long a Bash call that ran one check took, for `jouet cost`.
 /// A call that ran several is not split between them, and `jouet test`
 /// times each of its own jobs.
-fn keep_cost(payload: &Value, call: &Call, records: &[Record]) {
-    let ([record], Some(cwd), Some(ms), Some(exit)) = (
-        records,
+fn keep_cost(payload: &Value, call: &Call, records: &[Record], verified: bool) {
+    let (Some(command), Some(cwd), Some(ms), Some(exit)) = (
+        call.command.as_deref(),
         call.cwd.as_deref(),
         payload.get("duration_ms").and_then(Value::as_u64),
         call.exit_code,
     ) else {
         return;
     };
-    if record.dir.is_none() && !record.command.starts_with("jouet ") {
-        crate::cost::record(Path::new(cwd), &[crate::cost::Sample::of(record, ms, exit)]);
+    if !one_pipeline(command) {
+        return;
     }
+    let cwd = Path::new(cwd);
+    // Without verify, nothing evaluated the checks yet.
+    let found;
+    let records = if verified {
+        records
+    } else {
+        found = checks(cwd, command);
+        &found
+    };
+    if let [record] = records
+        && record.dir.is_none()
+        && !record.command.starts_with("jouet ")
+    {
+        crate::cost::record(cwd, &[crate::cost::Sample::of(record, ms, exit)]);
+    }
+}
+
+/// Whether `command` is one pipeline, so its time is its check's: in `npm
+/// ci && npm test`, the install would count as the test's, and a job sent
+/// to the background is not timed at all. Redirections such as `2>&1` are
+/// not separators. A separator inside quotes skips a call that could have
+/// counted, which only loses a timing.
+fn one_pipeline(command: &str) -> bool {
+    let bare = command
+        .replace("2>&1", "")
+        .replace("1>&2", "")
+        .replace(">&2", "")
+        .replace("&>", "");
+    !["&", "||", ";", "\n"].iter().any(|s| bare.contains(s))
 }
 
 /// The checks the rules here would record for `command` exiting 0: what
@@ -1454,8 +1484,20 @@ mod tests {
     }
 
     #[test]
+    fn only_a_call_that_is_one_pipeline_is_timed_as_its_check() {
+        assert!(one_pipeline("cargo test 2>&1 | tail -20"));
+        assert!(one_pipeline("mise x -- cargo test -p a"));
+        assert!(!one_pipeline("npm ci && npm test"));
+        assert!(!one_pipeline("cargo build; cargo test"));
+        assert!(!one_pipeline("cargo test &"));
+        assert!(!one_pipeline("cargo fmt\ncargo test"));
+    }
+
+    #[test]
     fn the_primer_names_the_active_rules() {
         let out = session_start(&engine(Vec::new()), true, true, Harness::Claude);
+        // The slow checks are a session-start note, read from the notes of
+        // the repository the session is in, never part of the primer.
         let context = out["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
