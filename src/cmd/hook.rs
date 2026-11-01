@@ -775,6 +775,33 @@ fn run_dir(cwd: Option<&Path>, dir: Option<&str>) -> Option<PathBuf> {
 /// `push-untested` and `pr land`. It goes through the same post-tool-use
 /// rules as a hook's run, so a rule that would not record it records
 /// nothing here either.
+/// Marks this `jouet test` process as running in the session's state, or,
+/// with `running` false, clears the mark once it has ended: while it runs,
+/// the stop gate does not hold up an agent waiting for it on what earlier
+/// test runs found.
+pub(crate) fn mark_own_run(cwd: &Path, command: &str, running: bool) {
+    let settings = Settings::load();
+    if !settings.hooks.enabled || !settings.hooks.verify {
+        return;
+    }
+    let Some(path) = jouet_git::session::id_from_env()
+        .as_deref()
+        .and_then(verify::state_path)
+    else {
+        return;
+    };
+    let root = verify::root_of(cwd);
+    let pid = std::process::id();
+    let _ = verify::update(&path, |state| {
+        if running {
+            let command = command.to_string();
+            state.start_run(&root, verify::Running { pid, command });
+        } else {
+            state.end_run(&root, pid);
+        }
+    });
+}
+
 pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
     let settings = Settings::load();
     let hooks = &settings.hooks;
@@ -867,7 +894,7 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
     if payload.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
         return as_note(note);
     }
-    let state = match harness {
+    let mut state = match harness {
         Harness::Claude | Harness::Cursor | Harness::Gemini | Harness::Copilot => {
             session_state_path(payload).map(|p| State::load(&p))
         }
@@ -879,6 +906,7 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
             .and_then(|commands| Some(codex_state(&load(payload)?, payload, commands))),
     }
     .unwrap_or_default();
+    state.prune_gone();
     let tree = std::cell::OnceCell::new();
     let now = || tree.get_or_init(|| work_tree(payload)).clone();
     let home = session_dir(payload)

@@ -6,7 +6,7 @@ use std::fs::File;
 
 /// Whether a process with this ID exists and has not exited.
 #[cfg(unix)]
-pub(crate) fn process_running(pid: u32) -> bool {
+pub fn process_running(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -43,7 +43,7 @@ fn zombie(_pid: libc::pid_t) -> bool {
 }
 
 #[cfg(windows)]
-pub(crate) fn process_running(pid: u32) -> bool {
+pub fn process_running(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, GetLastError, WAIT_TIMEOUT,
     };
