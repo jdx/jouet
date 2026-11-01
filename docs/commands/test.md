@@ -183,7 +183,7 @@ FAIL test_env (test_a.T.test_env)
 baseline: the failure also fails at main (302afa77cd40), so none is from this change; counted as passing: test_env (test_a.T.test_env)
 ```
 
-When the run fails, it runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch (`--since REF` names another), and compares the failures by name. If every one also fails there, the run passes (exit 0), and it names them; the stop gate and `push-untested` count it as a passing full run. A failure the merge base does not have still fails it (exit 1), listed as new. The worktree is removed afterwards. It needs a runner whose failures jouet recognises by name, costs one more run of the failed suites, and cannot be combined with `--affected`, whose tests depend on the changes.
+When the run fails, it runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch (`--since REF` names another), with any path into the checkout in the command pointed at the worktree, and compares the failures by name. If every one also fails there, the run passes (exit 0), and it names them; the stop gate and `push-untested` count it as a passing full run. A failure the merge base does not have still fails it (exit 1), listed as new. The worktree is removed afterwards. It needs a runner whose failures jouet recognises by name, costs one more run of the failed suites, and cannot be combined with `--affected`, whose tests depend on the changes.
 
 ### mise tasks
 

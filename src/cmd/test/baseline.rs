@@ -82,7 +82,9 @@ impl Baseline {
 /// Every failure a run's output names, or None when it names none, so the
 /// failures cannot be compared.
 pub(super) fn failure_names(output: &str) -> Option<BTreeSet<String>> {
-    let digest = testlog::digest(output, true, 0);
+    // Not as a failed run, which names an output it recognises nothing in by
+    // a stand-in that would match the merge base's.
+    let digest = testlog::digest(output, false, 0);
     let names: BTreeSet<String> = digest
         .failures
         .into_iter()
@@ -128,7 +130,7 @@ pub(super) fn compare(
     for (i, (job, now)) in failed.iter().enumerate() {
         let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
         let at_base = Job {
-            argv: job.argv.clone(),
+            argv: job.argv.iter().map(|w| rebase(w, root, &tree)).collect(),
             env: job.env.clone(),
             dir: tree.join(dir),
             exit: Box::new(|_| Exit::Ok),
@@ -157,6 +159,27 @@ pub(super) fn compare(
     })
 }
 
+/// `word`, a command word, with a path into `root` (alone, or an option's
+/// value after `=`) pointed at the same path in `tree`, so the run at the
+/// merge base does not read the checkout.
+fn rebase(word: &str, root: &Path, tree: &Path) -> String {
+    let root = root.to_string_lossy();
+    let tree = tree.to_string_lossy();
+    let at = |path: &str| -> Option<String> {
+        let rest = path.strip_prefix(root.as_ref())?;
+        (rest.is_empty() || rest.starts_with(['/', '\\'])).then(|| format!("{tree}{rest}"))
+    };
+    if let Some(path) = at(word) {
+        return path;
+    }
+    match word.split_once('=') {
+        Some((option, value)) => {
+            at(value).map_or_else(|| word.to_string(), |v| format!("{option}={v}"))
+        }
+        None => word.to_string(),
+    }
+}
+
 /// A worktree of the merge base, removed when dropped.
 struct Worktree<'a> {
     root: &'a Path,
@@ -183,5 +206,33 @@ fn git(dir: &Path, args: &[&str]) -> Result<(), String> {
         Ok(())
     } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebases_paths_into_the_checkout() {
+        let (root, tree) = (Path::new("/src/app"), Path::new("/tmp/base/tree"));
+        for (word, want) in [
+            ("/src/app", "/tmp/base/tree"),
+            ("/src/app/Cargo.toml", "/tmp/base/tree/Cargo.toml"),
+            (
+                "--manifest-path=/src/app/Cargo.toml",
+                "--manifest-path=/tmp/base/tree/Cargo.toml",
+            ),
+            ("/src/apple/x", "/src/apple/x"),
+            ("cargo", "cargo"),
+            ("--jobs=4", "--jobs=4"),
+        ] {
+            assert_eq!(rebase(word, root, tree), want, "{word}");
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_failure_names_nothing() {
+        assert_eq!(failure_names("something broke\n"), None);
     }
 }

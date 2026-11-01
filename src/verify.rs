@@ -146,6 +146,19 @@ pub(crate) struct Block {
     pub raised: Raised,
 }
 
+/// The `jouet test --baseline` run that compares the failed full run's own
+/// command: a `jouet test` run with the flag added, any other command
+/// through `--cmd`.
+fn baseline_command(command: &str) -> String {
+    match command.strip_prefix("jouet test") {
+        Some(rest) if rest.split_whitespace().any(|w| w == "--baseline") => command.to_string(),
+        Some(rest) if rest.is_empty() || rest.starts_with(' ') => {
+            format!("jouet test --baseline{rest}")
+        }
+        _ => format!("jouet test --baseline --cmd -- {command}"),
+    }
+}
+
 /// Whether a lint run went through hk: `hk check`, `hk run check`, or
 /// `jouet diag`, which runs it.
 fn through_hk(command: &str) -> bool {
@@ -448,9 +461,12 @@ impl Checks {
         // A full suite that fails on tests the change did not touch is the
         // costly case: point at the check that settles it.
         let baseline = if kind == Kind::Test && failed.full {
-            " If the failures are not from your change, `jouet test --baseline` runs the failed suite at the merge base too, and passes when each failure fails there as well."
+            format!(
+                " If the failures are not from your change, `{}` runs the failed suite at the merge base too, and passes when each failure fails there as well.",
+                baseline_command(&failed.command)
+            )
         } else {
-            ""
+            String::new()
         };
         let last = self.runs.get(&kind);
         if last == Some(failed) {
@@ -634,6 +650,27 @@ mod tests {
         assert!(why.contains("`cargo test` exited 101"), "{why}");
         state.record([test("cargo test", 0, "full")], Some("t1"));
         assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn the_baseline_hint_compares_the_failed_command() {
+        let mut state = Checks::default();
+        state.record([test("python -m unittest", 1, "full")], Some("t1"));
+        let why = reason(&state, "t1").unwrap();
+        assert!(
+            why.contains("`jouet test --baseline --cmd -- python -m unittest`"),
+            "{why}"
+        );
+        for (command, hint) in [
+            ("jouet test", "jouet test --baseline"),
+            (
+                "jouet test --cmd -- go test ./...",
+                "jouet test --baseline --cmd -- go test ./...",
+            ),
+            ("jouet test --baseline", "jouet test --baseline"),
+        ] {
+            assert_eq!(baseline_command(command), hint);
+        }
     }
 
     #[test]
