@@ -444,6 +444,17 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_stderr --partial 'running no-such-program-here'
 }
 
+@test "--budget after -- is refused, with the command it meant" {
+	run --separate-stderr jouet test --cmd -- mise run test:e2e test_a --budget 600
+	assert_failure 2
+	assert_equal "$stderr" "jouet: \`--budget\` after \`--\` would go to the command, not to jouet: put it before \`--\`
+hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
+
+	run --separate-stderr jouet test -- -k x --budget=100
+	assert_failure 2
+	assert_stderr --partial 'hint: jouet test --budget 100 -- -k x'
+}
+
 @test "a person at a terminal sees the output as it runs" {
 	tap_script 2 ""
 

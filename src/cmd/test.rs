@@ -120,6 +120,39 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             Some("jouet test --cmd -- cargo test -p mycrate"),
         );
     }
+    // `--budget` is jouet's, and no runner's: after `--` it would go to the
+    // command, which then fails on it before running a test.
+    if let Some(word) = args
+        .extra
+        .iter()
+        .find(|w| *w == "--budget" || w.starts_with("--budget="))
+    {
+        let mut budget = "BYTES";
+        let mut rest: Vec<&str> = Vec::new();
+        let mut words = args.extra.iter();
+        while let Some(w) = words.next() {
+            if w == "--budget" {
+                budget = words.next().map_or(budget, String::as_str);
+            } else if let Some(value) = w.strip_prefix("--budget=") {
+                budget = value;
+            } else {
+                rest.push(w);
+            }
+        }
+        let mut fixed = vec!["jouet", "test", "--budget", budget];
+        if args.cmd {
+            fixed.push("--cmd");
+        }
+        fixed.push("--");
+        fixed.extend(rest);
+        return out.error_with_hint(
+            Exit::Usage,
+            &format!(
+                "`{word}` after `--` would go to the command, not to jouet: put it before `--`"
+            ),
+            Some(&fixed.join(" ")),
+        );
+    }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => return out.error(Exit::Failed, &format!("reading the current directory: {e}")),
