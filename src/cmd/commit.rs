@@ -226,12 +226,13 @@ fn render(report: &Report) -> String {
     if let Some(scan) = report
         .secret_scan
         .as_ref()
-        .filter(|s| s.status == ScanStatus::Clean)
+        .filter(|s| s.findings.is_empty() && s.status != ScanStatus::Found)
     {
         let files = scan.files_scanned.map_or(String::new(), |n| {
             format!(" in {n} {}", if n == 1 { "file" } else { "files" })
         });
-        let by = if scan.tool.contains("fnox") {
+        // A fnox scan that could not run checked nothing: its warning says why.
+        let by = if scan.tool.contains("fnox") && scan.status == ScanStatus::Clean {
             "gitleaks' rules or fnox"
         } else {
             "gitleaks' rules"

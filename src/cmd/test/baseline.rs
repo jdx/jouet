@@ -103,8 +103,14 @@ impl Baseline {
 }
 
 /// Every failure a run's output names, or None when it names none, so the
-/// failures cannot be compared.
-pub(super) fn failure_names(output: &str, formats: &[Format]) -> Option<BTreeSet<String>> {
+/// failures cannot be compared. A path into `checkout` in a name (rustfmt's
+/// `rustfmt /src/app/a.rs:3`, pytest's) is written from its root, so the same
+/// failure in the merge base's worktree has the same name.
+pub(super) fn failure_names(
+    output: &str,
+    formats: &[Format],
+    checkout: &Path,
+) -> Option<BTreeSet<String>> {
     // Not as a failed run, which names an output it recognises nothing in by
     // a stand-in that would match the merge base's.
     let digest = testlog::digest_with(output, false, 0, formats);
@@ -113,6 +119,7 @@ pub(super) fn failure_names(output: &str, formats: &[Format]) -> Option<BTreeSet
         .into_iter()
         .map(|f| f.name)
         .chain(digest.more_failures)
+        .map(|name| from_root(&name, checkout))
         .collect();
     (!names.is_empty()).then_some(names)
 }
@@ -187,7 +194,7 @@ pub(super) fn compare(
         } else {
             // A run that failed before naming any test, such as a tool it
             // needs missing from the checkout, says nothing about them.
-            failure_names(&output, formats).ok_or_else(|| {
+            failure_names(&output, formats, &tree).ok_or_else(|| {
                 format!(
                     "the run at {} failed (exit {code}) without naming a failing test, so the failures could not be compared (full log: {})",
                     base.name,
@@ -216,6 +223,19 @@ pub(super) fn compare(
         new: new.into_iter().collect(),
         unknown: unknown.into_iter().collect(),
     })
+}
+
+/// `name` with each path into `checkout` written from its root: a worktree
+/// under `/tmp` can also be named by its canonical path (`/private/tmp` on
+/// macOS).
+fn from_root(name: &str, checkout: &Path) -> String {
+    let mut name = name.to_string();
+    let canonical = checkout.canonicalize().ok();
+    for dir in std::iter::once(checkout).chain(canonical.as_deref()) {
+        let prefix = format!("{}/", dir.display());
+        name = name.replace(&prefix, "");
+    }
+    name
 }
 
 /// `word`, a command word, with a path into `root` (alone, or an option's
@@ -292,6 +312,21 @@ mod tests {
 
     #[test]
     fn an_unrecognised_failure_names_nothing() {
-        assert_eq!(failure_names("something broke\n", &[]), None);
+        assert_eq!(
+            failure_names("something broke\n", &[], Path::new("/x")),
+            None
+        );
+    }
+
+    #[test]
+    fn names_are_written_from_the_checkout_root() {
+        let names = |out: &str, root: &str| failure_names(out, &[], Path::new(root));
+        let here = names("Diff in /src/app/src/a.rs:3:\n-x\n+y\n", "/src/app");
+        let there = names("Diff in /tmp/b/tree/src/a.rs:3:\n-x\n+y\n", "/tmp/b/tree");
+        assert_eq!(here, there);
+        assert_eq!(
+            here.unwrap().into_iter().next().unwrap(),
+            "rustfmt src/a.rs:3"
+        );
     }
 }

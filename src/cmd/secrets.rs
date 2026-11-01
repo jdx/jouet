@@ -265,6 +265,10 @@ impl CommitScanner for CommitScan {
                 scan.notes
                     .extend(theirs.notes.into_iter().map(|n| format!("fnox: {n}")));
                 scan.reason = theirs.reason;
+                // A fnox scan that could not run is no clean scan.
+                if theirs.status == ScanStatus::Skipped {
+                    scan.status = ScanStatus::Skipped;
+                }
             }
         }
         if !findings.is_empty() {
