@@ -40,6 +40,10 @@ Fix this in hk, with a test, and commit.
 git = "~/src/hk"
 commit = "22dbf399a32d806b5d7366a589537648c1465c89"
 
+# hk's own tasks run through mise, as they do in a developer's checkout.
+[tools]
+mise = "~/.local/bin/mise"
+
 [env]
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"
