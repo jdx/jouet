@@ -607,7 +607,8 @@ fn session_start(engine: &Engine, steer: bool, verify: bool) -> Value {
     } else {
         Vec::new()
     };
-    let mut context = guide::summary(&rules, verify);
+    let affected = std::env::current_dir().is_ok_and(|cwd| !crate::affected::near(&cwd).is_empty());
+    let mut context = guide::summary(&rules, verify, affected);
     // A deprecated Luau rule file: the agent can convert it.
     for note in engine
         .rules()

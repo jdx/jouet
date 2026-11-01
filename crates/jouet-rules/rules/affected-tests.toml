@@ -27,6 +27,13 @@ unless_flags = [
   "--project", "--watch", "--help", "-h",
 ]
 
+# cargo's whole workspace, or the package here.
+[[rule.match]]
+command = ["cargo test", "cargo nextest run"]
+max_args = 0
+value_flags = ["-j", "--jobs", "--features", "-F", "--target", "--profile"]
+unless_flags = ["-p", "--package", "--exclude", "--test", "--lib", "--bin", "--doc", "--help", "-h"]
+
 # The repository's test task, run whole.
 [[rule.match]]
 command = [
@@ -48,6 +55,9 @@ fires = [
   "mise run test",
   "jouet test",
   "cd web && npm test",
+  "cargo test",
+  "cargo test --workspace",
+  "cargo nextest run --workspace",
 ]
 quiet = [
   "jouet test --affected",
@@ -61,6 +71,8 @@ quiet = [
   "jest --findRelatedTests src/a.js",
   "npm test -- src/a.test.js",
   "mise run test:e2e",
-  "cargo test",
+  "cargo test -p jouet-edit",
+  "cargo test --lib verify",
+  "cargo test some_name",
   "npm install",
 ]

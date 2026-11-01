@@ -8,6 +8,8 @@
 
 setup_file() {
 	export DEPS="$BATS_TEST_DIRNAME/../target/affected-fixtures"
+	# Each test has a home of its own, where rustup would find no toolchain.
+	export REAL_RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" REAL_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 	mkdir -p "$DEPS"
 }
 
@@ -696,4 +698,36 @@ TOML
 	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
 	assert_failure 1
 	assert_output --partial 'ran far fewer tests, so the failure could not be compared: keychain'
+}
+
+@test "cargo picks the changed crates and every crate that depends on them" {
+	command -v cargo >/dev/null || need cargo "not installed"
+	export RUSTUP_HOME="$REAL_RUSTUP_HOME" CARGO_HOME="$REAL_CARGO_HOME"
+	printf '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n' >Cargo.toml
+	for c in base mid top lone; do
+		mkdir -p "crates/$c/src"
+		printf '[package]\nname = "%s"\nversion = "0.1.0"\nedition = "2021"\n' "$c" >"crates/$c/Cargo.toml"
+		printf 'pub fn f() {}\n' >"crates/$c/src/lib.rs"
+	done
+	printf '\n[dependencies]\nbase = { path = "../base" }\n' >>crates/mid/Cargo.toml
+	printf '\n[dev-dependencies]\nmid = { path = "../mid" }\n' >>crates/top/Cargo.toml
+	git add -A
+	git commit -q -m init
+
+	printf 'pub fn f() { let _ = 1; }\n' >crates/base/src/lib.rs
+	run --separate-stderr jouet test --affected --dry-run
+	assert_success
+	assert_line "cargo (the workspace's crates: each changed crate and every crate that depends on it): 3 crates"
+	assert_line '  base: changed'
+	assert_line '  mid: depends on base (changed)'
+	assert_line '  top: depends on mid → base (changed)'
+	refute_line --partial 'lone'
+	assert_line '  would run: cargo test -p base -p mid -p top'
+
+	# The workspace manifest is every crate's.
+	git checkout -q -- crates
+	printf '# a comment\n' >>Cargo.toml
+	run --separate-stderr jouet test --affected --dry-run
+	assert_success
+	assert_line --partial 'cargo test --workspace'
 }

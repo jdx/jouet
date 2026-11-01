@@ -659,11 +659,16 @@ fn text(report: &Report) -> String {
         match suite.decision {
             "affected" => {
                 let n = suite.tests.len();
-                let _ = writeln!(
-                    s,
-                    "{name}: {n} test {}",
-                    if n == 1 { "file" } else { "files" }
-                );
+                // cargo selects crates, which depend on each other; the
+                // other adapters select test files, which import.
+                let crates = suite.adapter == "cargo";
+                let (unit, link) = match (crates, n == 1) {
+                    (true, true) => ("crate", "depends on"),
+                    (true, false) => ("crates", "depends on"),
+                    (false, true) => ("test file", "imports"),
+                    (false, false) => ("test files", "imports"),
+                };
+                let _ = writeln!(s, "{name}: {n} {unit}");
                 for test in suite.tests.iter().take(TESTS_SHOWN) {
                     let why = match test.via.as_slice() {
                         [] => format!("picked by {}", suite.adapter),
@@ -672,7 +677,7 @@ fn text(report: &Report) -> String {
                             let mut chain: Vec<&str> = chain.iter().map(String::as_str).collect();
                             chain.pop();
                             chain.reverse();
-                            format!("imports {} (changed)", chain.join(" → "))
+                            format!("{link} {} (changed)", chain.join(" → "))
                         }
                     };
                     let _ = writeln!(s, "  {}: {why}", test.path);
