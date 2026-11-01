@@ -206,6 +206,13 @@ stop_reason() {
 	echo 'fn main() { todo!() }' >repo/main.rs
 	run stop_reason
 	assert_output --partial 'Files changed after the last test run passed ('
+	# With steering off, no rule runs before a call, but the tree is kept.
+	ran 'cargo test --workspace wait_github' 0
+	JOUET_HOOKS_STEER=false about_to 'cargo fmt --all'
+	echo 'fn main() { todo!(); }' >repo/main.rs
+	ran 'cargo fmt --all' 0
+	run stop_reason
+	assert_output ""
 }
 
 @test "a failure is raised once per tree and runs, not at every turn's stop" {

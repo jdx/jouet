@@ -165,6 +165,12 @@ fn handle(
             ));
             Some(with_notes(primer, &notes))
         }
+        // Without steering no rule runs, but the stop gate still wants the
+        // tree a formatting call started from.
+        "pre-tool-use" if !hooks.steer && hooks.verify => {
+            note_formatting(payload, &Call::from_hook(payload, harness.name()), true);
+            None
+        }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
             let mut call = Call::from_hook(payload, harness.name());

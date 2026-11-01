@@ -217,13 +217,16 @@ pub(crate) fn formats(command: &str) -> bool {
         .replace("2>&1", "")
         .replace("1>&2", "")
         .replace(">&2", "")
-        .replace("&>", ">");
+        .replace("2>/dev/null", "")
+        .replace(">/dev/null", "");
+    // Anything still redirected writes a file: `git status > src/a.rs`.
+    if bare.contains('>') {
+        return false;
+    }
     let segments: Vec<&str> = bare
         .split(['\n', ';', '|', '&'])
         .map(str::trim)
-        .filter(|s| {
-            !s.is_empty() && !s.starts_with('>') && !s.starts_with("1>") && !s.starts_with("2>")
-        })
+        .filter(|s| !s.is_empty())
         .collect();
     !segments.is_empty()
         && segments.iter().all(|segment| {
@@ -1187,6 +1190,8 @@ mod tests {
             "prettier --check src",
             "cd sub && cargo fmt",
             "sed -i s/a/b/ src/a.rs && cargo fmt",
+            "git status > src/main.rs",
+            "cargo fmt &> out.txt",
             "",
         ] {
             assert!(!formats(no), "{no}");
