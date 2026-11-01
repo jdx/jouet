@@ -172,9 +172,12 @@ fn handle(
                 .cwd
                 .as_deref()
                 .and_then(|cwd| fnox::context(cwd.as_ref()));
-            let (output, outcome) = pre_tool_use(&engine, &call);
+            let (mut output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);
+            }
+            if harness == Harness::Claude && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
+                output = with_long_timeout(&engine, payload, &call, output);
             }
             // A warning waits for the call's post-tool-use hook where the
             // harness has nowhere else to put it.
@@ -661,6 +664,61 @@ fn fnox_note(cwd: Option<&Path>, proxied: bool) -> Option<String> {
 /// returns what the rules decided, for the ledger. `setup` sends only shell
 /// commands here, but a rule matching a file tool's `paths` runs for any
 /// tool call the harness sends.
+/// The longest a Bash call may run in Claude Code, past which it would move
+/// to the background.
+const LONG_RUN_MS: u64 = 600_000;
+
+/// For Claude Code in `bypassPermissions` mode, a Bash call that runs a
+/// test, build or lint (what the `checks` rule records) with no timeout of
+/// its own gets the longest, so it ends in that call. Past the default two
+/// minutes it moves to the background, and agents then spent a request on
+/// each look at it: three of twelve in one benchmark run. Only in that mode,
+/// since `updatedInput` needs `permissionDecision: "allow"`, which in any
+/// other would skip the user's prompt; the command itself is never changed.
+fn with_long_timeout(
+    engine: &Engine,
+    payload: &Value,
+    call: &Call,
+    output: Option<Value>,
+) -> Option<Value> {
+    let bypass =
+        payload.get("permission_mode").and_then(Value::as_str) == Some("bypassPermissions");
+    let Some(input) = payload.get("tool_input").and_then(Value::as_object) else {
+        return output;
+    };
+    let timed = input.contains_key("timeout")
+        || input.get("run_in_background").and_then(Value::as_bool) == Some(true);
+    if !bypass || call.tool != "Bash" || timed {
+        return output;
+    }
+    // A check run is what the post-tool-use rules would record.
+    let after = Call {
+        event: Some(Event::PostToolUse),
+        exit_code: Some(0),
+        ..call.clone()
+    };
+    if engine.evaluate(&after).records.is_empty() {
+        return output;
+    }
+    let mut updated = input.clone();
+    updated.insert("timeout".into(), json!(LONG_RUN_MS));
+    let mut out = output.unwrap_or_else(|| json!({}));
+    let specific = out
+        .as_object_mut()
+        .expect("hook output is an object")
+        .entry("hookSpecificOutput")
+        .or_insert_with(|| json!({"hookEventName": "PreToolUse"}));
+    if let Some(specific) = specific.as_object_mut() {
+        specific.insert("permissionDecision".into(), json!("allow"));
+        specific.insert(
+            "permissionDecisionReason".into(),
+            json!("jouet: a 10-minute timeout, so this run ends in this call"),
+        );
+        specific.insert("updatedInput".into(), Value::Object(updated));
+    }
+    Some(out)
+}
+
 fn pre_tool_use(engine: &Engine, call: &Call) -> (Option<Value>, Option<Outcome>) {
     if call.tool == "Bash" && call.command.is_none() {
         return (None, None);
