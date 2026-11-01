@@ -288,9 +288,36 @@ fn a_long_line_is_cut_and_says_by_how_much() {
     assert_eq!(lines[2], " right: \"b\"");
 }
 
+/// An e2e script's format, as a project would declare it.
+const E2E_FORMAT: &str = r#"
+description = "A shell e2e runner"
+failed = [
+  '^(?:ERROR: )?E2E test (?<name>\S+) failed: exited with status code \d+$',
+  '^::error .*title=E2E test (?<name>\S+) failed::',
+]
+start = ['^(?:>>> |::group::)E2E (\S+)$']
+excerpt = ['^(?:ERROR: )?E2E assertion failed: ', '^::error .*title=E2E assertion failed::']
+drop = ['^\S+: \d+s$']
+
+[[examples]]
+output = """
+>>> E2E cli/test_a
+DEBUG: $ mise ls
+ERROR: E2E assertion failed: expected 'x'
+cli/test_a: 1s
+ERROR: E2E test cli/test_a failed: exited with status code 1
+"""
+failures = ["cli/test_a"]
+"#;
+
 #[test]
-fn mise_e2e_failures_carry_their_assertion() {
-    let d = digest(&fixture("mise-e2e"), true, DEFAULT_BUDGET);
+fn a_declared_format_names_failures_with_their_excerpt() {
+    // Without it, nothing in the output is recognised.
+    let d = digest(&fixture("e2e-script"), true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["no failure recognised; the end of the output"]);
+
+    let format = Format::parse("e2e", E2E_FORMAT).unwrap();
+    let d = digest_with(&fixture("e2e-script"), true, DEFAULT_BUDGET, &[format]);
     assert_eq!(counts(&d), [0, 1, 0]);
     assert_eq!(names(&d), ["backend/test_vfox_exec_env_cache"]);
     let lines = &d.failures[0].lines;
@@ -299,15 +326,31 @@ fn mise_e2e_failures_carry_their_assertion() {
         "{lines:?}"
     );
     assert_eq!(lines.len(), 2, "{lines:?}");
-}
 
-#[test]
-fn mise_e2e_failures_as_annotations() {
-    let text = "::group::E2E cli/test_a\nDEBUG: $ mise ls\n::error file=e2e/cli/test_a,title=E2E assertion failed::[mise ls] expected 'x'\n::endgroup::\n::error file=e2e/cli/test_a,title=E2E test cli/test_a failed::exited with status code 1\n";
-    let d = digest(text, true, DEFAULT_BUDGET);
+    // The same runner's GitHub Actions annotations.
+    let text = "::group::E2E cli/test_a\nDEBUG: $ mise ls\n::error file=e2e/cli/test_a,title=E2E assertion failed::expected 'x'\n::endgroup::\n::error file=e2e/cli/test_a,title=E2E test cli/test_a failed::exited with status code 1\n";
+    let format = Format::parse("e2e", E2E_FORMAT).unwrap();
+    let d = digest_with(text, true, DEFAULT_BUDGET, &[format]);
     assert_eq!(names(&d), ["cli/test_a"]);
     assert_eq!(
         d.failures[0].lines[0],
-        "::error file=e2e/cli/test_a,title=E2E assertion failed::[mise ls] expected 'x'"
+        "::error file=e2e/cli/test_a,title=E2E assertion failed::expected 'x'"
     );
+}
+
+#[test]
+fn a_format_that_cannot_work_does_not_load() {
+    for (text, why) in [
+        ("failed = []", "needs at least one pattern"),
+        ("failed = ['^FAIL']", "needs a group that names the test"),
+        ("failed = ['^FAIL (']", "`failed` pattern"),
+        ("failed = ['^FAIL (\\S+)']\ncolour = true", "unknown field"),
+        (
+            "failed = ['^FAIL (\\S+)']\n[[examples]]\noutput = 'FAIL a'\nfailures = ['b']",
+            "example 1 names [\"a\"], not [\"b\"]",
+        ),
+    ] {
+        let err = Format::parse("x", text).unwrap_err();
+        assert!(err.contains(why), "{text}: {err}");
+    }
 }

@@ -7,7 +7,7 @@ use jouet_rules::{Digests, Trust, TrustStore};
 use std::path::{Path, PathBuf};
 
 /// The files a repository's or the system's trust and hash cover.
-pub(crate) const ENTRIES: &[&str] = &["rules", "routines", "plugins.toml"];
+pub(crate) const ENTRIES: &[&str] = &["rules", "routines", "formats", "plugins.toml"];
 
 /// Where a set comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +116,11 @@ impl Set {
         self.root.join("routines")
     }
 
+    /// Its failure formats for `jouet test` (see [`crate::testlog::format`]).
+    pub(crate) fn formats_dir(&self) -> PathBuf {
+        self.root.join("formats")
+    }
+
     /// The `plugins.toml` of a set that can pin plugins.
     pub(crate) fn pins(&self) -> Option<PathBuf> {
         (self.kind != Kind::Plugin).then(|| self.root.join("plugins.toml"))
@@ -137,7 +142,9 @@ impl Set {
 
     /// Whether `path`, a rule's or routine's file, is one of this set's.
     pub(crate) fn holds(&self, path: &Path) -> bool {
-        path.starts_with(self.rules_dir()) || path.starts_with(self.routines_dir())
+        path.starts_with(self.rules_dir())
+            || path.starts_with(self.routines_dir())
+            || path.starts_with(self.formats_dir())
     }
 
     /// Whether there is anything to load from it.

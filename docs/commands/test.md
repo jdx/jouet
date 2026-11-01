@@ -54,10 +54,44 @@ FAIL tests::unwraps_none
 full log: ~/.local/state/jouet/logs/test-1793449700778-936641-0.log
 ```
 
-Failures are recognised, by their lines rather than by the command, in the output of cargo test and nextest, rustc (errors by file and line; warnings are counted), tsc, go test and go build, pytest, unittest, jest, vitest, TAP, which bats prints, and mise's e2e runner (`E2E test NAME failed`, with the failed assertion). One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
+Failures are recognised, by their lines rather than by the command, in the output of cargo test and nextest, rustc (errors by file and line; warnings are counted), tsc, go test and go build, pytest, unittest, jest, vitest, and TAP, which bats prints, and in any [format you declare](#your-own-runners-formats). One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
 
 This is for agents, and for plain display (pipes, redirects, CI). A person at a terminal sees the output as it runs, then the line with the counts and the log's path. `--json` puts the counts and failures in the document (see [JSON](#json)).
 
+### Your own runners: formats
+
+A runner jouet does not know, such as a project's own e2e script, can be described in a TOML file in a `formats/` directory: yours, `~/.config/jouet/formats/`, a trusted repository's `.jouet/formats/`, the system's, or a plugin's. Each file is one format, named after it (a plugin's after the plugin too, `acme/e2e`):
+
+```toml
+description = "The e2e runner's failed tests"
+# A line that says a test failed; its `name` group, else its first, names it.
+failed = ['^ERROR: E2E test (?<name>\S+) failed: exited with status code \d+$']
+# A line that starts a test: a failure's lines are those after the last one.
+start = ['^>>> E2E (\S+)$']
+# Where the failure's excerpt starts: its last line that matches, else the first.
+excerpt = ['^ERROR: E2E assertion failed: ']
+# Lines left out of the excerpt.
+drop = ['^\S+: \d+s$']
+
+[[examples]]
+output = """
+>>> E2E cli/test_a
+ERROR: E2E assertion failed: [mise ls] expected 'x'
+cli/test_a: 1s
+ERROR: E2E test cli/test_a failed: exited with status code 1
+"""
+failures = ["cli/test_a"]
+```
+
+With it, the failed test is named, with its assertion:
+
+```text
+cmd: failed (exit 1) in 0.0s: 1 failed
+FAIL cli/test_a
+  ERROR: E2E assertion failed: [mise ls] expected 'x'
+```
+
+Each pattern key takes a list of regular expressions ([Rust's syntax](https://docs.rs/regex/latest/regex/#syntax)), matched against each line once colour and mise's `[task]` prefixes are taken off. A format's examples are checked when it loads: one whose examples do not name the failures they list, or with a pattern that does not compile or a key jouet does not know, does not load, and `jouet test` says why on stderr and runs without it. `jouet test --dry-run` lists the formats that load, and `--json` reports them as `formats`. Failures named by a format count for [`--baseline`](#failures-that-were-there-before-baseline) like any other.
 ## Any command: `--cmd`
 
 `jouet test --cmd -- CMD` runs CMD, directly rather than through a shell, in the current directory, with the same log and digest: one test, an e2e suite, a build.

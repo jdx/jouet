@@ -4,7 +4,7 @@
 
 use super::{Job, execute, log_path};
 use crate::affected;
-use crate::testlog;
+use crate::testlog::{self, Format};
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -81,10 +81,10 @@ impl Baseline {
 
 /// Every failure a run's output names, or None when it names none, so the
 /// failures cannot be compared.
-pub(super) fn failure_names(output: &str) -> Option<BTreeSet<String>> {
+pub(super) fn failure_names(output: &str, formats: &[Format]) -> Option<BTreeSet<String>> {
     // Not as a failed run, which names an output it recognises nothing in by
     // a stand-in that would match the merge base's.
-    let digest = testlog::digest(output, false, 0);
+    let digest = testlog::digest_with(output, false, 0, formats);
     let names: BTreeSet<String> = digest
         .failures
         .into_iter()
@@ -100,6 +100,7 @@ pub(super) fn failure_names(output: &str) -> Option<BTreeSet<String>> {
 pub(super) fn compare(
     root: &Path,
     since: Option<&str>,
+    formats: &[Format],
     failed: &[(&Job, BTreeSet<String>)],
 ) -> Result<Baseline, String> {
     let base = affected::base(root, since).map_err(|e| e.message)?;
@@ -142,7 +143,7 @@ pub(super) fn compare(
         let at_base: BTreeSet<String> = if code == 0 {
             BTreeSet::new()
         } else {
-            failure_names(&String::from_utf8_lossy(&output)).unwrap_or_default()
+            failure_names(&String::from_utf8_lossy(&output), formats).unwrap_or_default()
         };
         for name in now {
             if at_base.contains(name) {
@@ -233,6 +234,6 @@ mod tests {
 
     #[test]
     fn an_unrecognised_failure_names_nothing() {
-        assert_eq!(failure_names("something broke\n"), None);
+        assert_eq!(failure_names("something broke\n", &[]), None);
     }
 }

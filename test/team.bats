@@ -241,7 +241,7 @@ TOML
 	echo x >"$BATS_TEST_TMPDIR/acme/skills/x.md"
 	run --separate-stderr jouet plugin add "$BATS_TEST_TMPDIR/acme" --yes
 	assert_failure 1
-	[[ "$stderr" == *"skills/ is not something a plugin ships; it holds rules/ and routines/ only, and jouet-plugin.toml"* ]]
+	[[ "$stderr" == *"skills/ is not something a plugin ships; it holds rules/, routines/, formats/ only, and jouet-plugin.toml"* ]]
 	rm -r "$BATS_TEST_TMPDIR/acme/skills"
 
 	echo 'hooks = []' >>"$BATS_TEST_TMPDIR/acme/jouet-plugin.toml"

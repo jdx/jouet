@@ -39,6 +39,9 @@ struct Report {
     /// With `--baseline`, a failing run's failures at the merge base.
     #[serde(skip_serializing_if = "Option::is_none")]
     baseline: Option<baseline::Baseline>,
+    /// The failure formats declared in `formats/` that loaded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    formats: Vec<String>,
     ok: bool,
 }
 
@@ -135,6 +138,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         Ok(planned) => planned,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    // Formats declared for runners jouet does not know; one that does not
+    // load is said, and the run goes on without it.
+    let (formats, problems) = testlog::format::load(&cwd);
+    for problem in &problems {
+        eprintln!("jouet: warning: {problem}");
+    }
+    report.formats = formats.iter().map(|f| f.name.clone()).collect();
     // The agent wrote the command it gave, so only a dry run repeats it.
     if !out.json && (!args.cmd || args.dry_run) {
         emit(&text(&report));
@@ -164,9 +174,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            suite.digest = Some(testlog::digest(&output, code != 0, budget));
+            suite.digest = Some(testlog::digest_with(&output, code != 0, budget, &formats));
             if args.baseline && code != 0 {
-                failed.push((job, baseline::failure_names(&output)));
+                failed.push((job, baseline::failure_names(&output, &formats)));
             }
             let suite_exit = (job.exit)(code);
             if suite_exit == Exit::Failed || exit == Exit::Ok {
@@ -189,7 +199,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             .collect();
         let found = match named {
             None => Err("the output names no failing test, so there is nothing to compare at the merge base".to_string()),
-            Some(named) => baseline::compare(&root, args.since.as_deref(), &named),
+            Some(named) => baseline::compare(&root, args.since.as_deref(), &formats, &named),
         };
         match found {
             Ok(found) => {
@@ -495,6 +505,7 @@ fn report_of(
         suites,
         dry_run,
         baseline: None,
+        formats: Vec::new(),
         ok: true,
     }
 }
@@ -672,6 +683,9 @@ fn text(report: &Report) -> String {
                 .collect();
             let _ = writeln!(s, "  {verb}: {env}{}{at}", affected::show(command));
         }
+    }
+    if !report.formats.is_empty() {
+        let _ = writeln!(s, "failure formats: {}", report.formats.join(", "));
     }
     s
 }
