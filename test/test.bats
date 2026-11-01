@@ -752,19 +752,19 @@ TOML
 	run --separate-stderr jouet test
 	assert_success
 	assert_output --partial 'baseline: the failure also fails at main'
-	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 2
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 2
 
 	# Kept: the next failure compares with it, and main does not run again.
 	echo more >>notes.md
 	run --separate-stderr jouet test
 	assert_success
 	assert_output --partial 'baseline: the failure also fails at main'
-	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 3
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
 
 	# The suite's own command, run through --cmd, shares what is kept.
 	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests
 	assert_success
-	assert_equal "$(wc -l <"$BATS_TEST_TMPDIR/runs")" 4
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 4
 	# Another command has nothing kept: --cmd does not run main on its own,
 	# and --baseline keeps what it finds for the next run.
 	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
