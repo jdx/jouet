@@ -360,9 +360,10 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
         if let Some(cached) = waits.avoidable_cached_input_tokens {
             let _ = writeln!(
                 s,
-                "  potentially avoidable input: {} tokens ({} cached)",
+                "  potentially avoidable input: {} tokens ({} cached, {} not cached)",
                 tokens(waits.avoidable_input_tokens),
-                tokens(cached)
+                tokens(cached),
+                tokens(waits.avoidable_input_tokens.saturating_sub(cached))
             );
         }
     }

@@ -75,11 +75,10 @@ impl Reader for Codex {
             t.lines += 1;
             state.line = t.lines;
             let found = |k: &&[u8]| memchr::memmem::find(line, k).is_some();
-            let assistant_message = memchr::memmem::find(line, b"\"role\":\"assistant\"").is_some()
-                && memchr::memmem::find(line, b"\"phase\":\"analysis\"").is_none();
             if !(RELEVANT.iter().any(found)
-                || assistant_message
-                || state.detail && DETAIL.iter().any(found))
+                || state.detail && DETAIL.iter().any(found)
+                || memchr::memmem::find(line, b"\"role\":\"assistant\"").is_some()
+                    && memchr::memmem::find(line, b"\"phase\":\"analysis\"").is_none())
             {
                 return true;
             }

@@ -37,6 +37,8 @@ The savings are estimates and are labelled as such:
 - **Edits:** requests whose edit failed and had to be redone.
 - **Builds and tests** cost time more than tokens; jouet has no command for them, and the report points to mbx.
 
+Codex process and cell IDs and Claude Code task IDs link checks within a transcript; the IDs are not printed. A check is short for this estimate only when it explicitly requests at most two seconds and actually returns within that time. Codex checks inside an `exec` cell and Claude checks are observations only: their surrounding work or result does not yet establish the same quiet-check evidence. Shell `sleep` and `pgrep` calls without a job identity are unlinked.
+
 The patterns are `sleep` before a check, test output cut with `| head` or `| tail`, a `GH_TOKEN=` prefix that works around a stale token, scripts or heredocs that rewrite files, GitHub rate-limit messages, `gh` run once per item of a shell loop, and a failed command run again with the same shape right after.
 
 ## Privacy

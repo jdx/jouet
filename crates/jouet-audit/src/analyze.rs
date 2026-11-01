@@ -246,7 +246,10 @@ impl Analyzer {
                     acc.waits.opportunity_requests += 1;
                     acc.waits.opportunity_input_tokens += request.input_tokens.unwrap_or(0);
                     acc.waits.avoidable_input_tokens += request.input_tokens.unwrap_or(0);
-                    if let Some(cached) = request.cached_input_tokens {
+                    if let Some(cached) = request
+                        .cached_input_tokens
+                        .filter(|n| request.input_tokens.is_some_and(|total| *n <= total))
+                    {
                         *acc.waits.avoidable_cached_input_tokens.get_or_insert(0) += cached;
                     } else {
                         acc.waits.cached_unknown = true;

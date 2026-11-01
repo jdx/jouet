@@ -475,6 +475,9 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
             }
             let before = found.map_or(0, |k| k.runs);
             if before < MIN_BASELINE_RUNS {
+                if kind == Kind::ProcessWait {
+                    return refuse(format!("only {before} linked process-wait opportunities before setup; an estimate needs {MIN_BASELINE_RUNS}"));
+                }
                 return refuse(format!(
                     "only {} before setup, and an estimate needs {MIN_BASELINE_RUNS}",
                     kind.count(before)
