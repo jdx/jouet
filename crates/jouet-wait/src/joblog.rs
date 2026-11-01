@@ -18,6 +18,27 @@ use std::sync::LazyLock;
 /// Lines worth keeping even when they come before the tail.
 static INTERESTING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("error|FAILED|panicked|assert").expect("a valid regex"));
+/// A line of a Rust backtrace, std's or color-eyre's: a frame (`  12:
+/// mise::cli::run::{{closure}}`), its location (`at src/main.rs:4:5`), or
+/// the lines around them. A numbered line that is a sentence, as eyre's
+/// `   0: dummy@latest is not installed`, is not a frame.
+static FRAME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"^\s*(\d+: \S*(::|<unknown>)\S*.*",
+        r"|at .+:(\d+|<unknown line>)(:\d+)?",
+        r"|⋮ \d+ frames? hidden ⋮",
+        r"|━+ BACKTRACE ━+",
+        r"|stack backtrace:",
+        r"|Run with (COLORBT_SHOW_HIDDEN|RUST_BACKTRACE)=.*)$",
+    ))
+    .expect("a valid regex")
+});
+/// A numbered line that is a frame when a location follows it: std's
+/// `   0: rust_begin_unwind`.
+static BARE_FRAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\d+: \S+$").expect("a valid regex"));
+/// How many backtrace lines in a row are folded into one.
+const FRAMES_FOLDED: usize = 2;
 static ANSI: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]").expect("a valid regex"));
 /// Lines of context kept around an interesting line.
@@ -130,6 +151,7 @@ pub fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
 /// lines that look like errors with a little context, as [`excerpt`] does
 /// for a GitHub log. `tail` 0 keeps them all.
 pub fn trim(lines: Vec<String>, tail: usize) -> Excerpt {
+    let lines = fold_backtraces(lines);
     if tail == 0 || lines.len() <= tail {
         return Excerpt {
             lines,
@@ -170,6 +192,31 @@ pub fn trim(lines: Vec<String>, tail: usize) -> Excerpt {
     }
 }
 
+/// `lines` with each run of [`FRAMES_FOLDED`] or more backtrace lines as
+/// one: a panic's 40 frames would otherwise fill the tail, and push out the
+/// message above them that says what failed.
+pub fn fold_backtraces(lines: Vec<String>) -> Vec<String> {
+    let frame = |i: usize| {
+        FRAME.is_match(&lines[i])
+            || (BARE_FRAME.is_match(&lines[i])
+                && lines.get(i + 1).is_some_and(|next| FRAME.is_match(next)))
+    };
+    let flags: Vec<bool> = (0..lines.len()).map(frame).collect();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let run = flags[i..].iter().take_while(|f| **f).count();
+        if run >= FRAMES_FOLDED {
+            out.push(format!("... {run} backtrace lines skipped"));
+            i += run;
+        } else {
+            out.push(lines[i].clone());
+            i += 1;
+        }
+    }
+    out
+}
+
 fn skipped_marker(n: usize) -> String {
     if n == 1 {
         "... 1 line skipped".into()
@@ -180,6 +227,58 @@ fn skipped_marker(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_backtrace_folds_so_the_error_above_it_stays_in_the_tail() {
+        let mut text = String::from(
+            "DEBUG: $ mise uninstall dummy@latest\nError:\n   0: dummy@latest is not installed\n\nLocation:\n   src/cli/uninstall.rs:120\n\n  ━━━━━━━━━━━━━━━━ BACKTRACE ━━━━━━━━━━━━━━━━\n                                ⋮ 5 frames hidden ⋮\n",
+        );
+        for n in 6..45 {
+            text.push_str(&format!(
+                "  {n:2}: std[dcc5f7e57a96086e]::panicking::catch_unwind::<i32><unknown>\n      at /rustc/fd8e211/library/std/src/panicking.rs:{n}\n"
+            ));
+        }
+        text.push_str("  45: _start<unknown>\n      at <unknown source file>:<unknown line>\n\nRun with COLORBT_SHOW_HIDDEN=1 environment variable to disable frame filtering.\nRun with RUST_BACKTRACE=full to include source snippets.\nERROR: E2E assertion failed: [mise uninstall dummy@latest] command failed with status 1\n");
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let cut = super::trim(lines, 20);
+        assert!(!cut.truncated, "{:#?}", cut.lines);
+        assert!(
+            cut.lines
+                .contains(&"   0: dummy@latest is not installed".to_string()),
+            "{:#?}",
+            cut.lines
+        );
+        assert!(
+            cut.lines
+                .iter()
+                .any(|l| l.ends_with("backtrace lines skipped")),
+            "{:#?}",
+            cut.lines
+        );
+        assert!(
+            cut.lines
+                .last()
+                .unwrap()
+                .starts_with("ERROR: E2E assertion failed")
+        );
+        // std's frames without a path, and a sentence that is numbered.
+        let std: Vec<String> = [
+            "   0: rust_begin_unwind",
+            "             at /rustc/abc/library/std/src/panicking.rs:665:5",
+            "   1: core::panicking::panic_fmt",
+            "             at /rustc/abc/library/core/src/panicking.rs:74:14",
+            "   0: a sentence with words",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        assert_eq!(
+            super::fold_backtraces(std),
+            [
+                "... 4 backtrace lines skipped",
+                "   0: a sentence with words"
+            ]
+        );
+    }
+
     use super::*;
 
     const LOG: &str = "\u{feff}2026-10-30T10:00:00.1000000Z ##[group]Run actions/checkout@v4
