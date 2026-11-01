@@ -17,4 +17,5 @@ Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hook
 - **`--dry-run`** — Show what would change without writing anything
 - **`--uninstall`** — Remove jouet's hooks and skill
 - **`--skill`** — Install the skill as well, which the session-start primer otherwise stands in for
+- **`--benchmark`** — Print a prompt for an agent to benchmark jouet on this project
 - **`-h --help`** — Print help
