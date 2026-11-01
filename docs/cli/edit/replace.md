@@ -16,7 +16,7 @@ Examples:
 - **`[PATHS]…`** — The files to edit
 
 ## Flags
-- **`--old <TEXT>`** — The text to find. Repeatable
+- **`--old <TEXT>`** — The text to find. Repeatable. It may start with `-`, such as a Markdown list item
 - **`--new <TEXT>`** — The text to put in its place, one for each --old
 - **`--count <N>`** — How many matches each --old must have in each file
 - **`--all`** — Replace every match (at least one in each file)

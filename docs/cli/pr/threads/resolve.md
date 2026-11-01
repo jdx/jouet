@@ -5,7 +5,7 @@
 
 Resolve threads
 
-Every ID is checked before any thread is resolved. A PR given after the IDs must not be a bare number: write it as #N.
+Every ID is checked before any thread is resolved. A reply's ID stands for the thread it is in. A PR given after the IDs is written #N; a bare number is taken as the PR only when it is the PR's own number.
 
 Entire findings (`entire:ID`, as `jouet pr threads` lists them) are resolved on Entire through the `entire` CLI, with --reply as the reason; --dismiss dismisses them instead, and needs a reason. A finding and a GitHub thread are separate: resolving one never resolves the other.
 
