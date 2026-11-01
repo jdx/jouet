@@ -271,6 +271,7 @@ impl Adapter for Cargo {
             command.push((*name).to_string());
         }
         command.extend(extra.iter().cloned());
+        let note = others(sources);
         Ok(Selection {
             tests: picked
                 .into_iter()
@@ -280,9 +281,48 @@ impl Adapter for Cargo {
                 })
                 .collect(),
             command,
-            note: None,
+            note,
         })
     }
+}
+
+/// Languages whose files cargo builds no tests from: a crate's directory
+/// can hold its bats tests or a Python harness, which `cargo test` leaves
+/// alone. Other files (`.luau`, `.toml`, fixtures) can reach a test
+/// through `include_str!`, so they stay the crate's.
+const NOT_CARGOS: &[&str] = &[
+    "py", "bats", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "rb",
+];
+
+/// How many of those files the note names.
+const OTHERS_SHOWN: usize = 4;
+
+/// A note naming the changed files of another language, whose own tests
+/// this run does not include.
+fn others(sources: &[Change]) -> Option<String> {
+    let paths: Vec<&str> = sources
+        .iter()
+        .map(|c| c.path.as_str())
+        .filter(|p| {
+            Path::new(p)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| NOT_CARGOS.contains(&e))
+        })
+        .collect();
+    if paths.is_empty() {
+        return None;
+    }
+    let more = paths.len().saturating_sub(OTHERS_SHOWN);
+    let more = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "cargo runs no tests of {}{more}: run their own tests too",
+        paths[..paths.len().min(OTHERS_SHOWN)].join(", ")
+    ))
 }
 
 #[cfg(test)]
@@ -295,6 +335,24 @@ mod tests {
             dir: dir.into(),
             deps: deps.to_vec(),
         }
+    }
+
+    #[test]
+    fn files_of_another_language_are_named_as_not_run() {
+        let change = |path: &str| Change {
+            path: path.into(),
+            status: crate::affected::Status::Modified,
+        };
+        assert_eq!(others(&[change("src/a.rs"), change("rules/x.luau")]), None);
+        assert_eq!(
+            others(&[
+                change("src/a.rs"),
+                change("test/x.bats"),
+                change("bench/a.py")
+            ])
+            .as_deref(),
+            Some("cargo runs no tests of test/x.bats, bench/a.py: run their own tests too")
+        );
     }
 
     #[test]

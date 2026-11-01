@@ -83,13 +83,15 @@ impl Run {
         self.exit_code == 0
     }
 
-    /// Whether this pass ran what `failed` selected: the same selection, or
+    /// Whether this pass ran what `failed` selected: the same selection,
     /// the same command over more names (`test:e2e a b` covers `test:e2e
-    /// a`). An option can change what the words mean (pytest's `-k not x`),
-    /// so a selection with one must match exactly.
+    /// a`), or the same selection without the names after it (`-p a`
+    /// covers `-p a name`, a filter that narrowed it). An option can change
+    /// what the words mean (pytest's `-k not x`), so a selection with one
+    /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
-        if ran == wanted {
+        if ran == wanted || without_names(ran, wanted) {
             return true;
         }
         let words = |s: &str| -> Option<Vec<String>> {
@@ -101,6 +103,20 @@ impl Run {
         };
         !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
     }
+}
+
+/// Whether `wanted` is `ran` with plain names after it: words that are
+/// neither an option nor `--`, and that do not follow an option, whose
+/// value they could be.
+fn without_names(ran: &str, wanted: &str) -> bool {
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let option = |w: &&str| w.starts_with('-');
+    !ran.is_empty()
+        && wanted.len() > ran.len()
+        && wanted.starts_with(&ran)
+        && !ran.last().is_some_and(option)
+        && !wanted[ran.len()..].iter().any(option)
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -1038,6 +1054,34 @@ mod tests {
         state.record([test("pytest -k x", 1, "-k x")], Some("t1"));
         state.record([test("pytest -k not x", 0, "-k not x")], Some("t1"));
         assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_pass_without_the_name_filter_clears_a_failure() {
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        let cargo = |args: &str, code| test(&format!("cargo test {args}"), code, args);
+        state.record([cargo("-p a name", 101)], Some("t1"));
+        // Another package, or a value for an option, does not cover it.
+        state.record([cargo("-p b", 0)], Some("t1"));
+        state.record([cargo("-p", 0)], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([cargo("-p a", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        // Words after the pass that hold an option are not only names.
+        state.record([cargo("-p a -- --exact name", 101)], Some("t1"));
+        state.record([cargo("-p a --", 0)], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn without_names_reads_only_trailing_plain_words() {
+        assert!(without_names("-p a", "-p a name"));
+        assert!(without_names("test:e2e", "test:e2e test_a"));
+        assert!(!without_names("-p a", "-p a"));
+        assert!(!without_names("-k", "-k x"));
+        assert!(!without_names("-p a", "-p a --exact name"));
+        assert!(!without_names("", "name"));
     }
 
     #[test]

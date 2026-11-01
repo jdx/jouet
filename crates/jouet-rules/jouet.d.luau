@@ -309,8 +309,9 @@ export type JouetRepo = {
 export type JouetGit = typeof(setmetatable(
 	{} :: {
 		-- The current branch, its upstream and how far apart they are, and
-		-- whether the work tree is clean, from `git status`.
-		state: () -> (JouetGitState?, string?),
+		-- whether the work tree is clean, from `git status`. With `dir`, of
+		-- the work tree there instead (a `cd`'s, from `jouet.dirs`).
+		state: (dir: string?) -> (JouetGitState?, string?),
 		-- A hash of the content of every tracked file in the work tree,
 		-- staged or not; untracked and ignored files are left out. A commit
 		-- with the same content hashes the same. The `tree` of a recorded run.
@@ -322,8 +323,9 @@ export type JouetGit = typeof(setmetatable(
 		changed: (scope: string?) -> ({ string }?, string?),
 		-- How many commits on the local branch `branch` are not in `of` (a
 		-- branch, `origin/…` or a SHA): what moving the branch to `of` would
-		-- drop. nil when there is no such local branch.
-		ahead: (branch: string, of: string) -> (number?, string?),
+		-- drop. nil when there is no such local branch. With `dir`, in the
+		-- repository there instead.
+		ahead: (branch: string, of: string, dir: string?) -> (number?, string?),
 	},
 	{} :: {
 		-- A git command's subcommand and its arguments, past global options
