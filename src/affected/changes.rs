@@ -102,6 +102,14 @@ pub(crate) fn base(root: &Path, since: Option<&str>) -> Result<Base, Error> {
     })
 }
 
+/// Whether the work tree is `merge_base` exactly: HEAD is that commit, and
+/// nothing differs from it, staged, unstaged or untracked.
+pub(crate) fn unchanged_since(root: &Path, merge_base: &str) -> Result<bool, Error> {
+    let head = git(root, &["rev-parse", "HEAD"])
+        .map_err(|e| Error::new(Exit::Failed, format!("reading HEAD: {e}")))?;
+    Ok(head.trim() == merge_base && changed(root, merge_base)?.is_empty())
+}
+
 /// Every file that differs from `merge_base` in the work tree (committed,
 /// staged or not), and every untracked file git does not ignore. A rename
 /// is a deletion and an addition.

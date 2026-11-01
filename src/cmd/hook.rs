@@ -1285,8 +1285,10 @@ mod tests {
         // Every built-in deny rule, not a sample, fits the primer's budget.
         // It grew from 1200 to fit `jouet test`'s usage: about 40 tokens a
         // request, where the `agent-help test` and `commit` lookups it saves
-        // printed 5.9 kB once each.
-        assert!(context.len() <= 1400, "{} bytes:\n{context}", context.len());
+        // printed 5.9 kB once each. Then to 1500 for `--baseline`: without it,
+        // Codex changed the environment, outside its checkout, to make
+        // failures it had not caused pass, in each of six benchmark runs.
+        assert!(context.len() <= 1500, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");

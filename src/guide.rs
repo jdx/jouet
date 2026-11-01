@@ -888,7 +888,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     if let ([commit, edit, reply], [suite, affected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let _ = writeln!(
             out,
-            "Test with `{suite}` (the full suite), `{affected}` (what your changes affect) or `{cmd}` (any other test or build). One run is enough. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "Test with `{affected}` (what your changes affect) or `{cmd}` (any other test or build). One run is enough. Run `{suite}` (the full suite) when the hooks ask. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -909,7 +909,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool) -> String {
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code.\n",
+            "They also stop you finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code. For failures you did not cause, use `jouet test --baseline`, not environment changes.\n",
         );
     }
     out
@@ -1122,6 +1122,11 @@ mod tests {
         // Codex ran the suite twice after a fix: once with the plain runner
         // and once with `jouet test`, or with both forms of `jouet test`.
         assert!(text.contains("One run is enough."), "{text}");
+        // With the full suite first in this list, Codex ran it unasked on a
+        // repository whose suite could not pass in its sandbox, then changed
+        // the environment, outside its checkout, to make it pass.
+        assert!(text.contains("Test with `jouet test --affected`"), "{text}");
+        assert!(text.contains("use `jouet test --baseline`"), "{text}");
         assert!(
             text.contains(
                 "python-edit (use `jouet edit`), git-stash, print-secrets, secret-files (use `fnox exec`)."
@@ -1135,7 +1140,7 @@ mod tests {
             "{text}"
         );
         assert!(text.lines().count() <= 4, "{text}");
-        assert!(text.len() <= 1200, "{} bytes:\n{text}", text.len());
+        assert!(text.len() <= 1300, "{} bytes:\n{text}", text.len());
     }
 
     #[test]

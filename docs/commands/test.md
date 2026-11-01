@@ -221,6 +221,8 @@ baseline: the failure also fails at main (302afa77cd40), so none is from this ch
 
 When the run fails, it runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch (`--since REF` names another), with any path into the checkout in the command pointed at the worktree, and compares the failures by name. If every one also fails there, the run passes (exit 0), and it names them; the stop gate and `push-untested` count it as a passing full run. A failure the merge base does not have still fails it (exit 1), listed as new. The worktree is removed afterwards. It needs a runner whose failures jouet recognises by name, costs one more run of the failed suites, and cannot be combined with `--affected`, whose tests depend on the changes.
 
+When the merge base is HEAD and nothing has changed since it, as after committing on `main` itself with no upstream, a run there would be the same code, so `--baseline` refuses before running anything (exit 2). Name the commit the change started from with `--since`, such as `jouet test --baseline --since HEAD~1` for a change of one commit.
+
 ### mise tasks
 
 If your project runs its tests through mise, keep `test` as the full suite, and add an optional task for the affected run:
