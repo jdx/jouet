@@ -123,7 +123,7 @@ Affected runs speed up iteration. They never replace the full suite:
 
 The changes are everything that differs from the merge base of `HEAD` and `--since` (by default the branch's upstream, else the remote's default branch, else a local `main` or `master`), committed or not, plus untracked files git does not ignore. A rename counts as a deletion and an addition.
 
-With an upstream that is the branch's own remote branch, the changed set is what you have not pushed yet. The full suite passed before the last push, because jouet's hooks ask for that, so the affected run covers what changed since.
+With an upstream that is the branch's own remote branch, the changed set is what you have not pushed yet. The affected run covers changes since that push; run any broader checks the project requires as well.
 
 ## What each changed file means
 
