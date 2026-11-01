@@ -162,7 +162,7 @@ stop_reason() {
 	assert_output 0
 }
 
-@test "only partial runs after the tree changed ask for the full suite once" {
+@test "a change after the last passing test run asks for a test run once" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
 	git -C repo add main.rs
@@ -173,12 +173,15 @@ stop_reason() {
 	assert_output ""
 
 	echo 'fn main() { todo!() }' >repo/main.rs
-	ran 'cargo test --workspace wait_github' 0
 	run stop_reason
-	assert_output --partial 'The tree has changed since the last full test run'
-	assert_output --partial 'selecting wait_github'
+	assert_output --partial 'Files changed after the last test run passed ('
+	assert_output --partial 'cargo test --workspace wait_github'
 	# The agent's answer stands after one nudge.
 	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":true}'
+	assert_output ""
+	# Part of the suite passing at the files now is enough: CI runs the rest.
+	ran 'cargo test --workspace wait_github' 0
+	run stop_reason
 	assert_output ""
 }
 
@@ -264,12 +267,11 @@ stop_reason() {
 	run stop_reason
 	assert_output ""
 
-	# After the tree there changes, part of the suite asks for the whole,
+	# After the tree there changes with no run since, it asks for one,
 	# naming the tree.
 	echo 'fn main() { todo!() }' >other/main.rs
-	ran "cd $PWD/other && bats test/a.bats" 0
 	run stop_reason
-	assert_output --partial "In $(cd other && pwd -P): The tree has changed since the last full test run"
+	assert_output --partial "In $(cd other && pwd -P): Files changed after the last test run passed"
 
 	# A cd it cannot follow records nothing, in either tree.
 	ran "cd $PWD/other && cargo test --workspace" 0
@@ -277,27 +279,6 @@ stop_reason() {
 	ran 'cd "$DIR" && cargo test --workspace' 101
 	run stop_reason
 	assert_output ""
-}
-
-@test "push-untested asks about the work tree a push goes to" {
-	git init -q repo
-	git init -q other
-	echo 'fn main() {}' >other/main.rs
-	git -C other add main.rs
-	push() {
-		jq -cn --arg c "$1" --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd,
-			hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' |
-			jouet hook claude pre-tool-use | jq -r '.hookSpecificOutput.additionalContext // empty'
-	}
-
-	ran "cd $PWD/other && cargo test --workspace" 0
-	run push "cd $PWD/other && git push"
-	assert_output ""
-
-	echo 'fn main() { todo!() }' >other/main.rs
-	run push "cd $PWD/other && git push"
-	assert_output --partial 'the tree has changed since the last full test run passed'
-	assert_output --partial '[jouet rule: push-untested]'
 }
 
 @test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {

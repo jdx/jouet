@@ -387,66 +387,6 @@ fn last_run_filters_by_scope_and_reports_the_tree() {
 }
 
 #[test]
-fn push_untested_warns_until_the_full_suite_passed_at_this_tree() {
-    let dir = repo();
-    let work = dir.path().join("work");
-    let tree = crate::tree::work_tree(Some(&work), Duration::from_secs(10)).unwrap();
-    let ledger = tempfile::tempdir().unwrap();
-    let engine = Engine::new(
-        crate::builtin()
-            .into_iter()
-            .filter(|s| s.name == "push-untested")
-            .collect(),
-        Options {
-            has_command: Box::new(|_| true),
-            disabled: Vec::new(),
-            budget: Budget {
-                time: Duration::from_secs(10),
-                ..Budget::default()
-            },
-            cache_dir: None,
-        },
-    );
-    engine.set_probes(Probes::new(
-        Some(work.clone()),
-        Some(ledger.path().into()),
-        false,
-    ));
-    let push = Call {
-        command: Some("git push".into()),
-        ..bash()
-    };
-    let warning = |lines: &[serde_json::Value]| {
-        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
-        std::fs::write(ledger.path().join("ledger.jsonl"), text).unwrap();
-        engine
-            .evaluate(&push)
-            .warnings
-            .first()
-            .and_then(|w| w.message.clone())
-    };
-    let run = |scope: &str, exit_code: i32, tree: &str| {
-        json!({"ts": 1, "harness": "claude", "event": "post-tool-use", "exit_code": exit_code,
-               "tree": tree, "decisions": [{"rule": "checks", "action": "record:test", "scope": scope}]})
-    };
-    // Nothing recorded here: nothing to judge by.
-    assert_eq!(warning(&[]), None);
-    let why = warning(&[run("partial", 0, &tree)]).unwrap();
-    assert!(why.contains("no full test run is recorded"), "{why}");
-    let why = warning(&[run("full", 101, &tree)]).unwrap();
-    assert!(why.contains("the last full test run failed"), "{why}");
-    assert_eq!(warning(&[run("full", 0, &tree)]), None);
-    // A later partial run at the same tree changes nothing.
-    assert_eq!(
-        warning(&[run("full", 0, &tree), run("partial", 0, &tree)]),
-        None
-    );
-    std::fs::write(work.join("a.txt"), "edited\n").unwrap();
-    let why = warning(&[run("full", 0, &tree)]).unwrap();
-    assert!(why.contains("the tree has changed"), "{why}");
-}
-
-#[test]
 fn scoped_lint_is_quiet_on_a_clean_work_tree() {
     let dir = repo();
     let work = dir.path().join("work");

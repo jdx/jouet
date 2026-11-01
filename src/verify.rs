@@ -1,7 +1,8 @@
 //! The check before an agent stops: if a test, lint or build run in this
-//! session failed and nothing since has covered it, or only part of the
-//! test suite ran since the tree last changed, the stop hook blocks once and
-//! says which.
+//! session failed and nothing since has covered it, or files changed after
+//! the last test run passed with none passing since, the stop hook blocks
+//! once and says which. The tests a change affects are enough: the full
+//! suite runs on CI.
 //!
 //! What counts as a check is decided by post-tool-use rules (the built-in
 //! `checks` rule, or a user's replacement), which `jouet.record` the runs
@@ -243,17 +244,19 @@ impl State {
     /// in: `home`, the session's own, first, then the others, each named.
     /// A tree whose reasons were all raised, with nothing changed since,
     /// is passed over (see [`Checks::block`]). `tree` gives a root's work
-    /// tree now, and `hk_repo` whether it has an hk config.
+    /// tree now, `hk_repo` whether it has an hk config, and `affected`
+    /// whether `jouet test --affected` can select tests there.
     pub(crate) fn block(
         &self,
         home: &str,
         tree: impl Fn(&str) -> Option<String>,
         hk_repo: impl Fn(&str) -> bool,
+        affected: impl Fn(&str) -> bool,
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
         let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
         own.into_iter().chain(others).find_map(|(root, checks)| {
-            let raised = checks.block(|| tree(root), hk_repo(root))?;
+            let raised = checks.block(|| tree(root), hk_repo(root), affected(root))?;
             // Those raised now: the ones before were raised at this tree.
             let before = match &checks.raised {
                 Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
@@ -386,10 +389,15 @@ impl Checks {
     /// [`MAX_RAISED`] of them), added to those it has; None when every reason
     /// has been raised at this tree with no run recorded since, so the agent
     /// has answered each once. An unknown tree is never the same tree.
-    pub(crate) fn block(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Option<Raised> {
+    pub(crate) fn block(
+        &self,
+        tree: impl Fn() -> Option<String>,
+        hk_repo: bool,
+        affected: bool,
+    ) -> Option<Raised> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(&tree).clone();
-        let reasons = self.reasons(now, hk_repo);
+        let reasons = self.reasons(now, hk_repo, affected);
         let tree = now();
         let mut raised = match &self.raised {
             Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
@@ -416,18 +424,24 @@ impl Checks {
     }
 
     /// Every reason stopping should wait, the first to raise first: each
-    /// failure nothing has cleared, a test suite that has only partly run
-    /// since the tree changed, and, in a repository with an hk config
-    /// (`hk_repo`), files changed since the last hk check passed. `tree`
-    /// gives the work tree now; it is only asked for when one of the last
-    /// two could apply.
-    pub(crate) fn reasons(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Vec<String> {
+    /// failure nothing has cleared, files changed after the last test run
+    /// passed with none passing since, and, in a repository with an hk
+    /// config (`hk_repo`), files changed since the last hk check passed.
+    /// `tree` gives the work tree now; it is only asked for when one of the
+    /// last two could apply. `affected` is whether `jouet test --affected`
+    /// can select tests there, for the message.
+    pub(crate) fn reasons(
+        &self,
+        tree: impl Fn() -> Option<String>,
+        hk_repo: bool,
+        affected: bool,
+    ) -> Vec<String> {
         // While a test run is still going, its result decides; the agent
         // waiting for it is not finishing on a stale one.
         let testing = self.running.iter().any(Running::alive);
         let mut reasons = self.failure_reasons(&tree, testing);
         if !testing {
-            reasons.extend(self.partial_test_reason(&tree));
+            reasons.extend(self.untested_reason(&tree, affected));
         }
         reasons.extend(self.hk_reason(&tree, hk_repo));
         reasons
@@ -453,26 +467,36 @@ impl Checks {
         ))
     }
 
-    fn partial_test_reason(&self, tree: &impl Fn() -> Option<String>) -> Option<String> {
+    /// Files changed after the newest test run passed, and no test run has
+    /// passed at the files now. Any passing run counts, a partial one too:
+    /// the tests a change affects are enough here, as the full suite runs
+    /// on CI. A failed newest run is a failure reason instead.
+    fn untested_reason(
+        &self,
+        tree: &impl Fn() -> Option<String>,
+        affected: bool,
+    ) -> Option<String> {
         let last = self.runs.get(&Kind::Test)?;
-        if last.full || !last.passed() {
+        if !last.passed() || last.tree.is_none() {
             return None;
         }
-        let since = match &last.selector {
-            Some(selector) => format!("`{}`, selecting {selector}", shown(&last.command)),
-            None => format!("`{}`", shown(&last.command)),
-        };
-        let Some(full) = self.full_passes.get(&Kind::Test) else {
-            return Some(format!(
-                "Only part of the test suite has run in this session (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]"
-            ));
-        };
-        if full.tree.is_some() && full.tree == tree() {
+        let now = tree()?;
+        let passed_now = self.passes.get(&Kind::Test).is_some_and(|passes| {
+            passes
+                .iter()
+                .any(|p| p.tree.as_deref() == Some(now.as_str()))
+        });
+        if passed_now {
             return None;
         }
+        let run = if affected {
+            "`jouet test --affected`, or the tests for the code you changed"
+        } else {
+            "the tests for the code you changed"
+        };
         Some(format!(
-            "The tree has changed since the last full test run (`{}`), and only part of the suite has run since (last {since}). Run the full suite before you finish, or say why it isn't needed. [jouet: verify]",
-            shown(&full.command)
+            "Files changed after the last test run passed (`{}`). Run the tests your change affects ({run}) before you finish, or say why none are needed. The full suite runs on CI. [jouet: verify]",
+            shown(&last.command)
         ))
     }
 
@@ -687,7 +711,7 @@ mod tests {
     impl Checks {
         /// The first reason to block with, raised or not.
         fn block_reason(&self, tree: impl Fn() -> Option<String>, hk_repo: bool) -> Option<String> {
-            self.reasons(tree, hk_repo).into_iter().next()
+            self.reasons(tree, hk_repo, true).into_iter().next()
         }
     }
 
@@ -759,7 +783,7 @@ mod tests {
         );
         let block = |state: &State| {
             state
-                .block(&root, |_| Some("t1".into()), |_| false)
+                .block(&root, |_| Some("t1".into()), |_| false, |_| true)
                 .map(|b| b.reason)
         };
         assert!(block(&state).unwrap().contains("test run"));
@@ -814,9 +838,17 @@ mod tests {
             [test("cargo test --workspace", 101, "full")],
             Some("t1"),
         );
-        assert!(state.block("/home", |_| None, |_| false).is_some());
+        assert!(
+            state
+                .block("/home", |_| None, |_| false, |_| true)
+                .is_some()
+        );
         state.prune_gone();
-        assert!(state.block("/home", |_| None, |_| false).is_none());
+        assert!(
+            state
+                .block("/home", |_| None, |_| false, |_| true)
+                .is_none()
+        );
     }
 
     #[test]
@@ -903,22 +935,26 @@ mod tests {
     }
 
     #[test]
-    fn only_partial_test_runs_since_the_tree_changed_block() {
+    fn a_change_after_the_last_passing_test_run_blocks_until_one_passes_again() {
         let mut state = Checks::default();
+        // A partial pass is enough at its tree: the full suite runs on CI.
         state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
-        let why = reason(&state, "t1").unwrap();
-        assert!(why.starts_with("Only part of the test suite"), "{why}");
-        assert!(why.contains("selecting -p a"), "{why}");
-
-        state.record([test("cargo test --workspace", 0, "full")], Some("t1"));
-        state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
-        // The tree the full suite passed at: nothing to add.
         assert_eq!(reason(&state, "t1"), None);
         let why = reason(&state, "t2").unwrap();
-        assert!(why.starts_with("The tree has changed"), "{why}");
-        assert!(why.contains("`cargo test --workspace`"), "{why}");
-        // An unknown tree (a Codex session) is not the same tree.
-        assert!(state.block_reason(|| None, false).is_some());
+        assert!(
+            why.starts_with("Files changed after the last test run passed (`cargo test -p a`)"),
+            "{why}"
+        );
+        assert!(why.contains("`jouet test --affected`"), "{why}");
+        assert!(why.contains("The full suite runs on CI."), "{why}");
+        // Where --affected cannot select, it is not offered.
+        let why = state.reasons(|| Some("t2".into()), false, false).remove(0);
+        assert!(!why.contains("--affected"), "{why}");
+        // Any passing run at the files now clears it.
+        state.record([test("cargo test -p b", 0, "-p b")], Some("t2"));
+        assert_eq!(reason(&state, "t2"), None);
+        // An unknown tree (a Codex session) cannot be compared.
+        assert_eq!(state.block_reason(|| None, false), None);
         // A partial lint or build run is not asked about.
         let mut lint = Checks::default();
         lint.record([record(Kind::Lint, "cargo clippy -p a", 0, "-p a")], None);
@@ -981,16 +1017,22 @@ mod tests {
             Some("o1"),
         );
         assert_eq!(
-            state.block("/home", tree, |_| false).map(|b| b.reason),
+            state
+                .block("/home", tree, |_| false, |_| true)
+                .map(|b| b.reason),
             None
         );
-        // Only part of the suite in the session's own tree blocks, unnamed.
-        state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("h1"));
+        // A change in the session's own tree after its last pass blocks,
+        // unnamed.
+        state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("h0"));
         let why = state
-            .block("/home", tree, |_| false)
+            .block("/home", tree, |_| false, |_| true)
             .map(|b| b.reason)
             .unwrap();
-        assert!(why.starts_with("Only part of the test suite"), "{why}");
+        assert!(
+            why.starts_with("Files changed after the last test run passed"),
+            "{why}"
+        );
         // A failure in another tree blocks, and names it.
         state.record(
             "/home",
@@ -998,7 +1040,9 @@ mod tests {
             Some("h1"),
         );
         assert_eq!(
-            state.block("/home", tree, |_| false).map(|b| b.reason),
+            state
+                .block("/home", tree, |_| false, |_| true)
+                .map(|b| b.reason),
             None
         );
         state.record(
@@ -1007,7 +1051,7 @@ mod tests {
             Some("o1"),
         );
         let why = state
-            .block("/home", tree, |_| false)
+            .block("/home", tree, |_| false, |_| true)
             .map(|b| b.reason)
             .unwrap();
         assert!(
@@ -1020,15 +1064,15 @@ mod tests {
     fn a_raised_reason_is_not_raised_again_until_something_changes() {
         let mut state = Checks::default();
         state.record([test("cargo test --workspace", 101, "full")], Some("t1"));
-        let raised = state.block(|| Some("t1".into()), false).unwrap();
+        let raised = state.block(|| Some("t1".into()), false, true).unwrap();
         assert!(raised.reasons[0].starts_with("The last test run failed"));
         assert_eq!(raised.tree.as_deref(), Some("t1"));
         state.raised = Some(raised.clone());
         // The same failure at the same tree: the agent has answered it.
-        assert_eq!(state.block(|| Some("t1".into()), false), None);
+        assert_eq!(state.block(|| Some("t1".into()), false, true), None);
         // The tree changed.
         assert_eq!(
-            state.block(|| Some("t2".into()), false),
+            state.block(|| Some("t2".into()), false, true),
             Some(Raised {
                 tree: Some("t2".into()),
                 ..raised.clone()
@@ -1039,18 +1083,18 @@ mod tests {
             tree: None,
             ..raised.clone()
         });
-        assert!(state.block(|| None, false).is_some());
+        assert!(state.block(|| None, false, true).is_some());
         // A new run, even the same failure again at the same tree.
         state.raised = Some(raised.clone());
         state.record([test("cargo test --workspace", 101, "full")], Some("t1"));
         assert_eq!(state.raised, None);
-        assert_eq!(state.block(|| Some("t1".into()), false), Some(raised));
-        // A partial-run reason is kept the same way.
-        let mut partial = Checks::default();
-        partial.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
-        partial.raised = partial.block(|| Some("t1".into()), false);
-        assert!(partial.raised.is_some());
-        assert_eq!(partial.block(|| Some("t1".into()), false), None);
+        assert_eq!(state.block(|| Some("t1".into()), false, true), Some(raised));
+        // An untested change is kept the same way.
+        let mut untested = Checks::default();
+        untested.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        untested.raised = untested.block(|| Some("t2".into()), false, true);
+        assert!(untested.raised.is_some());
+        assert_eq!(untested.block(|| Some("t2".into()), false, true), None);
     }
 
     #[test]
@@ -1066,11 +1110,11 @@ mod tests {
             Some("t1"),
         );
         let now = || Some("t1".to_string());
-        let raised = state.block(now, false).unwrap();
+        let raised = state.block(now, false, true).unwrap();
         let seen = raised.reasons.clone();
         assert_eq!(raised.more, 0);
         state.raised = Some(raised);
-        assert_eq!(state.block(now, false), None);
+        assert_eq!(state.block(now, false, true), None);
         // Each failure once, the full test failure before the partial one.
         assert_eq!(seen.len(), 3, "{seen:?}");
         assert!(
@@ -1083,7 +1127,7 @@ mod tests {
             "{seen:?}"
         );
         // At another tree, they are raised again.
-        let raised = state.block(|| Some("t2".into()), false).unwrap();
+        let raised = state.block(|| Some("t2".into()), false, true).unwrap();
         assert_eq!(raised.reasons, seen);
     }
 
@@ -1095,7 +1139,7 @@ mod tests {
             .collect();
         state.record("/home", failures, Some("t1"));
         let tree = |_: &str| Some("t1".to_string());
-        let block = state.block("/home", tree, |_| false).unwrap();
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         assert_eq!(block.raised.reasons.len(), 5);
         assert!(
             block
@@ -1105,7 +1149,7 @@ mod tests {
             block.reason
         );
         state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
-        let block = state.block("/home", tree, |_| false).unwrap();
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         assert_eq!(
             block.reason.matches("[jouet: verify]").count(),
             2,
@@ -1129,12 +1173,12 @@ mod tests {
         failures.push(test("cargo test -p b", 101, "-p b"));
         state.record("/home", failures, Some("t1"));
         let tree = |_: &str| Some("t1".to_string());
-        let block = state.block("/home", tree, |_| false).unwrap();
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         // Six cut to one text, and the other.
         assert_eq!(block.raised.reasons.len(), 2, "{}", block.reason);
         assert_eq!(block.raised.more, 0);
         state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
-        assert_eq!(state.block("/home", tree, |_| false), None);
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
     }
 
     #[test]
@@ -1171,17 +1215,17 @@ mod tests {
             [test("cargo test --workspace", 1, "full")],
             Some("o1"),
         );
-        let block = state.block("/home", tree, |_| false).unwrap();
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         assert_eq!(block.root, "/home");
         assert!(block.reason.contains("exited 101"), "{block:?}");
         state.raise(&block);
-        let block = state.block("/home", tree, |_| false).unwrap();
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         assert_eq!(block.root, "/other");
         assert!(block.reason.starts_with("In /other: "), "{block:?}");
         // The raised reason is kept without the tree's name.
         assert!(block.raised.reasons[0].starts_with("The last test run failed"));
         state.raise(&block);
-        assert_eq!(state.block("/home", tree, |_| false), None);
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
     }
 
     #[test]
@@ -1195,7 +1239,9 @@ mod tests {
             Some("t1"),
         );
         state.record("", [test("cargo test -p a", 0, "-p a")], None);
-        let block = state.block("/r", |_| Some("t1".into()), |_| false).unwrap();
+        let block = state
+            .block("/r", |_| Some("t1".into()), |_| false, |_| true)
+            .unwrap();
         state.raise(&block);
         state.save(&path).unwrap();
         assert_eq!(State::load(&path), state);

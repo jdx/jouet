@@ -110,8 +110,8 @@ pub(crate) struct HookSettings {
     /// Print a short jouet guide when a session starts
     #[usage(env = "JOUET_HOOKS_PRIME", default = true)]
     pub prime: bool,
-    /// Block finishing while a test, lint or build run failed, or after only
-    /// part of the test suite ran on changed code
+    /// Block finishing while a test, lint or build run failed, or after files
+    /// changed with no test run passing since
     #[usage(env = "JOUET_HOOKS_VERIFY", default = true)]
     pub verify: bool,
     /// Keep a ledger of command shapes and rule decisions

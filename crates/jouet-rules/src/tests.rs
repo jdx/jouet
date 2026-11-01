@@ -1497,7 +1497,7 @@ fn a_script_sees_which_commands_its_matchers_matched() {
 }
 
 #[test]
-fn a_cut_jouet_test_is_told_to_drop_the_cut() {
+fn a_cut_jouet_test_is_left_alone() {
     let engine = engine(builtin());
     let warning = |command: &str| {
         let outcome = engine.evaluate(&bash(command));
@@ -1507,16 +1507,12 @@ fn a_cut_jouet_test_is_told_to_drop_the_cut() {
             .find(|w| w.rule == "piped-test-output");
         w.and_then(|w| w.message).unwrap_or_default()
     };
-    let piped = warning("jouet test --cmd -- mise run test 2>&1 | tail -10");
-    assert!(
-        piped.starts_with("Drop the tail: `jouet test` already prints"),
-        "{piped}"
+    // It records its own result, piped or not, and prints little.
+    assert_eq!(
+        warning("jouet test --cmd -- mise run test 2>&1 | tail -10"),
+        ""
     );
-    assert!(piped.contains("does not count as passing"), "{piped}");
-    // Read back from a file, the run's exit status is its own.
-    let read_back = warning("jouet test > t.log 2>&1; tail -5 t.log");
-    assert!(read_back.starts_with("Drop the tail"), "{read_back}");
-    assert!(!read_back.contains("exit"), "{read_back}");
+    assert_eq!(warning("jouet test > t.log 2>&1; tail -5 t.log"), "");
     // Other runners are still pointed at `jouet test`.
     assert!(warning("cargo test 2>&1 | tail -3").starts_with("Run `jouet test`"));
 }

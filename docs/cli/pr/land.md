@@ -7,7 +7,7 @@ Merge a PR that is ready, honouring branch protection
 
 Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is missing. With --update, a branch behind its base is first updated on GitHub by merging the base in (never a force-push), and its new checks are waited for. The merge goes through the API with the head SHA as a guard, the way the merge button does, so branch protection applies and is never bypassed. Then the PR is confirmed merged and the merge commit printed. It asks first only when a person is at a terminal (stdin and stderr are terminals and no coding agent is detected); anyone else must pass --yes or --dry-run, or it exits 2 before contacting GitHub.
 
-While jouet's hooks keep a ledger, it also refuses (exit 4) unless they recorded a full test run passing at the PR head's tree; pass --skip-verify with a reason, which the ledger keeps, to land anyway.
+The PR's checks on GitHub, which `pr next` reads, are its tests: the full suite runs on CI, not here.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR
@@ -21,5 +21,4 @@ While jouet's hooks keep a ledger, it also refuses (exit 4) unless they recorded
 - **`--timeout <DUR>`** — How long to wait for checks after --update (default 30m)
 - **`--interval <DUR>`** — Time between the first checks of that wait; backs off to 60s (default 10s)
 - **`--settle <DUR>`** — How long to wait for GitHub to compute an unknown mergeable state (default 20s; 0 disables)
-- **`--skip-verify <REASON>`** — Land without a full test pass recorded at the PR head's tree, and say why; the reason is kept in the hook ledger
 - **`-h --help`** — Print help

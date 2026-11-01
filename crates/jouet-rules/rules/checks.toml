@@ -1,7 +1,7 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "checks"
-why = "Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed or only part of the suite ran."
+why = "Records test, lint and build runs and how much each covered, so jouet can stop an agent finishing while one failed, or after it changed files with no test run passing since."
 scope = "builtin"
 author = "builtin"
 created = "2026-10-30"

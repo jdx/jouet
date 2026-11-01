@@ -888,7 +888,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bo
     let tests: Vec<&str> = usage_of("test")
         .map(|u| u.lines.iter().take(3).map(|(line, _)| *line).collect())
         .unwrap_or_default();
-    if let ([commit, edit, reply], [suite, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
+    if let ([commit, edit, reply], [_, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let test = if affected {
             format!(
                 "Test with `{selected}` (what your changes affect) or `{cmd}` (any other test or build)."
@@ -898,7 +898,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bo
         };
         let _ = writeln!(
             out,
-            "{test} One run is enough. Run `{suite}` (the full suite) when the hooks ask. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} One run is enough; CI runs the full suite. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -919,7 +919,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bo
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while a test, lint or build run failed, or after only part of the test suite ran on changed code. For failures you did not cause, use `jouet test --baseline`, not environment changes.\n",
+            "They also stop you finishing while a test, lint or build run failed, or when no test passed since your last change. For failures you did not cause, use `jouet test --baseline`, not environment changes.\n",
         );
     }
     out
@@ -1145,7 +1145,12 @@ mod tests {
         assert!(text.contains("These need no lookup"), "{text}");
         // Codex ran the suite twice after a fix: once with the plain runner
         // and once with `jouet test`, or with both forms of `jouet test`.
-        assert!(text.contains("One run is enough."), "{text}");
+        assert!(
+            text.contains("One run is enough; CI runs the full suite."),
+            "{text}"
+        );
+        // CI runs it, so the primer never asks for the full suite.
+        assert!(!text.contains("the full suite)"), "{text}");
         // With the full suite first in this list, Codex ran it unasked on a
         // repository whose suite could not pass in its sandbox, then changed
         // the environment, outside its checkout, to make it pass.
