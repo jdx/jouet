@@ -184,6 +184,9 @@ fn handle(
             if harness == Harness::Claude && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
                 output = with_long_timeout(&engine, payload, &call, output);
             }
+            if hooks.verify && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
+                note_formatting(payload, &call, true);
+            }
             // A warning waits for the call's post-tool-use hook where the
             // harness has nowhere else to put it.
             if harness::defers_warnings(harness)
@@ -210,6 +213,9 @@ fn handle(
                 (Vec::new(), None)
             };
             log.post_tool_use(payload, &call, &records, ran);
+            if hooks.verify {
+                note_formatting(payload, &call, false);
+            }
             if call.tool == "Bash" {
                 keep_cost(payload, &call, &records, hooks.verify);
             }
@@ -832,6 +838,28 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
     });
     let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
     (records, Some(Ran { tree, repo }))
+}
+
+/// Keeps the tree before and after a call that only formats or commits
+/// ([`verify::formats`]), so a run that passed before it counts after: a
+/// formatter, or a commit's hooks fixing files, needs no second test run.
+fn note_formatting(payload: &Value, call: &Call, started: bool) {
+    let formats = call.tool == "Bash" && call.command.as_deref().is_some_and(verify::formats);
+    let (true, Some(path), Some(cwd)) =
+        (formats, session_state_path(payload), session_dir(payload))
+    else {
+        return;
+    };
+    let root = verify::root_of(&cwd);
+    let tree = jouet_rules::tree::work_tree(Some(&cwd), TREE_TIMEOUT).ok();
+    let _ = verify::update(&path, |state| {
+        let checks = state.checks_mut(&root);
+        if started {
+            checks.formatting_started(tree.as_deref());
+        } else {
+            checks.formatting_ended(tree.as_deref());
+        }
+    });
 }
 
 /// The directory the session's commands start in.
