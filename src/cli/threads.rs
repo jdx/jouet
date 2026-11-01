@@ -120,8 +120,9 @@ pub(crate) struct ReplyArgs {
 
 /// Resolve threads
 ///
-/// Every ID is checked before any thread is resolved. A PR given after the
-/// IDs must not be a bare number: write it as #N.
+/// Every ID is checked before any thread is resolved. A reply's ID stands for
+/// the thread it is in. A PR given after the IDs is written #N; a bare
+/// number is taken as the PR only when it is the PR's own number.
 ///
 /// Entire findings (`entire:ID`, as `jouet pr threads` lists them) are
 /// resolved on Entire through the `entire` CLI, with --reply as the reason;
@@ -148,8 +149,8 @@ pub(crate) struct ResolveArgs {
 
 /// Unresolve threads
 ///
-/// A PR given after the IDs must not be a bare number: write it as #N. An
-/// Entire finding (`entire:ID`) is reopened on Entire.
+/// A PR given after the IDs is written #N; a bare number is taken as the PR
+/// only when it is the PR's own number. An Entire finding (`entire:ID`) is reopened on Entire.
 #[derive(Args)]
 pub(crate) struct UnresolveArgs {
     /// Thread IDs or Entire finding handles, then optionally the PR

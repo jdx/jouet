@@ -25,6 +25,12 @@ pub struct Entry {
     pub resolve: bool,
     #[serde(skip)]
     pub unresolve: bool,
+    /// Named among `resolve`'s or `unresolve`'s arguments, where a PR written
+    /// after the IDs (`resolve 4435734278 1098`) arrives as one: then an ID
+    /// that is the PR's own number and no thread's is the PR. An `apply`
+    /// file names threads only, so there it is an unknown thread.
+    #[serde(skip)]
+    pub among_args: bool,
 }
 
 /// A thread ID as a JSON number or a string of digits.
@@ -140,22 +146,54 @@ pub struct PlanError {
     pub hint: Option<String>,
 }
 
+/// The entries with each ID as the thread it means. A reply's comment ID
+/// stands for the thread it is in. A number among the arguments that is the
+/// PR's own and no thread's was the PR, written after the IDs (`resolve
+/// 4435734278 1098`), so it is dropped (see [`Entry::among_args`]).
+fn addressed(entries: &[Entry], pr: &PrThreads) -> Result<Vec<Entry>, PlanError> {
+    let mut out: Vec<Entry> = Vec::new();
+    for e in entries {
+        let thread = pr
+            .threads
+            .iter()
+            .find(|t| t.id == e.id || t.comments.iter().any(|c| c.id == e.id));
+        let id = match thread {
+            Some(t) => t.id,
+            None if e.among_args && e.id == pr.number => continue,
+            None => e.id,
+        };
+        if out.iter().any(|o| o.id == id) {
+            return Err(PlanError {
+                exit: Exit::Usage,
+                message: format!("thread {id} is named twice; nothing was posted"),
+                hint: Some("a reply's ID stands for the thread it is in".into()),
+            });
+        }
+        out.push(Entry { id, ..e.clone() });
+    }
+    if out.is_empty() {
+        return Err(PlanError {
+            exit: Exit::Usage,
+            message: format!(
+                "{} is the PR, not a thread; name at least one thread ID",
+                pr.number
+            ),
+            hint: Some(
+                "a thread's ID is its first comment's ID, as `jouet pr threads --all` lists".into(),
+            ),
+        });
+    }
+    Ok(out)
+}
+
 /// Checks every entry against the PR and works out what is left to do.
 pub fn plan(entries: &[Entry], pr: &PrThreads, o: &Options) -> Result<Vec<Outcome>, PlanError> {
     let find = |id: u64| pr.threads.iter().find(|t| t.id == id);
+    let entries = &addressed(entries, pr)?;
     let unknown: Vec<String> = entries
         .iter()
         .filter(|e| find(e.id).is_none())
-        .map(|e| {
-            match pr
-                .threads
-                .iter()
-                .find(|t| t.comments.iter().any(|c| c.id == e.id))
-            {
-                Some(t) => format!("{} (a reply in thread {})", e.id, t.id),
-                None => e.id.to_string(),
-            }
-        })
+        .map(|e| e.id.to_string())
         .collect();
     if !unknown.is_empty() {
         let noun = if unknown.len() == 1 {

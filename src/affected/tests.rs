@@ -391,3 +391,25 @@ fn the_base_defaults_to_the_upstream_then_the_default_branch() {
     git(root, &["branch", "-q", "--set-upstream-to=work"]);
     assert_eq!(changes::base(root, None).unwrap().name, "work");
 }
+
+#[test]
+fn a_branchs_own_pushed_copy_is_not_its_base() {
+    // After `git push -u origin feat`, the upstream is origin/feat, which
+    // holds the change itself.
+    let dir = repo("pytest", "");
+    let root = dir.path();
+    let remote = tempfile::tempdir().unwrap();
+    let url = remote.path().to_string_lossy().into_owned();
+    git(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
+    git(root, &["remote", "add", "origin", &url]);
+    git(root, &["push", "-q", "origin", "main"]);
+    git(root, &["remote", "set-head", "origin", "main"]);
+    git(root, &["checkout", "-q", "-b", "feat"]);
+    write(&root.join("new.txt"), "x\n");
+    git(root, &["add", "new.txt"]);
+    git(root, &["commit", "-q", "-m", "feat"]);
+    git(root, &["push", "-q", "-u", "origin", "feat"]);
+    let base = changes::base(root, None).unwrap();
+    assert_eq!(base.name, "origin/main");
+    assert!(!changes::unchanged_since(root, &base.merge_base).unwrap());
+}

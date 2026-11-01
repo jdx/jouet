@@ -214,7 +214,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
-    let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>)> = Vec::new();
+    let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     // Marked for the stop gate while it runs; a run that dies early leaves a
     // mark whose process is gone, which holds nothing up.
@@ -234,10 +234,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            suite.digest = Some(testlog::digest_with(&output, code != 0, budget, &formats));
+            let digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if args.baseline && code != 0 {
-                failed.push((job, baseline::failure_names(&output, &formats)));
+                let ran = digest.passed + digest.failed + digest.skipped;
+                failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
             }
+            suite.digest = Some(digest);
             let suite_exit = (job.exit)(code);
             if suite_exit == Exit::Failed || exit == Exit::Ok {
                 exit = suite_exit;
@@ -250,7 +252,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     if let (Some(base), Exit::Failed) = (base, exit) {
         let named: Option<Vec<_>> = failed
             .into_iter()
-            .map(|(job, names)| names.map(|names| (job, names)))
+            .map(|(job, names, ran)| names.map(|names| (job, names, ran)))
             .collect();
         let found = match named {
             None => Err("the output names no failing test, so there is nothing to compare at the merge base".to_string()),

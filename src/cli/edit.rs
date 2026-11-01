@@ -144,11 +144,13 @@ pub(crate) enum EditCmd {
 pub(crate) struct ReplaceArgs {
     /// The files to edit
     pub(crate) paths: Vec<String>,
-    /// The text to find. Repeatable
-    #[usage(long, var, value_name = "TEXT")]
+    /// The text to find. Repeatable. It may start with `-`, such as a
+    /// Markdown list item
+    #[usage(long, var, value_name = "TEXT", allow_hyphen_values)]
     pub(crate) old: Vec<String>,
-    /// The text to put in its place, one for each --old
-    #[usage(long, var, value_name = "TEXT")]
+    /// The text to put in its place, one for each --old. It may start with
+    /// `-` too
+    #[usage(long, var, value_name = "TEXT", allow_hyphen_values)]
     pub(crate) new: Vec<String>,
     /// How many matches each --old must have in each file
     #[usage(long, value_name = "N")]

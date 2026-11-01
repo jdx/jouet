@@ -53,7 +53,9 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 
 /// The ref to measure from when `--since` is not given: the branch's
 /// upstream, else the remote's default branch, else a local `main` or
-/// `master`; None when there is none of these.
+/// `master`; None when there is none of these. An upstream of the same name
+/// is the branch's own copy, as `git push -u` sets it, and holds the change
+/// itself once pushed, so the default branch is used instead.
 fn default_base(root: &Path) -> Option<String> {
     let first = |args: &[&str]| {
         git(root, args)
@@ -67,7 +69,11 @@ fn default_base(root: &Path) -> Option<String> {
         "--symbolic-full-name",
         "@{upstream}",
     ]) {
-        return Some(upstream);
+        let branch = first(&["rev-parse", "--abbrev-ref", "HEAD"]);
+        let own = branch.is_some_and(|b| upstream.split_once('/').is_some_and(|(_, u)| u == b));
+        if !own {
+            return Some(upstream);
+        }
     }
     if let Some(head) = first(&[
         "symbolic-ref",

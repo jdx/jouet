@@ -70,6 +70,17 @@ impl Git {
         c
     }
 
+    /// A git command that runs hooks, such as `git commit`, without
+    /// `--literal-pathspecs`: git sets `GIT_LITERAL_PATHSPECS=1` for every
+    /// child, hooks included, and a hook that writes its own pathspec magic
+    /// (hk's `:(literal)PATH`) then matches nothing. Name each path with
+    /// [`literal`] instead.
+    pub(crate) fn hooked_command<S: AsRef<OsStr>>(&self, args: &[S]) -> Command {
+        let mut c = self.bare_command();
+        c.env_remove("GIT_LITERAL_PATHSPECS").args(args);
+        c
+    }
+
     /// A git command in this directory with no prompts, for the few
     /// commands that refuse `--literal-pathspecs`.
     fn bare_command(&self) -> Command {
@@ -181,6 +192,11 @@ impl Git {
 }
 
 /// Splits git's `-z` output into its fields.
+/// `path` as a pathspec that matches it alone, whatever characters it holds.
+pub(crate) fn literal(path: &str) -> String {
+    format!(":(literal){path}")
+}
+
 pub(crate) fn nul_fields(text: &str) -> impl Iterator<Item = &str> {
     text.split('\0').filter(|f| !f.is_empty())
 }

@@ -145,6 +145,10 @@ regexes! {
     RUSTC_ERROR = r"^(error(?:\[E\d{4}\])?): (.+)$";
     RUSTC_WARNING = r"^warning(?:\[[^\]]+\])?: ";
     RUSTC_AT = r"^\s*--> (\S+)$";
+    // rustfmt --check, `cargo fmt --check`: each place it would change.
+    RUSTFMT_DIFF = r"^Diff in (\S+?)(?::(\d+):| at line (\d+):)$";
+    // cargo's build scripts, whose own output is indented under it.
+    CARGO_BUILD_SCRIPT = r"^error: failed to run custom build command for `([^`]+)`$";
     // tsc, compact and pretty.
     TSC = r"^(\S+?)(?:\((\d+),(\d+)\): | ?:(\d+):(\d+) - )error (TS\d+): (.+)$";
     // go test and go build.
@@ -154,6 +158,9 @@ regexes! {
     GO_FILE = r"^\S+\.go:\d+(:\d+)?: ";
     GO_PANIC = r"^panic: ";
     GO_END = r"^(FAIL|ok)\s|^exit status ";
+    // A package's result line, `FAIL<tab>pkg<tab>1.2s` or `ok  <tab>pkg<tab>0.1s`:
+    // the tab tells it from jest's and vitest's `FAIL path`.
+    GO_PACKAGE = r"^(ok|FAIL|\?) *\t(\S+)";
     // pytest.
     PYTEST_SECTION = r"^=+ (FAILURES|ERRORS) =+$";
     PYTEST_HEAD = r"^_{3,} (.+?) _{3,}$";
@@ -199,6 +206,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
     libtest(&lines, &mut parsed);
     nextest(&lines, &mut parsed);
     rustc(&lines, &mut parsed);
+    rustfmt(&lines, &mut parsed);
     tsc(&lines, &mut parsed);
     go(&lines, &mut parsed);
     pytest(&lines, &mut parsed);
@@ -232,7 +240,9 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
 
 /// The output's lines without colour, with only what a carriage return left
 /// on screen, and without the `[task] ` prefix mise puts on each line of a
-/// task when most lines have one.
+/// task when most lines have one, as many deep as tasks were nested: a task
+/// that runs `mise run` prefixes its children's lines again
+/// (`[test:bats] [test:bats:libgit2] not ok 1`).
 fn clean(text: &str) -> Vec<String> {
     let lines: Vec<String> = text
         .lines()
@@ -249,7 +259,12 @@ fn clean(text: &str) -> Vec<String> {
     }
     lines
         .into_iter()
-        .map(|l| TASK_PREFIX.replace(&l, "").into_owned())
+        .map(|mut l| {
+            while let Some(m) = TASK_PREFIX.find(&l) {
+                l.replace_range(..m.end(), "");
+            }
+            l
+        })
         .collect()
 }
 
@@ -285,6 +300,40 @@ fn nextest(lines: &[String], out: &mut Parsed) {
     }
 }
 
+/// What a failed build script said: how it exited, then its stderr, which
+/// holds the error; its stdout is `cargo:` directives and the environment
+/// it read, shown only when it wrote nothing to stderr.
+fn build_script(after: &[String]) -> Vec<String> {
+    let block: Vec<&String> = after
+        .iter()
+        .take_while(|l| l.is_empty() || l.starts_with(char::is_whitespace) || *l == "Caused by:")
+        .filter(|l| *l != "Caused by:")
+        .collect();
+    let section = |name: &str| block.iter().position(|l| l.trim() == name);
+    let exited = block
+        .iter()
+        .take_while(|l| l.trim() != "--- stdout")
+        .filter(|l| !l.trim().is_empty());
+    let stderr: Vec<&&String> = match section("--- stderr") {
+        Some(at) => block[at + 1..]
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .collect(),
+        None => Vec::new(),
+    };
+    let rest: Vec<&&String> = if stderr.is_empty() {
+        block
+            .iter()
+            .filter(|l| !l.trim_start().starts_with("cargo:"))
+            .collect()
+    } else {
+        exited.chain(stderr).collect()
+    };
+    rest.into_iter()
+        .map(|l| l.trim_start().to_string())
+        .collect()
+}
+
 /// rustc's errors with a location or a code, and its warnings, counted.
 fn rustc(lines: &[String], out: &mut Parsed) {
     for (i, line) in lines.iter().enumerate() {
@@ -297,6 +346,14 @@ fn rustc(lines: &[String], out: &mut Parsed) {
         };
         if RUSTC_WARNING.is_match(line) && located(i + 1).is_some() {
             out.warnings += 1;
+            continue;
+        }
+        if let Some(c) = CARGO_BUILD_SCRIPT.captures(line) {
+            out.push(
+                i,
+                format!("build script {}", &c[1]),
+                build_script(&lines[i + 1..]),
+            );
             continue;
         }
         let Some(c) = RUSTC_ERROR.captures(line) else {
@@ -317,6 +374,22 @@ fn rustc(lines: &[String], out: &mut Parsed) {
             None => line.clone(),
         };
         out.push(i, name, block);
+    }
+}
+
+/// Where rustfmt would change a file, with the diff it prints.
+fn rustfmt(lines: &[String], out: &mut Parsed) {
+    for (i, line) in lines.iter().enumerate() {
+        let Some(c) = RUSTFMT_DIFF.captures(line) else {
+            continue;
+        };
+        let at = c.get(2).or(c.get(3)).map_or("", |m| m.as_str());
+        let block = lines[i + 1..]
+            .iter()
+            .take_while(|l| l.starts_with([' ', '+', '-']) || l.is_empty())
+            .cloned()
+            .collect();
+        out.push(i, format!("rustfmt {}:{at}", &c[1]), block);
     }
 }
 
@@ -349,10 +422,25 @@ fn tsc(lines: &[String], out: &mut Parsed) {
 }
 
 fn go(lines: &[String], out: &mut Parsed) {
+    // Where the current package's output starts, and how many failures had
+    // been found then: a package that fails with none of its own (TestMain
+    // giving up, a test binary that panicked before any test) is named itself.
+    let mut package = (0, out.found.len());
     let mut i = 0;
     while i < lines.len() {
         let line = &lines[i];
-        if let Some(c) = GO_RESULT.captures(line) {
+        if let Some(c) = GO_PACKAGE.captures(line) {
+            if &c[1] == "FAIL" && out.found.len() == package.1 {
+                let block: Vec<String> = lines[package.0..i]
+                    .iter()
+                    .filter(|l| !l.is_empty() && *l != "FAIL")
+                    .cloned()
+                    .collect();
+                out.count(0, 1, 0);
+                out.push(i, &c[2], block);
+            }
+            package = (i + 1, out.found.len());
+        } else if let Some(c) = GO_RESULT.captures(line) {
             // Top-level tests only: a subtest is part of its parent.
             if c[1].is_empty() {
                 match &c[2] {

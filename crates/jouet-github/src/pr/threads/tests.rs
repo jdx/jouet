@@ -366,6 +366,7 @@ fn entry(id: u64, reply: Option<&str>, resolve: bool) -> Entry {
         reply: reply.map(str::to_string),
         resolve,
         unresolve: false,
+        among_args: false,
     }
 }
 
@@ -383,7 +384,10 @@ fn unknown_ids_fail_the_whole_call() {
         "{}",
         e.message
     );
-    // A reply's ID is not a handle; say which thread it is in.
+}
+
+#[test]
+fn a_replys_id_stands_for_its_thread() {
     let mut pr = pr();
     let thread = pr.threads[0].id;
     let reply = Comment {
@@ -391,13 +395,44 @@ fn unknown_ids_fail_the_whole_call() {
         ..pr.threads[0].comments[0].clone()
     };
     pr.threads[0].comments.push(reply);
-    let e = plan(&[entry(7, None, true)], &pr, &options()).unwrap_err();
+    let planned = plan(&[entry(7, Some("done"), true)], &pr, &options()).unwrap();
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].id, thread);
+    // Naming the thread and a reply in it is naming it twice.
+    let e = plan(
+        &[entry(7, None, true), entry(thread, None, true)],
+        &pr,
+        &options(),
+    )
+    .unwrap_err();
+    assert_eq!(e.exit, Exit::Usage);
+    assert!(e.message.contains("named twice"), "{}", e.message);
+}
+
+#[test]
+fn the_prs_own_number_after_the_ids_is_the_pr() {
+    // `jouet pr threads resolve 4435734278 1098` on PR 1098.
+    let pr = pr();
+    let n = pr.number;
+    let arg = |id: u64| Entry {
+        among_args: true,
+        ..entry(id, None, true)
+    };
+    let planned = plan(&[arg(OPEN_CODE), arg(n)], &pr, &options()).unwrap();
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].id, OPEN_CODE);
+    // The PR alone names no thread.
+    let e = plan(&[arg(n)], &pr, &options()).unwrap_err();
+    assert_eq!(e.exit, Exit::Usage);
     assert!(
-        e.message
-            .contains(&format!("7 (a reply in thread {thread})")),
+        e.message.contains("is the PR, not a thread"),
         "{}",
         e.message
     );
+    // In an apply file, which names threads only, it is an unknown thread.
+    let entries = [entry(OPEN_CODE, None, true), entry(n, None, true)];
+    let e = plan(&entries, &pr, &options()).unwrap_err();
+    assert_eq!(e.exit, Exit::NotFound);
 }
 
 #[test]

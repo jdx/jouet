@@ -701,10 +701,10 @@ Examples:
 .PP
 .TP
 \fB\-\-old\fR \fI<TEXT>\fR
-The text to find. Repeatable
+The text to find. Repeatable. It may start with `\-`, such as a Markdown list item
 .TP
 \fB\-\-new\fR \fI<TEXT>\fR
-The text to put in its place, one for each \-\-old
+The text to put in its place, one for each \-\-old. It may start with `\-` too
 .TP
 \fB\-\-count\fR \fI<N>\fR
 How many matches each \-\-old must have in each file
@@ -1238,7 +1238,7 @@ The PR. Defaults to the current branch's PR
 .SH "JOUET PR THREADS RESOLVE"
 Resolve threads
 
-Every ID is checked before any thread is resolved. A PR given after the IDs must not be a bare number: write it as #N.
+Every ID is checked before any thread is resolved. A reply's ID stands for the thread it is in. A PR given after the IDs is written #N; a bare number is taken as the PR only when it is the PR's own number.
 
 Entire findings (`entire:ID`, as `jouet pr threads` lists them) are resolved on Entire through the `entire` CLI, with \-\-reply as the reason; \-\-dismiss dismisses them instead, and needs a reason. A finding and a GitHub thread are separate: resolving one never resolves the other.
 .PP
@@ -1269,7 +1269,7 @@ Thread IDs or Entire finding handles, then optionally the PR
 .SH "JOUET PR THREADS UNRESOLVE"
 Unresolve threads
 
-A PR given after the IDs must not be a bare number: write it as #N. An Entire finding (`entire:ID`) is reopened on Entire.
+A PR given after the IDs is written #N; a bare number is taken as the PR only when it is the PR's own number. An Entire finding (`entire:ID`) is reopened on Entire.
 .PP
 \fBUsage:\fR jouet pr threads unresolve [OPTIONS] [<ARGS>] ...
 .PP

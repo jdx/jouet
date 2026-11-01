@@ -140,18 +140,21 @@ MSG
 	assert_output '[null,"found",[{"secret":"STRIPE_KEY","path":"config/app.env","line":1}]]'
 }
 
-@test "a scan fnox cannot run refuses with exit 4, unless the agent runs under fnox proxy run" {
+@test "a scan fnox cannot run lets the commit go ahead and says why" {
 	fake_fnox
 	printf '[secrets]\nSTRIPE_KEY = { provider = "age", value = "YWdl" }\n' >fnox.toml
 	printf 'a2\n' >a.txt
 	printf '%s\n' "FAKE_FNOX_ERROR=\"None of the profile's secrets could be resolved\"" >"$BATS_TEST_TMPDIR/fnox.env"
 
-	run --separate-stderr jouet commit a.txt -m "fix: a"
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
 
-	assert_failure 4
-	assert_equal "${stderr_lines[0]}" "jouet: fnox could not scan the commit for secret values, so nothing was committed: Configuration error: None of the profile's secrets could be resolved (exit 1)"
-	assert_equal "$(git rev-list --count HEAD)" 1
+	assert_success
+	assert_equal "$stderr" "jouet: warning: fnox could not scan the commit for secret values (Configuration error: None of the profile's secrets could be resolved (exit 1)), so only gitleaks' rules checked it"
+	assert_line --partial "no secrets found by gitleaks' rules in"
+	refute_line --partial "or fnox"
+	assert_equal "$(git rev-list --count HEAD)" 2
 
+	printf 'a3\n' >a.txt
 	JOUET_COMMIT_TRAILERS='' FNOX_PROXY_MCP=1 run --separate-stderr jouet commit a.txt -m "fix: a"
 	assert_success
 	assert_equal "$stderr" "jouet: warning: fnox scan failed (Configuration error: None of the profile's secrets could be resolved (exit 1)); the agent runs under fnox proxy run, so it was only given placeholders"
@@ -231,4 +234,23 @@ A  other.txt
 	printf 'more\n' >>a.txt
 	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
 	assert_success
+}
+
+@test "hooks run without GIT_LITERAL_PATHSPECS, and a path with glob characters is still only itself" {
+	# `git --literal-pathspecs` would set it for the hooks, and a hook that
+	# writes pathspec magic, as hk does, then matches nothing.
+	export HOOK_LOG="$BATS_TEST_TMPDIR/hook.log"
+	cat >.git/hooks/pre-commit <<'HOOK'
+#!/bin/sh
+echo "literal=${GIT_LITERAL_PATHSPECS:-unset}" >"$HOOK_LOG"
+HOOK
+	chmod +x .git/hooks/pre-commit
+	printf 'x\n' >'a[1].txt'
+	printf 'y\n' >a1.txt
+
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit 'a[1].txt' -m "fix: a"
+
+	assert_success
+	assert_equal "$(cat "$HOOK_LOG")" "literal=unset"
+	assert_equal "$(git show --name-only --format= HEAD)" "a[1].txt"
 }

@@ -1,0 +1,10 @@
+ok  	example.com/app/artifact	0.023s
+ok  	example.com/app/release	0.111s
+2026/11/01 00:40:58 reached retry deadline: Get "http://localhost:32768/minio/health/ready": dial tcp [::1]:32768: connect: connection refused
+FAIL	example.com/app/blob	64.010s
+ok  	example.com/app/http	0.084s
+--- FAIL: TestBuild (0.13s)
+    build_test.go:12: bun not found
+FAIL
+FAIL	example.com/app/builders/bun	0.134s
+FAIL

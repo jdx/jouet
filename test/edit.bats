@@ -496,3 +496,13 @@ EOF
 	# Fields that are false or empty are left out rather than printed.
 	assert_equal "$(jq -r 'has("applied")' <<<"$output")" false
 }
+
+@test "replace takes --old and --new values that start with a dash" {
+	printf -- '- **old.** item\n- other\n' >list.md
+
+	run --separate-stderr jouet edit replace list.md --old '- **old.** item' --new '- **new.** item'
+
+	assert_success
+	assert_equal "$stderr" ""
+	assert_content list.md $'- **new.** item\n- other\n'
+}

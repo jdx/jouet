@@ -78,7 +78,7 @@ A clean scan adds a line such as `no secrets found by gitleaks' rules or fnox in
 | Situation | What happens |
 |---|---|
 | fnox is not on `PATH` in a fnox project | gitleaks' rules still scan; the commit goes ahead with a warning that fnox did not check the values (`secret_scan.reason`). |
-| fnox fails, for example because it cannot decrypt the secrets | Refused with exit 4 and fnox's error. A security check that could not run does not pass. |
+| fnox fails, for example because it cannot decrypt the secrets, or its mise shim has no version | gitleaks' rules still scan; the commit goes ahead with a warning that gives fnox's error (`secret_scan.reason`). A check that could not run says so instead of blocking the work. |
 | fnox fails inside `fnox proxy run` | The commit goes ahead with a warning. The agent only ever had placeholders, and fnox usually cannot resolve the real values there. |
 | `.gitleaks.toml` does not parse | Refused with exit 4. |
 | `--dry-run` | Not scanned. |
@@ -162,7 +162,7 @@ What happens when a subject breaks a rule is set by `conventional` under `[commi
 
 A file's `status` is `added`, `modified`, `deleted` or `type_changed`. `--dry-run` sets `dry_run` instead of `committed` and shows the message as it would be committed. A failed commit has a `failure` with `exit_code`, `output`, `lines_omitted` and `log_path`.
 
-`secret_scan` has the `tool` (`jouet` for gitleaks' rules, `jouet+fnox` in a fnox project), a `status` (`clean` or `found`), `files_scanned`, and, when secrets were found, `findings`, each with the `path` and `line`, and either the gitleaks `rule` and the `redacted` match, or the fnox `secret`'s name. A `reason` says why fnox did not check the values. fnox's warnings, and how many findings `.gitleaksignore` or `--allow-secret` passed over, are in `notes`.
+`secret_scan` has the `tool` (`jouet` for gitleaks' rules, `jouet+fnox` in a fnox project), a `status` (`clean`, `found`, or `skipped` when fnox could not scan and gitleaks' rules found nothing), `files_scanned`, and, when secrets were found, `findings`, each with the `path` and `line`, and either the gitleaks `rule` and the `redacted` match, or the fnox `secret`'s name. A `reason` says why fnox did not check the values. fnox's warnings, and how many findings `.gitleaksignore` or `--allow-secret` passed over, are in `notes`.
 
 ## Exit codes
 
@@ -172,4 +172,4 @@ A file's `status` is `added`, `modified`, `deleted` or `type_changed`. `--dry-ru
 | 1 | git refused the commit, usually because a hook failed, or the secret scan found a secret in it |
 | 2 | Usage: no paths, `-A`, `.`, `--no-verify`, no message or a bad trailer |
 | 3 | A named path does not exist |
-| 4 | A named path has no changes or is ignored, `refuse` rejected the subject, fnox could not scan the commit, or `.gitleaks.toml` does not parse |
+| 4 | A named path has no changes or is ignored, `refuse` rejected the subject, or `.gitleaks.toml` does not parse |
