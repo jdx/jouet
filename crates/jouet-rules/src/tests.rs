@@ -921,7 +921,9 @@ fn a_missing_primitive_is_recorded_as_a_gap() {
 fn matcher_rules_never_start_a_vm() {
     let engine = engine(builtin());
     for command in [
-        "git status && cargo test --workspace",
+        // Not `cargo test`: affected-tests asks its script about a whole
+        // workspace run, as it does about pytest's.
+        "git status && cargo build --workspace",
         "git add -A",
         "sleep 60 && gh pr checks",
         "python3 -c 'print(1)'",
