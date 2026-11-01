@@ -44,3 +44,10 @@ commit = "22dbf399a32d806b5d7366a589537648c1465c89"
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"
 MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "cargo build",
+    "test/bats/bin/bats test/check.bats",
+]

@@ -85,6 +85,8 @@ class Task:
     tools: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     path: list[str] = field(default_factory=list)
+    # Commands timed once for the cost note runs start with (see costs.py).
+    cost_seed: list[str] = field(default_factory=list)
 
     def agent_env(self, env: dict[str, str], bin_dir: Path, workdir: Path) -> None:
         """Adds the task's tools, variables and PATH entries to a run's environment."""
@@ -137,6 +139,7 @@ def load(name: str) -> Task:
         tools=dict(raw.get("tools", {})),
         env=dict(raw.get("env", {})),
         path=list(raw.get("path", [])),
+        cost_seed=list(raw.get("cost", {}).get("seed", [])),
     )
 
 
