@@ -451,3 +451,32 @@ E"
 	assert_success
 	assert_output ""
 }
+
+@test "a check run in bypassPermissions gets a 10-minute timeout, so it ends in that call" {
+	call() {
+		jq -cn --arg c "$1" --arg mode "$2" --argjson extra "${3:-{\}}" \
+			'{session_id: "s1", permission_mode: $mode, tool_name: "Bash", tool_input: ({command: $c} + $extra)}' |
+			jouet hook claude pre-tool-use
+	}
+
+	run --separate-stderr call 'cargo test --workspace' bypassPermissions
+	assert_success
+	run jq -c '.hookSpecificOutput | [.permissionDecision, .updatedInput]' <<<"$output"
+	assert_output '["allow",{"command":"cargo test --workspace","timeout":600000}]'
+
+	# In any other mode, allow would skip the user's prompt: left alone.
+	run --separate-stderr call 'cargo test --workspace' default
+	assert_output ""
+	# A timeout of its own, or a background run, stands.
+	run --separate-stderr call 'cargo test --workspace' bypassPermissions '{"timeout": 30000}'
+	assert_output ""
+	run --separate-stderr call 'cargo test --workspace' bypassPermissions '{"run_in_background": true}'
+	assert_output ""
+	# Not a test, build or lint.
+	run --separate-stderr call 'ls -la' bypassPermissions
+	assert_output ""
+	# A denial stays a denial.
+	run --separate-stderr call 'git add -A' bypassPermissions
+	run jq -r '.hookSpecificOutput.permissionDecision' <<<"$output"
+	assert_output "deny"
+}
