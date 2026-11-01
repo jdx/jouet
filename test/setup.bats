@@ -9,6 +9,40 @@ setup() {
 	unset CLAUDE_CONFIG_DIR CODEX_HOME
 }
 
+@test "setup can print the benchmark handoff without prompting" {
+	run --separate-stderr jouet setup codex --benchmark
+	assert_success
+	assert_output --partial 'Start a new agent session in the project'
+	assert_output --partial 'Help me compare this project with and without jouet.'
+	assert_output --partial 'approve it before posting anything'
+	refute [ -s "$HOME/.codex/auth.json" ]
+}
+
+@test "JSON setup includes the benchmark prompt only when requested" {
+	run --separate-stderr jouet setup codex --benchmark --json
+	assert_success
+	run jq -r '.benchmark_prompt' <<<"$output"
+	assert_success
+	assert_output --partial 'Help me compare this project with and without jouet.'
+	run --separate-stderr jouet setup codex --json
+	assert_success
+	run jq 'has("benchmark_prompt")' <<<"$output"
+	assert_output false
+}
+
+@test "interactive setup offers a benchmark handoff" {
+	run in_tty jouet setup codex
+	assert_success
+	assert_output --partial 'Would you like a prompt to compare this project'
+}
+
+@test "a benchmark handoff cannot be combined with uninstall or dry run" {
+	run --separate-stderr jouet setup codex --benchmark --uninstall
+	assert_failure 2
+	run --separate-stderr jouet setup codex --benchmark --dry-run
+	assert_failure 2
+}
+
 # Fails unless FILE matches test/fixtures/setup/NAME byte for byte.
 assert_golden() {
 	run diff -u "$PROJECT_ROOT/test/fixtures/setup/$2" "$1"

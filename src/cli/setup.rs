@@ -36,4 +36,7 @@ pub(crate) struct SetupArgs {
     /// stands in for
     #[usage(long)]
     pub(crate) skill: bool,
+    /// Print a prompt for an agent to benchmark jouet on this project
+    #[usage(long)]
+    pub(crate) benchmark: bool,
 }

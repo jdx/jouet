@@ -25,6 +25,19 @@ jouet setup codex --uninstall   # remove what jouet added
 The hooks, their rules and the settings below are new and may change between releases.
 :::
 
+## Compare a project
+
+After an interactive install, setup offers a prompt you can paste into a new
+agent session in your project. That session helps you choose a task and check,
+agree on a budget, arrange paired runs with and without jouet, and compare
+correctness, tokens and time. If the comparison suggests a problem, the
+prompt asks the agent to offer an issue or discussion draft for your review.
+
+To print the prompt later, run `jouet setup codex --benchmark` (or use your
+harness name). With `--json`, it is the `benchmark_prompt` field. Setup does
+not launch the benchmark or manage the agent's login. Unattended setup never
+prompts; without `--benchmark`, it keeps its existing output.
+
 ## What setup changes
 
 | Harness | Scope | Hooks | Skill |

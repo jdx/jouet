@@ -47,6 +47,8 @@ struct Report {
     files: Vec<FileChange>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     notes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    benchmark_prompt: Option<&'static str>,
 }
 
 pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
@@ -64,6 +66,12 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         return out.error(
             Exit::Usage,
             "--global cannot be used with --project or --shared",
+        );
+    }
+    if args.benchmark && (args.dry_run || args.uninstall) {
+        return out.error(
+            Exit::Usage,
+            "--benchmark cannot be combined with --dry-run or --uninstall",
         );
     }
     let scope = if args.shared {
@@ -210,10 +218,22 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         uninstall: args.uninstall,
         files,
         notes,
+        benchmark_prompt: args.benchmark.then_some(benchmark::PROMPT),
     };
     out.result(&report, || text(&report));
+    if !out.json
+        && !args.uninstall
+        && !args.dry_run
+        && !args.benchmark
+        && changed
+        && jouet_output::display::person_at_terminal()
+    {
+        benchmark::offer();
+    }
     Exit::Ok
 }
+
+mod benchmark;
 
 /// Where hk's stop hook is: merged into jouet's in `config`, or in another
 /// of the harness's hook files, where it still blocks on its own.
@@ -625,6 +645,9 @@ fn text(report: &Report) -> String {
     }
     for note in &report.notes {
         let _ = writeln!(out, "note: {note}");
+    }
+    if let Some(prompt) = report.benchmark_prompt {
+        benchmark::write_prompt(&mut out, prompt);
     }
     out
 }
