@@ -22,6 +22,9 @@ if build.returncode == 0:
             (["-u", "--no-hidden"], {"a.txt", "ignored.txt"}),
             (["--ignore", "-u"], {"a.txt", ".hidden.txt", ".ignore", "ignored.txt"}),
             (["--no-hidden", "-u"], {"a.txt", ".hidden.txt", ".ignore", "ignored.txt"}),
+            (["-u", "--ignore", "--no-hidden"], {"a.txt"}),
+            (["--ignore", "--no-hidden", "-u"], {"a.txt", ".hidden.txt", ".ignore", "ignored.txt"}),
+            (["-u", "--ignore", "-u"], {"a.txt", ".hidden.txt", ".ignore", "ignored.txt"}),
         ]
         for flags, want in cases:
             run = subprocess.run([binary, "--color=never", "--type", "f", *flags], cwd=directory,
