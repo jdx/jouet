@@ -13,8 +13,9 @@
 //!    flaky, failed the same way again is real;
 //! 2. the default branch: failing the same way there is real, and not the
 //!    change's fault (for a compile error, across every workflow);
-//! 3. the other jobs of the run: a test that passed on another OS on this
-//!    commit is flaky, the evidence naming the OSes;
+//! 3. the other jobs of the run: a test that passed on this commit in a job
+//!    on the same OS is flaky; one that passed only on other OSes is real,
+//!    most likely an OS difference, since that fails every run there;
 //! 4. the workflow's other recent runs: a test that failed on another
 //!    branch that passed later is a known flake.
 //!

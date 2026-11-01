@@ -25,12 +25,13 @@ pub(crate) enum CiCmd {
 /// nextest, bats, pytest, vitest, jest, go test), compile and lint errors,
 /// and runner or network trouble; history comes from the workflow's recent
 /// runs. flaky: it passed on the same commit elsewhere (another attempt, or
-/// another OS's job, which the evidence names), or the same test failed on
-/// another branch that passed later. infrastructure: the runner, disk,
+/// another job on the same OS), or the same test failed on another branch
+/// that passed later. infrastructure: the runner, disk,
 /// network, a registry, a rate limit, a service container or the cache.
 /// real: a compile or lint error, a test that failed on every attempt on
-/// this commit, or one that fails the same way on the default branch,
-/// which the evidence says is not the change's fault. Anything else is
+/// this commit, one that passed on this commit only on other OSes (most
+/// likely an OS difference), or one that fails the same way on the default
+/// branch, which the evidence says is not the change's fault. Anything else is
 /// unknown. A job that failed or was cancelled only because another did is
 /// listed as following it. --rerun reruns the failed jobs when every one is
 /// flaky or infrastructure, and refuses (exit 4) otherwise. A second failure

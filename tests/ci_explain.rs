@@ -5,7 +5,9 @@
 //! - Run 41193844808: `trusted / test-macos` failed in
 //!   `a_command_is_rerun_until_it_exits_as_expected` (tests/wait.rs:436, a
 //!   timing assertion), which `trusted / test` passed on Linux on the same
-//!   commit. Flaky.
+//!   commit. Passing on another OS is no evidence of a flake, so real; it is
+//!   flaky only with a later run of the same commit in which the job
+//!   passed, which [`github_rerun_passed`] adds.
 //! - Run 41193332714 (PR #73): every build failed with E0425, the error
 //!   #71 and #74 left on main until #79, which main's ci and docs runs
 //!   failed with too. Real, and not the PR's fault.
@@ -17,7 +19,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-const FLAKY_RUN: &str = "41193844808";
+const MACOS_RUN: &str = "41193844808";
 const REAL_RUN: &str = "41193332714";
 
 fn fixtures() -> PathBuf {
@@ -72,15 +74,58 @@ fn fixture_name(path: &str) -> String {
 /// Serves the recorded responses; reruns are accepted, anything else is a
 /// 404.
 fn github() -> Fake {
-    serve(|req, _| {
+    github_with(Vec::new())
+}
+
+/// Serves `overrides` (fixture name and body) before the recorded responses.
+fn github_with(overrides: Vec<(String, String)>) -> Fake {
+    serve(move |req, _| {
         if req.method == "POST" && req.path.contains("/rerun") {
             return (201, "{}".into());
         }
-        match std::fs::read_to_string(fixtures().join(fixture_name(&req.path))) {
+        let name = fixture_name(&req.path);
+        if let Some((_, body)) = overrides.iter().find(|(n, _)| *n == name) {
+            return (200, body.clone());
+        }
+        match std::fs::read_to_string(fixtures().join(name)) {
             Ok(body) => (200, body),
             Err(_) => (404, r#"{"message":"Not Found"}"#.into()),
         }
     })
+}
+
+/// The recorded responses, plus a later run of the same commit in which
+/// `trusted / test-macos` passed. That run is made up from the recorded
+/// one, not recorded: the rerun that shows the macOS failure was a flake.
+fn github_rerun_passed() -> Fake {
+    const LATER_RUN: u64 = 41_193_844_809;
+    let read = |name: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(fixtures().join(name)).unwrap()).unwrap()
+    };
+    let on_commit = "actions.workflows.401890512.runs@head_sha=e10984c4321d69a57a543651eb9b2f9f29fbd07a@per_page=20.json";
+    let mut runs = read(on_commit);
+    let mut later = runs["workflow_runs"][0].clone();
+    later["id"] = LATER_RUN.into();
+    later["conclusion"] = "success".into();
+    later["created_at"] = "2026-10-31T11:02:31Z".into();
+    runs["workflow_runs"].as_array_mut().unwrap().push(later);
+    runs["total_count"] = 2.into();
+    let mut jobs = read(&format!(
+        "actions.runs.{MACOS_RUN}.attempts.1.jobs@per_page=100.json"
+    ));
+    for job in jobs["jobs"].as_array_mut().unwrap() {
+        job["run_id"] = LATER_RUN.into();
+        if job["conclusion"] != "skipped" {
+            job["conclusion"] = "success".into();
+        }
+    }
+    github_with(vec![
+        (on_commit.to_string(), runs.to_string()),
+        (
+            format!("actions.runs.{LATER_RUN}.attempts.1.jobs@per_page=100.json"),
+            jobs.to_string(),
+        ),
+    ])
 }
 
 fn jouet(fake: &Fake, dir: &Path, args: &[&str]) -> Output {
@@ -121,19 +166,19 @@ fn jobs(doc: &Value) -> &Vec<Value> {
 }
 
 #[test]
-fn a_macos_only_timing_failure_is_flaky_and_names_the_oses() {
+fn a_macos_only_failure_is_an_os_difference_not_a_flake() {
     let fake = github();
     let dir = tempfile::tempdir().unwrap();
-    let out = explain(&fake, dir.path(), &["--run", FLAKY_RUN]);
-    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let doc = json(&out);
-    assert_eq!(doc["result"], "flaky");
+    assert_eq!(doc["result"], "real");
     let [job] = jobs(&doc).as_slice() else {
         panic!("one failed job: {doc}");
     };
     assert_eq!(job["name"], "trusted / test-macos");
     assert_eq!(job["os"], "macos");
-    assert_eq!(job["verdict"], "flaky");
+    assert_eq!(job["verdict"], "real");
     assert_eq!(job["failed_step"], "Run mise run test");
     assert_eq!(
         job["tests"][0],
@@ -149,8 +194,8 @@ fn a_macos_only_timing_failure_is_flaky_and_names_the_oses() {
     assert_eq!(
         evidence,
         [
-            "passed on linux on this commit (trusted / test); failed on macos",
-            "a failure on one OS can be a real macos bug: if a rerun fails the same way on this commit, it is real",
+            "fails only on macos: `a_command_is_rerun_until_it_exits_as_expected` passed on linux on this commit (trusted / test)",
+            "most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit",
         ]
     );
     let excerpt = job["log_excerpt"].to_string();
@@ -165,6 +210,24 @@ fn a_macos_only_timing_failure_is_flaky_and_names_the_oses() {
         following
             .iter()
             .all(|f| f["conclusion"] == "cancelled" && f["follows"] == "trusted / test-macos")
+    );
+    assert_eq!(doc["rerun"]["allowed"], false);
+    assert!(doc["rerun"].get("command").is_none(), "{doc}");
+    assert_eq!(
+        doc["rerun"]["reason"],
+        "a rerun repeats a real failure: trusted / test-macos (real)"
+    );
+
+    // A later run of the same commit in which the job passed makes it flaky.
+    let fake = github_rerun_passed();
+    let dir = tempfile::tempdir().unwrap();
+    let out = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json(&out);
+    assert_eq!(doc["result"], "flaky");
+    assert_eq!(
+        jobs(&doc)[0]["evidence"],
+        serde_json::json!(["passed on this commit in run 41193844809 attempt 1"])
     );
     assert_eq!(doc["rerun"]["allowed"], true);
     assert_eq!(
@@ -181,12 +244,12 @@ fn a_macos_only_timing_failure_is_flaky_and_names_the_oses() {
 fn a_second_explain_is_answered_from_the_cache() {
     let fake = github();
     let dir = tempfile::tempdir().unwrap();
-    let first = explain(&fake, dir.path(), &["--run", FLAKY_RUN]);
-    assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
+    let first = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    assert_eq!(first.status.code(), Some(1), "{}", stderr(&first));
     let sent = fake.requests().len();
     assert!(sent > 0);
-    let again = explain(&fake, dir.path(), &["--run", FLAKY_RUN]);
-    assert_eq!(again.status.code(), Some(0), "{}", stderr(&again));
+    let again = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    assert_eq!(again.status.code(), Some(1), "{}", stderr(&again));
     assert_eq!(
         fake.requests().len(),
         sent,
@@ -195,14 +258,14 @@ fn a_second_explain_is_answered_from_the_cache() {
     );
     let doc = json(&again);
     assert_eq!(doc["github"]["requests"], 0);
-    assert_eq!(doc["result"], "flaky");
+    assert_eq!(doc["result"], "real");
 }
 
 #[test]
 fn rerun_reruns_the_failed_jobs_of_a_flaky_run() {
-    let fake = github();
+    let fake = github_rerun_passed();
     let dir = tempfile::tempdir().unwrap();
-    let out = explain(&fake, dir.path(), &["--run", FLAKY_RUN, "--rerun"]);
+    let out = explain(&fake, dir.path(), &["--run", MACOS_RUN, "--rerun"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let doc = json(&out);
     assert_eq!(doc["rerun"]["started"], true);
@@ -226,7 +289,7 @@ fn rerun_reruns_the_failed_jobs_of_a_flaky_run() {
 
 #[test]
 fn one_job_is_explained_and_rerun_alone() {
-    let fake = github();
+    let fake = github_rerun_passed();
     let dir = tempfile::tempdir().unwrap();
     let out = explain(&fake, dir.path(), &["--job", "124515918002", "--rerun"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));

@@ -101,6 +101,37 @@ fn a_restack_that_reverts_the_parents_fix_is_flagged_by_content() {
 }
 
 #[test]
+fn the_childs_own_later_edit_of_the_parents_lines_is_not_flagged() {
+    // `a` changes a line, and `b`, built on it, rewrites that line again.
+    let repo = stacked();
+    repo.git(&["checkout", "-q", "a"]);
+    repo.commit(&[("lib.txt", "one\nfixed\nthree\nfour\nfive\n")], "a: fix");
+    repo.git(&["checkout", "-q", "b"]);
+    repo.git(&["rebase", "-q", "a"]);
+    repo.commit(
+        &[("lib.txt", "one\nfixed better\nthree\nfour\nfive\n")],
+        "b: rewrite the fix",
+    );
+    repo.commit(&[("b.txt", "b\nb\n")], "b: more");
+    let states = inspect(&repo.git_handle(), &stack()).unwrap();
+    assert_eq!(states[1].contains_parent, Some(true));
+    assert!(states[1].needs().is_empty(), "{:?}", states[1]);
+
+    // The same, after `a` is merged in rather than rebased onto.
+    let repo = stacked();
+    repo.git(&["checkout", "-q", "a"]);
+    repo.commit(&[("lib.txt", "one\nfixed\nthree\nfour\nfive\n")], "a: fix");
+    repo.git(&["checkout", "-q", "b"]);
+    repo.git(&["merge", "-q", "--no-edit", "a"]);
+    repo.commit(
+        &[("lib.txt", "one\nthree\nfour\nfive\n")],
+        "b: drop the line",
+    );
+    let states = inspect(&repo.git_handle(), &stack()).unwrap();
+    assert!(states[1].needs().is_empty(), "{:?}", states[1]);
+}
+
+#[test]
 fn unpushed_and_behind_come_from_the_remote_tracking_branch() {
     let repo = stacked();
     let head = repo.git(&["rev-parse", "b"]);

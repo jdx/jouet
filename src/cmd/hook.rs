@@ -932,6 +932,9 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
         .as_deref()
         .map(verify::root_of)
         .unwrap_or_default();
+    state.set_aside_settled(&home, jouet_output::time::now(), |root| {
+        jouet_rules::tree::uncommitted(Path::new(root), TREE_TIMEOUT).ok()
+    });
     // The session's own tree is hashed once; another is hashed only when
     // its checks need it.
     let tree_of = |root: &str| {

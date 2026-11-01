@@ -234,17 +234,17 @@ seed_explain_cache() {
 	export JOUET_GITHUB_API_URL="http://127.0.0.1:9" JOUET_GITHUB_TOKEN=test-token
 }
 
-@test "ci explain calls a macOS-only timing failure flaky, naming the OSes, from the cache" {
+@test "ci explain calls a macOS-only failure an OS difference, not flaky, from the cache" {
 	seed_explain_cache
 	run --separate-stderr jouet ci explain --run 41193844808 --repo jdx/jouet --display agent --log-lines 6
 
-	assert_success
-	assert_line --index 0 "FLAKY jdx/jouet  1 flaky, 9 following"
-	assert_line 'FLAKY trusted / test-macos (macos)  step "Run mise run test"'
+	assert_failure 1
+	assert_line --index 0 "REAL jdx/jouet  1 real, 9 following"
+	assert_line 'REAL trusted / test-macos (macos)  step "Run mise run test"'
 	assert_line "  failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5"
-	assert_line "  - passed on linux on this commit (trusted / test); failed on macos"
-	assert_line "  - a failure on one OS can be a real macos bug: if a rerun fails the same way on this commit, it is real"
-	assert_line "rerun: allowed, every failed job is flaky or infrastructure: jouet ci explain --run 41193844808 --repo jdx/jouet --rerun"
+	assert_line "  - fails only on macos: \`a_command_is_rerun_until_it_exits_as_expected\` passed on linux on this commit (trusted / test)"
+	assert_line "  - most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit"
+	assert_line "rerun: refused, a rerun repeats a real failure: trusted / test-macos (real)"
 	assert_line "GitHub: 0 requests, 9 from the cache"
 }
 

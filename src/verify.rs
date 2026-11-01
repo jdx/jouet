@@ -26,6 +26,12 @@
 //! the reasons raised and the tree, and a later stop at the same tree, with
 //! no run recorded since, raises only a reason not raised yet, or is let
 //! through. The agent has already answered the others.
+//!
+//! A work tree other than the session's own is set aside once the session
+//! has left it: nothing there is uncommitted, and the session has run no
+//! check there for [`SETTLED_AFTER`]. Its runs judged work that has been
+//! committed and left, such as a branch since merged, whose tree moved on
+//! without the session.
 
 use jouet_rules::{Kind, Record};
 use serde::{Deserialize, Serialize};
@@ -35,6 +41,10 @@ use std::path::{Path, PathBuf};
 
 /// How many unresolved failures of a kind are kept; older ones are dropped.
 const MAX_FAILURES: usize = 16;
+
+/// How long after the session's last run in another work tree with nothing
+/// uncommitted that tree stops being asked about.
+pub(crate) const SETTLED_AFTER: i64 = 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Run {
@@ -139,6 +149,11 @@ pub(crate) struct Checks {
     /// are not raised again whatever changes, until the command passes.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub answered: BTreeSet<String>,
+    /// When the session last recorded or started a run here, in seconds
+    /// since the Unix epoch. State files written before jouet kept it lack
+    /// it, and read as long ago.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<i64>,
 }
 
 /// A command as the unverifiable failures key it: `jouet test` without
@@ -323,9 +338,29 @@ impl State {
             .retain(|root, _| root.is_empty() || Path::new(root).is_dir());
     }
 
+    /// Sets aside the checks of work trees the session has left: any but
+    /// `home`, the session's own, where it ran nothing in the
+    /// [`SETTLED_AFTER`] before `now` and `uncommitted` says nothing is
+    /// uncommitted (`Some(false)`; None when it cannot tell).
+    pub(crate) fn set_aside_settled(
+        &mut self,
+        home: &str,
+        now: i64,
+        uncommitted: impl Fn(&str) -> Option<bool>,
+    ) {
+        self.trees.retain(|root, checks| {
+            let recent = checks
+                .last_run
+                .is_some_and(|at| now.saturating_sub(at) < SETTLED_AFTER);
+            root == home || root.is_empty() || recent || uncommitted(root) != Some(false)
+        });
+    }
+
     /// Marks a `jouet test` run as going in the work tree at `root`.
     pub(crate) fn start_run(&mut self, root: &str, running: Running) {
-        let runs = &mut self.trees.entry(root.to_string()).or_default().running;
+        let checks = self.trees.entry(root.to_string()).or_default();
+        checks.last_run = Some(jouet_output::time::now());
+        let runs = &mut checks.running;
         // Marks whose process is gone are dropped as new ones come.
         runs.retain(|r| r.pid != running.pid && r.alive());
         runs.push(running);
@@ -391,6 +426,7 @@ impl Checks {
         for record in records {
             // A run is something new to judge the next stop by.
             self.raised = None;
+            self.last_run = Some(jouet_output::time::now());
             let kind = record.kind;
             let run = Run::new(record, tree);
             let failures = self.failures.entry(kind).or_default();
@@ -1072,6 +1108,60 @@ mod tests {
         assert!(through_hk("jouet --json diag check --changed"));
         assert!(through_hk("jouet --display agent diag check"));
         assert!(!through_hk("jouet edit replace diag --old a --new b"));
+    }
+
+    #[test]
+    fn another_work_tree_left_committed_and_idle_is_set_aside() {
+        // Hours ago the session passed its tests in /old, whose branch has
+        // since merged and moved on: its tree is not the one that passed.
+        let tree = |root: &str| Some(if root == "/old" { "o2" } else { "h1" }.to_string());
+        let ask = |state: &State| {
+            state
+                .block("/home", tree, |_| false, |_| true)
+                .map(|b| b.reason)
+        };
+        let mut state = State::default();
+        state.record("/old", [test("cargo test -p a", 0, "-p a")], Some("o1"));
+        state.record("/home", [test("cargo test -p b", 0, "-p b")], Some("h1"));
+        let ran = state.trees["/old"].last_run.unwrap();
+        let why = ask(&state).unwrap();
+        assert!(
+            why.starts_with("In /old: Files changed after the last test run passed"),
+            "{why}"
+        );
+
+        // Within the hour, it is still asked about, clean or not.
+        let mut soon = State::load_from(&state);
+        soon.set_aside_settled("/home", ran + SETTLED_AFTER - 1, |_| Some(false));
+        assert!(ask(&soon).is_some());
+        // Later, with something uncommitted there, or no telling, it is too.
+        let later = ran + SETTLED_AFTER;
+        for uncommitted in [Some(true), None] {
+            let mut left = State::load_from(&state);
+            left.set_aside_settled("/home", later, |_| uncommitted);
+            assert!(ask(&left).is_some());
+        }
+        // Later and clean, it is set aside; the session's own tree never is.
+        let mut left = State::load_from(&state);
+        left.set_aside_settled("/home", later, |_| Some(false));
+        assert_eq!(ask(&left), None);
+        assert!(left.trees.contains_key("/home"));
+        left.record("/home", [test("cargo test -p b", 1, "-p b")], Some("h1"));
+        left.set_aside_settled("/home", later + SETTLED_AFTER, |_| Some(false));
+        assert!(ask(&left).unwrap().starts_with("The last test run failed"));
+
+        // A state written before jouet kept the time reads as long ago.
+        let mut old = State::load_from(&state);
+        old.trees.get_mut("/old").unwrap().last_run = None;
+        old.set_aside_settled("/home", ran, |_| Some(false));
+        assert_eq!(ask(&old), None);
+    }
+
+    impl State {
+        /// A copy, through the state file's form.
+        fn load_from(state: &State) -> State {
+            serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap()
+        }
     }
 
     #[test]

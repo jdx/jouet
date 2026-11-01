@@ -116,13 +116,13 @@ It takes the same targets as `jouet wait ci`. A PR is a number, URL, `OWNER/REPO
 
 ```output
 $ jouet ci explain --run 41193844808 --log-lines 8
-FLAKY jdx/jouet  1 flaky, 9 following
+REAL jdx/jouet  1 real, 9 following
   run 41193844808 ci @ e10984c4 on fix/main-build, attempt 1
 
-FLAKY trusted / test-macos (macos)  step "Run mise run test"
+REAL trusted / test-macos (macos)  step "Run mise run test"
   failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5
-  - passed on linux on this commit (trusted / test); failed on macos
-  - a failure on one OS can be a real macos bug: if a rerun fails the same way on this commit, it is real
+  - fails only on macos: `a_command_is_rerun_until_it_exits_as_expected` passed on linux on this commit (trusted / test)
+  - most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit
     Run mise run test
     ... 567 lines skipped
     [test:cargo] test a_log_wait_from_the_start_reads_what_is_there ... ok
@@ -137,7 +137,7 @@ FLAKY trusted / test-macos (macos)  step "Run mise run test"
 
 cancelled after trusted / test-macos failed, with nothing of their own: trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest), trusted / release-build (aarch64-unknown-linux-gnu, ubuntu-latest), trusted / release-build (x86_64-pc-windows-msvc, windows-latest) and 6 more
 
-rerun: allowed, every failed job is flaky or infrastructure: jouet ci explain --run 41193844808 --repo jdx/jouet --rerun
+rerun: refused, a rerun repeats a real failure: trusted / test-macos (real)
 GitHub: 11 requests, 0 from the cache
 ```
 
@@ -182,13 +182,13 @@ Jobs that failed the same way are reported together and judged once:
 | Verdict | When |
 |---|---|
 | `infrastructure` | The runner was lost or ran out of disk; these count even when tests failed too. Or a network, registry, rate-limit, service or cache failure, when no test or error explains the failure instead. |
-| `real` | A compile or lint error, which fails the same way on every run. Or a test that failed the same way on every attempt on this commit. Or one that fails the same way in the latest run on the default branch. When the default branch has the failure too, the evidence says so: *main is broken, not this change*, and whether it has passed since. A compile error is compared with the default branch's failures in every workflow from around the time the run started. |
-| `flaky` | The same job passed on this commit in another attempt or run. Or the failed test passed on this commit in another job, and when that job ran on another OS, the evidence names the OSes. Or the same test failed on another branch's commit, and that branch passed later. |
+| `real` | A compile or lint error, which fails the same way on every run. Or a test that failed the same way on every attempt on this commit. Or one that passed on this commit only in jobs on other OSes, which is most likely an OS difference. Or one that fails the same way in the latest run on the default branch. When the default branch has the failure too, the evidence says so: *main is broken, not this change*, and whether it has passed since. A compile error is compared with the default branch's failures in every workflow from around the time the run started. |
+| `flaky` | The same job passed on this commit in another attempt or run. Or the failed test passed on this commit in another job on the same OS. Or the same test failed on another branch's commit, and that branch passed later. |
 | `unknown` | Anything else, for example a test that failed once and has not failed in the other runs looked at. The evidence says what was checked. |
 
 A job that failed only because another one did, such as a `needs:` job that reports the result and has no failure of its own, *follows* that job and gets no verdict. So does a job cancelled after another one failed.
 
-A failure on only one OS can be a real bug on that OS. It counts as flaky the first time, so it gets one rerun. If the rerun fails the same way on the same commit, the next explain finds the two failures and calls it real.
+A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and `--rerun` refuses it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
 
 ## Entire Gates
 

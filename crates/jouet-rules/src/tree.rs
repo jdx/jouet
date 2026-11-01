@@ -140,6 +140,23 @@ fn file_mode(path: &Path) -> Option<&'static str> {
     Some("100644")
 }
 
+/// Whether the work tree at `dir` has anything uncommitted: a staged or
+/// unstaged change, or an untracked file that is not ignored.
+pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
+    let status = git(
+        Some(dir),
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=all",
+        ],
+        timeout,
+    )?;
+    Ok(!status.is_empty())
+}
+
 /// The tree of commit `rev` in the repository containing `dir`, hashed as
 /// [`work_tree`] hashes a work tree.
 pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<String, String> {
@@ -203,6 +220,26 @@ mod tests {
             .status
             .success();
         assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn uncommitted_counts_changes_and_untracked_files_not_ignored_ones() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path();
+        run(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.rs"), "one").unwrap();
+        run(dir, &["add", "a.rs"]);
+        run(dir, &["commit", "-qm", "first"]);
+        assert_eq!(uncommitted(dir, T), Ok(false));
+        std::fs::write(dir.join(".git/info/exclude"), "*.log\n").unwrap();
+        std::fs::write(dir.join("run.log"), "output").unwrap();
+        assert_eq!(uncommitted(dir, T), Ok(false));
+        std::fs::write(dir.join("new.rs"), "two").unwrap();
+        assert_eq!(uncommitted(dir, T), Ok(true));
+        std::fs::remove_file(dir.join("new.rs")).unwrap();
+        std::fs::write(dir.join("a.rs"), "changed").unwrap();
+        assert_eq!(uncommitted(dir, T), Ok(true));
+        assert!(uncommitted(&dir.join("missing"), T).is_err());
     }
 
     #[test]

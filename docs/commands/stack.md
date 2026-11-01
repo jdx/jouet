@@ -46,6 +46,8 @@ For each layer, jouet reads the local branch, because it may hold fixes not yet 
   - `changed differently`, when the layer changed the same lines and jouet cannot tell.
 
   This is checked only when ancestry holds; a layer without its parent's commits plainly lacks their changes.
+
+  A layer may change its parent's lines on purpose. A file is not reported when the layer's version comes from the layer's own commits, made on top of a version that had the parent's change: the newest commit past the parent that touched the file is not a merge, and the file before that commit had the change (or came about the same way). A version a merge made is always checked, since a merge is where a restack loses a change. One case this cannot catch: a rebase that resolves a conflict by dropping the parent's lines inside one of the layer's own commits looks the same as a deliberate edit.
 - **Merged prerequisites.** When the layer below has merged, its branch has left the stack, and the layer `needs origin/main merged in` until the trunk is an ancestor. Merging the trunk works where a rebase onto it would conflict, because a squash merge leaves the old commits behind.
 - **The remote.** `N unpushed` counts local commits the remote does not have. This is information, not a problem. `N behind origin/BRANCH` counts remote commits the local branch lacks, and that is a problem: restacking from the local branch would leave them out.
 
