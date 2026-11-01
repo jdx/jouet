@@ -1147,7 +1147,7 @@ Merge a PR that is ready, honouring branch protection
 
 Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is missing. With \-\-update, a branch behind its base is first updated on GitHub by merging the base in (never a force\-push), and its new checks are waited for. The merge goes through the API with the head SHA as a guard, the way the merge button does, so branch protection applies and is never bypassed. Then the PR is confirmed merged and the merge commit printed. It asks first only when a person is at a terminal (stdin and stderr are terminals and no coding agent is detected); anyone else must pass \-\-yes or \-\-dry\-run, or it exits 2 before contacting GitHub.
 
-The PR's checks on GitHub, which `pr next` reads, are its tests: the full suite runs on CI, not here.
+The PR's checks on GitHub, which `pr next` reads, are its tests. Verify that the configured checks cover the tests the change needs.
 .PP
 \fBUsage:\fR jouet pr land [OPTIONS] [<PR>]
 .PP
@@ -1802,7 +1802,7 @@ Files and directories to search (default .)
 .SH "JOUET TEST"
 Run the test suite, or only the tests a change affects
 
-Without \-\-affected, runs the repository's test task as the full suite: a mise `test` task, a package.json `test` script, Cargo.toml (`cargo test \-\-workspace`), a justfile or Makefile `test` target or go.mod, else the whole suite of each test runner found. With \-\-affected, runs only the tests that the changes since the merge base with \-\-since (default: the upstream, else the default branch), uncommitted and untracked files included, affect. Adapters delegate to each runner's own selection: vitest's and jest's module graphs, pytest\-testmon when it is installed, else a static import graph. The whole suite runs instead when a lockfile, tool versions, CI, the test configuration, a conftest or setup file, or a file no adapter can trace changed; nothing runs for docs only. Each test is listed with the chain of imports that picked it, and the command. Affected runs count as partial, which is enough before you finish: the full suite runs on CI. Words after `\-\-` go to the runner.
+Without \-\-affected, runs the repository's test task as the full suite: a mise `test` task, a package.json `test` script, Cargo.toml (`cargo test \-\-workspace`), a justfile or Makefile `test` target or go.mod, else the whole suite of each test runner found. With \-\-affected, runs only the tests that the changes since the merge base with \-\-since (default: the upstream, else the default branch), uncommitted and untracked files included, affect. Adapters delegate to each runner's own selection: vitest's and jest's module graphs, pytest\-testmon when it is installed, else a static import graph. The whole suite runs instead when a lockfile, tool versions, CI, the test configuration, a conftest or setup file, or a file no adapter can trace changed; nothing runs for docs only. Each test is listed with the chain of imports that picked it, and the command. Affected runs count as partial; they do not verify the full suite. Words after `\-\-` go to the runner.
 
 With \-\-cmd, the words after `\-\-` are the whole command instead, run directly rather than through a shell: one test, an e2e suite or a build, such as `jouet test \-\-cmd \-\- cargo build`.
 

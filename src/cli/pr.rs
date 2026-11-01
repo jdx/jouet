@@ -104,8 +104,8 @@ pub(crate) struct NextArgs {
 /// stderr are terminals and no coding agent is detected); anyone else must
 /// pass --yes or --dry-run, or it exits 2 before contacting GitHub.
 ///
-/// The PR's checks on GitHub, which `pr next` reads, are its tests: the
-/// full suite runs on CI, not here.
+/// The PR's checks on GitHub, which `pr next` reads, are its tests. Verify
+/// that the configured checks cover the tests the change needs.
 #[derive(Args)]
 pub(crate) struct LandArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the

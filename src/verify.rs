@@ -761,7 +761,7 @@ impl Checks {
             "the tests for the code you changed"
         };
         Some(format!(
-            "Files changed after the last test run passed (`{}`). Run the tests your change affects ({run}) before you finish, or say why none are needed. The full suite runs on CI. [jouet: verify]",
+            "Files changed after the last test run passed (`{}`). Run the tests your change affects ({run}) before you finish, or say why none are needed. [jouet: verify]",
             shown(&last.command)
         ))
     }
@@ -1370,7 +1370,7 @@ mod tests {
     #[test]
     fn a_change_after_the_last_passing_test_run_blocks_until_one_passes_again() {
         let mut state = Checks::default();
-        // A partial pass is enough at its tree: the full suite runs on CI.
+        // A partial pass satisfies the stop hook at its tree.
         state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
         assert_eq!(reason(&state, "t1"), None);
         let why = reason(&state, "t2").unwrap();
@@ -1379,7 +1379,7 @@ mod tests {
             "{why}"
         );
         assert!(why.contains("`jouet test --affected`"), "{why}");
-        assert!(why.contains("The full suite runs on CI."), "{why}");
+        assert!(!why.contains("The full suite runs on CI."), "{why}");
         // Where --affected cannot select, it is not offered.
         let why = state.reasons(|| Some("t2".into()), false, false).remove(0);
         assert!(!why.contains("--affected"), "{why}");

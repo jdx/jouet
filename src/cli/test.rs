@@ -14,8 +14,8 @@ use usage_rs::Args;
 /// lockfile, tool versions, CI, the test configuration, a conftest or setup
 /// file, or a file no adapter can trace changed; nothing runs for docs
 /// only. Each test is listed with the chain of imports that picked it, and
-/// the command. Affected runs count as partial, which is enough before you
-/// finish: the full suite runs on CI. Words after `--` go to the runner.
+/// the command. Affected runs count as partial; they do not verify the full
+/// suite. Words after `--` go to the runner.
 ///
 /// With --cmd, the words after `--` are the whole command instead, run
 /// directly rather than through a shell: one test, an e2e suite or a build,

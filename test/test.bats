@@ -147,7 +147,7 @@ vitest (vitest's module graph): 2 test files
 	assert_line --regexp '^vitest: failed \(exit 1\) in [0-9.]+s: 1 failed(, [0-9]+ passed)?$'
 	assert_line --regexp '^FAIL test/fmt.test.js > '
 	assert_line --regexp '^full log: .+\.log$'
-	assert_line "This was a partial run, which is enough before you finish: the full suite runs on CI."
+	assert_line "This was a partial run; the full suite was not verified."
 	assert_output --partial '1 failed'
 
 	printf "export const shout = (s) => s + '!'\n" >src/fmt.js

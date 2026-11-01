@@ -22,7 +22,7 @@ vitest (vitest's module graph): 2 test files
   ignored: README.md (documentation)
   run: node_modules/.bin/vitest run --changed 1a2b3c4d5e6f
 vitest: passed in 1.2s: 5 passed (full log: ~/.local/state/jouet/logs/test-1793449700864-936641-0.log)
-This was a partial run, which is enough before you finish: the full suite runs on CI.
+This was a partial run; the full suite was not verified.
 ```
 
 `--dry-run` prints the same explanation and runs nothing. The text lists the first 20 tests with their reasons and counts the rest; `--json` lists them all. Words after `--` go to the test runner. The flags are listed in the [CLI reference](/cli/test).
@@ -114,7 +114,7 @@ The built-in `piped-test-output` rule warns (it never denies) when an agent pipe
 
 Affected runs speed up iteration. They never replace the full suite:
 
-- **Recorded as partial.** With `jouet setup`'s hooks installed, the built-in `checks` rule records `jouet test` as a full test run and `jouet test --affected` as a partial one, with `--affected` as its selector. A partial pass never clears a failed full run, but a passing affected run at the files now is all the stop hook asks for after a change: the full suite runs on CI. See [finishing on a failing check](/setup#finishing-on-a-failing-check).
+- **Recorded as partial.** With `jouet setup`'s hooks installed, the built-in `checks` rule records `jouet test` as a full test run and `jouet test --affected` as a partial one, with `--affected` as its selector. A partial pass never clears a failed full run, but a passing affected run at the files now is all the stop hook asks for after a change. Check that the rest of the suite runs when needed. See [finishing on a failing check](/setup#finishing-on-a-failing-check).
 - **The whole suite when in doubt.** A change jouet cannot trace to tests runs everything, and says why.
 - **Nothing for docs.** A change to documentation alone runs no tests, and says so.
 - **Steering, not rewriting.** The `affected-tests` rule warns (it never denies) when an agent runs the whole suite again a few minutes after the last whole-suite run, in a repository with an adapter. It never fires after an affected run, nor after a whole-suite run whose output was cut with `head`, `tail`, `grep`, `rg` or `sed`: the agent did not see that run, and running it again whole is what `piped-test-output` asks for.
