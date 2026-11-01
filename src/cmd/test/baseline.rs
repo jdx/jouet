@@ -94,16 +94,33 @@ pub(super) fn failure_names(output: &str, formats: &[Format]) -> Option<BTreeSet
     (!names.is_empty()).then_some(names)
 }
 
-/// Runs each failed job again in a worktree of the merge base of HEAD with
-/// `since` (the upstream or default branch when None), and sorts the
+/// The merge base of HEAD with `since` (the upstream or default branch when
+/// None), checked before the run so a comparison that cannot tell anything
+/// costs nothing: when the work tree is that commit exactly, as after
+/// committing on the default branch itself, the run there would be the
+/// same code, and every failure would look as if it were there before.
+pub(super) fn base(root: &Path, since: Option<&str>) -> Result<affected::Base, affected::Error> {
+    let base = affected::base(root, since)?;
+    if affected::unchanged_since(root, &base.merge_base)? {
+        return Err(affected::Error::new(
+            Exit::Usage,
+            format!(
+                "--baseline compares with the merge base of HEAD and `{}`, which is HEAD itself with nothing changed since, so it would run this same code: name the commit your change started from with --since",
+                base.name
+            ),
+        ));
+    }
+    Ok(base)
+}
+
+/// Runs each failed job again in a worktree of `base`, and sorts the
 /// failures it had into those the merge base has too and the new ones.
 pub(super) fn compare(
     root: &Path,
-    since: Option<&str>,
+    base: affected::Base,
     formats: &[Format],
     failed: &[(&Job, BTreeSet<String>)],
 ) -> Result<Baseline, String> {
-    let base = affected::base(root, since).map_err(|e| e.message)?;
     let tmp = tempfile::Builder::new()
         .prefix("jouet-baseline-")
         .tempdir()

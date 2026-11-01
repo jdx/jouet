@@ -543,6 +543,38 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_failure 2
 }
 
+@test "--baseline refuses before the run when the merge base is the work tree itself" {
+	mkdir -p tests
+	printf 'import unittest\nclass T(unittest.TestCase):\n    def test_env(self):\n        self.fail("needs brew")\n' >tests/test_a.py
+	git add tests/test_a.py
+	git commit -q -m base
+	# Committed on main itself, with no upstream: the merge base with main is
+	# HEAD, and a run there would be this same code.
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+
+	run --separate-stderr jouet test --baseline
+	assert_failure 2
+	assert_equal "$output" ""
+	assert_stderr --partial "which is HEAD itself with nothing changed since"
+	assert_stderr --partial "jouet test --baseline --since HEAD~1"
+	run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests
+	assert_failure 2
+	assert_stderr --partial "jouet test --baseline --since HEAD~1 --cmd -- python3 -m unittest discover -s tests"
+
+	# The commit before the change is a base that tells something.
+	run --separate-stderr jouet test --baseline --since HEAD~1
+	assert_success
+	assert_output --partial "baseline: the failure also fails at HEAD~1"
+
+	# An uncommitted change is a difference from HEAD, so HEAD is a base.
+	echo more >>notes.md
+	run --separate-stderr jouet test --baseline
+	assert_success
+	assert_output --partial "baseline: the failure also fails at main"
+}
+
 @test "the fixture lock lets one install run at a time, past a stale lock" {
 	local fixture="$BATS_TEST_TMPDIR/fixture" log="$BATS_TEST_TMPDIR/held"
 	# A lock a killed run left: its holder is gone.

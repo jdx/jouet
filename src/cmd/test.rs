@@ -160,6 +160,31 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         Ok(cwd) => cwd,
         Err(e) => return out.error(Exit::Failed, &format!("reading the current directory: {e}")),
     };
+    let root = cwd
+        .ancestors()
+        .find(|d| d.join(".git").exists())
+        .unwrap_or(&cwd)
+        .to_path_buf();
+    // Before the run, which may take many minutes, not after it.
+    let base = if args.baseline {
+        match baseline::base(&root, args.since.as_deref()) {
+            Ok(base) => Some(base),
+            Err(e) => {
+                let mut fixed = vec!["jouet", "test", "--baseline", "--since", "HEAD~1"];
+                if args.cmd {
+                    fixed.push("--cmd");
+                }
+                if !args.extra.is_empty() {
+                    fixed.push("--");
+                    fixed.extend(args.extra.iter().map(String::as_str));
+                }
+                let hint = e.hint.unwrap_or_else(|| fixed.join(" "));
+                return out.error_with_hint(e.exit, &e.message, Some(&hint));
+            }
+        }
+    } else {
+        None
+    };
     let planned = if args.cmd {
         Ok(given(&cwd, args))
     } else if args.affected {
@@ -220,19 +245,14 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             }
         }
     }
-    if args.baseline && exit == Exit::Failed {
-        let root = cwd
-            .ancestors()
-            .find(|d| d.join(".git").exists())
-            .unwrap_or(&cwd)
-            .to_path_buf();
+    if let (Some(base), Exit::Failed) = (base, exit) {
         let named: Option<Vec<_>> = failed
             .into_iter()
             .map(|(job, names)| names.map(|names| (job, names)))
             .collect();
         let found = match named {
             None => Err("the output names no failing test, so there is nothing to compare at the merge base".to_string()),
-            Some(named) => baseline::compare(&root, args.since.as_deref(), &formats, &named),
+            Some(named) => baseline::compare(&root, base, &formats, &named),
         };
         match found {
             Ok(found) => {

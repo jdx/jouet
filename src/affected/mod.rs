@@ -23,7 +23,7 @@ mod js;
 mod pyimports;
 mod python;
 
-pub(crate) use changes::{Base, Change, Status, base};
+pub(crate) use changes::{Base, Change, Status, base, unchanged_since};
 pub(crate) use classify::Effect;
 use classify::Packages;
 use jouet_output::exit::Exit;
