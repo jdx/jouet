@@ -32,8 +32,8 @@ pub(crate) struct Sample {
     pub kind: String,
     /// The command as the `checks` rule recorded it.
     pub cmd: String,
-    /// The command with what it selected (a test name, a package) as `…`,
-    /// so one e2e test's cost speaks for the others.
+    /// The command with the last word of what it selected (a test name, a
+    /// package) as `…`, so one e2e test's cost speaks for the others.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family: Option<String>,
     pub ms: u64,
@@ -75,10 +75,13 @@ impl Sample {
     }
 }
 
-/// `cmd` with `selector` as `…`, when the command names it.
+/// `cmd` with the last word of `selector` as `…`, when the command ends
+/// with it: `mise run test:e2e test_use` selects `test:e2e test_use`,
+/// and its family is `mise run test:e2e …`, not `mise run …`.
 fn family(cmd: &str, selector: Option<&str>) -> Option<String> {
-    let selector = selector.filter(|s| !s.is_empty() && cmd.contains(*s))?;
-    Some(cmd.replacen(selector, "…", 1))
+    let last = selector?.split_whitespace().last()?;
+    let rest = cmd.strip_suffix(last)?;
+    rest.ends_with(' ').then(|| format!("{rest}…"))
 }
 
 /// This machine, as the first 12 hex characters of the SHA-256 of its

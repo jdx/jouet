@@ -92,8 +92,15 @@ fn failing_runs_count_only_when_no_run_passed() {
 fn a_family_replaces_what_the_command_selected() {
     assert_eq!(
         family("cargo test -p jouet-edit", Some("-p jouet-edit")).as_deref(),
-        Some("cargo test …")
+        Some("cargo test -p …")
     );
+    assert_eq!(
+        family("mise run test:e2e test_use", Some("test:e2e test_use")).as_deref(),
+        Some("mise run test:e2e …")
+    );
+    // A selector the command does not end with, or a word's tail, is none.
+    assert_eq!(family("cargo test -p a --lib", Some("-p a")), None);
+    assert_eq!(family("cargo test xfoo", Some("foo")), None);
     assert_eq!(family("cargo test", None), None);
     assert_eq!(family("cargo test", Some("absent")), None);
 }
