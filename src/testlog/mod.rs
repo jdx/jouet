@@ -240,7 +240,9 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
 
 /// The output's lines without colour, with only what a carriage return left
 /// on screen, and without the `[task] ` prefix mise puts on each line of a
-/// task when most lines have one.
+/// task when most lines have one, as many deep as tasks were nested: a task
+/// that runs `mise run` prefixes its children's lines again
+/// (`[test:bats] [test:bats:libgit2] not ok 1`).
 fn clean(text: &str) -> Vec<String> {
     let lines: Vec<String> = text
         .lines()
@@ -257,7 +259,12 @@ fn clean(text: &str) -> Vec<String> {
     }
     lines
         .into_iter()
-        .map(|l| TASK_PREFIX.replace(&l, "").into_owned())
+        .map(|mut l| {
+            while let Some(m) = TASK_PREFIX.find(&l) {
+                l.replace_range(..m.end(), "");
+            }
+            l
+        })
         .collect()
 }
 
