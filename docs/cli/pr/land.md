@@ -7,7 +7,7 @@ Merge a PR that is ready, honouring branch protection
 
 Refuses (exit 4) unless `pr next` says ready_to_merge, and says what is missing. With --update, a branch behind its base is first updated on GitHub by merging the base in (never a force-push), and its new checks are waited for. The merge goes through the API with the head SHA as a guard, the way the merge button does, so branch protection applies and is never bypassed. Then the PR is confirmed merged and the merge commit printed. It asks first only when a person is at a terminal (stdin and stderr are terminals and no coding agent is detected); anyone else must pass --yes or --dry-run, or it exits 2 before contacting GitHub.
 
-The PR's checks on GitHub, which `pr next` reads, are its tests: the full suite runs on CI, not here.
+The PR's checks on GitHub, which `pr next` reads, are its tests. Verify that the configured checks cover the tests the change needs.
 
 ## Arguments
 - **`[PR]`** — The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR

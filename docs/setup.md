@@ -157,7 +157,7 @@ The rules read the command the way a shell does: quoted strings, here-document b
 
 ### Finishing on a failing check
 
-The stop hook keeps an agent from declaring success while a test, lint or build run it made failed, or after it changed files with no test run passing since, in the spirit of "verification before completion". The tests a change affects are enough: the full suite runs on CI, so the hook never asks for it. It is conservative by design:
+The stop hook keeps an agent from declaring success while a test, lint or build run it made failed, or after it changed files with no test run passing since, in the spirit of "verification before completion". A passing partial run satisfies the hook; it does not establish that the full suite passed. It works as follows:
 
 - **What counts as a check.** Whatever the post-tool-use rules record. The built-in `checks` rule records `cargo test`, `build`, `check`, `clippy` and `fmt --check` (also through `mbx`), `mise run` tasks named `test*`, `lint*`, `check*`, `build*` or `ci`, `npm`/`pnpm`/`yarn`/`bun` test and scripts with those names, `make`/`just` targets, `go test`/`vet`/`build`, `pytest`, `python -m unittest`, `vitest`, `jest`, `bats`, `jouet test` (with `--cmd`, as the command it ran), `hk check` and a few common linters; add a [script rule](/rules#scripts) of your own with `on = "post-tool-use"` that calls `jouet.record` to count more.
 - **Full or partial.** Each run is recorded with its scope: `full` when it covered the whole project, or `partial` with what it selected. For cargo, `-p` (unless the packages named are every workspace member), `--test`, `--lib`, `--bin`, `--exclude`, a test-name filter, `--exact` or `--skip` after `--`, and nextest's `-E` make a run partial; `--workspace`, a plain run in a single-package project, and a plain run at a virtual manifest without `default-members` are full. A plain `cargo test` at the root of a workspace that is also a package tests only that package, so it is partial. A task runner's task is full when it is run alone by a plain name (`mise run test`, `npm test`, `make check`), and partial with arguments or a sub-task (`mise run test:e2e edit`). `go test ./...`, and `pytest`, `vitest` or `jest` without paths or name filters, are full, as is `python -m unittest` with no tests named (or `discover` without a pattern or `-k`). `jouet test` is full, and `jouet test --affected` is partial, selecting `--affected` (see [`jouet test`](/commands/test)); `jouet test --cmd -- CMD` has the kind and scope of CMD, read through wrappers such as `mise x --`, `env` and `timeout` as any command is, and is not recorded when the rule does not know CMD, as CMD run directly is not; a dry run is not recorded. Anything else, including a `cd` the rule cannot follow, is partial.
@@ -180,7 +180,7 @@ The stop hook keeps an agent from declaring success while a test, lint or build 
 
 ### Before pushing and landing
 
-The full suite runs on CI: jouet does not ask for a local full run before `git push`, `gh pr create` or [`jouet pr land`](/commands/pr-land#tests-before-landing), which merges only once the pull request's checks have passed.
+jouet does not ask for a local full run before `git push`, `gh pr create` or [`jouet pr land`](/commands/pr-land#tests-before-landing), which merges only once the pull request's checks have passed. Check that the configured CI checks cover the tests the change needs.
 
 Known false positives and misses:
 
