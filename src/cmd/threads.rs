@@ -503,6 +503,7 @@ fn reply(args: &ThreadsArgs, a: &ReplyArgs, out: &Output) -> Result<Exit, Stop> 
         reply: Some(body),
         resolve: a.resolve,
         unresolve: false,
+        among_args: false,
     }];
     write_threads(args, pr, &entries, &[], a.ignore_resolved, a.dry_run, out)
 }
@@ -537,6 +538,7 @@ fn resolve(args: &ThreadsArgs, a: &ResolveArgs, out: &Output) -> Result<Exit, St
             reply: a.reply.clone(),
             resolve: true,
             unresolve: false,
+            among_args: true,
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());
@@ -564,6 +566,7 @@ fn unresolve(args: &ThreadsArgs, a: &UnresolveArgs, out: &Output) -> Result<Exit
             reply: None,
             resolve: false,
             unresolve: true,
+            among_args: true,
         })
         .collect();
     let pr = pr.or(args.pr.as_deref());

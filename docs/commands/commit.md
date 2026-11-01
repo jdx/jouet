@@ -162,7 +162,7 @@ What happens when a subject breaks a rule is set by `conventional` under `[commi
 
 A file's `status` is `added`, `modified`, `deleted` or `type_changed`. `--dry-run` sets `dry_run` instead of `committed` and shows the message as it would be committed. A failed commit has a `failure` with `exit_code`, `output`, `lines_omitted` and `log_path`.
 
-`secret_scan` has the `tool` (`jouet` for gitleaks' rules, `jouet+fnox` in a fnox project), a `status` (`clean` or `found`), `files_scanned`, and, when secrets were found, `findings`, each with the `path` and `line`, and either the gitleaks `rule` and the `redacted` match, or the fnox `secret`'s name. A `reason` says why fnox did not check the values. fnox's warnings, and how many findings `.gitleaksignore` or `--allow-secret` passed over, are in `notes`.
+`secret_scan` has the `tool` (`jouet` for gitleaks' rules, `jouet+fnox` in a fnox project), a `status` (`clean`, `found`, or `skipped` when fnox could not scan and gitleaks' rules found nothing), `files_scanned`, and, when secrets were found, `findings`, each with the `path` and `line`, and either the gitleaks `rule` and the `redacted` match, or the fnox `secret`'s name. A `reason` says why fnox did not check the values. fnox's warnings, and how many findings `.gitleaksignore` or `--allow-secret` passed over, are in `notes`.
 
 ## Exit codes
 

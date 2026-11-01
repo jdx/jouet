@@ -148,7 +148,8 @@ pub(crate) struct ReplaceArgs {
     /// Markdown list item
     #[usage(long, var, value_name = "TEXT", allow_hyphen_values)]
     pub(crate) old: Vec<String>,
-    /// The text to put in its place, one for each --old
+    /// The text to put in its place, one for each --old. It may start with
+    /// `-` too
     #[usage(long, var, value_name = "TEXT", allow_hyphen_values)]
     pub(crate) new: Vec<String>,
     /// How many matches each --old must have in each file
