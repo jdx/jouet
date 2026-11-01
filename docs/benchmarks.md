@@ -76,6 +76,7 @@ The fake executes real GraphQL queries (variables, aliases, fragments, connectio
 - **GitHub state** is replaced by the fake, so PR tasks are the same every time. The fake's clock starts with the run, so how long the agent waits is part of what is measured.
 - **The prompt cache** depends on what ran recently on the same account. Runs interleave arms, so both see the same cache conditions on average, and the report shows cached and uncached input separately.
 - **The network** is not sandboxed. A prompt says not to push, and the fixture's remote points at a repository that does not exist.
+- **macOS process cleanup** uses `lsof` to find detached processes whose working directory remains in the run. A process that detaches and leaves that directory may survive cleanup.
 
 ### Metrics
 

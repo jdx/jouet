@@ -188,6 +188,20 @@ class SweepTest(unittest.TestCase):
         self.addCleanup(proc.kill)
         return proc
 
+    @unittest.skipUnless(sys.platform == "darwin", "needs macOS lsof")
+    def test_macos_stops_detached_process_in_run_but_not_neighbor(self):
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d) / "run1"
+            other = Path(d) / "run10"
+            run_dir.mkdir()
+            other.mkdir()
+            inside = self.start(run_dir)
+            outside = self.start(other)
+            left = runner.sweep(run_dir, None)
+            self.assertTrue(any(f"pid {inside.pid}:" in item for item in left), left)
+            self.assertIsNotNone(inside.wait(timeout=10))
+            self.assertIsNone(outside.poll())
+
     @unittest.skipUnless(Path("/proc").is_dir(), "needs /proc")
     def test_stops_processes_in_the_run_or_its_session(self):
         with tempfile.TemporaryDirectory() as d:

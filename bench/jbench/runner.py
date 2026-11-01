@@ -228,12 +228,14 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
     A run's processes are ours that are in the agent's session, or whose
     working directory or arguments are in the run's directory: a test
     suite's watchers can start sessions of their own and outlive both the
-    agent and the check. Without /proc (macOS) only the session is stopped.
+    agent and the check. On macOS, lsof finds processes by working directory;
+    detached processes that leave that directory may not be found.
     """
     import os
     import signal
 
     found = {}
+    stopped_session = None
     proc_dir = Path("/proc")
     if proc_dir.is_dir():
         under = str(run_dir)
@@ -253,27 +255,70 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
             inside = any(s.endswith(under) or under + "/" in s for s in [cwd, *args])
             if inside or (session is not None and sid == session):
                 found[int(entry.name)] = " ".join(args)[:200]
-    elif session is not None:
-        try:
-            os.killpg(session, signal.SIGKILL)
-            return [f"session {session}"]
-        except (ProcessLookupError, PermissionError):
-            return []
+    else:
+        found.update(cwd_processes(run_dir))
+        if session is not None:
+            try:
+                os.killpg(session, signal.SIGKILL)
+                stopped_session = f"session {session}"
+            except (ProcessLookupError, PermissionError):
+                pass
     for sig in (signal.SIGTERM, signal.SIGKILL):
         alive = []
         for pid in found:
             try:
                 os.kill(pid, sig)
                 alive.append(pid)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
         deadline = time.monotonic() + 5
         while alive and time.monotonic() < deadline:
-            alive = [pid for pid in alive if Path(f"/proc/{pid}").exists() and not zombie(pid)]
+            alive = [pid for pid in alive if process_alive(pid)]
             time.sleep(0.1)
         if not alive:
             break
-    return list(found.values())
+    return list(found.values()) + ([stopped_session] if stopped_session else [])
+
+
+def cwd_processes(run_dir: Path) -> dict[int, str]:
+    """Find this user's processes whose working directory is inside a run."""
+    import os
+
+    try:
+        proc = subprocess.run(
+            ["lsof", "-n", "-P", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fpn"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    root = run_dir.resolve()
+    found = {}
+    pid = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid and pid != os.getpid():
+            cwd = Path(line[1:])
+            if cwd == root or root in cwd.parents:
+                found[pid] = f"pid {pid}: cwd {cwd}"
+    return found
+
+
+def process_alive(pid: int) -> bool:
+    import os
+
+    if Path("/proc").is_dir():
+        return Path(f"/proc/{pid}").exists() and not zombie(pid)
+    try:
+        # A zombie can persist until its parent reaps it and cannot be killed.
+        proc = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True, timeout=2)
+        return proc.returncode == 0 and bool(proc.stdout.strip()) and not proc.stdout.strip().startswith("Z")
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
 
 
 def zombie(pid: int) -> bool:
