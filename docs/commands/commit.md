@@ -16,7 +16,10 @@ $ jouet commit src/commit.rs docs/commit.md -m "feat(git): add jouet commit"
 committed 3f2a9c1d0b7e on feat/git-recipes: feat(git): add jouet commit
   added     docs/commit.md  +48 -0
   modified  src/commit.rs   +12 -3
+  still uncommitted: src/other.rs
 ```
+
+The last line says what `git status` would still report, or `nothing else is uncommitted`, so checking that takes no call of its own (`left` in `--json`, at most 8 paths named in the text).
 
 The flags are listed in the [CLI reference](/cli/commit).
 

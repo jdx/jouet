@@ -136,6 +136,14 @@ fn the_first_commit_works_on_an_unborn_branch() {
     assert!(report.committed);
     assert_eq!(names(&report), [("a.txt", "added")]);
     assert_eq!(repo.git(&["status", "--porcelain"]), "?? b.txt");
+    // The report says what is left, as `git status` would.
+    assert_eq!(report.left.as_deref(), Some(&["b.txt".to_string()][..]));
+    let report = run(
+        &repo.git_handle(),
+        &request(&["b.txt"], "second", logs.path()),
+    )
+    .unwrap();
+    assert_eq!(report.left.as_deref(), Some(&[][..]));
 }
 
 #[test]

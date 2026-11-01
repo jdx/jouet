@@ -91,6 +91,11 @@ pub struct Report {
     /// What the secret scan found, when one ran or was skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_scan: Option<SecretScan>,
+    /// What is still uncommitted after a commit: changed, staged or untracked
+    /// paths, as git's status names them. None before a commit, or when git
+    /// could not say. Agents ran `git status` after each commit to learn it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<Vec<String>>,
 }
 
 impl Report {
@@ -272,12 +277,31 @@ pub fn run_scanned(
     report.committed = true;
     report.sha = git.head();
     report.files = committed_files(git)?;
+    report.left = left(git);
     // A commit-msg hook may have changed the message.
     if let Some(message) = git.line(&["log", "-1", "--format=%B", "HEAD"]) {
         report.subject = message.lines().next().unwrap_or_default().to_string();
         report.message = message;
     }
     Ok(report)
+}
+
+/// The paths `git status` still reports, changed, staged or untracked.
+fn left(git: &Git) -> Option<Vec<String>> {
+    let out = git
+        .text(&["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
+        .ok()?;
+    let mut paths = Vec::new();
+    let mut fields = crate::nul_fields(&out);
+    while let Some(entry) = fields.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        // A rename is followed by the name it had.
+        if entry.starts_with('R') || entry.starts_with('C') {
+            fields.next();
+        }
+        paths.push(path.to_string());
+    }
+    Some(paths)
 }
 
 fn no_paths() -> Error {
