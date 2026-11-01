@@ -5,6 +5,9 @@
 -- edit, however it changes the text: `.replace()`, slicing by `.index()`,
 -- `re.sub`. Writing one file from another is not an edit, and neither is a
 -- structured rewrite through json, yaml or toml, which `jouet edit` cannot do.
+-- Code that checks its text is there first (an `assert`, or a `raise` or
+-- `sys.exit` on a miss) cannot silently change nothing, so it is let through:
+-- denying it cost the agent a whole request to make the same edit again.
 
 -- The code a Python command runs inline: its here-documents and `-c`.
 local function code_of(command: JouetCommand): string
@@ -55,6 +58,17 @@ end
 -- Libraries that parse and write a file whole, by structure.
 local STRUCTURED = { "json%.dump", "yaml%.dump", "yaml%.safe_dump", "toml%.dump", "tomlkit%.dump", "tomli_w%.dump" }
 
+-- Whether the code stops on a miss before it writes: an `assert` line, or a
+-- `raise` or `sys.exit`, as `assert old in s` or `if old not in s: raise`.
+local function checked(code: string): boolean
+	for line in string.gmatch(code, "[^\n]+") do
+		if string.match(line, "^%s*assert%s") or string.find(line, "raise%s") or string.find(line, "sys%.exit%(") then
+			return true
+		end
+	end
+	return false
+end
+
 local function structured(code: string): boolean
 	for _, pattern in STRUCTURED do
 		if string.find(code, pattern) then
@@ -70,7 +84,7 @@ local rule: JouetRule = {
 			local program = command.program or ""
 			if string.match(program, "^python") then
 				local code = code_of(command)
-				if code ~= "" and not structured(code) then
+				if code ~= "" and not structured(code) and not checked(code) then
 					local reads = targets(code, "read")
 					for target in targets(code, "write") do
 						if reads[target] then
