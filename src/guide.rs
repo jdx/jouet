@@ -907,7 +907,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} One run is enough; CI runs the full suite. {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1153,14 +1153,8 @@ mod tests {
         );
         assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
         assert!(text.contains("These need no lookup"), "{text}");
-        // Codex ran the suite twice after a fix: once with the plain runner
-        // and once with `jouet test`, or with both forms of `jouet test`.
-        assert!(
-            text.contains("One run is enough; CI runs the full suite."),
-            "{text}"
-        );
-        // CI runs it, so the primer never asks for the full suite.
-        assert!(!text.contains("the full suite)"), "{text}");
+        // CI's coverage depends on the repository; the primer cannot assert it.
+        assert!(!text.contains("CI runs the full suite"), "{text}");
         // Agents committed in a call of their own after the test run, and
         // guessed `pr threads list` before `pr threads`.
         assert!(
