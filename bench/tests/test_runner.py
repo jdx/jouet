@@ -131,6 +131,31 @@ class HarnessOutputTest(unittest.TestCase):
             (u.input_tokens, u.cache_write_tokens, u.turns, u.model, u.is_error), (161, 50, 3, "claude-x", False)
         )
 
+    def test_claude_stream_resumed_after_a_background_command(self):
+        def result(turns, cost, input_tokens, output_tokens, text):
+            usage = {"input_tokens": input_tokens, "cache_read_input_tokens": 100, "output_tokens": output_tokens}
+            return json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "num_turns": turns,
+                    "total_cost_usd": cost,
+                    "result": text,
+                    "usage": usage,
+                }
+            )
+
+        lines = [
+            json.dumps({"type": "system", "subtype": "init", "model": "claude-x", "session_id": "s"}),
+            result(10, 0.19, 18, 3270, "waiting for the build"),
+            result(4, 0.23, 8, 1010, "done"),
+        ]
+        u = HARNESSES["claude"].usage(lines, Path("/nonexistent"))
+        self.assertEqual(
+            (u.input_tokens, u.output_tokens, u.turns, u.cost_usd, u.result), (226, 4280, 14, 0.23, "done")
+        )
+
     def test_codex_stream(self):
         lines = [
             json.dumps({"type": "thread.started", "thread_id": "t"}),
@@ -149,7 +174,68 @@ class HarnessOutputTest(unittest.TestCase):
         )
 
 
+class SweepTest(unittest.TestCase):
+    """What a run leaves running is stopped, and nothing else is."""
+
+    def start(self, cwd, *args, session=True):
+        import subprocess
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)", *args],
+            cwd=cwd,
+            start_new_session=session,
+        )
+        self.addCleanup(proc.kill)
+        return proc
+
+    @unittest.skipUnless(Path("/proc").is_dir(), "needs /proc")
+    def test_stops_processes_in_the_run_or_its_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d) / "task.claude.jouet.r1"
+            other = Path(d) / "task.claude.jouet.r10"
+            run_dir.mkdir()
+            other.mkdir()
+            # In its own session, as a test suite's watcher is, and deaf to SIGTERM.
+            in_cwd = self.start(run_dir)
+            in_args = self.start(d, f"--watch={run_dir}/work")
+            leader = self.start(d)
+            outside = self.start(other, str(other))
+            left = runner.sweep(run_dir, leader.pid)
+            self.assertEqual(len(left), 3, left)
+            for proc in (in_cwd, in_args, leader):
+                self.assertIsNotNone(proc.wait(timeout=10))
+            self.assertIsNone(outside.poll())
+
+
 class TasksTest(unittest.TestCase):
+    def test_the_check_runs_in_the_run_environment(self):
+        import dataclasses
+        import os
+
+        with tempfile.TemporaryDirectory() as d:
+            task_dir = Path(d) / "task"
+            task_dir.mkdir()
+            (task_dir / "check.py").write_text("import os\nprint(os.environ['HOME'], os.environ.get('BENCH_X'), os.environ.get('LEAK'))\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir)
+            os.environ["LEAK"] = "yes"
+            self.addCleanup(os.environ.pop, "LEAK")
+            check = tasks.run_check(task, Path(d), {"PATH": "/usr/bin:/bin", "HOME": f"{d}/home"}, {"BENCH_X": "1"})
+            self.assertEqual(check["output"], f"{d}/home 1 None")
+
+    def test_an_upstream_task_tracks_a_local_origin_at_the_base(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            task = dataclasses.replace(tasks.load("smoke"), remote=False, upstream=True)
+            workdir = Path(d) / "run" / "work"
+            workdir.parent.mkdir()
+            shas = tasks.prepare(task, workdir)
+            self.assertEqual(tasks.git(workdir, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/main")
+            self.assertEqual(tasks.git(workdir, "rev-parse", "origin/main"), shas["base_sha"])
+            self.assertEqual(tasks.git(workdir, "symbolic-ref", "refs/remotes/origin/HEAD"), "refs/remotes/origin/main")
+            self.assertTrue((Path(d) / "run" / "origin.git").is_dir())
+
+
     def test_every_task_loads(self):
         names = tasks.all_names()
         self.assertIn("smoke", names)

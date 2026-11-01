@@ -120,7 +120,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         args.rounds = 1
         args.label = args.label or "Smoke test: one run per arm. This checks the harness works; it is not a result."
     else:
-        selected = args.tasks or names
+        selected = args.tasks or [n for n in names if not tasks.load(n).opt_in]
     unknown = [n for n in selected if n not in names] + [h for h in args.harness if h not in HARNESSES]
     unknown += [a for a in args.arms if a not in arms.ARMS]
     if unknown:
@@ -241,7 +241,7 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
     import tempfile
 
     failures = []
-    for name in args.tasks or tasks.all_names():
+    for name in args.tasks or [n for n in tasks.all_names() if not tasks.load(n).opt_in]:
         task = tasks.load(name)
         with tempfile.TemporaryDirectory(prefix="jouet-bench-check-") as tmp:
             root = Path(tmp)
@@ -273,7 +273,13 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                 finally:
                     if fake:
                         fake.__exit__()
-                check = tasks.run_check(task, workdir, tasks.check_env(shas, state if fake else None))
+                # The environment a run's check gets, with no agent before it.
+                run_dir = root / f"{label}-run"
+                base = arms.base_env(run_dir, None, "jdx/demo")
+                task.agent_env(base, run_dir / "bin", workdir)
+                check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None))
+                runner.sweep(run_dir, None)
+                runner.sweep(workdir, None)
                 if check["passed"] != solve:
                     want = "pass" if solve else "fail"
                     failures.append(f"{name}: the check should {want} when {label}:\n{check['output']}")

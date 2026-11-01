@@ -1,0 +1,56 @@
+description = "Fix a real mise bug from its issue (jdx/mise#15110): `mise uninstall ruby 3.4.1` removed 3.4.12; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A pilot on a real repository: a Rust build of mise, so it runs only when named.
+opt_in = true
+remote = false
+# Committed on main, the agent measures its change from origin/main, as in a
+# clone; without it, `jouet test --baseline` had no base but HEAD itself.
+upstream = true
+# The smoke round's Codex run took 21 minutes.
+timeout_s = 3600
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (jdx/mise#15116, b003a3167).
+prompt = """
+Confusing handling of versions that are prefix of other versions
+
+While cleaning up I accidentally ran `mise uninstall ruby 3.4.1` a second time and this happened
+
+```
+❯ mise uninstall ruby 3.4.1
+mise WARN  ruby@3.4.1 is not installed
+✓ removed 1 tool in 7.7s: ruby@3.4.12
+```
+This feels wrong to me, but maybe my error was that I should have called `mise uninstall ruby@3.4.1` instead?
+
+So with this approach I get
+```
+❯ mise uninstall ruby@3.4.1
+mise ERROR multiple tools specified, use --all to uninstall all versions
+mise ERROR Version: 2026.10.21 macos-arm64 (2026-10-27)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+```
+and `--all` removes 3.4.12 again
+
+Does mise not work well with versions, that are a prefix of another version?
+
+Fix this in mise, with a test, and commit.
+"""
+
+# mise at the fix's base, the first parent of b003a3167.
+[source]
+git = "~/src/mise"
+commit = "4ca796a0bf27f2dab88f8ec930eb7870a36b407d"
+
+# The user's Rust toolchain and mise, without the rest of ~/.local/bin (which
+# holds jouet). `mise run` installs the repository's own tools, mbx among
+# them, into the run's home.
+[tools]
+mise = "~/.local/bin/mise"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"

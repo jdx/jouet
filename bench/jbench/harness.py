@@ -138,10 +138,20 @@ class Claude(Harness):
 
     def usage(self, stream_lines: list[str], config_dir: Path) -> Usage:
         events = _json_lines(stream_lines)
-        result = next((e for e in reversed(events) if e.get("type") == "result"), None)
+        results = [e for e in events if e.get("type") == "result"]
+        result = results[-1] if results else None
         init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
+        turns = sum(int(r.get("num_turns") or 0) for r in results) if results else None
         if result and result.get("usage"):
-            u = result["usage"]
+            # A session that ends its turn while a background command runs
+            # is resumed when it finishes, and each turn ends in a result of
+            # its own. A result's usage and turns cover its turn alone; its
+            # cost is the session's so far.
+            u = {}
+            for r in results:
+                for k, v in (r.get("usage") or {}).items():
+                    if isinstance(v, int):
+                        u[k] = u.get(k, 0) + v
         else:
             # Killed before the result: add up the responses seen so far.
             u = {}
@@ -157,7 +167,7 @@ class Claude(Harness):
             cache_write_tokens=write,
             output_tokens=int(u.get("output_tokens") or 0),
             cost_usd=(result or {}).get("total_cost_usd"),
-            turns=(result or {}).get("num_turns"),
+            turns=turns,
             is_error=bool((result or {}).get("is_error")) or result is None,
             result=(result or {}).get("result"),
             session_id=(result or init).get("session_id"),
@@ -185,6 +195,10 @@ class Codex(Harness):
             "--json",
             "--model",
             opts["codex_model"],
+            # Codex's workspace-write sandbox needs bubblewrap and
+            # unprivileged user namespaces, which a container often forbids;
+            # there every sandboxed command fails. The run's PATH has a
+            # `sudo` that refuses instead.
             "--dangerously-bypass-approvals-and-sandbox",
             # jouet's hooks are new to this throwaway CODEX_HOME, and Codex
             # skips hooks nobody has trusted. The plain arm has no hooks.
