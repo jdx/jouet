@@ -1,0 +1,25 @@
+description = "Fix jdx/fnox#1043: editor commands with arguments fail"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1800
+check_timeout_s = 1200
+path = ["~/.cargo/bin"]
+prompt = """
+`fnox edit` runs `$EDITOR` (or `$VISUAL`) as one program name. An editor
+command with arguments such as `code --wait` or `vim -n` fails to launch.
+An empty `EDITOR` also tries to run an empty command instead of falling back
+to `VISUAL`. Accept editor commands with arguments and make an empty EDITOR
+fall back to VISUAL. Add tests and commit your fix.
+"""
+
+[source]
+git = "~/src/fnox"
+commit = "2627b559531abed8fa270fbaa00371abb60ae2df"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
