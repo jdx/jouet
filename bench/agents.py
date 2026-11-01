@@ -136,10 +136,6 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     problems = []
     bins = {}
-    if "bench" in os.environ.get("MISE_ENV", "").split(","):
-        for tool in ("python3", "gh"):
-            if arms.resolve(tool) is None:
-                problems.append(f"benchmark tool `{tool}` is not installed; run `MISE_ENV=bench mise install`")
     for name in args.harness:
         h = HARNESSES[name]
         found = arms.resolve(h.binary)

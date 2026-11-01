@@ -53,15 +53,6 @@ ARMS = {
 
 def resolve(tool: str) -> Path | None:
     """The real binary behind `tool`, looking through mise shims."""
-    # With the benchmark environment enabled, use its pinned versions even
-    # when system shell setup has put other installations first on PATH.
-    if tool in {"python3", "gh", "claude", "codex"} and "bench" in os.environ.get("MISE_ENV", "").split(","):
-        mise = shutil.which("mise")
-        if mise:
-            proc = subprocess.run([mise, "which", tool], capture_output=True, text=True)
-            if proc.returncode == 0 and proc.stdout.strip():
-                return Path(proc.stdout.strip()).resolve()
-        return None
     for directory in os.get_exec_path():
         found = shutil.which(tool, path=directory or os.curdir)
         if not found:
