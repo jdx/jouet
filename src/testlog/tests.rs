@@ -437,6 +437,12 @@ fn a_panics_backtrace_folds_so_its_message_is_shown() {
         lines.iter().any(|l| l.ends_with("backtrace lines skipped")),
         "{lines:#?}"
     );
+    // A frame of a trait object folds too, and mbx's build lines are noise.
+    assert!(!lines.iter().any(|l| l.contains("<&dyn")), "{lines:#?}");
+    assert!(
+        !lines.iter().any(|l| l.contains("mbx[cache]")),
+        "{lines:#?}"
+    );
     assert!(
         lines
             .iter()
