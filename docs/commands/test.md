@@ -22,7 +22,7 @@ vitest (vitest's module graph): 2 test files
   ignored: README.md (documentation)
   run: node_modules/.bin/vitest run --changed 1a2b3c4d5e6f
 vitest: passed in 1.2s: 5 passed (full log: ~/.local/state/jouet/logs/test-1793449700864-936641-0.log)
-This was a partial run, which is enough before you finish: the full suite runs on CI.
+This was a partial run; the full suite was not verified.
 ```
 
 `--dry-run` prints the same explanation and runs nothing. The text lists the first 20 tests with their reasons and counts the rest; `--json` lists them all. Words after `--` go to the test runner. The flags are listed in the [CLI reference](/cli/test).
