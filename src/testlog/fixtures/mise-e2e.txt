@@ -1,0 +1,34 @@
+[build] $ cargo build --all-features
+   Compiling mise v2026.10.25 (/work)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.46s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+[test:e2e] $ ~/src/mise/.claude/worktrees/zealous-newton-9f1d07/xtasks/test/e2e test_vfox_exec_env_cache
+[xtask:e2e] Running test: backend/test_vfox_exec_env_cache
+>>> E2E backend/test_vfox_exec_env_cache
+DEBUG: $ test -e '/tmp/t/home/.local/share/mise/plugins/gcloud'
+SUCCESS: [test -e '/tmp/t/home/.local/share/mise/plugins/gcloud'] expected failure
+DEBUG: $ exec_env_cache_log 1
+SUCCESS: [exec_env_cache_log 1] output is equal to 'writing'
+DEBUG: $ exec_env_cache_log 2
+SUCCESS: [exec_env_cache_log 2] output is equal to 'reading'
+DEBUG: $ exec_env_cache_log 3
+SUCCESS: [exec_env_cache_log 3] output is equal to 'reading'
+DEBUG: $ exec_env_cache_log 4
+SUCCESS: [exec_env_cache_log 4] output is equal to 'writing'
+DEBUG: $ exec_env_cache_log 5
+SUCCESS: [exec_env_cache_log 5] output is equal to 'reading'
+DEBUG: $ mise env -s bash
+SUCCESS: [mise env -s bash] 'GCLOUD_OVERRIDE' is in output
+mise plugin:gcloud   uninstall
+mise plugin:gcloud   remove ~/.local/share/mise/plugins/gcloud
+mise plugin:gcloud ✓ uninstalled
+DEBUG: $ mise env -s bash
+ERROR: E2E assertion failed: [mise env -s bash] expected 'GCLOUD_OVERRIDE' not to be in 'export GCLOUD_OVERRIDE=1
+export PATH='/tmp/t/home/.local/share/mise/installs/gcloud/586.0.0/bin:/work/target/debug:/tmp/t/home/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin''
+backend/test_vfox_exec_env_cache: 2s
+ERROR: E2E test backend/test_vfox_exec_env_cache failed: exited with status code 1
+Test environment can be examined in /tmp/t
+
+Finished in 18.93s
+[test:e2e] ERROR task failed
