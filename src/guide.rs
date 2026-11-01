@@ -905,7 +905,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} One run is enough; CI runs the full suite. {wait}Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} One run is enough; CI runs the full suite. {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1159,6 +1159,13 @@ mod tests {
         );
         // CI runs it, so the primer never asks for the full suite.
         assert!(!text.contains("the full suite)"), "{text}");
+        // Agents committed in a call of their own after the test run, and
+        // guessed `pr threads list` before `pr threads`.
+        assert!(
+            text.contains("in the same call as their test run"),
+            "{text}"
+        );
+        assert!(text.contains("`jouet pr threads [PR]`"), "{text}");
         // With the full suite first in this list, Codex ran it unasked on a
         // repository whose suite could not pass in its sandbox, then changed
         // the environment, outside its checkout, to make it pass.
