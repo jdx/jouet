@@ -205,6 +205,7 @@ fn handle(
                 (Vec::new(), None)
             };
             log.post_tool_use(payload, &call, &records, ran);
+            keep_cost(payload, &call, &records);
             // A run of a mise task jouet added, for `jouet unwind`.
             if settings.wind.enabled
                 && let (Some(command), Some(cwd)) = (call.command.as_deref(), call.cwd.as_deref())
@@ -629,6 +630,12 @@ fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -
     };
     let affected = std::env::current_dir().is_ok_and(|cwd| !crate::affected::near(&cwd).is_empty());
     let mut context = guide::summary(&rules, verify, affected, wait_hint(harness));
+    if let Some(line) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::cost::primer_line(&crate::cost::Costs::load(&cwd)))
+    {
+        context.push_str(&line);
+    }
     // A deprecated Luau rule file: the agent can convert it.
     for note in engine
         .rules()
@@ -936,6 +943,38 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
         entry.decisions = records.iter().map(decision).collect();
         ledger::append(&dir, &entry);
     }
+}
+
+/// Keeps how long a Bash call that ran one check took, for `jouet cost`.
+/// A call that ran several is not split between them, and `jouet test`
+/// times each of its own jobs.
+fn keep_cost(payload: &Value, call: &Call, records: &[Record]) {
+    let ([record], Some(cwd), Some(ms), Some(exit)) = (
+        records,
+        call.cwd.as_deref(),
+        payload.get("duration_ms").and_then(Value::as_u64),
+        call.exit_code,
+    ) else {
+        return;
+    };
+    if record.dir.is_none() && !record.command.starts_with("jouet ") {
+        crate::cost::record(Path::new(cwd), &[crate::cost::Sample::of(record, ms, exit)]);
+    }
+}
+
+/// The checks the rules here would record for `command` exiting 0: what
+/// it builds, tests or lints.
+pub(crate) fn checks(cwd: &Path, command: &str) -> Vec<Record> {
+    let call = Call {
+        event: Some(Event::PostToolUse),
+        harness: "jouet".into(),
+        tool: "Bash".into(),
+        command: Some(command.to_string()),
+        cwd: Some(cwd.to_string_lossy().into_owned()),
+        exit_code: Some(0),
+        ..Call::default()
+    };
+    rules::load(cwd).engine.evaluate(&call).records
 }
 
 /// A recorded run, as the ledger keeps it: its kind and scope, never what

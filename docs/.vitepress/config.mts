@@ -104,6 +104,7 @@ export default defineConfig({
           { text: "jouet task", link: "/commands/task" },
           { text: "jouet audit", link: "/commands/audit" },
           { text: "jouet stats", link: "/commands/stats" },
+          { text: "jouet cost", link: "/commands/cost" },
           { text: "jouet commit", link: "/commands/commit" },
           { text: "jouet secrets", link: "/commands/secrets" },
           { text: "jouet review-package", link: "/commands/review-package" },
@@ -123,6 +124,15 @@ export default defineConfig({
             items: [
               { text: "audit", link: "/cli/audit" },
               { text: "stats", link: "/cli/stats" },
+              {
+                text: "cost",
+                link: "/cli/cost",
+                collapsed: true,
+                items: [
+                  { text: "fetch", link: "/cli/cost/fetch" },
+                  { text: "push", link: "/cli/cost/push" },
+                ],
+              },
               { text: "commit", link: "/cli/commit" },
               {
                 text: "secrets",

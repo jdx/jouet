@@ -11,6 +11,7 @@ pub mod claim;
 pub mod commit;
 pub mod conventional;
 pub mod handoff;
+pub mod notes;
 mod procs;
 pub mod review;
 pub mod session;

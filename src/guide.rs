@@ -170,6 +170,8 @@ const WHEN: &[(&str, Option<&str>)] = &[
     ("untrust", None),
     ("plugin", None),
     ("stats", None),
+    // The session-start primer names the slow checks it lists.
+    ("cost", None),
     ("completion", None),
 ];
 
