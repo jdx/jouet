@@ -33,6 +33,16 @@ static FRAME: LazyLock<Regex> = LazyLock::new(|| {
     ))
     .expect("a valid regex")
 });
+/// Of [`FRAME`]'s lines: a numbered frame, a location, and a line only a
+/// backtrace prints.
+static NUMBERED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\d+: \S").expect("a valid regex"));
+static LOCATION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*at .+:(\d+|<unknown line>)(:\d+)?$").expect("a valid regex"));
+static MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(⋮ \d+ frames? hidden ⋮|━+ BACKTRACE ━+|stack backtrace:|Run with (COLORBT_SHOW_HIDDEN|RUST_BACKTRACE)=.*)$")
+        .expect("a valid regex")
+});
 /// A numbered line that is a frame when a location follows it: std's
 /// `   0: rust_begin_unwind`.
 static BARE_FRAME: LazyLock<Regex> =
@@ -151,11 +161,14 @@ pub fn excerpt(log: &str, step: Option<&Step>, tail: usize) -> Excerpt {
 /// lines that look like errors with a little context, as [`excerpt`] does
 /// for a GitHub log. `tail` 0 keeps them all.
 pub fn trim(lines: Vec<String>, tail: usize) -> Excerpt {
+    let before = lines.len();
     let lines = fold_backtraces(lines);
+    // Folded lines are left out too.
+    let folded = lines.len() < before;
     if tail == 0 || lines.len() <= tail {
         return Excerpt {
             lines,
-            truncated: false,
+            truncated: folded,
         };
     }
     let tail_start = lines.len() - tail;
@@ -202,11 +215,20 @@ pub fn fold_backtraces(lines: Vec<String>) -> Vec<String> {
                 && lines.get(i + 1).is_some_and(|next| FRAME.is_match(next)))
     };
     let flags: Vec<bool> = (0..lines.len()).map(frame).collect();
+    // A run folds only when it is surely a backtrace: a numbered frame with
+    // a location under it, or a line only backtraces print. An error chain
+    // (`0: foo::Config failed`) has no locations, and a JavaScript stack
+    // (`at /work/a.js:10:3`) no numbered frames.
+    let backtrace = |run: &[String]| {
+        run.iter().any(|l| MARKER.is_match(l))
+            || (run.iter().any(|l| NUMBERED.is_match(l))
+                && run.iter().any(|l| LOCATION.is_match(l)))
+    };
     let mut out = Vec::with_capacity(lines.len());
     let mut i = 0;
     while i < lines.len() {
         let run = flags[i..].iter().take_while(|f| **f).count();
-        if run >= FRAMES_FOLDED {
+        if run >= FRAMES_FOLDED && backtrace(&lines[i..i + run]) {
             out.push(format!("... {run} backtrace lines skipped"));
             i += run;
         } else {
@@ -240,7 +262,8 @@ mod tests {
         text.push_str("  45: _start<unknown>\n      at <unknown source file>:<unknown line>\n\nRun with COLORBT_SHOW_HIDDEN=1 environment variable to disable frame filtering.\nRun with RUST_BACKTRACE=full to include source snippets.\nERROR: E2E assertion failed: [mise uninstall dummy@latest] command failed with status 1\n");
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
         let cut = super::trim(lines, 20);
-        assert!(!cut.truncated, "{:#?}", cut.lines);
+        // Folding left lines out.
+        assert!(cut.truncated, "{:#?}", cut.lines);
         assert!(
             cut.lines
                 .contains(&"   0: dummy@latest is not installed".to_string()),
@@ -277,6 +300,16 @@ mod tests {
                 "   0: a sentence with words"
             ]
         );
+        // An error chain, and a JavaScript stack, are not backtraces.
+        let chain: Vec<String> = ["   0: foo::Config failed", "   1: foo::Loader failed"]
+            .map(str::to_string)
+            .to_vec();
+        assert_eq!(super::fold_backtraces(chain.clone()), chain);
+        let js: Vec<String> = ["    at /work/test.js:10:3", "    at /work/setup.js:20:4"]
+            .map(str::to_string)
+            .to_vec();
+        assert_eq!(super::fold_backtraces(js.clone()), js);
+        assert!(!super::trim(js, 20).truncated);
     }
 
     use super::*;
