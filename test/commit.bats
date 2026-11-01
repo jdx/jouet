@@ -233,3 +233,22 @@ A  other.txt
 	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit a.txt -m "fix: a"
 	assert_success
 }
+
+@test "hooks run without GIT_LITERAL_PATHSPECS, and a path with glob characters is still only itself" {
+	# `git --literal-pathspecs` would set it for the hooks, and a hook that
+	# writes pathspec magic, as hk does, then matches nothing.
+	export HOOK_LOG="$BATS_TEST_TMPDIR/hook.log"
+	cat >.git/hooks/pre-commit <<'HOOK'
+#!/bin/sh
+echo "literal=${GIT_LITERAL_PATHSPECS:-unset}" >"$HOOK_LOG"
+HOOK
+	chmod +x .git/hooks/pre-commit
+	printf 'x\n' >'a[1].txt'
+	printf 'y\n' >a1.txt
+
+	JOUET_COMMIT_TRAILERS='' run --separate-stderr jouet commit 'a[1].txt' -m "fix: a"
+
+	assert_success
+	assert_equal "$(cat "$HOOK_LOG")" "literal=unset"
+	assert_equal "$(git show --name-only --format= HEAD)" "a[1].txt"
+}
