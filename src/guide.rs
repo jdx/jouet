@@ -855,8 +855,14 @@ const PRIMED: &[(&[&str], &[&str])] = &[
 /// session pay for them.
 /// `affected` is whether `jouet test --affected` can select tests where the
 /// session starts: without it, the primer leaves the flag out rather than
-/// send the agent to a command that exits 4.
-pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bool) -> String {
+/// send the agent to a command that exits 4. `wait` is how the harness waits
+/// for a long command in one call (see [`wait_hint`]).
+pub(crate) fn summary(
+    rules: &[(&str, Option<&str>)],
+    verify: bool,
+    affected: bool,
+    wait: Option<&str>,
+) -> String {
     let commands = agent_commands();
     let present = |name: &str| commands.iter().any(|(m, _)| m.cmd.name == name);
     // A group is one entry, as in the overview: `read/docs/deps/db`.
@@ -888,6 +894,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bo
     let tests: Vec<&str> = usage_of("test")
         .map(|u| u.lines.iter().take(3).map(|(line, _)| *line).collect())
         .unwrap_or_default();
+    let wait = wait.map_or(String::new(), |w| format!("{w} "));
     if let ([commit, edit, reply], [_, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let test = if affected {
             format!(
@@ -898,7 +905,7 @@ pub(crate) fn summary(rules: &[(&str, Option<&str>)], verify: bool, affected: bo
         };
         let _ = writeln!(
             out,
-            "{test} One run is enough; CI runs the full suite. Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} One run is enough; CI runs the full suite. {wait}Commit only the paths you name with {commit}. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Reply to and resolve a review thread with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1101,7 +1108,7 @@ mod tests {
     #[test]
     fn the_primer_leaves_out_affected_where_it_cannot_select() {
         // In a repository with no runner --affected knows, it exits 4.
-        let text = summary(&[], true, false);
+        let text = summary(&[], true, false, None);
         assert!(!text.contains("--affected"), "{text}");
         assert!(
             text.contains(
@@ -1128,6 +1135,7 @@ mod tests {
             ],
             true,
             true,
+            None,
         );
         assert!(
             text.contains("`jouet commit <PATHS>... --message MSG`"),
