@@ -1,0 +1,46 @@
+description = "A whole PR session on real mise code (jdx/mise#15110): wait for CI on PR #15116, fix what fails, address the review threads (two changes, one question), commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real repository with a Rust build of mise: it runs only when named.
+opt_in = true
+branch = "fix-uninstall-prefix"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 3600
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+prompt = """
+PR #15116 (branch fix-uninstall-prefix, checked out here) fixes jdx/mise#15110: `mise uninstall
+ruby 3.4.1` removed 3.4.12. CI is running on it, and a reviewer has left comments. Get it ready:
+wait for CI and fix what fails, and address the open review threads: make the requested changes,
+reply on each thread saying what you did, and resolve the ones you fixed. A thread that only asks a
+question gets an answer and stays open. Commit your changes; don't push.
+"""
+
+[source]
+git = "~/src/mise"
+commit = "4ca796a0bf27f2dab88f8ec930eb7870a36b407d"
+
+# The user's Rust toolchain and mise, without the rest of ~/.local/bin (which
+# holds jouet). `mise run` installs the repository's own tools, mbx among
+# them, into the run's home.
+[tools]
+mise = "~/.local/bin/mise"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py):
+# the builds and tests agents ran in the pilots, two e2e tests so they read as
+# one family.
+[cost]
+seed = [
+    "cargo test --bin mise uninstall",
+    "mise run build",
+    "mise run test:e2e test_uninstall",
+    "mise run test:e2e test_use",
+]

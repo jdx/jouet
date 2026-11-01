@@ -1,0 +1,1345 @@
+{
+  "repo": "jdx/demo",
+  "rest": {
+    "/repos/jdx/demo/pulls/15116": {
+      "number": 15116,
+      "id": 3007,
+      "node_id": "PR_15116",
+      "state": "open",
+      "draft": false,
+      "locked": false,
+      "title": "fix(uninstall): match a version prefix only at a version boundary",
+      "body": "Fixes #15110: `mise uninstall ruby 3.4.1` removed 3.4.12. A query now names a version only up to a `.` or `-`.",
+      "user": {
+        "login": "jdx"
+      },
+      "html_url": "https://github.com/jdx/demo/pull/15116",
+      "url": "http://api.github.localhost/repos/jdx/demo/pulls/15116",
+      "head": {
+        "ref": "fix-uninstall-prefix",
+        "sha": "{{head_sha}}",
+        "label": "jdx:fix-uninstall-prefix",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "base": {
+        "ref": "main",
+        "sha": "{{base_sha}}",
+        "label": "jdx:main",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "merged": false,
+      "created_at": "2026-10-30T12:00:00Z",
+      "updated_at": "2026-10-30T12:00:00Z"
+    },
+    "/repos/jdx/demo/pulls": [
+      {
+        "number": 15116,
+        "id": 3007,
+        "node_id": "PR_15116",
+        "state": "open",
+        "draft": false,
+        "locked": false,
+        "title": "fix(uninstall): match a version prefix only at a version boundary",
+        "body": "Fixes #15110: `mise uninstall ruby 3.4.1` removed 3.4.12. A query now names a version only up to a `.` or `-`.",
+        "user": {
+          "login": "jdx"
+        },
+        "html_url": "https://github.com/jdx/demo/pull/15116",
+        "url": "http://api.github.localhost/repos/jdx/demo/pulls/15116",
+        "head": {
+          "ref": "fix-uninstall-prefix",
+          "sha": "{{head_sha}}",
+          "label": "jdx:fix-uninstall-prefix",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "{{base_sha}}",
+          "label": "jdx:main",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "mergeable": true,
+        "mergeable_state": "unstable",
+        "merged": false,
+        "created_at": "2026-10-30T12:00:00Z",
+        "updated_at": "2026-10-30T12:00:00Z"
+      }
+    ],
+    "/repos/jdx/demo/commits/{{head_sha}}/check-runs": {
+      "total_count": 2,
+      "check_runs": [
+        {
+          "id": 7101,
+          "node_id": "CR_7101",
+          "name": "build",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:08Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 0
+          },
+          "$until": 8,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7102,
+          "node_id": "CR_7102",
+          "name": "e2e",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:01:30Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/status": {
+      "state": "pending",
+      "statuses": [],
+      "total_count": 0,
+      "sha": "{{head_sha}}"
+    },
+    "/repos/jdx/demo/branches/main": {
+      "name": "main",
+      "commit": {
+        "sha": "{{base_sha}}"
+      },
+      "protected": false
+    },
+    "/repos/jdx/demo/actions/runs": {
+      "total_count": 1,
+      "workflow_runs": [
+        {
+          "id": 9001,
+          "node_id": "WFR_9001",
+          "name": "ci",
+          "display_title": "fix(uninstall): match a version prefix only at a version boundary",
+          "head_branch": "fix-uninstall-prefix",
+          "head_sha": "{{head_sha}}",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure",
+          "workflow_id": 501,
+          "run_number": 41,
+          "run_attempt": 1,
+          "created_at": "2026-10-30T12:00:00Z",
+          "updated_at": "2026-10-30T12:00:50Z",
+          "run_started_at": "2026-10-30T12:00:00Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+          "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+          "path": ".github/workflows/ci.yml",
+          "repository": {
+            "full_name": "jdx/demo"
+          },
+          "pull_requests": [
+            {
+              "number": 15116,
+              "head": {
+                "ref": "fix-uninstall-prefix",
+                "sha": "{{head_sha}}"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "{{base_sha}}"
+              }
+            }
+          ],
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001": {
+      "id": 9001,
+      "node_id": "WFR_9001",
+      "name": "ci",
+      "display_title": "fix(uninstall): match a version prefix only at a version boundary",
+      "head_branch": "fix-uninstall-prefix",
+      "head_sha": "{{head_sha}}",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "workflow_id": 501,
+      "run_number": 41,
+      "run_attempt": 1,
+      "created_at": "2026-10-30T12:00:00Z",
+      "updated_at": "2026-10-30T12:00:50Z",
+      "run_started_at": "2026-10-30T12:00:00Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+      "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+      "path": ".github/workflows/ci.yml",
+      "repository": {
+        "full_name": "jdx/demo"
+      },
+      "pull_requests": [
+        {
+          "number": 15116,
+          "head": {
+            "ref": "fix-uninstall-prefix",
+            "sha": "{{head_sha}}"
+          },
+          "base": {
+            "ref": "main",
+            "sha": "{{base_sha}}"
+          }
+        }
+      ],
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null
+      }
+    },
+    "/repos/jdx/demo/actions/runs/9001/jobs": {
+      "total_count": 2,
+      "jobs": [
+        {
+          "id": 7101,
+          "run_id": 9001,
+          "node_id": "J_7101",
+          "name": "build",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "fix-uninstall-prefix",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:08Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run python3 -m compileall -q .",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 8,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v5",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run python3 -m compileall -q .",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              }
+            ]
+          }
+        },
+        {
+          "id": 7102,
+          "run_id": 9001,
+          "node_id": "J_7102",
+          "name": "e2e",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "fix-uninstall-prefix",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:50Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run python3 -m unittest discover -s tests -v",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 3
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v5",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run python3 -m unittest discover -s tests -v",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/jobs/7101": {
+      "id": 7101,
+      "run_id": 9001,
+      "node_id": "J_7101",
+      "name": "build",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "fix-uninstall-prefix",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-30T12:00:00Z",
+      "completed_at": "2026-10-30T12:00:08Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run cargo build",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 8,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run cargo build",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102": {
+      "id": 7102,
+      "run_id": 9001,
+      "node_id": "J_7102",
+      "name": "e2e",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "fix-uninstall-prefix",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-30T12:00:00Z",
+      "completed_at": "2026-10-30T12:00:50Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run mise run test:e2e test_uninstall",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 3
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run mise run test:e2e test_uninstall",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7101/logs": "2026-10-30T12:00:01.0000000Z ##[group]Run cargo build\n2026-10-30T12:00:40.0000000Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.91s\n",
+    "/repos/jdx/demo/actions/jobs/7102/logs": {
+      "$text": "2026-10-30T12:01:10.0000000Z ##[group]Run mise run test:e2e test_uninstall\n2026-10-30T12:01:10.0000000Z mise run test:e2e test_uninstall\n2026-10-30T12:01:10.0000000Z ##[endgroup]\n2026-10-30T12:01:10.0000000Z mise \u2713 dummy@1.1.1   467ms\n2026-10-30T12:01:10.0000000Z mise \u2713 dummy@1.1.12  632ms\n2026-10-30T12:01:10.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 2/2 \u00b7 installed 2 tools in 637ms\n2026-10-30T12:01:10.0000000Z mise by @jdx \u2013 removing 1 tool\n2026-10-30T12:01:11.0000000Z mise \u2713 dummy@1.1.1  193ms\n2026-10-30T12:01:11.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 removed 1 tool in 194ms\n2026-10-30T12:01:11.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:11.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.1\"' is not in output\n2026-10-30T12:01:12.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:12.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is in output\n2026-10-30T12:01:12.0000000Z DEBUG: $ mise uninstall dummy@1.1.1 2>&1\n2026-10-30T12:01:12.0000000Z SUCCESS: [mise uninstall dummy@1.1.1 2>&1] 'is not installed' is in output\n2026-10-30T12:01:13.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:13.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is in output\n2026-10-30T12:01:13.0000000Z mise by @jdx \u2013 installing 1 tool\n2026-10-30T12:01:13.0000000Z mise \u2713 dummy@1.1.1  500ms\n2026-10-30T12:01:14.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 installed 1 tool in 506ms\n2026-10-30T12:01:14.0000000Z DEBUG: $ mise uninstall dummy@latest\n2026-10-30T12:01:14.0000000Z mise by @jdx \u2013 removing 1 tool\n2026-10-30T12:01:14.0000000Z mise \u2713 dummy@1.1.12  200ms\n2026-10-30T12:01:15.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 removed 1 tool in 200ms\n2026-10-30T12:01:15.0000000Z SUCCESS: [mise uninstall dummy@latest] expected success\n2026-10-30T12:01:15.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:15.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.1\"' is in output\n2026-10-30T12:01:16.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:16.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is not in output\n2026-10-30T12:01:16.0000000Z DEBUG: $ mise uninstall java@temurin-21.0.1 2>&1\n2026-10-30T12:01:16.0000000Z ERROR: E2E assertion failed: [mise uninstall java@temurin-21.0.1 2>&1] command succeeded but was expected to fail\n2026-10-30T12:01:17.0000000Z cli/test_uninstall: 7s\n2026-10-30T12:01:17.0000000Z ERROR: E2E test cli/test_uninstall failed: exited with status code 1\n2026-10-30T12:01:17.0000000Z Test environment can be examined in /tmp/test_uninstall.qPws0l\n2026-10-30T12:01:17.0000000Z \n2026-10-30T12:01:18.0000000Z Finished in 7.15s\n2026-10-30T12:01:18.0000000Z [test:e2e] ERROR task failed\n2026-10-30T12:01:18.0000000Z ##[error]Process completed with exit code 1.\n",
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/workflows/501": {
+      "id": 501,
+      "node_id": "W_501",
+      "name": "ci",
+      "path": ".github/workflows/ci.yml",
+      "state": "active",
+      "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+    },
+    "/repos/jdx/demo/actions/workflows": {
+      "total_count": 1,
+      "workflows": [
+        {
+          "id": 501,
+          "node_id": "W_501",
+          "name": "ci",
+          "path": ".github/workflows/ci.yml",
+          "state": "active",
+          "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001/logs": {
+      "$zip": {
+        "0_build.txt": "2026-10-30T12:00:01.0000000Z ##[group]Run cargo build\n2026-10-30T12:00:40.0000000Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.91s\n",
+        "1_e2e.txt": "2026-10-30T12:01:10.0000000Z ##[group]Run mise run test:e2e test_uninstall\n2026-10-30T12:01:10.0000000Z mise run test:e2e test_uninstall\n2026-10-30T12:01:10.0000000Z ##[endgroup]\n2026-10-30T12:01:10.0000000Z mise \u2713 dummy@1.1.1   467ms\n2026-10-30T12:01:10.0000000Z mise \u2713 dummy@1.1.12  632ms\n2026-10-30T12:01:10.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 2/2 \u00b7 installed 2 tools in 637ms\n2026-10-30T12:01:10.0000000Z mise by @jdx \u2013 removing 1 tool\n2026-10-30T12:01:11.0000000Z mise \u2713 dummy@1.1.1  193ms\n2026-10-30T12:01:11.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 removed 1 tool in 194ms\n2026-10-30T12:01:11.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:11.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.1\"' is not in output\n2026-10-30T12:01:12.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:12.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is in output\n2026-10-30T12:01:12.0000000Z DEBUG: $ mise uninstall dummy@1.1.1 2>&1\n2026-10-30T12:01:12.0000000Z SUCCESS: [mise uninstall dummy@1.1.1 2>&1] 'is not installed' is in output\n2026-10-30T12:01:13.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:13.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is in output\n2026-10-30T12:01:13.0000000Z mise by @jdx \u2013 installing 1 tool\n2026-10-30T12:01:13.0000000Z mise \u2713 dummy@1.1.1  500ms\n2026-10-30T12:01:14.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 installed 1 tool in 506ms\n2026-10-30T12:01:14.0000000Z DEBUG: $ mise uninstall dummy@latest\n2026-10-30T12:01:14.0000000Z mise by @jdx \u2013 removing 1 tool\n2026-10-30T12:01:14.0000000Z mise \u2713 dummy@1.1.12  200ms\n2026-10-30T12:01:15.0000000Z mise \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 1/1 \u00b7 removed 1 tool in 200ms\n2026-10-30T12:01:15.0000000Z SUCCESS: [mise uninstall dummy@latest] expected success\n2026-10-30T12:01:15.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:15.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.1\"' is in output\n2026-10-30T12:01:16.0000000Z DEBUG: $ mise ls --installed --json dummy\n2026-10-30T12:01:16.0000000Z SUCCESS: [mise ls --installed --json dummy] '\"version\": \"1.1.12\"' is not in output\n2026-10-30T12:01:16.0000000Z DEBUG: $ mise uninstall java@temurin-21.0.1 2>&1\n2026-10-30T12:01:16.0000000Z ERROR: E2E assertion failed: [mise uninstall java@temurin-21.0.1 2>&1] command succeeded but was expected to fail\n2026-10-30T12:01:17.0000000Z cli/test_uninstall: 7s\n2026-10-30T12:01:17.0000000Z ERROR: E2E test cli/test_uninstall failed: exited with status code 1\n2026-10-30T12:01:17.0000000Z Test environment can be examined in /tmp/test_uninstall.qPws0l\n2026-10-30T12:01:17.0000000Z \n2026-10-30T12:01:18.0000000Z Finished in 7.15s\n2026-10-30T12:01:18.0000000Z [test:e2e] ERROR task failed\n2026-10-30T12:01:18.0000000Z ##[error]Process completed with exit code 1.\n"
+      },
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/pulls/15116/reviews": [
+      {
+        "id": 4401,
+        "node_id": "PRR_1",
+        "user": {
+          "login": "octo-reviewer"
+        },
+        "body": "A few things before this lands.",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-30T09:15:00Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/15116#pullrequestreview-4401"
+      }
+    ],
+    "/repos/jdx/demo/issues/15116/comments": [
+      {
+        "id": 66601,
+        "node_id": "IC_kwDOdemo1",
+        "user": {
+          "login": "octo-reviewer"
+        },
+        "body": "Thanks, this is close.",
+        "created_at": "2026-10-30T09:16:00Z",
+        "html_url": "https://github.com/jdx/demo/pull/15116#issuecomment-66601"
+      }
+    ],
+    "/repos/jdx/demo/activity": []
+  },
+  "graphql": {
+    "viewer": {
+      "__typename": "User",
+      "login": "jdx",
+      "id": "U_jdx",
+      "name": "jdx"
+    },
+    "repository": {
+      "__typename": "Repository",
+      "id": "R_demo",
+      "name": "demo",
+      "nameWithOwner": "jdx/demo",
+      "url": "https://github.com/jdx/demo",
+      "owner": {
+        "__typename": "User",
+        "login": "jdx",
+        "id": "U_jdx",
+        "name": "jdx"
+      },
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "viewerPermission": "ADMIN",
+      "isPrivate": false,
+      "pullRequests": {
+        "nodes": [
+          {
+            "__typename": "PullRequest",
+            "id": "PR_15116",
+            "number": 15116,
+            "databaseId": 315116,
+            "title": "fix(uninstall): match a version prefix only at a version boundary",
+            "body": "Fixes #15110: `mise uninstall ruby 3.4.1` removed 3.4.12. A query now names a version only up to a `.` or `-`.",
+            "state": "OPEN",
+            "isDraft": false,
+            "closed": false,
+            "merged": false,
+            "url": "https://github.com/jdx/demo/pull/15116",
+            "author": {
+              "__typename": "User",
+              "login": "jdx",
+              "id": "U_jdx",
+              "name": "jdx"
+            },
+            "headRefName": "fix-uninstall-prefix",
+            "headRefOid": "{{head_sha}}",
+            "baseRefName": "main",
+            "baseRefOid": "{{base_sha}}",
+            "headRepository": {
+              "__typename": "Repository",
+              "name": "demo",
+              "nameWithOwner": "jdx/demo",
+              "id": "R_demo"
+            },
+            "headRepositoryOwner": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "isCrossRepository": false,
+            "maintainerCanModify": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "UNSTABLE",
+            "reviewDecision": "CHANGES_REQUESTED",
+            "additions": 33,
+            "deletions": 1,
+            "changedFiles": 2,
+            "createdAt": "2026-10-30T12:00:00Z",
+            "updatedAt": "2026-10-30T12:00:00Z",
+            "closedAt": null,
+            "mergedAt": null,
+            "commits": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "__typename": "PullRequestCommit",
+                  "id": "PRC_1",
+                  "commit": {
+                    "__typename": "Commit",
+                    "id": "COMMIT_head",
+                    "oid": "{{head_sha}}",
+                    "abbreviatedOid": "{{head_short}}",
+                    "statusCheckRollup": {
+                      "__typename": "StatusCheckRollup",
+                      "state": "FAILURE",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7101",
+                            "databaseId": 7101,
+                            "name": "build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                            "startedAt": "2026-10-30T12:00:00Z",
+                            "completedAt": "2026-10-30T12:00:08Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 8,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7102",
+                            "databaseId": 7102,
+                            "name": "e2e",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-10-30T12:00:00Z",
+                            "completedAt": "2026-10-30T12:00:50Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 90,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          }
+                        ]
+                      },
+                      "$until": 50,
+                      "$before": {
+                        "state": "PENDING"
+                      },
+                      "id": "SCR_1"
+                    },
+                    "messageHeadline": "fix(uninstall): match a version prefix only at a version boundary",
+                    "committedDate": "2026-10-30T12:00:00Z",
+                    "authors": {
+                      "nodes": [
+                        {
+                          "name": "jdx",
+                          "email": "jdx@example.invalid",
+                          "user": {
+                            "login": "jdx"
+                          }
+                        }
+                      ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
+                    }
+                  }
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "__typename": "StatusCheckRollup",
+              "state": "FAILURE",
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7101",
+                    "databaseId": 7101,
+                    "name": "build",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-10-30T12:00:00Z",
+                    "completedAt": "2026-10-30T12:00:08Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 8,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7102",
+                    "databaseId": 7102,
+                    "name": "e2e",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-10-30T12:00:00Z",
+                    "completedAt": "2026-10-30T12:00:50Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 90,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  }
+                ]
+              },
+              "$until": 50,
+              "$before": {
+                "state": "PENDING"
+              },
+              "id": "SCR_2"
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "reviews": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "comments": {
+              "nodes": []
+            },
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo0",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "isCollapsed": true,
+                  "path": "src/cli/uninstall.rs",
+                  "line": 9,
+                  "startLine": null,
+                  "originalLine": 9,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": {
+                    "__typename": "User",
+                    "id": "U_rev",
+                    "login": "octo-reviewer",
+                    "name": "Octo Reviewer"
+                  },
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo0",
+                        "databaseId": 55500,
+                        "fullDatabaseId": "55500",
+                        "url": "https://github.com/jdx/demo/pull/15116#discussion_r55500",
+                        "createdAt": "2026-10-29T09:00:00Z",
+                        "updatedAt": "2026-10-29T09:00:00Z",
+                        "body": "Unused import here?",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "src/cli/uninstall.rs",
+                        "line": 9,
+                        "originalLine": 9,
+                        "diffHunk": "",
+                        "outdated": true,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/cli/uninstall.rs",
+                  "line": 335,
+                  "startLine": null,
+                  "originalLine": 335,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo1",
+                        "databaseId": 55501,
+                        "fullDatabaseId": "55501",
+                        "url": "https://github.com/jdx/demo/pull/15116#discussion_r55501",
+                        "createdAt": "2026-10-30T09:10:00Z",
+                        "updatedAt": "2026-10-30T09:10:00Z",
+                        "body": "Hard-coding `.` and `-` as the only boundaries skips the backend's own matching: java accepts a `+` build after any query, so `java@temurin-21.0.1` no longer finds `temurin-21.0.1+12`. That's the e2e failure. Match each candidate through `backend.fuzzy_match_filter` instead.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "src/cli/uninstall.rs",
+                        "line": 335,
+                        "originalLine": 335,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo2",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/cli/uninstall.rs",
+                  "line": 389,
+                  "startLine": null,
+                  "originalLine": 389,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo2",
+                        "databaseId": 55502,
+                        "fullDatabaseId": "55502",
+                        "url": "https://github.com/jdx/demo/pull/15116#discussion_r55502",
+                        "createdAt": "2026-10-30T09:12:00Z",
+                        "updatedAt": "2026-10-30T09:12:00Z",
+                        "body": "Please add unit tests for the matching, at least `1.1.1` against `1.1.12` and a query that names the whole version.",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "src/cli/uninstall.rs",
+                        "line": 389,
+                        "originalLine": 389,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo3",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/cli/uninstall.rs",
+                  "line": 392,
+                  "startLine": null,
+                  "originalLine": 392,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo3",
+                        "databaseId": 55503,
+                        "fullDatabaseId": "55503",
+                        "url": "https://github.com/jdx/demo/pull/15116#discussion_r55503",
+                        "createdAt": "2026-10-30T09:14:00Z",
+                        "updatedAt": "2026-10-30T09:14:00Z",
+                        "body": "Does `mise uninstall node@20` still find every installed 20.x?",
+                        "author": {
+                          "__typename": "User",
+                          "id": "U_rev",
+                          "login": "octo-reviewer",
+                          "name": "Octo Reviewer"
+                        },
+                        "path": "src/cli/uninstall.rs",
+                        "line": 392,
+                        "originalLine": 392,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "COLLABORATOR",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "projectCards": {
+              "nodes": []
+            },
+            "projectItems": {
+              "nodes": []
+            },
+            "milestone": null,
+            "autoMergeRequest": null,
+            "reactionGroups": [],
+            "files": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "e2e/cli/test_uninstall",
+                  "additions": 20,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "src/cli/uninstall.rs",
+                  "additions": 13,
+                  "deletions": 1
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "object": {
+        "__typename": "Commit",
+        "id": "COMMIT_head",
+        "oid": "{{head_sha}}",
+        "abbreviatedOid": "{{head_short}}",
+        "statusCheckRollup": {
+          "__typename": "StatusCheckRollup",
+          "state": "FAILURE",
+          "contexts": {
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7101",
+                "databaseId": 7101,
+                "name": "build",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-10-30T12:00:00Z",
+                "completedAt": "2026-10-30T12:00:08Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 8,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7102",
+                "databaseId": 7102,
+                "name": "e2e",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-10-30T12:00:00Z",
+                "completedAt": "2026-10-30T12:00:50Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 90,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              }
+            ]
+          },
+          "$until": 50,
+          "$before": {
+            "state": "PENDING"
+          },
+          "id": "SCR_3"
+        },
+        "messageHeadline": "fix(uninstall): match a version prefix only at a version boundary",
+        "committedDate": "2026-10-30T12:00:00Z",
+        "authors": {
+          "nodes": [
+            {
+              "name": "jdx",
+              "email": "jdx@example.invalid",
+              "user": {
+                "login": "jdx"
+              }
+            }
+          ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
+        }
+      }
+    }
+  }
+}
