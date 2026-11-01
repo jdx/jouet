@@ -22,8 +22,15 @@ command = [
   "yarn dev*", "yarn run dev*", "yarn start*", "yarn serve*", "yarn watch*",
   "bun dev*", "bun run dev*", "bun run start*",
   "deno task dev*", "deno task start*",
-  "mise run dev*", "mise run serve*", "mise run start*", "mise watch",
+  "mise run dev*", "mise run serve*", "mise run start*",
 ]
+background = true
+
+# `mise watch` runs until stopped; with `--once` (mise 2026.10.25) it waits
+# for one change, runs the tasks and exits.
+[[rule.match]]
+command = "mise watch"
+unless_flags = ["--once"]
 background = true
 
 # JavaScript dev servers and watchers.
@@ -111,6 +118,7 @@ fires = [
   "npx vite --port 4000 & sleep 3 && curl -sf localhost:4000",
   "uvicorn app:app --reload &",
   "cargo watch -x run &",
+  "mise watch test &",
   "docker compose up &",
   "bundle exec rails s -p 3001 &",
   "node server.js > out.log 2>&1 &",
@@ -129,6 +137,7 @@ quiet = [
   "cargo build -p a & cargo build -p b & wait",
   "sleep 5 &",
   "vite build &",
+  "mise watch test --once &",
   "docker compose up -d &",
   "jouet job start dev --port 5173 -- npm run dev",
   "echo 'npm run dev &'",
