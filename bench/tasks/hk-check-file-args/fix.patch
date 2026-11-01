@@ -1,0 +1,233 @@
+diff --git a/src/hook.rs b/src/hook.rs
+index 8d9be49c..281783a8 100644
+--- a/src/hook.rs
++++ b/src/hook.rs
+@@ -2183,7 +2183,7 @@ impl fmt::Display for Hook {
+ 
+ /// Use `/` separators, as git paths and exclude patterns do. Rebuilding a path
+ /// from components on Windows joins them with `\`, which regexes would not match.
+-fn with_forward_slashes(path: PathBuf) -> PathBuf {
++pub(crate) fn with_forward_slashes(path: PathBuf) -> PathBuf {
+     if cfg!(windows)
+         && let Some(s) = path.to_str()
+     {
+@@ -2194,7 +2194,7 @@ fn with_forward_slashes(path: PathBuf) -> PathBuf {
+ 
+ /// Remove `.` components and resolve `..` against preceding components without
+ /// touching the filesystem. Leading `..` components of a relative path are kept.
+-fn normalize_lexically(path: &Path) -> PathBuf {
++pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
+     let mut normalized = PathBuf::new();
+     for component in path.components() {
+         match component {
+diff --git a/src/hook_options.rs b/src/hook_options.rs
+index 741a218a..13b05df0 100644
+--- a/src/hook_options.rs
++++ b/src/hook_options.rs
+@@ -196,6 +196,57 @@ impl HookOptions {
+         Ok(())
+     }
+ 
++    /// hk runs from the repository root, but file arguments are written relative
++    /// to the directory the user invoked it from. Rewrite them as repo-relative
++    /// paths before the working directory changes.
++    fn resolve_file_args(&mut self) {
++        let Some(files) = &mut self.files else {
++            return;
++        };
++        let Ok(cwd) = std::env::current_dir() else {
++            return;
++        };
++        let root = crate::git_util::find_work_tree_root();
++        let canonical_root = root.canonicalize().ok();
++        for file in files.iter_mut() {
++            let joined = cwd.join(&*file);
++            let has_parent_dir = file
++                .components()
++                .any(|c| c == std::path::Component::ParentDir);
++            // `..` after a symlinked directory leaves the symlink's target, so
++            // resolve the parent on disk. The file name is kept so a symlinked
++            // file still matches by its own path.
++            let on_disk = has_parent_dir
++                .then(|| {
++                    // An argument ending in `..` (`sub/..`) has no file name to keep.
++                    let Some(name) = joined.file_name() else {
++                        return joined.canonicalize().ok();
++                    };
++                    Some(joined.parent()?.canonicalize().ok()?.join(name))
++                })
++                .flatten();
++            let abs = match on_disk {
++                Some(p) => p,
++                // A `..` that cannot be resolved on disk is kept as written:
++                // collapsing it lexically could select a different file.
++                None if has_parent_dir => joined,
++                None => crate::hook::normalize_lexically(&joined),
++            };
++            // The work tree may be spelled through a symlink (`GIT_WORK_TREE`),
++            // while on-disk resolution yields the canonical spelling.
++            let rel = abs.strip_prefix(&root).ok().or_else(|| {
++                canonical_root
++                    .as_deref()
++                    .and_then(|r| abs.strip_prefix(r).ok())
++            });
++            *file = match rel {
++                Some(rel) if rel.as_os_str().is_empty() => PathBuf::from("."),
++                Some(rel) => crate::hook::with_forward_slashes(rel.to_path_buf()),
++                None => abs,
++            };
++        }
++    }
++
+     pub fn should_stage(&self) -> Option<bool> {
+         if self.stage {
+             Some(true)
+@@ -209,6 +260,7 @@ impl HookOptions {
+     pub(crate) async fn run(mut self, name: &str) -> Result<()> {
+         self.validate()?;
+         self.load_files0()?;
++        self.resolve_file_args();
+         // Under `--from-hook`, short-circuit *before* loading the config. A
+         // broken user-global config shouldn't fail every `git commit` in a
+         // repo that doesn't use hk — which is the main risk under
+diff --git a/test/check.bats b/test/check.bats
+index 10957f17..ce11c84a 100644
+--- a/test/check.bats
++++ b/test/check.bats
+@@ -132,3 +132,120 @@ EOF
+     assert_success
+     assert_output --partial "checking test.js"
+ }
++
++@test "check files resolves relative to the invocation directory" {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    mkdir sub
++    echo "root" > a.js
++    echo "sub" > sub/a.js
++    git add .
++    git commit -m "initial commit"
++    cd sub
++    run hk check a.js
++    assert_success
++    assert_output --partial "checking sub/a.js"
++    refute_output --partial "checking a.js"
++    run hk check ../a.js
++    assert_success
++    assert_output --partial "checking a.js"
++    run hk check .
++    assert_success
++    assert_output --partial "checking sub/a.js"
++}
++
++@test "check files follows directory symlinks before .." {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    mkdir -p nested/child
++    echo "root" > a.js
++    echo "nested" > nested/a.js
++    ln -s nested/child link
++    git add .
++    git commit -m "initial commit"
++    run hk check link/../a.js
++    assert_success
++    assert_output --partial "checking nested/a.js"
++}
++
++@test "check files keeps unresolvable .. paths unchanged" {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    echo "root" > a.js
++    git add .
++    git commit -m "initial commit"
++    run hk check missing/../a.js
++    assert_success
++    refute_output --partial "checking a.js"
++}
++
++@test "check files resolves directory arguments ending in .." {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { dir = "src"; check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    mkdir -p src sub
++    echo "x" > src/a.js
++    echo "y" > sub/b.js
++    git add .
++    git commit -m "initial commit"
++    run hk check sub/..
++    assert_success
++    assert_output --partial "checking a.js"
++}
++
++@test "check files keeps a final directory symlink name after .." {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { dir = "alias"; check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    mkdir -p sub real
++    echo "x" > real/a.js
++    ln -s real alias
++    git add .
++    git commit -m "initial commit"
++    HK_WALK_IGNORE=0 run hk check sub/../alias
++    assert_success
++    assert_output --partial "checking a.js"
++}
++
++@test "check files with a symlinked GIT_WORK_TREE stays repo-relative" {
++    cat <<EOF > hk.pkl
++amends "$PKL_PATH/Config.pkl"
++hooks {
++    ["check"] { steps { ["a"] { dir = "src"; check = "echo checking {{files}}" } } }
++}
++EOF
++    git init
++    mkdir -p src sub
++    echo "x" > src/a.js
++    git add .
++    git commit -m "initial commit"
++    ln -s "$PWD" ../tree-link
++    export GIT_DIR="$PWD/.git" GIT_WORK_TREE="$PWD/../tree-link"
++    cd sub
++    run hk check ../src/a.js
++    assert_success
++    assert_output --partial "checking a.js"
++}
+diff --git a/test/top_level_exclude.bats b/test/top_level_exclude.bats
+index b04f5e16..03c85b46 100644
+--- a/test/top_level_exclude.bats
++++ b/test/top_level_exclude.bats
+@@ -337,8 +337,9 @@ EOF
+     git add -A
+     git commit -m "initial commit"
+ 
+-    # link/../main.js opens other/main.js, which the exclude does not match
++    # link/../main.js opens other/main.js, which the exclude does not match;
++    # hk resolves the argument on disk to that repo-relative path
+     run hk check link/../main.js
+     assert_success
+-    assert_output --partial 'checking: link/../main.js'
++    assert_output --partial 'checking: other/main.js'
+ }

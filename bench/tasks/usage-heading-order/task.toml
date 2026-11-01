@@ -1,0 +1,57 @@
+description = "Implement a real usage request from its issue (jdx/usage#1582): let the ungrouped commands section come after the help_heading sections; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real repository with a Rust build: it runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 2400
+check_timeout_s = 1200
+path = ["~/.cargo/bin"]
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (jdx/usage#1583, 81469fe).
+prompt = """
+Let the ungrouped commands section come after the `help_heading` sections
+
+When a CLI puts its subcommands under `help_heading`s, the commands with no heading — always including the built-in `help`, and typically `completion` — are listed first, under `Commands:`. There is no way to move that section after the named ones.
+
+For a CLI that groups everything it has, the ungrouped commands are usually the least important, so they lead the page:
+
+```
+Commands:
+  completion  Generate shell completion scripts.
+  help        Print this message or the help of the given subcommand(s)
+
+Source:
+  fmt         Format source files in place
+  lint        Check source files against lint rules
+
+Dependencies:
+  update      Resolve the dependencies again and write the lock file
+  fetch       Fetch the dependencies into the shared cache
+```
+
+The order comes from `headings` starting as `vec![None]` in the commands section of `usage-argv`'s `help.rs`, so the default section is always written first. `display_order` orders commands within a section but not the sections themselves.
+
+Any of these would cover it:
+
+- Order sections by the smallest `display_order` among their commands, the built-in `help` sorting last. A `display_order` on `completion` would then move the default section after the others.
+- Let `help_heading` apply to the built-in `help` command too, e.g. through a `help_subcommand_heading` setting on the `Cli`, so every command can be grouped.
+- A `Cli` setting to write the default section last.
+
+Seen with `usage-rs` 6.11.1; 7.1.2 builds the section list the same way.
+
+
+
+Implement this in usage, with a test, and commit.
+"""
+
+# usage at the fix's base, the first parent of 81469fe.
+[source]
+git = "~/src/usage"
+commit = "ad1549d987d432202f4f0e123ca81470a5700969"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"

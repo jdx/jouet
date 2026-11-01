@@ -1,0 +1,129 @@
+diff --git a/argv/src/help.rs b/argv/src/help.rs
+index 60f08b7e43..c897542a22 100644
+--- a/argv/src/help.rs
++++ b/argv/src/help.rs
+@@ -2388,6 +2388,17 @@ fn commands_section(
+             headings.push(heading);
+         }
+     }
++    // A section sits where its first-ordered command does, so `display_order` on one command
++    // can move a whole section. Sections nothing orders keep their first-seen order, the
++    // unheaded one leading, and the built-in `help` row never orders its section.
++    headings.sort_by_key(|heading| {
++        lines
++            .iter()
++            .filter(|(_, sub)| command_help_section(sub, default_title) == *heading)
++            .map(|(_, sub)| sub.extra.display_order.unwrap_or(999))
++            .min()
++            .unwrap_or(999)
++    });
+     for heading in headings {
+         write_heading(out, heading.unwrap_or(default_title), style);
+         // A `help_heading` on a subcommand builds a section like a flag's does, so it takes
+diff --git a/conformance/tests/heading_help.rs b/conformance/tests/heading_help.rs
+index 0d842dd39e..8f42fd222c 100644
+--- a/conformance/tests/heading_help.rs
++++ b/conformance/tests/heading_help.rs
+@@ -266,3 +266,45 @@ fn a_subcommand_heading_takes_prose_like_any_other() {
+     let short = help::render(Subs::spec(), Subs::spec().root.cmd, false).expect("short help");
+     assert!(!short.contains("These write to"), "{short}");
+ }
++
++/// `display_order` on a command moves the whole section it sits in.
++#[derive(Cli)]
++#[usage(bin = "ordered")]
++#[allow(dead_code)]
++struct Ordered {
++    #[usage(subcommand)]
++    command: OrderedCmds,
++}
++
++#[derive(Subcommands)]
++#[allow(dead_code)]
++enum OrderedCmds {
++    /// Generate shell completion scripts.
++    #[usage(display_order = 99)]
++    Completion(NoArgs),
++    /// Format source files in place.
++    #[usage(help_heading = "Source", display_order = 1)]
++    Fmt(NoArgs),
++    /// Fetch the dependencies.
++    #[usage(help_heading = "Dependencies", display_order = 2)]
++    Fetch(NoArgs),
++}
++
++#[test]
++fn a_command_display_order_places_its_section() {
++    let spec = Ordered::spec();
++    let page = help::render(spec, spec.root.cmd, false).expect("help");
++    let at = |needle: &str| {
++        page.find(needle)
++            .unwrap_or_else(|| panic!("{needle}: {page}"))
++    };
++    assert!(at("Source:") < at("Dependencies:"), "{page}");
++    assert!(at("Dependencies:") < at("Commands:"), "{page}");
++    assert!(at("completion") < at("help"), "{page}");
++
++    let reference: usage::Spec = Ordered::to_kdl().parse().expect("generated spec");
++    assert_eq!(
++        usage::docs::cli::render_help(&reference, &reference.cmd, false),
++        page
++    );
++}
+diff --git a/docs/rust/help.md b/docs/rust/help.md
+index f0713ecdae..8a7bf339f9 100644
+--- a/docs/rust/help.md
++++ b/docs/rust/help.md
+@@ -148,7 +148,10 @@ full rule, including what a default does not count as, is in
+   same entries appear under a different default title per renderer, so a title matching one of
+   those renders nowhere. This is bpaf's `group_help`; clap has no equivalent.
+ - `display_order = n` on a field or subcommand controls its position within a help section
+-  without changing positional parsing order.
++  without changing positional parsing order. On a subcommand it also places the section: sections
++  are ordered by their lowest `display_order`. A command without one counts as `999`, so a
++  section nothing orders (typically the default `Commands` section, with the built-in `help`)
++  comes after sections ordered below that, and sections that tie keep their existing order.
+ - `next_line_help` on a command puts every argument, flag, and subcommand description beneath
+   its usage instead of in an aligned column beside it.
+ - `flatten_help` replaces the command list with a synopsis and argument summary for every
+diff --git a/lib/src/docs/models.rs b/lib/src/docs/models.rs
+index 6f38fb5929..2ade490767 100644
+--- a/lib/src/docs/models.rs
++++ b/lib/src/docs/models.rs
+@@ -816,11 +816,12 @@ impl From<&crate::SpecCommand> for SpecCommand {
+             .collect();
+         let mut subcommand_groups =
+             group_by_heading(&help_subcommands, |command| command.help_heading.as_deref());
+-        subcommand_groups.sort_by_key(|group| group.heading.is_some());
++        // The unheaded group holds the built-in `help` row, so it exists even when no command
++        // falls in it.
+         if !help_subcommands.is_empty()
+-            && subcommand_groups
+-                .first()
+-                .is_none_or(|group| group.heading.is_some())
++            && !subcommand_groups
++                .iter()
++                .any(|group| group.heading.is_none())
+         {
+             subcommand_groups.insert(
+                 0,
+@@ -832,6 +833,19 @@ impl From<&crate::SpecCommand> for SpecCommand {
+                 },
+             );
+         }
++        // A section sits where its first-ordered command does, so `display_order` on one
++        // command can move a whole section. Sections nothing orders keep their first-seen
++        // order, the unheaded one leading; the stable sort leaves them where they are.
++        let section_order = |heading: Option<&str>| {
++            help_subcommands
++                .iter()
++                .zip(&help_order)
++                .filter(|(command, _)| command.help_heading.as_deref() == heading)
++                .map(|(_, (order, _, _))| *order)
++                .min()
++                .unwrap_or(999)
++        };
++        subcommand_groups.sort_by_key(|group| section_order(group.heading.as_deref()));
+         let mut flattened_subcommands = Vec::new();
+         if *flatten_help {
+             for (_, _, key) in help_order {

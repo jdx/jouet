@@ -1,0 +1,46 @@
+description = "Fix a real hk bug from its issue (jdx/hk#1753): `hk check FILE` from a subdirectory checks the root's file of that name; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real repository with a Rust build: it runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 2400
+check_timeout_s = 1200
+path = ["~/.cargo/bin"]
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (jdx/hk#1754, 3dfcbe6).
+prompt = """
+Clarify the exact run path when `hk check/fix/run` runs with `[FILES]` parameter
+
+When running `hk check/fix/run`, hk changes to the repo root and runs the commands from there. However, in some cases, this behavior is weird. I'm not sure if they are legit, and I also don't see any docs explain this behavior well, so I'm reporting them here and see if they need to be treated or not.
+Suppose the repo is like below, `sub/AGENTS.md` is broken, and a markdown linter is on:
+```text
+.
+├── AGENTS.md      // well-formatted
+├── hk.pkl
+└── sub
+    └── AGENTS.md  // ill-formatted
+```
+If running `hk check AGENTS.md` under `sub`, it would pass -- what `hk` checks in this case is the `<root>/AGENTS.md`, not `<root>/sub/AGENTS.md`. Even if with `--cd` flag, `./sub/AGENTS.md` won't be checked regardless. `hk check .` will work under `sub`, but it's not like what I normally expect it to do: `hk` first changes to the repo root, and runs checks recursively, and then finds the issue in `sub/AGENTS.md`. The correct paths to check sub or sub/AGENTS.md, even under `sub`, is then `hk check sub/AGENTS.md`
+
+Another related observation is when the path does exist, like `hk check foo`, `hk` would pass regardless.
+
+All those confusions could be resolved by using absolute paths, but just to confirm is it the proper way to use hk?
+The version I used to verify those findings is 2.8.0.
+
+Thanks.
+
+
+Fix this in hk, with a test, and commit.
+"""
+
+# hk at the fix's base, the first parent of 3dfcbe6.
+[source]
+git = "~/src/hk"
+commit = "22dbf399a32d806b5d7366a589537648c1465c89"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
