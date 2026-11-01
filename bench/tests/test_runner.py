@@ -208,6 +208,31 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_source_preserves_and_initializes_submodules(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}):
+            root = Path(d)
+            sub = root / "sub"
+            sub.mkdir()
+            tasks.git(sub, "init", "-q", "-b", "main")
+            (sub / "fixture.txt").write_text("from submodule\n")
+            tasks.git(sub, "add", "fixture.txt")
+            tasks.git(sub, "commit", "-q", "-m", "submodule")
+            source = root / "source"
+            source.mkdir()
+            tasks.git(source, "init", "-q", "-b", "main")
+            tasks.git(source, "submodule", "add", "-q", str(sub), "vendor/sub")
+            tasks.git(source, "commit", "-q", "-m", "source")
+            revision = tasks.git(source, "rev-parse", "HEAD")
+            task = dataclasses.replace(tasks.load("smoke"), source={"git": str(source), "commit": revision})
+            workdir = root / "work"
+            tasks.prepare(task, workdir)
+            self.assertEqual((workdir / "vendor/sub/fixture.txt").read_text(), "from submodule\n")
+            self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
+
     def test_the_check_runs_in_the_run_environment(self):
         import dataclasses
         import os

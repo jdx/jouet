@@ -37,7 +37,7 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 
 - a fresh copy of the task's repository;
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
-- a short `PATH` whose first entry is a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm.
+- a short `PATH` whose first entry is a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, when installed on the host, is available to both arms for projects whose test runner uses it.
 
 The isolated home's login profiles restore that `PATH` after system profiles run. On macOS, `path_helper` otherwise puts system tools ahead of the run's tools and can expose host-installed programs to the plain arm.
 

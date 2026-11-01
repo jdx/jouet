@@ -35,7 +35,7 @@ from typing import Any
 from .harness import Harness
 
 # Tools linked into every run's bin/ when the machine has them.
-TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch", "mise")
+TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch", "mise", "parallel")
 
 
 @dataclass(frozen=True)
