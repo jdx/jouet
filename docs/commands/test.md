@@ -67,6 +67,8 @@ description = "The e2e runner's failed tests"
 # A line that says a test failed; its `name` group, else its first, names it.
 failed = ['^ERROR: E2E test (?<name>\S+) failed: exited with status code \d+$']
 # A line that starts a test: a failure's lines are those after the last one.
+# Without it, a failure has only the lines from an excerpt line on, or else
+# the failed line itself.
 start = ['^>>> E2E (\S+)$']
 # Where the failure's excerpt starts: its last line that matches, else the first.
 excerpt = ['^ERROR: E2E assertion failed: ']

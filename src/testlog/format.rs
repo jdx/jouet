@@ -7,7 +7,9 @@
 //! description = "The e2e runner's failed tests"
 //! # A line that says a test failed; its `name` group, else its first, names it.
 //! failed = ['^E2E test (?<name>\S+) failed']
-//! # A line that starts a test: a failure's lines are those after the last one.
+//! # A line that starts a test: a failure's lines are those after the last
+//! # one. Without it, a failure has only the lines from an excerpt line on, or
+//! # else the failed line itself.
 //! start = ['^>>> E2E (\S+)$']
 //! # Where a failure's excerpt starts: its last line that matches, else the first.
 //! excerpt = ['^E2E assertion failed: ']
@@ -128,15 +130,22 @@ impl Format {
             };
             failed += 1;
             let body = &lines[start.min(i)..i];
+            // Without a start, the lines before a failure may be another
+            // test's: only an excerpt line marks where this one's begin.
             let from = body
                 .iter()
                 .rposition(|l| any(&self.excerpt, l))
-                .unwrap_or(0);
-            let block = body[from..]
+                .unwrap_or(if self.start.is_empty() { body.len() } else { 0 });
+            let mut block: Vec<String> = body[from..]
                 .iter()
                 .filter(|l| !any(&self.drop, l))
                 .cloned()
                 .collect();
+            // A runner that says it all on the failed line (`FAIL a: expected
+            // 1, got 2`) has nothing before it to show.
+            if block.is_empty() {
+                block.push(line.clone());
+            }
             out.push(i, name.as_str(), block);
             start = i + 1;
         }
@@ -152,14 +161,23 @@ pub(crate) fn load(cwd: &Path) -> (Vec<Format>, Vec<String>) {
     let mut errors = Vec::new();
     let mut formats = Vec::new();
     for set in sets.iter().filter(|s| s.loads() && s.status.runs()) {
-        let Ok(entries) = std::fs::read_dir(set.formats_dir()) else {
-            continue;
+        let dir = set.formats_dir();
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                errors.push(format!("formats {}: {e}", dir.display()));
+                continue;
+            }
         };
-        let mut paths: Vec<_> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
-            .collect();
+        let mut paths = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry) => paths.push(entry.path()),
+                Err(e) => errors.push(format!("formats {}: {e}", dir.display())),
+            }
+        }
+        paths.retain(|p| p.extension().is_some_and(|x| x == "toml"));
         paths.sort();
         for path in paths {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();

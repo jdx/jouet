@@ -354,3 +354,16 @@ fn a_format_that_cannot_work_does_not_load() {
         assert!(err.contains(why), "{text}: {err}");
     }
 }
+
+#[test]
+fn a_one_line_failure_keeps_its_line() {
+    let format = Format::parse("one", "failed = ['^FAIL (?<name>\\w+):']").unwrap();
+    let d = digest_with(
+        "ok case_b\nFAIL case_a: expected 1, got 2\n",
+        true,
+        DEFAULT_BUDGET,
+        &[format],
+    );
+    assert_eq!(names(&d), ["case_a"]);
+    assert_eq!(d.failures[0].lines, ["FAIL case_a: expected 1, got 2"]);
+}
