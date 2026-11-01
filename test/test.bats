@@ -496,6 +496,42 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
+@test "--baseline passes a run whose every failure also fails at the merge base" {
+	# The test file is rewritten within a second to the same size, which
+	# Python's bytecode cache cannot tell from the old one.
+	export PYTHONDONTWRITEBYTECODE=1
+	tests() {
+		mkdir -p tests
+		printf 'import unittest\nclass T(unittest.TestCase):\n    def test_env(self):\n        self.fail("needs brew")\n    def test_math(self):\n        self.assertEqual(1 + 1, %s)\n' "$1" >tests/test_a.py
+	}
+	tests 2
+	git add tests/test_a.py
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+
+	# test_env failed before the change too: the run passes, naming it.
+	run --separate-stderr jouet test --baseline
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	assert_output --partial 'test_env'
+
+	# A failure the merge base does not have still fails the run.
+	tests 3
+	run --separate-stderr jouet test --baseline
+	assert_failure 1
+	assert_output --partial 'baseline: 1 of 2 failures is new, not failing at main'
+	assert_output --partial 'test_math'
+	# The merge base's worktree is gone again.
+	run git worktree list
+	assert_equal "${#lines[@]}" 1
+
+	run --separate-stderr jouet test --baseline --affected
+	assert_failure 2
+}
+
 @test "the fixture lock lets one install run at a time, past a stale lock" {
 	local fixture="$BATS_TEST_TMPDIR/fixture" log="$BATS_TEST_TMPDIR/held"
 	# A lock a killed run left: its holder is gone.

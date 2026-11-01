@@ -71,6 +71,9 @@ fires = [
   { command = "jouet --json test", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --affected", exit_code = 0, kind = "test", scope = "partial --affected" },
   { command = "jouet test --affected --since origin/main --json", exit_code = 1, kind = "test", scope = "partial --affected --since origin/main" },
+  # `--baseline` reruns failures at the merge base; the run is still the whole suite.
+  { command = "jouet test --baseline", exit_code = 0, kind = "test", scope = "full" },
+  { command = "jouet test --baseline --since origin/main", exit_code = 1, kind = "test", scope = "full" },
   { command = "jouet test -- -k slow", exit_code = 0, kind = "test", scope = "partial -- -k slow" },
   # `jouet test --cmd -- CMD` is a run of CMD.
   { command = "jouet test --cmd -- cargo build", exit_code = 1, kind = "build" },

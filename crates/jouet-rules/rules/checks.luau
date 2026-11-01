@@ -409,6 +409,7 @@ end
 local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 	local unknown = partial(nil)
 	local picks: { string } = {}
+	local selects: { string } = {}
 	local affected = false
 	local cmd = false
 	local sub = false
@@ -442,16 +443,21 @@ local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 		elseif arg == "--affected" then
 			affected = true
 		elseif arg == "--since" or arg == "--adapter" then
-			table.insert(picks, `{arg} {args[i] or ""}`)
+			table.insert(selects, `{arg} {args[i] or ""}`)
 			i += 1
 		elseif string.match(arg, "^%-%-since=") or string.match(arg, "^%-%-adapter=") then
-			table.insert(picks, arg)
+			table.insert(selects, arg)
 		end
 	end
 	if not sub then
 		return nil, unknown
 	end
+	-- `--since` and `--adapter` narrow only what `--affected` picks; with
+	-- `--baseline`, `--since` names the base to compare with.
 	if affected then
+		for k, select in selects do
+			table.insert(picks, k, select)
+		end
 		table.insert(picks, 1, "--affected")
 	end
 	return "test", if #picks == 0 then FULL else partial(table.concat(picks, " "))
