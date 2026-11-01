@@ -25,6 +25,12 @@ pub struct Entry {
     pub resolve: bool,
     #[serde(skip)]
     pub unresolve: bool,
+    /// Named among `resolve`'s or `unresolve`'s arguments, where a PR written
+    /// after the IDs (`resolve 4435734278 1098`) arrives as one: then an ID
+    /// that is the PR's own number and no thread's is the PR. An `apply`
+    /// file names threads only, so there it is an unknown thread.
+    #[serde(skip)]
+    pub among_args: bool,
 }
 
 /// A thread ID as a JSON number or a string of digits.
@@ -141,9 +147,9 @@ pub struct PlanError {
 }
 
 /// The entries with each ID as the thread it means. A reply's comment ID
-/// stands for the thread it is in. A number that is the PR's own and no
-/// thread's was the PR, written after the IDs (`resolve 4435734278 1098`),
-/// so it is dropped.
+/// stands for the thread it is in. A number among the arguments that is the
+/// PR's own and no thread's was the PR, written after the IDs (`resolve
+/// 4435734278 1098`), so it is dropped (see [`Entry::among_args`]).
 fn addressed(entries: &[Entry], pr: &PrThreads) -> Result<Vec<Entry>, PlanError> {
     let mut out: Vec<Entry> = Vec::new();
     for e in entries {
@@ -153,7 +159,7 @@ fn addressed(entries: &[Entry], pr: &PrThreads) -> Result<Vec<Entry>, PlanError>
             .find(|t| t.id == e.id || t.comments.iter().any(|c| c.id == e.id));
         let id = match thread {
             Some(t) => t.id,
-            None if e.id == pr.number => continue,
+            None if e.among_args && e.id == pr.number => continue,
             None => e.id,
         };
         if out.iter().any(|o| o.id == id) {

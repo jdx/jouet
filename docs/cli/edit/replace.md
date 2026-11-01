@@ -17,7 +17,7 @@ Examples:
 
 ## Flags
 - **`--old <TEXT>`** — The text to find. Repeatable. It may start with `-`, such as a Markdown list item
-- **`--new <TEXT>`** — The text to put in its place, one for each --old
+- **`--new <TEXT>`** — The text to put in its place, one for each --old. It may start with `-` too
 - **`--count <N>`** — How many matches each --old must have in each file
 - **`--all`** — Replace every match (at least one in each file)
 - **`-h --help`** — Print help

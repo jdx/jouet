@@ -150,6 +150,8 @@ MSG
 
 	assert_success
 	assert_equal "$stderr" "jouet: warning: fnox could not scan the commit for secret values (Configuration error: None of the profile's secrets could be resolved (exit 1)), so only gitleaks' rules checked it"
+	assert_line --partial "no secrets found by gitleaks' rules in"
+	refute_line --partial "or fnox"
 	assert_equal "$(git rev-list --count HEAD)" 2
 
 	printf 'a3\n' >a.txt
