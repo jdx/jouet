@@ -245,6 +245,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // How long the slowest failed suite took, which decides whether a
     // `--cmd` run is cheap enough to run again at the merge base.
     let mut slowest_failure = 0;
+    // The lines the change adds, read once, for naming its passing tests.
+    let mut added: Option<String> = None;
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
@@ -283,7 +285,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            let digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
+                let added = added.get_or_insert_with(|| added_lines(&job.dir));
+                digest.passed_changed = changed_tests(&digest.passed_all, added);
+            }
             let empty_test = args.cmd
                 && code == 0
                 && digest.no_tests
@@ -567,6 +573,69 @@ fn versioned_on_path(name: &str) -> Option<String> {
         .collect();
     found.sort_by_key(|f| (f.len(), f.clone()));
     found.into_iter().next()
+}
+
+/// The lines the work tree adds since HEAD: the diff's added lines and
+/// every untracked file's, up to a few megabytes.
+fn added_lines(dir: &Path) -> String {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    };
+    let mut added: String = git(&["diff", "HEAD", "-U0", "--no-color", "--no-ext-diff"])
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .map(|l| format!("{}\n", &l[1..]))
+        .collect();
+    let root = git(&["rev-parse", "--show-toplevel"]);
+    for path in git(&["ls-files", "--others", "--exclude-standard", "--full-name"]).lines() {
+        if added.len() > 4 << 20 {
+            break;
+        }
+        if let Ok(text) = std::fs::read_to_string(Path::new(root.trim()).join(path)) {
+            added.push_str(&text);
+        }
+    }
+    added
+}
+
+/// The passing tests whose name, or its last part (`a::tests::b`'s `b`,
+/// vitest's `file > suite > test` test), a line of `added` holds, up to
+/// eight.
+fn changed_tests(passed: &[String], added: &str) -> Vec<String> {
+    if added.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<String> = passed
+        .iter()
+        .filter(|name| {
+            let last = name.rsplit([':', '>', '.']).next().unwrap_or(name).trim();
+            let named = |n: &str| n.chars().count() >= 4 && contains_word(added, n);
+            named(name.trim()) || named(last)
+        })
+        .take(9)
+        .cloned()
+        .collect();
+    // Too many is not the agent's own: say none.
+    if found.len() > 8 {
+        found.clear();
+    }
+    found
+}
+
+/// Whether `text` holds `word` with no letter, digit or `_` against either
+/// end: `eta` is not in `theta`.
+fn contains_word(text: &str, word: &str) -> bool {
+    let inner = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    text.match_indices(word).any(|(at, _)| {
+        !inner(text[..at].chars().next_back()) && !inner(text[at + word.len()..].chars().next())
+    })
 }
 
 /// Copies what the child writes to its log onto stdout until it exits.
@@ -1022,6 +1091,13 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
     if suite.exit_code == Some(0) && !streamed && !digest.passed_names.is_empty() {
         let _ = write!(s, " ({})", digest.passed_names.join(", "));
     }
+    if suite.exit_code == Some(0) && !streamed && !digest.passed_changed.is_empty() {
+        let _ = write!(
+            s,
+            ", among them the changed {}",
+            digest.passed_changed.join(", ")
+        );
+    }
     // A pass of nothing proves nothing: say so, so the agent does not read
     // the log to find out, or take it for its test passing.
     // `cargo test --bin NAME` runs that binary's own tests alone, and a
@@ -1097,4 +1173,29 @@ fn counts(digest: &Digest) -> String {
     .map(|(n, what)| format!("{n} {what}"))
     .collect::<Vec<_>>()
     .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_change_names_its_own_passing_tests_by_whole_words() {
+        let passed: Vec<String> = [
+            "commands::edit::tests::split_editor",
+            "commands::edit::tests::visual_fallback",
+            "eta works",
+            "theta works",
+        ]
+        .map(String::from)
+        .into();
+        let added = "    fn split_editor() {\n@test \"theta works\" {\n";
+        assert_eq!(
+            changed_tests(&passed, added),
+            ["commands::edit::tests::split_editor", "theta works"]
+        );
+        assert!(changed_tests(&passed, "").is_empty());
+        assert!(contains_word("fn split_editor()", "split_editor"));
+        assert!(!contains_word("fn split_editors()", "split_editor"));
+    }
 }

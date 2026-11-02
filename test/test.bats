@@ -1254,3 +1254,25 @@ SCRIPT
 	assert_output --partial 'baseline: the failure also fails at main'
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
 }
+
+@test "a large passing run names the tests the change adds, and only those" {
+	git commit -q --allow-empty -m base
+	cat >run-tests <<'SH'
+#!/bin/sh
+echo 1..10
+i=0
+for t in alpha beta gamma delta epsilon zeta eta theta iota kappa; do
+	i=$((i + 1))
+	echo "ok $i $t works"
+done
+SH
+	chmod +x run-tests
+	run --separate-stderr jouet test --cmd -- ./run-tests
+	assert_success
+	refute_output --partial 'among them'
+	# The agent adds a test, in a file of its own.
+	printf '@test "theta works" {\n\ttrue\n}\n' >new.bats
+	run --separate-stderr jouet test --cmd -- ./run-tests
+	assert_success
+	assert_output --partial '10 passed, among them the changed theta works'
+}
