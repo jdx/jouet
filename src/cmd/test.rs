@@ -191,8 +191,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     } else {
         None
     };
-    // A failing full suite is run at the merge base, once per merge base; any
-    // other failing run uses only what an earlier one kept.
+    // A failing full suite is run at the merge base, once per merge base; a
+    // failing --cmd run is too when it was short, else it uses what an
+    // earlier one kept.
     let mode = if args.baseline {
         baseline::Mode::Retry
     } else if !args.cmd {
@@ -228,6 +229,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
+    // How long the slowest failed suite took, which decides whether a
+    // `--cmd` run is cheap enough to run again at the merge base.
+    let mut slowest_failure = 0;
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
@@ -280,6 +284,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
+                slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
             let suite_exit = (job.exit)(code);
@@ -296,6 +301,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             .into_iter()
             .map(|(job, names, ran)| names.map(|names| (job, names, ran)))
             .collect();
+        // Set when only a kept comparison could be used, and none was.
+        let mut slow = false;
         let found = match named {
             // Said only when asked for: a failing build names no test.
             None if !args.baseline => Ok(None),
@@ -303,10 +310,29 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 "the output names no failing test, so there is nothing to compare at the merge base"
                     .to_string(),
             )),
-            Some(named) => baseline::compare(&root, base, &formats, &named, mode),
+            Some(named) => {
+                // A short run costs little to run again at the merge base,
+                // and an agent asks that itself of every failure otherwise.
+                let short = crate::settings::Settings::load().test.baseline_cmd_under_ms;
+                let mode = if mode == baseline::Mode::Kept && slowest_failure < short {
+                    baseline::Mode::Run
+                } else {
+                    mode
+                };
+                slow = mode == baseline::Mode::Kept;
+                baseline::compare(&root, base, &formats, &named, mode)
+            }
         };
         match found {
-            Ok(None) => {}
+            Ok(None) => {
+                if slow && !out.json {
+                    emit(&format!(
+                        "baseline: not compared, the run took {}s; `{}` runs it at the merge base\n",
+                        slowest_failure / 1000,
+                        with_baseline()
+                    ));
+                }
+            }
             Ok(Some(found)) => {
                 if !out.json {
                     emit(&found.text());
@@ -374,6 +400,15 @@ fn emit(text: &str) {
 
 /// How this `jouet test` was called, as a shell command: what the rules
 /// classify, as they would the hook's.
+/// This command with `--baseline`, which compares its failures at the merge
+/// base whatever the run took.
+fn with_baseline() -> String {
+    let mut words: Vec<String> = std::env::args().skip(1).collect();
+    let at = words.iter().position(|w| w == "test").map_or(0, |i| i + 1);
+    words.insert(at, "--baseline".into());
+    format!("jouet {}", command_line(&words))
+}
+
 fn own_command() -> String {
     let words: Vec<String> = std::env::args().skip(1).collect();
     format!("jouet {}", command_line(&words))
