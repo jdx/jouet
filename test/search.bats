@@ -157,3 +157,12 @@ payload() {
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload PreToolUse Grep '{"pattern": "download", "output_mode": "content", "head_limit": 20}')"
 	assert_output ""
 }
+
+@test "search takes --max for -m, as agents guess it" {
+	run jouet search -m 1 url src/lib.rs
+	assert_success
+	local one="$output"
+	run jouet search --max 1 url src/lib.rs
+	assert_success
+	assert_output "$one"
+}
