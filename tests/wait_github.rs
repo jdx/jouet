@@ -49,6 +49,10 @@ struct World {
     /// Complete the check runs after the fake returns an unchanged check poll.
     complete_after_304: bool,
     base_sha: &'static str,
+    /// For the base-change test, advance the branch after its first read and
+    /// complete CI only once the compare has actually been requested.
+    advance_base_after_read: bool,
+    complete_after_compare: bool,
     /// Files changed on the base between two SHAs, and in the PR.
     base_files: Vec<&'static str>,
     pr_files: Vec<&'static str>,
@@ -70,6 +74,8 @@ impl Default for World {
             checks: BTreeMap::new(),
             complete_after_304: false,
             base_sha: "base000",
+            advance_base_after_read: false,
+            complete_after_compare: false,
             base_files: Vec::new(),
             pr_files: vec!["src/a.rs"],
             required: Vec::new(),
@@ -194,10 +200,24 @@ fn respond(
             ok(json!({ "total_count": runs.len(), "check_runs": runs }))
         }
         ["commits", _, "status"] => ok(json!({ "total_count": 0, "statuses": [] })),
-        ["branches", "main"] => ok(json!({ "commit": { "sha": world.base_sha } })),
-        ["compare", _] => ok(json!({
-            "files": world.base_files.iter().map(|f| json!({ "filename": f })).collect::<Vec<_>>()
-        })),
+        ["branches", "main"] => {
+            let sha = world.base_sha;
+            if std::mem::take(&mut world.advance_base_after_read) {
+                world.base_sha = "base111";
+            }
+            ok(json!({ "commit": { "sha": sha } }))
+        }
+        ["compare", _] => {
+            if std::mem::take(&mut world.complete_after_compare) {
+                world.checks.insert(
+                    world.head,
+                    vec![check(1, "unit", "completed", Some("success"))],
+                );
+            }
+            ok(json!({
+                "files": world.base_files.iter().map(|f| json!({ "filename": f })).collect::<Vec<_>>()
+            }))
+        }
         ["actions", "jobs", id] => {
             let id: u64 = id.parse().unwrap();
             let check = world
@@ -854,7 +874,11 @@ fn a_rate_limit_is_slept_off_when_it_resets_in_time() {
 #[test]
 fn base_commits_touching_the_prs_files_are_reported() {
     let dir = tempfile::tempdir().unwrap();
-    let mut world = World::default();
+    let mut world = World {
+        advance_base_after_read: true,
+        complete_after_compare: true,
+        ..World::default()
+    };
     world
         .checks
         .insert(SHA_A, vec![check(1, "unit", "in_progress", None)]);
@@ -863,21 +887,8 @@ fn base_commits_touching_the_prs_files_are_reported() {
     let child = spawn(
         &fake,
         dir.path(),
-        &[&CI[..], &["100ms", "--jsonl"]].concat(),
+        &[&CI[..], &["100ms", "--timeout", "5s", "--jsonl"]].concat(),
     );
-    let w = handle(&fake);
-    after(500, move || w.lock().unwrap().base_sha = "base111")
-        .join()
-        .unwrap();
-    let w = handle(&fake);
-    after(500, move || {
-        w.lock()
-            .unwrap()
-            .checks
-            .insert(SHA_A, vec![check(1, "unit", "completed", Some("success"))]);
-    })
-    .join()
-    .unwrap();
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),
