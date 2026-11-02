@@ -23,11 +23,11 @@ question gets an answer and stays open. Commit your changes; don't push.
 git = "~/src/mise"
 commit = "4ca796a0bf27f2dab88f8ec930eb7870a36b407d"
 
-# The user's Rust toolchain and mise, without the rest of ~/.local/bin (which
-# holds jouet). `mise run` installs the repository's own tools, mbx among
-# them, into the run's home.
+# Resolve mise from the benchmark environment, without exposing the rest of
+# its directory (which may also hold jouet) to the plain arm. `mise run`
+# installs the repository's own tools, mbx among them, into the run's home.
 [tools]
-mise = "~/.local/bin/mise"
+mise = "mise"
 
 [env]
 RUSTUP_HOME = "~/.rustup"
