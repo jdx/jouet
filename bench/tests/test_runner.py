@@ -809,7 +809,7 @@ class TasksTest(unittest.TestCase):
             (task / "check.py").touch()
             (task / "solve.py").touch()
             result = subprocess.run([sys.executable, str(runner.REPO_ROOT / "bench/agents.py"),
-                                     "check-tasks", "--tasks-dir", str(root)], capture_output=True, text=True)
+                                     "check-tasks", "--tasks", "task", "--tasks-dir", str(root)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             self.assertIn("preparation failed", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
