@@ -908,7 +908,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Find code with `jouet search PATTERN [PATHS]` (the whole tree, matches grouped by the function they are in, within a budget) instead of `grep -rn`, and read one definition with `jouet read PATH --symbol NAME` instead of `sed -n` ranges. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1184,7 +1184,9 @@ mod tests {
             "{text}"
         );
         assert!(text.lines().count() <= 4, "{text}");
-        assert!(text.len() <= 1300, "{} bytes:\n{text}", text.len());
+        // 1300 until it named `jouet search` and `jouet read --symbol`
+        // (see the primer's test in hook.rs for what that saved).
+        assert!(text.len() <= 1500, "{} bytes:\n{text}", text.len());
     }
 
     #[test]
