@@ -1557,8 +1557,12 @@ mod tests {
         // of 40k tokens or more. Then to 1700 for listing threads and for
         // committing in the test run's call: in the benchmark's short tasks,
         // agents guessed `pr threads list` and committed in a call of its
-        // own, a request of about 20k tokens each.
-        assert!(context.len() <= 1700, "{} bytes:\n{context}", context.len());
+        // own, a request of about 20k tokens each. Then to 1900 for finding
+        // code with `jouet search` and `jouet read --symbol`: in the
+        // benchmark's usage task agents spent 14 to 18 requests on grep and
+        // sed and never used them; named here, they did, and the median run
+        // fell from 627k input tokens to 376k.
+        assert!(context.len() <= 1900, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");
