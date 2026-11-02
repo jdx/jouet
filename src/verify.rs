@@ -97,6 +97,17 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
+        // An affected baseline only established that this tree's selected
+        // jobs have pre-existing failures. Another tree may select other jobs.
+        if ran.split_whitespace().next() == Some("--affected")
+            && self
+                .command
+                .split_whitespace()
+                .any(|word| word == "--baseline")
+            && (self.tree.is_none() || self.tree != failed.tree)
+        {
+            return false;
+        }
         if ran == wanted {
             return true;
         }
@@ -981,8 +992,10 @@ impl Checks {
         // tool this machine lacks, is the costly case: point at the check
         // that settles it. Its result is kept, so later runs of the same
         // command compare with it without running the merge base again.
-        // Not a partial test run: that is most often a test written to fail.
-        let baseline = if kind == Kind::Build || (kind == Kind::Test && failed.full) {
+        // Most partial test runs are written to fail, but an affected run
+        // often includes existing tests selected by the change.
+        let affected = failed.selection().split_whitespace().next() == Some("--affected");
+        let baseline = if kind == Kind::Build || (kind == Kind::Test && (failed.full || affected)) {
             format!(
                 " If the failures are not from your change, `{}` runs it at the merge base too, and passes when each failure fails there as well.",
                 baseline_command(&failed.command)
@@ -1209,6 +1222,29 @@ mod tests {
         ] {
             assert_eq!(baseline_command(command), hint);
         }
+        let mut affected = Checks::default();
+        affected.record(
+            [test(
+                "jouet test --affected --since main",
+                1,
+                "--affected --since main",
+            )],
+            Some("t1"),
+        );
+        let why = reason(&affected, "t1").unwrap();
+        assert!(
+            why.contains("`jouet test --baseline --affected --since main`"),
+            "{why}"
+        );
+        affected.record(
+            [test(
+                "jouet test --baseline --affected --since main",
+                0,
+                "--affected --since main",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&affected, "t1"), None);
     }
 
     #[test]
@@ -1224,6 +1260,25 @@ mod tests {
         assert!(why.contains("only a full test run clears it"), "{why}");
         state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn an_affected_baseline_does_not_clear_a_different_tree() {
+        let mut checks = Checks::default();
+        checks.record(
+            [test("jouet test --affected", 1, "--affected")],
+            Some("old"),
+        );
+        checks.record(
+            [test("jouet test --baseline --affected", 0, "--affected")],
+            Some("new"),
+        );
+        assert_eq!(checks.failures[&Kind::Test].len(), 1);
+        checks.record(
+            [test("jouet test --baseline --affected", 0, "--affected")],
+            Some("old"),
+        );
+        assert!(!checks.failures.contains_key(&Kind::Test));
     }
 
     #[test]

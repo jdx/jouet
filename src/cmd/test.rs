@@ -97,12 +97,6 @@ struct Job {
 }
 
 pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
-    if args.baseline && args.affected {
-        return out.error(
-            Exit::Usage,
-            "--baseline reruns a whole run's failures at the merge base; the tests --affected picks depend on the changes, so it cannot",
-        );
-    }
     if !args.affected && (args.adapter.is_some() || (args.since.is_some() && !args.baseline)) {
         return out.error_with_hint(
             Exit::Usage,
@@ -172,6 +166,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             Ok(base) => Some(base),
             Err(e) => {
                 let mut fixed = vec!["jouet", "test", "--baseline", "--since", "HEAD~1"];
+                if args.affected {
+                    fixed.push("--affected");
+                    if let Some(adapter) = args.adapter.as_deref() {
+                        fixed.extend(["--adapter", adapter]);
+                    }
+                }
                 if args.cmd {
                     fixed.push("--cmd");
                 }
@@ -194,7 +194,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // A failing full suite is run at the merge base, once per merge base; a
     // failing --cmd run is too when it was short, else it uses what an
     // earlier one kept.
-    let mode = if args.baseline {
+    let mode = if args.baseline && args.affected {
+        baseline::Mode::Fresh
+    } else if args.baseline {
         baseline::Mode::Retry
     } else if !args.cmd {
         baseline::Mode::Run
@@ -212,6 +214,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         Ok(planned) => planned,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    // Selection and comparison must use the same merge base. If the ref
+    // moved while planning, refuse before running either set of tests.
+    if args.affected
+        && args.baseline
+        && report.base.as_ref().map(|b| &b.merge_base) != base.as_ref().map(|b| &b.merge_base)
+    {
+        return out.error(
+            Exit::Precondition,
+            "the merge base changed while selecting tests; run the command again",
+        );
+    }
     // Formats declared for runners jouet does not know; one that does not
     // load is said, and the run goes on without it.
     let (formats, problems) = testlog::format::load(&cwd);
@@ -283,7 +296,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
-                failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
+                failed.push((
+                    job,
+                    baseline::failure_names(
+                        &output,
+                        &formats,
+                        &root,
+                        args.affected && args.baseline,
+                    ),
+                    ran,
+                ));
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
