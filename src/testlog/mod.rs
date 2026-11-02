@@ -234,6 +234,7 @@ regexes! {
     UNITTEST_KIND = r"(failures|errors|skipped|expected failures|unexpected successes)=(\d+)";
     // jest.
     JEST_HEAD = r"^\s*● (.+)$";
+    JEST_FILE = r"^FAIL +(.+?)(?: \([\d.]+ s\))?$";
     JEST_END = r"^\s*● |^(Test Suites|Tests|Snapshots|Time):|^\s*(PASS|FAIL) ";
     JEST_TESTS = r"^Tests:\s+(.+)$";
     // vitest.
@@ -597,8 +598,8 @@ pub(crate) fn jest_failure_files(
     let mut file = None;
     let mut names = std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     for line in clean(text) {
-        if let Some(path) = line.strip_prefix("FAIL ") {
-            file = Some(path.trim().to_string());
+        if let Some(c) = JEST_FILE.captures(&line) {
+            file = Some(c[1].trim().to_string());
         } else if let Some(c) = JEST_HEAD.captures(&line) {
             let path = file.as_ref()?;
             names

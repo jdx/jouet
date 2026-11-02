@@ -688,13 +688,18 @@ fn affected(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), a
     let Plan {
         base,
         changes,
-        suites,
+        mut suites,
     } = affected::plan(
         cwd,
         args.since.as_deref(),
         args.adapter.as_deref(),
         &args.extra,
     )?;
+    if args.baseline {
+        for suite in &mut suites {
+            freeze_javascript_selection(suite, &args.extra)?;
+        }
+    }
     let reports = suites.iter().map(suite_report).collect();
     let jobs = suites
         .into_iter()
@@ -707,6 +712,54 @@ fn affected(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), a
         report_of(true, Some(base), Some(changes.len()), reports, args.dry_run),
         jobs,
     ))
+}
+
+/// Git-relative and module-graph selectors can choose different tests at the
+/// merge base. Run the files the adapter already listed in both worktrees.
+fn freeze_javascript_selection(suite: &mut Suite, extra: &[String]) -> Result<(), affected::Error> {
+    if !matches!(suite.adapter.name(), "vitest" | "jest") {
+        return Ok(());
+    }
+    if extra.iter().any(|arg| {
+        [
+            "--changed",
+            "--findRelatedTests",
+            "--onlyChanged",
+            "--lastCommit",
+            "--related",
+        ]
+        .iter()
+        .any(|flag| arg.as_str() == *flag || arg.starts_with(&format!("{flag}=")))
+            || arg == "-o"
+    }) {
+        return Err(affected::Error::new(
+            Exit::Precondition,
+            "a dynamic JavaScript test selector cannot be frozen for a baseline comparison",
+        ));
+    }
+    if !matches!(suite.decision, Decision::Affected) {
+        return Ok(());
+    }
+    let Some(command) = &suite.command else {
+        return Ok(());
+    };
+    let mut frozen = vec![command[0].clone()];
+    if suite.adapter.name() == "vitest" {
+        frozen.push("run".into());
+    }
+    frozen.extend(extra.iter().cloned());
+    if suite.adapter.name() == "jest" {
+        frozen.push("--runTestsByPath".into());
+    }
+    frozen.extend(suite.tests.iter().map(|test| {
+        let path = suite.project.root.join(&test.path);
+        path.strip_prefix(&suite.project.dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned()
+    }));
+    suite.command = Some(frozen);
+    Ok(())
 }
 
 fn report_of(

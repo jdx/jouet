@@ -224,6 +224,23 @@ vitest (vitest's module graph): 2 test files
 	assert_output '[true,true,"affected",["test/fmt.test.js"],0]'
 }
 
+@test "affected vitest baseline replays the selected files at the merge base" {
+	js_project vitest
+	# The real runner is available in the isolated worktree through this fixture
+	# symlink, just as it is in the changed worktree.
+	git add -f node_modules
+	printf "export const shout = (s) => s + '?'\n" >src/fmt.js
+	git add src/fmt.js
+	git commit -qm 'fixture with existing failure'
+	git branch -f main HEAD
+	printf '// change\n' >>src/fmt.js
+
+	run --separate-stderr jouet test --baseline --affected --since main --json
+	assert_success
+	run jq -e '.baseline.pre_existing | length > 0' <<<"$output"
+	assert_success
+}
+
 @test "jest selects through its module graph and passes extra arguments on" {
 	js_project jest
 	printf 'exports.sum = (a, b) => b + a\n' >src/sum.js
@@ -236,6 +253,15 @@ vitest (vitest's module graph): 2 test files
 	assert_equal "$(grep -c '^Tests:' "$log")" 1
 	run jq -c '[.suites[0].adapter, .suites[0].tests, .suites[0].command[1]]' <<<"$output"
 	assert_output '["jest",[{"path":"test/calc.test.js","via":["src/sum.js","src/calc.js","test/calc.test.js"]},{"path":"test/sum.test.js","via":["src/sum.js","test/sum.test.js"]}],"--ci"]'
+}
+
+@test "affected jest baseline freezes the selected test paths" {
+	js_project jest
+	printf 'exports.sum = (a, b) => b + a\n' >src/sum.js
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run --json -- --ci
+	assert_success
+	run jq -e '.suites[0].command | index("--runTestsByPath") != null and index("--findRelatedTests") == null and index("--ci") != null' <<<"$output"
+	assert_success
 }
 
 @test "pytest without testmon follows imports, and a conftest runs the whole suite" {

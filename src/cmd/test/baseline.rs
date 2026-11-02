@@ -490,6 +490,10 @@ mod tests {
         let second = names("FAIL tests/b.test.js\n  ● same test\n").unwrap();
         assert_ne!(first, second);
         assert!(names("  ● same test\n").is_none());
+        assert_eq!(
+            names("FAIL tests/a.test.js (5.123 s)\n  ● same test\n"),
+            names("FAIL tests/a.test.js (12.345 s)\n  ● same test\n")
+        );
     }
 
     #[test]
