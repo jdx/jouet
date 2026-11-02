@@ -786,7 +786,7 @@ class TasksTest(unittest.TestCase):
                     self.assertEqual(agents.main(["check-tasks", "--tasks-dir", str(directory)]), 2)
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
                 run.assert_called_once()
-                self.assertEqual(tasks.all_names(), ["local-task"])
+                self.assertEqual(run.call_args.args[0].tasks_dir, [directory])
 
     def test_checkout_roots_include_the_current_worktree(self):
         self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
