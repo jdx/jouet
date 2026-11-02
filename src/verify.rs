@@ -1572,6 +1572,18 @@ mod tests {
     }
 
     #[test]
+    fn playwright_pass_does_not_clear_an_unrelated_full_test_failure() {
+        let mut state = Checks::default();
+        state.record([test("npm test", 1, "full")], Some("t1"));
+        let cwd = std::env::current_dir().unwrap();
+        let records = crate::cmd::hook::checks(&cwd, "npx playwright test");
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].full);
+        state.record(records, Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
     fn a_pass_over_more_names_clears_a_failure() {
         let mut state = Checks::default();
         state.record([test("mise run test", 0, "full")], Some("t1"));

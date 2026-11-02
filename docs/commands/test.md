@@ -306,7 +306,7 @@ A run that passed without running a test says so when the output shows it: TAP's
 
 If a recognized test command exits zero but its output reports failed tests, jouet exits `4` and shows the failures. This can happen when a script runs several checks and returns only the last one's status. The JSON `exit_code` remains the command's actual exit code, while `ok` is false. A merge-base run with the same contradiction cannot establish a baseline pass.
 
-The checks rule recognizes direct Playwright runs and explicit binary execution through `npx`, `bunx`, `pnpm exec`, `yarn exec`, `yarn workspace NAME exec`, and `npm exec --`. A workspace run covers only that workspace. Package scripts named `playwright` are not assumed to run the binary. The rule does not record interactive UI or debug modes, or `--pass-with-no-tests`: they can exit successfully without evidence that a test ran. Filters and options that change snapshot checks count as partial runs.
+The checks rule recognizes direct Playwright runs and explicit binary execution through `npx`, `bunx`, `pnpm exec`, `yarn exec`, `yarn workspace NAME exec`, and `npm exec --`. Playwright covers its own tests, not necessarily the project's unit tests, so its runs are partial; workspace runs are scoped to that workspace. Package scripts named `playwright` are not assumed to run the binary. The rule does not record interactive UI or debug modes, or `--pass-with-no-tests`: they can exit successfully without evidence that a test ran.
 
 ### Your own runners: formats
 

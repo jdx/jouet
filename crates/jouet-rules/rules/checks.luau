@@ -509,9 +509,11 @@ local function playwright_scope(args: { string }, at: number, workspace: string?
 	end
 	-- A workspace is a filter. Mark it as an option so the verifier requires
 	-- an exact selection instead of treating added test names as a wider run.
-	if workspace then return "test", partial("--workspace=" .. workspace .. " " .. table.concat(args, " ", at)) end
-	if narrowed then return "test", partial(table.concat(args, " ", at)) end
-	return "test", runner_scope(args, at + 1)
+	if workspace then return "test", partial("--workspace=" .. workspace .. " playwright " .. table.concat(args, " ", at)) end
+	if narrowed then return "test", partial("playwright " .. table.concat(args, " ", at)) end
+	local selection = runner_scope(args, at + 1).selector
+	-- Even an unfiltered Playwright run need not cover a project's unit tests.
+	return "test", partial("playwright" .. (if selection then " " .. selection else ""))
 end
 
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
