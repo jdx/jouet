@@ -753,14 +753,14 @@
                             "summary": null,
                             "text": null,
                             "checkSuite": {
-                              "__typename": "CheckSuite",
+                              "__typename": "CheckSuite", "branch": null,
                               "id": "CS_8001",
                               "app": {
                                 "slug": "github-actions",
                                 "name": "GitHub Actions"
                               },
                               "workflowRun": {
-                                "__typename": "WorkflowRun",
+                                "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                                 "id": "WFR_9001",
                                 "databaseId": 9001,
                                 "event": "pull_request",
@@ -794,14 +794,14 @@
                             "summary": null,
                             "text": null,
                             "checkSuite": {
-                              "__typename": "CheckSuite",
+                              "__typename": "CheckSuite", "branch": null,
                               "id": "CS_8001",
                               "app": {
                                 "slug": "github-actions",
                                 "name": "GitHub Actions"
                               },
                               "workflowRun": {
-                                "__typename": "WorkflowRun",
+                                "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                                 "id": "WFR_9001",
                                 "databaseId": 9001,
                                 "event": "pull_request",
@@ -869,14 +869,14 @@
                     "summary": null,
                     "text": null,
                     "checkSuite": {
-                      "__typename": "CheckSuite",
+                      "__typename": "CheckSuite", "branch": null,
                       "id": "CS_8001",
                       "app": {
                         "slug": "github-actions",
                         "name": "GitHub Actions"
                       },
                       "workflowRun": {
-                        "__typename": "WorkflowRun",
+                        "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                         "id": "WFR_9001",
                         "databaseId": 9001,
                         "event": "pull_request",
@@ -910,14 +910,14 @@
                     "summary": null,
                     "text": null,
                     "checkSuite": {
-                      "__typename": "CheckSuite",
+                      "__typename": "CheckSuite", "branch": null,
                       "id": "CS_8001",
                       "app": {
                         "slug": "github-actions",
                         "name": "GitHub Actions"
                       },
                       "workflowRun": {
-                        "__typename": "WorkflowRun",
+                        "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                         "id": "WFR_9001",
                         "databaseId": 9001,
                         "event": "pull_request",
@@ -1247,14 +1247,14 @@
                 "summary": null,
                 "text": null,
                 "checkSuite": {
-                  "__typename": "CheckSuite",
+                  "__typename": "CheckSuite", "branch": null,
                   "id": "CS_8001",
                   "app": {
                     "slug": "github-actions",
                     "name": "GitHub Actions"
                   },
                   "workflowRun": {
-                    "__typename": "WorkflowRun",
+                    "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                     "id": "WFR_9001",
                     "databaseId": 9001,
                     "event": "pull_request",
@@ -1288,14 +1288,14 @@
                 "summary": null,
                 "text": null,
                 "checkSuite": {
-                  "__typename": "CheckSuite",
+                  "__typename": "CheckSuite", "branch": null,
                   "id": "CS_8001",
                   "app": {
                     "slug": "github-actions",
                     "name": "GitHub Actions"
                   },
                   "workflowRun": {
-                    "__typename": "WorkflowRun",
+                    "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                     "id": "WFR_9001",
                     "databaseId": 9001,
                     "event": "pull_request",

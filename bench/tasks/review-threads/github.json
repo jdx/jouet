@@ -191,13 +191,13 @@
                 "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
                 "isRequired": true,
                 "checkSuite": {
-                  "__typename": "CheckSuite",
+                  "__typename": "CheckSuite", "branch": null, "app": null,
                   "workflowRun": {
-                    "__typename": "WorkflowRun",
+                    "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                     "databaseId": 9101,
                     "event": "pull_request",
                     "workflow": {
-                      "__typename": "Workflow",
+                      "__typename": "Workflow", "id": "W_review",
                       "name": "ci"
                     }
                   }
@@ -301,13 +301,13 @@
                             "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
                             "isRequired": true,
                             "checkSuite": {
-                              "__typename": "CheckSuite",
+                              "__typename": "CheckSuite", "branch": null, "app": null,
                               "workflowRun": {
-                                "__typename": "WorkflowRun",
+                                "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                                 "databaseId": 9101,
                                 "event": "pull_request",
                                 "workflow": {
-                                  "__typename": "Workflow",
+                                  "__typename": "Workflow", "id": "W_review",
                                   "name": "ci"
                                 }
                               }
@@ -355,13 +355,13 @@
                     "detailsUrl": "https://github.com/jdx/demo/actions/runs/9101/job/7201",
                     "isRequired": true,
                     "checkSuite": {
-                      "__typename": "CheckSuite",
+                      "__typename": "CheckSuite", "branch": null, "app": null,
                       "workflowRun": {
-                        "__typename": "WorkflowRun",
+                        "__typename": "WorkflowRun", "runNumber": null, "runAttempt": null,
                         "databaseId": 9101,
                         "event": "pull_request",
                         "workflow": {
-                          "__typename": "Workflow",
+                          "__typename": "Workflow", "id": "W_review",
                           "name": "ci"
                         }
                       }

@@ -126,6 +126,96 @@ fn failing_check_names_are_fetched_only_for_prs_with_failures() {
 }
 
 #[test]
+fn superseded_workflow_runs_do_not_report_old_failures() {
+    let mut pr = fetch_batch().prs.remove(0);
+    pr.status.checks = Checks {
+        pass: 1,
+        fail: 3,
+        pending: 1,
+        ..Checks::default()
+    };
+    let first = json!({"pageInfo": {"hasNextPage": true, "endCursor": "next"}, "nodes": [
+        {"name": "title", "status": "COMPLETED", "conclusion": "CANCELLED", "databaseId": 1,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 1, "runAttempt": 1, "workflow": {"id": "one"}}}},
+        {"name": "title", "status": "COMPLETED", "conclusion": "FAILURE", "databaseId": 2,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 1, "runAttempt": 1, "workflow": {"id": "two"}}}},
+        {"name": "unknown", "conclusion": "FAILURE"}
+    ]});
+    pr.add_contexts(serde_json::from_value(first).unwrap());
+    assert!(pr.contexts_after.is_some());
+    let second = json!({"pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [
+        {"name": "title", "status": "COMPLETED", "conclusion": "SUCCESS", "databaseId": 3,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 2, "runAttempt": 1, "workflow": {"id": "one"}}}},
+        {"name": "other", "status": "IN_PROGRESS", "conclusion": null}
+    ]});
+    pr.add_contexts(serde_json::from_value(second).unwrap());
+    assert!(pr.contexts_after.is_none());
+    assert_eq!(pr.status.checks.pass, 1);
+    assert_eq!(pr.status.checks.fail, 2);
+    assert_eq!(pr.status.checks.pending, 1);
+    assert_eq!(pr.status.checks.failing, ["title", "unknown"]);
+}
+
+#[test]
+fn duplicate_names_within_a_workflow_run_are_not_collapsed() {
+    let mut pr = fetch_batch().prs.remove(0);
+    pr.status.checks = Checks {
+        pass: 2,
+        fail: 1,
+        ..Checks::default()
+    };
+    let run = |number, conclusion| {
+        json!({
+            "name": "matrix", "status": "COMPLETED", "conclusion": conclusion,
+            "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"},
+              "workflowRun": {"event": "pull_request", "runNumber": number, "runAttempt": 1, "workflow": {"id": "one"}}}
+        })
+    };
+    pr.add_contexts(
+        serde_json::from_value(json!({
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+            "nodes": [run(1, "SUCCESS"), run(1, "FAILURE"), run(2, "SUCCESS")]
+        }))
+        .unwrap(),
+    );
+    assert_eq!(pr.status.checks.pass, 2);
+    assert_eq!(pr.status.checks.fail, 1);
+    assert_eq!(pr.status.checks.failing, ["matrix"]);
+}
+
+#[test]
+fn repeated_check_cursor_returns_an_error() {
+    let mut pr = fetch_batch().prs.remove(0);
+    let lookup = Lookup::Contexts {
+        id: "rollup".into(),
+        after: Some("same".into()),
+    };
+    let entry =
+        json!({"contexts": {"pageInfo": {"hasNextPage": true, "endCursor": "same"}, "nodes": []}});
+    assert!(
+        read_page(&mut pr, &lookup, &entry)
+            .unwrap_err()
+            .contains("repeated")
+    );
+}
+
+#[test]
+fn missing_check_cursor_returns_an_error() {
+    let mut pr = fetch_batch().prs.remove(0);
+    let lookup = Lookup::Contexts {
+        id: "rollup".into(),
+        after: None,
+    };
+    let entry =
+        json!({"contexts": {"pageInfo": {"hasNextPage": true, "endCursor": null}, "nodes": []}});
+    assert!(
+        read_page(&mut pr, &lookup, &entry)
+            .unwrap_err()
+            .contains("omitted")
+    );
+}
+
+#[test]
 fn attention_is_derived_from_the_fields() {
     let mut result = fetch_batch();
     let page = result.prs[0].pages().remove(0);
