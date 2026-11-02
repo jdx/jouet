@@ -771,6 +771,9 @@ class TasksTest(unittest.TestCase):
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory)]), 2)
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(runner.REPO_ROOT / "results")]), 2)
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_checkout / "results")]), 2)
+                other_spelling = other_checkout.with_name(other_checkout.name.upper())
+                if other_spelling.exists() and other_spelling != other_checkout:
+                    self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_spelling / "results")]), 2)
                 with patch.dict(os.environ, {"XDG_CACHE_HOME": str(runner.REPO_ROOT / "cache")}):
                     self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 2)
                 with patch.object(agents.tempfile, "gettempdir", return_value=str(other_checkout)):
@@ -778,6 +781,9 @@ class TasksTest(unittest.TestCase):
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
                 run.assert_called_once()
                 self.assertEqual(tasks.all_names(), ["local-task"])
+
+    def test_checkout_roots_include_the_current_worktree(self):
+        self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
 
     def test_check_tasks_reports_history_preparation_errors(self):
         import subprocess

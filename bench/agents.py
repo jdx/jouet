@@ -396,7 +396,18 @@ def main(argv: list[str]) -> int:
             print("cannot verify jouet worktree locations", file=sys.stderr)
             return 2
         def in_checkout(path: Path) -> bool:
-            return any(path.is_relative_to(root) for root in checkouts)
+            for root in checkouts:
+                if path.is_relative_to(root):
+                    return True
+                # On case-insensitive filesystems an existing ancestor can be
+                # the same directory even when its spelling differs.
+                for ancestor in (path, *path.parents):
+                    try:
+                        if ancestor.samefile(root):
+                            return True
+                    except OSError:
+                        continue
+            return False
 
         if args.command == "run" and not args.dry_run and args.out is None:
             print("--tasks-dir requires an explicit --out for run results", file=sys.stderr)
