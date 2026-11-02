@@ -146,7 +146,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             bins[name] = found
         if arms.auth_status(h) is None:
             problems.append(f"{name}: no credentials ({', '.join(h.auth_env)} or {h.auth_files[0]})")
-    if "jouet" in args.arms and not args.jouet.exists():
+    if any(arms.ARMS[a].jouet for a in args.arms if a in arms.ARMS) and not args.jouet.exists():
         problems.append(f"no jouet binary at {args.jouet}; run `mise run build` or pass --jouet")
     if len(planned) > args.max_runs:
         problems.append(f"{len(planned)} runs planned, over --max-runs {args.max_runs}")

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -30,16 +31,30 @@ TIMEOUT_S = 1800
 
 
 def key(task: tasks_mod.Task, head_sha: str, jouet_bin: Path, harness: Harness, opts: dict[str, Any]) -> str:
+    """A hash only: like a measured run's directory, the skill's paths carry
+    no task name, which a project's tests could see."""
     digest = hashlib.sha256(jouet_bin.read_bytes()).hexdigest()[:16]
     model = opts.get(f"{harness.name}_model") or ""
     raw = f"{task.name}\0{head_sha}\0{digest}\0{harness.name}\0{model}"
-    return f"{task.name}-{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def git(workdir: Path, *args: str) -> str:
+    """git with the bench's own identity and none of the host's config, as
+    every other git call of the harness. The output is kept whole: a patch
+    needs its last newline."""
     return subprocess.run(
-        ["git", *args], cwd=workdir, check=True, capture_output=True, text=True
+        ["git", *args],
+        cwd=workdir,
+        env={**os.environ, **tasks_mod.GIT_ENV},
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
+
+
+def untracked(workdir: Path) -> list[str]:
+    return [p for p in git(workdir, "ls-files", "--others", "--exclude-standard", "-z").split("\0") if p]
 
 
 def prepared(
@@ -62,6 +77,9 @@ def prepared(
     run_dir = work_root / f"init-{name}"
     workdir = run_dir / "work"
     fresh = tasks_mod.prepare(task, workdir)
+    # A task's own untracked files (another session's, say) are not the
+    # skill's work, and every run's tree has them already.
+    before = set(untracked(workdir))
     env = arms_mod.build(
         run_dir,
         harness,
@@ -70,7 +88,7 @@ def prepared(
         jouet_bin,
         None,
         "jdx/demo",
-        run_dir / "tmp",
+        Path(opts["tmp_root"]) / f"init-{name}",
     )
     task.agent_env(env, run_dir / "bin", workdir)
     tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", run_dir / "environment.log")
@@ -92,8 +110,16 @@ def prepared(
     finally:
         credentials.give_back(lent)
     usage = harness.usage(agent["lines"], config_dir)
+    # A run that failed configured nothing to keep: say so, and cache none.
+    if agent["exit_code"] != 0 or agent["stopped"] or usage.is_error:
+        raise RuntimeError(
+            f"jouet-init for {task.name} did not finish (exit {agent['exit_code']}, "
+            f"stopped {agent['stopped']}); see {run_dir / 'agent.jsonl'}"
+        )
     # Everything it left, committed or not, against where it started.
     git(workdir, "add", "-A")
+    if before:
+        git(workdir, "reset", "-q", "--", *sorted(before))
     diff = git(workdir, "diff", "--cached", "--binary", fresh["head_sha"])
     files = [f for f in git(workdir, "diff", "--cached", "--name-only", fresh["head_sha"]).splitlines() if f]
     directory.mkdir(parents=True, exist_ok=True)
@@ -124,5 +150,8 @@ def apply(workdir: Path, patch: Path) -> str | None:
 
 def trust(env: dict[str, str], workdir: Path) -> None:
     """Trusts the project's jouet config, as the user does once after
-    jouet-init: each run's home is new, so the trust is not there yet."""
-    subprocess.run(["jouet", "trust", "--yes"], cwd=workdir, env=env, capture_output=True, text=True)
+    jouet-init: each run's home is new, so the trust is not there yet. A
+    trust that fails would measure an untrusted config, so it stops the run."""
+    proc = subprocess.run(["jouet", "trust", "--yes"], cwd=workdir, env=env, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"jouet trust --yes failed: {proc.stderr.strip() or proc.stdout.strip()}")

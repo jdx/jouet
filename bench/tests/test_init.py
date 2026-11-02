@@ -40,6 +40,24 @@ class InitTest(unittest.TestCase):
             self.assertEqual(git(work, "status", "--porcelain"), "")
             self.assertEqual((work / ".jouet" / "test.toml").read_text(), "[test]\n")
 
+    def test_a_tasks_own_untracked_files_stay_out_of_the_patch(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = self.repo(d)
+            # The task leaves another session's file untracked.
+            (work / "notes.md").write_text("theirs\n")
+            before = set(init.untracked(work))
+            (work / ".jouet").mkdir()
+            (work / ".jouet" / "test.toml").write_text("[test]\n")
+            init.git(work, "add", "-A")
+            init.git(work, "reset", "-q", "--", *sorted(before))
+            patch = Path(d) / "init.patch"
+            patch.write_text(init.git(work, "diff", "--cached", "--binary", "HEAD"))
+            self.assertNotIn("notes.md", patch.read_text())
+            # A fresh tree with that file applies it cleanly.
+            init.git(work, "reset", "-q", "--hard")
+            self.assertIsNotNone(init.apply(work, patch))
+            self.assertEqual((work / "notes.md").read_text(), "theirs\n")
+
     def test_a_skill_that_changed_nothing_leaves_the_tree_as_it_was(self):
         with tempfile.TemporaryDirectory() as d:
             work = self.repo(d)
