@@ -18,7 +18,7 @@ const siteUrl = "https://jouet.jdx.dev";
 export default defineConfig({
   title: "jouet",
   description:
-    "Wind-up tools for coding agents: one command for each shell chore agents keep scripting by hand.",
+    "Wind-up tools for coding agents. jouet tells an agent which checks are slow, and turns what went wrong in past sessions into rules, tasks and routines.",
   lang: "en-US",
   lastUpdated: true,
   // Dark by default, like the rest of jdx's docs, with a light theme a click away.

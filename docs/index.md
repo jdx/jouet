@@ -1,12 +1,12 @@
 ---
 layout: home
 title: Wind-up tools for coding agents
-description: jouet turns the shell chores coding agents keep scripting by hand into single commands that never prompt and exit with a code an agent can act on.
+description: jouet tells a coding agent which checks are slow before it runs them, and turns what went wrong in past sessions into rules, tasks and routines for the next one.
 
 hero:
   name: 'jouet <span class="jouet-gloss">pronounced “zhweh” · French for “toy”</span>'
   text: "Wind-up tools for coding agents"
-  tagline: "Agents keep rebuilding the same shell chores by hand, and get them subtly wrong. jouet turns each one into a single command that never prompts, never cuts output silently, and exits with a code an agent can act on."
+  tagline: "jouet tells an agent which builds and tests are slow before it runs them, notices what keeps going wrong across sessions, and turns the fixes into rules, tasks and routines the next session uses."
   image:
     src: /logo.svg
     alt: The jouet logo, a coral wind-up tin robot with a brass key on top
@@ -19,20 +19,16 @@ hero:
       link: /why
 
 features:
-  - title: 'jouet edit <span class="jouet-status is-ready">available</span>'
-    details: Exact, all-or-nothing edits across files, from search/replace blocks, a Codex-style patch or JSON. A failed edit writes nothing and shows the closest match.
-    link: /commands/edit
-    linkText: Read the guide
-  - title: 'jouet wait <span class="jouet-status is-ready">available</span>'
-    details: Blocks until CI finishes, a PR is ready, or a file, log line, port, URL, process or command is, then prints one summary. A CI failure comes with the failed step's log.
-    link: /commands/wait
-    linkText: Read the guide
-  - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'
-    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code> lists, replies to and resolves review threads without hand-written GraphQL.
-    link: /commands/pr-status
-    linkText: Read the guide
-  - title: 'jouet setup <span class="jouet-status is-ready">available</span>'
-    details: Hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Rules deny an agent's costly habits and name the command to use instead, and it cannot finish while its last test run failed.
-    link: /setup
-    linkText: Read the guide
+  - title: Know what a run costs
+    details: jouet times every build, test and lint. At session start the agent hears which ones are slow, so it can finish its edits and build once. <code>jouet audit</code> shows where a session's tokens and time went.
+    link: /commands/cost
+    linkText: How the timings work
+  - title: Notice what keeps failing
+    details: When a command keeps failing, or the user keeps correcting the agent, jouet drafts a rule, a mise task or a note about it. You or the agent decide whether to adopt it, and a new rule only warns at first.
+    link: /winding
+    linkText: How self-winding works
+  - title: Procedures the agent calls once
+    details: A routine is something like a skill that runs, a short tested Luau program the agent calls instead of working through each step itself. The built-in <code>land</code> routine waits for CI and merges a PR once it is ready.
+    link: /routines
+    linkText: Write a routine
 ---

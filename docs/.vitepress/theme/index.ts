@@ -19,23 +19,22 @@ export default {
       "home-hero-image": () => h(HomeRobot),
       "home-hero-actions-after": () => h(HomeQuickStart),
       "home-features-before": () => [
-        h(HomeBeforeAfter),
         h("div", { class: "jouet-section JouetCommandsHeading" }, [
           h("div", { class: "jouet-container" }, [
             h(
               HomeHeading,
               {
                 id: "jouet-commands",
-                eyebrow: "Commands",
-                title: "One command per chore",
+                eyebrow: "How it works",
+                title: "Learning from past sessions",
               },
               () =>
-                "Each command replaces a script agents keep rewriting.",
+                "jouet keeps the timings, failures and corrections from past sessions, and uses them to steer the next one.",
             ),
           ]),
         ]),
       ],
-      "home-features-after": () => h(HomeConventions),
+      "home-features-after": () => [h(HomeBeforeAfter), h(HomeConventions)],
       "layout-bottom": () => [h(EndevSponsors), h(EndevFooter)],
     });
   },

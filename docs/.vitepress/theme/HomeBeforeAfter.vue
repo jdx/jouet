@@ -159,8 +159,12 @@ function select(index: number, focus = false) {
         eyebrow="Before and after"
         title="The chore, minus the script"
       >
-        Agents write these scripts by hand in session after session. They look
-        right and usually work, which is why the failures are easy to miss.
+        jouet also has commands for the chores agents keep scripting by hand: a
+        <a href="/commands/graph">code graph</a>,
+        <a href="/commands/search">searches and reads</a> that stay within a
+        budget, <a href="/commands/test">only the tests a change affects</a>,
+        edits that check before they write, and waits that poll for you. A few
+        of them, next to the script they replace:
       </HomeHeading>
 
       <div class="tabs" role="tablist" aria-label="Examples">
@@ -390,6 +394,11 @@ function select(index: number, focus = false) {
 </template>
 
 <style scoped>
+a {
+  color: var(--vp-c-brand-1);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .tabs {
   display: flex;
   flex-wrap: wrap;

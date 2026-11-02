@@ -33,6 +33,12 @@ async function copyCommand() {
       >
     </p>
     <p class="copy-status" role="status">{{ status }}</p>
+    <p class="early-note">
+      <strong>Early development.</strong> How much jouet helps depends on your
+      project, and yours may need some configuration, or a fix in jouet, before
+      it does. Commands and output may change incompatibly until 1.0.
+      <a href="/why#early-development">What to expect →</a>
+    </p>
   </section>
 </template>
 
@@ -100,6 +106,15 @@ a:hover {
   color: var(--vp-c-brand-1);
   font-size: 12px;
   min-height: 20px;
+  text-align: left;
+}
+.early-note {
+  border-left: 2px solid var(--jouet-brass);
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 8px;
+  padding-left: 12px;
   text-align: left;
 }
 @media (max-width: 959px) {
