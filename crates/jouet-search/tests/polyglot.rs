@@ -512,3 +512,38 @@ fn a_structural_search_groups_and_budgets_like_a_text_one() {
         "{text}"
     );
 }
+
+#[test]
+fn a_typescript_outline_has_its_top_level_values_and_type_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("checks.ts");
+    let source = b"export interface $ZodCheck {\n  n: number;\n}\nexport const $ZodCheck = core.$constructor(\"$ZodCheck\", (inst) => {\n  inst.n = 1;\n});\nexport const add = (a: number) => a + 1;\nexport type Formats = \"int32\" | \"safeint\";\nenum Mode {\n  A,\n}\nfunction f() {\n  const inner = 1;\n  return inner;\n}\n";
+    std::fs::write(&path, source).unwrap();
+    let found = symbols::outline(&path, source).unwrap();
+    let defs: Vec<(String, String, u32)> = found
+        .iter()
+        .map(|l| (l.def.kind.clone(), l.def.name.clone(), l.def.line))
+        .collect();
+    let def = |kind: &str, name: &str, line: u32| (kind.to_string(), name.to_string(), line);
+    assert_eq!(
+        defs,
+        [
+            def("interface", "$ZodCheck", 1),
+            def("constant", "$ZodCheck", 4),
+            def("function", "add", 7),
+            def("type", "Formats", 8),
+            def("type", "Mode", 9),
+            def("function", "f", 12),
+        ]
+    );
+    // Both definitions of a name a type and a value share.
+    let both = symbols::select(
+        &path,
+        source,
+        &symbols::Selector::parse("$ZodCheck").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(both.len(), 2);
+    let text = std::str::from_utf8(&source[both[1].start_byte..both[1].end_byte]).unwrap();
+    assert!(text.ends_with("inst.n = 1;\n})"), "{text}");
+}

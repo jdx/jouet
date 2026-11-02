@@ -286,11 +286,28 @@ mod imp {
         })
     }
 
+    /// Definitions the upstream JavaScript tags miss: a module's top-level
+    /// `const`, `let` and `var` whose value is not a function, such as
+    /// zod's `export const $ZodCheckNumberFormat = core.$constructor(...)`.
+    /// After the upstream patterns, so a function value stays a function.
+    const JS_EXTRA: &str = r"
+(program (lexical_declaration (variable_declarator name: (identifier) @name) @definition.constant))
+(program (variable_declaration (variable_declarator name: (identifier) @name) @definition.constant))
+(program (export_statement declaration: (lexical_declaration (variable_declarator name: (identifier) @name) @definition.constant)))
+(program (export_statement declaration: (variable_declaration (variable_declarator name: (identifier) @name) @definition.constant)))
+";
+
+    /// TypeScript's type aliases and enums, which its upstream tags miss.
+    const TS_EXTRA: &str = r"
+(type_alias_declaration name: (type_identifier) @name) @definition.type
+(enum_declaration name: (identifier) @name) @definition.type
+";
+
     /// A language's grammar, tags query and locals query.
     fn source(lang: Lang) -> (tree_sitter::Language, String) {
         let typescript = || {
             format!(
-                "{}\n{}",
+                "{}\n{}\n{JS_EXTRA}\n{TS_EXTRA}",
                 tree_sitter_javascript::TAGS_QUERY,
                 tree_sitter_typescript::TAGS_QUERY
             )
@@ -314,7 +331,7 @@ mod imp {
             ),
             Lang::JavaScript => (
                 tree_sitter_javascript::LANGUAGE.into(),
-                tree_sitter_javascript::TAGS_QUERY.to_string(),
+                format!("{}\n{JS_EXTRA}", tree_sitter_javascript::TAGS_QUERY),
             ),
             Lang::Python => (
                 tree_sitter_python::LANGUAGE.into(),
@@ -382,6 +399,8 @@ mod imp {
             tree_sitter_ruby::TAGS_QUERY,
             tree_sitter_rust::TAGS_QUERY,
             tree_sitter_typescript::TAGS_QUERY,
+            JS_EXTRA,
+            TS_EXTRA,
         ]
     }
 
