@@ -48,13 +48,16 @@ class InitTest(unittest.TestCase):
             before = set(init.untracked(work))
             (work / ".jouet").mkdir()
             (work / ".jouet" / "test.toml").write_text("[test]\n")
+            # Even committed by the skill, the task's file stays out.
             init.git(work, "add", "-A")
-            init.git(work, "reset", "-q", "--", *sorted(before))
+            init.git(work, "commit", "-q", "-m", "skill")
+            paths = ["--", ".", *(f":(exclude,literal){p}" for p in sorted(before))]
             patch = Path(d) / "init.patch"
-            patch.write_text(init.git(work, "diff", "--cached", "--binary", "HEAD"))
+            patch.write_text(init.git(work, "diff", "--cached", "--binary", "HEAD~1", *paths))
             self.assertNotIn("notes.md", patch.read_text())
-            # A fresh tree with that file applies it cleanly.
-            init.git(work, "reset", "-q", "--hard")
+            # A fresh tree, with that file untracked again, applies it cleanly.
+            init.git(work, "reset", "-q", "--hard", "HEAD~1")
+            (work / "notes.md").write_text("theirs\n")
             self.assertIsNotNone(init.apply(work, patch))
             self.assertEqual((work / "notes.md").read_text(), "theirs\n")
 

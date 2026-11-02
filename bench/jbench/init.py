@@ -118,10 +118,10 @@ def prepared(
         )
     # Everything it left, committed or not, against where it started.
     git(workdir, "add", "-A")
-    if before:
-        git(workdir, "reset", "-q", "--", *sorted(before))
-    diff = git(workdir, "diff", "--cached", "--binary", fresh["head_sha"])
-    files = [f for f in git(workdir, "diff", "--cached", "--name-only", fresh["head_sha"]).splitlines() if f]
+    # Left out by path, so they stay out even if the skill committed them.
+    paths = ["--", ".", *(f":(exclude,literal){p}" for p in sorted(before))]
+    diff = git(workdir, "diff", "--cached", "--binary", fresh["head_sha"], *paths)
+    files = [f for f in git(workdir, "diff", "--cached", "--name-only", fresh["head_sha"], *paths).splitlines() if f]
     directory.mkdir(parents=True, exist_ok=True)
     patch.write_text(diff)
     meta = {
