@@ -219,7 +219,9 @@ class ImportTest(unittest.TestCase):
     def test_check_fails_unsolved_and_passes_solved(self):
         work = self.tmp / "work"
         git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
-        env = {**GIT_ENV, "BENCH_HEAD_SHA": self.base}
+        # The fix keeps calc.py's size, so within one second a cached .pyc
+        # of the unsolved file would still be used.
+        env = {**GIT_ENV, "BENCH_HEAD_SHA": self.base, "PYTHONDONTWRITEBYTECODE": "1"}
 
         def run(script):
             return subprocess.run([sys.executable, "-I", str(self.task / script)], cwd=work, env=env,
