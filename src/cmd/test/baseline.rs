@@ -284,7 +284,15 @@ pub(super) fn compare(
     for (i, (job, now, ran)) in failed.iter().enumerate() {
         let key = command_key(job, root);
         let kept = if setup.is_empty() {
-            known::lookup(root, &base.merge_base, &key)
+            known::lookup(root, &base.merge_base, &key).filter(|outcome| {
+                !matches!(
+                    outcome,
+                    known::Outcome::Failed {
+                        non_failed: None,
+                        ..
+                    }
+                )
+            })
         } else {
             None
         };
@@ -332,6 +340,7 @@ pub(super) fn compare(
                             known::Outcome::Failed {
                                 names: names.into_iter().collect(),
                                 ran: d.passed + d.failed + d.skipped,
+                                non_failed: Some(d.passed + d.skipped),
                             }
                         }
                         None => known::Outcome::Unnamed {
@@ -365,7 +374,22 @@ pub(super) fn compare(
                     unverifiable: true,
                 });
             }
-            known::Outcome::Failed { names, ran } => (names.into_iter().collect(), ran),
+            known::Outcome::Failed {
+                names,
+                ran,
+                non_failed,
+            } => {
+                // A broken checkout can make every test fail in setup.
+                // Matching names in that run do not establish that the
+                // current failures existed.
+                if ran > 1 && non_failed == Some(0) {
+                    return Err(NotCompared::from(format!(
+                        "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                        base.name
+                    )));
+                }
+                (names.into_iter().collect(), ran)
+            }
             known::Outcome::Unnamed { exit, log } => {
                 let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
                 return Err(NotCompared {
@@ -377,14 +401,6 @@ pub(super) fn compare(
                 });
             }
         };
-        // A broken checkout can make every test fail in setup. Matching names
-        // in that run do not establish that the current failures existed.
-        if reached > 1 && u64::try_from(at_base.len()).unwrap_or(u64::MAX) >= reached {
-            return Err(NotCompared::from(format!(
-                "all {reached} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
-                base.name
-            )));
-        }
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;

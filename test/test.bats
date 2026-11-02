@@ -746,6 +746,40 @@ SH
 	assert_output --partial 'all 3 tests failed at'
 }
 
+@test "--baseline does not count Go subtest names as separate failed tests" {
+	export GO_RUNS_FILE="$BATS_TEST_TMPDIR/go-runs"
+	cat >check-command <<'SH'
+#!/bin/sh
+echo run >>"$GO_RUNS_FILE"
+printf '%s\n' \
+  '--- PASS: TestOK (0.00s)' \
+  '--- FAIL: TestTable (0.00s)' \
+  '    --- FAIL: TestTable/one (0.00s)' \
+  '    --- FAIL: TestTable/two (0.00s)' \
+  'FAIL'
+exit 1
+SH
+	chmod +x check-command
+	git add check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >change
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_output --partial 'TestTable/one'
+	assert_output --partial 'TestTable/two'
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 2
+
+	# A result kept by an older version lacks the passing/skip count. It
+	# must be rerun rather than assumed to contain only failing tests.
+	local known=("$XDG_STATE_HOME"/jouet/known/*.json)
+	jq '(.entries[] | select(.outcome == "failed")) |= del(.non_failed)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
+	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 4
+}
+
 @test "--baseline passes a run whose every failure also fails at the merge base" {
 	# The test file is rewritten within a second to the same size, which
 	# Python's bytecode cache cannot tell from the old one.
