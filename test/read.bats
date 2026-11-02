@@ -108,9 +108,10 @@ RS
 	run --separate-stderr jouet read src/lib.rs --range 16:18 --again
 	assert_line --index 0 --regexp '^16	fn fetch'
 	# Sections of one call that overlap all print: none was shown before it.
-	run --separate-stderr jouet read src/lib.rs --range 1:9 --symbol Client::download
+	# Ranges go in the order given, so the second sits inside the first.
+	run --separate-stderr jouet read src/lib.rs --range 1:9 --range 6:9
 	refute_output --partial 'already shown'
-	assert_line 'src/lib.rs: method Client::download (6-9)'
+	assert_equal "$(grep -c '^6	' <<<"$output")" 2
 	# And the next call collapses them.
 	run --separate-stderr jouet read src/lib.rs --range 6:9
 	assert_output --partial 'already shown'
