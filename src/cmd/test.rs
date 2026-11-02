@@ -241,7 +241,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
-    let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
+    let mut failed: Vec<(&Job, Option<baseline::Evidence>, u64)> = Vec::new();
     // How long the slowest failed suite took, which decides whether a
     // `--cmd` run is cheap enough to run again at the merge base.
     let mut slowest_failure = 0;
@@ -307,7 +307,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((
                     job,
-                    baseline::failure_names(
+                    baseline::failure_evidence(
                         &output,
                         &formats,
                         &root,

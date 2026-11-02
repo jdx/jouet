@@ -196,12 +196,13 @@ $ jouet test --baseline
 unittest: failed (exit 1) in 0.1s: 1 failed, 1 passed
 FAIL test_env (test_a.T.test_env)
   …
-baseline: the failure also fails at main (302afa77cd40); matching names do not establish the same cause; counted as passing: test_env (test_a.T.test_env)
+baseline: the failure also fails at main (302afa77cd40) with matching failure details; counted as passing: test_env (test_a.T.test_env)
 ```
 
-When the run fails, jouet runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch, and compares the failures by name. `--since REF` names another branch or commit. An upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead. Any path into the checkout in the command is pointed at the worktree, and the worktree is removed afterwards.
+When the run fails, jouet runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch, and compares the names and captured failure details. `--since REF` names another branch or commit. An upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead. Any path into the checkout in the command is pointed at the worktree, and the worktree is removed afterwards.
 
-- If every failure also fails at the merge base, the run passes (exit `0`) and names them. The stop gate counts the coverage actually run; an affected run remains partial.
+- If every failure also fails at the merge base with matching, unambiguous details, the run passes (exit `0`) and names them. The stop gate counts the coverage actually run; an affected run remains partial.
+- Matching names with missing, ambiguous or different details remain unresolved (exit `1`).
 - A failure the merge base does not have still fails the run (exit `1`), and is listed as new.
 - When the run at the merge base fails without naming any failing test, as when a tool it needs is missing from that checkout, nothing is compared and the run still fails.
 - When a multi-test merge-base run reports only failures, with no passes or skips, the result is not compared: a setup problem may have prevented the tests from running. This also applies to a kept baseline.
@@ -210,7 +211,7 @@ When the run fails, jouet runs each failed suite again in a temporary worktree o
 
 The comparison needs a runner whose failures jouet recognises by name, and costs one more run of the failed suites. With `--affected --baseline`, jouet selects the tests once from the change, then replays those exact commands at the merge base; it does not select again there. For Vitest and Jest, the run names the selected files directly, so their Git- and module-graph-based selectors cannot choose different files at the merge base. It runs a fresh comparison rather than using a cached result. A missing test, missing dependencies in the isolated checkout, or an uncomparable result does not prove a failure was pre-existing and does not clear the run. A successful comparison clears the matching affected failure at the same work tree; it does not clear a full-suite failure or an affected failure recorded at a different tree.
 
-The comparison uses failure names, not failure details. A matching name can fail for a different reason at the merge base, so review the logs before treating a match as proof that a failure is unrelated to the change.
+The comparison uses full captured failure blocks, not the shortened display, and normalizes checkout paths and Rust thread IDs. Other variable output can prevent a match. Identical output is evidence, not proof that the underlying cause is the same; inspect the logs when that distinction matters. Name-only cached failures from older versions are not reused.
 
 For a project whose tests need dependencies installed in each checkout, configure an optional setup command in `.jouet/test.toml`:
 

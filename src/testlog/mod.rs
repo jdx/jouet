@@ -316,6 +316,22 @@ fn parse(lines: &[String], formats: &[Format]) -> Parsed {
     parsed
 }
 
+/// Unshortened failure blocks for baseline comparison. Summary lines alone
+/// do not contain enough evidence about a failure's cause.
+pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<Failure> {
+    let lines = clean(text);
+    parse(&lines, formats)
+        .found
+        .into_iter()
+        .filter(|f| !PYTEST_SHORT.is_match(&lines[f.at]))
+        .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
+        .map(|f| Failure {
+            name: f.name,
+            lines: f.lines,
+        })
+        .collect()
+}
+
 /// [`digest_with`] jouet's own formats alone.
 #[cfg(test)]
 pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {

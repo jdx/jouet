@@ -7,9 +7,15 @@ use crate::testlog::{self, Format};
 use crate::{affected, known};
 use jouet_output::exit::Exit;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::LazyLock;
+
+static RUST_THREAD_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
+});
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -57,7 +63,7 @@ impl Baseline {
                 n => format!("all {n} failures also fail"),
             };
             format!(
-                "baseline: {all} at {at}; matching names do not establish the same cause; counted as passing: {}\n",
+                "baseline: {all} at {at} with matching failure details; counted as passing: {}\n",
                 list(&self.pre_existing)
             )
         } else {
@@ -69,7 +75,7 @@ impl Baseline {
                     (n, total) => format!("{n} of {total} failures"),
                 };
                 format!(
-                    "baseline: the run at {at} ran far fewer tests, so {which} could not be compared: {}\n",
+                    "baseline: {which} could not be compared at {at} because failure details were missing, different, ambiguous, or the run reached fewer tests: {}\n",
                     list(&self.unknown)
                 )
             } else {
@@ -85,7 +91,7 @@ impl Baseline {
                 );
                 if !self.unknown.is_empty() {
                     text.push_str(&format!(
-                        "  not reached at {at}, which ran far fewer tests: {}\n",
+                        "  could not compare details or confirm the test was reached at {at}: {}\n",
                         list(&self.unknown)
                     ));
                 }
@@ -149,6 +155,57 @@ pub(super) fn failure_names(
         }
     }
     Some(names)
+}
+
+/// Names and fingerprints of unambiguous, unshortened failure blocks.
+pub(super) struct Evidence {
+    names: BTreeSet<String>,
+    details: BTreeMap<String, String>,
+}
+
+pub(super) fn failure_evidence(
+    output: &str,
+    formats: &[Format],
+    root: &Path,
+    scoped: bool,
+) -> Option<Evidence> {
+    let names = failure_names(output, formats, root, scoped)?;
+    let found = testlog::failure_details(output, formats);
+    let mut details = BTreeMap::new();
+    if !testlog::ambiguous_libtest(output) {
+        for name in &names {
+            let candidates: Vec<_> = found
+                .iter()
+                .filter(|f| {
+                    let candidate = from_root(&f.name, root);
+                    *name == candidate || name.ends_with(&format!("::{candidate}"))
+                })
+                .collect();
+            if let [failure] = candidates.as_slice() {
+                let lines: Vec<_> = failure
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        let line = from_root(line, root);
+                        RUST_THREAD_ID.replace(&line, "$1$2").into_owned()
+                    })
+                    .collect();
+                let mut hash = Sha256::new();
+                for line in lines {
+                    hash.update((line.len() as u64).to_be_bytes());
+                    hash.update(line.as_bytes());
+                }
+                details.insert(
+                    name.clone(),
+                    hash.finalize()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                );
+            }
+        }
+    }
+    Some(Evidence { names, details })
 }
 
 /// The merge base of HEAD with `since` (the upstream or default branch when
@@ -265,7 +322,7 @@ pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
-    failed: &[(&Job, Option<BTreeSet<String>>, u64)],
+    failed: &[(&Job, Option<Evidence>, u64)],
     mode: Mode,
 ) -> Result<Option<Baseline>, NotCompared> {
     let setup = affected::project_config::baseline_setup(root).map_err(|e| {
@@ -290,7 +347,7 @@ pub(super) fn compare(
                     known::Outcome::Failed {
                         non_failed: None,
                         ..
-                    }
+                    } | known::Outcome::Failed { details: None, .. }
                 )
             })
         } else {
@@ -346,13 +403,14 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    match failure_names(&output, formats, &tree, mode == Mode::Fresh) {
-                        Some(names) => {
+                    match failure_evidence(&output, formats, &tree, mode == Mode::Fresh) {
+                        Some(evidence) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
                             known::Outcome::Failed {
-                                names: names.into_iter().collect(),
+                                names: evidence.names.into_iter().collect(),
                                 ran: d.passed + d.failed + d.skipped,
                                 non_failed: Some(d.passed + d.skipped),
+                                details: Some(evidence.details),
                             }
                         }
                         None => known::Outcome::Unnamed {
@@ -369,56 +427,67 @@ pub(super) fn compare(
             (Some(outcome), _) => outcome,
             (None, Mode::Kept) => return Ok(None),
         };
-        let (at_base, reached): (BTreeSet<String>, u64) = match outcome {
-            known::Outcome::Passed if now.is_none() => {
-                return Err(NotCompared::from(format!(
-                    "the command passed at {}, but the current failure could not be named; it remains unresolved",
-                    base.name
-                )));
-            }
-            known::Outcome::Passed => (BTreeSet::new(), u64::MAX),
-            known::Outcome::Failed { .. } if now.is_none() => {
-                return Err(NotCompared {
-                    message: format!(
-                        "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it is not known whether they are the same and the failure remains unresolved",
-                        base.name
-                    ),
-                    unverifiable: true,
-                });
-            }
-            known::Outcome::Failed {
-                names,
-                ran,
-                non_failed,
-            } => {
-                // A broken checkout can make every test fail in setup.
-                // Matching names in that run do not establish that the
-                // current failures existed.
-                if ran > 1 && non_failed == Some(0) {
+        let (at_base, base_details, reached): (BTreeSet<String>, BTreeMap<String, String>, u64) =
+            match outcome {
+                known::Outcome::Passed if now.is_none() => {
                     return Err(NotCompared::from(format!(
-                        "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                        "the command passed at {}, but the current failure could not be named; it remains unresolved",
                         base.name
                     )));
                 }
-                (names.into_iter().collect(), ran)
-            }
-            known::Outcome::Unnamed { exit, log } => {
-                let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
-                return Err(NotCompared {
-                    message: format!(
-                        "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
-                        base.name
-                    ),
-                    unverifiable: true,
-                });
-            }
-        };
+                known::Outcome::Passed => (BTreeSet::new(), BTreeMap::new(), u64::MAX),
+                known::Outcome::Failed { .. } if now.is_none() => {
+                    return Err(NotCompared {
+                        message: format!(
+                            "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it is not known whether they are the same and the failure remains unresolved",
+                            base.name
+                        ),
+                        unverifiable: true,
+                    });
+                }
+                known::Outcome::Failed {
+                    names,
+                    ran,
+                    non_failed,
+                    details,
+                } => {
+                    // A broken checkout can make every test fail in setup.
+                    // Matching names in that run do not establish that the
+                    // current failures existed.
+                    if ran > 1 && non_failed == Some(0) {
+                        return Err(NotCompared::from(format!(
+                            "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                            base.name
+                        )));
+                    }
+                    (
+                        names.into_iter().collect(),
+                        details.unwrap_or_default(),
+                        ran,
+                    )
+                }
+                known::Outcome::Unnamed { exit, log } => {
+                    let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
+                    return Err(NotCompared {
+                        message: format!(
+                            "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
+                            base.name
+                        ),
+                        unverifiable: true,
+                    });
+                }
+            };
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;
-        for name in now.iter().flatten() {
+        for name in now.iter().flat_map(|e| &e.names) {
             if at_base.contains(name) {
-                pre_existing.insert(name.clone());
+                let current = now.as_ref().and_then(|e| e.details.get(name));
+                if current.is_some() && current == base_details.get(name) {
+                    pre_existing.insert(name.clone());
+                } else {
+                    unknown.insert(name.clone());
+                }
             } else if short {
                 unknown.insert(name.clone());
             } else {
@@ -441,7 +510,13 @@ pub(super) fn compare(
 fn from_root(name: &str, checkout: &Path) -> String {
     let mut name = name.to_string();
     let canonical = checkout.canonicalize().ok();
-    for dir in std::iter::once(checkout).chain(canonical.as_deref()) {
+    // Prefer the canonical spelling: on macOS `/var/...` occurs inside
+    // `/private/var/...`, so replacing the shorter prefix first corrupts it.
+    for dir in canonical
+        .as_deref()
+        .into_iter()
+        .chain(std::iter::once(checkout))
+    {
         let prefix = format!("{}/", dir.display());
         name = name.replace(&prefix, "");
     }
@@ -533,6 +608,42 @@ mod tests {
             failure_names("something broke\n", &[], Path::new("/x"), false),
             None
         );
+    }
+
+    #[test]
+    fn failure_evidence_compares_full_details_and_normalizes_checkout_paths() {
+        let evidence = |root: &str, detail: &str| {
+            let output = format!(
+                "test parse_input ... FAILED\n---- parse_input stdout ----\nthread 'parse_input' (1234) panicked at {root}/src/a.rs:2:\n{detail}\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n"
+            );
+            failure_evidence(&output, &[], Path::new(root), false).unwrap()
+        };
+        let here = evidence("/src/app", "assertion left: 2 right: 3");
+        let same = evidence("/tmp/base/tree", "assertion left: 2 right: 3");
+        let different = evidence("/tmp/base/tree", "ModuleNotFoundError: dependency");
+        assert_eq!(here.details, same.details);
+        assert!(!here.details.is_empty());
+        assert_ne!(here.details, different.details);
+
+        // Differences beyond the displayed excerpt still change the fingerprint.
+        let long = |last: &str| format!("{}\n{last}", "line\n".repeat(100));
+        assert_ne!(
+            evidence("/src/app", &long("first")).details,
+            evidence("/src/app", &long("second")).details
+        );
+    }
+
+    #[test]
+    fn name_only_and_ambiguous_failures_have_no_details() {
+        let names_only =
+            "test parse_input ... FAILED\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+        let evidence = failure_evidence(names_only, &[], Path::new("/x"), false).unwrap();
+        assert!(!evidence.names.is_empty());
+        assert!(evidence.details.is_empty());
+
+        let repeated = "test same ... FAILED\n---- same stdout ----\nfirst cause\n---- same stdout ----\nsecond cause\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+        let evidence = failure_evidence(repeated, &[], Path::new("/x"), false).unwrap();
+        assert!(evidence.details.is_empty());
     }
 
     #[test]
