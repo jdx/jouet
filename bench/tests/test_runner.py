@@ -56,14 +56,23 @@ class PlanTest(unittest.TestCase):
             xdg = Path(d) / "xdg"
             (xdg / "git").mkdir(parents=True)
             (xdg / "git" / "ignore").write_text("agent.txt\n")
-            hostile = {"GIT_CONFIG_GLOBAL": str(config), "XDG_CONFIG_HOME": str(xdg),
-                       "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
-                       "GIT_CONFIG_VALUE_0": str(excludes)}
-            with patch.dict(os.environ, hostile):
-                before = runner.worktree_snapshot(root)
-                (root / "agent.txt").write_text("new\n")
-                after = runner.worktree_snapshot(root)
-                self.assertEqual(runner.changed_paths(root, before, after), ["agent.txt"])
+            empty_xdg = Path(d) / "empty-xdg"
+            empty_xdg.mkdir()
+            common = {"GIT_CONFIG_GLOBAL": os.devnull, "XDG_CONFIG_HOME": str(empty_xdg),
+                      "GIT_CONFIG_COUNT": "0"}
+            cases = [
+                {"GIT_CONFIG_GLOBAL": str(config)},
+                {"XDG_CONFIG_HOME": str(xdg)},
+                {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+                 "GIT_CONFIG_VALUE_0": str(excludes)},
+            ]
+            for hostile in cases:
+                with self.subTest(hostile=hostile), patch.dict(os.environ, common | hostile):
+                    before = runner.worktree_snapshot(root)
+                    (root / "agent.txt").write_text("new\n")
+                    after = runner.worktree_snapshot(root)
+                    self.assertEqual(runner.changed_paths(root, before, after), ["agent.txt"])
+                    (root / "agent.txt").unlink()
 
     def test_change_evidence_compares_worktrees_without_touching_the_index(self):
         with tempfile.TemporaryDirectory() as d:
