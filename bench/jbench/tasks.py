@@ -29,10 +29,15 @@ A task on a real project also sets, in `task.toml`:
   base commit as `main`, which `main` tracks: an agent that commits on
   `main` still has a branch to measure its change from, as in a clone;
 - `check_timeout_s`, for a check that builds the project;
-- `[tools]`: programs linked into the agent's `bin/` (name = path), and
+- `[tools]`: programs linked into the agent's `bin/` (name = path, or a bare
+  program name, found on the host's `PATH` as the default tools are), and
   `[env]`: variables set for the agent, such as a toolchain's home. A leading
   `~/` is the user's home, and `{workdir}` is the work tree;
-- `path`: directories appended to the agent's `PATH`, after the tools.
+- `path`: directories appended to the agent's `PATH`, after the tools;
+- `setup`: commands run in the work tree, with the host's environment (and
+  `~/` and `{workdir}` expanded in their arguments), after
+  it is committed and before the agent's clock starts, such as an offline
+  `npm ci` from the user's cache. What they write must be ignored by git.
 
 Commits use a fixed author and date, so a task's SHAs are the same in every
 run and on every machine.
@@ -43,6 +48,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tomllib
@@ -90,6 +96,7 @@ class Task:
     tools: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     path: list[str] = field(default_factory=list)
+    setup: list[str] = field(default_factory=list)
     # Commands timed once for the cost note runs start with (see costs.py).
     cost_seed: list[str] = field(default_factory=list)
     # A fully pinned pip requirements file, relative to the task directory.
@@ -97,9 +104,18 @@ class Task:
 
     def agent_env(self, env: dict[str, str], bin_dir: Path, workdir: Path) -> None:
         """Adds the task's tools, variables and PATH entries to a run's environment."""
+        from .arms import resolve
+
         for name, target in self.tools.items():
             link = bin_dir / name
-            if not link.exists():
+            if link.exists():
+                continue
+            if "/" not in target:
+                found = resolve(target)
+                if found is None:
+                    raise RuntimeError(f"task {self.name} needs {target}, which is not on PATH")
+                link.symlink_to(found)
+            else:
                 link.symlink_to(expand(target, workdir))
         env.update({k: expand(v, workdir) for k, v in self.env.items()})
         if self.path:
@@ -146,6 +162,7 @@ def load(name: str) -> Task:
         tools=dict(raw.get("tools", {})),
         env=dict(raw.get("env", {})),
         path=list(raw.get("path", [])),
+        setup=list(raw.get("setup", [])),
         cost_seed=list(raw.get("cost", {}).get("seed", [])),
         python_requirements=raw.get("python_requirements"),
     )
@@ -235,6 +252,7 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     # them at the recorded revisions so an agent can run the project's tests.
     if task.source and (workdir / ".gitmodules").exists():
         git(workdir, "submodule", "update", "--init", "--recursive")
+    run_setup(task, workdir)
     base = git(workdir, "rev-parse", "HEAD")
     if task.branch:
         git(workdir, "checkout", "-q", "-b", task.branch)
@@ -267,6 +285,24 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     return {"base_sha": base, "head_sha": head}
+
+
+def run_setup(task: Task, workdir: Path) -> None:
+    """Runs the task's `setup` commands, such as installing a project's
+    dependencies offline, and refuses one that leaves the tree dirty."""
+    for command in task.setup:
+        proc = subprocess.run(
+            [expand(arg, workdir) for arg in shlex.split(command)],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            output = (proc.stdout + proc.stderr)[-3000:]
+            raise RuntimeError(f"task {task.name}: setup `{command}` exited {proc.returncode}:\n{output}")
+    if dirty := git(workdir, "status", "--porcelain", "--ignored=no"):
+        raise RuntimeError(f"task {task.name}: setup left files git does not ignore:\n{dirty}")
 
 
 def copy_source(source: dict[str, str], workdir: Path) -> None:
