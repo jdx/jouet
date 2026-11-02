@@ -209,8 +209,8 @@ fn render_explain(r: &explain::Report) -> String {
     let rerun = &r.rerun;
     if rerun.started {
         let _ = writeln!(s, "rerun: started for {}", short_list(&rerun.jobs));
-        for run in r.runs.iter().filter(|run| !run.jobs.is_empty()) {
-            let _ = writeln!(s, "  jouet wait run {} --repo {}", run.run_id, r.repo);
+        for id in &rerun.runs {
+            let _ = writeln!(s, "  jouet wait run {id} --repo {}", r.repo);
         }
     } else if let Some(command) = rerun.command.as_deref().filter(|_| rerun.allowed) {
         let _ = writeln!(s, "rerun: allowed, {}: {command}", rerun.reason);

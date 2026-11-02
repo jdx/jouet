@@ -170,6 +170,9 @@ pub(crate) struct Rerun {
     pub(crate) command: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) jobs: Vec<String>,
+    /// The runs a started rerun reran, to wait for.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) runs: Vec<u64>,
     /// The rerun was started.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) started: bool,
@@ -455,11 +458,13 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
                 None => format!("/actions/runs/{}/rerun-failed-jobs", run.id),
             };
             gh.rerun(&path, run.id).map_err(remote)?;
+            rerun.runs.push(run.id);
         }
         if only_job.is_none() {
             for id in &cancelled {
                 gh.rerun(&format!("/actions/runs/{id}/rerun"), *id)
                     .map_err(remote)?;
+                rerun.runs.push(*id);
             }
         }
         rerun.started = true;
@@ -1207,6 +1212,7 @@ fn rerun_plan(
         reason,
         command: None,
         jobs: Vec::new(),
+        runs: Vec::new(),
         started: false,
     };
     let command = |flags: &str| {
@@ -1221,7 +1227,13 @@ fn rerun_plan(
             allowed: true,
             reason: "the run was cancelled before anything failed, so a rerun runs it".into(),
             command: Some(command("")),
-            jobs: Vec::new(),
+            // The run itself, since it has no failed job to name.
+            jobs: reports
+                .iter()
+                .filter(|r| r.jobs.is_empty())
+                .map(|r| format!("{} (run {}, cancelled)", r.workflow, r.run_id))
+                .collect(),
+            runs: Vec::new(),
             started: false,
         };
     }
@@ -1275,6 +1287,7 @@ fn rerun_plan(
         },
         command: Some(command(if blocking.is_empty() { "" } else { " --force" })),
         jobs: failed.iter().map(|j| j.name.clone()).collect(),
+        runs: Vec::new(),
         started: false,
     }
 }
@@ -1333,6 +1346,7 @@ mod tests {
         // Cancelled before anything failed: nothing to judge.
         let plan = rerun_plan(&[report(Vec::new())], "--run 7", false, true, false);
         assert!(plan.allowed, "{}", plan.reason);
+        assert_eq!(plan.jobs, ["release (run 7, cancelled)"]);
         assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, false, false).allowed);
         let job = || JobReport {
             name: "Release".into(),

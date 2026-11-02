@@ -797,6 +797,31 @@ impl Checks {
     /// Whether the files at `now` are those at `ran`, or what formatting or
     /// a commit's hooks made of them since. An unknown tree is never the
     /// same.
+    /// Whether `now` is `ran`, or a formatting of it, but for prose: as
+    /// [`Self::same_files`], comparing the trees' code parts.
+    fn same_code(&self, ran: Option<&str>, now: Option<&str>) -> bool {
+        use jouet_rules::tree::code_part;
+        let (Some(ran), Some(mut at)) = (ran, now) else {
+            return false;
+        };
+        for _ in 0..=self.formatted.len() {
+            if code_part(at) == code_part(ran) {
+                return true;
+            }
+            // A formatting from a tree with the same code, prose aside.
+            match self
+                .formatted
+                .iter()
+                .rev()
+                .find(|(_, to)| code_part(to) == code_part(at))
+            {
+                Some((from, _)) => at = from,
+                None => return false,
+            }
+        }
+        false
+    }
+
     fn same_files(&self, ran: Option<&str>, now: Option<&str>) -> bool {
         let (Some(ran), Some(mut at)) = (ran, now) else {
             return false;
@@ -975,15 +1000,11 @@ impl Checks {
         }
         let now = tree()?;
         // A change to prose alone (docs, a changelog) is one no test run
-        // needs to follow.
-        let code = jouet_rules::tree::code_part(&now);
+        // needs to follow, formatting after the pass included.
         let passed_now = self.passes.get(&Kind::Test).is_some_and(|passes| {
-            passes.iter().any(|p| {
-                self.same_files(p.tree.as_deref(), Some(now.as_str()))
-                    || p.tree
-                        .as_deref()
-                        .is_some_and(|t| jouet_rules::tree::code_part(t) == code)
-            })
+            passes
+                .iter()
+                .any(|p| self.same_code(p.tree.as_deref(), Some(now.as_str())))
         });
         if passed_now {
             return None;
@@ -1750,6 +1771,9 @@ mod tests {
         docs.record([test("cargo test -p a", 0, "-p a")], Some("all1.code1"));
         assert_eq!(reason(&docs, "all2.code1"), None);
         assert!(reason(&docs, "all3.code2").is_some());
+        // Prose changed after a formatter rewrote the tested code.
+        docs.reformatted("all1.code1", "all4.code4");
+        assert_eq!(reason(&docs, "all5.code4"), None);
         // An unknown tree (a Codex session) cannot be compared.
         assert_eq!(state.block_reason(|| None, false), None);
         // A partial lint or build run is not asked about.

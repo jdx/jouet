@@ -215,17 +215,36 @@ pub fn code_part(tree: &str) -> &str {
 
 /// Whether `path` is prose that a test rarely reads: Markdown,
 /// reStructuredText, AsciiDoc or plain text, or a licence, changelog,
-/// notice or authors file.
+/// notice or authors file with no other extension (`LICENSE`,
+/// `LICENSE-MIT`, `NOTICE`), never source that only starts with one of
+/// those names (`license.rs`).
 fn prose(path: &str) -> bool {
+    const TEXT: [&str; 6] = ["md", "mdx", "markdown", "rst", "adoc", "txt"];
     let name = path.rsplit('/').next().unwrap_or(path);
     let lower = name.to_ascii_lowercase();
-    let extension = lower.rsplit_once('.').map(|(_, e)| e);
-    matches!(
-        extension,
-        Some("md" | "mdx" | "markdown" | "rst" | "adoc" | "txt")
-    ) || ["license", "licence", "changelog", "notice", "authors"]
+    let (stem, extension) = match lower.rsplit_once('.') {
+        Some((stem, extension)) => (stem, Some(extension)),
+        None => (lower.as_str(), None),
+    };
+    if extension.is_some_and(|e| TEXT.contains(&e)) {
+        return true;
+    }
+    extension.is_none()
+        && [
+            "license",
+            "licence",
+            "changelog",
+            "notice",
+            "authors",
+            "copying",
+        ]
         .iter()
-        .any(|p| lower.starts_with(p))
+        .any(|n| {
+            stem == *n
+                || stem
+                    .strip_prefix(n)
+                    .is_some_and(|rest| rest.starts_with('-'))
+        })
 }
 
 #[cfg(test)]
@@ -275,6 +294,25 @@ mod tests {
         assert_ne!(code_part(&docs), code_part(&code));
         // A tree from before the code part had one is its own.
         assert_eq!(code_part("abc"), "abc");
+        for path in [
+            "LICENSE",
+            "LICENSE-MIT",
+            "docs/a.md",
+            "NOTICE",
+            "notes.txt",
+            "CHANGELOG.md",
+        ] {
+            assert!(prose(path), "{path}");
+        }
+        for path in [
+            "src/license.rs",
+            "licenses.py",
+            "notice_handler.go",
+            "authors/mod.rs",
+            "Makefile",
+        ] {
+            assert!(!prose(path), "{path}");
+        }
     }
 
     #[test]
