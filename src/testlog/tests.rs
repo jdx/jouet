@@ -649,6 +649,14 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     ] {
         assert!(usage_error(line, &[]).is_some(), "{line}");
     }
+    // A compiler's own argument warning is no refusal of the run.
+    assert_eq!(
+        usage_error(
+            "clang: error: argument unused during compilation: '-pthread'\n",
+            &[]
+        ),
+        None
+    );
     // A run with tests is judged by them, whatever else it printed.
     assert_eq!(
         usage_error(
