@@ -782,6 +782,10 @@ class TasksTest(unittest.TestCase):
                     self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_spelling / "results")]), 2)
                 with patch.dict(os.environ, {"XDG_CACHE_HOME": str(runner.REPO_ROOT / "cache")}):
                     self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 2)
+                with patch.dict(os.environ, {"JOUET_BENCH_TASKS": str(directory)}):
+                    self.assertEqual(agents.main(["run"]), 2)
+                    self.assertEqual(agents.main(["run", "--out", str(other_checkout / "results")]), 2)
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--tasks-dir", str(other_checkout), "--out", str(directory / "results")]), 2)
                 with patch.object(agents.tempfile, "gettempdir", return_value=str(other_checkout)):
                     self.assertEqual(agents.main(["check-tasks", "--tasks-dir", str(directory)]), 2)
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
