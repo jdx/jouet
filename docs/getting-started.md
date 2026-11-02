@@ -18,11 +18,7 @@ How much jouet helps depends on your language, test runner and agent, and your s
 mise use -g jouet
 ```
 
-The short name needs mise 2026.10.25 or later. With an older mise, name the repository instead:
-
-```sh
-mise use -g github:jdx/jouet
-```
+mise installs jouet from its signed [packslip](https://packslip.dev) release, checking its signature and digests first.
 
 ### With cargo
 
@@ -149,7 +145,7 @@ jouet notices when an agent runs it and switches to compact output by itself; se
 
 ## Shell completions
 
-With `mise use -g jouet` and [mise activated](https://mise.jdx.dev/shell-setup.html), there is nothing to do: mise installs jouet from its signed packslip, loads its completions in bash, zsh, fish and PowerShell, and makes `man jouet` open the active version's page. An install through `github:jdx/jouet` or cargo does not get them.
+With `mise use -g jouet` and [mise activated](https://mise.jdx.dev/shell-setup.html), there is nothing to do: mise installs jouet from its signed packslip, loads its completions in bash, zsh, fish and PowerShell, and makes `man jouet` open the active version's page. An install through cargo does not get them.
 
 Otherwise, `jouet completion SHELL` prints a completion script for bash, zsh, fish or PowerShell. The script asks the `jouet` on your `PATH` for each completion, so it needs nothing else installed and keeps up with upgrades without being regenerated.
 

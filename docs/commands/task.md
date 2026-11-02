@@ -13,10 +13,6 @@ jouet task apply ID --file local|shared [--name NAME] [--dry-run] [--json]
 
 The flags are listed in the CLI reference: [`task propose`](/cli/task/propose) and [`task apply`](/cli/task/apply).
 
-::: warning Needs a recent mise
-`jouet task apply` needs mise 2026.10.25 or later, the first release with `mise tasks set` and `mise tasks rm`, file selection for `mise tasks add`, and `--json` on all three. Update with `mise self-update`. With an older mise, `apply` refuses with exit 4 and says which version it needs. `jouet task propose` only reads `mise tasks ls --json`, which older versions have.
-:::
-
 ## Proposing
 
 `jouet task propose` runs in a repository. It reads the Claude Code and Codex transcripts of sessions that ran there (the 8 most recent from the last 14 days, or since `--since`) and looks at every shell command they ran. Before comparing commands, it normalizes them:

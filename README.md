@@ -37,14 +37,13 @@ coding agents such as Claude Code and Codex. It does two things:
 
 ## Quick start
 
-1. Install jouet with [mise](https://mise.jdx.dev) (2026.10.25 or later):
+1. Install jouet with [mise](https://mise.jdx.dev):
 
    ```sh
    mise use -g jouet
    ```
 
-   With an older mise, use `mise use -g github:jdx/jouet`. Or run
-   `cargo install jouet --locked`, or unpack a
+   Or run `cargo install jouet --locked`, or unpack a
    [release archive](https://github.com/jdx/jouet/releases) for Linux, macOS
    (Apple Silicon) or Windows. [All installation options →](https://jouet.jdx.dev/getting-started#install)
 
