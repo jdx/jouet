@@ -288,12 +288,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 && code == 0
                 && digest.no_tests
                 && matches!(records.as_slice(), [record] if record.kind == jouet_rules::Kind::Test);
+            let contradictory = code == 0
+                && digest.failed > 0
+                && records
+                    .iter()
+                    .any(|record| record.kind == jouet_rules::Kind::Test);
             if let Some(ticket) = ticket {
                 let command = match records.as_slice() {
                     [record] => Some(record.command.as_str()),
                     _ => None,
                 };
-                ticket.finish(command, ms, code == 0 && !empty_test);
+                ticket.finish(command, ms, code == 0 && !empty_test && !contradictory);
             }
             if code != 0 {
                 environment.push(testlog::environment_cause(&output, &formats));
@@ -313,7 +318,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = if empty_test {
+            let suite_exit = if empty_test || contradictory {
                 Exit::Precondition
             } else {
                 (job.exit)(code)
@@ -322,7 +327,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 exit = suite_exit;
             }
             if !out.json {
-                emit(&outcome(suite, stream, empty_test));
+                emit(&outcome(suite, stream, empty_test, contradictory));
             }
         }
     }
@@ -1002,10 +1007,14 @@ fn text(report: &Report) -> String {
 
 /// How a suite's run ended: a line with its counts and its log, and for an
 /// agent (`!streamed`) the failures it found, cut to the budget.
-fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
+fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory: bool) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
     let mut s = match suite.exit_code {
         Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
+        Some(0) if contradictory => format!(
+            "{}: command exited 0 but reported failing tests in {secs:.1}s",
+            suite.adapter
+        ),
         Some(0) => format!("{}: passed in {secs:.1}s", suite.adapter),
         Some(code) => format!("{}: failed (exit {code}) in {secs:.1}s", suite.adapter),
         None => return format!("{}: did not run\n", suite.adapter),
@@ -1019,7 +1028,8 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
         let _ = write!(s, ": {counts}");
     }
     // A person watching saw them go by.
-    if suite.exit_code == Some(0) && !streamed && !digest.passed_names.is_empty() {
+    if suite.exit_code == Some(0) && !contradictory && !streamed && !digest.passed_names.is_empty()
+    {
         let _ = write!(s, " ({})", digest.passed_names.join(", "));
     }
     // A pass of nothing proves nothing: say so, so the agent does not read
@@ -1038,10 +1048,12 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
         );
     } else if empty_test {
         s.push_str(": a filter or path that matched nothing? (exit 4)");
+    } else if contradictory {
+        s.push_str(" (exit 4)");
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
-    if streamed || suite.exit_code == Some(0) {
+    if streamed || (suite.exit_code == Some(0) && !contradictory) {
         let _ = writeln!(s, " (full log: {log})");
         // A few warnings by name, so the agent can tell its own without
         // reading the log.

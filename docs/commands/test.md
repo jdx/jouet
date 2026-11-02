@@ -299,6 +299,8 @@ One task can run several of them, as `mise run test` may run cargo's tests and t
 
 A run that passed without running a test says so when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, jest or go saying they ran none. With `--cmd`, if the command is recognised as a test and its output shows no test ran, jouet exits `4` instead of accepting the runner's successful exit; check the filter or path. An unrecognised command retains its own exit code, and an empty `--affected` plan still succeeds. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
 
+If a recognized test command exits zero but its output reports failed tests, jouet exits `4` and shows the failures. This can happen when a script runs several checks and returns only the last one's status. The JSON `exit_code` remains the command's actual exit code, while `ok` is false. A merge-base run with the same contradiction cannot establish a baseline pass.
+
 ### Your own runners: formats
 
 A runner jouet does not know, such as a project's own e2e script, can be described in a TOML file in a `formats/` directory: yours, `~/.config/jouet/formats/`, a trusted repository's `.jouet/formats/`, the system's, or a plugin's. Each file is one format, named after it (a plugin's after the plugin too, `acme/e2e`):

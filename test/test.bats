@@ -546,6 +546,60 @@ tap_script() {
 	assert_success
 }
 
+@test "a successful test command that reports failures is not accepted as passing" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf 'running 2 tests\ntest broken ... FAILED\n---- broken stdout ----\nassertion failed\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n'
+printf 'running 1 test\ntest later ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n'
+exit 0
+SH
+	chmod +x bin/cargo
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	assert_output --partial 'FAIL broken'
+	assert_output --partial '(exit 4)'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- cargo test
+	assert_failure 4
+	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].failed]' <<<"$output")" '[false,0,1]'
+
+	# A task script such as `make test` can hide the earlier runner's exit.
+	cp bin/cargo bin/make
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- make test
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	PATH="$PWD/bin:$PATH" run --separate-stderr sh -c 'jouet test --cmd -- cargo test && touch committed'
+	assert_failure 4
+	[ ! -e committed ]
+
+	# Printing the same text is not a test command.
+	cp bin/cargo ./other-command
+	run --separate-stderr jouet test --cmd -- ./other-command
+	assert_success
+	printf '#!/bin/sh\nprintf "The word FAILED appears in a fixture.\\n"\n' >bin/cargo
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test
+	assert_success
+}
+
+@test "a contradictory merge-base test result is not recorded as a pass" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf 'running 2 tests\ntest broken ... FAILED\n---- broken stdout ----\nassertion failed\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n'
+test "$(cat mode)" = base
+SH
+	chmod +x bin/cargo
+	printf 'base\n' >mode
+	git add mode
+	git commit -qm base
+	git checkout -qb work
+	printf 'changed\n' >mode
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- cargo test
+	assert_failure 1
+	assert_output --partial 'exited 0 but reported failing tests; failures cannot be compared'
+}
+
 @test "a failing run shows each failure up to the budget, then names the rest" {
 	tap_script 6 "2 3 4 5 6"
 

@@ -331,6 +331,18 @@ pub(super) fn compare(
                 let (code, _) = execute(&at_base, &log, false)?;
                 let output = std::fs::read(&log).unwrap_or_default();
                 let output = String::from_utf8_lossy(&output);
+                if code == 0
+                    && testlog::digest_with(&output, false, 0, formats).failed > 0
+                    && super::super::hook::checks(&at_base.dir, &super::command_line(&at_base.argv))
+                        .iter()
+                        .any(|record| record.kind == jouet_rules::Kind::Test)
+                {
+                    return Err(NotCompared::from(format!(
+                        "the run at {} exited 0 but reported failing tests; failures cannot be compared (full log: {})",
+                        base.name,
+                        log.display()
+                    )));
+                }
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
