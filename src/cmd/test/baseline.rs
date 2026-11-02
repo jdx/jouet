@@ -16,7 +16,11 @@ use std::sync::LazyLock;
 static RUST_THREAD_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\s*thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
 });
-const DETAILS_VERSION: u32 = 1;
+static PYTEST_SELF_ADDRESS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\s*self = <[^<>]+ object at )0x[0-9a-fA-F]+(>)$")
+        .expect("pytest self address pattern")
+});
+const DETAILS_VERSION: u32 = 2;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -203,7 +207,10 @@ pub(super) fn failure_evidence(
                     .iter()
                     .map(|line| {
                         let line = from_root(line, root);
-                        RUST_THREAD_ID.replace(&line, "$1$2").into_owned()
+                        let line = RUST_THREAD_ID.replace(&line, "$1$2");
+                        PYTEST_SELF_ADDRESS
+                            .replace(&line, "${1}<address>${2}")
+                            .into_owned()
                     })
                     .collect();
                 let mut hash = Sha256::new();
@@ -541,8 +548,14 @@ fn from_root(name: &str, checkout: &Path) -> String {
         .into_iter()
         .chain(std::iter::once(checkout))
     {
-        let prefix = format!("{}/", dir.display());
-        name = name.replace(&prefix, "");
+        let slash = dir.to_string_lossy().replace('\\', "/");
+        let slash = slash.trim_end_matches('/');
+        for prefix in [
+            format!("{slash}/"),
+            format!("{}\\", slash.replace('/', "\\")),
+        ] {
+            name = name.replace(&prefix, "");
+        }
     }
     name
 }
@@ -705,6 +718,48 @@ mod tests {
         assert_eq!(
             RUST_THREAD_ID.replace(&line(123), "$1$2"),
             RUST_THREAD_ID.replace(&line(456), "$1$2")
+        );
+    }
+
+    #[test]
+    fn pytest_self_addresses_are_volatile_but_assertions_are_not() {
+        let output = |address: &str, assertion: &str| {
+            format!(
+                "=== FAILURES ===\n___ TestParser.test_parse ___\nself = <test_parser.TestParser object at {address}>\nE {assertion}\ntests/test_parser.py:7: AssertionError\n=== short test summary info ===\nFAILED tests/test_parser.py::TestParser::test_parse - AssertionError\n1 failed in 0.1s\n"
+            )
+        };
+        let evidence = |address, assertion| {
+            failure_evidence(&output(address, assertion), &[], Path::new("/work"), false).unwrap()
+        };
+        assert_eq!(
+            evidence("0x1234", "assert 1 == 2").details,
+            evidence("0xabcd", "assert 1 == 2").details
+        );
+        assert!(!evidence("0x1234", "assert 1 == 2").details.is_empty());
+        assert_ne!(
+            evidence("0x1234", "assert 1 == 2").details,
+            evidence("0xabcd", "assert 1 == 3").details
+        );
+        assert_ne!(
+            evidence("0x1234", "assert 0x1234 == 2").details,
+            evidence("0xabcd", "assert 0xabcd == 2").details
+        );
+    }
+
+    #[test]
+    fn checkout_paths_normalize_windows_and_forward_slashes() {
+        let root = Path::new(r"C:\work\project");
+        assert_eq!(
+            from_root(r"at C:\work\project\src\file.rs:3", root),
+            r"at src\file.rs:3"
+        );
+        assert_eq!(
+            from_root("at C:/work/project/src/file.rs:3", root),
+            "at src/file.rs:3"
+        );
+        assert_eq!(
+            from_root(r"at C:\work\project-other\file.rs:3", root),
+            r"at C:\work\project-other\file.rs:3"
         );
     }
 
