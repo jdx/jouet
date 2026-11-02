@@ -3,8 +3,8 @@
 `[cost] seed` in task.toml lists the commands to time. They run once through
 `jouet test --cmd`, in a work tree of their own rather than a run's, whose
 build they would warm. The note jouet keeps for them under
-`refs/notes/jouet-cost` is cached by the source, setup, tools, jouet binary,
-commands and machine. Every run, in both arms,
+`refs/notes/jouet-cost` is cached by the source, setup, tools, harness code,
+jouet binary, commands and machine. Every run, in both arms,
 starts with that note on its HEAD, so the jouet arm's primer can name the
 slow checks, as it would in a repository whose CI keeps them.
 """
@@ -28,6 +28,12 @@ from . import tasks as tasks_mod
 NOTES_REF = "jouet-cost"
 
 
+def harness_hashes() -> list[str]:
+    """Code that constructs and seeds the isolated environment."""
+    return [hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            for path in (__file__, arms_mod.__file__, tasks_mod.__file__)]
+
+
 def cache_path(task: tasks_mod.Task, jouet_bin: Path) -> Path:
     # Setup and the tools used by it can change what a check costs even when
     # the source commit and check command stay the same.
@@ -38,9 +44,14 @@ def cache_path(task: tasks_mod.Task, jouet_bin: Path) -> Path:
     programs.update(task.tools.values())
     tools = {}
     for program in sorted(programs):
-        found = str(Path(program).expanduser()) if "/" in program else shutil.which(program)
+        if "/" in program and not program.startswith("~/") and not Path(program).is_absolute():
+            # It will be resolved in the task's work tree, not this process's
+            # cwd. The source revision and setup are already part of the key.
+            tools[program] = ["worktree", program]
+            continue
+        found = Path(program).expanduser() if "/" in program else arms_mod.resolve(program)
         if found:
-            path = Path(found).resolve()
+            path = found.resolve()
             try:
                 stat = path.stat()
                 tools[program] = [str(path), stat.st_size, stat.st_mtime_ns]
@@ -51,7 +62,7 @@ def cache_path(task: tasks_mod.Task, jouet_bin: Path) -> Path:
     with jouet_bin.open("rb") as binary:
         jouet_hash = hashlib.file_digest(binary, "sha256").hexdigest()
     data = [task.name, task.source, task.cost_seed, task.setup, task.tools, task.env, task.path,
-            tools, jouet_hash, socket.gethostname()]
+            tools, jouet_hash, harness_hashes(), socket.gethostname()]
     if requirements_hash:
         data.append(requirements_hash)
     key = json.dumps(data, sort_keys=True)
