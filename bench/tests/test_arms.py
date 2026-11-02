@@ -10,15 +10,17 @@ from jbench import arms
 
 
 class ResolveTest(unittest.TestCase):
-    def test_parallel_is_available_in_the_isolated_environment(self):
+    def test_project_tools_are_available_in_the_isolated_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            executable = root / "parallel"
-            executable.write_text("#!/bin/sh\nexit 0\n")
-            executable.chmod(0o755)
+            for name in ("parallel", "uv"):
+                executable = root / name
+                executable.write_text("#!/bin/sh\nexit 0\n")
+                executable.chmod(0o755)
             with patch.dict(os.environ, {"PATH": str(root)}):
                 env = arms.base_env(root / "run", None, "jdx/demo")
-            self.assertEqual((root / "run/bin/parallel").resolve(), executable.resolve())
+            for name in ("parallel", "uv"):
+                self.assertEqual((root / "run/bin" / name).resolve(), (root / name).resolve())
             self.assertTrue(env["PATH"].startswith(str(root / "run/bin")))
 
     def test_resolve_mise_itself(self):
