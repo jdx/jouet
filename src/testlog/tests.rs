@@ -18,6 +18,70 @@ fn counts(d: &Digest) -> [u64; 3] {
 }
 
 #[test]
+fn playwright_failures_keep_the_test_path_and_assertion() {
+    let output = "Running 3 tests using 1 worker\n\n  1) [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance ───\n\n    Error: expect(locator).toHaveText(expected) failed\n    Expected: \"42.00\"\n    Received: \"17.00\"\n\n    attachment #1: screenshot ───\n    test-results/screenshot.png\n\n  2) e2e/account.test.ts:9:2 › account › opens\n\n    TimeoutError: waiting for button\n\n  2 failed\n    e2e/balance.spec.ts:5:3 › account › updates balance\n    e2e/account.test.ts:9:2 › account › opens\n  1 passed (12s)\n";
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 0]);
+    assert_eq!(
+        names(&d),
+        [
+            "[chromium] › e2e/balance.spec.ts:5:3 › account › updates balance",
+            "e2e/account.test.ts:9:2 › account › opens"
+        ]
+    );
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("42.00"))
+    );
+    assert!(
+        !d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("screenshot"))
+    );
+    assert!(
+        d.failures[1]
+            .lines
+            .iter()
+            .any(|line| line.contains("TimeoutError"))
+    );
+}
+
+#[test]
+fn playwright_names_need_a_run_and_a_failure_detail() {
+    let heading = "  1) e2e/a.test.ts:1:1 › a test\n";
+    let without_run = format!("{heading}    Error: failure\n");
+    assert!(
+        digest(&without_run, false, DEFAULT_BUDGET)
+            .failures
+            .is_empty()
+    );
+    let without_detail = format!("Running 1 test using 1 worker\n{heading}  1 failed\n");
+    assert!(
+        digest(&without_detail, false, DEFAULT_BUDGET)
+            .failures
+            .is_empty()
+    );
+    // A pytest summary following a Playwright run is not another Playwright
+    // summary, even when the surrounding task indents it.
+    let mixed = "Running 1 test using 1 worker\n  1 passed (1.0s)\n  2 passed in 0.2s\n";
+    assert_eq!(counts(&digest(mixed, false, DEFAULT_BUDGET)), [1, 0, 0]);
+}
+
+#[test]
+fn playwright_shards_name_bare_test_timeouts() {
+    let output = "Running 1 test using 1 worker, shard 1 of 2\n  1) e2e/a.spec.ts:5:1 › waits for data\n    Test timeout of 30000ms exceeded.\n  1 failed\n";
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["e2e/a.spec.ts:5:1 › waits for data"]);
+    assert!(d.failures[0].lines[0].contains("Test timeout of 30000ms exceeded"));
+    // A generic timeout does not prove the baseline failed for the same reason.
+    assert!(failure_details(output, &[]).is_empty());
+}
+
+#[test]
 fn cargo_test_failures_keep_the_panic_and_drop_libtest_noise() {
     let d = digest(&fixture("cargo-test"), true, DEFAULT_BUDGET);
     assert_eq!(counts(&d), [40, 3, 0]);
@@ -566,6 +630,7 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
         "collected 0 items",
         "========== no tests ran in 0.01s ==========",
         "No tests found, exiting with code 1",
+        "Error: No tests found.",
         "testing: warning: no tests to run",
     ] {
         assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");

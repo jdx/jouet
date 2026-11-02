@@ -294,14 +294,19 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 - tsc;
 - go test and go build, including a package that fails with no failed test of its own, as when `TestMain` gives up, named by the package;
 - pytest, unittest, RSpec, jest and vitest;
+- Playwright's list reporter for `.test` and `.spec` files, including its numbered failure blocks;
 - TAP, which bats prints;
 - any [format you declare](#your-own-runners-formats).
 
 One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
 
-A run that passed without running a test says so when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, RSpec, jest or go saying they ran none. With `--cmd`, if the command is recognised as a test and its output shows no test ran, jouet exits `4` instead of accepting the runner's successful exit; check the filter or path. An unrecognised command retains its own exit code, and an empty `--affected` plan still succeeds. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
+Playwright's generic test timeouts are named in the digest but remain unresolved in baseline comparisons: the same timeout headline can have different causes.
+
+A run that passed without running a test says so when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, RSpec, jest, Playwright or go saying they ran none. With `--cmd`, if the command is recognised as a test and its output shows no test ran, jouet exits `4` instead of accepting the runner's successful exit; check the filter or path. An unrecognised command retains its own exit code, and an empty `--affected` plan still succeeds. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
 
 If a recognized test command exits zero but its output reports failed tests, jouet exits `4` and shows the failures. This can happen when a script runs several checks and returns only the last one's status. The JSON `exit_code` remains the command's actual exit code, while `ok` is false. A merge-base run with the same contradiction cannot establish a baseline pass.
+
+The checks rule does not record Playwright's interactive UI or debug modes, or `--pass-with-no-tests`: they can exit successfully without evidence that a test ran. Filters and options that change snapshot checks count as partial runs.
 
 ### Your own runners: formats
 

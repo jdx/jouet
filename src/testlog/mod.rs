@@ -193,6 +193,13 @@ regexes! {
     ANSI = "\x1b\\[[0-9;?]*[ -/]*[@-~]";
     TASK_PREFIX = r"^\[[^\]\s]+\] ";
     COUNT = r"\b(\d+) (passed|failed|errors?|skipped|ignored|todo|pending)\b";
+    // Playwright's list reporter names a test in a numbered failure block.
+    PLAYWRIGHT_RUN = r"^Running \d+ tests? using \d+ workers?(?:, shard \d+ of \d+)?$";
+    PLAYWRIGHT_HEAD = r"^\s*\d+\)\s+(.+\.(?:spec|test)\.[cm]?[jt]sx?:\d+:\d+\s+›\s+.+?)\s*(?:─+)?\s*$";
+    PLAYWRIGHT_END = r"^\s*(?:\d+\)\s+.+\.(?:spec|test)\.[cm]?[jt]sx?:\d+:\d+\s+›|\d+ (?:failed|passed|skipped|flaky)\b|attachment #)";
+    PLAYWRIGHT_SUMMARY = r"^\s+\d+ (?:failed|passed|skipped)(?: \([\d.hms ]+\))?\s*$";
+    PLAYWRIGHT_ERROR = r"^\s*(?:(?:\w*Error|AssertionError):|Test timeout of \d+ms exceeded\b)";
+    PLAYWRIGHT_TIMEOUT = r"^\s*(?:\w*Error:\s*)?Test timeout of \d+ms exceeded\b";
     // A line that blames the machine, not the code: no D-Bus or keyring, a
     // system library missing, no network, an API's rate limit, or no
     // database or service running on this machine (a refused connection to
@@ -225,7 +232,7 @@ regexes! {
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
-    NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|No tests found|testing: warning: no tests to run)";
+    NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
     // it prints last.
@@ -347,6 +354,7 @@ fn parse(lines: &[String], formats: &[Format]) -> Parsed {
     rspec(lines, &mut parsed);
     jest(lines, &mut parsed);
     vitest(lines, &mut parsed);
+    playwright(lines, &mut parsed);
     tap(lines, &mut parsed);
     for format in formats {
         format.apply(lines, &mut parsed);
@@ -370,6 +378,12 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
         .found
         .into_iter()
         .filter(|f| !PYTEST_SHORT.is_match(&lines[f.at]))
+        // The same timeout headline can have different underlying causes.
+        // Name it for display, but do not treat it as a matching baseline.
+        .filter(|f| {
+            !PLAYWRIGHT_HEAD.is_match(&lines[f.at])
+                || !f.lines.iter().any(|line| PLAYWRIGHT_TIMEOUT.is_match(line))
+        })
         .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
         .map(|f| {
             let binary = LIBTEST_BLOCK
@@ -972,6 +986,24 @@ fn vitest(lines: &[String], out: &mut Parsed) {
             }
         } else if let Some(c) = VITEST_TESTS.captures(line) {
             out.count_words(&c[1]);
+        }
+    }
+}
+
+fn playwright(lines: &[String], out: &mut Parsed) {
+    // A numbered list in another program is not enough to identify a test.
+    if !lines.iter().any(|line| PLAYWRIGHT_RUN.is_match(line)) {
+        return;
+    }
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(c) = PLAYWRIGHT_HEAD.captures(line) {
+            let block = until(lines, i + 1, &PLAYWRIGHT_END);
+            // A summary or an interrupted block alone is not failure evidence.
+            if block.iter().any(|line| PLAYWRIGHT_ERROR.is_match(line)) {
+                out.push(i, c[1].trim(), block);
+            }
+        } else if PLAYWRIGHT_SUMMARY.is_match(line) {
+            out.count_words(line);
         }
     }
 }

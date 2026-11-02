@@ -517,6 +517,38 @@ tap_script() {
 	assert_equal "$(cat "$log")" "$(./run-tests)"
 }
 
+@test "--cmd names a Playwright list failure and shows its assertion" {
+	mkdir bin
+	cat >bin/playwright <<'SH'
+#!/bin/sh
+cat <<'OUTPUT'
+Running 1 test using 1 worker
+
+  1) [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance ───
+    Error: expect(locator).toHaveText(expected) failed
+    Expected: "42.00"
+    Received: "17.00"
+
+  1 failed
+    [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance
+OUTPUT
+exit "${PLAYWRIGHT_EXIT:-1}"
+SH
+	chmod +x bin/playwright
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- playwright test
+	assert_failure 1
+	assert_output --partial 'FAIL [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance'
+	assert_output --partial 'Expected: "42.00"'
+	refute_output --partial 'no failure recognised'
+	PATH="$PWD/bin:$PATH" PLAYWRIGHT_EXIT=0 run --separate-stderr jouet test --cmd -- playwright test
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	printf '#!/bin/sh\nprintf "Error: No tests found.\\n"\n' >bin/playwright
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- playwright test
+	assert_failure 4
+	assert_output --partial 'no test ran'
+}
+
 @test "--cmd refuses a recognised test run that selected no tests" {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo
