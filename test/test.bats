@@ -766,6 +766,7 @@ SH
 	assert_failure 1
 	assert_output --partial 'without naming a failing test, so the failures could not be compared'
 	assert_output --partial 'it is not known whether they are the same'
+	refute_output --partial 'baseline checkout reports missing node_modules'
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
 
 	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command
@@ -773,6 +774,31 @@ SH
 	assert_stderr --partial 'without naming a failing test, so the failures could not be compared'
 	assert_equal "$(jq -r '.ok' <<<"$output")" false
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 4
+}
+
+@test "a baseline missing pnpm dependencies suggests the opt-in setup" {
+	cat >fail-command <<'SH'
+#!/bin/sh
+if [ ! -e .deps-ready ]; then
+    echo 'WARN Local package.json exists, but node_modules missing, did you mean to install?'
+else
+    echo 'the current check failed'
+fi
+exit 1
+SH
+	chmod +x fail-command
+	printf '.deps-ready\n' >.gitignore
+	git add fail-command .gitignore
+	git commit -qm base
+	git checkout -qb work
+	touch .deps-ready
+	printf 'change\n' >change
+
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	assert_output --partial 'baseline checkout reports missing node_modules'
+	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'trust it before retrying'
 }
 
 @test "--baseline keeps an unnamed failure unresolved when the merge base passes" {

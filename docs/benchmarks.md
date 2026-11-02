@@ -40,10 +40,21 @@ Projects beyond jdx's own:
 | `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in the clone to fill the store |
 | `commander-output-config` | commander.js, a CLI library | [tj/commander.js#2342](https://github.com/tj/commander.js/issues/2342) | JavaScript, jest and tsc | one `npm ci` in the clone to fill npm's cache |
 | `click-short-help` | Click, a CLI library | [pallets/click#3865](https://github.com/pallets/click/pull/3865) | Python, pytest | Python 3.13 and the task's hash-locked pytest and build dependencies; Click is installed editable in each run |
+| `django-group-by-transform` | Django, a web framework | [ticket #36292](https://code.djangoproject.com/ticket/36292) | Python, Django's `tests/runtests.py` on SQLite | Python 3.13, a Django clone at `~/src/django`, and the task's hash-locked wheels in `~/src/django-bench-wheels`, as described below |
+| `zod-lazy-error-pr` | zod, a library | a whole PR session on [colinhacks/zod#6519](https://github.com/colinhacks/zod/pull/6519) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in `~/src/zod` at the PR's base to fill the store |
 
 Each `task.toml` notes which jouet levels the task can exercise: what `jouet test` does with the project out of the box, and where TOML config or a Luau rule or routine could help. A JavaScript project's dependencies are installed by the task's `setup` commands, offline from your cache, after the work tree is committed and before the agent's clock starts. The agents are not network-sandboxed and can override offline defaults. A setup that leaves files git does not ignore is refused. Tools the default `bin/` lacks, such as `go`, `npm` or a pinned `pnpm`, can be exposed through `[tools]`, by path or by a bare name found on your `PATH`.
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
+
+The opt-in Django task's traceback ends in the SQL compiler, but the cause is in how the query records its `values()` selection, so the agent has to read across the query and the compiler. Its check runs the fix's own aggregation tests and `aggregation_regress`. Each run creates a virtual environment with asgiref, sqlparse and tblib (without tblib, Django's parallel runner cannot report a failure). pip installs them with `PIP_NO_INDEX`, so prepare the wheels once:
+
+```sh
+git clone https://github.com/django/django.git ~/src/django
+python3 -m pip download --only-binary=:all: --require-hashes -r bench/tasks/django-group-by-transform/requirements.lock -d ~/src/django-bench-wheels
+```
+
+The opt-in `zod-lazy-error-pr` task is a whole PR session in a TypeScript project, like `mise-uninstall-pr`. The agent starts at the PR's second push (442ff01). The fake GitHub serves that push's real CI failure and log, and pullfrog's real review thread. To pass, the agent has to fix the failing issue-schema tests, make a check that throws synchronously reject through `~standard.validate`, keep the PR's own lazy-error tests passing, then reply on the thread and resolve it. Fill pnpm's store once with `pnpm install` in a `~/src/zod` worktree at a6b4939.
 
 The opt-in Requests task installs hash-locked test dependencies, the project's pinned Ruff version, and the checkout into an isolated Python environment before each run. Its independent checker prepares multipart requests without network access, exercising temporary files, dynamically proxied streams and ordinary file values.
 
@@ -71,6 +82,12 @@ The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://g
 
 The prompt is the same in both arms. `--jouet-env KEY=VALUE` sets a variable in the jouet arm's agent environment after `jouet setup`. For example, `--jouet-env JOUET_HOOKS_PRIME=0` measures sessions without the primer, and without the skill that setup would install in its place. Adding an arm for rtk, or for jouet with only some rules, means adding an entry to `ARMS` in `bench/jbench/arms.py` with its setup step.
 
+### The jouet-init arm
+
+`--arms plain,jouet,jouet-init` adds a third arm: jouet as in the `jouet` arm, in the project as the [jouet-init skill](/project-setup) configured it, which is how a user who ran `jouet setup` and then `/jouet-init` works. The skill runs once per task, starting commit, jouet build, harness and model, in an isolated home like any run, with the prompt `Use the jouet-init skill to configure jouet for this project.`. What it changed, committed or not, is kept as a patch with what the run cost under `~/.cache/jouet-bench/init/`, and reused by every later `jouet-init` run. Each run applies the patch, commits it, so the agent starts from a clean tree, and runs `jouet trust --yes` in its fresh home, as the user does once after the skill. A PR task's fake GitHub then sees that commit as the branch head.
+
+The skill's run is not counted at all: a project commits the configuration once and keeps it, as it keeps its other tooling config, so it is part of the project, not of a task. The report says which files it configured. Without a `jouet` arm in the pilot, the report compares `jouet-init` with `plain`.
+
 ### Isolation
 
 Every run starts from nothing, in a temporary directory outside any checkout (so no parent `CLAUDE.md` or `AGENTS.md` leaks in):
@@ -78,6 +95,16 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 - a fresh copy of the task's repository;
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
 - a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, `uv` and `uvx`, when installed on the host, are available to both arms for projects whose checks use them.
+
+A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.
+
+For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
+
+```sh
+MISE_ENV=bench mise run bench:agents --tasks-dir "$HOME/bench-tasks" --tasks example --out "$HOME/bench-results/example"
+```
+
+These worktrees are not security sandboxes: agents and task programs can access host files and the network. Results, agent transcripts, cost notes and any retained worktrees can contain task data; choose locations and task programs accordingly.
 
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
 
@@ -181,7 +208,7 @@ Some tasks cannot be published: their source is a private repository, or their f
 
 ```sh
 python3 bench/agents.py check-tasks --tasks-dir ~/bench-private --tasks invoice-rounding
-JOUET_BENCH_TASKS=~/bench-private mise run bench:agents --tasks invoice-rounding --harness claude
+JOUET_BENCH_TASKS=~/bench-private mise run bench:agents --tasks invoice-rounding --harness claude --out ~/bench-results/invoice-rounding
 ```
 
 A check or reference solution outside `bench/tasks/` can still use the shared helpers: `BENCH_CHECK_HELPERS` names the directory holding `_check.py`, so the script starts with `sys.path.insert(0, os.environ["BENCH_CHECK_HELPERS"])`. `meta.json` lists the directories a suite read (`task_dirs`), so a results directory says where its tasks came from. `mise run test:bench` reads only `bench/tasks/` unless `JOUET_BENCH_TASKS` is set.

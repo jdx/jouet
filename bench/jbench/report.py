@@ -72,11 +72,18 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                     for r in runs
                 ],
             }
-        if "plain" in by_arm and "jouet" in by_arm:
+        # Against plain: `jouet`, or `jouet-init` in a pilot without it.
+        treat = next((a for a in ("jouet", "jouet-init") if a in by_arm), None)
+        cell["treatment"] = treat
+        init_runs = [r["init"] for r in by_arm.get("jouet-init", []) if r.get("init")]
+        if init_runs:
+            cell["init"] = init_runs[0]
+        if "plain" in by_arm and treat:
             paired_runs = {
                 arm: {r["round"]: r for r in by_arm[arm] if not r.get("error") and isinstance(r.get("success"), bool)}
-                for arm in ("plain", "jouet")
+                for arm in ("plain", treat)
             }
+            paired_runs["jouet"] = paired_runs[treat]
             rounds = sorted(paired_runs["plain"].keys() & paired_runs["jouet"].keys())
             outcomes = [(paired_runs["plain"][n]["success"], paired_runs["jouet"][n]["success"]) for n in rounds]
             cell["paired_outcomes"] = {
@@ -89,7 +96,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             cell["paired_when_both_pass"] = {}
             for key, _, get, _ in METRICS:
                 plain = {r["round"]: get(r) for r in by_arm["plain"] if not r.get("error")}
-                jouet = {r["round"]: get(r) for r in by_arm["jouet"] if not r.get("error")}
+                jouet = {r["round"]: get(r) for r in by_arm[treat] if not r.get("error")}
                 cell["paired"][key] = stats.paired(plain, jouet)
                 cell["paired_when_both_pass"][key] = stats.paired(
                     {n: get(paired_runs["plain"][n]) for n in passed_rounds},
@@ -97,6 +104,18 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 )
         cells.append(cell)
     return {"schema": 1, "meta": meta, "cells": cells}
+
+
+def init_line(cell: dict[str, Any], init: dict[str, Any]) -> str:
+    """What the jouet-init skill changed. Its run is not a cost of the
+    task: a project commits the configuration once and keeps it, as it
+    keeps any other tooling config."""
+    del cell
+    files = init.get("files") or []
+    if not files:
+        return "jouet-init changed no files for this task, so the `jouet-init` arm ran it as the `jouet` arm does."
+    named = ", ".join(files[:8]) + (f" and {len(files) - 8} more" if len(files) > 8 else "")
+    return f"jouet-init configured the project with {len(files)} file(s), committed before each run: {named}."
 
 
 def fmt(value: float | None, kind: str) -> str:
@@ -160,8 +179,8 @@ def markdown(summary: dict[str, Any]) -> str:
     ]
     for cell in summary["cells"]:
         arms = cell["arms"]
-        row = [cell["task"], cell["harness"]]
-        for arm in ("plain", "jouet"):
+        row = [cell["task"] + (" (jouet-init)" if cell.get("treatment") == "jouet-init" else ""), cell["harness"]]
+        for arm in ("plain", cell.get("treatment") or "jouet"):
             a = arms.get(arm)
             row.append(f"{a['successes']}/{a['runs']}" if a else "–")
         row.append(str(cell["paired_outcomes"]["both_passed"]) if "paired_outcomes" in cell else "–")
@@ -197,7 +216,7 @@ def markdown(summary: dict[str, Any]) -> str:
         ]
         for key, label, _, kind in METRICS:
             row = [label]
-            for arm in ("plain", "jouet"):
+            for arm in ("plain", cell.get("treatment") or "jouet"):
                 m = (cell["arms"].get(arm) or {}).get("metrics", {}).get(key)
                 row.append(f"{fmt(m['median'], kind)} [{fmt(m['p25'], kind)}–{fmt(m['p75'], kind)}]" if m else "–")
             p = cell["paired"].get(key)
@@ -225,6 +244,8 @@ def markdown(summary: dict[str, Any]) -> str:
             count = cell["paired_outcomes"]["both_passed"]
             detail = "; ".join(parts) if parts else "no comparable metrics"
             lines += ["", f"Both-pass pairs ({count}): median jouet minus plain: {detail}."]
+        if init := cell.get("init"):
+            lines += ["", init_line(cell, init)]
         notes = []
         for arm, a in sorted(cell["arms"].items()):
             for change in a.get("changes", []):

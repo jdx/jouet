@@ -1,0 +1,140 @@
+description = "Fix a real Django regression from its ticket (#36292): values() over a transform and a column, then an aggregate, crashes with IndexError; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real web framework: the traceback ends in the SQL compiler, and the cause
+# is in how the query records its values() selection. It runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1500
+check_timeout_s = 300
+# asgiref and sqlparse, which Django needs, and tblib, without which its
+# parallel runner cannot report a failure. The install is offline, from
+# wheels downloaded once (docs/benchmarks.md).
+python_requirements = "requirements.lock"
+# jouet levels: out of the box, `jouet test --cmd` digests the unittest
+# output of Django's own runner (`python3 tests/runtests.py aggregation`),
+# but `jouet test --affected` finds no runner: the tests are packages under
+# `tests/`, run by `tests/runtests.py`, not pytest or plain unittest
+# discovery. Config could name the runner; a Luau routine could map
+# `django/db/models/sql/query.py` to the test packages that exercise it
+# (`aggregation`, `aggregation_regress`, `queries`) and run only those.
+# The ticket's title and description as its reporter wrote them (Trac
+# markup), and one line. Nothing from the fix (543e17c).
+prompt = '''
+Annotating an aggregate function over a group including annotations or transforms followed by a column references crashes with IndexError
+
+When I upgraded to 5.2 today, a number of my query sets broke tracebacks on building the query.  I didn't notice anything in the BIC of the release notes. 
+
+I tossed together a project to make it easier to clone and repro:
+https://github.com/paltman/groupby-demo-dj52
+
+But in summary, when I have some models like:
+
+{{{
+from django.db import models
+
+
+class Bag(models.Model):
+    kind = models.PositiveBigIntegerField(unique=True)
+
+
+class Order(models.Model):
+    blended_at = models.DateTimeField(null=True, default=None)
+    gross_weight = models.FloatField(null=True, default=None)
+    tare_weight = models.FloatField(null=True, default=None)
+    total_tons = models.FloatField(null=True, default=None)
+    blend_status = models.CharField(max_length=2, blank=True)
+    bag_type = models.ForeignKey(Bag, on_delete=models.CASCADE, null=True)
+}}}
+
+and try to build a queryset like:
+
+{{{
+from django.db.models import Case, When, F, FloatField, Value, Sum
+
+from .models import Order
+
+
+TONS_ANNOTATION = dict(
+    blended_tons=Case(
+        When(
+            gross_weight__gt=0,
+            then=(F("gross_weight") - F("tare_weight")) / Value(2000)
+        ),
+        default=F("total_tons"),
+        output_field=FloatField()
+    )
+)
+
+dry_tons = Order.objects.filter(
+    blended_at__date__range=["2025-03-01", "2025-03-31"],
+).annotate(
+    **TONS_ANNOTATION
+).values(
+    "blend_status",
+    "blended_at__date",
+    "bag_type__kind",
+).annotate(
+    tons=Sum("blended_tons")
+)
+}}}
+
+I get the following traceback when trying to just print the query out:
+
+{{{
+>>> print(dry_tons.query)
+Traceback (most recent call last):
+  File "<console>", line 1, in <module>
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/query.py", line 342, in __str__
+    sql, params = self.sql_with_params()
+                  ~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/query.py", line 350, in sql_with_params
+    return self.get_compiler(DEFAULT_DB_ALIAS).as_sql()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/compiler.py", line 765, in as_sql
+    extra_select, order_by, group_by = self.pre_sql_setup(
+                                       ~~~~~~~~~~~~~~~~~~^
+        with_col_aliases=with_col_aliases or bool(combinator),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/compiler.py", line 85, in pre_sql_setup
+    self.setup_query(with_col_aliases=with_col_aliases)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/compiler.py", line 74, in setup_query
+    self.select, self.klass_info, self.annotation_col_map = self.get_select(
+                                                            ~~~~~~~~~~~~~~~^
+        with_col_aliases=with_col_aliases,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/local/lib/python3.13/site-packages/django/db/models/sql/compiler.py", line 286, in get_select
+    expression = cols[expression]
+                 ~~~~^^^^^^^^^^^^
+IndexError: tuple index out of range
+}}}
+
+Posted here earlier: https://forum.djangoproject.com/t/my-group-by-aggregations-are-breaking-in-5-2/40162/1 but after I posted I realized this seems like a bug just in the fact that it's been working for a while now in previous versions.
+
+Fix this in Django, with a test, and commit.
+'''
+
+# Django at the fix's base, the parent of 543e17c.
+[source]
+git = "~/src/django"
+commit = "3ae049b26b995c650c41ef918d5f60beed52b4ba"
+
+# The checkout is Django: its runner imports it from the work tree. Pip
+# installs the requirements from the prepared wheels, never the index.
+[env]
+PYTHONPATH = "{workdir}"
+PIP_NO_INDEX = "1"
+PIP_FIND_LINKS = "~/src/django-bench-wheels"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "python3 tests/runtests.py aggregation",
+    "python3 tests/runtests.py aggregation aggregation_regress queries",
+]

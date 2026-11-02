@@ -11,7 +11,8 @@ name, and must be unique across all of them:
   session's scratch output);
 - `repo/`: the files committed on `main`, or instead `[source]` in
   `task.toml`: `git` (a local repository, read only) and `commit`, whose tree
-  is committed on `main` as the one commit, without its history;
+  is committed on `main` as the one commit, without its history by default;
+  `history = true` preserves the pinned commit and its ancestors instead;
 - `pr/` (optional): files committed on `branch` on top of `repo/`;
 - `github.json` (optional): the fake GitHub's fixture. `{{head_sha}}` and
   `{{base_sha}}` are replaced with the commits made here, and `{{head_short}}`
@@ -52,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -95,7 +97,7 @@ class Task:
     branch: str | None = None
     untracked: dict[str, str] = field(default_factory=dict)
     probes: list[dict[str, Any]] = field(default_factory=list)
-    source: dict[str, str] | None = None
+    source: dict[str, str | bool] | None = None
     opt_in: bool = False
     remote: bool = True
     upstream: bool = False
@@ -184,6 +186,14 @@ def load(name: str) -> Task:
         for command in isolated_setup
     ):
         raise ValueError(f"task {name}: isolated_setup must be a list of nonempty argument lists")
+    source = raw.get("source")
+    if source is not None:
+        if not isinstance(source, dict) or any(not isinstance(source.get(key), str) or not source[key] for key in ("git", "commit")):
+            raise ValueError(f"task {name}: source needs nonempty git and commit strings")
+        if not isinstance(source.get("history", False), bool):
+            raise ValueError(f"task {name}: source.history must be a boolean")
+        if source.get("history") and raw.get("remote", True):
+            raise ValueError(f"task {name}: source.history requires remote = false")
     return Task(
         name=name,
         dir=d,
@@ -196,7 +206,7 @@ def load(name: str) -> Task:
         branch=raw.get("branch"),
         untracked=dict(raw.get("untracked", {})),
         probes=list(raw.get("probe", [])),
-        source=raw.get("source"),
+        source=source,
         opt_in=bool(raw.get("opt_in", False)),
         remote=bool(raw.get("remote", True)),
         upstream=bool(raw.get("upstream", False)),
@@ -331,25 +341,52 @@ def all_names() -> list[str]:
     return sorted(index())
 
 
+def git_env() -> dict[str, str]:
+    redirected = {"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR", "GIT_WORK_TREE",
+                  "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"}
+    return {k: v for k, v in os.environ.items() if k not in redirected
+            and not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))} | GIT_ENV
+
+
 def git(workdir: Path, *args: str) -> str:
-    env = {**os.environ, **GIT_ENV}
     return subprocess.run(
-        ["git", *args], cwd=workdir, env=env, check=True, capture_output=True, text=True
+        ["git", *args], cwd=workdir, env=git_env(), check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def checkout_roots(workdir: Path) -> list[Path]:
+    """All worktrees sharing this checkout, including paths with whitespace."""
+    output = subprocess.run(
+        ["git", "worktree", "list", "--porcelain", "-z"],
+        cwd=workdir, env=git_env(), check=True, capture_output=True, text=True,
+    ).stdout
+    roots = [Path(item.removeprefix("worktree ")).resolve() for item in output.split("\0")
+             if item.startswith("worktree ")]
+    if not roots:
+        raise RuntimeError("git returned no worktrees")
+    return roots
 
 
 def prepare(task: Task, workdir: Path) -> dict[str, str]:
     """Builds the task's work tree in `workdir`; returns its SHAs."""
+    if task.source and task.source.get("history", False) and task.remote:
+        raise EnvironmentSetupError("history mode requires remote = false")
     if task.source:
-        copy_source(task.source, workdir)
+        if task.source.get("history", False):
+            copy_history(task.source, workdir)
+        else:
+            copy_source(task.source, workdir)
     else:
         shutil.copytree(task.dir / "repo", workdir, ignore=IGNORE)
         git(workdir, "init", "-q", "-b", "main")
         git(workdir, "add", "-A")
-    git(workdir, "commit", "-q", "-m", "initial commit")
+    if not task.source or not task.source.get("history", False):
+        git(workdir, "commit", "-q", "-m", "initial commit")
     # An archived tree contains gitlinks, not the files they point to. Populate
     # them at the recorded revisions so an agent can run the project's tests.
     if task.source and (workdir / ".gitmodules").exists():
+        if task.source.get("history", False):
+            raise EnvironmentSetupError("history mode does not fetch submodules; provide a task without them")
         git(workdir, "submodule", "update", "--init", "--recursive")
     run_setup(task, workdir)
     base = git(workdir, "rev-parse", "HEAD")
@@ -379,6 +416,8 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
         git(workdir, "fetch", "-q", "origin")
         git(workdir, "branch", "-q", "--set-upstream-to=origin/main", "main")
         git(workdir, "remote", "set-head", "origin", "main")
+        if task.source and task.source.get("history", False):
+            git(workdir, "remote", "set-url", "--push", "origin", os.devnull)
     for rel, text in task.untracked.items():
         path = workdir / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,19 +447,20 @@ def run_setup(task: Task, workdir: Path) -> None:
         raise RuntimeError(f"task {task.name}: setup changed files git does not ignore:\n{dirty}")
 
 
-def copy_source(source: dict[str, str], workdir: Path) -> None:
+def copy_source(source: dict[str, str | bool], workdir: Path) -> None:
     """Stages the exact commit tree in a new, independent repository.
 
     Import the objects and check out the index directly: `git archive` can
     omit export-ignored files, and re-adding an archive can normalize blobs
     whose bytes do not match the project's current attributes.
     """
-    repo = Path(source["git"]).expanduser()
-    commit = source["commit"]
+    repo = Path(str(source["git"])).expanduser().resolve()
+    commit = str(source["commit"])
+    revision = git(repo, "rev-parse", f"{commit}^{{commit}}")
     workdir.mkdir(parents=True)
     git(workdir, "init", "-q", "-b", "main")
-    git(workdir, "fetch", "-q", "--no-tags", "--depth=1", str(repo), commit)
-    git(workdir, "read-tree", "--reset", "-u", "FETCH_HEAD^{tree}")
+    git(workdir, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--depth=1", str(repo), revision)
+    git(workdir, "read-tree", "--reset", "-u", f"{revision}^{{tree}}")
     tree = git(workdir, "write-tree")
     want = git(repo, "rev-parse", f"{commit}^{{tree}}")
     if tree != want:
@@ -430,6 +470,40 @@ def copy_source(source: dict[str, str], workdir: Path) -> None:
 def helpers_env() -> dict[str, str]:
     """Where `_check.py` is, for a task outside `bench/tasks/` to import."""
     return {"BENCH_CHECK_HELPERS": str(TASKS_DIR)}
+
+
+def copy_history(source: dict[str, str | bool], workdir: Path) -> None:
+    """Copy a pinned commit and its ancestors without retaining a network remote."""
+    repo = Path(str(source["git"])).expanduser().resolve()
+    commit = str(source["commit"])
+    if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", commit):
+        raise EnvironmentSetupError("history mode needs a full pinned commit SHA")
+    try:
+        resolved = git(repo, "rev-parse", f"{commit}^{{commit}}")
+        shallow = git(repo, "rev-parse", "--is-shallow-repository")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise EnvironmentSetupError("history mode cannot read the pinned source commit") from error
+    if resolved != commit:
+        raise EnvironmentSetupError("history mode source.commit must identify a commit")
+    if shallow == "true":
+        raise EnvironmentSetupError("history mode needs a complete, non-shallow source repository")
+    partial = subprocess.run(
+        ["git", "config", "--local", "--get-regexp", r"^remote\..*\.promisor$"],
+        cwd=repo, env=git_env(), capture_output=True, text=True,
+    )
+    if partial.returncode not in (0, 1):
+        raise EnvironmentSetupError("could not inspect the source repository's partial-clone configuration")
+    if partial.returncode == 0 and any(line.split()[-1].lower() == "true" for line in partial.stdout.splitlines()):
+        raise EnvironmentSetupError("history mode needs a complete source, not a partial clone")
+    workdir.mkdir(parents=True)
+    git(workdir, "init", "-q", "-b", "main")
+    try:
+        git(workdir, "fetch", "-q", "--no-tags", "--no-write-fetch-head", str(repo), commit)
+        git(workdir, "checkout", "-q", "-B", "main", commit)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise EnvironmentSetupError("history mode could not copy the pinned source history") from error
+    if git(workdir, "rev-parse", "HEAD") != commit:
+        raise EnvironmentSetupError("history mode did not check out the pinned commit")
 
 
 def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
