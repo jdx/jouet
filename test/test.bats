@@ -1361,3 +1361,22 @@ SH
 	assert_success
 	refute_output --partial 'among them'
 }
+
+@test "a program not on PATH names the project's mise task that runs it" {
+	command -v mise >/dev/null || skip "mise is not installed"
+	printf '[tasks."test:frob"]\nrun = "frob tests/"\n[tasks.lint]\nrun = "echo lint"\n' >mise.toml
+	MISE_TRUSTED_CONFIG_PATHS="$PWD" run jouet test --cmd -- frob tests/
+	assert_failure
+	assert_output --partial 'running frob: No such file or directory'
+	assert_output --regexp '.mise run test:frob. runs it in this project'
+	# A file task's script counts, and a script that only names the program
+	# does not run it.
+	mkdir -p mise-tasks/test
+	printf '#!/bin/sh\nzork --all\n' >mise-tasks/test/zork
+	chmod +x mise-tasks/test/zork
+	printf '[tasks.say]\nrun = "echo quux"\n' >>mise.toml
+	MISE_TRUSTED_CONFIG_PATHS="$PWD" run jouet test --cmd -- zork
+	assert_output --regexp '.mise run test:zork. runs it in this project'
+	MISE_TRUSTED_CONFIG_PATHS="$PWD" run jouet test --cmd -- quux
+	refute_output --partial 'mise run'
+}
