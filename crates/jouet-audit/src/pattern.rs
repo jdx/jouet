@@ -240,6 +240,13 @@ mod tests {
             "cargo +1.91 check 2>&1 | head",
             Pattern::HeadOnTestOutput
         ));
+        assert!(has("uv run pytest -q | head", Pattern::HeadOnTestOutput));
+        assert!(has("uv run -- pytest | tail", Pattern::HeadOnTestOutput));
+        assert!(!has("uv run rg pytest | head", Pattern::HeadOnTestOutput));
+        assert!(!has(
+            "uv run echo 'pytest' | head",
+            Pattern::HeadOnTestOutput
+        ));
         assert!(!has(
             "cargo test > log; head log",
             Pattern::HeadOnTestOutput

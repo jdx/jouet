@@ -779,6 +779,26 @@ fn subcommands(
             }
             (&["tasks", "settings", "plugins", "cache"], &["run", "r"])
         }
+        "uv" if ident(i).as_deref() == Some("run") => {
+            parts.push("run".into());
+            i += 1;
+            if let Some(Tok::Word(w)) = items.get(i) {
+                if w.text == "--" && !w.quoted {
+                    parts.push("--".into());
+                    i += 1;
+                } else if w.text.starts_with('-') {
+                    return i;
+                }
+            }
+            let rest: Vec<&Tok> = items[i..].to_vec();
+            let (inner, inner_program) = shape_simple(&rest);
+            if inner_program.is_some() {
+                parts.push(inner);
+                *runs = inner_program;
+                return items.len();
+            }
+            return i;
+        }
         "npm" | "pnpm" | "yarn" | "bun" | "aube" => (&[], &["run", "exec"]),
         "docker" | "podman" => (
             &[
