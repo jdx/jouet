@@ -22,8 +22,9 @@ const groups = [
     commands: [
       ["test", "/commands/test", "Only the tests a change affects, and one line when they pass"],
       ["wait", "/commands/wait", "CI, logs, ports and processes, in one call"],
-      ["job", "/commands/job", "A build or server in the background, ready when it returns"],
-      ["ci", "/commands/ci", "Run a workflow's jobs here, or tell a flake from a real failure"],
+      ["job", "/commands/job", "A build or server in the background, with an optional ready check"],
+      ["ci run", "/commands/ci", "Run a workflow's jobs here before pushing"],
+      ["ci explain", "/commands/ci#jouet-ci-explain", "Tell a flaky CI failure from a real one"],
       ["task", "/commands/task", "Turn a retyped command sequence into a mise task"],
     ],
   },

@@ -139,7 +139,7 @@ every file alone and shows the closest match instead.
 | [`jouet test`](https://jouet.jdx.dev/commands/test) | re-running the whole suite after every edit; `--affected` runs only the tests a change reaches |
 | [`jouet wait`](https://jouet.jdx.dev/commands/wait) | `sleep` and `until` loops around `gh pr checks`, log files, ports, URLs and processes |
 | [`jouet job`](https://jouet.jdx.dev/commands/job) | `cmd &`, `nohup`, sleep-and-curl loops and `pkill` |
-| [`jouet ci`](https://jouet.jdx.dev/commands/ci) | pushing to see whether CI passes, and rerunning a failure without knowing whether it is flaky |
+| [`jouet ci run`](https://jouet.jdx.dev/commands/ci) / [`explain`](https://jouet.jdx.dev/commands/ci#jouet-ci-explain) | pushing to see whether CI passes, and rerunning a failure without knowing whether it is flaky |
 | [`jouet task`](https://jouet.jdx.dev/commands/task) | retyping the same command sequence every session; drafts a mise task for it |
 
 **Pull requests**
