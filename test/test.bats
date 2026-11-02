@@ -262,6 +262,14 @@ vitest (vitest's module graph): 2 test files
 	assert_success
 	run jq -e '.suites[0].command | index("--runTestsByPath") != null and index("--findRelatedTests") == null and index("--ci") != null' <<<"$output"
 	assert_success
+
+	# Jest applies this Git-relative selector before --runTestsByPath.
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- --changedSince main
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- --changed-since=main
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
 }
 
 @test "pytest without testmon follows imports, and a conftest runs the whole suite" {

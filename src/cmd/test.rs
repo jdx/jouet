@@ -721,16 +721,27 @@ fn freeze_javascript_selection(suite: &mut Suite, extra: &[String]) -> Result<()
         return Ok(());
     }
     if extra.iter().any(|arg| {
-        [
-            "--changed",
-            "--findRelatedTests",
-            "--onlyChanged",
-            "--lastCommit",
-            "--related",
-        ]
-        .iter()
-        .any(|flag| arg.as_str() == *flag || arg.starts_with(&format!("{flag}=")))
-            || arg == "-o"
+        if !arg.starts_with('-') {
+            return false;
+        }
+        let name = arg.split('=').next().unwrap_or(arg);
+        let normalized: String = name
+            .chars()
+            .filter(|c| *c != '-')
+            .flat_map(char::to_lowercase)
+            .collect();
+        matches!(
+            normalized.as_str(),
+            "changed"
+                | "changedsince"
+                | "changedfileswithancestor"
+                | "findrelatedtests"
+                | "onlychanged"
+                | "onlyfailures"
+                | "lastcommit"
+                | "related"
+                | "o"
+        )
     }) {
         return Err(affected::Error::new(
             Exit::Precondition,
