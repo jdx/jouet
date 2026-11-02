@@ -525,6 +525,10 @@ tap_script() {
 	assert_failure 4
 	assert_output --partial 'no test ran'
 	assert_output --partial '(exit 4)'
+	# --bin runs only the binary's own tests: the lib's need --lib.
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test --bin app missing_name
+	assert_failure 4
+	assert_output --partial 'lib tests run with --lib'
 
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- cargo test missing_name
 	assert_failure 4

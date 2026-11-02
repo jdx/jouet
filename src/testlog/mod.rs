@@ -38,9 +38,14 @@ pub(crate) struct Digest {
     pub(crate) failed: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub(crate) skipped: u64,
-    /// Compiler warnings (rustc's), which are counted but not shown.
+    /// Compiler warnings (rustc's), counted.
     #[serde(skip_serializing_if = "is_zero")]
     pub(crate) warnings: u64,
+    /// Each warning's headline and location, when there are at most
+    /// [`WARNINGS_NAMED`] of them: a count alone sends the agent to the
+    /// log, to see whether a warning is its own.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warning_names: Vec<String>,
     /// The failures that fit the budget, in the order the output has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) failures: Vec<Failure>,
@@ -86,6 +91,9 @@ fn no_tests(lines: &[String]) -> bool {
 /// The most passing tests a digest names.
 const PASSES_NAMED: usize = 8;
 
+/// The most compiler warnings a digest names.
+const WARNINGS_NAMED: usize = 5;
+
 /// The longest name a digest lists, in characters.
 const NAME_MAX: usize = 120;
 
@@ -117,6 +125,8 @@ struct Parsed {
     found: Vec<Found>,
     /// The names of the passing tests, from runners that print each.
     passed_names: Vec<String>,
+    /// Each compiler warning's headline and location.
+    warning_names: Vec<String>,
 }
 
 impl Parsed {
@@ -350,6 +360,21 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         } else {
             Vec::new()
         },
+        warning_names: {
+            // cargo reports a warning once for each target that builds it.
+            let mut names = parsed.warning_names.clone();
+            names.dedup();
+            names.sort();
+            names.dedup();
+            if names.len() <= WARNINGS_NAMED {
+                names
+                    .iter()
+                    .map(|n| n.chars().take(160).collect())
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        },
         no_tests,
     }
 }
@@ -462,8 +487,12 @@ fn rustc(lines: &[String], out: &mut Parsed) {
                 .take(3)
                 .find_map(|l| RUSTC_AT.captures(l).map(|c| c[1].to_string()))
         };
-        if RUSTC_WARNING.is_match(line) && located(i + 1).is_some() {
+        if RUSTC_WARNING.is_match(line)
+            && let Some(at) = located(i + 1)
+        {
             out.warnings += 1;
+            let headline = line.split_once(": ").map_or(line.as_str(), |(_, h)| h);
+            out.warning_names.push(format!("{headline} ({at})"));
             continue;
         }
         if let Some(c) = CARGO_BUILD_SCRIPT.captures(line) {

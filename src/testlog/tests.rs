@@ -599,3 +599,22 @@ fn vitest_files_that_failed_to_load_show_their_shared_error_once() {
     // The others are named, without the error again.
     assert!(d.failures[1..].iter().all(|f| f.lines.is_empty()));
 }
+
+#[test]
+fn a_few_warnings_are_named_with_their_place_once_each() {
+    let warning = "warning: unused variable: `x`\n --> src/a.rs:1:5\n  |\n1 | let x = 1;\n";
+    // cargo prints a warning once for each target that builds it.
+    let text = format!(
+        "{warning}{warning}warning: `fnox` (lib) generated 1 warning\nrunning 1 test\ntest t ... ok\n\ntest result: ok. 1 passed; 0 failed\n"
+    );
+    let d = digest(&text, false, DEFAULT_BUDGET);
+    assert_eq!(d.warning_names, ["unused variable: `x` (src/a.rs:1:5)"]);
+    let many: String = (0..6)
+        .map(|i| format!("warning: unused variable: `x{i}`\n --> src/a.rs:{i}:5\n"))
+        .collect();
+    assert!(
+        digest(&many, false, DEFAULT_BUDGET)
+            .warning_names
+            .is_empty()
+    );
+}

@@ -1024,13 +1024,31 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
     }
     // A pass of nothing proves nothing: say so, so the agent does not read
     // the log to find out, or take it for its test passing.
-    if empty_test {
+    // `cargo test --bin NAME` runs that binary's own tests alone, and a
+    // crate keeps most of them in its lib.
+    let bin_only = suite.command.as_ref().is_some_and(|argv| {
+        argv.iter().any(|w| w == "cargo")
+            && argv.iter().any(|w| w == "test")
+            && argv.iter().any(|w| w == "--bin" || w.starts_with("--bin="))
+    });
+    if empty_test && bin_only {
+        s.push_str(
+            ": --bin runs only the binary's own tests; a crate's lib tests run with --lib (exit 4)",
+        );
+    } else if empty_test {
         s.push_str(": a filter or path that matched nothing? (exit 4)");
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
     if streamed || suite.exit_code == Some(0) {
         let _ = writeln!(s, " (full log: {log})");
+        // A few warnings by name, so the agent can tell its own without
+        // reading the log.
+        if !streamed {
+            for warning in &digest.warning_names {
+                let _ = writeln!(s, "  warning: {warning}");
+            }
+        }
         return s;
     }
     s.push('\n');
