@@ -289,7 +289,10 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
 
 def run_setup(task: Task, workdir: Path) -> None:
     """Runs the task's `setup` commands, such as installing a project's
-    dependencies offline, and refuses one that leaves the tree dirty."""
+    dependencies offline, and refuses changes to the initial work tree."""
+    if not task.setup:
+        return
+    before = (git(workdir, "status", "--porcelain", "--ignored=no"), git(workdir, "diff", "--binary", "HEAD"))
     for command in task.setup:
         proc = subprocess.run(
             [expand(arg, workdir) for arg in shlex.split(command)],
@@ -301,8 +304,9 @@ def run_setup(task: Task, workdir: Path) -> None:
         if proc.returncode != 0:
             output = (proc.stdout + proc.stderr)[-3000:]
             raise RuntimeError(f"task {task.name}: setup `{command}` exited {proc.returncode}:\n{output}")
-    if dirty := git(workdir, "status", "--porcelain", "--ignored=no"):
-        raise RuntimeError(f"task {task.name}: setup left files git does not ignore:\n{dirty}")
+    dirty = git(workdir, "status", "--porcelain", "--ignored=no")
+    if (dirty, git(workdir, "diff", "--binary", "HEAD")) != before:
+        raise RuntimeError(f"task {task.name}: setup changed files git does not ignore:\n{dirty}")
 
 
 def copy_source(source: dict[str, str], workdir: Path) -> None:
