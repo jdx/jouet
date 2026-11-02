@@ -1,0 +1,298 @@
+diff --git a/packages/zod/src/v4/classic/tests/issue-schema.test.ts b/packages/zod/src/v4/classic/tests/issue-schema.test.ts
+index f061abb4..8026be9a 100644
+--- a/packages/zod/src/v4/classic/tests/issue-schema.test.ts
++++ b/packages/zod/src/v4/classic/tests/issue-schema.test.ts
+@@ -5,6 +5,9 @@ afterEach(() => {
+   z.config({ customError: undefined });
+ });
+ 
++/** Error maps run on the first read of `error`, so a test that only observes them reads it. */
++const fail = (r: { error?: unknown }) => r.error;
++
+ /** Collects the owning schema's registered metadata for every issue an error map sees. */
+ function captureMeta(): { seen: (z.core.GlobalMeta | undefined)[] } {
+   const seen: (z.core.GlobalMeta | undefined)[] = [];
+@@ -20,11 +23,11 @@ function captureMeta(): { seen: (z.core.GlobalMeta | undefined)[] } {
+ test("check-originated issues expose the owning schema", () => {
+   const { seen } = captureMeta();
+ 
+-  z.object({ name: z.string().min(5).meta({ title: "Name" }) }).safeParse({ name: "ab" });
+-  z.string().max(2).meta({ title: "Max" }).safeParse("abc");
+-  z.email().meta({ title: "Email" }).safeParse("nope");
+-  z.number().multipleOf(3).meta({ title: "Multiple" }).safeParse(4);
+-  z.array(z.string()).min(2).meta({ title: "Array" }).safeParse([]);
++  fail(z.object({ name: z.string().min(5).meta({ title: "Name" }) }).safeParse({ name: "ab" }));
++  fail(z.string().max(2).meta({ title: "Max" }).safeParse("abc"));
++  fail(z.email().meta({ title: "Email" }).safeParse("nope"));
++  fail(z.number().multipleOf(3).meta({ title: "Multiple" }).safeParse(4));
++  fail(z.array(z.string()).min(2).meta({ title: "Array" }).safeParse([]));
+ 
+   expect(seen).toEqual([
+     { title: "Name" },
+@@ -38,8 +41,8 @@ test("check-originated issues expose the owning schema", () => {
+ test("schema-originated issues expose the owning schema", () => {
+   const { seen } = captureMeta();
+ 
+-  z.object({ name: z.string().min(5).meta({ title: "Name" }) }).safeParse({ name: 123 });
+-  z.email().meta({ title: "Email" }).safeParse(123);
++  fail(z.object({ name: z.string().min(5).meta({ title: "Name" }) }).safeParse({ name: 123 }));
++  fail(z.email().meta({ title: "Email" }).safeParse(123));
+ 
+   expect(seen).toEqual([{ title: "Name" }, { title: "Email" }]);
+ });
+@@ -47,14 +50,20 @@ test("schema-originated issues expose the owning schema", () => {
+ test("refinements attribute to the refined schema, not the internal check schema", () => {
+   const { seen } = captureMeta();
+ 
+-  z.string()
+-    .refine(() => false)
+-    .meta({ title: "Refine" })
+-    .safeParse("abc");
+-  z.string()
+-    .superRefine((_, ctx) => ctx.addIssue({ code: "custom", message: "" }))
+-    .meta({ title: "SuperRefine" })
+-    .safeParse("abc");
++  fail(
++    z
++      .string()
++      .refine(() => false)
++      .meta({ title: "Refine" })
++      .safeParse("abc")
++  );
++  fail(
++    z
++      .string()
++      .superRefine((_, ctx) => ctx.addIssue({ code: "custom", message: "" }))
++      .meta({ title: "SuperRefine" })
++      .safeParse("abc")
++  );
+ 
+   expect(seen).toEqual([{ title: "Refine" }, { title: "SuperRefine" }]);
+ });
+@@ -62,17 +71,26 @@ test("refinements attribute to the refined schema, not the internal check schema
+ test("the innermost schema owns the issue", () => {
+   const { seen } = captureMeta();
+ 
+-  z.array(z.string().min(5).meta({ title: "Element" }))
+-    .meta({ title: "Array" })
+-    .safeParse(["ab"]);
+-  z.string()
+-    .pipe(z.string().min(5).meta({ title: "Target" }))
+-    .meta({ title: "Pipe" })
+-    .safeParse("ab");
+-  z.looseObject({})
+-    .check(z.property("a", z.string().meta({ title: "Property" })))
+-    .meta({ title: "Object" })
+-    .safeParse({ a: 1 });
++  fail(
++    z
++      .array(z.string().min(5).meta({ title: "Element" }))
++      .meta({ title: "Array" })
++      .safeParse(["ab"])
++  );
++  fail(
++    z
++      .string()
++      .pipe(z.string().min(5).meta({ title: "Target" }))
++      .meta({ title: "Pipe" })
++      .safeParse("ab")
++  );
++  fail(
++    z
++      .looseObject({})
++      .check(z.property("a", z.string().meta({ title: "Property" })))
++      .meta({ title: "Object" })
++      .safeParse({ a: 1 })
++  );
+ 
+   expect(seen).toEqual([{ title: "Element" }, { title: "Target" }, { title: "Property" }]);
+ });
+@@ -81,12 +99,15 @@ test("issues carrying no usable `inst` still get the owning schema", () => {
+   const { seen } = captureMeta();
+ 
+   // A hand-pushed issue may carry no inst at all, and ctx.addIssue(string) puts the check's def — not a Zod object — on inst.
+-  z.string()
+-    .check((payload) => {
+-      payload.issues.push({ code: "custom", input: payload.value });
+-    })
+-    .meta({ title: "Bare" })
+-    .safeParse("abc");
++  fail(
++    z
++      .string()
++      .check((payload) => {
++        payload.issues.push({ code: "custom", input: payload.value });
++      })
++      .meta({ title: "Bare" })
++      .safeParse("abc")
++  );
+   const shorthand = z
+     .string()
+     .superRefine((_, ctx) => ctx.addIssue("bad stuff"))
+@@ -100,11 +121,13 @@ test("issues carrying no usable `inst` still get the owning schema", () => {
+ test("async checks expose the owning schema", async () => {
+   const { seen } = captureMeta();
+ 
+-  await z
+-    .string()
+-    .refine(async () => false)
+-    .meta({ title: "Async" })
+-    .safeParseAsync("abc");
++  fail(
++    await z
++      .string()
++      .refine(async () => false)
++      .meta({ title: "Async" })
++      .safeParseAsync("abc")
++  );
+ 
+   expect(seen).toEqual([{ title: "Async" }]);
+ });
+@@ -120,7 +143,7 @@ test("the owning schema is the clone `.meta()` registered, not the pre-metadata
+     },
+   });
+ 
+-  labeled.safeParse("ab");
++  fail(labeled.safeParse("ab"));
+ 
+   expect(seen).toEqual([true]);
+ });
+@@ -134,12 +157,12 @@ test("`inst` keeps its meaning and `schema` stays off the finalized issue", () =
+     },
+   });
+ 
+-  const tooSmall = z.string().min(5).safeParse("ab");
+-  const wrongType = z.string().safeParse(123);
++  const tooSmall = z.string().min(5).safeParse("ab").error!;
++  const wrongType = z.string().safeParse(123).error!;
+ 
+   expect(insts).toEqual(["$ZodCheckMinLength", "ZodString"]);
+-  expect(Object.keys(tooSmall.error!.issues[0])).not.toContain("schema");
+-  expect(Object.keys(wrongType.error!.issues[0])).not.toContain("schema");
++  expect(Object.keys(tooSmall.issues[0])).not.toContain("schema");
++  expect(Object.keys(wrongType.issues[0])).not.toContain("schema");
+ });
+ 
+ test("every error map kind receives the owning schema", () => {
+@@ -149,28 +172,37 @@ test("every error map kind receives the owning schema", () => {
+     return undefined;
+   };
+ 
+-  z.string()
+-    .min(5, { error: capture("check") })
+-    .meta({ title: "Check" })
+-    .safeParse("ab");
++  fail(
++    z
++      .string()
++      .min(5, { error: capture("check") })
++      .meta({ title: "Check" })
++      .safeParse("ab")
++  );
+ 
+   // A schema-bound map is only consulted for issues the schema itself raised, so this one needs a type error.
+-  z.string({ error: capture("schema") })
+-    .meta({ title: "Schema" })
+-    .safeParse(123);
+-
+-  z.string()
+-    .min(5)
+-    .meta({ title: "Parse" })
+-    .safeParse("ab", { error: capture("parse") });
++  fail(
++    z
++      .string({ error: capture("schema") })
++      .meta({ title: "Schema" })
++      .safeParse(123)
++  );
++
++  fail(
++    z
++      .string()
++      .min(5)
++      .meta({ title: "Parse" })
++      .safeParse("ab", { error: capture("parse") })
++  );
+ 
+   z.config({ customError: capture("customError") });
+-  z.string().min(5).meta({ title: "Custom" }).safeParse("ab");
++  fail(z.string().min(5).meta({ title: "Custom" }).safeParse("ab"));
+ 
+   // localeError carries the default English locale, so it is restored rather than cleared.
+   const localeError = z.config().localeError;
+   z.config({ customError: undefined, localeError: capture("localeError") });
+-  z.string().min(5).meta({ title: "Locale" }).safeParse("ab");
++  fail(z.string().min(5).meta({ title: "Locale" }).safeParse("ab"));
+   z.config({ localeError });
+ 
+   expect(seen).toEqual({
+diff --git a/packages/zod/src/v4/classic/tests/standard-schema.test.ts b/packages/zod/src/v4/classic/tests/standard-schema.test.ts
+index 3124a895..b0c3e3fd 100644
+--- a/packages/zod/src/v4/classic/tests/standard-schema.test.ts
++++ b/packages/zod/src/v4/classic/tests/standard-schema.test.ts
+@@ -142,3 +142,12 @@ test("a failing validate reports the same issues as safeParse, without a ZodErro
+   const sync = z.string().min(3)["~standard"].validate("ab") as { issues: unknown[] };
+   expect(sync.issues).toEqual(z.string().min(3).safeParse("ab").error!.issues);
+ });
++
++test("a synchronously throwing check rejects through ~standard instead of throwing", async () => {
++  const schema = z.string().refine(() => {
++    throw new Error("boom");
++  });
++  const result = schema["~standard"].validate("abc");
++  expect(result).toBeInstanceOf(Promise);
++  await expect(result as Promise<unknown>).rejects.toThrow("boom");
++});
+diff --git a/packages/zod/src/v4/core/schemas.ts b/packages/zod/src/v4/core/schemas.ts
+index 2df29a0f..b7c23d96 100644
+--- a/packages/zod/src/v4/core/schemas.ts
++++ b/packages/zod/src/v4/core/schemas.ts
+@@ -336,6 +336,11 @@ export const $ZodType: core.$constructor<$ZodType> = /*@__PURE__*/ core.$constru
+ const toStandardResult = (r: ParsePayload, ctx: ParseContextInternal) =>
+   r.issues.length ? { issues: r.issues.map((iss) => util.finalizeIssue(iss, ctx, core.config())) } : { value: r.value };
+ 
++async function validateAsync(inst: $ZodType, value: unknown) {
++  const ctx: ParseContextInternal = { async: true };
++  return toStandardResult((await inst._zod.run({ value, issues: [] }, ctx)) as ParsePayload, ctx);
++}
++
+ export function standardProps(inst: $ZodType): StandardSchemaV1.Props<any, any> {
+   return {
+     validate: (value: unknown) => {
+@@ -344,10 +349,8 @@ export function standardProps(inst: $ZodType): StandardSchemaV1.Props<any, any>
+         const r = inst._zod.run({ value, issues: [] }, ctx);
+         if (!(r instanceof Promise)) return toStandardResult(r, ctx);
+       } catch (_) {}
+-      const actx: ParseContextInternal = { async: true };
+-      return (inst._zod.run({ value, issues: [] }, actx) as Promise<ParsePayload>).then((r) =>
+-        toStandardResult(r, actx)
+-      );
++      // async function so a synchronously throwing check rejects instead of escaping validate
++      return validateAsync(inst, value);
+     },
+     vendor: "zod",
+     version: 1 as const,
+@@ -1048,9 +1051,12 @@ export const $ZodBase64: core.$constructor<$ZodBase64> = /*@__PURE__*/ core.$con
+   }
+ );
+ 
+-//////////////////////////////   ZodBase64   //////////////////////////////
++//////////////////////////////   ZodBase64URL   //////////////////////////////
++// charset only — the quantified regexes.base64url overflows the regex stack on multi-MB input; isValidBase64 enforces length on the padded string
++const base64urlCharset = /^[A-Za-z0-9_-]*$/;
++
+ export function isValidBase64URL(data: string): boolean {
+-  if (!regexes.base64url.test(data)) return false;
++  if (!base64urlCharset.test(data)) return false;
+   const base64 = data.replace(/[-_]/g, (c) => (c === "-" ? "+" : "/"));
+   const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+   return isValidBase64(padded);
+@@ -1109,7 +1115,7 @@ function isLuhnAlgo(digits: string): boolean {
+   let bit = 1;
+   let sum = 0;
+   while (length) {
+-    const value = +digits[--length]!;
++    const value = digits.charCodeAt(--length) - 48;
+     bit ^= 1;
+     sum += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value]! : value;
+   }

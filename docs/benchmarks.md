@@ -40,10 +40,21 @@ Projects beyond jdx's own:
 | `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in the clone to fill the store |
 | `commander-output-config` | commander.js, a CLI library | [tj/commander.js#2342](https://github.com/tj/commander.js/issues/2342) | JavaScript, jest and tsc | one `npm ci` in the clone to fill npm's cache |
 | `click-short-help` | Click, a CLI library | [pallets/click#3865](https://github.com/pallets/click/pull/3865) | Python, pytest | Python 3.13 and the task's hash-locked pytest and build dependencies; Click is installed editable in each run |
+| `django-lookup-subquery` | Django, a web framework | [ticket #35972](https://code.djangoproject.com/ticket/35972) | Python, Django's `tests/runtests.py` on SQLite | Python 3.13, a Django clone at `~/src/django`, and the task's hash-locked wheels in `~/src/django-bench-wheels`, as described below |
+| `zod-lazy-error-pr` | zod, a library | a whole PR session on [colinhacks/zod#6519](https://github.com/colinhacks/zod/pull/6519) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in `~/src/zod` at the PR's base to fill the store |
 
 Each `task.toml` notes which jouet levels the task can exercise: what `jouet test` does with the project out of the box, and where TOML config or a Luau rule or routine could help. A JavaScript project's dependencies are installed by the task's `setup` commands, offline from your cache, after the work tree is committed and before the agent's clock starts. The agents are not network-sandboxed and can override offline defaults. A setup that leaves files git does not ignore is refused. Tools the default `bin/` lacks, such as `go`, `npm` or a pinned `pnpm`, can be exposed through `[tools]`, by path or by a bare name found on your `PATH`.
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
+
+The opt-in Django task's fix spans the ORM's lookups, expressions, functions and schema editor. Its check runs the fix's own tests in three test packages. Each run creates a virtual environment with asgiref, sqlparse and tblib (without tblib, Django's parallel runner cannot report a failure). pip installs them with `PIP_NO_INDEX`, so prepare the wheels once:
+
+```sh
+git clone https://github.com/django/django.git ~/src/django
+python3 -m pip download --only-binary=:all: --require-hashes -r bench/tasks/django-lookup-subquery/requirements.lock -d ~/src/django-bench-wheels
+```
+
+The opt-in `zod-lazy-error-pr` task is a whole PR session in a TypeScript project, like `mise-uninstall-pr`. The agent starts at the PR's second push (442ff01). The fake GitHub serves that push's real CI failure and log, and pullfrog's real review thread. To pass, the agent has to fix the failing issue-schema tests, make a check that throws synchronously reject through `~standard.validate`, keep the PR's own lazy-error tests passing, then reply on the thread and resolve it. Fill pnpm's store once with `pnpm install` in a `~/src/zod` worktree at a6b4939.
 
 The opt-in Requests task installs hash-locked test dependencies, the project's pinned Ruff version, and the checkout into an isolated Python environment before each run. Its independent checker prepares multipart requests without network access, exercising temporary files, dynamically proxied streams and ordinary file values.
 

@@ -1,0 +1,77 @@
+description = "A whole PR session on real zod code (colinhacks/zod#6519): wait for CI on the PR, fix the tests it fails, address the review thread, commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real TypeScript library in a pnpm monorepo: it runs only when named.
+opt_in = true
+branch = "lazy-safeparse-error-pr"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 2400
+check_timeout_s = 300
+# jouet levels: out of the box, `jouet wait ci`, `jouet pr threads` and
+# `jouet pr next` read the PR from the fake, `jouet test` digests vitest's
+# output (each failure prints twice, once per vitest project), and
+# `--affected` selects through vitest's module graph, though for
+# `core/schemas.ts` that is nearly every test file. No format is needed; a
+# Luau rule could steer agents from the root's whole `pnpm test` to the one
+# test file, or name `pnpm build` before it, since a test checks that the
+# build is fresh.
+# The PR at its second push (442ff01): CI fails the issue-schema tests, and
+# pullfrog's review thread asks that a throwing check reject. Upstream fixed
+# them in 227d555 and 3ccbab4; the review came after a merge from main, which
+# the task leaves out.
+prompt = """
+PR #6519 (branch lazy-safeparse-error-pr, checked out here) makes a failing `safeParse` build its
+error on first read. CI is running on it, and a reviewer has left a comment. Get it ready: wait for
+CI and fix what fails, and address the open review thread: make the requested change, reply on the
+thread saying what you did, and resolve it. Commit your changes; don't push.
+"""
+
+# As zod-int-bounds: the benchmark environment pins the pnpm the base
+# requires, and the install is offline from the user's pnpm store, so run
+# `pnpm install` once in ~/src/zod at this commit to fill it. The full test
+# suite needs built package files, which are ignored by Git.
+setup = ["pnpm install --offline --frozen-lockfile --ignore-scripts", "pnpm build"]
+
+# The PR's base, a6b4939 on main; `pr/` holds its files at 442ff01.
+[source]
+git = "~/src/zod"
+commit = "a6b493907066003e28f8b7e967faf4d19f2174f4"
+
+[tools]
+pnpm = "pnpm"
+npm = "npm"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "pnpm vitest run packages/zod/src/v4/classic/tests/issue-schema.test.ts",
+    "pnpm build",
+    "pnpm test",
+]
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "6519", "--json"]
+exit = 1
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "6519", "--json"]
+stdout_contains = "synchronously-throwing"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "55501", "6519", "--body", "validate's async branch is an async function now.", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "6519"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "issue-schema.test.ts"
