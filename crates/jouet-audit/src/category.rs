@@ -1,7 +1,7 @@
 //! What a call was for.
 
 use crate::event::{Call, Tool};
-use crate::shape::programs;
+use crate::shape::program_shapes;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -241,12 +241,34 @@ pub(crate) fn categorize_command(command: &str) -> Category {
     if STATUS.is_match(command) {
         return Category::PrStatus;
     }
-    if EDIT.is_match(command) {
+    let shapes = program_shapes(command);
+    let jouet = |sub: &str| {
+        shapes.iter().any(|(program, shaped)| {
+            if program != "jouet" {
+                return false;
+            }
+            let mut words = shaped
+                .split_whitespace()
+                .skip_while(|word| *word != "jouet");
+            words.next();
+            while let Some(word) = words.next() {
+                match word {
+                    "--json" | "--display=<v>" => {}
+                    "--display" => {
+                        words.next();
+                    }
+                    _ => return word == sub,
+                }
+            }
+            false
+        })
+    };
+    if EDIT.is_match(command) || jouet("edit") {
         return Category::Edits;
     }
-    let programs = programs(command);
-    let runs = |p: &str| programs.iter().any(|q| q == p);
-    if programs.iter().any(|p| is_build(p, command)) {
+    let programs: Vec<&str> = shapes.iter().map(|(program, _)| program.as_str()).collect();
+    let runs = |p: &str| programs.contains(&p);
+    if jouet("test") || programs.iter().any(|p| is_build(p, command)) {
         return Category::BuildTestLint;
     }
     if sleeps || runs("pgrep") || runs("wait") {
@@ -255,11 +277,12 @@ pub(crate) fn categorize_command(command: &str) -> Category {
     if GITHUB.is_match(command) {
         return Category::Github;
     }
-    if runs("git") {
+    if runs("git") || jouet("commit") {
         return Category::Git;
     }
-    let first = programs.iter().find(|p| !SETUP.contains(&p.as_str()));
-    if first.is_some_and(|p| READ.contains(&p.as_str())) {
+    let first = programs.iter().find(|p| !SETUP.contains(p));
+    if first.is_some_and(|p| READ.contains(p)) || jouet("read") || jouet("search") || jouet("graph")
+    {
         return Category::ReadSearch;
     }
     if runs("curl") || runs("wget") {
@@ -361,6 +384,34 @@ mod tests {
         assert_eq!(cat("pgrep -f server"), Category::ProcessPolling);
         assert_eq!(cat("curl -s https://example.com"), Category::Web);
         assert_eq!(cat("echo hi"), Category::Other);
+    }
+
+    #[test]
+    fn categorizes_jouet_commands_by_the_work_they_do() {
+        assert_eq!(
+            cat("jouet test --affected && jouet commit file --message fix"),
+            Category::BuildTestLint
+        );
+        assert_eq!(
+            cat("mise x -- jouet --json test --cmd -- cargo test"),
+            Category::BuildTestLint
+        );
+        assert_eq!(
+            cat("jouet --display agent read src/main.rs --symbol run"),
+            Category::ReadSearch
+        );
+        assert_eq!(cat("jouet search needle src"), Category::ReadSearch);
+        assert_eq!(cat("jouet graph affected file.rs"), Category::ReadSearch);
+        assert_eq!(cat("jouet commit file --message fix"), Category::Git);
+        assert_eq!(
+            cat("jouet --json edit replace file --old a --new b"),
+            Category::Edits
+        );
+        assert_eq!(
+            cat("echo 'jouet test' && jouet read file"),
+            Category::ReadSearch
+        );
+        assert_eq!(cat("echo 'jouet read file'"), Category::Other);
     }
 
     #[test]
