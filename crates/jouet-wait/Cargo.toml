@@ -1,6 +1,6 @@
 [package]
 name = "jouet-wait"
-version = "0.0.1"
+version = "0.0.2"
 description = "The conditions and polling behind jouet wait: local subjects, CI runs and pull requests"
 keywords = ["agents", "wait", "ci", "github"]
 categories = ["development-tools"]

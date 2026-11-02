@@ -19,17 +19,17 @@ readme = "README.md"
 [workspace.dependencies]
 aho-corasick = "1"
 ast-grep-core = "0.51"
-jouet-audit = { path = "crates/jouet-audit", version = "0.0.1" }
-jouet-edit = { path = "crates/jouet-edit", version = "0.0.1" }
-jouet-git = { path = "crates/jouet-git", version = "0.0.1" }
-jouet-graph = { path = "crates/jouet-graph", version = "0.0.1" }
-jouet-github = { path = "crates/jouet-github", version = "0.0.1" }
-jouet-output = { path = "crates/jouet-output", version = "0.0.1" }
-jouet-routines = { path = "crates/jouet-routines", version = "0.0.1" }
-jouet-rules = { path = "crates/jouet-rules", version = "0.0.1" }
-jouet-search = { path = "crates/jouet-search", version = "0.0.1" }
-jouet-secrets = { path = "crates/jouet-secrets", version = "0.0.1" }
-jouet-wait = { path = "crates/jouet-wait", version = "0.0.1" }
+jouet-audit = { path = "crates/jouet-audit", version = "0.0.2" }
+jouet-edit = { path = "crates/jouet-edit", version = "0.0.2" }
+jouet-git = { path = "crates/jouet-git", version = "0.0.2" }
+jouet-graph = { path = "crates/jouet-graph", version = "0.0.2" }
+jouet-github = { path = "crates/jouet-github", version = "0.0.2" }
+jouet-output = { path = "crates/jouet-output", version = "0.0.2" }
+jouet-routines = { path = "crates/jouet-routines", version = "0.0.2" }
+jouet-rules = { path = "crates/jouet-rules", version = "0.0.2" }
+jouet-search = { path = "crates/jouet-search", version = "0.0.2" }
+jouet-secrets = { path = "crates/jouet-secrets", version = "0.0.2" }
+jouet-wait = { path = "crates/jouet-wait", version = "0.0.2" }
 grep-regex = "0.1"
 grep-searcher = "0.1"
 ignore = "0.4"
@@ -89,7 +89,7 @@ unreachable_pub = "deny"
 
 [package]
 name = "jouet"
-version = "0.0.1"
+version = "0.0.2"
 description = "A toolkit CLI for coding agents"
 keywords = ["cli", "agents", "github", "ci"]
 categories = ["command-line-utilities", "development-tools"]
