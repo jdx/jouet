@@ -764,3 +764,81 @@ class CostSeedTest(unittest.TestCase):
             shas = tasks.prepare(task, run)
             costs.apply(run, note, shas["head_sha"])
             self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)
+
+    def test_cost_cache_changes_with_setup_tools_and_jouet(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tool = root / "pnpm"
+            tool.write_text("tool one")
+            tool.chmod(0o755)
+            binary = root / "jouet"
+            binary.write_text("jouet one")
+            task = dataclasses.replace(tasks.load("smoke"), cost_seed=["pnpm test"],
+                                       setup=["pnpm install"], tools={"pnpm": "pnpm"})
+            with patch.dict(os.environ, {"PATH": str(root), "XDG_CACHE_HOME": str(root / "cache")}):
+                original = costs.cache_path(task, binary)
+                self.assertEqual(costs.cache_path(task, binary), original)
+                self.assertNotEqual(costs.cache_path(dataclasses.replace(task, setup=["pnpm build"]), binary), original)
+                self.assertNotEqual(costs.cache_path(dataclasses.replace(task, env={"MODE": "offline"}), binary), original)
+                with patch.object(costs, "harness_hashes", return_value=["different harness"]):
+                    self.assertNotEqual(costs.cache_path(task, binary), original)
+                tool.write_text("a different tool version")
+                self.assertNotEqual(costs.cache_path(task, binary), original)
+                tool.write_text("tool one")
+                tool.chmod(0o755)
+                before_binary_change = costs.cache_path(task, binary)
+                binary.write_text("jouet two")
+                self.assertNotEqual(costs.cache_path(task, binary), before_binary_change)
+
+    def test_cost_cache_fingerprints_the_tool_behind_a_mise_shim(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tool = root / "actual-pnpm"
+            tool.write_text("first version")
+            tool.chmod(0o755)
+            mise = root / "mise"
+            mise.write_text(f'#!/bin/sh\nprintf "%s\\n" "{tool}"\n')
+            mise.chmod(0o755)
+            (root / "pnpm").symlink_to(mise)
+            binary = root / "jouet"
+            binary.write_text("jouet")
+            task = dataclasses.replace(tasks.load("smoke"), cost_seed=["pnpm test"])
+            with patch.dict(os.environ, {"PATH": str(root), "XDG_CACHE_HOME": str(root / "cache")}):
+                original = costs.cache_path(task, binary)
+                tool.write_text("a different version of the tool")
+                self.assertNotEqual(costs.cache_path(task, binary), original)
+
+    def test_cost_cache_does_not_resolve_worktree_commands_from_the_host_cwd(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            binary = root / "jouet"
+            binary.write_text("jouet")
+            for name in ("first", "second"):
+                (root / name / "local").mkdir(parents=True)
+            (root / "first/local/check").write_text("unrelated host file")
+            task = dataclasses.replace(tasks.load("smoke"), cost_seed=["local/check"])
+            previous = Path.cwd()
+            try:
+                with patch.dict(os.environ, {"PATH": str(root), "XDG_CACHE_HOME": str(root / "cache")}):
+                    os.chdir(root / "first")
+                    first = costs.cache_path(task, binary)
+                    os.chdir(root / "second")
+                    self.assertEqual(costs.cache_path(task, binary), first)
+            finally:
+                os.chdir(previous)
