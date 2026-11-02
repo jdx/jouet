@@ -502,7 +502,8 @@ class ReportTest(unittest.TestCase):
         )
         text = report.markdown(summary)
         self.assertIn("> **Smoke test**", text)
-        self.assertIn("| smoke | claude | 2/2 | 1/2 | -50 (-5%)", text)
+        self.assertIn("| smoke | claude | 2/2 | 1/2 | 1 | -200 (-20%)", text)
+        self.assertIn("diagnostic metrics include finished runs even when a task failed or stopped early", text)
         self.assertIn("`python-edit:deny` ×2", text)
         self.assertIn("Paired outcomes: 1 both passed; 1 plain only; 0 jouet only; 0 both failed.", text)
         self.assertIn("Both-pass pairs (1): median jouet minus plain: input -200", text)
@@ -525,7 +526,9 @@ class ReportTest(unittest.TestCase):
         cell = report.summarize(records, {})["cells"][0]
         self.assertEqual(cell["paired_outcomes"], {"both_passed": 0, "plain_only": 1, "jouet_only": 1, "both_failed": 1})
         self.assertIsNone(cell["paired_when_both_pass"]["input_tokens"])
-        self.assertIn("Both-pass pairs (0): median jouet minus plain: no comparable metrics.", report.markdown({"meta": {}, "cells": [cell]}))
+        text = report.markdown({"meta": {}, "cells": [cell]})
+        self.assertIn("| t | codex | 3/5 | 1/4 | 0 | – | – | – | – | – |", text)
+        self.assertIn("Both-pass pairs (0): median jouet minus plain: no comparable metrics.", text)
 
 
 if __name__ == "__main__":

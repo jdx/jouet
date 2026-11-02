@@ -146,8 +146,10 @@ def markdown(summary: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        "| task | harness | success plain | success jouet | input tokens Δ | output tokens Δ | requests Δ | tool calls Δ | wall Δ |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "Deltas compare only pairs where both arms passed the task checker.",
+        "",
+        "| task | harness | success plain | success jouet | both passed | input tokens Δ | output tokens Δ | requests Δ | tool calls Δ | wall Δ |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for cell in summary["cells"]:
         arms = cell["arms"]
@@ -155,6 +157,7 @@ def markdown(summary: dict[str, Any]) -> str:
         for arm in ("plain", "jouet"):
             a = arms.get(arm)
             row.append(f"{a['successes']}/{a['runs']}" if a else "–")
+        row.append(str(cell["paired_outcomes"]["both_passed"]) if "paired_outcomes" in cell else "–")
         for key, kind in (
             ("input_tokens", "tokens"),
             ("output_tokens", "tokens"),
@@ -162,7 +165,7 @@ def markdown(summary: dict[str, Any]) -> str:
             ("calls", "count"),
             ("wall_s", "seconds"),
         ):
-            p = cell["paired"].get(key)
+            p = cell.get("paired_when_both_pass", {}).get(key)
             if not p:
                 row.append("–")
                 continue
@@ -180,6 +183,8 @@ def markdown(summary: dict[str, Any]) -> str:
                 "",
             ]
         lines += [
+            "The following diagnostic metrics include finished runs even when a task failed or stopped early.",
+            "",
             "| metric | plain median [p25–p75] | jouet median [p25–p75] | paired Δ median [min, max] | jouet lower | p |",
             "|---|---|---|---|---|---|",
         ]
