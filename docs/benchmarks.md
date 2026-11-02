@@ -158,7 +158,7 @@ Results go to `bench/results/<timestamp>/`, which git ignores:
 - `summary.json` and `summary.md`: the comparison;
 - `runs/<task>.<harness>.<arm>.r<round>/`: the agent's event stream, its transcripts, `jouet audit`'s report, the check's output and, for PR tasks, every request the fake GitHub saw and its final state.
 
-Each run's `changed_paths` lists paths whose contents or Git index entries changed between setup and the checker, including committed, staged and untracked changes. Staging an existing file can list it even when its contents did not change. This is evidence for a scope review, not a pass/fail judgment or a substitute for reviewing the diff. Ignored files and changes inside submodules are not included. `null` means the snapshots could not be compared; it does not mean nothing changed. The snapshots use a temporary Git index and do not change the agent's index.
+Each run's `changed_paths` lists paths whose contents or Git index entries changed between setup and the checker, including committed, staged and untracked changes. The summary shows up to ten paths per run and points to `runs.jsonl` when more were recorded; `summary.json` retains the full list. Staging an existing file can list it even when its contents did not change. This is evidence for a scope review, not a pass/fail judgment or a substitute for reviewing the diff. Ignored files and changes inside submodules are not included. `null` means the snapshots could not be compared; it does not mean nothing changed. The snapshots use a temporary Git index and do not change the agent's index.
 
 ### In CI
 

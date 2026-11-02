@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
@@ -66,6 +67,10 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 "metrics": {key: stats.summarize(get(r) for r in finished) for key, _, get, _ in METRICS},
                 "rule_decisions": dict(sorted(decisions.items())),
                 "github_unanswered": sorted(unanswered),
+                "changes": [
+                    {"round": r.get("round"), "paths": r.get("changed_paths")}
+                    for r in runs
+                ],
             }
         if "plain" in by_arm and "jouet" in by_arm:
             paired_runs = {
@@ -220,6 +225,21 @@ def markdown(summary: dict[str, Any]) -> str:
             lines += ["", f"Both-pass pairs ({count}): median jouet minus plain: {detail}."]
         notes = []
         for arm, a in sorted(cell["arms"].items()):
+            for change in a.get("changes", []):
+                paths = change["paths"]
+                if paths is None:
+                    shown = "unavailable"
+                elif not paths:
+                    shown = "none observed"
+                else:
+                    value = json.dumps(paths[:10], ensure_ascii=True)
+                    ticks = "`"
+                    while ticks in value:
+                        ticks += "`"
+                    shown = f"{ticks}{value}{ticks}"
+                    if len(paths) > 10:
+                        shown += f"; {len(paths) - 10} more (full list: runs.jsonl)"
+                notes.append(f"- **{arm} changed paths (round {change['round']}):** {shown}")
             if a["rule_decisions"]:
                 notes.append(
                     f"- **{arm} rule decisions:** " + ", ".join(f"`{k}` ×{v}" for k, v in a["rule_decisions"].items())
