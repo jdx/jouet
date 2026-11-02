@@ -169,6 +169,9 @@ regexes! {
     // missing command or file, which is most often the change's own (a
     // binary it did not build).
     ENVIRONMENT = r"(?i)(dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|api rate limit exceeded)";
+    // A line of an assertion: what was expected, what came instead, or a
+    // side of a diff.
+    ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -259,17 +262,24 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
         .found
         .iter()
         .filter(|f| f.lines.iter().any(|l| !l.trim().is_empty()))
-        .all(|f| f.lines.iter().any(|l| ENVIRONMENT.is_match(l)))
+        .all(|f| f.lines.iter().any(|l| blames_machine(l)))
     {
         return None;
     }
     let digest = digest_with(text, true, 0, formats);
     let mut first = None;
     for failure in &digest.failures {
-        let line = failure.lines.iter().find(|l| ENVIRONMENT.is_match(l))?;
+        let line = failure.lines.iter().find(|l| blames_machine(l))?;
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
     first
+}
+
+/// Whether `line` blames the machine: it names a missing bus, library or
+/// network, and is not an assertion quoting one (`expected: DBus error`,
+/// a diff's side), which the change's own test can fail on.
+fn blames_machine(line: &str) -> bool {
+    ENVIRONMENT.is_match(line) && !ASSERTION.is_match(line)
 }
 
 /// What every runner jouet knows, and each of `formats`, finds in `lines`,
