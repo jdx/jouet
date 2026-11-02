@@ -13,6 +13,8 @@ import click
 cases = [
     ("Weigh apples vs. pears.", 30, "Weigh apples vs. pears."),
     ("Choose e.g. apples and pears.", 40, "Choose e.g. apples and pears."),
+    ("Continue here. another word follows.", 50, "Continue here. another word follows."),
+    ("First sentence. Second sentence.", 40, "First sentence."),
     ("Pick a fruit. 3 remain.", 40, "Pick a fruit."),
     ("First line\ncontinues.\n\nSecond paragraph.", 45, "First line continues."),
     ("Weigh apples vs. pears and plums.", 20, "Weigh apples vs...."),
