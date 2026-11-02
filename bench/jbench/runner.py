@@ -415,12 +415,16 @@ def execute(
     # The agent's environment without its credentials: the check builds and
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
-    check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
+    usage = ran["usage"]
+    capacity = usage.is_error and not usage.input_tokens and usage.extra.get("capacity_error", False)
+    if capacity:
+        check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
+    else:
+        check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
     audit_report = audit(opts["jouet_bin"], harness, env)
     (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
     agent = ran["agent"]
-    usage = ran["usage"]
     record = {
         "id": p.id,
         "round": p.round,
@@ -441,6 +445,8 @@ def execute(
         "credentials": ran["credentials"],
         "left_running": left,
     }
+    if capacity:
+        record["error"] = "Codex model at capacity before the run started"
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
     copy_transcripts(ran["config_dir"], keep / "transcripts")

@@ -73,6 +73,32 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(records[1]["success"])
         self.assertTrue(any("environment setup already failed" in message for message in messages))
 
+    def test_capacity_error_skips_check_and_is_not_a_task_failure(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            event = json.dumps({"type": "turn.failed", "error": {
+                "message": "Selected model is at capacity. Please try a different model."}})
+            agent = {"lines": [event], "session": None, "stopped": None, "exit_code": 1, "wall_s": 1}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", return_value=agent), \
+                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner, "audit", return_value={}), \
+                    patch.object(runner.tasks_mod, "run_check") as check:
+                record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+            check.assert_not_called()
+            self.assertIn("capacity", record["error"])
+            self.assertFalse(record["success"])
+            self.assertIsNone(record["check"]["exit_code"])
+
 
 class StopTest(unittest.TestCase):
     """The cost controls, with a stand-in agent that prints Claude Code's events."""
@@ -210,6 +236,18 @@ class HarnessOutputTest(unittest.TestCase):
             (u.input_tokens, u.cached_input_tokens, u.output_tokens, u.result, u.is_error),
             (1000, 800, 20, "done", False),
         )
+
+    def test_codex_capacity_failure_is_distinguished_from_a_failed_task(self):
+        lines = [json.dumps({"type": "turn.failed", "error": {
+            "message": "Selected model is at capacity. Please try a different model."}})]
+        u = HARNESSES["codex"].usage(lines, Path("/nonexistent"))
+        self.assertTrue(u.is_error)
+        self.assertTrue(u.extra["capacity_error"])
+        self.assertEqual(u.input_tokens, 0)
+        after_work = [json.dumps({"type": "item.completed", "item": {
+            "type": "command_execution", "command": "git status"}}), *lines]
+        u = HARNESSES["codex"].usage(after_work, Path("/nonexistent"))
+        self.assertFalse(u.extra["capacity_error"])
 
 
 class SweepTest(unittest.TestCase):
@@ -525,9 +563,10 @@ class ReportTest(unittest.TestCase):
         ]
         cell = report.summarize(records, {})["cells"][0]
         self.assertEqual(cell["paired_outcomes"], {"both_passed": 0, "plain_only": 1, "jouet_only": 1, "both_failed": 1})
+        self.assertEqual((cell["arms"]["jouet"]["successes"], cell["arms"]["jouet"]["runs"]), (1, 3))
         self.assertIsNone(cell["paired_when_both_pass"]["input_tokens"])
         text = report.markdown({"meta": {}, "cells": [cell]})
-        self.assertIn("| t | codex | 3/5 | 1/4 | 0 | – | – | – | – | – |", text)
+        self.assertIn("| t | codex | 3/5 | 1/3 | 0 | – | – | – | – | – |", text)
         self.assertIn("Both-pass pairs (0): median jouet minus plain: no comparable metrics.", text)
 
 
