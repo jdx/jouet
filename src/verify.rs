@@ -1005,7 +1005,7 @@ impl Checks {
     fn failure_reason(&self, kind: Kind, failed: &Run) -> String {
         if self.unverifiable.contains(&same_run(&failed.command)) {
             return format!(
-                "The last {} run failed (`{}` exited {}), and the merge base could not run it either, so jouet cannot tell whether its failures were there before your change. Say which failures, if any, your change caused before you finish; this is asked once. [jouet: verify]",
+                "The last {} run failed (`{}` exited {}), and the command also failed at the merge base, so jouet cannot tell whether its failures were there before your change. Say which failures, if any, your change caused before you finish; this is asked once. [jouet: verify]",
                 kind.name(),
                 shown(&failed.command),
                 failed.exit_code
@@ -1913,7 +1913,7 @@ mod tests {
             .block("/w", |_| Some("t1".into()), |_| false, |_| true)
             .unwrap();
         assert!(first.reason.contains("--baseline"), "{}", first.reason);
-        // jouet test marks a run whose merge base could not run it either.
+        // jouet test marks a run whose merge base also failed at the merge base.
         state.mark_unverifiable("/w", "jouet test --budget 1500");
         let block = state
             .block("/w", |_| Some("t1".into()), |_| false, |_| true)
@@ -1921,7 +1921,7 @@ mod tests {
         assert!(
             block
                 .reason
-                .contains("the merge base could not run it either"),
+                .contains("the command also failed at the merge base"),
             "{}",
             block.reason
         );
@@ -1958,7 +1958,7 @@ mod tests {
             again.reason
         );
         assert!(
-            !again.reason.contains("could not run it either"),
+            !again.reason.contains("also failed at the merge base"),
             "{}",
             again.reason
         );

@@ -265,7 +265,7 @@ pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
-    failed: &[(&Job, BTreeSet<String>, u64)],
+    failed: &[(&Job, Option<BTreeSet<String>>, u64)],
     mode: Mode,
 ) -> Result<Option<Baseline>, NotCompared> {
     let setup = affected::project_config::baseline_setup(root).map_err(|e| {
@@ -349,7 +349,22 @@ pub(super) fn compare(
             (None, Mode::Kept) => return Ok(None),
         };
         let (at_base, reached): (BTreeSet<String>, u64) = match outcome {
+            known::Outcome::Passed if now.is_none() => {
+                return Err(NotCompared::from(format!(
+                    "the command passed at {}, but the current failure could not be named; it remains unresolved",
+                    base.name
+                )));
+            }
             known::Outcome::Passed => (BTreeSet::new(), u64::MAX),
+            known::Outcome::Failed { .. } if now.is_none() => {
+                return Err(NotCompared {
+                    message: format!(
+                        "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it remains unresolved",
+                        base.name
+                    ),
+                    unverifiable: true,
+                });
+            }
             known::Outcome::Failed { names, ran } => (names.into_iter().collect(), ran),
             known::Outcome::Unnamed { exit, log } => {
                 let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
@@ -365,7 +380,7 @@ pub(super) fn compare(
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;
-        for name in now {
+        for name in now.iter().flatten() {
             if at_base.contains(name) {
                 pre_existing.insert(name.clone());
             } else if short {

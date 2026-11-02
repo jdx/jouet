@@ -650,7 +650,7 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
-@test "--baseline says when an unnamed failure was not run at the merge base" {
+@test "--baseline runs an unnamed failure at the merge base without calling it a pass" {
 	printf 'base\n' >tracked
 	export RUNS_FILE="$BATS_TEST_TMPDIR/unnamed-runs"
 	cat >fail-command <<'SH'
@@ -667,14 +667,55 @@ SH
 
 	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
 	assert_failure 1
-	assert_output --partial 'baseline: not compared: failure names are missing or cannot be matched safely; the merge-base command was not run'
-	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 1
+	assert_output --partial 'without naming a failing test, so the failures could not be compared'
+	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
 
 	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command
 	assert_failure 1
-	assert_stderr --partial 'not compared: failure names are missing or cannot be matched safely; the merge-base command was not run'
+	assert_stderr --partial 'without naming a failing test, so the failures could not be compared'
 	assert_equal "$(jq -r '.ok' <<<"$output")" false
-	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
+	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 4
+}
+
+@test "--baseline keeps an unnamed failure unresolved when the merge base passes" {
+	cat >check-command <<'SH'
+#!/bin/sh
+test "$(cat tracked)" = base
+SH
+	chmod +x check-command
+	printf 'base\n' >tracked
+	git add tracked check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >tracked
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'the command passed at'
+	assert_output --partial 'current failure could not be named; it remains unresolved'
+}
+
+@test "an unnamed baseline failure is raised once and remains recorded" {
+	export JOUET_SESSION_ID=s1
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	printf '#!/bin/sh\necho tool failed\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/pytest"
+	chmod +x "$BATS_TEST_TMPDIR/bin/pytest"
+	export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+	printf 'base\n' >tracked
+	git add tracked
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >>tracked
+
+	run --separate-stderr jouet test --baseline --cmd -- pytest
+	assert_failure 1
+	stop=$(jq -cn --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}')
+	run --separate-stderr jouet hook claude stop <<<"$stop"
+	run jq -r '.reason' <<<"$output"
+	assert_output --partial 'the command also failed at the merge base'
+	run --separate-stderr jouet hook claude stop <<<"$stop"
+	assert_output ''
+	run jq -c '[.trees[].failures.test // [] | length]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '[1]'
 }
 
 @test "--baseline passes a run whose every failure also fails at the merge base" {
