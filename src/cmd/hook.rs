@@ -1029,8 +1029,15 @@ pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Opt
 }
 
 /// Records a `jouet test` run as the checks see it; `environment` is what
-/// its output blames on the machine, when every failure does.
-pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32, environment: Option<&str>) {
+/// its output blames on the machine, when every failure does, and
+/// `ran_tests` that it was a `--cmd` run whose output showed tests passing.
+pub(crate) fn record_own_run(
+    cwd: &Path,
+    command: &str,
+    exit_code: i32,
+    environment: Option<&str>,
+    ran_tests: bool,
+) {
     let settings = Settings::load();
     let hooks = &settings.hooks;
     if !hooks.enabled || !(hooks.verify || hooks.ledger) {
@@ -1047,10 +1054,11 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32, environm
     };
     let mut records = rules::load(cwd).engine.evaluate(&call).records;
     // A `jouet test --cmd` of a command no rule knows, such as a project's
-    // own check script, is a test the agent ran: its pass counts as a test
-    // passing at these files, as a part of the suite. A failure of it is
-    // still not recorded, since it may be no test at all.
-    if records.is_empty() && exit_code == 0 && command.starts_with("jouet test --cmd ") {
+    // own check script, is a test the agent ran when its output showed tests
+    // passing: its pass counts as a test passing at these files, as a part
+    // of the suite. A run that only listed tests or formatted files showed
+    // none, and a failure is still not recorded, since it may be no test.
+    if records.is_empty() && exit_code == 0 && ran_tests {
         records.push(Record {
             rule: "checks".into(),
             kind: jouet_rules::Kind::Test,

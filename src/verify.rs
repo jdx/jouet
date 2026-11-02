@@ -166,14 +166,29 @@ fn without_names(ran: &str, wanted: &str) -> bool {
 const NAME_FILTERS: &[&str] = &["-f", "--filter", "-t", "--testNamePattern", "-run"];
 
 /// Whether `wanted` is `ran` with a name filter after it (`bats t.bats -f
-/// name`): the whole of `ran` covers what the filter picked from it.
+/// name`): the whole of `ran` covers what the filter picked from it. The
+/// name may be several words, since the recorded command lost its quotes,
+/// but none may be another file or package (`./pkg`, or a word with the
+/// extension of a file `ran` named), which `ran` did not run.
 fn without_name_filter(ran: &str, wanted: &str) -> bool {
     let ran: Vec<&str> = ran.split_whitespace().collect();
     let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let extensions: Vec<&str> = ran
+        .iter()
+        .filter_map(|w| Path::new(w).extension()?.to_str())
+        .collect();
+    let a_path = |w: &&str| {
+        w.starts_with("./")
+            || Path::new(w)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| extensions.contains(&e))
+    };
     !ran.is_empty()
         && wanted.len() > ran.len() + 1
         && wanted.starts_with(&ran)
         && NAME_FILTERS.contains(&wanted[ran.len()])
+        && !wanted[ran.len() + 1..].iter().any(a_path)
 }
 
 /// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
@@ -1657,6 +1672,15 @@ mod tests {
         ));
         assert!(!without_name_filter("bats a.bats", "bats b.bats -f x"));
         assert!(!without_name_filter("bats a.bats", "bats a.bats -f"));
+        // A file or package after the name is one `ran` did not run.
+        assert!(!without_name_filter(
+            "bats a.bats",
+            "bats a.bats -f x b.bats"
+        ));
+        assert!(!without_name_filter(
+            "go test ./pkg",
+            "go test ./pkg -run TestA ./other"
+        ));
     }
 
     #[test]

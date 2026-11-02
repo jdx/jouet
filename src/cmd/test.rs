@@ -433,11 +433,19 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // hooks.
     if runs && misuse.is_none() {
         crate::cost::record(&cwd, &timed);
+        // A `--cmd` run whose output showed tests passing, which counts
+        // even when no rule knows its command.
+        let ran_tests = args.cmd
+            && report
+                .suites
+                .iter()
+                .any(|suite| suite.digest.as_ref().is_some_and(|d| d.passed > 0));
         super::hook::record_own_run(
             &cwd,
             &own_command(),
             i32::from(exit.code()),
             blamed.as_deref(),
+            ran_tests,
         );
     }
     if runs {
