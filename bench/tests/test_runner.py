@@ -497,6 +497,26 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_history_configuration_requires_a_local_source_and_no_forge_remote(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            directory = Path(d) / "task"
+            directory.mkdir()
+            (directory / "check.py").touch()
+            (directory / "solve.py").touch()
+            base = 'description = "test"\nprompt = "test"\nchore = "bug-fix"\n'
+            with patch.object(tasks, "TASKS_DIR", Path(d)):
+                cases = [
+                    ('[source]\ngit = ""\ncommit = "abc"\n', "nonempty git"),
+                    ('[source]\ngit = "/tmp/source"\ncommit = "abc"\nhistory = "yes"\n', "boolean"),
+                    ('[source]\ngit = "/tmp/source"\ncommit = "abc"\nhistory = true\n', "remote = false"),
+                ]
+                for config, message in cases:
+                    (directory / "task.toml").write_text(base + config)
+                    with self.subTest(config=config), self.assertRaisesRegex(ValueError, message):
+                        tasks.load("task")
+
     def test_rubocop_rejects_hidden_checkout_paths_before_running(self):
         import subprocess
 
@@ -645,11 +665,164 @@ class TasksTest(unittest.TestCase):
                                        setup=["true"])
             workdir = root / "work"
             tasks.prepare(task, workdir)
+            self.assertFalse((workdir / ".git" / "FETCH_HEAD").exists())
             self.assertEqual((workdir / "hidden.txt").read_text(), "included in the commit\n")
             self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
             modified = dataclasses.replace(task, setup=["sh -c 'printf altered > crlf.txt'"])
             with self.assertRaisesRegex(RuntimeError, "crlf.txt"):
                 tasks.prepare(modified, root / "modified")
+
+    def test_history_source_keeps_only_the_pinned_ancestry_and_local_upstream(self):
+        import dataclasses
+        import os
+        import subprocess
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = root / "source"
+            source.mkdir()
+            tasks.git(source, "init", "-q", "-b", "main")
+            for value in ("first", "pinned", "later"):
+                (source / "file").write_text(value)
+                tasks.git(source, "add", "file")
+                tasks.git(source, "commit", "-q", "-m", value)
+                if value == "pinned":
+                    pinned = tasks.git(source, "rev-parse", "HEAD")
+            later = tasks.git(source, "rev-parse", "HEAD")
+            task = dataclasses.replace(tasks.load("smoke"),
+                source={"git": str(source), "commit": pinned, "history": True}, remote=False, upstream=True)
+            work = root / "work"
+            with patch.dict(os.environ, {"GIT_DIR": str(source / ".git")}):
+                shas = tasks.prepare(task, work)
+            self.assertEqual(shas["base_sha"], pinned)
+            self.assertEqual(tasks.git(work, "log", "--format=%s"), "pinned\nfirst")
+            missing = subprocess.run(["git", "cat-file", "-e", f"{later}^{{commit}}"], cwd=work, capture_output=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertEqual((work / "file").read_text(), "pinned")
+            self.assertEqual(tasks.git(work, "remote", "get-url", "origin"), str(root / "origin.git"))
+            self.assertNotIn(str(source.resolve()), (work / ".git" / "FETCH_HEAD").read_text())
+            self.assertEqual(tasks.git(work, "remote", "get-url", "--push", "origin"), os.devnull)
+            pushed = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/other"], cwd=work, capture_output=True)
+            self.assertNotEqual(pushed.returncode, 0)
+            self.assertEqual(tasks.git(source, "log", "-1", "--format=%s"), "later")
+            no_upstream = dataclasses.replace(task, upstream=False)
+            no_origin = root / "no-origin"
+            tasks.prepare(no_upstream, no_origin)
+            self.assertFalse((no_origin / ".git" / "FETCH_HEAD").exists())
+
+    def test_history_source_rejects_partial_and_shallow_clones(self):
+        import dataclasses
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = root / "source"
+            source.mkdir()
+            tasks.git(source, "init", "-q", "-b", "main")
+            (source / "file").write_text("base")
+            tasks.git(source, "add", "file")
+            tasks.git(source, "commit", "-q", "-m", "base")
+            revision = tasks.git(source, "rev-parse", "HEAD")
+            shallow = root / "shallow"
+            subprocess.run(["git", "clone", "--quiet", "--depth=1", source.as_uri(), str(shallow)], check=True)
+            task = dataclasses.replace(tasks.load("smoke"), remote=False,
+                source={"git": str(shallow), "commit": revision, "history": True})
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "non-shallow"):
+                tasks.prepare(task, root / "shallow-work")
+            task.source["git"] = str(source)
+            task.source["commit"] = "main"
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "full pinned commit"):
+                tasks.prepare(task, root / "moving-ref-work")
+            tasks.git(source, "config", "remote.origin.promisor", "true")
+            task.source["commit"] = revision
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "partial clone"):
+                tasks.prepare(task, root / "partial-work")
+
+    def test_history_source_refuses_network_remotes_and_submodules(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = root / "source"
+            source.mkdir()
+            tasks.git(source, "init", "-q", "-b", "main")
+            (source / ".gitmodules").write_text('[submodule "child"]\npath = child\nurl = https://example.invalid/child\n')
+            tasks.git(source, "add", ".gitmodules")
+            tasks.git(source, "commit", "-q", "-m", "base")
+            revision = tasks.git(source, "rev-parse", "HEAD")
+            task = dataclasses.replace(tasks.load("smoke"), remote=True,
+                source={"git": str(source), "commit": revision, "history": True})
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "remote = false"):
+                tasks.prepare(task, root / "remote-work")
+            task.remote = False
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "does not fetch submodules"):
+                tasks.prepare(task, root / "submodule-work")
+
+    def test_external_tasks_require_an_explicit_outside_result_directory(self):
+        import contextlib
+        import io
+        import os
+        from unittest.mock import patch
+        import agents
+
+        with tempfile.TemporaryDirectory() as d, patch.object(tasks, "TASKS_DIR", tasks.TASKS_DIR):
+            directory = Path(d)
+            other_checkout = directory / "another worktree"
+            other_checkout.mkdir()
+            (directory / "local-task").mkdir()
+            (directory / "local-task" / "task.toml").write_text('description = "local"\n')
+            with contextlib.redirect_stderr(io.StringIO()), patch.object(agents, "cmd_run", return_value=0) as run, \
+                 patch.object(tasks, "checkout_roots", return_value=[runner.REPO_ROOT, other_checkout.resolve()]):
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory)]), 2)
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(runner.REPO_ROOT / "results")]), 2)
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_checkout / "results")]), 2)
+                other_spelling = other_checkout.with_name(other_checkout.name.upper())
+                if other_spelling.exists() and other_spelling != other_checkout:
+                    self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_spelling / "results")]), 2)
+                with patch.dict(os.environ, {"XDG_CACHE_HOME": str(runner.REPO_ROOT / "cache")}):
+                    self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 2)
+                with patch.dict(os.environ, {"JOUET_BENCH_TASKS": str(directory)}):
+                    self.assertEqual(agents.main(["run"]), 2)
+                    self.assertEqual(agents.main(["run", "--out", str(other_checkout / "results")]), 2)
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--tasks-dir", str(other_checkout), "--out", str(directory / "results")]), 2)
+                with patch.object(agents.tempfile, "gettempdir", return_value=str(other_checkout)):
+                    self.assertEqual(agents.main(["check-tasks", "--tasks-dir", str(directory)]), 2)
+                self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0].tasks_dir, [directory])
+
+    def test_checkout_roots_include_the_current_worktree(self):
+        self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
+
+    def test_report_does_not_inspect_external_task_directories(self):
+        import agents
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"JOUET_BENCH_TASKS": "/missing-tasks"}), \
+             patch.object(tasks, "checkout_roots", side_effect=AssertionError("not needed")), \
+             patch.object(agents, "cmd_report", return_value=0) as report:
+            self.assertEqual(agents.main(["report", "/results"]), 0)
+            report.assert_called_once()
+
+    def test_check_tasks_reports_history_preparation_errors(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task = root / "task"
+            task.mkdir()
+            (task / "task.toml").write_text(
+                'description = "test"\nprompt = "test"\nchore = "bug-fix"\nremote = false\n'
+                '[source]\ngit = "/missing-source"\ncommit = "' + "a" * 40 + '"\nhistory = true\n'
+            )
+            (task / "check.py").touch()
+            (task / "solve.py").touch()
+            result = subprocess.run([sys.executable, str(runner.REPO_ROOT / "bench/agents.py"),
+                                     "check-tasks", "--tasks", "task", "--tasks-dir", str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("preparation failed", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
 
     def test_python_environment_is_isolated_and_available_to_the_run(self):
         import dataclasses

@@ -96,6 +96,16 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
 - a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, `uv` and `uvx`, when installed on the host, are available to both arms for projects whose checks use them.
 
+A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.
+
+For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
+
+```sh
+MISE_ENV=bench mise run bench:agents --tasks-dir "$HOME/bench-tasks" --tasks example --out "$HOME/bench-results/example"
+```
+
+These worktrees are not security sandboxes: agents and task programs can access host files and the network. Results, agent transcripts, cost notes and any retained worktrees can contain task data; choose locations and task programs accordingly.
+
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
 
 A task may also specify `isolated_setup` as lists of command arguments. The harness runs each command directly in the run's environment before timing, with output in `environment.log`; failures or changes to tracked or nonignored checkout files make the setup fail. `{workdir}` names the run's checkout and `{taskdir}` the benchmark task's directory. Ignored dependencies may be installed in the checkout. Only use commands appropriate for the task, since they run project tools and can access the network.
@@ -198,7 +208,7 @@ Some tasks cannot be published: their source is a private repository, or their f
 
 ```sh
 python3 bench/agents.py check-tasks --tasks-dir ~/bench-private --tasks invoice-rounding
-JOUET_BENCH_TASKS=~/bench-private mise run bench:agents --tasks invoice-rounding --harness claude
+JOUET_BENCH_TASKS=~/bench-private mise run bench:agents --tasks invoice-rounding --harness claude --out ~/bench-results/invoice-rounding
 ```
 
 A check or reference solution outside `bench/tasks/` can still use the shared helpers: `BENCH_CHECK_HELPERS` names the directory holding `_check.py`, so the script starts with `sys.path.insert(0, os.environ["BENCH_CHECK_HELPERS"])`. `meta.json` lists the directories a suite read (`task_dirs`), so a results directory says where its tasks came from. `mise run test:bench` reads only `bench/tasks/` unless `JOUET_BENCH_TASKS` is set.

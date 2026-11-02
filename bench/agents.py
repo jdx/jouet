@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -268,8 +269,6 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
     """For each task: the untouched fixture fails its check, the reference
     solution passes it, and each probe gets the exit code it expects from
     the fake GitHub without a request the fake cannot answer."""
-    import tempfile
-
     names = use_task_dirs(args)
     if names is None:
         return 2
@@ -282,9 +281,15 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
         task = tasks.load(name)
         with tempfile.TemporaryDirectory(prefix="jouet-bench-check-") as tmp:
             root = Path(tmp)
+            prepared = True
             for label, solve in (("unsolved", False), ("solved", True)):
                 workdir = root / label
-                shas = tasks.prepare(task, workdir)
+                try:
+                    shas = tasks.prepare(task, workdir)
+                except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+                    failures.append(f"{name}: preparation failed: {error}")
+                    prepared = False
+                    break
                 # The reference solution and check use the same dependencies
                 # that an agent sees, in a fresh environment for each arm.
                 run_dir = root / f"{label}-run"
@@ -330,7 +335,8 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                     failures.append(f"{name}: the check should {want} when {label}:\n{check['output']}")
                 else:
                     print(f"ok   {name}: check {'passes' if solve else 'fails'} when {label}")
-            failures += probe(task, root, args.jouet)
+            if prepared:
+                failures += probe(task, root, args.jouet)
     for f in failures:
         print(f"FAIL {f}", file=sys.stderr)
     return 1 if failures else 0
@@ -382,6 +388,46 @@ def probe(task: tasks.Task, root: Path, jouet_bin: Path) -> list[str]:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    extra_dirs = [*getattr(args, "tasks_dir", []), *(Path(p) for p in os.environ.get("JOUET_BENCH_TASKS", "").split(os.pathsep) if p)]
+    if args.command in ("run", "check-tasks") and extra_dirs:
+        try:
+            checkouts = tasks.checkout_roots(runner.REPO_ROOT)
+        except (OSError, RuntimeError, subprocess.CalledProcessError):
+            print("cannot verify jouet worktree locations", file=sys.stderr)
+            return 2
+        def in_checkout(path: Path) -> bool:
+            for root in checkouts:
+                if path.is_relative_to(root):
+                    return True
+                # On case-insensitive filesystems an existing ancestor can be
+                # the same directory even when its spelling differs.
+                for ancestor in (path, *path.parents):
+                    try:
+                        if ancestor.samefile(root):
+                            return True
+                    except OSError:
+                        continue
+            return False
+
+        if args.command == "run" and not args.dry_run and args.out is None:
+            print("--tasks-dir requires an explicit --out for run results", file=sys.stderr)
+            return 2
+        if args.command == "run" and args.out is not None and in_checkout(args.out.expanduser().resolve()):
+            print("--tasks-dir requires --out outside the jouet checkout", file=sys.stderr)
+            return 2
+        for task_dir in extra_dirs:
+            if in_checkout(task_dir.expanduser().resolve()):
+                print("external task directories must be outside the jouet checkout", file=sys.stderr)
+                return 2
+        temporary = Path(tempfile.gettempdir() if args.command == "check-tasks" else "/tmp").resolve()
+        if in_checkout(temporary):
+            print("--tasks-dir requires temporary directories outside the jouet checkout", file=sys.stderr)
+            return 2
+        if args.command == "run":
+            cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").expanduser().resolve()
+            if in_checkout(cache):
+                print("--tasks-dir requires XDG_CACHE_HOME outside the jouet checkout", file=sys.stderr)
+                return 2
     return {"run": cmd_run, "report": cmd_report, "check-tasks": cmd_check_tasks}[args.command](args)
 
 
