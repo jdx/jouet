@@ -704,6 +704,20 @@ mod tests {
     }
 
     #[test]
+    fn playwright_baselines_require_matching_failure_details() {
+        let output = |received: &str| {
+            format!(
+                "Running 1 test using 1 worker\n  1) e2e/balance.spec.ts:5:3 › updates balance\n    Error: expect(locator).toHaveText(expected) failed\n    Expected: 42\n    Received: {received}\n  1 failed\n"
+            )
+        };
+        let evidence =
+            |received| failure_evidence(&output(received), &[], Path::new("/work"), false).unwrap();
+        assert!(!evidence("17").details.is_empty());
+        assert_eq!(evidence("17").details, evidence("17").details);
+        assert_ne!(evidence("17").details, evidence("18").details);
+    }
+
+    #[test]
     fn pytest_class_headers_match_qualified_node_ids() {
         let output = include_str!("../../testlog/fixtures/pytest-q.txt");
         let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();

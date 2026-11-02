@@ -193,6 +193,12 @@ regexes! {
     ANSI = "\x1b\\[[0-9;?]*[ -/]*[@-~]";
     TASK_PREFIX = r"^\[[^\]\s]+\] ";
     COUNT = r"\b(\d+) (passed|failed|errors?|skipped|ignored|todo|pending)\b";
+    // Playwright's list reporter names a test in a numbered failure block.
+    PLAYWRIGHT_RUN = r"^Running \d+ tests? using \d+ workers?$";
+    PLAYWRIGHT_HEAD = r"^\s*\d+\)\s+(.+\.(?:spec|test)\.[cm]?[jt]sx?:\d+:\d+\s+›\s+.+?)\s*(?:─+)?\s*$";
+    PLAYWRIGHT_END = r"^\s*(?:\d+\)\s+.+\.(?:spec|test)\.[cm]?[jt]sx?:\d+:\d+\s+›|\d+ (?:failed|passed|skipped|flaky)\b|attachment #)";
+    PLAYWRIGHT_SUMMARY = r"^\s+\d+ (?:failed|passed|skipped)(?: \([\d.hms ]+\))?\s*$";
+    PLAYWRIGHT_ERROR = r"^\s*(?:\w*Error|AssertionError):";
     // A line that blames the machine, not the code: no D-Bus or keyring, a
     // system library missing, no network, an API's rate limit, or no
     // database or service running on this machine (a refused connection to
@@ -347,6 +353,7 @@ fn parse(lines: &[String], formats: &[Format]) -> Parsed {
     rspec(lines, &mut parsed);
     jest(lines, &mut parsed);
     vitest(lines, &mut parsed);
+    playwright(lines, &mut parsed);
     tap(lines, &mut parsed);
     for format in formats {
         format.apply(lines, &mut parsed);
@@ -972,6 +979,24 @@ fn vitest(lines: &[String], out: &mut Parsed) {
             }
         } else if let Some(c) = VITEST_TESTS.captures(line) {
             out.count_words(&c[1]);
+        }
+    }
+}
+
+fn playwright(lines: &[String], out: &mut Parsed) {
+    // A numbered list in another program is not enough to identify a test.
+    if !lines.iter().any(|line| PLAYWRIGHT_RUN.is_match(line)) {
+        return;
+    }
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(c) = PLAYWRIGHT_HEAD.captures(line) {
+            let block = until(lines, i + 1, &PLAYWRIGHT_END);
+            // A summary or an interrupted block alone is not failure evidence.
+            if block.iter().any(|line| PLAYWRIGHT_ERROR.is_match(line)) {
+                out.push(i, c[1].trim(), block);
+            }
+        } else if PLAYWRIGHT_SUMMARY.is_match(line) {
+            out.count_words(line);
         }
     }
 }

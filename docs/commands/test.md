@@ -294,6 +294,7 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 - tsc;
 - go test and go build, including a package that fails with no failed test of its own, as when `TestMain` gives up, named by the package;
 - pytest, unittest, RSpec, jest and vitest;
+- Playwright's list reporter for `.test` and `.spec` files, including its numbered failure blocks;
 - TAP, which bats prints;
 - any [format you declare](#your-own-runners-formats).
 
