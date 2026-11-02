@@ -141,13 +141,14 @@ The review runs in a separate agent rather than in the session itself. The stop 
 - **`routine`:** a Luau [routine](/routines) over jouet's primitives, when it needs logic over structured state. Start with a task, and escalate when conditionals creep in.
 - **`rule`:** a rule that steers the agent's own tool calls, such as pointing a long command at the task that replaces it. Always warn mode, like a rule the ledger drafts. The agent writes it to your rules with `jouet rule new NAME` and checks it with `jouet rule test NAME`.
 - **`agents_md`:** a line or two for the project's AGENTS.md: knowledge every agent in the repository needs. Always asked first.
+- **`project_change`:** a suggestion for project build, test or CI configuration, grounded in transcript evidence and the relevant checked-in files. For example, a review might investigate whether differing Cargo feature flags cause repeated builds, or suggest investigating a flaky test. The draft explains the proposed change, tradeoffs and how to verify it; a hypothesis is not a measured saving. The agent asks for approval before applying and verifying it.
 - **`memory`:** a note for the harness's memory: this user's preference, across projects.
 - **`memory_update`:** a new text for a memory the agent already keeps, when the session contradicts it: the bug it works around did not happen, or the user corrected a step it prescribes. `target` names the memory by its path, as the review lists it.
 - **`memory_delete`:** deleting a memory that is wrong or no longer needed, with `target` and the reason as its draft. A memory that works around jouet itself is a jouet bug, not a memory: the review proposes deleting it, and with `contribute` on, the bug as a `jouet` proposal too.
 - **`jouet`:** a change to jouet itself, for its maintainers. Offered only with `[share] contribute` on. It is not a pending proposal: `jouet wind propose` records it as an idea for [`jouet share`](#what-sessions-show-about-jouet), which drafts it and posts only with the user's yes.
 - **`nothing`:** most sessions need nothing, and the prompt says so.
 
-A `rule`, `routine`, `memory`, `memory_update` or `memory_delete` proposal takes the scope `user` (the default) or `project`, and an `agents_md` proposal takes `project`.
+A `rule`, `routine`, `memory`, `memory_update` or `memory_delete` proposal takes the scope `user` (the default) or `project`; an `agents_md` or `project_change` proposal takes `project`.
 
 ### Checks on proposals
 
@@ -155,6 +156,7 @@ A `rule`, `routine`, `memory`, `memory_update` or `memory_delete` proposal takes
 
 - without a title, a why and a draft, or with a title over 120 characters;
 - with a scope its kind does not take, or evidence that is not a span such as `L120-188`;
+- for `project_change`, without a transcript evidence span;
 - for `memory_update` or `memory_delete`, with a `target` that is not one of the memories the review listed;
 - that looks like it holds a secret.
 

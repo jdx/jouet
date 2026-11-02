@@ -230,6 +230,7 @@ fn the_prompt_names_every_kind_and_the_reply_it_reads() {
         "\"routine\"",
         "\"rule\"",
         "\"agents_md\"",
+        "\"project_change\"",
         "\"memory\"",
         "\"memory_update\"",
         "\"memory_delete\"",
@@ -242,6 +243,34 @@ fn the_prompt_names_every_kind_and_the_reply_it_reads() {
     let end = PROMPT[start..].find("\n]}").unwrap() + start + 3;
     let example: Reply = serde_json::from_str(&PROMPT[start..end]).unwrap();
     assert!(problem(&example.proposals[0], &[]).is_none());
+}
+
+#[test]
+fn project_changes_need_evidence_and_are_shown_for_review() {
+    let f = fixture();
+    let out = record(
+        &f.paths,
+        reply(r#"{"session":"s1","proposals":[
+            {"kind":"project_change","title":"Align check features","why":"Checks rebuilt dependencies.","evidence":["L12-16"],"draft":"Review the feature flags in mise.toml and verify the checks."},
+            {"kind":"project_change","title":"No evidence","why":"Maybe faster.","draft":"Change CI."}
+        ]}"#),
+        NOW,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(out.recorded, ["p1"]);
+    assert_eq!(
+        out.skipped[0].reason,
+        "a project change needs a transcript evidence span"
+    );
+    let state = State::load(&f.paths.state);
+    let proposal = state.reviews.proposal("p1").unwrap();
+    assert_eq!(proposal.kind, Kind::ProjectChange);
+    assert_eq!(proposal.scope, "project");
+    assert_eq!(proposal.evidence, ["L12-16"]);
+    let line = &lines_for_session(&f.paths, "s2", None, 2, NOW)[0];
+    assert!(line.contains("a project change (p1)"));
+    assert!(line.contains("review and approve"));
 }
 
 #[test]
