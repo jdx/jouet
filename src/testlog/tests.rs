@@ -563,3 +563,28 @@ fn a_small_passing_run_names_its_tests() {
     let quiet = "running 2 tests\n..\ntest result: ok. 2 passed; 0 failed; 0 ignored\n";
     assert!(digest(quiet, false, DEFAULT_BUDGET).passed_names.is_empty());
 }
+
+#[test]
+fn vitest_files_that_failed_to_load_show_their_shared_error_once() {
+    let mut text = String::from("⎯⎯⎯⎯⎯⎯ Failed Suites 30 ⎯⎯⎯⎯⎯⎯\n\n");
+    for i in 0..30 {
+        text.push_str(&format!(
+            " FAIL  |zod| src/t{i}.test.ts [ src/t{i}.test.ts ]\n"
+        ));
+    }
+    text.push_str(
+        "Error: Transform failed with 1 error:\n/w/src/checks.ts:819:4: ERROR: Expected \")\" but found \"}\"\n  Plugin: vite:esbuild\n\n⎯⎯⎯⎯⎯⎯[1/30]⎯\n\n Test Files  30 failed (30)\n      Tests  no tests\n",
+    );
+    let d = digest(&text, true, DEFAULT_BUDGET);
+    assert_eq!(
+        d.failures[0].name,
+        "|zod| src/t0.test.ts [ src/t0.test.ts ]"
+    );
+    assert_eq!(
+        d.failures[0].lines[0],
+        "Error: Transform failed with 1 error:"
+    );
+    assert!(d.failures[0].lines[1].contains("checks.ts:819:4"));
+    // The others are named, without the error again.
+    assert!(d.failures[1..].iter().all(|f| f.lines.is_empty()));
+}
