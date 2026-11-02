@@ -136,7 +136,9 @@ def markdown(summary: dict[str, Any]) -> str:
         lines += [f"> **{meta['label']}**", ""]
     lines += [
         f"- **When:** {meta.get('started')} ({meta.get('rounds')} round(s), seed {meta.get('seed')})",
-        f"- **jouet:** {meta.get('jouet_version')} at `{meta.get('commit')}`",
+        f"- **Benchmark checkout:** `{meta.get('commit') or 'unavailable'}`",
+        f"- **jouet:** {meta.get('jouet_version') or 'version unavailable'}; "
+        f"binary SHA-256 `{meta.get('jouet_sha256') or 'unavailable'}`",
     ]
     for name, info in (meta.get("harnesses") or {}).items():
         lines.append(
