@@ -192,6 +192,7 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
     LIBTEST_RUNNING = r"^running (\d+) tests?$";
+    CARGO_TEST_BINARY = r"^\s*Running (?:unittests|tests) (.+?) \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
@@ -316,18 +317,61 @@ fn parse(lines: &[String], formats: &[Format]) -> Parsed {
     parsed
 }
 
+pub(crate) struct FailureDetail {
+    pub(crate) name: String,
+    pub(crate) lines: Vec<String>,
+    pub(crate) binary: Option<String>,
+    pub(crate) qualified: Option<String>,
+}
+
 /// Unshortened failure blocks for baseline comparison. Summary lines alone
 /// do not contain enough evidence about a failure's cause.
-pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<Failure> {
+pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDetail> {
     let lines = clean(text);
     parse(&lines, formats)
         .found
         .into_iter()
         .filter(|f| !PYTEST_SHORT.is_match(&lines[f.at]))
         .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
-        .map(|f| Failure {
-            name: f.name,
-            lines: f.lines,
+        .map(|f| {
+            let binary = LIBTEST_BLOCK
+                .is_match(&lines[f.at])
+                .then(|| {
+                    lines[..f.at]
+                        .iter()
+                        .rev()
+                        .take_while(|line| !LIBTEST_RESULT.is_match(line))
+                        .find_map(|line| CARGO_TEST_BINARY.captures(line))
+                        .and_then(|c| {
+                            let executable = std::path::Path::new(&c[2]).file_name()?.to_str()?;
+                            let executable = executable.strip_suffix(".exe").unwrap_or(executable);
+                            let (name, hash) = executable.rsplit_once('-')?;
+                            (hash.len() >= 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+                                .then(|| format!("{}::{name}", &c[1]))
+                        })
+                })
+                .flatten();
+            let qualified = if GO_RESULT.is_match(&lines[f.at]) {
+                lines[f.at + 1..]
+                    .iter()
+                    .find_map(|line| GO_PACKAGE.captures(line))
+                    .filter(|c| &c[1] == "FAIL")
+                    .map(|c| format!("{}::{}", &c[2], f.name))
+            } else if JEST_HEAD.is_match(&lines[f.at]) {
+                lines[..f.at]
+                    .iter()
+                    .rev()
+                    .find_map(|line| JEST_FILE.captures(line))
+                    .map(|c| format!("{}::{}", c[1].trim(), f.name))
+            } else {
+                None
+            };
+            FailureDetail {
+                name: f.name,
+                lines: f.lines,
+                binary,
+                qualified,
+            }
         })
         .collect()
 }

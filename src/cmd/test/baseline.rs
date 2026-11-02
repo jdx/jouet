@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use std::sync::LazyLock;
 
 static RUST_THREAD_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
+    regex::Regex::new(r"^(\s*thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
 });
 
 /// What a failing run's failures were at the merge base.
@@ -132,9 +132,6 @@ pub(super) fn failure_names(
         return None;
     }
     if scoped {
-        if testlog::ambiguous_libtest(output) {
-            return None;
-        }
         let go = testlog::go_failure_packages(output)?;
         if !go.is_empty() {
             // Do not compare unqualified Go output, including panics or
@@ -172,16 +169,30 @@ pub(super) fn failure_evidence(
     let names = failure_names(output, formats, root, scoped)?;
     let found = testlog::failure_details(output, formats);
     let mut details = BTreeMap::new();
-    if !testlog::ambiguous_libtest(output) {
+    let multiple_binaries = testlog::ambiguous_libtest(output);
+    // A duplicate test name can be collapsed by the display digest. Refuse
+    // all details in that case, even if one binary omitted its failure block.
+    if !multiple_binaries
+        || testlog::digest_with(output, false, 0, formats).failed == names.len() as u64
+    {
         for name in &names {
             let candidates: Vec<_> = found
                 .iter()
                 .filter(|f| {
                     let candidate = from_root(&f.name, root);
-                    *name == candidate || name.ends_with(&format!("::{candidate}"))
+                    if *name == candidate {
+                        return true;
+                    }
+                    if let Some(qualified) = &f.qualified {
+                        return *name == from_root(qualified, root);
+                    }
+                    name.ends_with(&format!("::{candidate}"))
+                        || name.ends_with(&format!("::{}", candidate.replace('.', "::")))
                 })
                 .collect();
-            if let [failure] = candidates.as_slice() {
+            if let [failure] = candidates.as_slice()
+                && (!multiple_binaries || failure.binary.is_some())
+            {
                 let lines: Vec<_> = failure
                     .lines
                     .iter()
@@ -191,6 +202,11 @@ pub(super) fn failure_evidence(
                     })
                     .collect();
                 let mut hash = Sha256::new();
+                if let Some(binary) = &failure.binary {
+                    let binary = from_root(binary, root);
+                    hash.update((binary.len() as u64).to_be_bytes());
+                    hash.update(binary.as_bytes());
+                }
                 for line in lines {
                     hash.update((line.len() as u64).to_be_bytes());
                     hash.update(line.as_bytes());
@@ -652,6 +668,26 @@ mod tests {
     }
 
     #[test]
+    fn pytest_class_headers_match_qualified_node_ids() {
+        let output = include_str!("../../testlog/fixtures/pytest-q.txt");
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(
+            evidence
+                .details
+                .contains_key("tests/test_calc.py::TestStrings::test_upper")
+        );
+    }
+
+    #[test]
+    fn rust_panic_thread_ids_are_normalized_when_indented() {
+        let line = |id| format!("    thread 'test' ({id}) panicked at src/lib.rs:1:");
+        assert_eq!(
+            RUST_THREAD_ID.replace(&line(123), "$1$2"),
+            RUST_THREAD_ID.replace(&line(456), "$1$2")
+        );
+    }
+
+    #[test]
     fn names_are_written_from_the_checkout_root() {
         let names = |out: &str, root: &str| failure_names(out, &[], Path::new(root), false);
         let here = names("Diff in /src/app/src/a.rs:3:\n-x\n+y\n", "/src/app");
@@ -675,6 +711,15 @@ mod tests {
         let mixed = names("--- FAIL: TestSame (0.00s)\n    --- FAIL: TestSame/sub (0.00s)\nFAIL\nFAIL\texample.com/a\t0.001s\n--- FAIL: TestSame (0.00s)\nFAIL\nFAIL\texample.com/b\t0.001s\nFAIL\n").unwrap();
         assert!(mixed.contains("example.com/a::TestSame/sub"));
         assert!(mixed.contains("example.com/b::TestSame"));
+
+        let details = "--- FAIL: TestSame (0.00s)\n    a_test.go:1: first cause\nFAIL\nFAIL\texample.com/a\t0.001s\n--- FAIL: TestSame (0.00s)\n    b_test.go:2: second cause\nFAIL\nFAIL\texample.com/b\t0.001s\n";
+        let evidence = failure_evidence(details, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.contains_key("example.com/a::TestSame"));
+        assert!(evidence.details.contains_key("example.com/b::TestSame"));
+        assert_ne!(
+            evidence.details["example.com/a::TestSame"],
+            evidence.details["example.com/b::TestSame"]
+        );
     }
 
     #[test]
@@ -688,11 +733,45 @@ mod tests {
             names("FAIL tests/a.test.js (5.123 s)\n  ● same test\n"),
             names("FAIL tests/a.test.js (12.345 s)\n  ● same test\n")
         );
+        let details = "FAIL tests/a.test.js\n  ● same test\n    first cause\nFAIL tests/b.test.js\n  ● same test\n    second cause\n";
+        let evidence = failure_evidence(details, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.contains_key("tests/a.test.js::same test"));
+        assert!(evidence.details.contains_key("tests/b.test.js::same test"));
+        assert_ne!(
+            evidence.details["tests/a.test.js::same test"],
+            evidence.details["tests/b.test.js::same test"]
+        );
     }
 
     #[test]
     fn affected_libtest_names_from_multiple_binaries_are_ambiguous() {
         let output = "test same ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
-        assert!(failure_names(output, &[], Path::new("/x"), true).is_none());
+        let evidence = failure_evidence(output, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.is_empty());
+    }
+
+    #[test]
+    fn workspace_libtest_evidence_includes_the_binary_identity() {
+        let output = |binary: &str, hash: &str| {
+            format!(
+                "Running unittests src/lib.rs (target/debug/deps/{binary}-{hash})\n\
+             test same ... FAILED\n---- same stdout ----\nassertion failed\n\
+             test result: FAILED. 1 passed; 1 failed; 0 ignored\n\
+             Running tests/other.rs (target/debug/deps/other-12345678)\n\
+             test result: ok. 1 passed; 0 failed; 0 ignored\n"
+            )
+        };
+        let evidence = |text: String| failure_evidence(&text, &[], Path::new("/x"), true).unwrap();
+        let a = evidence(output("first", "12345678"));
+        assert!(!a.details.is_empty());
+        assert_eq!(a.details, evidence(output("first", "abcdef12")).details);
+        assert_ne!(a.details, evidence(output("second", "abcdef12")).details);
+
+        let duplicate = format!(
+            "{}{}",
+            output("first", "12345678"),
+            output("second", "abcdef12")
+        );
+        assert!(evidence(duplicate).details.is_empty());
     }
 }
