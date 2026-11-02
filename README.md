@@ -43,7 +43,8 @@ coding agents such as Claude Code and Codex. It does two things:
    mise use -g jouet
    ```
 
-   With an older mise, use `mise use -g github:jdx/jouet`. Or run
+   With mise 2026.9.2 to 2026.10.24, name the signed packslip release
+   instead: `mise use -g packslip:jdx/jouet`. Or run
    `cargo install jouet --locked`, or unpack a
    [release archive](https://github.com/jdx/jouet/releases) for Linux, macOS
    (Apple Silicon) or Windows. [All installation options →](https://jouet.jdx.dev/getting-started#install)
