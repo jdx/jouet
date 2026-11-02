@@ -400,19 +400,67 @@ pub(crate) fn program_shapes(command: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Programs grouped by shell pipeline, without joining separate commands.
-pub(crate) fn pipeline_shapes(command: &str) -> Vec<Vec<(String, String)>> {
-    let mut pipelines = Vec::new();
-    let mut pipeline = Vec::new();
-    for (simple, op) in simple_commands(&lex(command)) {
-        let (shaped, program) = shape_simple(&simple);
-        if let Some(program) = program {
-            pipeline.push((program, shaped));
+type Stage = Vec<(String, String)>;
+type Pipeline = Vec<Stage>;
+
+/// Programs grouped by shell pipeline. A subshell is one stage of its outer
+/// pipeline, while its own pipelines are also recorded separately.
+pub(crate) fn pipeline_shapes(command: &str) -> Vec<Pipeline> {
+    fn group<'a>(toks: &'a [Tok], at: &mut usize, out: &mut Vec<Pipeline>) -> Stage {
+        let mut all = Vec::new();
+        let mut pipeline = Vec::new();
+        let mut simple: Vec<&'a Tok> = Vec::new();
+        let mut after_pipe = false;
+        while *at < toks.len() {
+            let tok = &toks[*at];
+            *at += 1;
+            if let Tok::Op(op) = tok {
+                if !simple.is_empty() {
+                    let (shaped, program) = shape_simple(&simple);
+                    if let Some(program) = program {
+                        let item = (program, shaped);
+                        all.push(item.clone());
+                        pipeline.push(vec![item]);
+                    }
+                    simple.clear();
+                    after_pipe = false;
+                }
+                match *op {
+                    "(" => {
+                        let inner = group(toks, at, out);
+                        all.extend(inner.clone());
+                        pipeline.push(inner);
+                        after_pipe = false;
+                    }
+                    "|" | "|&" => after_pipe = true,
+                    "\n" if after_pipe => {}
+                    ")" => break,
+                    _ => {
+                        if !pipeline.is_empty() {
+                            out.push(std::mem::take(&mut pipeline));
+                        }
+                        after_pipe = false;
+                    }
+                }
+            } else {
+                simple.push(tok);
+            }
         }
-        if !matches!(op, Some("|" | "|&")) && !pipeline.is_empty() {
-            pipelines.push(std::mem::take(&mut pipeline));
+        if !simple.is_empty() {
+            let (shaped, program) = shape_simple(&simple);
+            if let Some(program) = program {
+                let item = (program, shaped);
+                all.push(item.clone());
+                pipeline.push(vec![item]);
+            }
         }
+        if !pipeline.is_empty() {
+            out.push(pipeline);
+        }
+        all
     }
+    let mut pipelines = Vec::new();
+    group(&lex(command), &mut 0, &mut pipelines);
     pipelines
 }
 

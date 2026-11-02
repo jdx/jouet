@@ -173,9 +173,12 @@ pub fn detect(command: &str) -> Patterns {
     }
     if pipeline_shapes(command).iter().any(|pipeline| {
         let mut test_seen = false;
-        pipeline.iter().any(|(program, shaped)| {
-            let cuts_test = test_seen && matches!(program.as_str(), "head" | "tail");
-            test_seen |= TEST_HEAD.is_match(shaped);
+        pipeline.iter().any(|stage| {
+            let cuts_test = test_seen
+                && stage
+                    .iter()
+                    .any(|(program, _)| matches!(program.as_str(), "head" | "tail"));
+            test_seen |= stage.iter().any(|(_, shaped)| TEST_HEAD.is_match(shaped));
             cuts_test
         })
     }) {
@@ -252,6 +255,15 @@ mod tests {
         ));
         assert!(has(
             "cargo test 2>&1 | tee test.log | tail -40",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(has(
+            "(cd src && cargo test) | tail",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(has("cargo test |\n head", Pattern::HeadOnTestOutput));
+        assert!(!has(
+            "(cargo test && rg pytest config | head)",
             Pattern::HeadOnTestOutput
         ));
     }
