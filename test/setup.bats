@@ -60,7 +60,7 @@ hook_command() {
 	assert_success
 	assert_output --partial "would create $HOME/.claude/settings.json"
 	assert_output --partial '+            "command": "sh -c '"'"'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"'"'",'
-	refute_output --partial "SKILL.md"
+	assert_line "would create $HOME/.claude/skills/jouet-init/SKILL.md"
 	assert [ ! -e "$HOME/.claude" ]
 }
 
@@ -78,6 +78,57 @@ hook_command() {
 	JOUET_HOOKS_PRIME=0 run --separate-stderr jouet setup claude
 	assert_success
 	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
+}
+
+@test "setup installs onboarding by default for every harness and prints its invocation" {
+	for harness in claude codex cursor gemini copilot; do
+		run --separate-stderr jouet setup "$harness" --json
+		assert_success
+		if [[ "$harness" == claude ]]; then
+			skill_path="$HOME/.claude/skills/jouet-init/SKILL.md"
+		else
+			skill_path="$HOME/.agents/skills/jouet-init/SKILL.md"
+		fi
+		run jq -r --arg path "$skill_path" '.files[] | select(.path == $path) | .action' <<<"$output"
+		assert_success
+		assert [ -f "$skill_path" ]
+		run cat "$skill_path"
+		assert_line 'name: jouet-init'
+	done
+
+	run --separate-stderr jouet setup claude
+	assert_line --partial 'ask: /jouet-init'
+	run --separate-stderr jouet setup codex
+	assert_line --partial 'ask: $jouet-init'
+}
+
+@test "onboarding is idempotent, uninstalled when unedited, and preserves local edits" {
+	jouet setup codex >/dev/null
+	skill_path="$HOME/.agents/skills/jouet-init/SKILL.md"
+	cp "$skill_path" before-skill
+	run --separate-stderr jouet setup codex
+	assert_success
+	assert_line "unchanged $skill_path"
+	run cmp before-skill "$skill_path"
+	assert_success
+
+	run --separate-stderr jouet setup codex --uninstall
+	assert_success
+	assert_line "removed $skill_path"
+	assert [ ! -e "$skill_path" ]
+	refute_output --partial 'next:'
+
+	jouet setup codex >/dev/null
+	printf '\nmy project notes\n' >>"$skill_path"
+	cp "$skill_path" edited-skill
+	run --separate-stderr jouet setup codex
+	assert_success
+	assert_line "kept $skill_path"
+	run --separate-stderr jouet setup codex --uninstall
+	assert_success
+	assert_line "kept $skill_path"
+	run cmp edited-skill "$skill_path"
+	assert_success
 }
 
 @test "setup merges into existing hooks, and a re-run changes nothing" {
@@ -131,7 +182,7 @@ hook_command() {
 
 	# Without --skill, setup has nothing to say about it.
 	run --separate-stderr jouet setup claude
-	refute_output --partial "SKILL.md"
+	refute_output --partial "/skills/jouet/SKILL.md"
 	assert_content "$HOME/.claude/skills/jouet/SKILL.md" $'my own notes\n'
 
 	# jouet's own, once edited, is the user's.
@@ -141,7 +192,7 @@ hook_command() {
 	run --separate-stderr jouet setup claude --uninstall
 	assert_line "kept $HOME/.claude/skills/jouet/SKILL.md"
 	run --separate-stderr jouet setup claude
-	refute_output --partial "SKILL.md"
+	refute_output --partial "/skills/jouet/SKILL.md"
 }
 
 @test "setup codex writes hooks.json and the skill under .agents, and says to trust the hooks" {
@@ -219,11 +270,11 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert_success
 	assert_line "created $work/.claude/settings.local.json"
 	assert_line "created $work/.claude/skills/jouet/SKILL.md"
-	assert_line "note: git does not ignore .claude/settings.local.json or .claude/skills/jouet/SKILL.md, so \`git add\` could commit them: list them in .gitignore, or in .git/info/exclude for this clone alone"
+	assert_line "note: git does not ignore .claude/settings.local.json or .claude/skills/jouet/SKILL.md or .claude/skills/jouet-init/SKILL.md, so \`git add\` could commit them: list them in .gitignore, or in .git/info/exclude for this clone alone"
 	assert_golden "$work/.claude/settings.local.json" claude-hooks.json
 	assert [ ! -e "$work/.claude/settings.json" ]
 
-	printf '.claude/settings.local.json\n.claude/skills/jouet/\n' >>"$work/.git/info/exclude"
+	printf '.claude/settings.local.json\n.claude/skills/jouet/\n.claude/skills/jouet-init/\n' >>"$work/.git/info/exclude"
 	run --separate-stderr jouet setup claude --project --skill
 	assert_success
 	refute_line --partial "git does not ignore"

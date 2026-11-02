@@ -12,4 +12,7 @@ pub(crate) struct SkillArgs {
     /// Print the optional skill for proposing rules and ideas to jouet instead
     #[usage(long)]
     pub(crate) contribute: bool,
+    /// Print the project onboarding skill instead
+    #[usage(long)]
+    pub(crate) init: bool,
 }

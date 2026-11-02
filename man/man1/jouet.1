@@ -21,9 +21,6 @@ Print help
 Print version
 .SH COMMANDS
 .TP
-\fBinit\fR
-Inspect this project and propose jouet configuration
-.TP
 \fBaudit\fR
 Report where coding\-agent sessions spend tokens and time
 .TP
@@ -356,21 +353,6 @@ Install jouet's hooks into a coding agent's harness
 .TP
 \fBcompletion\fR
 Print a shell completion script
-.SH "JOUET INIT"
-Inspect this project and propose jouet configuration
-
-Reads project files and previews any supported recommendations. It does not execute project commands or trust the repository. With \-\-yes, writes the proposed files without replacing existing files; review them before deciding whether to trust the repository.
-.PP
-\fBUsage:\fR jouet init [OPTIONS]
-.PP
-\fBOptions:\fR
-.PP
-.TP
-\fB\-\-yes\fR
-Write the proposed files after reviewing the preview
-.TP
-\fB\-h, \-\-help\fR
-Print help
 .SH "JOUET AUDIT"
 Report where coding\-agent sessions spend tokens and time
 
@@ -3019,12 +3001,15 @@ claude or codex (a SKILL.md), or agents\-md (a snippet for AGENTS.md)
 \fB\-\-contribute\fR
 Print the optional skill for proposing rules and ideas to jouet instead
 .TP
+\fB\-\-init\fR
+Print the project onboarding skill instead
+.TP
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET SETUP"
 Install jouet's hooks into a coding agent's harness
 
-Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing. The jouet\-init project onboarding skill is always installed; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 .PP
 \fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
 .PP
@@ -3044,7 +3029,7 @@ Install into the repository's tracked hooks file (.claude/settings.json, .codex/
 Show what would change without writing anything
 .TP
 \fB\-\-uninstall\fR
-Remove jouet's hooks and skill
+Remove jouet's hooks and skills
 .TP
 \fB\-\-skill\fR
 Install the skill as well, which the session\-start primer otherwise stands in for

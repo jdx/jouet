@@ -7,7 +7,8 @@ use usage_rs::Args;
 /// hooks/jouet.json, keeping every other hook. The session-start hook primes each session with
 /// the commands and rules, so the skill, which says the same, is installed
 /// only with --skill or when priming is off ([hooks] prime). Running it again
-/// changes nothing; --uninstall removes only what jouet added. The hooks do
+/// changes nothing. The jouet-init project onboarding skill is always installed;
+/// --uninstall removes only what jouet added. The hooks do
 /// nothing where jouet is not on PATH.
 #[derive(Args)]
 pub(crate) struct SetupArgs {
@@ -29,7 +30,7 @@ pub(crate) struct SetupArgs {
     /// Show what would change without writing anything
     #[usage(long)]
     pub(crate) dry_run: bool,
-    /// Remove jouet's hooks and skill
+    /// Remove jouet's hooks and skills
     #[usage(long)]
     pub(crate) uninstall: bool,
     /// Install the skill as well, which the session-start primer otherwise

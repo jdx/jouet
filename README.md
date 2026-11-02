@@ -55,6 +55,13 @@ distributions use the static musl archive, which mise picks automatically.
 completions, which mise loads for you when it installs jouet.
 [All installation options →](https://jouet.jdx.dev/getting-started)
 
+Then start your agent in a project and ask it to use **jouet-init**:
+`/jouet-init` in Claude Code, `$jouet-init` in Codex, or
+"Use the jouet-init skill to configure jouet for this project."
+Setup installs the skill. It inspects the project's workflows and timing
+history, makes useful configuration changes, and verifies them.
+[Project onboarding →](https://jouet.jdx.dev/project-setup)
+
 ## What it keeps track of
 
 `jouet setup` installs hooks and a short primer the agent reads at session
