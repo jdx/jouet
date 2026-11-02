@@ -237,6 +237,53 @@ fn an_unrecognised_failure_shows_the_end_of_the_output() {
 }
 
 #[test]
+fn rspec_keeps_named_failures_and_their_assertions() {
+    let output = r#"
+==> Summary (2 workers)
+    [ 1] 4 examples, 1 pending, 2 failures
+    [ 2] 2 examples, 0 failures
+==> Failures
+
+  1) RuboCop::Config excludes a file
+     Failure/Error: expect(configuration).to be_file_to_exclude('bar.rb')
+       expected true, got false
+     # ./spec/rubocop/config_spec.rb:625
+
+  2) Another example fails
+     Failure/Error: expect(1).to eq(2)
+       expected: 2
+            got: 1
+     # ./spec/other_spec.rb:7
+==> Failed Examples
+rspec ./spec/rubocop/config_spec.rb:619
+"#;
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        ["RuboCop::Config excludes a file", "Another example fails"]
+    );
+    assert_eq!((d.passed, d.failed, d.skipped), (3, 2, 1));
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("expected true, got false"))
+    );
+    assert!(
+        d.failures[1]
+            .lines
+            .iter()
+            .any(|line| line.contains("expected: 2"))
+    );
+}
+
+#[test]
+fn numbered_text_without_an_rspec_failure_is_not_a_failure() {
+    let output = "Failures:\n  1) A numbered diagnostic\n     an explanation\nFinished in 0.1s\n";
+    assert!(digest(output, false, DEFAULT_BUDGET).failures.is_empty());
+}
+
+#[test]
 fn colour_carriage_returns_and_task_prefixes_are_cleaned() {
     let text = "[test:e2e] 1..2\n[test:e2e] ok 1 a\n[test:e2e] progress 10%\rprogress 100%\n[test:e2e] \x1b[31mnot ok 2 b\x1b[0m\n[test:e2e] # it broke\n";
     let d = digest(text, true, DEFAULT_BUDGET);
