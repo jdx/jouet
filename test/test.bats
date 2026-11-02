@@ -521,14 +521,12 @@ tap_script() {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo
 	chmod +x bin/cargo
-	export PATH="$PWD/bin:$PATH"
-
-	run --separate-stderr jouet test --cmd -- cargo test missing_name
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test missing_name
 	assert_failure 4
 	assert_output --partial 'no test ran'
 	assert_output --partial '(exit 4)'
 
-	run --separate-stderr jouet test --json --cmd -- cargo test missing_name
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- cargo test missing_name
 	assert_failure 4
 	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].no_tests]' <<<"$output")" '[false,0,true]'
 
@@ -538,7 +536,7 @@ tap_script() {
 	assert_success
 
 	printf '#!/bin/sh\nprintf "running 1 test\\ntest one ... ok\\ntest result: ok. 1 passed; 0 failed; 0 ignored\\n"\n' >bin/cargo
-	run --separate-stderr jouet test --cmd -- cargo test one
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test one
 	assert_success
 }
 
