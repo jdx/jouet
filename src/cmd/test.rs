@@ -626,7 +626,21 @@ fn changed_tests(passed: &[String], added: &str) -> Vec<String> {
     let mut found: Vec<String> = passed
         .iter()
         .filter(|name| {
-            let last = name.rsplit([':', '>', '.']).next().unwrap_or(name).trim();
+            // The last part of a path of names: libtest's `a::tests::b`,
+            // vitest's `file > suite > test`, or a dotted name with no
+            // spaces (`tests.test_a.T.test_b`). A name with spaces is a
+            // sentence, as bats', and only matches whole: `settings.json`
+            // is not a test called `json`.
+            let last = if let Some((_, l)) = name.rsplit_once("::") {
+                l
+            } else if let Some((_, l)) = name.rsplit_once(" > ") {
+                l
+            } else if !name.contains(char::is_whitespace) {
+                name.rsplit('.').next().unwrap_or(name)
+            } else {
+                name
+            }
+            .trim();
             let named = |n: &str| n.chars().count() >= 4 && contains_word(added, n);
             named(name.trim()) || named(last)
         })
@@ -1260,5 +1274,10 @@ mod tests {
         assert!(changed_tests(&passed, "").is_empty());
         assert!(contains_word("fn split_editor()", "split_editor"));
         assert!(!contains_word("fn split_editors()", "split_editor"));
+        // A sentence of a name is matched whole, not by its last dotted part.
+        let bats = ["setup --shared writes the tracked settings.json".to_string()];
+        assert!(changed_tests(&bats, "run jouet --json search x\n").is_empty());
+        let dotted = ["tests.test_a.T.test_json".to_string()];
+        assert_eq!(changed_tests(&dotted, "    def test_json(self):\n"), dotted);
     }
 }
