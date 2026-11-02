@@ -1,0 +1,23 @@
+description = "Fix yt-dlp/yt-dlp#14576: parsing metadata into a single field never matches"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 900
+check_timeout_s = 180
+prompt = """
+`--parse-metadata playlist_autonumber:track` reports that it could not
+interpret `playlist_autonumber` as `track`, rather than copying the
+playlist number into the track field. This happens when the output is a
+single field name; templated output and explicit regular expressions should
+continue to work.
+
+Fix the metadata parser in yt-dlp, add tests, and commit your change. The
+problem can be exercised with synthetic metadata; a network download is not
+needed.
+"""
+
+[source]
+git = "~/src/yt-dlp"
+commit = "ba499ab0dcf2486d97f739e155264b305e0abd26"

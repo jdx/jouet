@@ -1,0 +1,44 @@
+diff --git a/README.md b/README.md
+index 6e3e23fcb..ef2e2493f 100644
+--- a/README.md
++++ b/README.md
+@@ -1821,6 +1821,9 @@ $ yt-dlp --parse-metadata "title:%(artist)s - %(title)s"
+ # Regex example
+ $ yt-dlp --parse-metadata "description:Artist - (?P<artist>.+)"
+ 
++# Copy the episode field to the title field (with FROM and TO as single fields)
++$ yt-dlp --parse-metadata "episode:title"
++
+ # Set title as "Series name S01E05"
+ $ yt-dlp --parse-metadata "%(series)s S%(season_number)02dE%(episode_number)02d:%(title)s"
+ 
+diff --git a/test/test_postprocessors.py b/test/test_postprocessors.py
+index 391156706..d58a97fc6 100644
+--- a/test/test_postprocessors.py
++++ b/test/test_postprocessors.py
+@@ -29,6 +29,11 @@ class TestMetadataFromField(unittest.TestCase):
+             MetadataParserPP.format_to_regex('%(title)s - %(artist)s'),
+             r'(?P<title>.+)\ \-\ (?P<artist>.+)')
+         self.assertEqual(MetadataParserPP.format_to_regex(r'(?P<x>.+)'), r'(?P<x>.+)')
++        self.assertEqual(MetadataParserPP.format_to_regex(r'text (?P<x>.+)'), r'text (?P<x>.+)')
++        self.assertEqual(MetadataParserPP.format_to_regex('x'), r'(?s)(?P<x>.+)')
++        self.assertEqual(MetadataParserPP.format_to_regex('Field_Name1'), r'(?s)(?P<Field_Name1>.+)')
++        self.assertEqual(MetadataParserPP.format_to_regex('é'), r'(?s)(?P<é>.+)')
++        self.assertEqual(MetadataParserPP.format_to_regex('invalid '), 'invalid ')
+ 
+     def test_field_to_template(self):
+         self.assertEqual(MetadataParserPP.field_to_template('title'), '%(title)s')
+diff --git a/yt_dlp/postprocessor/metadataparser.py b/yt_dlp/postprocessor/metadataparser.py
+index 1d6054294..e9e026717 100644
+--- a/yt_dlp/postprocessor/metadataparser.py
++++ b/yt_dlp/postprocessor/metadataparser.py
+@@ -42,6 +42,9 @@ class MetadataParserPP(PostProcessor):
+         to a regex like
+            '(?P<title>.+)\ \-\ (?P<artist>.+)'
+         """
++        if re.fullmatch(r'\w+', fmt):
++            # convert a single field name into regex pattern that matches the entire input
++            return rf'(?s)(?P<{fmt}>.+)'
+         if not re.search(r'%\(\w+\)s', fmt):
+             return fmt
+         lastpos = 0
