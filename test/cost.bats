@@ -3,7 +3,7 @@
 setup() {
 	load "test_helper/common_setup"
 	_common_setup
-	unset XDG_CONFIG_HOME XDG_CACHE_HOME
+	unset XDG_CONFIG_HOME XDG_CACHE_HOME JOUET_COST_SEQUENCES
 	init_repo
 	mkdir -p "$BATS_TEST_TMPDIR/tools"
 	printf '#!/bin/sh\nexit 0\n' >"$BATS_TEST_TMPDIR/tools/cargo"
@@ -23,8 +23,8 @@ setup() {
 	done
 	run --separate-stderr jouet cost --sequences --json
 	assert_success
-	run jq -c '[.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]' <<<"$output"
-	assert_output '[3]'
+	run jq -c '[.sequences_recording, [.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]]' <<<"$output"
+	assert_output '[false,[3]]'
 	run grep -r 'private-codex-thread' "$XDG_STATE_HOME/jouet/cost-sequences"
 	assert_failure 1
 }
@@ -47,8 +47,8 @@ setup() {
 	done
 	run --separate-stderr jouet cost --sequences --json
 	assert_success
-	run jq -c '[.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]' <<<"$output"
-	assert_output '[3]'
+	run jq -c '[.sequences_recording, [.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]]' <<<"$output"
+	assert_output '[false,[3]]'
 	run --separate-stderr jouet cost --sequences
 	assert_success
 	assert_line --partial 'other work and cache changes may intervene'
