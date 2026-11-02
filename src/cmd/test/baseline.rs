@@ -268,6 +268,10 @@ pub(super) fn compare(
     failed: &[(&Job, BTreeSet<String>, u64)],
     mode: Mode,
 ) -> Result<Option<Baseline>, NotCompared> {
+    let setup = affected::project_config::baseline_setup(root).map_err(|e| {
+        let hint = e.hint.map_or(String::new(), |hint| format!(" {hint}"));
+        NotCompared::from(format!("baseline setup configuration: {}{hint}", e.message))
+    })?;
     let mut checkout = Checkout {
         root,
         base: &base,
@@ -276,14 +280,37 @@ pub(super) fn compare(
     let mut pre_existing = BTreeSet::new();
     let mut new = BTreeSet::new();
     let mut unknown = BTreeSet::new();
+    let mut prepared = false;
     for (i, (job, now, ran)) in failed.iter().enumerate() {
         let key = command_key(job, root);
-        let kept = known::lookup(root, &base.merge_base, &key);
+        let kept = if setup.is_empty() {
+            known::lookup(root, &base.merge_base, &key)
+        } else {
+            None
+        };
         let outcome = match (kept, mode) {
             (_, Mode::Fresh)
             | (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
             | (None, Mode::Run | Mode::Retry) => {
                 let tree = checkout.tree()?.to_path_buf();
+                if !prepared && !setup.is_empty() {
+                    let prepare = Job {
+                        argv: setup.iter().map(|w| rebase(w, root, &tree)).collect(),
+                        env: Vec::new(),
+                        dir: tree.clone(),
+                        exit: Box::new(|_| Exit::Ok),
+                    };
+                    let log = log_path(failed.len() * 2 + 1);
+                    let (code, _) = execute(&prepare, &log, false)
+                        .map_err(|e| format!("baseline setup: {e}"))?;
+                    if code != 0 {
+                        return Err(NotCompared::from(format!(
+                            "baseline setup failed (exit {code}); failures were not compared (full log: {})",
+                            log.display()
+                        )));
+                    }
+                    prepared = true;
+                }
                 let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
                 let at_base = Job {
                     argv: job.argv.iter().map(|w| rebase(w, root, &tree)).collect(),
@@ -313,7 +340,7 @@ pub(super) fn compare(
                         },
                     }
                 };
-                if mode != Mode::Fresh {
+                if mode != Mode::Fresh && setup.is_empty() {
                     known::keep(root, &base.merge_base, &key, outcome.clone());
                 }
                 outcome

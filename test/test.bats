@@ -720,6 +720,57 @@ PY
 	assert_output --partial 'test_added'
 }
 
+@test "baseline setup requires trust and runs only in the isolated checkout" {
+	export BASELINE_SETUP_TRACE="$BATS_TEST_TMPDIR/setup-trace"
+	mkdir -p .jouet tests
+	printf '[baseline]\nsetup = ["sh", "prepare.sh"]\n' >.jouet/test.toml
+	printf '.baseline-ready\n' >.gitignore
+	cat >prepare.sh <<'SH'
+#!/bin/sh
+printf '%s\n' "$PWD" >>"$BASELINE_SETUP_TRACE"
+touch .baseline-ready
+SH
+	cat >tests/test_a.py <<'PY'
+import os
+import unittest
+class Tests(unittest.TestCase):
+    def test_existing(self):
+        if not os.path.exists('.baseline-ready'):
+            raise RuntimeError('setup did not run')
+        self.fail('already broken')
+PY
+	git add .jouet/test.toml .gitignore prepare.sh tests/test_a.py
+	git commit -qm base
+	git checkout -qb work
+	touch .baseline-ready
+	printf '\n# change\n' >>tests/test_a.py
+
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --since main --cmd -- python3 -m unittest discover -s tests
+	assert_failure 1
+	assert_output --partial 'not trusted'
+	[ ! -e "$BASELINE_SETUP_TRACE" ]
+
+	run --separate-stderr jouet trust --yes
+	assert_success
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --since main --cmd -- python3 -m unittest discover -s tests
+	assert_success
+	assert_output --partial 'test_existing'
+	run cat "$BASELINE_SETUP_TRACE"
+	assert_success
+	refute_output "$PWD"
+	assert_output --partial 'jouet-baseline-'
+
+	printf '[baseline]\nsetup = ["false"]\n' >.jouet/test.toml
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --since main --cmd -- python3 -m unittest discover -s tests
+	assert_failure 1
+	assert_output --partial 'not trusted'
+	run --separate-stderr jouet trust --yes
+	assert_success
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --since main --cmd -- python3 -m unittest discover -s tests
+	assert_failure 1
+	assert_output --partial 'baseline setup failed'
+}
+
 @test "--baseline refuses before the run when the merge base is the work tree itself" {
 	mkdir -p tests
 	printf 'import unittest\nclass T(unittest.TestCase):\n    def test_env(self):\n        self.fail("needs brew")\n' >tests/test_a.py

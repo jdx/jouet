@@ -208,6 +208,15 @@ When the run fails, jouet runs each failed suite again in a temporary worktree o
 
 The comparison needs a runner whose failures jouet recognises by name, and costs one more run of the failed suites. With `--affected --baseline`, jouet selects the tests once from the change, then replays those exact commands at the merge base; it does not select again there. For Vitest and Jest, the run names the selected files directly, so their Git- and module-graph-based selectors cannot choose different files at the merge base. It runs a fresh comparison rather than using a cached result. A missing test, missing dependencies in the isolated checkout, or an uncomparable result does not prove a failure was pre-existing and does not clear the run. A successful comparison clears the matching affected failure at the same work tree; it does not clear a full-suite failure or an affected failure recorded at a different tree.
 
+For a project whose tests need dependencies installed in each checkout, configure an optional setup command in `.jouet/test.toml`:
+
+```toml
+[baseline]
+setup = ["npm", "ci"]
+```
+
+After reviewing the configuration, a person runs `jouet trust`. When a comparison actually runs, jouet executes this argument list once in the root of its temporary merge-base checkout, before the test commands. It invokes the program directly, without a shell, and does not run setup in the current worktree. The program can run project scripts and access the network as the user; trust it accordingly. A missing program or unsuccessful setup leaves the failures uncomparable, with its output in the reported log. A configured setup uses a fresh comparison, rather than a cached result.
+
 **What the merge base did is kept** for 14 days in `$XDG_STATE_HOME/jouet/known/`, by repository (every worktree of it shares it), merge base and command. A later failure of the same command at the same merge base is compared with what is kept, without running the merge base again, so a failure that was already there stays known while you work. If the kept run could not name any failures, passing `--baseline` explicitly retries it, for example after installing a missing tool.
 
 **Without `--baseline`:**
