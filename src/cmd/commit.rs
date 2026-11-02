@@ -35,10 +35,24 @@ pub(crate) fn run(args: &CommitArgs, out: &Output) -> Exit {
     };
     let scan = CommitScan { allow, fnox };
     let scanner: Option<&dyn Scanner> = secret_scan.then_some(&scan as &dyn Scanner);
+    // The tree before and after, to tell the stop hook what the commit's
+    // own hooks reformatted.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    // Only in an agent session, which has a stop hook to tell.
+    let session = jouet_git::session::id_from_env().is_some();
+    let tree = || {
+        session
+            .then(|| jouet_rules::tree::work_tree(Some(&cwd), super::hook::TREE_TIMEOUT).ok())
+            .flatten()
+    };
+    let before = tree();
     let mut report = match commit::run_scanned(&Git::here(), &req, scanner) {
         Ok(report) => report,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    if report.failure.is_none() {
+        super::hook::record_own_formatting(&cwd, before.as_deref(), tree().as_deref());
+    }
     if let Some(reason) = report.secret_scan.as_ref().and_then(|s| s.reason.clone()) {
         report.warnings.push(reason);
     }

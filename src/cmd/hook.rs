@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// How long a hook may spend hashing the work tree a check ran against.
-const TREE_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const TREE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
     let started = std::time::Instant::now();
@@ -989,6 +989,28 @@ fn own_state() -> Option<(PathBuf, bool)> {
     let session = jouet_git::session::id_from_env()?;
     let lead = agents::caller(&session, "test").is_lead();
     Some((verify::state_path(&session)?, lead))
+}
+
+/// Records that a `jouet commit`'s hooks rewrote files, from the tree
+/// `before` to `after`: what passed at `before` counts at `after`, as after a
+/// formatter's call. Its call may run tests or `cd` first, which the hooks
+/// cannot tell from a call that edits.
+pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Option<&str>) {
+    let settings = Settings::load();
+    let (Some(before), Some(after)) = (before, after) else {
+        return;
+    };
+    if !settings.hooks.enabled || !settings.hooks.verify || before == after {
+        return;
+    }
+    let Some((path, lead)) = own_state() else {
+        return;
+    };
+    let root = verify::root_of(cwd);
+    let _ = verify::update(&path, |state| {
+        state.by(&root, lead);
+        state.checks_mut(&root).reformatted(before, after);
+    });
 }
 
 /// Records a `jouet test` run as the checks see it; `environment` is what

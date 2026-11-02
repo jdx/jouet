@@ -787,10 +787,17 @@ impl Checks {
 
     /// That call ended, at `tree`: what it changed was formatting.
     pub(crate) fn formatting_ended(&mut self, tree: Option<&str>) {
-        if let (Some(from), Some(to)) = (self.formatting.take(), tree)
-            && from != to
-        {
-            self.formatted.push((from, to.to_string()));
+        if let (Some(from), Some(to)) = (self.formatting.take(), tree) {
+            self.reformatted(&from, to);
+        }
+    }
+
+    /// The files went from `from` to `to` by formatting alone, as a
+    /// commit's hooks report it, without ending a formatting call that
+    /// may still be in flight around it (`cargo fmt && jouet commit`).
+    pub(crate) fn reformatted(&mut self, from: &str, to: &str) {
+        if from != to {
+            self.formatted.push((from.to_string(), to.to_string()));
             let over = self.formatted.len().saturating_sub(FORMATTED_KEPT);
             self.formatted.drain(..over);
         }
@@ -1437,6 +1444,18 @@ mod tests {
         state.formatting_started(Some("t4"));
         state.formatting_ended(Some("t4"));
         assert_eq!(state.formatted.len(), 2);
+    }
+
+    #[test]
+    fn a_commits_own_reformat_keeps_the_formatting_call_around_it() {
+        // `cargo fmt && jouet commit`: the formatter's call spans t1 to t3,
+        // and the commit's hooks rewrote t2 to t3 inside it.
+        let mut state = Checks::default();
+        state.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        state.formatting_started(Some("t1"));
+        state.reformatted("t2", "t3");
+        state.formatting_ended(Some("t3"));
+        assert_eq!(reason(&state, "t3"), None);
     }
 
     #[test]

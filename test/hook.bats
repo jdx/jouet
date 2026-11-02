@@ -215,6 +215,27 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "files a jouet commit's hooks rewrote need no second run, whatever else its call ran" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	git -C repo config user.name test
+	git -C repo config user.email test@example.com
+	git -C repo commit -q -m base
+	# A pre-commit hook that reformats what it commits, as hk fix does.
+	printf '#!/bin/sh\necho "fn main() { }" >main.rs\ngit add main.rs\n' >repo/.git/hooks/pre-commit
+	chmod +x repo/.git/hooks/pre-commit
+	echo 'fn main() { todo!() }' >repo/main.rs
+
+	ran 'cargo test --workspace' 0
+	# The agent's call ran the tests and committed after a cd, which the
+	# hooks cannot tell from an edit; jouet commit tells them itself.
+	(cd repo && CLAUDE_CODE_SESSION_ID=s1 jouet commit main.rs --message change >/dev/null)
+	assert_equal "$(cat repo/main.rs)" 'fn main() { }'
+	run stop_reason
+	assert_output ""
+}
+
 @test "a failure is raised once for its run, not at every turn's stop or after other changes" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
