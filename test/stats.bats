@@ -71,6 +71,14 @@ setup() {
 	[[ "$(grep -c jouet-run "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl")" == 2 ]]
 }
 
+@test "jouet pr and jouet run record their own exit codes too" {
+	run --separate-stderr env CLAUDE_CODE_SESSION_ID=s1 JOUET_GITHUB_API_URL=http://127.0.0.1:9 jouet pr status 1 --repo a/b
+	assert_failure
+	local code=$status
+	run --separate-stderr jq -c 'select(.event == "jouet-run") | [.shape, .exit_code]' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_output "[\"jouet pr status\",$code]"
+}
+
 @test "saved baselines are reused until --rescan" {
 	run --separate-stderr jouet stats --json --display plain
 	assert_success
