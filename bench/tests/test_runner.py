@@ -186,6 +186,25 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(records[1]["success"])
         self.assertTrue(any("environment setup already failed" in message for message in messages))
 
+    def test_snapshot_callback_sees_the_binary_the_suite_uses(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            binary = root / "source"
+            binary.write_bytes(b"original")
+            seen = []
+
+            def on_snapshot(copy):
+                binary.write_bytes(b"rebuilt")
+                seen.append(copy.read_bytes())
+
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}):
+                runner.run_suite([], {"jouet_bin": binary}, root, lambda _: None, on_snapshot=on_snapshot)
+            self.assertEqual(seen, [b"original"])
+
     def test_agent_exit_is_part_of_success(self):
         from unittest.mock import patch
 
@@ -831,6 +850,13 @@ class ReportTest(unittest.TestCase):
         )
         text = report.markdown(summary)
         self.assertIn("> **Smoke test**", text)
+        self.assertIn("**Benchmark checkout:** `unavailable`", text)
+        self.assertIn("binary SHA-256 `unavailable`", text)
+        identified = report.markdown(report.summarize([], {
+            "commit": "harness-revision", "jouet_version": "jouet 0.1", "jouet_sha256": "abc123"
+        }))
+        self.assertIn("**Benchmark checkout:** `harness-revision`", identified)
+        self.assertIn("**jouet:** jouet 0.1; binary SHA-256 `abc123`", identified)
         self.assertIn("| smoke | claude | 2/2 | 1/2 | 1 | -200 (-20%)", text)
         self.assertIn("diagnostic metrics include finished runs even when a task failed or stopped early", text)
         self.assertIn("`python-edit:deny` ×2", text)

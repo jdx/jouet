@@ -581,7 +581,8 @@ def copy_transcripts(config_dir: Path, dest: Path) -> None:
                 shutil.copy2(path, target)
 
 
-def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: Any) -> list[dict[str, Any]]:
+def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: Any,
+              on_snapshot: Any = None) -> list[dict[str, Any]]:
     budget = Budget(opts.get("max_total_tokens"))
     # Work trees outside /tmp: a project's tests may refuse a checkout below a
     # directory anyone can write to (mise's brew cask tests do). TMPDIR stays
@@ -597,6 +598,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     results_path = out_dir / "runs.jsonl"
     failed_environments = set()
     try:
+        if on_snapshot is not None:
+            on_snapshot(opts["jouet_bin"])
         opts["cost_notes"] = costs_mod.seeds(planned, opts["jouet_bin"], work_root, log, out_dir / "cost-seeds")
         for n, p in enumerate(planned, 1):
             if p.task in failed_environments:

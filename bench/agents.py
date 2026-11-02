@@ -13,6 +13,7 @@ See docs/benchmarks.md for the method and its limits.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -185,7 +186,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "seed": seed,
         "rounds": args.rounds,
         "commit": git_commit(),
-        "jouet_version": runner.version([str(args.jouet), "--version"]),
+        "jouet_version": None,
         "effort": args.effort,
         "tasks": selected,
         "arms": args.arms,
@@ -218,7 +219,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         "harness_bins": bins,
         "keep_work": args.keep_work,
     }
-    records = runner.run_suite(planned, opts, out, log)
+    def record_snapshot(binary: Path) -> None:
+        with binary.open("rb") as f:
+            meta["jouet_sha256"] = hashlib.file_digest(f, "sha256").hexdigest()
+        meta["jouet_version"] = runner.version([str(binary), "--version"])
+        (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+    records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
     write_summary(out, records, meta)
     print(f"results: {out}")
     return 0
