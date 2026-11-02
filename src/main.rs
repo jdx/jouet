@@ -3,6 +3,7 @@
 //! Early development: commands land one at a time.
 
 mod affected;
+mod agents;
 mod ci;
 mod cli;
 mod cmd;

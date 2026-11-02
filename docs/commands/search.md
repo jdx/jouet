@@ -98,6 +98,8 @@ Quote the pattern in single quotes, or the shell expands `$X`. `-F`, `-i` and `-
 
 `--callers-of PATH#SYMBOL` keeps only the matches at calls the [code graph](/commands/graph) attributes to that symbol, so a pattern like `load($$$A)` leaves other functions named `load` out. `--impact PATH#SYMBOL` keeps the matches inside the symbol and the code that depends on it. Both need `--structural`. After the matches comes what the graph made of the rest: the matches it cannot attribute, and the symbol's calls the pattern did not match, as [scoped rewrites](/commands/edit#scoped-by-the-code-graph) list them.
 
+Claude Code runs its subagents (the Agent tool) inside the lead's session, under the same session ID, so each agent has a memory of its own: what a subagent was shown does not collapse for the lead or another subagent, nor theirs for it. The hooks read which agent made a call from its payload (`agent_id`). A command gets only the session's ID in its environment, so the pre-tool-use hook notes each Bash call that runs jouet, with its agent, in `$XDG_STATE_HOME/jouet/calls/`, and `jouet search` or `jouet read` looks itself up there. When two agents' calls that could have run it are going at once, it cannot tell whose it is, and neither collapses nor remembers anything.
+
 ## Rules
 
 Two built-in [rules](/rules) steer reads and searches. Both only warn.

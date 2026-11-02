@@ -238,6 +238,11 @@ pub(crate) struct Checks {
     /// The tree when such a call started, until it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formatting: Option<String>,
+    /// Whether only the session's subagents ran anything here, such as in
+    /// a scratch repository of their own: the stop gate does not hold the
+    /// lead to it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub subagents_only: bool,
 }
 
 /// How many rewrites [`Checks::formatted`] keeps.
@@ -442,6 +447,19 @@ impl State {
             .record(records, tree);
     }
 
+    /// Notes who is running something in the work tree at `root`: the
+    /// session's own agent (`lead`), or one of its subagents. A tree only
+    /// subagents ran in stays theirs until the lead runs something there.
+    pub(crate) fn by(&mut self, root: &str, lead: bool) {
+        let new = !self.trees.contains_key(root);
+        let checks = self.checks_mut(root);
+        if lead {
+            checks.subagents_only = false;
+        } else if new {
+            checks.subagents_only = true;
+        }
+    }
+
     /// The checks run in the work tree at `root`, made when there are none.
     pub(crate) fn checks_mut(&mut self, root: &str) -> &mut Checks {
         self.trees.entry(root.to_string()).or_default()
@@ -454,6 +472,8 @@ impl State {
 
     /// Why stopping should wait, in any work tree the session ran checks
     /// in: `home`, the session's own, first, then the others, each named.
+    /// Trees only subagents ran in are left out, except `home`: a subagent's
+    /// runs count as evidence, but its scratch repositories are its own.
     /// A tree whose reasons were all raised, with nothing changed since,
     /// is passed over (see [`Checks::block`]). `tree` gives a root's work
     /// tree now, `hk_repo` whether it has an hk config, and `affected`
@@ -466,7 +486,10 @@ impl State {
         affected: impl Fn(&str) -> bool,
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
-        let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
+        let others = self
+            .trees
+            .iter()
+            .filter(|(root, checks)| root.as_str() != home && !checks.subagents_only);
         // Every tree's at once: a tree left for a later stop would be raised
         // at the end of a turn that never touched it.
         let found: Vec<(String, String, Raised)> = own
@@ -1737,6 +1760,45 @@ mod tests {
             why.starts_with("In /other: The last test run failed"),
             "{why}"
         );
+    }
+
+    #[test]
+    fn a_tree_only_subagents_ran_in_does_not_hold_up_the_lead() {
+        let mut state = State::default();
+        let tree = |root: &str| Some(format!("{root}-now"));
+        let block = |state: &State| {
+            state
+                .block("/home", tree, |_| false, |_| true)
+                .map(|b| b.reason)
+        };
+        // A subagent's scratch repository, changed after its pass.
+        state.by("/scratch", false);
+        state.record(
+            "/scratch",
+            [test("pytest", 0, "full")],
+            Some("/scratch-then"),
+        );
+        assert_eq!(block(&state), None);
+        // In the session's own tree, a subagent's run counts like the lead's.
+        state.by("/home", false);
+        state.record(
+            "/home",
+            [test("cargo test", 101, "full")],
+            Some("/home-now"),
+        );
+        assert!(
+            block(&state)
+                .unwrap()
+                .starts_with("The last test run failed")
+        );
+        // Once the lead runs something in the scratch tree, it is the lead's.
+        state.record("/home", [test("cargo test", 0, "full")], Some("/home-now"));
+        state.by("/scratch", true);
+        let why = block(&state).unwrap();
+        assert!(why.starts_with("In /scratch: Files changed"), "{why}");
+        // A subagent's later run there does not hand it back.
+        state.by("/scratch", false);
+        assert!(!state.checks("/scratch").unwrap().subagents_only);
     }
 
     #[test]

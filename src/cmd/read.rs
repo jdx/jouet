@@ -257,7 +257,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     let mut memory = if args.again {
         Memory::none()
     } else {
-        super::search::session_memory()
+        super::search::session_memory("read")
     };
     let stamp = Stamp::read(file);
     let key = memory::key(file);
