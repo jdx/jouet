@@ -42,10 +42,15 @@ pub(crate) struct Checks {
 /// The longest line the primer gives the project's checks, in characters.
 const LINE_MAX: usize = 600;
 
-/// The project file at `root`, when there is one that parses.
-pub(crate) fn read(root: &Path) -> Option<Project> {
+/// The project file at `root`, when there is one: its checks, or why it
+/// does not parse.
+pub(crate) fn read(root: &Path) -> Option<Result<Project, String>> {
     let text = std::fs::read_to_string(root.join(".jouet/project.toml")).ok()?;
-    toml::from_str(&text).ok()
+    Some(parse(&text))
+}
+
+pub(crate) fn parse(text: &str) -> Result<Project, String> {
+    toml::from_str(text).map_err(|e: toml::de::Error| e.message().to_string())
 }
 
 /// One line for the session-start primer naming the project's checks, when
@@ -61,7 +66,13 @@ pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
     if !trusted {
         return None;
     }
-    line(&project.checks)
+    match project {
+        Ok(project) => line(&project.checks),
+        // Said, so a typo does not look like no file at all.
+        Err(error) => Some(format!(
+            "jouet: .jouet/project.toml does not parse, so its checks are not shown: {error}"
+        )),
+    }
 }
 
 fn line(checks: &Checks) -> Option<String> {

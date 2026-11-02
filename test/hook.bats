@@ -678,3 +678,14 @@ claude_payload() {
 	run start
 	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
 }
+
+@test "trust refuses a .jouet/project.toml that does not parse" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '[checks]\nfast = "cargo test"\n' >repo/.jouet/project.toml
+	cd repo
+	run jouet trust --yes
+	assert_failure
+	assert_output --partial "project.toml does not parse: unknown field"
+	assert_output --partial "not trusting"
+}

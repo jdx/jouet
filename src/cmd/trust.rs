@@ -123,6 +123,9 @@ struct Trusted {
     /// `.jouet/project.toml`, which the primer shows every session.
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
+    /// Why `project.toml` does not parse, which refuses the trust.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_error: Option<String>,
 }
 
 /// This repository's set.
@@ -199,7 +202,11 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
     for plugin in &plugins {
         routine_names.extend(routines(&plugin.routines_dir(), plugin.name.as_deref()));
     }
-    let failed = checked.iter().any(|r| r.problem.is_some());
+    let project = std::fs::read_to_string(set.root.join("project.toml")).ok();
+    let project_error = project
+        .as_deref()
+        .and_then(|text| crate::project::parse(text).err());
+    let failed = checked.iter().any(|r| r.problem.is_some()) || project_error.is_some();
     // What was checked must be what is trusted.
     let digest = sources::digests().of(&set.root, sources::ENTRIES);
     let changed = digest.as_ref().ok() != set.digest.as_ref();
@@ -210,7 +217,8 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         routines: routine_names,
         plugins: pinned.plugin.keys().cloned().collect(),
         test_config: std::fs::read_to_string(set.root.join("test.toml")).ok(),
-        project: std::fs::read_to_string(set.root.join("project.toml")).ok(),
+        project,
+        project_error,
     };
     let reviewed = |report: &Trusted| {
         let mut text = checked_text(&report.rules);
@@ -223,12 +231,15 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         if let Some(project) = &report.project {
             let _ = writeln!(text, "project.toml (shown to every session):\n{project}");
         }
+        if let Some(error) = &report.project_error {
+            let _ = writeln!(text, "project.toml does not parse: {error}");
+        }
         text
     };
     if failed {
         out.result(&report, || {
             format!(
-                "{}not trusting {}: every rule must load and pass its examples of both kinds first\n",
+                "{}not trusting {}: every rule must load and pass its examples of both kinds, and project.toml must parse, first\n",
                 reviewed(&report),
                 report.dir
             )
