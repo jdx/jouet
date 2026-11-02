@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/jdx/jouet/compare/v0.0.2...v0.0.3) - 2026-11-02
+
+### Fixed
+
+- *(init)* keep before_push to what CI runs and write one NAME placeholder ([#287](https://github.com/jdx/jouet/pull/287))
+- *(test)* fall back when Go graph parsing is incomplete ([#286](https://github.com/jdx/jouet/pull/286))
+- *(test)* show lines marked as failures when no failure is recognised ([#281](https://github.com/jdx/jouet/pull/281))
+- *(test)* exclude Go fixture sources from affected tests ([#283](https://github.com/jdx/jouet/pull/283))
+
+### Other
+
+- assume a current mise and drop older-mise notes ([#284](https://github.com/jdx/jouet/pull/284))
+
 ## [0.0.2](https://github.com/jdx/jouet/compare/v0.0.1...v0.0.2) - 2026-11-02
 
 ### Added
