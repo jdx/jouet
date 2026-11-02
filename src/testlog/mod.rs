@@ -60,6 +60,15 @@ pub(crate) struct Digest {
     /// tests it ran, so the agent need not read the log to see its own.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) passed_names: Vec<String>,
+    /// Every passing test the runner named, however many: what a larger
+    /// run's change-named tests are picked from (see `jouet test`).
+    #[serde(skip)]
+    pub(crate) passed_all: Vec<String>,
+    /// Of a run too large to name, the passing tests the change names in a
+    /// line it adds: the agent's own, so it need not read the log to see
+    /// that they ran.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) passed_changed: Vec<String>,
     /// A runner said it ran no test at all: a filter that matched nothing,
     /// so a pass says nothing.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -362,6 +371,8 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         } else {
             Vec::new()
         },
+        passed_all: parsed.passed_names.clone(),
+        passed_changed: Vec::new(),
         warning_names: {
             // cargo reports a warning once for each target that builds it.
             let mut names = parsed.warning_names.clone();
