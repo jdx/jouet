@@ -1,0 +1,25 @@
+description = "Fix astral-sh/ruff#29365: PERF401 and PERF403 fixes produce invalid comprehensions for conditional iterables"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1800
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+prompt = """
+Ruff's PERF401 and PERF403 fixes can generate invalid Python when a for loop
+iterates over a conditional expression, causing Ruff to revert the fix. Make
+these fixes produce valid code that preserves behavior. Consider related
+iterable expressions that cannot safely appear in a comprehension, and add
+tests. Commit your change.
+"""
+
+[source]
+git = "~/src/ruff-bench-source"
+commit = "83a3afc3156d73ae4296f3fa74ede28e4c72bfcd"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+CARGO_BUILD_JOBS = "4"
