@@ -406,7 +406,7 @@ type Pipeline = Vec<Stage>;
 /// Programs grouped by shell pipeline. A subshell is one stage of its outer
 /// pipeline, while its own pipelines are also recorded separately.
 pub(crate) fn pipeline_shapes(command: &str) -> Vec<Pipeline> {
-    fn group<'a>(toks: &'a [Tok], at: &mut usize, out: &mut Vec<Pipeline>) -> Stage {
+    fn group<'a>(toks: &'a [Tok], at: &mut usize, out: &mut Vec<Pipeline>, nested: bool) -> Stage {
         let mut all = Vec::new();
         let mut pipeline = Vec::new();
         let mut simple: Vec<&'a Tok> = Vec::new();
@@ -427,14 +427,14 @@ pub(crate) fn pipeline_shapes(command: &str) -> Vec<Pipeline> {
                 }
                 match *op {
                     "(" => {
-                        let inner = group(toks, at, out);
+                        let inner = group(toks, at, out, true);
                         all.extend(inner.clone());
                         pipeline.push(inner);
                         after_pipe = false;
                     }
                     "|" | "|&" => after_pipe = true,
                     "\n" if after_pipe => {}
-                    ")" => break,
+                    ")" if nested => break,
                     _ => {
                         if !pipeline.is_empty() {
                             out.push(std::mem::take(&mut pipeline));
@@ -460,7 +460,7 @@ pub(crate) fn pipeline_shapes(command: &str) -> Vec<Pipeline> {
         all
     }
     let mut pipelines = Vec::new();
-    group(&lex(command), &mut 0, &mut pipelines);
+    group(&lex(command), &mut 0, &mut pipelines, false);
     pipelines
 }
 

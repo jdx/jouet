@@ -262,6 +262,10 @@ mod tests {
             Pattern::HeadOnTestOutput
         ));
         assert!(has("cargo test |\n head", Pattern::HeadOnTestOutput));
+        assert!(has(
+            "case $x in foo) cargo test | tail ;; esac",
+            Pattern::HeadOnTestOutput
+        ));
         assert!(!has(
             "(cargo test && rg pytest config | head)",
             Pattern::HeadOnTestOutput
