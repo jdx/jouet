@@ -135,6 +135,8 @@ pub(crate) struct Test {
 pub(crate) struct Selection {
     pub tests: Vec<Test>,
     pub command: Vec<String>,
+    /// Why selection could not safely narrow the suite, if it runs in full.
+    pub full_reason: Option<String>,
     /// Something the reader should know about how the tests were chosen.
     pub note: Option<String>,
 }
@@ -593,6 +595,11 @@ fn decide(
     let selection = suite
         .adapter
         .select(&suite.project, base, &sources, selection_extra)?;
+    if let Some(reason) = selection.full_reason {
+        suite.decision = Decision::Full(reason);
+        suite.command = Some(selection.command);
+        return Ok(suite);
+    }
     suite.note = selection.note;
     if selection.tests.is_empty() {
         suite.decision = Decision::Nothing("no tests selected for the changed files".into());

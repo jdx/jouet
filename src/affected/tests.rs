@@ -182,8 +182,11 @@ fn go_selection_falls_back_when_an_unchanged_test_cannot_be_parsed() {
         suite.command.as_deref(),
         Some(["go".into(), "test".into(), "./...".into()].as_slice())
     );
-    assert!(suite.note.as_deref().unwrap().contains("lib/lib_test.go"));
-    assert!(suite.note.as_deref().unwrap().contains("whole suite"));
+    let Decision::Full(reason) = &suite.decision else {
+        panic!("unparseable Go test should run the whole suite")
+    };
+    assert!(reason.contains("lib/lib_test.go"));
+    assert!(suite.tests.is_empty());
 
     write(
         &root.join("lib/lib_test.go"),

@@ -326,6 +326,7 @@ impl Adapter for Js {
         Ok(Selection {
             tests,
             command: argv,
+            full_reason: None,
             note,
         })
     }

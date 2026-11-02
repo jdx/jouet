@@ -161,14 +161,12 @@ impl Adapter for Graph {
                 .find(|path| project.inside(path).is_some())
         {
             return Ok(Selection {
-                tests: vec![Test {
-                    path: project.relative_to_root(&project.dir).unwrap_or_default(),
-                    via: Vec::new(),
-                }],
+                tests: Vec::new(),
                 command: self.full(project, extra)?,
-                note: Some(format!(
-                    "the code graph could not fully parse or index {path}, so the whole suite runs"
+                full_reason: Some(format!(
+                    "the code graph could not fully parse or index {path}"
                 )),
+                note: None,
             });
         }
         let changed: Vec<_> = sources.iter().map(|s| project.root.join(&s.path)).collect();
@@ -177,15 +175,13 @@ impl Adapter for Graph {
             // A file the graph could not index (too large, not UTF-8): the
             // whole suite, rather than a selection that may miss tests.
             return Ok(Selection {
-                tests: vec![Test {
-                    path: project.relative_to_root(&project.dir).unwrap_or_default(),
-                    via: Vec::new(),
-                }],
+                tests: Vec::new(),
                 command: self.full(project, extra)?,
-                note: Some(format!(
-                    "the code graph could not index {}, so the whole suite runs",
+                full_reason: Some(format!(
+                    "the code graph could not index {}",
                     unknown.display()
                 )),
+                note: None,
             });
         }
         let tests: Vec<Test> = affected
@@ -264,6 +260,7 @@ impl Adapter for Graph {
         Ok(Selection {
             tests,
             command: argv,
+            full_reason: None,
             note: None,
         })
     }

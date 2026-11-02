@@ -511,6 +511,7 @@ impl Adapter for Pytest {
                     })
                     .collect(),
                 command: argv,
+                full_reason: None,
                 note,
             });
         }
@@ -519,6 +520,7 @@ impl Adapter for Pytest {
         Ok(Selection {
             tests,
             command: argv,
+            full_reason: None,
             note: None,
         })
     }
@@ -666,6 +668,7 @@ impl Adapter for Unittest {
         Ok(Selection {
             tests,
             command: argv,
+            full_reason: None,
             note: None,
         })
     }
