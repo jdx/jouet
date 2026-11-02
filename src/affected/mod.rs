@@ -21,7 +21,7 @@ mod classify;
 mod codegraph;
 mod graph;
 mod js;
-mod project_config;
+pub(crate) mod project_config;
 mod pyimports;
 mod python;
 
