@@ -494,6 +494,18 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_rubocop_rejects_hidden_checkout_paths_before_running(self):
+        import subprocess
+
+        command = tasks.load("rubocop-redundant-self").isolated_setup[0]
+        def check(path):
+            return subprocess.run([sys.executable, *command[1:-1], path], capture_output=True, text=True)
+
+        self.assertEqual(check("/work/benchmark/repo").returncode, 0)
+        hidden = check("/work/.cache/benchmark/repo")
+        self.assertNotEqual(hidden.returncode, 0)
+        self.assertIn("XDG_CACHE_HOME", hidden.stderr)
+
     def test_isolated_setup_rejects_shell_strings_and_empty_commands(self):
         from unittest.mock import patch
 

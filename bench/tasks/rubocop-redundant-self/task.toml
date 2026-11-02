@@ -7,6 +7,7 @@ upstream = true
 timeout_s = 1500
 check_timeout_s = 180
 isolated_setup = [
+  ["python3", "-c", "import pathlib, sys; p = pathlib.Path(sys.argv[1]); any(part.startswith('.') for part in p.parts) and sys.exit('RuboCop specs need a non-hidden checkout path; set XDG_CACHE_HOME to a non-hidden directory')", "{workdir}"],
   ["mkdir", "-p", "{workdir}/vendor"],
   ["cp", "-R", "~/src/rubocop-bench-source/vendor/bundle", "{workdir}/vendor/bundle"],
   ["cp", "{taskdir}/Gemfile.lock", "{workdir}/Gemfile.lock"],
@@ -32,7 +33,10 @@ end
 Expected: no offenses detected. Actual: Style/RedundantSelf marks the `self`
 in `*self.payload` as redundant, and its autocorrection changes the assignment.
 
-Fix the bug, add tests, and commit the change.
+This is rubocop/rubocop#16149. For this simulated task, use the synthetic
+contributor handle @benchmark-user if a changelog entry needs a handle.
+Fix the bug, add tests, and commit the change, including the project's required
+changelog entry.
 '''
 
 [source]
