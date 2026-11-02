@@ -3,6 +3,7 @@
 
 use super::Output;
 use crate::cli::{CostArgs, CostCmd};
+use crate::cost::sequences::Observation;
 use crate::cost::{Costs, Estimate, NOTES};
 use jouet_audit::digest::duration;
 use jouet_git::Git;
@@ -18,6 +19,8 @@ struct Report {
     /// timed in both places; 1 when there are none.
     scale: f64,
     scaled_by: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequences: Option<Vec<Observation>>,
 }
 
 pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
@@ -63,19 +66,35 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
         Some(Err(e)) => return out.error(Exit::Usage, &format!("--min: {e}")),
     };
     let costs = Costs::load(&cwd);
+    let sequences = if args.sequences {
+        match crate::cost::sequences::load(&cwd) {
+            Ok(found) => Some(found.into_iter().filter(|s| s.median_ms >= min).collect()),
+            Err(e) => {
+                return out.error(
+                    Exit::Precondition,
+                    &format!("reading local cost sequences: {e}"),
+                );
+            }
+        }
+    } else {
+        None
+    };
     let report = Report {
         commands: costs.table().into_iter().filter(|e| e.ms >= min).collect(),
         scale: costs.scale(),
         scaled_by: costs.scaled_by,
+        sequences,
     };
     out.result(&report, || text(&report, costs.is_empty()));
     Exit::Ok
 }
 
 fn text(report: &Report, empty: bool) -> String {
+    let mut s = String::new();
     if empty {
-        return format!(
-            "no timings yet: `jouet test` and the hooks keep one for each build, test and lint run, and `jouet cost fetch` brings CI's (refs/notes/{NOTES})\n"
+        let _ = writeln!(
+            s,
+            "no timings yet: `jouet test` and the hooks keep one for each build, test and lint run, and `jouet cost fetch` brings CI's (refs/notes/{NOTES})"
         );
     }
     let width = report
@@ -84,7 +103,6 @@ fn text(report: &Report, empty: bool) -> String {
         .map(|e| e.key.chars().count())
         .max()
         .unwrap_or(0);
-    let mut s = String::new();
     for e in &report.commands {
         let basis = match e.scale {
             None => format!("{} {} here", e.here, runs(e.here)),
@@ -111,6 +129,22 @@ fn text(report: &Report, empty: bool) -> String {
                 "commands"
             }
         );
+    }
+    if let Some(sequences) = &report.sequences {
+        s.push_str("\nSuccessive recorded checks in the same session and worktree (other work and cache changes may intervene):\n");
+        if sequences.is_empty() {
+            s.push_str("  not enough observations (at least 3 matching pairs are needed)\n");
+        }
+        for sequence in sequences {
+            let _ = writeln!(
+                s,
+                "  {} → {}: median {} for the second check ({} pairs)",
+                sequence.before,
+                sequence.after,
+                duration(sequence.median_ms),
+                sequence.samples
+            );
+        }
     }
     s
 }

@@ -259,6 +259,7 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 
 [cost]
 record = true # JOUET_COST_RECORD: keep how long each build, test and lint took as a git note on HEAD (see `jouet cost`)
+sequences = false # JOUET_COST_SEQUENCES: record local session-linked jouet test timings (see `jouet cost --sequences`)
 
 [test]
 baseline = "auto" # JOUET_TEST_BASELINE: auto compares a failing run with the merge base on its own (see `jouet test`), off only with --baseline

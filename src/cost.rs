@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) mod sequences;
+
 /// The notes ref, under `refs/notes/`.
 pub(crate) const NOTES: &str = "jouet-cost";
 /// How many first-parent commits back estimates read.

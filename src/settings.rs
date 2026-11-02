@@ -57,6 +57,9 @@ pub(crate) struct CostSettings {
     /// Keep how long each build, test and lint run took as a git note on HEAD, under refs/notes/jouet-cost
     #[usage(env = "JOUET_COST_RECORD", default = true)]
     pub record: bool,
+    /// Record local, session-linked timings for successive jouet test checks
+    #[usage(env = "JOUET_COST_SEQUENCES", default = false)]
+    pub sequences: bool,
 }
 
 /// What `jouet test` does about a failing run.
