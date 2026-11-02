@@ -5,6 +5,7 @@ import { data as starsData } from "../stars.data";
 import EndevFooter from "./EndevFooter.vue";
 import EndevSponsors from "./EndevSponsors.vue";
 import HomeBeforeAfter from "./HomeBeforeAfter.vue";
+import HomeCommands from "./HomeCommands.vue";
 import HomeConventions from "./HomeConventions.vue";
 import HomeHeading from "./HomeHeading.vue";
 import HomeQuickStart from "./HomeQuickStart.vue";
@@ -34,7 +35,11 @@ export default {
           ]),
         ]),
       ],
-      "home-features-after": () => [h(HomeBeforeAfter), h(HomeConventions)],
+      "home-features-after": () => [
+        h(HomeBeforeAfter),
+        h(HomeCommands),
+        h(HomeConventions),
+      ],
       "layout-bottom": () => [h(EndevSponsors), h(EndevFooter)],
     });
   },
