@@ -15,7 +15,7 @@
 //!
 //! jouet owns the code from here on: there is no parity goal, and no MCP
 //! server, file watcher or daemon. Instead every query first runs a cheap
-//! freshness check ([`Graph::refresh`]), and jouet's post-tool-use hook
+//! freshness check ([`Graph::refresh`]), and jouet's after-edit hook
 //! re-indexes the files an agent edits ([`Graph::reindex_paths`]).
 //!
 //! The database lives in `$XDG_CACHE_HOME/jouet/graph/<repo key>.db`, one
