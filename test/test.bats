@@ -850,14 +850,20 @@ SCRIPT
 	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests
 	assert_success
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 4
-	# Another command has nothing kept: --cmd does not run main on its own,
-	# and --baseline keeps what it finds for the next run.
-	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
+	# Another command has nothing kept. Past the limit, --cmd does not run
+	# main on its own and names the --baseline command, which keeps what it
+	# finds for the next run.
+	JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
 	assert_failure 1
-	refute_output --partial 'baseline:'
+	assert_output --regexp 'baseline: not compared, the run took 0s; .jouet test --baseline --cmd -- python3 -m unittest discover -s tests -p .test_\*\.py.. runs it at the merge base'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 5
 	run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
 	assert_success
 	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_*.py'
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	# A short run of a command with nothing kept runs main on its own.
+	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests -p 'test_a*.py'
 	assert_success
 	assert_output --partial 'baseline: the failure also fails at main'
 

@@ -263,6 +263,7 @@ sequences = false # JOUET_COST_SEQUENCES: record local session-linked jouet test
 
 [test]
 baseline = "auto" # JOUET_TEST_BASELINE: auto compares a failing run with the merge base on its own (see `jouet test`), off only with --baseline
+baseline_cmd_under_ms = 60000 # JOUET_TEST_BASELINE_CMD_UNDER_MS: a failing --cmd run shorter than this is compared at the merge base on its own
 
 [wind]
 enabled = true # JOUET_WIND: self-winding, drafting rules from the ledger
