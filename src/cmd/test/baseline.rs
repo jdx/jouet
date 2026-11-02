@@ -788,6 +788,11 @@ mod tests {
         assert_eq!(a.details, evidence(output("first", "abcdef12")).details);
         assert_ne!(a.details, evidence(output("second", "abcdef12")).details);
 
+        let integration = "Running tests/other.rs (target/debug/deps/other-12345678)\ntest same ... FAILED\n---- same stdout ----\nassertion failed\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\nRunning unittests src/lib.rs (target/debug/deps/lib-12345678)\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
+        let integration = evidence(integration.to_string());
+        assert!(!integration.details.is_empty());
+        assert_ne!(a.details, integration.details);
+
         let duplicate = format!(
             "{}{}",
             output("first", "12345678"),

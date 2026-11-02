@@ -192,7 +192,7 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
     LIBTEST_RUNNING = r"^running (\d+) tests?$";
-    CARGO_TEST_BINARY = r"^\s*Running (?:unittests|tests) (.+?) \((.+)\)$";
+    CARGO_TEST_BINARY = r"^\s*Running (?:unittests )?(.+?) \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
