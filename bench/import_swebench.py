@@ -326,12 +326,12 @@ def prime(task: Path, clones: Path, envs: Path) -> Path | None:
     if primed.exists():
         log(f"{task.name}: {env} is already primed")
         return env
-    if env.exists():
-        subprocess.run(["chmod", "-R", "u+w", str(env)], check=True)
-        shutil.rmtree(env)
     uv = shutil.which("uv")
     if not uv:
         raise SystemExit("prime needs uv (MISE_ENV=bench mise x -- python3 bench/import_swebench.py prime ...)")
+    if env.exists():
+        subprocess.run(["chmod", "-R", "u+w", str(env)], check=True)
+        shutil.rmtree(env)
     # Packages as of a while after the instance: a base commit between
     # releases can need a dependency released after the issue was filed.
     newer = []
