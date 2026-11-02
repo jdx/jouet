@@ -474,6 +474,7 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
         "======= 5 deselected in 0.01s =======",
         "5 deselected in 0.01s",
         "no tests ran in 0.01s",
+        "collected 5 items / 5 deselected / 0 selected",
     ] {
         assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
     }

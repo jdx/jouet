@@ -161,7 +161,7 @@ regexes! {
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
-    NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|No tests found|testing: warning: no tests to run)";
+    NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
     // it prints last.
