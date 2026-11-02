@@ -416,7 +416,7 @@ def execute(
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
     usage = ran["usage"]
-    capacity = (usage.is_error and not usage.total_tokens and not ran["agent"]["stopped"]
+    capacity = (usage.is_error and not ran["agent"]["stopped"]
                 and usage.extra.get("capacity_error", False))
     if capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
@@ -447,7 +447,7 @@ def execute(
         "left_running": left,
     }
     if capacity:
-        record["error"] = "Codex model at capacity before the run started"
+        record["error"] = "Codex model at capacity before the run completed"
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
     copy_transcripts(ran["config_dir"], keep / "transcripts")
