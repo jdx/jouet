@@ -66,9 +66,12 @@ pub(crate) struct CostSettings {
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "test")]
 pub(crate) struct TestSettings {
-    /// When a failing run is compared with the merge base: auto runs a failing full suite there once per merge base, and compares any other failing run with what is kept; off only with --baseline
+    /// When a failing run is compared with the merge base: auto runs a failing full suite, or a failing --cmd run shorter than baseline_cmd_under_ms, there once per merge base, and compares any other failing run with what is kept; off only with --baseline
     #[usage(env = "JOUET_TEST_BASELINE", default = "auto", choices("auto", "off"))]
     pub baseline: String,
+    /// Milliseconds under which a failing --cmd run is run again at the merge base on its own; a slower one names the --baseline command instead
+    #[usage(env = "JOUET_TEST_BASELINE_CMD_UNDER_MS", default = 60000)]
+    pub baseline_cmd_under_ms: u64,
 }
 
 /// Reading Entire's sessions, checkpoints and line origins, where a

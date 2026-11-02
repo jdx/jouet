@@ -254,9 +254,9 @@ When the run fails, it runs each failed suite again in a temporary worktree of t
 **Without `--baseline`:**
 
 - `jouet test`, the full suite, runs a failing suite at the merge base on its own, once per merge base and command.
-- `jouet test --cmd` compares a failing run with what is kept for its command, and runs nothing at the merge base: a test written to fail, or a build broken by the change, would only cost a second run. Run it once with `--baseline` to keep what the merge base does, as for a cross-compile that needs a tool this machine lacks.
+- `jouet test --cmd` runs a failing run that took under a minute at the merge base on its own too, once per merge base and command, so a failure that was already there is said without the agent asking. A slower failing run is compared with what is kept for its command, and runs nothing at the merge base, because a test written to fail, or a build broken by the change, would cost a second long run; its result names the `--baseline` command that compares it. Run that once to keep what the merge base does, as for a cross-compile that needs a tool this machine lacks.
 - `--affected` and `--dry-run` compare nothing.
-- `[test] baseline = "off"` in the config file, or `JOUET_TEST_BASELINE=off`, compares only with `--baseline`.
+- `[test] baseline = "off"` in the config file, or `JOUET_TEST_BASELINE=off`, compares only with `--baseline`. `[test] baseline_cmd_under_ms` (`JOUET_TEST_BASELINE_CMD_UNDER_MS`, 60000 by default) is how short a failing `--cmd` run must be to run at the merge base on its own: raise it for a project whose focused tests are slow but whose failures are often already there.
 
 When the merge base could not run the command either, the [stop hook](/setup#finishing-on-a-failing-check) asks about those failures once, and not again until the command passes: nothing on this machine can tell more.
 
