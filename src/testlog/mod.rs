@@ -50,6 +50,32 @@ pub(crate) struct Digest {
     /// Failures past the budget even by name.
     #[serde(skip_serializing_if = "is_zero")]
     pub(crate) failures_omitted: u64,
+    /// A runner said it ran no test at all: a filter that matched nothing,
+    /// so a pass says nothing.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) no_tests: bool,
+}
+
+/// Whether the output says a run selected no test: TAP's empty plan,
+/// libtest running none in every binary, pytest, jest or go saying so.
+fn no_tests(lines: &[String]) -> bool {
+    // A Go package that ran a test shows it only in its plain `ok` line,
+    // which the counts do not see: that is a run.
+    let go = |empty: bool| {
+        lines
+            .iter()
+            .any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
+    };
+    if go(false) {
+        return false;
+    }
+    let said = go(true) || lines.iter().any(|l| NO_TESTS.is_match(l));
+    let mut libtest = lines
+        .iter()
+        .filter_map(|l| LIBTEST_RUNNING.captures(l))
+        .peekable();
+    let none_in_libtest = libtest.peek().is_some() && libtest.all(|c| &c[1] == "0");
+    said || none_in_libtest
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -135,6 +161,12 @@ regexes! {
     LIBTEST_BLOCK = r"^---- (.+) stdout ----$";
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
+    LIBTEST_RUNNING = r"^running (\d+) tests?$";
+    // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
+    // `[no tests to run]` after it when the package ran none.
+    GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
+    // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
+    NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
     // it prints last.
@@ -250,6 +282,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         });
     }
     let (failures, more_failures, failures_omitted) = fit(found, budget);
+    let no_tests = parsed.passed + parsed.failed == 0 && no_tests(&lines);
     Digest {
         passed: parsed.passed,
         failed: parsed.failed,
@@ -258,6 +291,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         failures,
         more_failures,
         failures_omitted,
+        no_tests,
     }
 }
 
