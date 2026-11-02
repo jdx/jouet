@@ -1,0 +1,145 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 67dbfc4..c26977a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,7 @@
+ -
+ 
+ ## Bugfixes
++- Make `--ignore` and `--no-hidden` after `-u` override only their half of `-u`, see #2192 (@NavpreetSSidhu)
+ - Fix inline case-insensitive regex flags incorrectly making other `--and` patterns case-sensitive, see #2184 (@mabunemeh)
+ - Accept `--format` templates that start with `-` when passed as a separate argument, see #2126 (@vulragrag-star)
+ - Don't incorrectly escape newlines in error messages, see #2104
+diff --git a/src/cli.rs b/src/cli.rs
+index 2cc5367..6b48694 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -4,8 +4,8 @@ use std::time::Duration;
+ 
+ use anyhow::anyhow;
+ use clap::{
+-    Arg, ArgAction, ArgGroup, ArgMatches, Command, Parser, ValueEnum, error::ErrorKind,
+-    value_parser,
++    Arg, ArgAction, ArgGroup, ArgMatches, Command, CommandFactory, FromArgMatches, Parser,
++    ValueEnum, error::ErrorKind, parser::ValueSource, value_parser,
+ };
+ #[cfg(feature = "completions")]
+ use clap_complete::Shell;
+@@ -120,10 +120,14 @@ pub struct Opts {
+ 
+     /// Perform an unrestricted search, including ignored and hidden files. This is
+     /// an alias for '--no-ignore --hidden'.
+-    #[arg(long = "unrestricted", short = 'u', overrides_with_all(&["ignore", "no_hidden"]), action(ArgAction::Count), hide_short_help = true,
+-    help = "Unrestricted search, alias for '--no-ignore --hidden'",
+-        long_help,
+-        )]
++    #[arg(
++        long = "unrestricted",
++        short = 'u',
++        action(ArgAction::Count),
++        hide_short_help = true,
++        help = "Unrestricted search, alias for '--no-ignore --hidden'",
++        long_help
++    )]
+     rg_alias_hidden_ignore: u8,
+ 
+     /// Case-sensitive search (default: smart case)
+@@ -694,6 +698,22 @@ pub struct Opts {
+ }
+ 
+ impl Opts {
++    /// Expands -u into --hidden --no-ignore, so a later --no-hidden or --ignore
++    /// only overrides its own half.
++    pub fn from_matches(matches: ArgMatches) -> Self {
++        let mut opts = Self::from_arg_matches(&matches)
++            .unwrap_or_else(|e| e.format(&mut Self::command()).exit());
++        // Defaults have indices too, so only count flags given on the command line.
++        let last = |id| match matches.value_source(id) {
++            Some(ValueSource::CommandLine) => matches.indices_of(id).and_then(Iterator::max),
++            _ => None,
++        };
++        let unrestricted = last("rg_alias_hidden_ignore");
++        opts.hidden |= unrestricted > last("no_hidden");
++        opts.no_ignore |= unrestricted > last("ignore");
++        opts
++    }
++
+     pub fn search_paths(&self) -> anyhow::Result<Vec<PathBuf>> {
+         // would it make sense to concatenate these?
+         let paths = if !self.path.is_empty() {
+@@ -742,11 +762,6 @@ impl Opts {
+         self.path.is_empty() && self.search_path.is_empty()
+     }
+ 
+-    #[inline]
+-    pub fn rg_alias_ignore(&self) -> bool {
+-        self.rg_alias_hidden_ignore > 0
+-    }
+-
+     pub fn max_depth(&self) -> Option<usize> {
+         self.max_depth.or(self.exact_depth)
+     }
+diff --git a/src/main.rs b/src/main.rs
+index fd58d53..7cb1202 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -23,7 +23,7 @@ use std::path::Path;
+ use std::sync::Arc;
+ 
+ use anyhow::{Context, Result, anyhow, bail};
+-use clap::{CommandFactory, Parser};
++use clap::CommandFactory;
+ use globset::GlobBuilder;
+ use lscolors::LsColors;
+ use regex::bytes::{Regex, RegexBuilder, RegexSetBuilder};
+@@ -78,7 +78,7 @@ fn main() {
+ }
+ 
+ fn run() -> Result<ExitCode> {
+-    let opts = Opts::parse();
++    let opts = Opts::from_matches(Opts::command().get_matches());
+ 
+     #[cfg(feature = "completions")]
+     if let Some(shell) = opts.gen_completions()? {
+@@ -315,14 +315,12 @@ fn construct_config(mut opts: Opts, pattern_regexps: &[String]) -> Result<Config
+     Ok(Config {
+         case_sensitive,
+         full_path_base,
+-        ignore_hidden: !(opts.hidden || opts.rg_alias_ignore()),
+-        read_fdignore: !(opts.no_ignore || opts.rg_alias_ignore()),
+-        read_vcsignore: !(opts.no_ignore || opts.rg_alias_ignore() || opts.no_ignore_vcs),
++        ignore_hidden: !opts.hidden,
++        read_fdignore: !opts.no_ignore,
++        read_vcsignore: !(opts.no_ignore || opts.no_ignore_vcs),
+         require_git_to_read_vcsignore: !opts.no_require_git,
+         read_parent_ignore: !opts.no_ignore_parent,
+-        read_global_ignore: !(opts.no_ignore
+-            || opts.rg_alias_ignore()
+-            || opts.no_global_ignore_file),
++        read_global_ignore: !(opts.no_ignore || opts.no_global_ignore_file),
+         follow_links: opts.follow,
+         one_file_system: opts.one_file_system,
+         null_separator: opts.null_separator,
+diff --git a/tests/tests.rs b/tests/tests.rs
+index 686924e..1042000 100644
+--- a/tests/tests.rs
++++ b/tests/tests.rs
+@@ -2944,6 +2944,18 @@ fn test_opposing(flag: &str, opposing_flags: &[&str]) {
+     );
+ }
+ 
++#[test_case(&["-u", "--ignore"], &["--hidden"] ; "u ignore")]
++#[test_case(&["-u", "--no-hidden"], &["--no-ignore"] ; "u no-hidden")]
++#[test_case(&["--ignore", "--no-hidden", "-u"], &["-u"] ; "u last")]
++fn test_unrestricted_partial_override(flags: &[&str], expected_flags: &[&str]) {
++    let te = TestEnv::new(DEFAULT_DIRS, DEFAULT_FILES);
++
++    assert_eq!(
++        te.assert_success_and_get_normalized_output(".", flags),
++        te.assert_success_and_get_normalized_output(".", expected_flags),
++    );
++}
++
+ /// Print error if search pattern starts with a dot and --hidden is not set
+ /// (Unix only, hidden files on Windows work differently)
+ #[test]

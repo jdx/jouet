@@ -1,0 +1,28 @@
+description = "Fix sharkdp/fd#2192: -u and later overrides should affect hidden and ignored files independently"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1200
+check_timeout_s = 900
+path = ["~/.cargo/bin"]
+prompt = """
+`-u`/`--unrestricted` should be equivalent to `--no-ignore --hidden`.
+However, when followed by `--ignore` or `--no-hidden`, both effects of `-u`
+are currently lost. For example, given `a.txt`, `.hidden.txt`, and
+`ignored.txt` listed in `.ignore`, `fd -u --ignore` should show hidden files
+but respect `.ignore`; `fd -u --no-hidden` should include ignored files but
+not hidden files. Flags before `-u` should still be overridden by it.
+
+Fix this in fd, add tests, and commit the change.
+"""
+
+[source]
+git = "~/src/fd"
+commit = "c44735ec0f130c2486afe9c976937c03b57a8c62"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
