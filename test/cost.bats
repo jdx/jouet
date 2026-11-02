@@ -12,6 +12,18 @@ setup() {
 	export JOUET_COST_RECORD=0 JOUET_TEST_BASELINE=off JOUET_SESSION_ID=private-session
 }
 
+@test "records the duration of Tornado's test runner" {
+	commit_file README.md 'test project' 'test: initialize project'
+	printf '#!/bin/sh\nexit 0\n' >"$BATS_TEST_TMPDIR/tools/python3"
+	chmod +x "$BATS_TEST_TMPDIR/tools/python3"
+	run --separate-stderr env JOUET_COST_RECORD=1 jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test
+	assert_success
+	run --separate-stderr jouet cost --json
+	assert_success
+	run jq -r '.commands[] | select(.key == "python3 -m tornado.test.runtests tornado.test.web_test") | .kind' <<<"$output"
+	assert_output 'test'
+}
+
 @test "uses the Codex thread ID when no jouet session ID is set" {
 	unset JOUET_SESSION_ID CLAUDE_CODE_SESSION_ID
 	export CODEX_THREAD_ID=private-codex-thread

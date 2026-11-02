@@ -31,6 +31,8 @@ The JSON output includes `sequences_recording` when `--sequences` is used.
 
 Agents don't know which runs are slow. In five of six Claude Code runs on the mise benchmark task, close to 90% or more of the wall time went to running commands, nearly all of it compiling. It built mise two or three times a run, for a unit test and again for an e2e test. `jouet cost` shows what each check costs here, and the session-start primer names the slowest, so the agent can finish its edits before starting a slow run and check them all in one run.
 
+Timings include recognized test runners such as `python3 -m tornado.test.runtests`, including when run through `jouet test --cmd`.
+
 ```text
 jouet cost [--min DUR] [--json]
 jouet cost fetch [REMOTE]

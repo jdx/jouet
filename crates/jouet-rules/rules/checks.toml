@@ -92,6 +92,8 @@ fires = [
   { command = "python3 -m unittest discover tests 'test_a*.py'", exit_code = 0, kind = "test", scope = "partial test_a*.py" },
   { command = "python3 -m unittest tests.test_amounts", exit_code = 1, kind = "test", scope = "partial tests.test_amounts" },
   { command = "python3 -m unittest -k thousands", exit_code = 0, kind = "test", scope = "partial -k thousands" },
+  { command = "python3 -m tornado.test.runtests", exit_code = 0, kind = "test", scope = "partial" },
+  { command = "jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test", exit_code = 1, kind = "test", scope = "partial" },
 ]
 quiet = [
   { command = "cargo fmt", exit_code = 0 },
@@ -118,6 +120,8 @@ quiet = [
   # Nothing ran: listing or explaining the tests, a dry run, a usage error,
   # no runner found, another command.
   { command = "pytest --collect-only -q", exit_code = 0 },
+  { command = "python3 -m tornado.test.runtests --help", exit_code = 0 },
+  { command = "python3 -m tornado.test.other", exit_code = 0 },
   { command = "cargo test -- --list", exit_code = 0 },
   { command = "jouet test --cmd -- python3 -m pytest --co", exit_code = 0 },
   { command = "cargo test --help", exit_code = 0 },
