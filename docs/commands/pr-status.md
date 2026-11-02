@@ -37,6 +37,8 @@ Arguments and selectors combine, and a pull request named twice is reported once
 
 Each pull request reports its state (`open`, `draft`, `merged` or `closed`), whether it can merge (`ok`, `CONFLICT` or `unknown`), its checks as passing out of all, with the names of the failing ones, its unresolved review threads and its review decision. `auto-merge` is added when auto-merge is enabled. Titles are cut at a word boundary after 40 characters. The summary line is always last.
 
+When GitHub reports a failure, jouet reads the check runs and disregards an older GitHub Actions run if a newer run of the same check, workflow, branch and event is present. Checks without enough information to match them are retained. When no failure is reported, the counts come directly from GitHub's rollup.
+
 ## Attention
 
 Every open pull request lists the reasons it needs attention, as fixed codes with a message for each:
