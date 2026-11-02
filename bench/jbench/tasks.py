@@ -1,6 +1,9 @@
 """Benchmark tasks: a fixture repository, a prompt and a success check.
 
-A task is a directory under `bench/tasks/`:
+A task is a directory under `bench/tasks/`, or under a directory named by
+`--tasks-dir` or the `JOUET_BENCH_TASKS` path list, such as tasks on private
+repositories that cannot live in this one. A task's name is its directory's
+name, and must be unique across all of them:
 
 - `task.toml`: the prompt, a description, the chore and rules it exercises,
   a timeout, and optionally `branch` (checked out for the agent) and
@@ -14,9 +17,10 @@ A task is a directory under `bench/tasks/`:
   `{{base_sha}}` are replaced with the commits made here, and `{{head_short}}`
   and `{{base_short}}` with their first seven characters;
 - `check.py`: run in the work tree after the agent stops. Exit 0 means the
-  task succeeded. It gets `BENCH_BASE_SHA`, `BENCH_HEAD_SHA` and, for a task
-  with a fake GitHub, `BENCH_GITHUB_STATE` (the fixture after the agent's
-  writes);
+  task succeeded. It gets `BENCH_BASE_SHA`, `BENCH_HEAD_SHA`,
+  `BENCH_CHECK_HELPERS` (the directory holding `_check.py`, for a task outside
+  `bench/tasks/`) and, for a task with a fake GitHub, `BENCH_GITHUB_STATE`
+  (the fixture after the agent's writes);
 - `solve.py`: a reference solution, run in a fresh work tree by
   `check-tasks` to prove `check.py` passes for a correct answer (and fails
   without one). It gets `BENCH_GITHUB_URL` for a task with a fake GitHub.
@@ -57,6 +61,9 @@ from pathlib import Path
 from typing import Any
 
 TASKS_DIR = Path(__file__).resolve().parent.parent / "tasks"
+# Directories from --tasks-dir, searched after TASKS_DIR and before
+# JOUET_BENCH_TASKS.
+EXTRA_DIRS: list[Path] = []
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
 
 GIT_ENV = {
@@ -136,8 +143,36 @@ class Task:
         return json.loads(text)
 
 
+def directories() -> list[Path]:
+    """The directories tasks are loaded from, each once."""
+    listed = os.environ.get("JOUET_BENCH_TASKS", "")
+    found: list[Path] = []
+    for d in [TASKS_DIR, *EXTRA_DIRS, *(Path(p) for p in listed.split(os.pathsep) if p)]:
+        d = d.expanduser().resolve()
+        if not d.is_dir():
+            raise ValueError(f"no task directory at {d}")
+        if d not in found:
+            found.append(d)
+    return found
+
+
+def index() -> dict[str, Path]:
+    """Each task's name and directory; a name in two directories is an error."""
+    tasks: dict[str, Path] = {}
+    for d in directories():
+        for p in sorted(d.iterdir()):
+            if not (p / "task.toml").exists():
+                continue
+            if p.name in tasks:
+                raise ValueError(f"task {p.name} is in both {tasks[p.name].parent} and {d}")
+            tasks[p.name] = p
+    return tasks
+
+
 def load(name: str) -> Task:
-    d = TASKS_DIR / name
+    d = index().get(name)
+    if d is None:
+        raise ValueError(f"no task named {name}")
     with (d / "task.toml").open("rb") as f:
         raw = tomllib.load(f)
     for required in ("check.py", "solve.py") if "source" in raw else ("check.py", "solve.py", "repo"):
@@ -293,7 +328,7 @@ def expand(value: str, workdir: Path) -> str:
 
 
 def all_names() -> list[str]:
-    return sorted(p.name for p in TASKS_DIR.iterdir() if (p / "task.toml").exists())
+    return sorted(index())
 
 
 def git(workdir: Path, *args: str) -> str:
@@ -392,8 +427,13 @@ def copy_source(source: dict[str, str], workdir: Path) -> None:
         raise RuntimeError(f"the staged tree {tree} is not {commit}'s tree {want}")
 
 
+def helpers_env() -> dict[str, str]:
+    """Where `_check.py` is, for a task outside `bench/tasks/` to import."""
+    return {"BENCH_CHECK_HELPERS": str(TASKS_DIR)}
+
+
 def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
-    env = {"BENCH_BASE_SHA": shas["base_sha"], "BENCH_HEAD_SHA": shas["head_sha"]}
+    env = {"BENCH_BASE_SHA": shas["base_sha"], "BENCH_HEAD_SHA": shas["head_sha"], **helpers_env()}
     if state is not None:
         env["BENCH_GITHUB_STATE"] = str(state)
     return env
