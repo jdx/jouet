@@ -544,10 +544,12 @@ fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
     let started = Instant::now();
     let mut child = command.spawn().map_err(|e| {
         let mut message = format!("running {}: {e}", job.argv[0]);
-        if e.kind() == std::io::ErrorKind::NotFound
-            && let Some(other) = versioned_on_path(&job.argv[0])
-        {
-            let _ = write!(message, "; `{other}` is on PATH");
+        if e.kind() == std::io::ErrorKind::NotFound {
+            if let Some(other) = versioned_on_path(&job.argv[0]) {
+                let _ = write!(message, "; `{other}` is on PATH");
+            } else if let Some(task) = task_running(&job.dir, &job.argv[0]) {
+                let _ = write!(message, "; `mise run {task}` runs it in this project");
+            }
         }
         message
     })?;
@@ -645,6 +647,22 @@ fn contains_word(text: &str, word: &str) -> bool {
     text.match_indices(word).any(|(at, _)| {
         !inner(text[..at].chars().next_back()) && !inner(text[at + word.len()..].chars().next())
     })
+}
+
+/// The project's mise task whose script runs `program`, a test task first:
+/// a program that is not on PATH, such as `bats` in fnox, the project
+/// installs and runs through its own task.
+fn task_running(dir: &Path, program: &str) -> Option<String> {
+    let runs = |t: &crate::wind::tasks::Existing| {
+        t.run.iter().any(|line| {
+            line.split_whitespace()
+                .any(|w| Path::new(w).file_name().is_some_and(|n| n == program))
+        })
+    };
+    let tasks = crate::mise::tasks(dir).ok()?;
+    let mut found: Vec<&crate::wind::tasks::Existing> = tasks.iter().filter(|t| runs(t)).collect();
+    found.sort_by_key(|t| (!t.name.starts_with("test"), t.name.len()));
+    found.first().map(|t| t.name.clone())
 }
 
 /// Copies what the child writes to its log onto stdout until it exits.
