@@ -490,6 +490,31 @@ class CostSeedTest(unittest.TestCase):
         self.assertEqual(notes, {})
         self.assertIn("trials will retry setup", messages[0])
 
+    def test_seed_setup_failure_keeps_its_log_outside_the_work_tree(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a").write_text("a\n")
+            (task_dir / "requirements.lock").write_text("# locked\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, cost_seed=["python3 -V"],
+                                       python_requirements="requirements.lock")
+
+            def fail_setup(_task, _env, _workdir, _cache, log):
+                log.write_text("setup details\n")
+                raise tasks.EnvironmentSetupError(f"setup failed (log: {log})")
+
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup):
+                with self.assertRaises(tasks.EnvironmentSetupError):
+                    costs.seed(task, Path(sys.executable), root / "work", lambda _: None, root / "results")
+            self.assertEqual((root / "results" / "smoke.environment.log").read_text(), "setup details\n")
+
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
         import os
 

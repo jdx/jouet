@@ -515,7 +515,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     results_path = out_dir / "runs.jsonl"
     failed_environments = set()
     try:
-        opts["cost_notes"] = costs_mod.seeds(planned, opts["jouet_bin"], work_root, log)
+        opts["cost_notes"] = costs_mod.seeds(planned, opts["jouet_bin"], work_root, log, out_dir / "cost-seeds")
         for n, p in enumerate(planned, 1):
             if p.task in failed_environments:
                 log(f"skipping {p.id}: environment setup already failed for {p.task}")

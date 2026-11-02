@@ -38,7 +38,8 @@ def cache_path(task: tasks_mod.Task) -> Path:
     return root / "jouet-bench" / "cost-seeds" / f"{task.name}-{digest}.txt"
 
 
-def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[str], None]) -> str | None:
+def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[str], None],
+         log_dir: Path | None = None) -> str | None:
     """The task's cost note: from the cache, else timed now. None when the
     task seeds nothing, or when no command was timed."""
     if not task.cost_seed:
@@ -57,8 +58,11 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
     env = arms_mod.base_env(run_dir, None, "jdx/demo", tmp)
     arms_mod.wrapper(run_dir / "bin" / "jouet", jouet_bin.resolve(), {})
     task.agent_env(env, run_dir / "bin", workdir)
+    setup_log = (log_dir or run_dir) / f"{task.name}.environment.log"
+    if task.python_requirements:
+        setup_log.parent.mkdir(parents=True, exist_ok=True)
     try:
-        tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", run_dir / "environment.log")
+        tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", setup_log)
     except tasks_mod.EnvironmentSetupError:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -89,12 +93,13 @@ def apply(workdir: Path, note: str, commit: str) -> None:
     tasks_mod.git(workdir, "notes", "--ref", NOTES_REF, "add", "-f", "-m", note.strip(), commit)
 
 
-def seeds(planned: list[Any], jouet_bin: Path, work_root: Path, log: Callable[[str], None]) -> dict[str, str]:
+def seeds(planned: list[Any], jouet_bin: Path, work_root: Path, log: Callable[[str], None],
+          log_dir: Path | None = None) -> dict[str, str]:
     """Each planned task's cost note, by task name."""
     notes = {}
     for name in sorted({p.task for p in planned}):
         try:
-            note = seed(tasks_mod.load(name), jouet_bin, work_root, log)
+            note = seed(tasks_mod.load(name), jouet_bin, work_root, log, log_dir)
         except tasks_mod.EnvironmentSetupError as error:
             log(f"    {name}: cost seed setup failed ({error}); trials will retry setup")
             continue
