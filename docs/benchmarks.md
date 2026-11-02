@@ -153,7 +153,7 @@ A run stopped by its timeout or a budget counts as a failure, and the report say
 
 Results go to `bench/results/<timestamp>/`, which git ignores:
 
-- `meta.json`: versions, models, seed, budget, benchmark checkout commit and the SHA-256 of the jouet binary snapshot used by the suite. The checkout commit identifies the benchmark code; it does not establish which source built an externally supplied `--jouet` binary. Older records do not have the binary hash;
+- `meta.json`: versions, models, seed, budget, benchmark checkout commit and the SHA-256 of the jouet binary snapshot used by the suite. The commit is the benchmark checkout's HEAD; it does not capture uncommitted changes or establish which source built an externally supplied `--jouet` binary. Older records do not have the binary hash;
 - `runs.jsonl`: one record per run;
 - `summary.json` and `summary.md`: the comparison;
 - `runs/<task>.<harness>.<arm>.r<round>/`: the agent's event stream, its transcripts, `jouet audit`'s report, the check's output and, for PR tasks, every request the fake GitHub saw and its final state.
