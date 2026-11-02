@@ -261,13 +261,14 @@ jobs:
           artifacts: release-assets/jouet-*.tar.gz release-assets/jouet-*.zip
           manifest: .github/packslip/release.toml
           bin: jouet joue
+          # With two executables, each resource names the one it is for.
           resources: |
-            cli-spec/usage=asset:jouet.usage.kdl
-            completion/bash=asset:jouet.bash
-            completion/zsh=asset:jouet.zsh
-            completion/fish=asset:jouet.fish
-            completion/powershell=asset:jouet.powershell
-            man=asset:jouet.1
+            cli-spec/usage/jouet=asset:jouet.usage.kdl
+            completion/bash/jouet=asset:jouet.bash
+            completion/zsh/jouet=asset:jouet.zsh
+            completion/fish/jouet=asset:jouet.fish
+            completion/powershell/jouet=asset:jouet.powershell
+            man/jouet=asset:jouet.1
 
       # Called from release-plz.yml, undrafting is that workflow's job — it
       # happens after this one returns. Run by hand, nothing else will do it,
