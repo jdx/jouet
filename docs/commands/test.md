@@ -27,6 +27,24 @@ This was a partial run; the full suite was not verified.
 
 `--dry-run` prints the same explanation and runs nothing. The text lists the first 20 tests with their reasons and counts the rest; `--json` lists them all. Words after `--` go to the test runner. The flags are listed in the [CLI reference](/cli/test).
 
+### Project options for affected pytest runs
+
+A repository can supply pytest arguments for the selected tests in `.jouet/test.toml`:
+
+```toml
+[pytest]
+affected_args = ["-m", "not download"]
+```
+
+This example excludes tests marked `download` from selected runs; use it only
+when that is appropriate for the project. The arguments also apply to
+pytest-testmon's collection. They do not apply to `jouet test`, `--cmd`, or a
+full-suite fallback when affected selection cannot safely narrow the change.
+The output identifies the configured arguments and the run remains partial.
+Review the repository's `.jouet` files before a person runs `jouet trust`:
+this file is included in the trust hash, and an untrusted or changed file
+causes an affected pytest run to stop before executing tests.
+
 ## What a run prints
 
 An agent that runs a suite and cuts its output with `head`, `tail` or `grep` often cuts off the failure it needed, and runs the whole suite again with another filter. `jouet test` runs it once:

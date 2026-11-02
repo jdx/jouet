@@ -7,7 +7,7 @@ use jouet_rules::{Digests, Trust, TrustStore};
 use std::path::{Path, PathBuf};
 
 /// The files a repository's or the system's trust and hash cover.
-pub(crate) const ENTRIES: &[&str] = &["rules", "routines", "formats", "plugins.toml"];
+pub(crate) const ENTRIES: &[&str] = &["rules", "routines", "formats", "plugins.toml", "test.toml"];
 
 /// Where a set comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
