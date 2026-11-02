@@ -269,6 +269,33 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_zod_checker_keeps_the_related_bigint_case_separate(self):
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tests = root / "packages/zod/src/v4/classic/tests"
+            tests.mkdir(parents=True)
+            vitest = root / "node_modules/.bin/vitest"
+            vitest.parent.mkdir(parents=True)
+            vitest.write_text('#!/bin/sh\ncase "$*" in *bigint.test.ts*) exit 1;; esac\nexit "${FAIL_NUMBER:-0}"\n')
+            vitest.chmod(0o755)
+            tasks.git(root, "init", "-q", "-b", "main")
+            (root / "tracked").write_text("fixture")
+            tasks.git(root, "add", "tracked")
+            tasks.git(root, "commit", "-q", "-m", "fixture")
+            check = tasks.load("zod-int-bounds").dir / "check.py"
+            env = {**os.environ, **tasks.GIT_ENV, "BENCH_HEAD_SHA": "different"}
+            result = subprocess.run([sys.executable, "-I", str(check)], cwd=root, env=env,
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("related pre-existing bigint case: failed", result.stdout)
+            result = subprocess.run([sys.executable, "-I", str(check)], cwd=root,
+                                    env={**env, "FAIL_NUMBER": "1"}, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("the hidden number tests fail", result.stdout)
+
     def test_source_keeps_export_ignored_and_unnormalized_blobs(self):
         import dataclasses
         import subprocess
