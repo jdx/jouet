@@ -197,7 +197,7 @@
                     "databaseId": 9101,
                     "event": "pull_request",
                     "workflow": {
-                      "__typename": "Workflow", "id": null,
+                      "__typename": "Workflow", "id": "W_review",
                       "name": "ci"
                     }
                   }
@@ -307,7 +307,7 @@
                                 "databaseId": 9101,
                                 "event": "pull_request",
                                 "workflow": {
-                                  "__typename": "Workflow", "id": null,
+                                  "__typename": "Workflow", "id": "W_review",
                                   "name": "ci"
                                 }
                               }
@@ -361,7 +361,7 @@
                         "databaseId": 9101,
                         "event": "pull_request",
                         "workflow": {
-                          "__typename": "Workflow", "id": null,
+                          "__typename": "Workflow", "id": "W_review",
                           "name": "ci"
                         }
                       }
