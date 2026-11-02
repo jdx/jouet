@@ -604,6 +604,25 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     // libtest names a failure twice, the second time with its block.
     let libtest = "running 1 test\ntest keyring ... FAILED\n\nfailures:\n\n---- keyring stdout ----\nthread panicked: DBus error: no bus\n\nfailures:\n    keyring\n\ntest result: FAILED. 0 passed; 1 failed\n";
     assert!(environment_cause(libtest, &[]).is_some());
+    // No database or service running here.
+    for line in [
+        "    db_test.go:12: failed to connect to `user=app database=app`:",
+        "psql: error: could not connect to server: No such file or directory",
+        "sqlalchemy.exc.OperationalError: connection to server at \"localhost\" (::1), port 5432 failed",
+        "Error: connect ECONNREFUSED 127.0.0.1:6379",
+        "        dial error: dial tcp 127.0.0.1:5432: connect: connection refused",
+    ] {
+        let text = format!("1..1\nnot ok 1 a\n# {line}\n");
+        assert!(environment_cause(&text, &[]).is_some(), "{line}");
+    }
+    // A refused connection to another host may be the change's own.
+    assert_eq!(
+        environment_cause(
+            "1..1\nnot ok 1 a\n# dial tcp 10.0.0.5:443: connect: connection refused\n",
+            &[]
+        ),
+        None
+    );
     // A missing command is most often a binary the change did not build.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# fnox: command not found\n", &[]),
