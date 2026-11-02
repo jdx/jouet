@@ -110,6 +110,7 @@ pub(super) fn failure_names(
     output: &str,
     formats: &[Format],
     checkout: &Path,
+    scoped: bool,
 ) -> Option<BTreeSet<String>> {
     // Not as a failed run, which names an output it recognises nothing in by
     // a stand-in that would match the merge base's.
@@ -121,7 +122,33 @@ pub(super) fn failure_names(
         .chain(digest.more_failures)
         .map(|name| from_root(&name, checkout))
         .collect();
-    (!names.is_empty()).then_some(names)
+    if names.is_empty() {
+        return None;
+    }
+    if scoped {
+        if testlog::ambiguous_libtest(output) {
+            return None;
+        }
+        let go = testlog::go_failure_packages(output)?;
+        if !go.is_empty() {
+            // Do not compare unqualified Go output, including panics or
+            // build errors mixed with test failures.
+            return names
+                .iter()
+                .all(|name| go.contains_key(name))
+                .then(|| go.into_values().flatten().collect());
+        }
+        let jest = testlog::jest_failure_files(output)?;
+        if !jest.is_empty() {
+            return names.iter().all(|name| jest.contains_key(name)).then(|| {
+                jest.into_values()
+                    .flatten()
+                    .map(|name| from_root(&name, checkout))
+                    .collect()
+            });
+        }
+    }
+    Some(names)
 }
 
 /// The merge base of HEAD with `since` (the upstream or default branch when
@@ -148,6 +175,8 @@ pub(super) fn base(root: &Path, since: Option<&str>) -> Result<affected::Base, a
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Mode {
     Run,
+    /// An affected selection must be compared with this invocation's environment.
+    Fresh,
     /// An explicit retry may replace an inconclusive cached run.
     Retry,
     Kept,
@@ -251,7 +280,8 @@ pub(super) fn compare(
         let key = command_key(job, root);
         let kept = known::lookup(root, &base.merge_base, &key);
         let outcome = match (kept, mode) {
-            (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
+            (_, Mode::Fresh)
+            | (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
             | (None, Mode::Run | Mode::Retry) => {
                 let tree = checkout.tree()?.to_path_buf();
                 let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
@@ -269,7 +299,7 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    match failure_names(&output, formats, &tree) {
+                    match failure_names(&output, formats, &tree, mode == Mode::Fresh) {
                         Some(names) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
                             known::Outcome::Failed {
@@ -283,7 +313,9 @@ pub(super) fn compare(
                         },
                     }
                 };
-                known::keep(root, &base.merge_base, &key, outcome.clone());
+                if mode != Mode::Fresh {
+                    known::keep(root, &base.merge_base, &key, outcome.clone());
+                }
                 outcome
             }
             (Some(outcome), _) => outcome,
@@ -420,14 +452,14 @@ mod tests {
     #[test]
     fn an_unrecognised_failure_names_nothing() {
         assert_eq!(
-            failure_names("something broke\n", &[], Path::new("/x")),
+            failure_names("something broke\n", &[], Path::new("/x"), false),
             None
         );
     }
 
     #[test]
     fn names_are_written_from_the_checkout_root() {
-        let names = |out: &str, root: &str| failure_names(out, &[], Path::new(root));
+        let names = |out: &str, root: &str| failure_names(out, &[], Path::new(root), false);
         let here = names("Diff in /src/app/src/a.rs:3:\n-x\n+y\n", "/src/app");
         let there = names("Diff in /tmp/b/tree/src/a.rs:3:\n-x\n+y\n", "/tmp/b/tree");
         assert_eq!(here, there);
@@ -435,5 +467,38 @@ mod tests {
             here.unwrap().into_iter().next().unwrap(),
             "rustfmt src/a.rs:3"
         );
+    }
+
+    #[test]
+    fn affected_go_failures_are_qualified_by_package() {
+        let names = |out: &str| failure_names(out, &[], Path::new("/x"), true);
+        let first =
+            names("--- FAIL: TestSame (0.00s)\nFAIL\nFAIL\texample.com/a\t0.001s\nFAIL\n").unwrap();
+        let second =
+            names("--- FAIL: TestSame (0.00s)\nFAIL\nFAIL\texample.com/b\t0.001s\nFAIL\n").unwrap();
+        assert_ne!(first, second);
+        assert!(names("--- FAIL: TestSame (0.00s)\nFAIL\n").is_none());
+        let mixed = names("--- FAIL: TestSame (0.00s)\n    --- FAIL: TestSame/sub (0.00s)\nFAIL\nFAIL\texample.com/a\t0.001s\n--- FAIL: TestSame (0.00s)\nFAIL\nFAIL\texample.com/b\t0.001s\nFAIL\n").unwrap();
+        assert!(mixed.contains("example.com/a::TestSame/sub"));
+        assert!(mixed.contains("example.com/b::TestSame"));
+    }
+
+    #[test]
+    fn affected_jest_failures_are_qualified_by_file() {
+        let names = |out: &str| failure_names(out, &[], Path::new("/x"), true);
+        let first = names("FAIL tests/a.test.js\n  ● same test\n").unwrap();
+        let second = names("FAIL tests/b.test.js\n  ● same test\n").unwrap();
+        assert_ne!(first, second);
+        assert!(names("  ● same test\n").is_none());
+        assert_eq!(
+            names("FAIL tests/a.test.js (5.123 s)\n  ● same test\n"),
+            names("FAIL tests/a.test.js (12.345 s)\n  ● same test\n")
+        );
+    }
+
+    #[test]
+    fn affected_libtest_names_from_multiple_binaries_are_ambiguous() {
+        let output = "test same ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
+        assert!(failure_names(output, &[], Path::new("/x"), true).is_none());
     }
 }

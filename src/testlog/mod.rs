@@ -234,6 +234,7 @@ regexes! {
     UNITTEST_KIND = r"(failures|errors|skipped|expected failures|unexpected successes)=(\d+)";
     // jest.
     JEST_HEAD = r"^\s*● (.+)$";
+    JEST_FILE = r"^FAIL +(.+?)(?: \([\d.]+ s\))?$";
     JEST_END = r"^\s*● |^(Test Suites|Tests|Snapshots|Time):|^\s*(PASS|FAIL) ";
     JEST_TESTS = r"^Tests:\s+(.+)$";
     // vitest.
@@ -560,6 +561,65 @@ fn go(lines: &[String], out: &mut Parsed) {
         }
         i += 1;
     }
+}
+
+/// Associate Go test failures with their package before comparing two runs.
+/// Go prints the package after its test output, and the same test name can
+/// occur in more than one package.
+pub(crate) fn go_failure_packages(
+    text: &str,
+) -> Option<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>> {
+    let mut pending = Vec::new();
+    let mut names = std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for line in clean(text) {
+        if let Some(c) = GO_RESULT.captures(&line) {
+            if &c[2] == "FAIL" {
+                pending.push(c[3].to_string());
+            }
+        } else if let Some(c) = GO_PACKAGE.captures(&line) {
+            if !pending.is_empty() && &c[1] != "FAIL" {
+                return None;
+            }
+            for name in pending.drain(..) {
+                names
+                    .entry(name.clone())
+                    .or_default()
+                    .insert(format!("{}::{name}", &c[2]));
+            }
+        }
+    }
+    pending.is_empty().then_some(names)
+}
+
+/// Jest names a test inside a file heading; a test name alone is ambiguous.
+pub(crate) fn jest_failure_files(
+    text: &str,
+) -> Option<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>> {
+    let mut file = None;
+    let mut names = std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for line in clean(text) {
+        if let Some(c) = JEST_FILE.captures(&line) {
+            file = Some(c[1].trim().to_string());
+        } else if let Some(c) = JEST_HEAD.captures(&line) {
+            let path = file.as_ref()?;
+            names
+                .entry(c[1].to_string())
+                .or_default()
+                .insert(format!("{path}::{}", &c[1]));
+        }
+    }
+    Some(names)
+}
+
+/// libtest names are local to each binary; without the binary in the name,
+/// matching two runs that contain several test binaries would be ambiguous.
+pub(crate) fn ambiguous_libtest(text: &str) -> bool {
+    clean(text)
+        .iter()
+        .filter(|line| LIBTEST_RESULT.is_match(line))
+        .take(2)
+        .count()
+        > 1
 }
 
 /// What a failed Go test logged: the lines indented under its `--- FAIL`,

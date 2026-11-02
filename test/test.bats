@@ -224,6 +224,23 @@ vitest (vitest's module graph): 2 test files
 	assert_output '[true,true,"affected",["test/fmt.test.js"],0]'
 }
 
+@test "affected vitest baseline replays the selected files at the merge base" {
+	js_project vitest
+	# The real runner is available in the isolated worktree through this fixture
+	# symlink, just as it is in the changed worktree.
+	git add -f node_modules
+	printf "export const shout = (s) => s + '?'\n" >src/fmt.js
+	git add src/fmt.js
+	git commit -qm 'fixture with existing failure'
+	git branch -f main HEAD
+	printf '// change\n' >>src/fmt.js
+
+	run --separate-stderr jouet test --baseline --affected --since main --json
+	assert_success
+	run jq -e '.baseline.pre_existing | length > 0' <<<"$output"
+	assert_success
+}
+
 @test "jest selects through its module graph and passes extra arguments on" {
 	js_project jest
 	printf 'exports.sum = (a, b) => b + a\n' >src/sum.js
@@ -236,6 +253,29 @@ vitest (vitest's module graph): 2 test files
 	assert_equal "$(grep -c '^Tests:' "$log")" 1
 	run jq -c '[.suites[0].adapter, .suites[0].tests, .suites[0].command[1]]' <<<"$output"
 	assert_output '["jest",[{"path":"test/calc.test.js","via":["src/sum.js","src/calc.js","test/calc.test.js"]},{"path":"test/sum.test.js","via":["src/sum.js","test/sum.test.js"]}],"--ci"]'
+}
+
+@test "affected jest baseline freezes the selected test paths" {
+	js_project jest
+	printf 'exports.sum = (a, b) => b + a\n' >src/sum.js
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run --json -- --ci
+	assert_success
+	run jq -e '.suites[0].command | index("--runTestsByPath") != null and index("--findRelatedTests") == null and index("--ci") != null' <<<"$output"
+	assert_success
+
+	# Jest applies this Git-relative selector before --runTestsByPath.
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- --changedSince main
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- --changed-since=main
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- -f
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- -of
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
 }
 
 @test "pytest without testmon follows imports, and a conftest runs the whole suite" {
@@ -614,8 +654,70 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	run git worktree list
 	assert_equal "${#lines[@]}" 1
 
-	run --separate-stderr jouet test --baseline --affected
-	assert_failure 2
+}
+
+@test "affected baseline compares the selected tests and clears only that run" {
+	export JOUET_TEST_BASELINE=off JOUET_SESSION_ID=s1
+	mkdir -p tests
+	: >tests/__init__.py
+	cat >tests/test_a.py <<'PY'
+import os
+import unittest
+class Tests(unittest.TestCase):
+    def test_existing(self):
+        if os.environ.get("AFFECTED_EXISTING", "1") == "1":
+            self.fail("already broken")
+    def test_changed(self):
+        self.assertEqual(1 + 1, 2)
+PY
+	git add tests
+	git commit -qm base
+	git checkout -qb work
+	printf '\n# a change\n' >>tests/test_a.py
+
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main
+	assert_failure 1
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main --json
+	assert_success
+	run jq -r '[.affected, .baseline.pre_existing[]] | @tsv' <<<"$output"
+	assert_output --partial $'true\ttest_existing'
+	run --separate-stderr jq -c '[.trees[].failures.test // [] | length]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '[0]'
+	run --separate-stderr jq -r '.trees[].runs.test | [.full, .selector] | @tsv' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output $'false\t--affected --since main'
+
+	# The same command under a different environment must not reuse the
+	# previous baseline, whose failure is no longer present at the base.
+	cat >tests/test_a.py <<'PY'
+import unittest
+class Tests(unittest.TestCase):
+    def test_existing(self):
+        self.fail("new under this environment")
+    def test_changed(self):
+        self.assertEqual(1 + 1, 2)
+PY
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 AFFECTED_EXISTING=0 jouet test --baseline --affected --since main
+	assert_failure 1
+	assert_output --partial 'test_existing'
+	assert_output --partial 'is new'
+
+	# A new failure in an existing selected test is not cleared by the old one.
+	printf '\n    def test_new_failure(self):\n        self.fail("new failure")\n' >>tests/test_a.py
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main
+	assert_failure 1
+	assert_output --partial 'test_new_failure'
+	assert_output --partial 'is new'
+
+	# A selected test module absent at the base is not treated as pre-existing.
+	cat >tests/test_new.py <<'PY'
+import unittest
+class Added(unittest.TestCase):
+    def test_added(self):
+        self.fail("new module")
+PY
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main
+	assert_failure 1
+	assert_output --partial 'test_added'
 }
 
 @test "--baseline refuses before the run when the merge base is the work tree itself" {

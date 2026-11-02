@@ -42,7 +42,9 @@ use usage_rs::Args;
 /// naming them; any new failure still fails it. It needs the output to name
 /// its failures, and costs one more run of the failed suites. What the merge
 /// base did is kept, so a later failure of the same command compares with it
-/// without running it again. Without --baseline, a failing full suite is
+/// without running it again. With --affected, it replays the selected commands
+/// at the merge base without selecting tests again; a missing or uncomparable
+/// test does not count as an existing failure. Without --baseline, a failing full suite is
 /// compared on its own, and so is a failing --cmd run that took under a
 /// minute; a slower one uses what is kept for it, or names the --baseline
 /// command that compares it. `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.

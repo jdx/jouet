@@ -97,12 +97,6 @@ struct Job {
 }
 
 pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
-    if args.baseline && args.affected {
-        return out.error(
-            Exit::Usage,
-            "--baseline reruns a whole run's failures at the merge base; the tests --affected picks depend on the changes, so it cannot",
-        );
-    }
     if !args.affected && (args.adapter.is_some() || (args.since.is_some() && !args.baseline)) {
         return out.error_with_hint(
             Exit::Usage,
@@ -172,6 +166,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             Ok(base) => Some(base),
             Err(e) => {
                 let mut fixed = vec!["jouet", "test", "--baseline", "--since", "HEAD~1"];
+                if args.affected {
+                    fixed.push("--affected");
+                    if let Some(adapter) = args.adapter.as_deref() {
+                        fixed.extend(["--adapter", adapter]);
+                    }
+                }
                 if args.cmd {
                     fixed.push("--cmd");
                 }
@@ -194,7 +194,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // A failing full suite is run at the merge base, once per merge base; a
     // failing --cmd run is too when it was short, else it uses what an
     // earlier one kept.
-    let mode = if args.baseline {
+    let mode = if args.baseline && args.affected {
+        baseline::Mode::Fresh
+    } else if args.baseline {
         baseline::Mode::Retry
     } else if !args.cmd {
         baseline::Mode::Run
@@ -212,6 +214,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         Ok(planned) => planned,
         Err(e) => return out.error_with_hint(e.exit, &e.message, e.hint.as_deref()),
     };
+    // Selection and comparison must use the same merge base. If the ref
+    // moved while planning, refuse before running either set of tests.
+    if args.affected
+        && args.baseline
+        && report.base.as_ref().map(|b| &b.merge_base) != base.as_ref().map(|b| &b.merge_base)
+    {
+        return out.error(
+            Exit::Precondition,
+            "the merge base changed while selecting tests; run the command again",
+        );
+    }
     // Formats declared for runners jouet does not know; one that does not
     // load is said, and the run goes on without it.
     let (formats, problems) = testlog::format::load(&cwd);
@@ -283,7 +296,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
-                failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
+                failed.push((
+                    job,
+                    baseline::failure_names(
+                        &output,
+                        &formats,
+                        &root,
+                        args.affected && args.baseline,
+                    ),
+                    ran,
+                ));
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
@@ -666,13 +688,18 @@ fn affected(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), a
     let Plan {
         base,
         changes,
-        suites,
+        mut suites,
     } = affected::plan(
         cwd,
         args.since.as_deref(),
         args.adapter.as_deref(),
         &args.extra,
     )?;
+    if args.baseline {
+        for suite in &mut suites {
+            freeze_javascript_selection(suite, &args.extra)?;
+        }
+    }
     let reports = suites.iter().map(suite_report).collect();
     let jobs = suites
         .into_iter()
@@ -685,6 +712,72 @@ fn affected(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), a
         report_of(true, Some(base), Some(changes.len()), reports, args.dry_run),
         jobs,
     ))
+}
+
+/// Git-relative and module-graph selectors can choose different tests at the
+/// merge base. Run the files the adapter already listed in both worktrees.
+fn freeze_javascript_selection(suite: &mut Suite, extra: &[String]) -> Result<(), affected::Error> {
+    if !matches!(suite.adapter.name(), "vitest" | "jest") {
+        return Ok(());
+    }
+    if extra.iter().any(|arg| {
+        if !arg.starts_with('-') {
+            return false;
+        }
+        let name = arg.split('=').next().unwrap_or(arg);
+        if let Some(short) = name.strip_prefix('-')
+            && !short.starts_with('-')
+            && short.chars().any(|c| matches!(c, 'o' | 'f'))
+        {
+            return true;
+        }
+        let normalized: String = name
+            .chars()
+            .filter(|c| *c != '-')
+            .flat_map(char::to_lowercase)
+            .collect();
+        matches!(
+            normalized.as_str(),
+            "changed"
+                | "changedsince"
+                | "changedfileswithancestor"
+                | "findrelatedtests"
+                | "onlychanged"
+                | "onlyfailures"
+                | "lastcommit"
+                | "related"
+                | "o"
+                | "f"
+        )
+    }) {
+        return Err(affected::Error::new(
+            Exit::Precondition,
+            "a dynamic JavaScript test selector cannot be frozen for a baseline comparison",
+        ));
+    }
+    if !matches!(suite.decision, Decision::Affected) {
+        return Ok(());
+    }
+    let Some(command) = &suite.command else {
+        return Ok(());
+    };
+    let mut frozen = vec![command[0].clone()];
+    if suite.adapter.name() == "vitest" {
+        frozen.push("run".into());
+    }
+    frozen.extend(extra.iter().cloned());
+    if suite.adapter.name() == "jest" {
+        frozen.push("--runTestsByPath".into());
+    }
+    frozen.extend(suite.tests.iter().map(|test| {
+        let path = suite.project.root.join(&test.path);
+        path.strip_prefix(&suite.project.dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned()
+    }));
+    suite.command = Some(frozen);
+    Ok(())
 }
 
 fn report_of(

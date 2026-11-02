@@ -27,7 +27,7 @@ jouet test [--affected] [--since REF] [--adapter NAME] [--baseline] [--dry-run] 
 jouet test --cmd [--baseline] [--since REF] [--budget BYTES] -- CMD...
 ```
 
-Words after `--` go to the test runner, or with `--cmd` are the command. `--since` and `--adapter` choose what `--affected` selects, so they need it; `--since` also names the base for `--baseline`, which cannot be combined with `--affected`. Each flag is described in the [CLI reference](/cli/test).
+Words after `--` go to the test runner, or with `--cmd` are the command. `--since` and `--adapter` choose what `--affected` selects, so they need it; `--since` also names the base for `--baseline`. Each flag is described in the [CLI reference](/cli/test).
 
 ## How `--affected` picks tests
 
@@ -201,12 +201,12 @@ baseline: the failure also fails at main (302afa77cd40), so none is from this ch
 
 When the run fails, jouet runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch, and compares the failures by name. `--since REF` names another branch or commit. An upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead. Any path into the checkout in the command is pointed at the worktree, and the worktree is removed afterwards.
 
-- If every failure also fails at the merge base, the run passes (exit `0`) and names them. The stop gate counts it as a passing full run.
+- If every failure also fails at the merge base, the run passes (exit `0`) and names them. The stop gate counts the coverage actually run; an affected run remains partial.
 - A failure the merge base does not have still fails the run (exit `1`), and is listed as new.
 - When the run at the merge base fails without naming any failing test, as when a tool it needs is missing from that checkout, nothing is compared and the run still fails.
 - When the merge base ran fewer than half as many tests, a failure it does not list may never have run there, so it is listed as not compared rather than new.
 
-The comparison needs a runner whose failures jouet recognises by name, and costs one more run of the failed suites. It cannot be combined with `--affected`, whose tests depend on the changes.
+The comparison needs a runner whose failures jouet recognises by name, and costs one more run of the failed suites. With `--affected --baseline`, jouet selects the tests once from the change, then replays those exact commands at the merge base; it does not select again there. For Vitest and Jest, the run names the selected files directly, so their Git- and module-graph-based selectors cannot choose different files at the merge base. It runs a fresh comparison rather than using a cached result. A missing test, missing dependencies in the isolated checkout, or an uncomparable result does not prove a failure was pre-existing and does not clear the run. A successful comparison clears the matching affected failure at the same work tree; it does not clear a full-suite failure or an affected failure recorded at a different tree.
 
 **What the merge base did is kept** for 14 days in `$XDG_STATE_HOME/jouet/known/`, by repository (every worktree of it shares it), merge base and command. A later failure of the same command at the same merge base is compared with what is kept, without running the merge base again, so a failure that was already there stays known while you work. If the kept run could not name any failures, passing `--baseline` explicitly retries it, for example after installing a missing tool.
 
@@ -356,7 +356,7 @@ run = "jouet test --affected"
 |---|---|
 | `0` | the tests passed, every failure also fails at the merge base, or nothing needed to run |
 | `1` | the tests failed (the runner exited non-zero), the `--cmd` command exited non-zero, or the runner could not list the tests a change affects |
-| `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--baseline` with `--affected`, `--cmd` without a command or with `--affected`, `--budget` after `--` (where it would go to the command), an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
+| `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--cmd` without a command or with `--affected`, `--budget` after `--` (where it would go to the command), an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
 | `4` | no adapter or test task was found, the runner or the `--cmd` program is not installed, not in a git repository, or `.jouet/test.toml` is untrusted or has changed since it was trusted |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.
