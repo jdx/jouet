@@ -106,7 +106,9 @@ locked() {
 	local lock="$1.lock" i=0 status holder
 	shift
 	until mkdir "$lock" 2>/dev/null; do
-		holder=$(cat "$lock/pid" 2>/dev/null)
+		# A new holder may have created the directory but not written its PID
+		# yet. That is not an error, including when Bats has errexit enabled.
+		holder=$(cat "$lock/pid" 2>/dev/null || true)
 		# One waiter at a time takes over a lock whose holder is gone, and
 		# reads the holder again first: another may have taken it over and
 		# locked it anew already.
@@ -121,8 +123,11 @@ locked() {
 		sleep 0.1
 	done
 	echo "$$" >"$lock/pid"
-	"$@"
-	status=$?
+	if "$@"; then
+		status=0
+	else
+		status=$?
+	fi
 	rm -rf "$lock"
 	return "$status"
 }
@@ -817,15 +822,45 @@ PY
 		echo "end $1" >>"$log"
 	}
 	locked "$fixture" hold a &
+	local a=$!
 	locked "$fixture" hold b &
+	local b=$!
 	locked "$fixture" hold c &
-	wait
+	local c=$!
+	wait "$a" || fail "first fixture installation failed"
+	wait "$b" || fail "second fixture installation failed"
+	wait "$c" || fail "third fixture installation failed"
 
 	# Each install ran, and each ended before the next started.
 	run awk 'NR % 2 == 1 { if ($1 != "start") bad = 1; who = $2 } NR % 2 == 0 { if ($1 != "end" || $2 != who) bad = 1 } END { exit bad || NR != 6 }' "$log"
 	assert_success
 	assert [ ! -e "$fixture.lock" ]
 	assert [ ! -e "$fixture.lock.takeover" ]
+}
+
+@test "a fixture lock without a PID is waited for" {
+	local fixture="$BATS_TEST_TMPDIR/fixture" marker="$BATS_TEST_TMPDIR/ran" observed="$BATS_TEST_TMPDIR/observed" i
+	cat() {
+		if [[ ${1:-} == "$fixture.lock/pid" && ! -e $1 ]]; then
+			touch "$observed"
+		fi
+		command cat "$@"
+	}
+	mkdir "$fixture.lock"
+	locked "$fixture" touch "$marker" &
+	local waiter=$!
+	for ((i = 0; i < 50; i++)); do
+		[[ -e $observed ]] && break
+		sleep 0.1
+	done
+	assert [ -e "$observed" ]
+	kill -0 "$waiter" || fail "waiter exited before the holder wrote its PID"
+	rmdir "$fixture.lock"
+	wait "$waiter" || fail "waiter failed after the lock was released"
+	assert [ -e "$marker" ]
+	run locked "$fixture" false
+	assert_failure 1
+	assert [ ! -e "$fixture.lock" ]
 }
 
 @test "jouet test records its own run, so a piped one still counts" {
