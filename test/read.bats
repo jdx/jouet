@@ -99,8 +99,12 @@ RS
 	assert_output "1	hello"
 }
 
-@test "read collapses lines this session already read" {
+set_read_session() {
 	export JOUET_SESSION_ID=s1
+}
+
+@test "read collapses lines this session already read" {
+	set_read_session
 	run --separate-stderr jouet read src/lib.rs --symbol fetch
 	assert_line --index 0 'src/lib.rs: function fetch (16-18)'
 	run --separate-stderr jouet read src/lib.rs --range 16:18
@@ -124,7 +128,7 @@ RS
 }
 
 @test "read shares its line cap across selections and remembers only shown lines" {
-	export JOUET_SESSION_ID=s1
+	set_read_session
 	run --separate-stderr jouet read src/lib.rs --range 1:2 --range 6:9 --range 12:14 --max-lines 3
 	assert_success
 	assert_line --partial 'pub fn download'
