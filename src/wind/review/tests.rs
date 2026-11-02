@@ -281,6 +281,40 @@ fn queued_reviews_supply_the_project_and_reject_a_mismatch() {
 }
 
 #[test]
+fn review_over_the_per_review_limit_does_not_hide_recorded_proposals() {
+    let f = fixture();
+    consider(
+        &f.paths,
+        &settings(),
+        "codex",
+        "session-one",
+        Some("repo-a".into()),
+        NOISY,
+        NOW,
+    );
+    let reply = reply(
+        r#"{"session":"session-one","proposals":[
+        {"kind":"agents_md","title":"One","why":"x","draft":"x"},
+        {"kind":"agents_md","title":"Two","why":"x","draft":"x"},
+        {"kind":"agents_md","title":"Three","why":"x","draft":"x"},
+        {"kind":"agents_md","title":"Four","why":"x","draft":"x"}]}"#,
+    );
+    let out = record(&f.paths, reply, NOW, &[], None).unwrap();
+    assert_eq!(out.recorded.len(), 3);
+    assert!(out.skipped[0].reason.contains("review records 3"));
+    assert_eq!(
+        State::load(&f.paths.state)
+            .reviews
+            .queued("r1")
+            .unwrap()
+            .status,
+        Status::Adopted
+    );
+    let lines = lines_for_session(&f.paths, "next", Some("repo-a"), 2, NOW);
+    assert!(lines[0].contains("(p2)"));
+}
+
+#[test]
 fn daily_limits_for_one_project_do_not_hide_another_projects_proposal() {
     let f = fixture();
     let three = r#"{"proposals":[

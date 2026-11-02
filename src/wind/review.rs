@@ -638,7 +638,6 @@ fn record_in(
             continue;
         }
         if this_review == MAX_PER_REVIEW {
-            deferred = true;
             out.skipped.push(skip(format!(
                 "a review records {MAX_PER_REVIEW} proposals at most"
             )));
