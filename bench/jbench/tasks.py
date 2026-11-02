@@ -160,6 +160,13 @@ def requirements_file(task: Task) -> Path | None:
     return requirements
 
 
+def requirements_digest(task: Task, requirements: Path) -> str:
+    try:
+        return hashlib.sha256(requirements.read_bytes()).hexdigest()
+    except OSError as error:
+        raise EnvironmentSetupError(f"{task.name}: cannot read Python requirements {requirements}: {error}") from error
+
+
 def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Path, log: Path) -> dict[str, str] | None:
     """Create an isolated Python environment before an agent or check starts."""
     requirements = requirements_file(task)
@@ -195,7 +202,7 @@ def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Pat
         version = subprocess.run([str(venv_python), "--version"], env=env, capture_output=True, text=True, check=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
         raise EnvironmentSetupError(f"{task.name}: cannot read the Python version: {error}") from error
-    return {"python": version.stdout.strip(), "requirements_sha256": hashlib.sha256(requirements.read_bytes()).hexdigest()}
+    return {"python": version.stdout.strip(), "requirements_sha256": requirements_digest(task, requirements)}
 
 
 def expand(value: str, workdir: Path) -> str:

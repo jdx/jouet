@@ -478,6 +478,27 @@ class CostSeedTest(unittest.TestCase):
     """A task's seed commands run once, through `jouet test --cmd`, and every
     run starts with the note they left."""
 
+    def test_unreadable_requirements_do_not_abort_other_tasks(self):
+        import dataclasses
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "requirements.lock").write_text("# locked\n")
+            bad = dataclasses.replace(tasks.load("smoke"), name="bad", dir=root,
+                                      cost_seed=["python3 -V"], python_requirements="requirements.lock")
+            good = dataclasses.replace(tasks.load("smoke"), name="good", cost_seed=[])
+            planned = [runner.Planned(1, name, "codex", "plain") for name in ("bad", "good")]
+            messages = []
+            with patch.object(tasks, "load", side_effect=lambda name: {"bad": bad, "good": good}[name]), \
+                    patch.object(Path, "read_bytes", side_effect=PermissionError("permission denied")):
+                notes = costs.seeds(planned, Path("jouet"), root, messages.append)
+            self.assertEqual(notes, {})
+            self.assertEqual(len(messages), 1)
+            self.assertIn("bad: cannot read Python requirements", messages[0])
+            self.assertIn("trials will retry setup", messages[0])
+
     def test_seed_setup_failure_leaves_trials_to_retry(self):
         from unittest.mock import patch
         from jbench import costs

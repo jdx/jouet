@@ -31,7 +31,7 @@ NOTES_REF = "jouet-cost"
 def cache_path(task: tasks_mod.Task) -> Path:
     data = [task.name, task.source, task.cost_seed, socket.gethostname()]
     if requirements := tasks_mod.requirements_file(task):
-        data.append(hashlib.sha256(requirements.read_bytes()).hexdigest())
+        data.append(tasks_mod.requirements_digest(task, requirements))
     key = json.dumps(data)
     digest = hashlib.sha256(key.encode()).hexdigest()[:16]
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
