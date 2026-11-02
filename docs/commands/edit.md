@@ -6,22 +6,117 @@ description: Exact, checked, all-or-nothing text edits across files, from search
 
 `jouet edit` makes exact, checked, all-or-nothing text edits across files. Use it where an agent would write a Python heredoc with `str.replace` and a hand-written `assert s.count(old) == 1`. It also accepts the patch format OpenAI Codex uses, from any agent.
 
+For one replacement, give the file, the text to find and the text to put in its place:
+
+```output
+$ jouet edit replace src/main.rs --old 'let x = 1;' --new 'let x = 2;'
+ok          src/main.rs  1 edit  +1 -1
+1 of 1 file written
+```
+
+The old text must occur exactly once. If it occurs more often or not at all, nothing is written, and the report lists the lines it matched or shows the closest text in the file (see [when an edit does not apply](#when-an-edit-does-not-apply)). For edits to several files, write a [spec](#editing-several-files-with-a-spec). [Why jouet](/why#editing-two-files) compares both with the heredoc they replace.
+
 ```text
-jouet edit [--spec FILE] [--format blocks|patch|json] [--dry-run] [--diff]
-           [--check CMD] [--diag] [--revert-on-fail] [--why] [--expect-hash PATH=SHA256]...
 jouet edit replace PATH... (--old TEXT --new TEXT)... [--count N | --all]
+jouet edit [--spec FILE] [--format blocks|patch|json]
+jouet edit --pattern PAT --rewrite REPL --lang LANG [--callers-of PATH#SYMBOL | --impact PATH#SYMBOL] [PATH]...
 jouet edit hash PATH...
 ```
 
-`jouet edit` reads a spec from `--spec FILE` or from stdin. The flags are listed in the [CLI reference](/cli/edit/), and [Why jouet](/why#editing-two-files) compares it with the heredoc it replaces.
+The first three forms share the flags that preview and check an edit: `--dry-run`, `--diff`, `--check CMD`, `--diag`, `--revert-on-fail`, `--why` and `--expect-hash PATH=SHA256` (repeatable). They are described [below](#preview-with-dry-run-and-diff), and every flag is listed in the [CLI reference](/cli/edit/).
+
+## Replacing text from the command line {#edit-from-the-command-line}
+
+`jouet edit replace` makes replacements without a spec. Like a JSON edit, `--old` matches anywhere in a file, inside a line too. It must match exactly once in each file unless `--count N` or `--all` says otherwise, and `--all` replaces every match but still needs at least one in each file:
+
+```sh
+jouet edit replace src/main.rs --old 'HTTP' --new 'HTTP_FETCH' --all
+```
+
+It takes several files, and `--old` and `--new` repeat: the Nth `--new` replaces the Nth `--old`, and every replacement applies to every file. A rename across files is one call, and like any edit it lands in every file or in none:
+
+```sh
+jouet edit replace shipit/config.py shipit/cli.py --old retry_limit --new max_attempts --all
+jouet edit replace app.py --old 'reverse=True)' --new ')' --old 'math.floor' --new 'math.ceil'
+```
+
+`--old` and `--new` may start with `-`, as a Markdown list item does.
+
+## Editing several files with a spec
+
+A spec lists edits to any number of files. `jouet edit` reads it from stdin, or from `--spec FILE` (`-` is stdin). This one changes two files, and either both are written or neither is:
+
+```spec
+jouet edit <<'JOUET_EDIT'
+=== src/main.rs
+<<<<<<< SEARCH
+    let x = 1;
+=======
+    let x = 2;
+>>>>>>> REPLACE
+
+=== Cargo.toml
+<<<<<<< SEARCH
+version = "0.1.0"
+=======
+version = "0.2.0"
+>>>>>>> REPLACE
+JOUET_EDIT
+```
+
+```output
+ok          src/main.rs  1 edit  +1 -1
+ok          Cargo.toml   1 edit  +1 -1
+2 of 2 files written
+```
+
+Pass a spec through a quoted heredoc with a delimiter that cannot appear in the content, such as `<<'JOUET_EDIT'`. Quoting stops the shell expanding `$` and backticks, and a unique delimiter stops the spec being cut short. If a spec ends inside an open block or patch anyway, `jouet edit` refuses it as a usage error rather than applying the part that survived.
+
+This spec is written as search/replace blocks. A spec can also be a Codex-style patch or JSON; see [spec formats](#spec-formats).
 
 ## How an edit runs
 
 - **All or nothing.** Every edit in every file is applied in memory first. If any edit fails, no file is written and the output says so: `0 of 2 files written`. Each file is written to a temporary file beside it and renamed into place, keeping its permissions, and if a write fails part way, the files already written are restored.
 - **In order.** Edits to one file apply in the order given, and each one sees the result of the one before. Two spellings of the same file, such as `a.rs` and `sub/../a.rs` or its absolute path, are the same file.
-- **Exact.** Search text matches exactly, whitespace included. In a file with CRLF line endings, line breaks in the search and replacement text are treated as CRLF.
-- **Diagnostics, not guesses.** jouet never applies a near match. When search text matches nothing, it shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When the text does occur, but inside a line or only with other indentation, it says so and where. When it matches too often, it lists the line of every match, so you can add context or set a count, and it names the count to set in the form you used (`--count N` or `--all`, `count=N` after `SEARCH`, or a JSON `count`), also as the edit's `message` in `--json`.
+- **Exact.** Search text matches exactly, whitespace included, and jouet never applies a near match. In a file with CRLF line endings, line breaks in the search and replacement text are treated as CRLF.
+- **Failed matches are explained.** When search text matches nothing, the report shows the closest region of the file and a short diff against what you searched for, which shows at a glance when a formatter re-wrapped a line. When the text does occur, but inside a line or only with other indentation, it says so and where. When it matches too often, it lists the line of every match, so you can add context or set a count, and it names the count to set in the form you used (`--count N` or `--all`, `count=N` after `SEARCH`, or a JSON `count`), also as the edit's `message` in `--json`.
 - **Every problem at once.** A failed edit does not stop the others from being checked, so one run reports everything wrong with a spec.
+
+## When an edit does not apply
+
+Nothing is written, and the report says why. Files that were fine but not written because of another file are marked `not written`:
+
+```output
+failed      src/main.rs  1 edit
+  edit 1: no match
+    closest at line 2 (93% similar), - spec / + file:
+    -    let x = 3;
+    +    let x = 2;
+not written Cargo.toml   1 edit  +1 -1
+0 of 2 files written
+```
+
+Too many matches list where they are:
+
+```output
+failed      src/main.rs  1 edit
+  edit 1: 2 matches, expected 1, at lines 2, 3
+    set `<<<<<<< SEARCH count=2` or `count=all` to replace every match, or give more surrounding text to match fewer
+0 of 1 file written
+```
+
+A search block whose text occurs only inside a line says so, and points to `jouet edit replace`:
+
+```output
+failed      src/main.rs  1 edit
+  edit 1: no match as whole lines; the text occurs inside line 2 (SEARCH blocks hold whole lines, or use `jouet edit replace` for text inside a line)
+    closest at line 2 (78% similar), - spec / + file:
+    -    let x
+    +    let x = 1;
+0 of 1 file written
+```
+
+The [exit code](#exit-codes) is `4` for a match count that was wrong, and `3` when every failure was a missing file.
 
 ## Spec formats
 
@@ -91,62 +186,9 @@ use crate::http::HTTP_FETCH;
 - The definition is its signature and body. Comments and attributes above it stay as they are.
 - Write the new text at any indentation: it is moved to where the definition sits.
 - An edit that would leave the file with more syntax errors than it has is refused (`does_not_parse`). This also catches new text cut short.
-- When the edit changes the definition's first line, its signature in most languages, its callers may need changing too. If the work tree has a [code graph](/commands/graph), the report lists the definition's callers in files the edit does not change (`callers` in JSON). Otherwise, or when the graph does not know the definition, it notes the change (`signature` in JSON).
+- When the edit changes the definition's first line, its signature in most languages, its callers may need changing too. If the work tree has a [code graph](/commands/graph), the report lists up to 10 of the definition's callers in files the edit does not change (`callers` in JSON). Otherwise, or when the graph does not know the definition, it notes the change (`signature` in JSON).
 
 Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
-
-### Structural rewrites
-
-`jouet edit --pattern PAT --rewrite REPL --lang LANG [PATH]...` rewrites every match of a code pattern under the paths (the current directory by default), instead of reading a spec. Matching is [ast-grep](https://ast-grep.github.io)'s (`ast-grep-core`, MIT), on the same grammars as symbol targets:
-
-```output
-$ jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app
-ok          app/main.py  1 edit  +2 -2
-1 of 1 file written
-```
-
-- **All or nothing, as any edit.** `--dry-run`, `--diff`, `--check` and `--revert-on-fail` work as with a spec. A rewrite that would add syntax errors to a file is refused, and so is a file that changed after the pattern matched it.
-- **No match, no write.** A pattern that matches nothing exits 4 and says how many files of the language it read.
-- **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c` and `cpp`. Only files in that language are read.
-
-#### Scoped by the code graph
-
-A pattern such as `load($$$A)` matches every function named `load`. The [code graph](/commands/graph) knows which `load` each call means, so two flags narrow a rewrite to one symbol, given as `PATH#NAME` (or `#ID` from `jouet graph symbols`):
-
-- `--callers-of PATH#SYMBOL` rewrites only the calls the graph attributes to that symbol. A match counts when it starts where such a call starts and names the symbol, so write the pattern for the whole call, receiver included: `$F($P)` or `$R.load($$$A)`, not `load` alone.
-- `--impact PATH#SYMBOL` rewrites only inside the symbol and the code that depends on it, three hops back, as `jouet graph impact` counts them.
-
-```output
-$ jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, {})' --lang typescript --callers-of web/config.ts#load
-scope: 1 match in calls of function load (web/config.ts:1); 4 other matches left alone
-    web/app.ts:5  load("jouet.toml")  ->  load("jouet.toml", {})
-unresolved, left alone: 1 (check them by hand)
-  unlinked: the graph could not tell which definition these call
-    web/app.ts:7  registry.load("dynamic")
-tests that depend on the changed files: 1
-    web/app.test.ts
-ok          web/app.ts  1 edit  +1 -1
-dry run: 1 file would be written
-```
-
-- **Nothing the graph cannot attribute is rewritten, or dropped without a word.** A match is listed as unresolved, and left alone, when the graph recorded the call but could not tell which definition it means (`unlinked`, as with dynamic dispatch), linked it to more than one (`ambiguous`), has not read the file (`not_indexed`), or records no call starting there (`no_site`). A call written inside a macro, which neither the pattern nor the graph parses, is listed as `in_macro`.
-- **Calls the rewrite did not reach are listed too:** the symbol's calls the pattern does not match (`not_matched`), and those outside the paths given (`not_searched`).
-- **The tests to run afterwards.** The report lists each rewrite and the test files that depend on the changed files (the graph's `affected`), with `--dry-run` before anything is written, and after a write.
-- **The same refusals.** A rewrite that adds syntax errors, or a file that changed after it was matched, is refused. A scope with no match in it writes nothing and exits 4. The symbol must name exactly one definition (exit 2 lists the candidates; exit 3 when there is none).
-- **The graph stays current.** It is brought up to date before matching, and the files written are re-indexed afterwards, as after any `jouet edit`.
-
-`jouet search --structural` takes the same two flags, to see the scope before rewriting. In JSON, both commands add a `scope` object with `matched`, `skipped`, `unresolved`, `unmatched`, and for edits `changes` and `tests`.
-
-Agents often write patterns that match nothing. The rules that matter most:
-
-- **Quote patterns in single quotes.** In double quotes the shell expands `$X`, so `"$X.unwrap()"` becomes `.unwrap()`.
-- **`$X` matches one node, `$$$X` any number.** `foo($A)` matches only calls with one argument; `foo($$$ARGS)` matches every call. Metavariable names are uppercase, and `$_` matches without capturing.
-- **A pattern is whole code in the language.** `client.get($URL)` matches, `get($URL` is refused. A Rust call pattern matches the call itself, not a `?` or `;` after it, so `$C.get($URL).send()?` matches the whole `?` expression.
-- **A name used twice must match the same text:** `$A == $A`.
-- **The rewrite is text** with the pattern's metavariables filled in. Its indentation follows the match.
-- **Try it first** with `jouet search --structural --lang LANG 'PAT'`, which shows each match under the function it is in.
-
-These rules and worked examples are also in `jouet agent-help edit --full`.
 
 ### Codex-style patch
 
@@ -190,27 +232,66 @@ For specs that programs generate:
 - `symbol` replaces a whole definition, as a [symbol target](#symbol-targets) does, and takes `new` only.
 - An entry without `old` creates the file.
 
-## Edit from the command line
+## Structural rewrites
 
-`jouet edit replace` makes replacements without a spec. Like a JSON edit, `--old` matches anywhere in a file, and it must match exactly once in each file unless `--count N` or `--all` says otherwise:
+`jouet edit --pattern PAT --rewrite REPL --lang LANG [PATH]...` rewrites every match of a code pattern under the paths (the current directory by default), instead of reading a spec. Matching is [ast-grep](https://ast-grep.github.io)'s (`ast-grep-core`, MIT), on the same grammars as symbol targets:
 
-```sh
-jouet edit replace src/main.rs --old 'let x = 1;' --new 'let x = 2;'
-jouet edit replace src/main.rs --old 'HTTP' --new 'HTTP_FETCH' --all
+```output
+$ jouet edit --pattern 'print($$$ARGS)' --rewrite 'log.info($$$ARGS)' --lang python app
+ok          app/main.py  1 edit  +2 -2
+1 of 1 file written
 ```
 
-It takes several files, and `--old` and `--new` repeat: the Nth `--new` replaces the Nth `--old`, and every replacement applies to every file. A rename across files is one call, and like any edit it lands in every file or in none:
+- **Same checks as any edit.** The rewrites are written all or nothing, and `--dry-run`, `--diff`, `--check` and `--revert-on-fail` work as with a spec. A rewrite that would add syntax errors to a file is refused, and so is a file that changed after the pattern matched it.
+- **No match.** A pattern that matches nothing writes nothing, exits 4, and says how many files of the language it read.
+- **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c` and `cpp`. Only files in that language are read.
 
-```sh
-jouet edit replace shipit/config.py shipit/cli.py --old retry_limit --new max_attempts --all
-jouet edit replace app.py --old 'reverse=True)' --new ')' --old 'math.floor' --new 'math.ceil'
+Paths, `--rewrite`, `--lang`, `--callers-of` and `--impact` go only with `--pattern` (exit 2 otherwise), since a spec names its own files.
+
+### Writing patterns
+
+Agents often write patterns that match nothing. The rules that matter most:
+
+- **Quote patterns in single quotes.** In double quotes the shell expands `$X`, so `"$X.unwrap()"` becomes `.unwrap()`.
+- **`$X` matches one node, `$$$X` any number.** `foo($A)` matches only calls with one argument; `foo($$$ARGS)` matches every call. Metavariable names are uppercase, and `$_` matches without capturing.
+- **A pattern is whole code in the language.** `client.get($URL)` matches, `get($URL` is refused. A Rust call pattern matches the call itself, not a `?` or `;` after it, so `$C.get($URL).send()?` matches the whole `?` expression.
+- **A name used twice must match the same text:** `$A == $A`.
+- **The rewrite is text** with the pattern's metavariables filled in. Its indentation follows the match.
+- **Try it first** with `jouet search --structural --lang LANG 'PAT'`, which shows each match under the function it is in.
+
+These rules and worked examples are also in `jouet agent-help edit --full`.
+
+### Scoped by the code graph
+
+A pattern such as `load($$$A)` matches every function named `load`. The [code graph](/commands/graph) knows which `load` each call means, so two flags narrow a rewrite to one symbol, given as `PATH#NAME` (or `#ID` from `jouet graph symbols`):
+
+- `--callers-of PATH#SYMBOL` rewrites only the calls the graph attributes to that symbol. A match counts when it starts where such a call starts and names the symbol, so write the pattern for the whole call, receiver included: `$F($P)` or `$R.load($$$A)`, not `load` alone.
+- `--impact PATH#SYMBOL` rewrites only inside the symbol and the code that depends on it, three hops back, as `jouet graph impact` counts them.
+
+```output
+$ jouet edit --dry-run --pattern '$F($P)' --rewrite '$F($P, {})' --lang typescript --callers-of web/config.ts#load
+scope: 1 match in calls of function load (web/config.ts:1); 4 other matches left alone
+    web/app.ts:5  load("jouet.toml")  ->  load("jouet.toml", {})
+unresolved, left alone: 1 (check them by hand)
+  unlinked: the graph could not tell which definition these call
+    web/app.ts:7  registry.load("dynamic")
+tests that depend on the changed files: 1
+    web/app.test.ts
+ok          web/app.ts  1 edit  +1 -1
+dry run: 1 file would be written
 ```
 
-The edit flags below work with `replace` too.
+- **Unresolved matches.** Nothing the graph cannot attribute is rewritten, and nothing is dropped without a word. A match is listed as unresolved, and left alone, when the graph recorded the call but could not tell which definition it means (`unlinked`, as with dynamic dispatch), linked it to more than one (`ambiguous`), has not read the file (`not_indexed`), or records no call starting there (`no_site`). A call written inside a macro, which neither the pattern nor the graph parses, is listed as `in_macro`.
+- **Calls the rewrite did not reach** are listed too: the symbol's calls the pattern does not match (`not_matched`), and those outside the paths given (`not_searched`).
+- **Tests to run afterwards.** The report lists each rewrite and the test files that depend on the changed files (the graph's `affected`), with `--dry-run` before anything is written, and after a write.
+- **Refusals.** Besides the refusals of [any rewrite](#structural-rewrites) (added syntax errors, a file changed after it was matched), a scope with no match in it writes nothing and exits 4, and the symbol must name exactly one definition (exit 2 lists the candidates; exit 3 when there is none).
+- **The graph stays current.** It is brought up to date before matching, and the files written are re-indexed afterwards, as after any `jouet edit`.
+
+`jouet search --structural` takes the same two flags, to see the scope before rewriting. In JSON, both commands add a `scope` object with `matched`, `skipped`, `unresolved`, `unmatched`, and for edits `changes` and `tests`.
 
 ## Preview with `--dry-run` and `--diff`
 
-`--dry-run` checks every edit and reports what would change, without writing anything. `--diff` adds a unified diff of each file to the report, with or without `--dry-run`:
+`--dry-run` checks every edit and reports what would change, without writing anything; `--check` and `--diag` do not run with it. `--diff` adds a unified diff of each file to the report, with or without `--dry-run`:
 
 ```output
 $ jouet edit replace src/main.rs --old x --new y --all --diff
@@ -231,7 +312,7 @@ ok          src/main.rs  1 edit  +2 -2
 
 `--check CMD` runs a command through the shell (`sh -c`, or `cmd /C` on Windows) after the files are written, for example `cargo check -q`. Its output goes to a [log file](/conventions#full-logs-are-kept), and the report shows the last 30 lines when it fails. A failing check makes the exit code `1`.
 
-With `--revert-on-fail`, a failing check also restores every edited file to its previous bytes and permissions, and removes the files the edit created:
+With `--revert-on-fail`, a failing check also restores every edited file to its previous bytes and permissions, and removes the files the edit created. `--revert-on-fail` needs `--check` or `--diag`, and is a usage error (exit 2) without either:
 
 ```output
 $ jouet edit replace src/main.rs --old 'let y = 2' --new 'let y = 5' \
@@ -268,19 +349,6 @@ When the files were checked at exactly their current contents before, by `jouet 
 
 With `[edit] fix_after = true` in the [config file](/setup#settings), the project's hk fixers format the written files first, so a formatting-only finding never fails the edit; see [formatting after edits](/commands/diag#formatting-after-edits).
 
-## Lines an earlier session wrote, with `--why`
-
-In a repository with [Entire](https://entire.io), `--why` looks up the lines the edit removes or replaces with `entire why FILE --json`, and warns about those an agent session other than this one wrote, with the checkpoint and the start of the prompt behind them. Use it with `--dry-run` to see that before anything is written. It only warns: the edit is written as without it.
-
-```text
-$ jouet edit replace test/proxy_mcp.bats --old '|| true)' --new '|| :)' --dry-run --why
-ok          test/proxy_mcp.bats  1 edit  +1 -1
-dry run: 1 file would be written
-warning: this edit changes a line of test/proxy_mcp.bats that an earlier session wrote: 1 line (149) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "why did this fail https://github.com/jdx/fnox/pull/1087#issuecomment-6520951953". Check that the change is intended (`entire why test/proxy_mcp.bats:149`)
-```
-
-This session is `JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; its own lines are not warned about. `--why` is off by default because `entire why` can take a minute in a repository with a long history (see [`jouet read --why`](/commands/read#where-lines-came-from-with-why)). It looks at the first 10 files the edit changes, each bounded by `[entire] why_timeout_ms`, and stops at the first that times out. Failures are `note:` lines, never errors.
-
 ## Guard against stale reads with `--expect-hash`
 
 An agent that read a file a while ago may be editing a version that has since changed. `jouet edit hash` prints SHA-256 hashes to pass back later:
@@ -300,34 +368,18 @@ failed      Cargo.toml  1 edit  +1 -1
 0 of 1 file written
 ```
 
-## When an edit does not apply
+## Lines an earlier session wrote, with `--why`
 
-Nothing is written, and the report says why. Files that were fine but not written because of another file are marked `not written`:
+In a repository with [Entire](https://entire.io), `--why` looks up the lines the edit removes or replaces with `entire why FILE --json`, and warns about those an agent session other than this one wrote, with the checkpoint and the start of the prompt behind them. Use it with `--dry-run` to see that before anything is written. It only warns: the edit is written as it would be without `--why`.
 
-```output
-failed      src/main.rs  1 edit
-  edit 1: no match
-    closest at line 2 (93% similar), - spec / + file:
-    -    let x = 3;
-    +    let x = 2;
-not written Cargo.toml   1 edit  +1 -1
-0 of 2 files written
+```text
+$ jouet edit replace test/proxy_mcp.bats --old '|| true)' --new '|| :)' --dry-run --why
+ok          test/proxy_mcp.bats  1 edit  +1 -1
+dry run: 1 file would be written
+warning: this edit changes a line of test/proxy_mcp.bats that an earlier session wrote: 1 line (149) by Claude Code session 8d2ac41d, checkpoint 01M66H17P11G (commit 12fa1abf): "why did this fail https://github.com/jdx/fnox/pull/1087#issuecomment-6520951953". Check that the change is intended (`entire why test/proxy_mcp.bats:149`)
 ```
 
-Too many matches list where they are:
-
-```output
-failed      src/main.rs  1 edit
-  edit 1: 2 matches, expected 1, at lines 2, 3
-    set `<<<<<<< SEARCH count=2` or `count=all` to replace every match, or give more surrounding text to match fewer
-0 of 1 file written
-```
-
-## Heredocs
-
-Pass specs through a quoted heredoc with a delimiter that cannot appear in the content, such as `<<'JOUET_EDIT'`. Quoting stops the shell expanding `$` and backticks, and a unique delimiter stops the spec being cut short.
-
-If a spec ends inside an open block or patch anyway, `jouet edit` refuses it as a usage error rather than applying the part that survived.
+This session is `JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; its own lines are not warned about. `--why` is off by default because `entire why` can take a minute in a repository with a long history (see [`jouet read --why`](/commands/read#where-lines-came-from-with-why)). It looks at the first 10 files the edit changes, each bounded by `[entire] why_timeout_ms` (15000 by default, or `JOUET_ENTIRE_WHY_TIMEOUT_MS`), and stops at the first that times out. Failures are `note:` lines, never errors.
 
 ## JSON output
 
@@ -354,6 +406,7 @@ With `--json`, the report is one document. Fields that are empty, `false` or `nu
 | `fix` | What `[edit] fix_after` did: `status`, the `formatted` files, `failed_steps` |
 | `earlier_sessions` | With `--why`: the changed lines earlier agent sessions wrote, one entry per file and checkpoint: `path`, `lines`, `checkpoint_id`, `session_id`, `agent`, `commit` and `prompt` |
 | `notes` | With `--why`: why some lines could not be looked up |
+| `scope` | With `--callers-of` or `--impact`: see [scoped by the code graph](#scoped-by-the-code-graph) |
 
 `jouet edit hash --json` prints `{"files":[{"path":"…","sha256":"…"}]}`.
 

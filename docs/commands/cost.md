@@ -4,40 +4,9 @@ description: See how long each build, test and lint takes here, from timings kep
 
 # jouet cost
 
-## Experimental local sequences
+`jouet cost` lists how long each build, test and lint takes on this machine, from the timings of earlier runs, so an agent can plan its checks before it starts them.
 
-Opt in with `[cost] sequences = true` in your user config, or set
-`JOUET_COST_SEQUENCES=1`. In an identified agent session, `jouet test` records
-local start and finish events for its jobs under the jouet state directory.
-For example, run both checks through `jouet test --cmd -- cargo clippy` and
-`jouet test --cmd -- cargo test`, then inspect `jouet cost --sequences`.
-
-For each pair seen at least three times, it reports the second check's median
-duration and the number of pairs. Pairs must be adjacent among recorded
-`jouet test` jobs in the same session and worktree, successful, non-overlapping,
-and no more than 30 minutes apart. A failed or unrecognized job breaks the
-sequence. An unfinished job prevents later pairs in that session from being
-reported, because its end is unknown. Ordinary shell commands and other work are not recorded
-by this experiment and may intervene, and cache state is unknown. These are
-conditional observations, not measured savings or proof of cache reuse.
-
-Events are local and are not added to git notes or transferred by `cost push`.
-Commands use the same redaction as normal cost samples; session IDs, machine
-identity and the worktree path are hashed. The files stay under the jouet state directory until
-you delete them; recording stops with a warning once a file reaches 16 MiB.
-Turn recording off with `JOUET_COST_SEQUENCES=0` or by
-removing the setting; `--sequences` can still read previously recorded data.
-The JSON output includes `sequences_recording` when `--sequences` is used.
-
-Agents don't know which runs are slow. In five of six Claude Code runs on the mise benchmark task, close to 90% or more of the wall time went to running commands, nearly all of it compiling. It built mise two or three times a run, for a unit test and again for an e2e test. `jouet cost` shows what each check costs here, and the session-start primer names the slowest, so the agent can finish its edits before starting a slow run and check them all in one run.
-
-Timings include recognized test runners such as `python3 -m tornado.test.runtests`, including when run through `jouet test --cmd`.
-
-```text
-jouet cost [--min DUR] [--json]
-jouet cost fetch [REMOTE]
-jouet cost push [REMOTE]
-```
+Agents don't know which runs are slow. In five of six Claude Code runs on the mise benchmark task, close to 90% or more of the wall time went to running commands, nearly all of it compiling. It built mise two or three times a run, for a unit test and again for an e2e test. With the timings in front of it, the agent can finish its edits before starting a slow run and check them all in one run.
 
 ```text
 $ jouet cost   # an example
@@ -47,15 +16,27 @@ mise run test:e2e …        40s  12 runs here
 this machine takes 1.4× as long as the others, over 2 commands timed in both
 ```
 
-A family such as `mise run test:e2e …` is one command with what it selected (a test name, a package) left out, once two of its commands have been timed. The session-start primer names up to four checks that take 20 seconds or more:
+The commands are listed costliest first. Each line ends with what the estimate rests on: `N runs here` is this machine's own median, `N runs elsewhere, × 1.4` is other machines' timings scaled to this one, and `N runs elsewhere, unscaled` is other machines' timings as they are, when no command has been timed in both places (see [timings from other machines](#timings-from-other-machines)). A family such as `mise run test:e2e …` is one command with what it selected (a test name, a package) left out, once two of its commands have been timed. Before anything has been timed, `jouet cost` says so and names where timings come from.
+
+The session-start primer names up to four checks that take 20 seconds or more, so the agent sees the slowest without running `jouet cost`:
 
 ```text
 jouet: slow checks here: `mise run test` ~25m00s, `mise run build` ~1m40s (`jouet cost` lists all). Finish the edits a slow run checks before starting it, so one run covers them.
 ```
 
+```text
+jouet cost [--min DUR] [--sequences] [--json]
+jouet cost fetch [REMOTE]
+jouet cost push [REMOTE]
+```
+
+`--min DUR`, such as `--min 30s`, lists only the commands estimated to take at least that long. `--sequences` is [experimental](#experimental-local-sequences). Every flag is in the [CLI reference](/cli/cost).
+
 ## Where the timings come from
 
-`jouet test` times each command it runs, and the hooks time a Bash call that runs one build, test or lint, as the [`checks` rule](/rules) recognizes them. Each timing is a line of JSON in a git note on HEAD under `refs/notes/jouet-cost`, which says which machine took it: a hash of its machine id, its CPU count and OS, and whether it ran on CI. The notes never touch the commits or the work tree. `[cost] record = false` in the config file, or `JOUET_COST_RECORD=0`, stops recording.
+`jouet test` times each job it runs, and the hooks time each Bash call. A timing is kept when the command runs one build, test or lint, as the [`checks` rule](/rules) recognizes them; a command that runs several checks is not split between them. Timings include recognized test runners such as `python3 -m tornado.test.runtests`, also when run through `jouet test --cmd`.
+
+Each timing is a line of JSON in a git note on HEAD under `refs/notes/jouet-cost`, which says which machine took it: a hash of its machine id, its CPU count and OS, and whether it ran on CI. The notes never touch the commits or the work tree. `[cost] record = false` in the config file, or `JOUET_COST_RECORD=0`, stops recording.
 
 Estimates read the notes on up to 200 first-parent commits back from HEAD, and up to the 20 most recent runs of each command, counting failing runs only when none passed, since a failing run can stop early.
 
@@ -70,6 +51,56 @@ CI shares its timings by pushing the notes after its runs:
 - run: jouet cost push
 ```
 
-The push needs permission to write to the repository. It is never forced: when another job pushed first, it fetches their notes, merges them with git's `cat_sort_uniq` strategy and tries again, up to five times. `jouet cost fetch` brings the remote's timings here and merges them with the ones already here. Don't add the notes ref to `git fetch`'s refspecs instead: a fetch replaces a ref with the remote's rather than merging it, which would drop timings taken here and not yet pushed.
+The push needs permission to write to the repository. It is never forced: when another job pushed first, it fetches their notes, merges them with git's `cat_sort_uniq` strategy and tries again, up to five times. `jouet cost fetch` brings the remote's timings here and merges them with the ones already here, and exits 3 when the remote has no `refs/notes/jouet-cost`. Both use `origin` unless given another remote.
+
+Don't add the notes ref to `git fetch`'s refspecs instead. A fetch replaces a ref with the remote's rather than merging it, which would drop timings taken here and not yet pushed.
 
 This uses the same notes design as [tak](https://tak.jdx.dev).
+
+## JSON output
+
+With `--json`, the list is one document:
+
+```json
+{"commands":[{"key":"make test","kind":"test","ms":1001,"here":3,"elsewhere":0},{"key":"make lint","kind":"lint","ms":201,"here":3,"elsewhere":0}],"scale":1.0,"scaled_by":0}
+```
+
+| Field | Meaning |
+|---|---|
+| `commands[].key` | The command, or its family |
+| `commands[].kind` | The kind of check: `test`, `build`, `lint` and so on |
+| `commands[].ms` | The estimate, in milliseconds |
+| `commands[].here`, `commands[].elsewhere` | How many runs were timed on this machine and on others |
+| `commands[].scale` | The scale applied, when the estimate comes from other machines' timings |
+| `scale` | This machine's time over the others' |
+| `scaled_by` | How many commands the scale was measured on; with `0`, the scale is 1 |
+| `sequences`, `sequences_recording` | With `--sequences`; see [below](#experimental-local-sequences) |
+
+`jouet cost fetch --json` prints `{"fetched":true}` and `jouet cost push --json` prints `{"pushed":true}`.
+
+## Experimental local sequences
+
+::: warning Experimental
+This is an opt-in experiment, and its output may change or be removed. It records observations, not measured savings.
+:::
+
+With sequences turned on, `jouet test` also records when each of its jobs started and finished, so `jouet cost --sequences` can show how long one check took when it ran straight after another. Opt in with `[cost] sequences = true` in your user config, or set `JOUET_COST_SEQUENCES=1`. Recording happens only in an identified agent session (`JOUET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`), and the events are kept under the jouet state directory.
+
+Only checks run through `jouet test` are recorded: for example, `jouet test --cmd -- cargo clippy` followed by `jouet test --cmd -- cargo test`, then `jouet cost --sequences` to inspect them. In a repository with a Makefile, after running `jouet test --cmd -- make lint` and then `jouet test --cmd -- make test`, three times in one session:
+
+```output
+$ jouet cost --sequences
+make test       1s  3 runs here
+make lint    201ms  3 runs here
+
+Successive recorded checks in the same session and worktree (other work and cache changes may intervene):
+  make lint → make test: median 1s for the second check (3 pairs)
+```
+
+For each pair seen at least three times, it reports the second check's median duration and the number of pairs (`make test → make lint` was seen only twice here, so it is left out). Pairs must be adjacent among recorded `jouet test` jobs in the same session and worktree, successful, non-overlapping, and no more than 30 minutes apart. A failed or unrecognized job breaks the sequence. An unfinished job prevents later pairs in that session from being reported, because its end is unknown.
+
+Ordinary shell commands and other work are not recorded by this experiment and may intervene, and cache state is unknown. These are conditional observations, not measured savings or proof of cache reuse.
+
+Events are local and are not added to git notes or transferred by `cost push`. Commands use the same redaction as normal cost samples; session IDs, machine identity and the worktree path are hashed. The files stay under the jouet state directory until you delete them; recording stops with a warning once a file reaches 16 MiB, until the file is moved or deleted.
+
+Turn recording off with `JOUET_COST_SEQUENCES=0` or by removing the setting; `--sequences` can still read previously recorded data, and says when recording is off. The JSON output includes `sequences_recording` when `--sequences` is used, and `sequences` lists each pair's `before` and `after` commands, `median_ms` and `samples`. `--min` applies to the pairs' medians too.

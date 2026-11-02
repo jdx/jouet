@@ -14,7 +14,7 @@ In five of six Claude Code runs on a mise benchmark task, close to 90% of the wa
 
 At session start, the primer names the slowest checks. The agent can then finish the edits a slow run checks before starting it, or use a narrower check while it iterates, instead of finding out how long the build takes by waiting for it.
 
-[Self-winding](/winding) looks across sessions for a command that keeps failing, long sleeps, or the same commands run over and over. Session review reads whole sessions for the user's corrections and the effort that went nowhere, and proposes rules, mise tasks, routines and notes for AGENTS.md.
+[Self-winding](/winding) looks across sessions for a command that keeps failing, long sleeps, or the same commands run over and over. Session review, once you turn it on, reads whole sessions for the user's corrections and the effort that went nowhere, and proposes rules, mise tasks, routines and notes for AGENTS.md.
 
 You or the agent decide what to adopt. An adopted rule steers later calls, and a task or routine gives later sessions something to run instead of retyping it. A drafted rule only warns until it is promoted, and automatic promotion is off unless you turn it on. `jouet unwind` proposes retiring rules that aren't helping.
 
@@ -34,25 +34,9 @@ A skill tells an agent how to do something, and the agent still carries out each
 
 The agent calls the routine once, and the loops and conditions run as code. A routine declares the capabilities it needs, is tested against recorded responses, and only previews its writes until it is given `--yes`. It does the same thing every session, and you can add one to jouet without writing a Rust command.
 
-## Commands for the chores
+## The chores agents script by hand
 
-[`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Besides recording timings and outcomes, they catch an agent hand-rolling something jouet has a command for, and name the command; `jouet agent-help` explains each one. Among them:
-
-- A [code graph](/commands/graph) for callers, dependencies and the tests a change reaches, and [searches](/commands/search) and [reads](/commands/read) that stay within a budget and skip what the session has already seen.
-- [Edits](/commands/edit) that check every replacement before writing any file, in place of Python heredocs.
-- [Waits](/commands/wait) that do the polling in one call and return the failed step's log, and [`jouet test --affected`](/commands/test), which runs only the tests a change reaches.
-
-How much these save depends on the project and the work.
-
-## Early development
-
-jouet is pre-1.0, and how much it helps depends on your language, framework, test runner and agent. Your project may need some configuration, a rule or routine of your own, or a fix in jouet before it works well, and you may not see fewer tokens or faster sessions straight away. Support for more ecosystems is still being worked out, and commands, flags, exit codes and JSON output may change incompatibly between releases.
-
-To see whether it is helping, [`jouet audit`](/commands/audit) shows where your sessions' tokens and time go, and [`jouet stats`](/commands/stats) estimates what jouet saved, against your own history. Those are estimates, not measurements. The [comparative benchmarks](/benchmarks), which run the same tasks with and without jouet and compare tokens, time and whether the task got done, are still being built.
-
-## What agents do today
-
-jouet was designed from a survey of about 2,600 Claude Code and Codex sessions, which ran roughly 266,000 shell commands between them. Four chores stood out:
+jouet started from a survey of about 2,600 Claude Code and Codex sessions, which ran roughly 266,000 shell commands between them. Four chores stood out:
 
 | Chore | What agents write | What goes wrong |
 |---|---|---|
@@ -61,7 +45,7 @@ jouet was designed from a survey of about 2,600 Claude Code and Codex sessions, 
 | Status of many PRs | `for n in …; do gh pr view $n; done` loops | `mergeable: UNKNOWN` read as an answer, and missing CI runs never traced back to a merge conflict |
 | File edits | Python heredocs that call `str.replace`, often with a hand-written `assert s.count(old) == 1` | A formatter re-wrapped the line so the literal matches nothing, or an assertion aborts the script after some files were already written |
 
-Each of these is a few lines of shell that looks right and usually works. That is why agents keep writing them, and why the failures are easy to miss.
+Each of these is a few lines of shell that looks right and usually works. That is why agents keep writing them, and why the failures are easy to miss. jouet has a command for each, and the hooks [`jouet setup`](/setup) installs catch an agent hand-rolling one anyway and name the command to use.
 
 ## Before and after
 
@@ -189,6 +173,7 @@ The `until` loop above would still be polling: a failed check never makes `gh pr
 | [`jouet edit`](/commands/edit) | Heredoc edits with a hand-written `assert s.count(old) == 1`; all or nothing, never partly written |
 | [`jouet search`](/commands/search) | `rg` and `grep -r` printing every match in the tree; grouped by the function each match is in, cut to a budget, and without the matches the session already saw |
 | [`jouet read --map`](/commands/read) | Listing directories and reading whole files to learn a codebase; the most important definitions, sized to a token budget |
+| [`jouet graph`](/commands/graph) | Repeated searches to find a function's callers, what it depends on, and the tests a change reaches |
 | [`jouet docs`](/commands/docs) | Guessing a dependency's API from memory, or reading files out of the cargo registry and `node_modules`; its signatures and docs at the version the lockfile names |
 | [`jouet deps`](/commands/deps) | Adding a dependency from memory, which may not exist, be deprecated or have a known advisory; asks its registry and OSV first, and checks the locked versions against OSV |
 | [`jouet db`](/commands/db) | `sqlite3 app.db "select * from …"` and `psql -c` printing every row; the schema in a few lines, and one read-only query cut to a limit, refused when it would write or reach another machine |
@@ -197,8 +182,15 @@ The `until` loop above would still be polling: a failed check never makes `gh pr
 | [`jouet wait`](/commands/wait) | `sleep` and `until` loops around log files, ports, URLs and processes; and around `gh pr checks` and `gh run view` |
 | [`jouet pr status`](/commands/pr-status) | Per-PR loops over `gh pr view`, including `mergeable: UNKNOWN` |
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
+| [`jouet test --affected`](/commands/test) | Re-running the whole test suite after every edit; only the tests the change reaches, and the whole suite when jouet can't trace the change to tests |
 
-Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is cut without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
+How much these save depends on the project and the work. Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is cut without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
+
+## Early development
+
+jouet is pre-1.0, and how much it helps depends on your language, framework, test runner and agent. Your project may need some configuration, a rule or routine of your own, or a fix in jouet before it works well, and you may not see fewer tokens or faster sessions straight away. Support for more ecosystems is still being worked out, and commands, flags, exit codes and JSON output may change incompatibly between releases. [Stability and deprecations](/stability) says what changes at 1.0.
+
+To see whether it is helping, [`jouet audit`](/commands/audit) shows where your sessions' tokens and time go, and [`jouet stats`](/commands/stats) estimates what jouet saved, against your own history. Those are estimates, not measurements. The [comparative benchmarks](/benchmarks), which run the same tasks with and without jouet and compare tokens, time and whether the task got done, are still being built.
 
 ## The name
 

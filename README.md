@@ -68,12 +68,12 @@ and Codex transcripts and shows where the tokens and time went.
 [`jouet wind`](https://jouet.jdx.dev/winding) looks across sessions for a
 command that keeps failing, long sleeps, or the same commands run over and
 over, and drafts a rule or a mise task for each.
-[Session review](https://jouet.jdx.dev/winding#reviewing-whole-sessions) reads
-whole sessions for the user's corrections and abandoned approaches, and
-proposes rules, tasks, routines and notes. You or the agent decide what to
-adopt. A drafted rule only warns until it is promoted (automatic promotion is
-off unless you turn it on), and `jouet unwind` proposes retiring rules that
-aren't helping.
+[Session review](https://jouet.jdx.dev/winding#reviewing-whole-sessions), once
+you turn it on, reads whole sessions for the user's corrections and abandoned
+approaches, and proposes rules, tasks, routines and notes. You or the agent
+decide what to adopt. A drafted rule only warns until it is promoted
+(automatic promotion is off unless you turn it on), and `jouet unwind`
+proposes retiring rules that aren't helping.
 
 [`jouet stats`](https://jouet.jdx.dev/commands/stats) estimates the tokens
 jouet saved, against your own history. Those are estimates, not benchmark
