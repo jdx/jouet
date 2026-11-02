@@ -43,6 +43,7 @@ fn run_explain(a: &CiExplainArgs, out: &Output) -> Exit {
     let req = explain::Request {
         target,
         rerun: a.rerun,
+        force: a.force,
         log_lines: a.log_lines.unwrap_or(EXPLAIN_LOG_LINES),
     };
     match explain::explain(&mut Client::from_env(), &req) {
@@ -208,8 +209,8 @@ fn render_explain(r: &explain::Report) -> String {
     let rerun = &r.rerun;
     if rerun.started {
         let _ = writeln!(s, "rerun: started for {}", short_list(&rerun.jobs));
-        for run in r.runs.iter().filter(|run| !run.jobs.is_empty()) {
-            let _ = writeln!(s, "  jouet wait run {} --repo {}", run.run_id, r.repo);
+        for id in &rerun.runs {
+            let _ = writeln!(s, "  jouet wait run {id} --repo {}", r.repo);
         }
     } else if let Some(command) = rerun.command.as_deref().filter(|_| rerun.allowed) {
         let _ = writeln!(s, "rerun: allowed, {}: {command}", rerun.reason);

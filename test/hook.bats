@@ -156,8 +156,9 @@ stop_reason() {
 	# The ledger keeps each run's scope and tree, never what it selected.
 	run jq -c 'select(.event == "post-tool-use") | [.decisions[0].scope, (.tree | length)]' \
 		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
-	assert_line --index 0 '["full",32]'
-	assert_line --index 1 '["partial",32]'
+	# A tree is two hashes, the whole and the part without prose.
+	assert_line --index 0 '["full",65]'
+	assert_line --index 1 '["partial",65]'
 	run grep -c 'test cli' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	assert_output 0
 }
