@@ -33,6 +33,7 @@ Projects beyond jdx's own:
 | task | project | issue | language and runner | needs on the host |
 |---|---|---|---|---|
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
+| `cobra-completion-args` | Cobra, a Go CLI library | [spf13/cobra#2257](https://github.com/spf13/cobra/issues/2257) | Go, `go test` | the benchmark's Go tools, cached modules, and a local clone at `~/src/cobra-bench-source` |
 | `requests-proxied-files` | Requests, an HTTP library | [psf/requests#7502](https://github.com/psf/requests/pull/7502) | Python, pytest and pytest-httpbin | Python 3.13 and a local Requests clone at `~/src/requests-bench-source` |
 | `yq-signed-hex` | yq, a CLI | [mikefarah/yq#2748](https://github.com/mikefarah/yq/issues/2748) | Go, `go test` | the benchmark's pinned Go toolchain, and yq's modules in `~/go/pkg/mod` (`go mod download`) |
 | `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in the clone to fill the store |
