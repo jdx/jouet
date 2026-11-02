@@ -200,6 +200,22 @@ fn repeated_check_cursor_returns_an_error() {
 }
 
 #[test]
+fn missing_check_cursor_returns_an_error() {
+    let mut pr = fetch_batch().prs.remove(0);
+    let lookup = Lookup::Contexts {
+        id: "rollup".into(),
+        after: None,
+    };
+    let entry =
+        json!({"contexts": {"pageInfo": {"hasNextPage": true, "endCursor": null}, "nodes": []}});
+    assert!(
+        read_page(&mut pr, &lookup, &entry)
+            .unwrap_err()
+            .contains("omitted")
+    );
+}
+
+#[test]
 fn attention_is_derived_from_the_fields() {
     let mut result = fetch_batch();
     let page = result.prs[0].pages().remove(0);

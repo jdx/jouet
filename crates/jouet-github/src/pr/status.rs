@@ -703,6 +703,9 @@ fn read_page(pr: &mut Fetched, lookup: &Lookup, entry: &Value) -> Result<(), Str
         Lookup::Threads { .. } => pr.add_threads(parse(&entry["reviewThreads"], "review threads")?),
         Lookup::Contexts { after, .. } => {
             let contexts: RawContexts = parse(&entry["contexts"], "checks")?;
+            if contexts.page_info.has_next_page && contexts.page_info.end_cursor.is_none() {
+                return Err("GitHub omitted the next check contexts cursor".into());
+            }
             if contexts.page_info.has_next_page
                 && after.is_some()
                 && contexts.page_info.end_cursor == *after
