@@ -416,7 +416,8 @@ def execute(
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
     usage = ran["usage"]
-    capacity = usage.is_error and not usage.input_tokens and usage.extra.get("capacity_error", False)
+    capacity = (usage.is_error and not usage.total_tokens and not ran["agent"]["stopped"]
+                and usage.extra.get("capacity_error", False))
     if capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
     else:
