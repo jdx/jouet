@@ -159,6 +159,8 @@ fn go_selection_falls_back_when_an_unchanged_test_cannot_be_parsed() {
         &root.join("lib/lib.go"),
         "package lib\nfunc Value() int { return 1 }\n",
     );
+    // Go 1.26 accepts new(expression), but the bundled tree-sitter-go grammar
+    // does not yet parse it. An unchanged, valid test must not be omitted.
     write(
         &root.join("lib/lib_test.go"),
         "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = *new(Value()) }\n",
