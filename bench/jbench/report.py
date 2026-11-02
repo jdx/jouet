@@ -59,10 +59,10 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                     decisions[k] += v
                 unanswered.update((r.get("github") or {}).get("unanswered_examples") or [])
             cell["arms"][arm] = {
-                "runs": len(runs),
+                "runs": len(finished),
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in finished if r.get("stopped")],
-                "successes": sum(1 for r in runs if r.get("success")),
+                "successes": sum(1 for r in finished if r.get("success")),
                 "metrics": {key: stats.summarize(get(r) for r in finished) for key, _, get, _ in METRICS},
                 "rule_decisions": dict(sorted(decisions.items())),
                 "github_unanswered": sorted(unanswered),
