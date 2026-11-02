@@ -327,30 +327,29 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         }
     }
     if let (Some(base), Exit::Failed) = (base, exit) {
-        let named: Option<Vec<_>> = failed
-            .into_iter()
-            .map(|(job, names, ran)| names.map(|names| (job, names, ran)))
-            .collect();
+        let unnamed = failed.iter().any(|(_, names, _)| names.is_none());
         // Set when only a kept comparison could be used, and none was.
         let mut slow = false;
-        let found = match named {
+        let found = match (unnamed, args.baseline, failed.len()) {
             // Said only when asked for: a failing build names no test.
-            None if !args.baseline => Ok(None),
-            None => Err(baseline::NotCompared::from(
-                "not compared: failure names are missing or cannot be matched safely; the merge-base command was not run"
+            (true, false, _) => Ok(None),
+            (true, true, n) if n != 1 => Err(baseline::NotCompared::from(
+                "not compared: multiple failing commands include unnamed failures; the merge-base commands were not run"
                     .to_string(),
             )),
-            Some(named) => {
+            _ => {
                 // A short run costs little to run again at the merge base,
                 // and an agent asks that itself of every failure otherwise.
                 let short = crate::settings::Settings::load().test.baseline_cmd_under_ms;
-                let mode = if mode == baseline::Mode::Kept && slowest_failure < short {
+                let mode = if unnamed {
+                    baseline::Mode::Fresh
+                } else if mode == baseline::Mode::Kept && slowest_failure < short {
                     baseline::Mode::Run
                 } else {
                     mode
                 };
                 slow = mode == baseline::Mode::Kept;
-                baseline::compare(&root, base, &formats, &named, mode)
+                baseline::compare(&root, base, &formats, &failed, mode)
             }
         };
         match found {
