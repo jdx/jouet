@@ -12,6 +12,11 @@ use usage_rs::Args;
 ///    (`Vfox::download`, `Shop.Cart`); every definition it matches is printed.
 /// 3. `--range A:B`: lines A to B (`A:` to the end, `:B` from the start).
 ///
+/// `--symbol` and `--range` repeat, and go together: one call reads several
+/// definitions and ranges of a file, each symbol then each range, which
+/// costs one request where a read each costs one each. A name that matches
+/// nothing is noted, and fails the call only when nothing else was found.
+///
 /// With none of them, a file of up to 300 lines is printed whole, and a
 /// longer one as its outline. `--outline` prints a file of up to 100 lines
 /// whole too (with its outline in --json), since reading it after its
@@ -41,6 +46,7 @@ use usage_rs::Args;
 ///   jouet read src/backend/vfox.rs --outline
 ///   jouet read src/backend/vfox.rs --symbol 'Vfox::download'
 ///   jouet read src/backend/vfox.rs --range 120:160
+///   jouet read src/backend/vfox.rs --symbol download --symbol install --range 1:20
 ///   jouet read --map --focus src/backend/vfox.rs --focus download
 #[derive(Args)]
 pub(crate) struct ReadArgs {
@@ -50,12 +56,13 @@ pub(crate) struct ReadArgs {
     /// 100 lines is printed whole)
     #[usage(long)]
     pub(crate) outline: bool,
-    /// Print the definitions this names: NAME, KIND NAME or Scope::NAME
-    #[usage(long, value_name = "NAME")]
-    pub(crate) symbol: Option<String>,
-    /// Print lines A to B: `A:B`, `A:` or `:B`
-    #[usage(long, value_name = "A:B")]
-    pub(crate) range: Option<String>,
+    /// Print the definitions this names: NAME, KIND NAME or Scope::NAME.
+    /// Repeatable, and with --range in the same call
+    #[usage(long, var, value_name = "NAME")]
+    pub(crate) symbol: Vec<String>,
+    /// Print lines A to B: `A:B`, `A:` or `:B`. Repeatable
+    #[usage(long, var, value_name = "A:B")]
+    pub(crate) range: Vec<String>,
     /// The most lines of code to print (default 400; 0 is no limit)
     #[usage(long, value_name = "N")]
     pub(crate) max_lines: Option<usize>,

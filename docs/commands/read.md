@@ -7,7 +7,7 @@ description: Read a file by its outline, one definition or a range of lines inst
 Reading a whole file to find one thing is the most common way agents fill their context. `jouet read` reads in steps instead: a file's outline, then the one definition needed, or a range of lines. `jouet read --map` does the same for a whole repository.
 
 ```text
-jouet read FILE [--outline | --symbol NAME | --range A:B] [--max-lines N] [--again] [--why]
+jouet read FILE [--outline | --symbol NAME... --range A:B...] [--max-lines N] [--again] [--why]
 jouet read --map [PATH] [--budget TOKENS] [--focus FILE|NAME]...
 ```
 
@@ -33,13 +33,14 @@ src/lib.rs: method Client::download (6-9)
 - **`--outline`** lists every definition with its line range, each named with its scope: the class, module or namespace it is in, a Rust `impl` block's type, or a Go method's receiver. A file of up to 100 lines is printed whole instead, under a line saying so, because its outline saves little and reading it after the outline costs another call; `--json` then has both the outline and the file, and `short: true`. A short file this session was already shown gets only its outline.
 - **`--symbol NAME`** prints the definitions `NAME` matches. `NAME` is a name (`download`), a kind and a name (`fn download`, `class Cart`, `trait Backend`), or a name with its scope (`Client::download`, `Shop.Cart`). The same selectors pick definitions for [`jouet edit`'s symbol targets](/commands/edit#symbol-targets).
 - **`--range A:B`** prints lines `A` to `B`; `A:` runs to the end and `:B` starts at the beginning.
+- **Several at once:** `--symbol` and `--range` repeat and go together, so `jouet read src/cart.ts --symbol Cart --symbol checkout --range 1:20` reads all three in one call, each symbol then each range. An agent pays for each call with the whole context, so one call for three reads costs a third. A name that matches nothing is noted beside the rest, and the call fails (exit 3) only when nothing was found.
 - **With none of them,** a file of up to 300 lines is printed whole, and a longer one as its outline, with a line saying so.
 
 Code is printed with line numbers, at most `--max-lines` lines (400 by default; `0` is no limit), and an outline at most that many definitions. A cut ends with a marker, such as `... 16 more lines (--range 3:18, or raise --max-lines)`.
 
 Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line, as in [`jouet search`](/commands/search#sessions); `--again` prints them. The hooks remember what Claude Code's Read tool showed too. Each of Claude Code's subagents has a memory of its own, apart from the lead's and from each other's ([sessions](/commands/search#sessions)).
 
-Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file or symbol exits 3, and a missing symbol's error lists what the file defines.
+Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file exits 3, as does a call whose every symbol is missing; that error lists what the file defines.
 
 With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:
 

@@ -107,6 +107,14 @@ RS
 	assert_output 'src/lib.rs:16-18 already shown, unchanged (--again prints it)'
 	run --separate-stderr jouet read src/lib.rs --range 16:18 --again
 	assert_line --index 0 --regexp '^16	fn fetch'
+	# Sections of one call that overlap all print: none was shown before it.
+	# Ranges go in the order given, so the second sits inside the first.
+	run --separate-stderr jouet read src/lib.rs --range 1:9 --range 6:9
+	refute_output --partial 'already shown'
+	assert_equal "$(grep -c '^6	' <<<"$output")" 2
+	# And the next call collapses them.
+	run --separate-stderr jouet read src/lib.rs --range 6:9
+	assert_output --partial 'already shown'
 }
 
 @test "read caps code at --max-lines and says what it left out" {
@@ -253,5 +261,21 @@ payload() {
 	run --separate-stderr jouet read src/lib.rs --budget 10
 	assert_failure 2
 	run --separate-stderr jouet read
+	assert_failure 2
+}
+
+@test "read takes several --symbol and --range in one call" {
+	run --separate-stderr jouet read src/lib.rs --symbol Client::download --symbol join_url --range 1:2
+	assert_success
+	assert_line 'src/lib.rs: method Client::download (6-9)'
+	assert_line --partial 'src/lib.rs: function join_url (12-14)'
+	assert_line --regexp '^1	pub struct Client'
+	# A name that matches nothing is noted, while the rest are read.
+	run --separate-stderr jouet read src/lib.rs --symbol join_url --symbol upload
+	assert_success
+	assert_output --partial 'join_url'
+	assert_output --regexp 'no definition matching .upload.'
+	# --outline goes alone.
+	run --separate-stderr jouet read src/lib.rs --outline --symbol join_url
 	assert_failure 2
 }
