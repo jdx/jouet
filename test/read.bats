@@ -107,6 +107,13 @@ RS
 	assert_output 'src/lib.rs:16-18 already shown, unchanged (--again prints it)'
 	run --separate-stderr jouet read src/lib.rs --range 16:18 --again
 	assert_line --index 0 --regexp '^16	fn fetch'
+	# Sections of one call that overlap all print: none was shown before it.
+	run --separate-stderr jouet read src/lib.rs --range 1:9 --symbol Client::download
+	refute_output --partial 'already shown'
+	assert_line 'src/lib.rs: method Client::download (6-9)'
+	# And the next call collapses them.
+	run --separate-stderr jouet read src/lib.rs --range 6:9
+	assert_output --partial 'already shown'
 }
 
 @test "read caps code at --max-lines and says what it left out" {

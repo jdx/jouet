@@ -262,7 +262,11 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     };
     let stamp = Stamp::read(file);
     let key = memory::key(file);
-    let section = |symbol: Option<String>, start: usize, end: usize, memory: &mut Memory| {
+    // The lines this call prints, kept once it has built every section:
+    // what the session saw before the call collapses, and a section of this
+    // call that overlaps another does not.
+    let printed = std::cell::RefCell::new(Vec::new());
+    let section = |symbol: Option<String>, start: usize, end: usize, memory: &Memory| {
         let end = end.min(lines.len());
         let seen =
             stamp.is_some_and(|stamp| memory.shown_range(&key, stamp, to_u32(start), to_u32(end)));
@@ -284,9 +288,9 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         } else {
             end.min(start + max - 1)
         };
-        if let Some(stamp) = stamp {
-            memory.record(&key, stamp, to_u32(start), to_u32(shown_end));
-        }
+        printed
+            .borrow_mut()
+            .push((to_u32(start), to_u32(shown_end)));
         Section {
             symbol,
             start,
@@ -316,7 +320,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                         Some(label),
                         l.def.start as usize,
                         l.def.end as usize,
-                        &mut memory,
+                        &memory,
                     );
                     (read_section.callers, read_section.caller_count) =
                         graph_callers(file, l.def.line);
@@ -337,7 +341,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 ),
             );
         };
-        read.sections.push(section(None, start, end, &mut memory));
+        read.sections.push(section(None, start, end, &memory));
     }
     if !missing.is_empty() {
         let names: Vec<String> = missing.iter().map(|n| format!("`{n}`")).collect();
@@ -357,7 +361,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     if selected {
         // The sections asked for, above.
     } else if let Some(whole) = (args.outline && !lines.is_empty() && lines.len() <= SHORT)
-        .then(|| section(None, 1, lines.len(), &mut memory))
+        .then(|| section(None, 1, lines.len(), &memory))
         .filter(|s| !s.already_shown)
     {
         // A short file whole, with its outline when jouet can read one. One
@@ -372,13 +376,15 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 return out.error(Exit::Usage, &select_error(&SelectError::Unsupported, path));
             }
             // A long file jouet cannot outline: its start, with a marker.
-            None => read
-                .sections
-                .push(section(None, 1, lines.len(), &mut memory)),
+            None => read.sections.push(section(None, 1, lines.len(), &memory)),
         }
     } else if !lines.is_empty() {
-        read.sections
-            .push(section(None, 1, lines.len(), &mut memory));
+        read.sections.push(section(None, 1, lines.len(), &memory));
+    }
+    if let Some(stamp) = stamp {
+        for (start, end) in printed.take() {
+            memory.record(&key, stamp, start, end);
+        }
     }
     memory.save();
     if args.why {
