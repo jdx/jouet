@@ -617,4 +617,17 @@ fn a_few_warnings_are_named_with_their_place_once_each() {
             .warning_names
             .is_empty()
     );
+    // cargo's summary is not a warning, nor does it take the next one's place.
+    let summary = "warning: `fnox` (lib) generated 1 warning\nwarning: unused import: `y`\n --> src/b.rs:2:5\n";
+    let d = digest(summary, false, DEFAULT_BUDGET);
+    assert_eq!(d.warning_names, ["unused import: `y` (src/b.rs:2:5)"]);
+    assert_eq!(d.warnings, 1);
+    // A long headline is cut, not its place.
+    let long = format!("warning: {}\n --> src/c.rs:3:1\n", "x".repeat(300));
+    let d = digest(&long, false, DEFAULT_BUDGET);
+    assert!(
+        d.warning_names[0].ends_with("(src/c.rs:3:1)"),
+        "{:?}",
+        d.warning_names
+    );
 }

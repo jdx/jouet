@@ -529,6 +529,8 @@ tap_script() {
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test --bin app missing_name
 	assert_failure 4
 	assert_output --partial 'lib tests run with --lib'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test --lib --bin app missing_name
+	refute_output --partial 'lib tests run with --lib'
 
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- cargo test missing_name
 	assert_failure 4

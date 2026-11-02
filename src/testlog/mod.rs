@@ -215,6 +215,8 @@ regexes! {
     // rustc's diagnostics.
     RUSTC_ERROR = r"^(error(?:\[E\d{4}\])?): (.+)$";
     RUSTC_WARNING = r"^warning(?:\[[^\]]+\])?: ";
+    // cargo's count of a target's warnings, not a warning of its own.
+    CARGO_WARNING_SUMMARY = r"^warning: `[^`]+` \([^)]+\) generated \d+ warnings?";
     RUSTC_AT = r"^\s*--> (\S+)$";
     // rustfmt --check, `cargo fmt --check`: each place it would change.
     RUSTFMT_DIFF = r"^Diff in (\S+?)(?::(\d+):| at line (\d+):)$";
@@ -368,9 +370,6 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
             names.dedup();
             if names.len() <= WARNINGS_NAMED {
                 names
-                    .iter()
-                    .map(|n| n.chars().take(160).collect())
-                    .collect()
             } else {
                 Vec::new()
             }
@@ -480,18 +479,24 @@ fn build_script(after: &[String]) -> Vec<String> {
 /// rustc's errors with a location or a code, and its warnings, counted.
 fn rustc(lines: &[String], out: &mut Parsed) {
     for (i, line) in lines.iter().enumerate() {
+        // The place in the next few lines, up to the next diagnostic: a
+        // location after that is the next one's.
         let located = |from: usize| {
             lines
                 .iter()
                 .skip(from)
                 .take(3)
+                .take_while(|l| !RUSTC_WARNING.is_match(l) && !RUSTC_ERROR.is_match(l))
                 .find_map(|l| RUSTC_AT.captures(l).map(|c| c[1].to_string()))
         };
         if RUSTC_WARNING.is_match(line)
+            && !CARGO_WARNING_SUMMARY.is_match(line)
             && let Some(at) = located(i + 1)
         {
             out.warnings += 1;
             let headline = line.split_once(": ").map_or(line.as_str(), |(_, h)| h);
+            // A long headline is cut, never its place.
+            let headline: String = headline.chars().take(120).collect();
             out.warning_names.push(format!("{headline} ({at})"));
             continue;
         }

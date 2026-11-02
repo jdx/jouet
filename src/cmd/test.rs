@@ -1030,10 +1030,11 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
         argv.iter().any(|w| w == "cargo")
             && argv.iter().any(|w| w == "test")
             && argv.iter().any(|w| w == "--bin" || w.starts_with("--bin="))
+            && !argv.iter().any(|w| w == "--lib")
     });
     if empty_test && bin_only {
         s.push_str(
-            ": --bin runs only the binary's own tests; a crate's lib tests run with --lib (exit 4)",
+            ": a filter that matched nothing, or --bin, which runs only the binary's own tests? a crate's lib tests run with --lib (exit 4)",
         );
     } else if empty_test {
         s.push_str(": a filter or path that matched nothing? (exit 4)");
