@@ -61,6 +61,9 @@ commit = "0beddf45fa8d50cca26ef13d5c7304248450965b"
 
 [tools]
 go = "go"
+gofmt = "gofmt"
+golangci-lint = "golangci-lint"
+typos = "typos"
 
 # The user's module cache, which must hold yq's modules (`go mod download` in
 # ~/src/yq at this commit), and no proxy: runs build offline. The build cache
