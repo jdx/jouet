@@ -31,7 +31,7 @@ test("escapes title markup and gives changed content a new image URL", () => {
 });
 
 test("the home page gets the brand card instead of a page card", () => {
-  const title = "Spend fewer tokens. Get there faster.";
+  const title = "Wind-up tools for coding agents";
   const home = socialCard(title, { home: true });
   assert.notEqual(home.path, socialCard(title).path);
   assert.match(home.svg, />jouet<\/text>/);

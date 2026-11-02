@@ -26,10 +26,10 @@ export default {
               {
                 id: "jouet-commands",
                 eyebrow: "How it works",
-                title: "Measure. Learn. Improve the next run.",
+                title: "Learning from past sessions",
               },
               () =>
-                "Make the cost of work visible, give the agent better choices, and keep what helps for the next session.",
+                "jouet keeps the timings, failures and corrections from past sessions, and uses them to steer the next one.",
             ),
           ]),
         ]),

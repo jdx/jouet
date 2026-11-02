@@ -156,14 +156,15 @@ function select(index: number, focus = false) {
     <div class="jouet-container">
       <HomeHeading
         id="jouet-before-after"
-        eyebrow="Some of the tools behind the loop"
-        title="Give the agent better ways to work"
+        eyebrow="Before and after"
+        title="The chore, minus the script"
       >
-        A <a href="/commands/graph">code graph</a> and
-        <a href="/commands/search">budgeted searches and reads</a> narrow
-        exploration. <a href="/commands/test">Affected tests</a> shorten
-        iteration. Checked edits and waits replace the scripts and polling
-        that keep wasting turns. These examples show a few of those tools.
+        jouet also has commands for the chores agents keep scripting by hand: a
+        <a href="/commands/graph">code graph</a>,
+        <a href="/commands/search">searches and reads</a> that stay within a
+        budget, <a href="/commands/test">only the tests a change affects</a>,
+        edits that check before they write, and waits that poll for you. A few
+        of them, next to the script they replace:
       </HomeHeading>
 
       <div class="tabs" role="tablist" aria-label="Examples">

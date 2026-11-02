@@ -5,8 +5,8 @@
 <h1 align="center">jouet</h1>
 
 <p align="center">
-  <strong>Spend fewer tokens. Get there faster.</strong><br>
-  A toolkit that measures agent work, learns from it, and helps the next session do better.
+  <strong>Wind-up tools for coding agents.</strong><br>
+  It tells an agent which checks are slow, and turns what went wrong in past sessions into rules, tasks and routines for the next one.
 </p>
 
 <p align="center">
@@ -16,35 +16,22 @@
   <a href="https://github.com/jdx/jouet/releases">Releases</a>
 </p>
 
-jouet (pronounced "zhweh", French for "toy") helps coding agents use fewer
-tokens and finish work faster through a feedback loop: measure what the work
-costs, learn where effort is wasted, and carry better choices into the next
-session.
+jouet (pronounced "zhweh", French for "toy") is a command-line toolkit for
+coding agents. It keeps track of what an agent's work costs and what keeps
+going wrong, and hands that to later sessions.
 
-An agent that knows a rebuild takes minutes can finish its edits before
-starting it. A lesson from a failed approach can become a rule. A workflow
-the agent keeps reasoning through can become code it runs once.
-
-- **Measure the cost.** [Cost analysis](https://jouet.jdx.dev/commands/cost)
-  records how long builds, tests and lints take and tells the agent about slow
-  checks at session start, so it can plan around expensive runs.
-  [Session audits](https://jouet.jdx.dev/commands/audit) show where tokens and
-  time go.
-- **Learn from the work.** [Self-winding](https://jouet.jdx.dev/winding)
-  notices repeated failures, costly habits and repeated command sequences.
-  Session review uses corrections and wasted effort to propose better rules,
-  tasks and project guidance. You or your agent choose what to adopt.
-- **Make the lesson reusable.** Rules steer future calls, tasks replace
-  repeated commands, and [routines](https://jouet.jdx.dev/routines) turn
-  procedures into tested programs. Think skills with executable workflows:
-  the agent calls the procedure instead of working out every step again.
+An agent doesn't know a build takes minutes until it has waited for one, so it
+builds after one edit and again after the next. Told up front, it can finish
+its edits and build once. A command that fails in every session can get a rule
+that names what to run instead, and a procedure the agent works through by
+hand each time can become a [routine](https://jouet.jdx.dev/routines) it calls
+once: a short Luau program, something like a skill that runs.
 
 > [!CAUTION]
-> **jouet is early, and benefits will vary.** Your language, framework, test
-> runner or agent harness may need configuration or changes to jouet itself
-> before it works well for your project. You may not see savings right away.
-> Broad ecosystem support is still being worked out before 1.0; commands,
-> flags, exit codes and JSON output may change incompatibly between releases.
+> **jouet is in early development.** How much it helps depends on your
+> language, test runner and agent, and your setup may need some configuration,
+> or a fix in jouet, before you see any savings. Commands, flags, exit codes
+> and JSON output may change incompatibly between releases until 1.0.
 
 ## Install
 
@@ -68,37 +55,40 @@ distributions use the static musl archive, which mise picks automatically.
 completions, which mise loads for you when it installs jouet.
 [All installation options →](https://jouet.jdx.dev/getting-started)
 
-## From measurements to better decisions
+## What it keeps track of
 
-`jouet setup` installs a short session primer and hooks. The hooks record
-check durations and command outcomes. `jouet cost` shows historical timings
-for builds, tests and lints, and the primer names the slowest checks before
-the agent starts work. That gives it a reason to batch edits, choose a
-focused check while iterating, and avoid repeating an expensive rebuild.
+`jouet setup` installs hooks and a short primer the agent reads at session
+start. The hooks time each build, test and lint, and
+[`jouet cost`](https://jouet.jdx.dev/commands/cost) lists the timings. The
+primer names the slowest checks, so the agent can batch its edits before a
+long run, or pick a narrower check while it iterates.
 
-[`jouet audit`](https://jouet.jdx.dev/commands/audit) shows where your
-Claude Code and Codex sessions spend tokens and time.
-[`jouet wind`](https://jouet.jdx.dev/winding) turns recurring patterns into
-proposals that future sessions can use. Draft rules start in warn mode;
-automatic rule promotion is opt-in, and `jouet unwind` can propose retiring
-rules that are not helping.
+[`jouet audit`](https://jouet.jdx.dev/commands/audit) reads your Claude Code
+and Codex transcripts and shows where the tokens and time went.
+[`jouet wind`](https://jouet.jdx.dev/winding) looks across sessions for a
+command that keeps failing, long sleeps, or the same commands run over and
+over, and drafts a rule or a mise task for each.
+[Session review](https://jouet.jdx.dev/winding#reviewing-whole-sessions) reads
+whole sessions for the user's corrections and abandoned approaches, and
+proposes rules, tasks, routines and notes. You or the agent decide what to
+adopt. A drafted rule only warns until it is promoted (automatic promotion is
+off unless you turn it on), and `jouet unwind` proposes retiring rules that
+aren't helping.
 
-[`jouet stats`](https://jouet.jdx.dev/commands/stats) records jouet usage
-and estimates token savings against your own history. These estimates are
-not benchmark results; [comparative benchmarks](https://jouet.jdx.dev/benchmarks)
-are still being developed.
+[`jouet stats`](https://jouet.jdx.dev/commands/stats) estimates the tokens
+jouet saved, against your own history. Those are estimates, not benchmark
+results; the [comparative benchmarks](https://jouet.jdx.dev/benchmarks) are
+still being built.
 
-## Tools the agent can act on
+## Commands for the chores
 
-The feedback loop comes with tools for doing the work: a
-[code graph](https://jouet.jdx.dev/commands/graph) for focused exploration,
-budgeted searches and reads that remember what the session has already seen,
-checked edits, and waits that handle polling in one call. Hooks catch costly
-patterns as they happen and point to the command that replaces them.
+The rest of jouet is commands for the work itself: a
+[code graph](https://jouet.jdx.dev/commands/graph), searches and reads that
+stay within a budget and skip what the session has already seen, edits that
+check before they write, and waits that do the polling in one call. When an
+agent hand-rolls one of these anyway, a hook names the command.
 
-For example, a simple edit should be a simple command.
-
-An agent should not need to write a Python program to change one string:
+An agent shouldn't need a Python program to change one string:
 
 ```sh
 python3 - <<'EOF'
@@ -116,20 +106,17 @@ With jouet:
 jouet edit replace src/main.rs --old 'let x = 1;' --new 'let x = 2;'
 ```
 
-The text must match exactly once. Across multiple files and replacements,
-jouet checks every edit before writing any file. A stale match writes
-nothing and shows the closest match, so the agent has enough information
-to correct it. [See a multi-file failure →](https://jouet.jdx.dev/why#editing-two-files)
-
-The same idea runs through the toolkit: let code handle the mechanics,
-and give the model the result it needs to make the next decision.
+The old text has to match exactly once. With several files or replacements,
+jouet checks all of them before it writes anything, so a stale match leaves
+every file alone and shows the closest match instead.
+[See a multi-file failure →](https://jouet.jdx.dev/why#editing-two-files)
 
 ## Commands
 
 | Command | Replaces |
 |---|---|
 | [`jouet cost`](https://jouet.jdx.dev/commands/cost) | guessing how long a build, test or lint will take before running it again |
-| [`jouet wind`](https://jouet.jdx.dev/winding) | losing lessons from repeated failures and wasted effort between sessions |
+| [`jouet wind`](https://jouet.jdx.dev/winding) | hitting the same failure, or the same correction, session after session |
 | [`jouet edit`](https://jouet.jdx.dev/commands/edit) | heredoc edits with a hand-written `assert s.count(old) == 1` |
 | [`jouet search`](https://jouet.jdx.dev/commands/search) | `rg` printing every match; grouped by function, budgeted, and skipping what the session already saw |
 | [`jouet read --map`](https://jouet.jdx.dev/commands/read) | reading whole files to learn a codebase; Aider's repo map, on the code graph |
@@ -154,9 +141,10 @@ Commands follow shared
 output that adapts to whoever is reading, `--json` that prints exactly one
 document, and one table of exit codes.
 
-See [agent setup and hooks](https://jouet.jdx.dev/setup),
+To change what jouet does in your project, see
+[agent setup and hooks](https://jouet.jdx.dev/setup),
 [rules](https://jouet.jdx.dev/rules) and
-[routines](https://jouet.jdx.dev/routines) to adapt jouet to your workflow.
+[routines](https://jouet.jdx.dev/routines).
 
 ## Development
 

@@ -18,7 +18,7 @@ const siteUrl = "https://jouet.jdx.dev";
 export default defineConfig({
   title: "jouet",
   description:
-    "Help coding agents use fewer tokens and finish work faster by measuring costs, learning from wasted effort and carrying better workflows into future sessions.",
+    "Wind-up tools for coding agents. jouet tells an agent which checks are slow, and turns what went wrong in past sessions into rules, tasks and routines.",
   lang: "en-US",
   lastUpdated: true,
   // Dark by default, like the rest of jdx's docs, with a light theme a click away.

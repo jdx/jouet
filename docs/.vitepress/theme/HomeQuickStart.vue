@@ -34,9 +34,9 @@ async function copyCommand() {
     </p>
     <p class="copy-status" role="status">{{ status }}</p>
     <p class="early-note">
-      <strong>Early development.</strong> Benefits vary by project. Your ecosystem
-      may need configuration or changes to jouet before you see savings.
-      Compatibility may change before 1.0.
+      <strong>Early development.</strong> How much jouet helps depends on your
+      project, and yours may need some configuration, or a fix in jouet, before
+      it does. Commands and output may change incompatibly until 1.0.
       <a href="/why#early-development">What to expect →</a>
     </p>
   </section>
