@@ -269,6 +269,35 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_zod_related_timeout_does_not_fail_the_requested_issue(self):
+        import contextlib
+        import io
+        import os
+        import runpy
+        import subprocess
+        from unittest.mock import patch
+
+        def run(command, **kwargs):
+            if command[0] == "git":
+                return subprocess.CompletedProcess(command, 0, stdout="changed\n", stderr="")
+            if "bigint.test.ts" in command[-1]:
+                self.assertEqual(kwargs["timeout"], 20)
+                raise subprocess.TimeoutExpired(command, 20)
+            self.assertEqual(kwargs["timeout"], 240)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        output = io.StringIO()
+        check = tasks.load("zod-int-bounds").dir / "check.py"
+        try:
+            with patch.object(sys, "path", sys.path.copy()), patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
+                    patch("shutil.copyfile"), patch("subprocess.run", side_effect=run), \
+                    contextlib.redirect_stdout(output):
+                runpy.run_path(str(check), run_name="__main__")
+        finally:
+            sys.modules.pop("_check", None)
+        self.assertIn("related pre-existing bigint case: could not check", output.getvalue())
+        self.assertTrue(output.getvalue().endswith("ok\n"))
+
     def test_zod_checker_keeps_the_related_bigint_case_separate(self):
         import os
         import subprocess
