@@ -773,6 +773,8 @@ class TasksTest(unittest.TestCase):
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(other_checkout / "results")]), 2)
                 with patch.dict(os.environ, {"XDG_CACHE_HOME": str(runner.REPO_ROOT / "cache")}):
                     self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 2)
+                with patch.object(agents.tempfile, "gettempdir", return_value=str(other_checkout)):
+                    self.assertEqual(agents.main(["check-tasks", "--tasks-dir", str(directory)]), 2)
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
                 run.assert_called_once()
                 self.assertEqual(tasks.all_names(), ["local-task"])
