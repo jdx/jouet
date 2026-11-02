@@ -47,7 +47,10 @@ setup() {
 
 @test "proposes an explicitly documented pytest marker as a partial-run option" {
 	printf '[project]\nname = "example"\n[tool.pytest.ini_options]\n' >pyproject.toml
-	printf 'offlinetest: check\n\t$(PYTHON) -m pytest -Werror -m "not download"\n' >Makefile
+	cat >Makefile <<'MAKE'
+offlinetest: check
+	$(PYTHON) -m pytest -Werror -m "not download"
+MAKE
 	run --separate-stderr jouet init --json
 	assert_success
 	[[ ! -e .jouet ]]
