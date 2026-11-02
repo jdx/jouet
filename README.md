@@ -55,12 +55,12 @@ distributions use the static musl archive, which mise picks automatically.
 completions, which mise loads for you when it installs jouet.
 [All installation options →](https://jouet.jdx.dev/getting-started)
 
-Then start your agent in a project and ask it to use **jouet-init**:
-`/jouet-init` in Claude Code, `$jouet-init` in Codex, or
-"Use the jouet-init skill to configure jouet for this project."
-Setup installs the skill. It inspects the project's workflows and timing
-history, makes useful configuration changes, and verifies them.
-[Project onboarding →](https://jouet.jdx.dev/project-setup)
+Then start your agent in a project and ask it to use the **jouet-init** skill,
+which setup installs: `/jouet-init` in Claude Code, `$jouet-init` in Codex, or
+"Use the jouet-init skill to configure jouet for this project." The agent reads
+the project's checks and timing history, changes jouet's configuration where
+the project needs it, and checks what it changed.
+[Initializing a project →](https://jouet.jdx.dev/project-setup)
 
 ## What it keeps track of
 
@@ -75,12 +75,12 @@ and Codex transcripts and shows where the tokens and time went.
 [`jouet wind`](https://jouet.jdx.dev/winding) looks across sessions for a
 command that keeps failing, long sleeps, or the same commands run over and
 over, and drafts a rule or a mise task for each.
-[Session review](https://jouet.jdx.dev/winding#reviewing-whole-sessions) reads
-whole sessions for the user's corrections and abandoned approaches, and
-proposes rules, tasks, routines and notes. You or the agent decide what to
-adopt. A drafted rule only warns until it is promoted (automatic promotion is
-off unless you turn it on), and `jouet unwind` proposes retiring rules that
-aren't helping.
+[Session review](https://jouet.jdx.dev/winding#reviewing-whole-sessions), once
+you turn it on, reads whole sessions for the user's corrections and abandoned
+approaches, and proposes rules, tasks, routines and notes. You or the agent
+decide what to adopt. A drafted rule only warns until it is promoted
+(automatic promotion is off unless you turn it on), and `jouet unwind`
+proposes retiring rules that aren't helping.
 
 [`jouet stats`](https://jouet.jdx.dev/commands/stats) estimates the tokens
 jouet saved, against your own history. Those are estimates, not benchmark

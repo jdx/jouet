@@ -1,18 +1,18 @@
 ---
-description: Rules and routines from outside — a repository's, a plugin's, an organisation's — and how jouet decides they may run.
+description: Rules and routines from outside (a repository's, a plugin's, an organisation's), and how jouet decides they may run.
 ---
 
 # Plugins and trust
 
-jouet's own [rules](/rules) and [routines](/routines), and yours in `~/.config/jouet`, always run. Anything else comes from somewhere you did not write it, so jouet runs it only once it is vouched for:
+jouet's own [rules](/rules) and [routines](/routines), and yours in `~/.config/jouet`, always run. Anything else comes from somewhere you did not write it, so jouet runs it only once it is vouched for: you trust a repository's rules and routines with `jouet trust`, you pin a plugin at a commit, or an administrator puts them in the system directory. This page covers each of the three, and what they do not protect against.
 
 | Source | Where | Runs |
 |---|---|---|
-| A repository's | `.jouet/rules`, `.jouet/routines`, `.jouet/formats`, and the plugins `.jouet/plugins.toml` pins | once you [trust](#trusting-a-repository) the repository with `jouet trust` |
+| A repository's | `.jouet/rules`, `.jouet/routines`, `.jouet/formats`, `.jouet/test.toml`, and the plugins `.jouet/plugins.toml` pins | once you [trust](#trusting-a-repository) the repository with `jouet trust` |
 | A [plugin](#plugins) you pin | the plugins `~/.config/jouet/plugins.toml` pins | once fetched as pinned |
 | The system's ([enforced](#enforced-rules-and-routines)) | `/etc/jouet/rules`, `/etc/jouet/routines`, the plugins `/etc/jouet/plugins.toml` pins, and those in `/etc/jouet/plugins/` | always, unless its group or others can write it; your settings cannot turn them off |
 
-Every rule from outside must pass its `fires` and `quiet` examples before it runs: jouet checks when you trust or add it, and again when a hook loads it, from a cache keyed by the files' hash and jouet's version, so a hook runs them once per change or upgrade. A rule that fails is listed as broken and does not run. Scripts and routines from outside run in the same sandbox and budgets as jouet's own.
+Every rule from outside must pass its `fires` and `quiet` [examples](/rules#examples) before it runs. jouet checks them when you trust or add it, and again when a hook loads it, from a cache keyed by the files' hash and jouet's version, so a hook runs them once per change or upgrade. A rule that fails is listed as broken and does not run. Scripts and routines from outside run in the same [sandbox](/rules#the-sandbox-and-its-limits) and budgets as jouet's own.
 
 `jouet rule list` and `joue --list` say where each rule and routine comes from and whether its source runs: `repo:trusted`, `repo:changed` or `repo:untrusted`; `plugin:NAME`, `plugin:NAME:mismatch` or `plugin:NAME:missing`; `enforced`, `enforced:NAME` for a plugin the system pins, or `enforced:writable`. `--json` gives the same as `trust` and `plugin` fields.
 
@@ -22,7 +22,7 @@ Plugins and trust are new, and their files may change between releases.
 
 ## Trusting a repository
 
-A repository's rules can deny commands and put text in front of the agent, and its routines run commands, so they run only once you trust the repository, the way `mise trust` works for a mise config. One trust covers `.jouet/rules`, `.jouet/routines`, `.jouet/formats` (the [failure formats](/commands/test#your-own-runners-formats) `jouet test` reads) and the plugins `.jouet/plugins.toml` pins, together:
+A repository's rules can deny commands and put text in front of the agent, and its routines run commands, so they run only once you trust the repository, the way `mise trust` works for a mise config. One trust covers all of these together: `.jouet/rules`, `.jouet/routines`, `.jouet/formats` (the [failure formats](/commands/test#your-own-runners-formats) `jouet test` reads), `.jouet/test.toml` (its [pytest options](/commands/test#project-options-for-affected-pytest-runs)) and the plugins `.jouet/plugins.toml` pins. `jouet trust` does not ask for confirmation, so read those files before you run it. It lists what it trusted:
 
 ```output
 $ jouet trust
@@ -32,15 +32,15 @@ routines: release-notes
 trusted /src/app/.jouet (2 rules, 1 routines); a change to any of them needs trusting again
 ```
 
-- **What is trusted.** A SHA-256 over the path and contents of every file in `.jouet/rules` and `.jouet/routines`, and of `.jouet/plugins.toml`. A pull or another branch that changes any of them makes the repository untrusted again, and `jouet rule list` says `repo:changed`. Every hash you trusted is kept, so going back to a branch you trusted does not need trusting again. Trust is kept in `$XDG_STATE_HOME/jouet/trusted.json`.
-- **Examples first.** Trusting fetches the plugins `.jouet/plugins.toml` pins and runs every rule's examples, the repository's and theirs. If one fails, or a rule lacks examples of either kind or does not load, nothing is trusted and it exits 1.
+- **What is trusted.** A SHA-256 over the path and contents of every file in `.jouet/rules`, `.jouet/routines` and `.jouet/formats`, and of `.jouet/test.toml` and `.jouet/plugins.toml`. A pull or another branch that changes any of them makes the repository untrusted again, and `jouet rule list` says `repo:changed`. The last 32 hashes you trusted are kept for each repository, so going back to a branch you trusted does not need trusting again. Trust is kept in `$XDG_STATE_HOME/jouet/trusted.json`.
+- **Examples first.** Trusting fetches the plugins `.jouet/plugins.toml` pins and runs every rule's examples, the repository's and theirs. If one fails, or a rule lacks examples of either kind or does not load, nothing is trusted and it exits 1. Outside a repository, or in one with none of these files, it exits 3.
 - **The user's decision.** Without a terminal, `jouet trust` refuses (exit 4) unless given `--yes`, which is for a script or CI job you run. The built-in rule `trust` denies `jouet trust` and `jouet plugin add` to an agent, with or without `--yes`: the rules being trusted are the text that would be steering it. The session-start primer says in one line when this repository has rules and routines that do not run, and that trusting them is the user's decision.
 
 `jouet untrust` withdraws trust. `jouet trust --list` shows whether this repository is trusted, and every directory trusted.
 
 ## Plugins
 
-A plugin is a named set of rules and routines that several repositories or people share: a git repository, or a directory, with a manifest and a `rules/` directory, a `routines/` one, a `formats/` one of [failure formats](/commands/test#your-own-runners-formats), or any of them together:
+A plugin is a named set of rules and routines that several repositories or people share. It is a git repository, or a directory, with a manifest and at least one of a `rules/` directory, a `routines/` one, and a `formats/` one of [failure formats](/commands/test#your-own-runners-formats):
 
 ```text
 jouet-plugin.toml
@@ -56,9 +56,15 @@ description = "The platform team's rules and routines"
 jouet = "0.3"                      # the oldest jouet it works with
 ```
 
-Its rules and routines are named after it, so a plugin never takes the name of a built-in, yours or another plugin's: the rule above is `acme/no-prod-db` (in `[jouet rule: acme/no-prod-db]`, `jouet rule test` and `[rules] disable`), and the routine runs as `joue acme/deploy`. A name belongs to one plugin: `jouet plugin add` refuses a name already pinned elsewhere or enforced (adding it to the same `plugins.toml` replaces the pin), and of two plugins with one name only the first loads, the system's before yours before a repository's, so an enforced plugin keeps its name; `jouet plugin ls` shows the other as invalid. A file at the plugin's root other than the manifest, such as a README, is left out, and so is a directory whose name starts with `.`; any other directory, or a key the manifest does not know, is refused, so that new kinds of thing can be added to plugins later.
+Its rules and routines are named after it, so a plugin never takes the name of a built-in, yours or another plugin's: the rule above is `acme/no-prod-db` (in `[jouet rule: acme/no-prod-db]`, `jouet rule test` and `[rules] disable`), and the routine runs as `joue acme/deploy`.
 
-`jouet plugin add` fetches a plugin, runs its rules' examples, and pins it in `~/.config/jouet/plugins.toml`, or with `--repo` in this repository's `.jouet/plugins.toml`:
+A name belongs to one plugin. `jouet plugin add` refuses a name already pinned elsewhere or enforced (exit 4); adding it to the same `plugins.toml` replaces the pin. Of two plugins with one name, only the first loads, the system's before yours before a repository's, so an enforced plugin keeps its name, and `jouet plugin ls` shows the other as invalid.
+
+A file at the plugin's root other than the manifest, such as a README, is left out, and so is a directory at its root whose name starts with `.`. Any other directory, or a key the manifest does not know, is refused, so that new kinds of thing can be added to plugins later. Only plain files are taken: a symlink or a submodule in `rules/`, `routines/` or `formats/` is refused.
+
+### Adding a plugin
+
+`jouet plugin add SOURCE` fetches a plugin from a git URL or a directory, runs its rules' examples, and pins it in `~/.config/jouet/plugins.toml`, or with `--repo` in this repository's `.jouet/plugins.toml`. Like `jouet trust`, it needs a terminal or `--yes` (exit 4 otherwise), and the `trust` rule denies it to an agent.
 
 ```output
 $ jouet plugin add https://github.com/acme/jouet-plugin --rev v3
@@ -67,6 +73,8 @@ routines: acme/deploy
 pinned acme (https://github.com/acme/jouet-plugin at 4e1f0c9a2b7d, 1 rules, 1 routines) in /home/me/.config/jouet/plugins.toml
 ```
 
+The pin it writes names the source, the commit, and the hash of every file the plugin ships:
+
 ```toml
 [plugin.acme]
 git = "https://github.com/acme/jouet-plugin"
@@ -74,16 +82,16 @@ rev = "4e1f0c9a2b7d8e3f6a5c4b3a2918f7e6d5c4b3a2"
 digest = "0b6c…"
 ```
 
-- **Pinned by commit.** `--rev` (a commit, tag or branch; the remote's HEAD without it) is resolved once, when the plugin is added, to a full commit, and `git rev-parse` checks that the commit fetched is that one. A directory, without `--rev`, is pinned by the hash of its files alone. `--dir` names the plugin's directory in a larger repository. A registry of plugins may come later.
+- **Pinned by commit.** `--rev` (a commit, tag or branch; the remote's HEAD without it) is resolved once, when the plugin is added, to a full commit, and `git rev-parse` checks that the commit fetched is that one. A directory, without `--rev`, is pinned by the hash of its files alone, as `path`; with `--rev` it is fetched as a git repository. `--dir` names the plugin's directory in a larger repository, kept as `dir`. A registry of plugins may come later.
 - **Checked on every load.** The plugin's files at the pinned commit are kept in `$XDG_STATE_HOME/jouet/plugins/<hash>`. Every hook hashes them again, from a cache keyed by each file's size, times and inode, so only a changed file is read, and runs them only if they match the pin. A hook never fetches: `jouet plugin sync` fetches what is pinned and missing or changed, and fails (exit 5) unless it gets the pinned commit and hash.
 - **Examples first.** As when trusting, a plugin whose rules do not all pass their examples is not pinned (exit 1). A pin written by hand is held to them when it loads. A plugin that needs a newer jouet than the one installed is not pinned, and one pinned before an upgrade went the other way does not run.
-- **Who pins it.** Your pins run always. A repository's are part of what you trust, so they are fetched and run only once the repository is trusted, and `plugin add --repo` makes it need trusting again. Plugins the system pins or installs are [enforced](#enforced-rules-and-routines).
+- **Who pins it.** Your pins always run. A repository's pins are part of what you trust, so they are fetched and run only once the repository is trusted, and `plugin add --repo` makes the repository need trusting again. Plugins the system pins or installs are [enforced](#enforced-rules-and-routines).
 
-`jouet plugin ls` lists the plugins and whether each is kept as pinned; `jouet plugin rm NAME` unpins one. Git is run with its hooks off and only the `https`, `http`, `ssh` and `file` transports, and only plain files are taken from the commit: a symlink or a submodule in `rules/` or `routines/` is refused.
+`jouet plugin ls` lists the plugins and whether each is kept as pinned; `jouet plugin rm NAME` unpins one. jouet runs git with its hooks off and allows only the `https`, `http`, `ssh` and `file` transports.
 
 ## Enforced rules and routines
 
-An organisation puts rules and routines every session on a machine must have in the system directory, `/etc/jouet` (`%ProgramData%\jouet` on Windows; `$JOUET_SYSTEM_DIR` moves it): `rules/` and `routines/`, plugins pinned in `plugins.toml`, and plugins installed as directories in `plugins/`, each with its own manifest. `jouet rule list` shows their rules as `enforced`:
+An organisation puts the rules and routines every session on a machine must have in the system directory, `/etc/jouet` (`%ProgramData%\jouet` on Windows; `$JOUET_SYSTEM_DIR` moves it): `rules/` and `routines/`, plugins pinned in `plugins.toml`, and plugins installed in `plugins/`, each in a directory named after the plugin, with its own manifest. `jouet rule list` shows their rules as `enforced`:
 
 ```output
 $ JOUET_RULES_DISABLE=all jouet rule list
@@ -97,7 +105,7 @@ note: org-no-prod-db is enforced by /etc/jouet/rules/org.toml, so the setting th
 
 ## What this does not protect against
 
-- **A user who wants out.** Enforcement is policy over configuration, not a sandbox. Whoever runs jouet can still turn every hook off (`[hooks] steer = false`, `jouet setup --uninstall`), or point `JOUET_SYSTEM_DIR` elsewhere. Anything that can set an environment variable for jouet can already run what it likes, so jouet does not guard against it.
-- **An agent with a shell.** The `trust` rule stops an agent from trusting a repository or adding a plugin by running jouet, but an agent that can write files can still edit `trusted.json`, or write a rule or routine in `~/.config/jouet`, which runs untrusted. It is a guard against an agent talked into trusting, not a boundary.
+- **A user who wants out.** Enforcement is a policy over jouet's configuration. Whoever runs jouet can still turn every hook off (`[hooks] steer = false`, `jouet setup --uninstall`), or point `JOUET_SYSTEM_DIR` elsewhere. Anything that can set an environment variable for jouet can already run what it likes, so jouet does not guard against it.
+- **An agent with a shell.** The `trust` rule stops an agent from trusting a repository or adding a plugin by running jouet, but an agent that can write files can still edit `trusted.json`, or write a rule or routine in `~/.config/jouet`, which runs without being trusted. The rule stops an agent that was talked into trusting something, and is no security boundary.
 - **The kept copies.** The hash cache trusts a file whose size, times and inode are unchanged. Anything that can write to your state or cache directory can change what runs, as it could change your config.
-- **Aggregated audits.** Collecting rule decisions across a team, opt-in, is left out: it needs a server, which jouet does not have.
+- **Aggregated audits.** jouet does not collect rule decisions across a team, even as an opt-in: that needs a server, and jouet has none.
