@@ -75,7 +75,7 @@ There is no file watcher and no background process:
 
 - **`jouet graph index`** lists the work tree's source files, honouring `.gitignore`, and extracts only the files whose content changed since the last index. A file whose timestamp changed but whose content did not is only re-stamped. `--full` drops the database and starts again.
 - **Every query** runs the same check first, and builds the graph if there is none, so a graph that was built once stays current.
-- **jouet's post-tool-use hook** re-indexes the files an agent just edited, through Claude Code's file tools or a Codex patch, and `jouet edit` re-indexes what it wrote. Both spend at most a quarter of a second; anything left over is picked up by the next query. The hook only updates a graph that exists, and never builds one. Turn it off with `hooks.graph = false` or `JOUET_HOOKS_GRAPH=0`.
+- **jouet's after-edit hook** re-indexes the files an agent just edited, through its harness's file tools (Claude Code, Cursor, Gemini CLI, Copilot) or a Codex `apply_patch`, and `jouet edit` re-indexes what it wrote. Both spend at most a quarter of a second; anything left over is picked up by the next query. The hook only updates a graph that exists, and never builds one. Turn it off with `hooks.graph = false` or `JOUET_HOOKS_GRAPH=0`.
 
 ## Worktrees
 

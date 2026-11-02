@@ -244,9 +244,6 @@ fn handle(
             {
                 wind::tasks::record_use(&paths, Path::new(cwd), command, crate::wind::now());
             }
-            if hooks.graph {
-                super::graph::reindex_after_tool(payload, &call);
-            }
             // A warning the pre-tool-use hook held for this call.
             if !harness::defers_warnings(harness) {
                 return None;
@@ -261,11 +258,20 @@ fn handle(
                 }
             }))
         }
+        // Every harness sends its file edits here, Codex its patches too.
+        // The graph is re-indexed after the format, so it sees the file as
+        // it was left.
         "post-edit" => {
-            if !settings.edit.fix_after {
-                return None;
+            let fixed = settings
+                .edit
+                .fix_after
+                .then(|| fix_after_edit(payload, settings))
+                .flatten();
+            if hooks.graph {
+                let call = Call::from_hook(payload, harness.name());
+                super::graph::reindex_after_tool(payload, &call);
             }
-            let (fixed, root) = fix_after_edit(payload, settings)?;
+            let (fixed, root) = fixed?;
             crate::ledger::record_fix(
                 &root,
                 log.session,

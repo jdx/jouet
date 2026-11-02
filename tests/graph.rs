@@ -64,8 +64,13 @@ impl Env {
     }
 
     fn hook(&self, payload: &Value) {
+        self.hook_as("claude", "post-edit", payload, &[]);
+    }
+
+    fn hook_as(&self, harness: &str, event: &str, payload: &Value, vars: &[(&str, &str)]) {
         let mut child = self
-            .command(&["hook", "claude", "post-tool-use"])
+            .command(&["hook", harness, event])
+            .envs(vars.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .spawn()
@@ -196,6 +201,49 @@ fn the_hook_reads_the_files_a_codex_patch_names() {
     let status = env.json(&["graph", "status"]);
     assert_eq!(status["files"], 2);
     assert_eq!(outline(&env), "B,C");
+}
+
+/// A harness's payload from `test/fixtures/hooks`, about this work tree.
+fn fixture(env: &Env, harness: &str, name: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("test/fixtures/hooks")
+        .join(harness)
+        .join(format!("{name}.json"));
+    let text = std::fs::read_to_string(path).unwrap();
+    serde_json::from_str(&text.replace("/work/app", &env.root().display().to_string())).unwrap()
+}
+
+#[test]
+fn every_harness_edit_hook_reindexes_what_it_wrote() {
+    for (harness, name) in [
+        ("cursor", "after-file-edit"),
+        ("gemini", "after-tool-edit"),
+        ("copilot", "post-tool-use-edit"),
+        ("codex", "post-tool-use-apply-patch"),
+    ] {
+        let env = Env::new();
+        env.write("src/main.rs", "fn main() {}\n");
+        env.json(&["graph", "index"]);
+        env.write("src/main.rs", "fn other() {}\n");
+        env.hook_as(harness, "post-edit", &fixture(&env, harness, name), &[]);
+        assert_eq!(outline(&env), "other", "{harness} {name}");
+    }
+}
+
+#[test]
+fn the_edit_hook_leaves_the_graph_alone_with_hooks_graph_off() {
+    let env = Env::new();
+    env.write("src/main.rs", "fn main() {}\n");
+    env.json(&["graph", "index"]);
+    env.write("src/main.rs", "fn other() {}\n");
+    let payload = fixture(&env, "codex", "post-tool-use-apply-patch");
+    env.hook_as(
+        "codex",
+        "post-edit",
+        &payload,
+        &[("JOUET_HOOKS_GRAPH", "0")],
+    );
+    assert_eq!(outline(&env), "main");
 }
 
 #[test]

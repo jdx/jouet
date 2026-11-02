@@ -110,7 +110,9 @@ impl Harness {
     /// `(harness event, matcher, jouet hook event)` for each hook installed.
     ///
     /// Codex sends no exit code to its hooks, so it gets no post-tool-use
-    /// hooks: its stop hook reads the session transcript instead. Claude
+    /// hook for commands: its stop hook reads the session transcript
+    /// instead. Its `apply_patch` gets one, which keeps the code graph
+    /// current. Claude
     /// Code's Read and Grep tools reach the hooks too, so rules can steer
     /// them, and a Read is remembered for the session.
     ///
@@ -132,14 +134,15 @@ impl Harness {
                 ),
                 ("PostToolUse", Some("Bash|Read"), "post-tool-use"),
                 ("PostToolUseFailure", Some("Bash"), "post-tool-use-failure"),
-                // Formats edited files with `[edit] fix_after`; a no-op
-                // without it.
+                // Formats edited files with `[edit] fix_after` and
+                // re-indexes them in the code graph.
                 ("PostToolUse", Some("Edit|Write|MultiEdit"), "post-edit"),
                 ("Stop", None, "stop"),
             ],
             Self::Codex => &[
                 ("SessionStart", None, "session-start"),
                 ("PreToolUse", Some("^Bash$"), "pre-tool-use"),
+                ("PostToolUse", Some("^apply_patch$"), "post-edit"),
                 ("Stop", None, "stop"),
             ],
             Self::Cursor => &[
@@ -645,6 +648,19 @@ mod tests {
             "type": "command",
             "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex pre-tool-use'",
             "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex post-edit'",
+            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex post-edit }",
             "timeout": 10
           }
         ]
