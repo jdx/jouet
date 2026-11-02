@@ -450,3 +450,32 @@ fn a_panics_backtrace_folds_so_its_message_is_shown() {
         "{lines:#?}"
     );
 }
+
+#[test]
+fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
+    // bats with a filter that matched nothing: TAP's empty plan.
+    assert!(digest("1..0\n", false, DEFAULT_BUDGET).no_tests);
+    // cargo test with a name filter that matched nothing in any binary.
+    let none = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out\n";
+    assert!(digest(none, false, DEFAULT_BUDGET).no_tests);
+    // One binary ran a test: that is a run.
+    let one = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\n\nrunning 1 test\ntest a ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
+    assert!(!digest(one, false, DEFAULT_BUDGET).no_tests);
+    for said in [
+        "collected 0 items",
+        "========== no tests ran in 0.01s ==========",
+        "No tests found, exiting with code 1",
+        "testing: warning: no tests to run",
+    ] {
+        assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
+    }
+    // A build says nothing about tests.
+    assert!(
+        !digest(
+            "   Compiling a v0.1.0\n    Finished `dev` profile\n",
+            false,
+            DEFAULT_BUDGET
+        )
+        .no_tests
+    );
+}
