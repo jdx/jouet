@@ -920,6 +920,11 @@ fn a_missing_primitive_is_recorded_as_a_gap() {
 #[test]
 fn matcher_rules_never_start_a_vm() {
     let engine = engine(builtin());
+    let dir = tempfile::tempdir().unwrap();
+    let call = |command: &str| Call {
+        cwd: Some(dir.path().to_string_lossy().into_owned()),
+        ..bash(command)
+    };
     for command in [
         // Not `cargo test`: affected-tests asks its script about a whole
         // workspace run, as it does about pytest's.
@@ -928,14 +933,14 @@ fn matcher_rules_never_start_a_vm() {
         "sleep 60 && gh pr checks",
         "python3 -c 'print(1)'",
     ] {
-        engine.evaluate(&bash(command));
+        engine.evaluate(&call(command));
     }
     assert!(!engine.vm_started());
     // `checks` runs after a tool, behind a matcher of the programs it knows.
     let post = |command: &str| Call {
         event: Some(Event::PostToolUse),
         exit_code: Some(0),
-        ..bash(command)
+        ..call(command)
     };
     assert!(engine.evaluate(&post("ls -la src")).records.is_empty());
     assert!(!engine.vm_started());
@@ -1136,11 +1141,15 @@ quiet = ["rm -r a", "ls a b c d"]
     assert_eq!(engine.proven(rule), Ok(3));
     // `ls a b c d` never reached the script: no VM for it.
     let fresh = self::engine(discover(&user_rules).0);
-    assert!(fresh.evaluate(&bash("ls a b c d e")).deny.is_none());
+    let call = |command: &str| Call {
+        cwd: Some(dir.path().to_string_lossy().into_owned()),
+        ..bash(command)
+    };
+    assert!(fresh.evaluate(&call("ls a b c d e")).deny.is_none());
     assert!(!fresh.vm_started());
     assert_eq!(
         fresh
-            .evaluate(&bash("rm a b c d e"))
+            .evaluate(&call("rm a b c d e"))
             .deny
             .unwrap()
             .message
@@ -1359,8 +1368,12 @@ fn background_matches_an_ampersand_or_a_backgrounded_call() {
 #[test]
 fn job_start_names_the_job_and_its_ready_check() {
     let engine = engine(builtin());
+    let dir = tempfile::tempdir().unwrap();
     let advice = |command: &str| {
-        let outcome = engine.evaluate(&bash(command));
+        let outcome = engine.evaluate(&Call {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..bash(command)
+        });
         let d = outcome.deny.or(outcome.warnings.into_iter().next());
         let d = d.unwrap_or_else(|| panic!("nothing for {command}"));
         assert_eq!(d.rule, "job-start", "{command}");
@@ -1408,6 +1421,7 @@ fn job_start_names_the_job_and_its_ready_check() {
     // Run in the harness's background, a pipe's reader is not the server.
     let piped = Call {
         input: Some(serde_json::json!({ "run_in_background": true })),
+        cwd: Some(dir.path().to_string_lossy().into_owned()),
         ..bash("npm run dev 2>&1 | tee dev.log")
     };
     let message = engine.evaluate(&piped).warnings.remove(0).message.unwrap();
@@ -1418,6 +1432,7 @@ fn job_start_names_the_job_and_its_ready_check() {
     // Nor is a command the matchers did not find, run after it.
     let then = Call {
         input: Some(serde_json::json!({ "run_in_background": true })),
+        cwd: Some(dir.path().to_string_lossy().into_owned()),
         ..bash("cd web && npm run dev; echo started; ls -la")
     };
     let message = engine.evaluate(&then).warnings.remove(0).message.unwrap();
