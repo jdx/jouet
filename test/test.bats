@@ -695,18 +695,16 @@ SH
 }
 
 @test "an unnamed baseline failure is raised once and remains recorded" {
-	export JOUET_SESSION_ID=s1
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	printf '#!/bin/sh\necho tool failed\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/pytest"
 	chmod +x "$BATS_TEST_TMPDIR/bin/pytest"
-	export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 	printf 'base\n' >tracked
 	git add tracked
 	git commit -qm base
 	git checkout -qb work
 	printf 'change\n' >>tracked
 
-	run --separate-stderr jouet test --baseline --cmd -- pytest
+	run --separate-stderr env JOUET_SESSION_ID=s1 PATH="$BATS_TEST_TMPDIR/bin:$PATH" jouet test --baseline --cmd -- pytest
 	assert_failure 1
 	stop=$(jq -cn --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}')
 	run --separate-stderr jouet hook claude stop <<<"$stop"
