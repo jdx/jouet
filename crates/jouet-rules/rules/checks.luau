@@ -494,7 +494,6 @@ end
 
 local function playwright_scope(args: { string }, at: number, workspace: string?): (Kind?, Scope)
 	local unknown = partial(nil)
-	local narrowed = false
 	local custom_config = false
 	for i = at + 1, #args do
 		local arg = args[i]
@@ -507,19 +506,24 @@ local function playwright_scope(args: { string }, at: number, workspace: string?
 		if name == "--ui" or name == "--ui-host" or name == "--ui-port" or name == "--debug" or name == "--pass-with-no-tests" then
 			return nil, unknown
 		end
-		if name == "--only-changed" or name == "--grep-invert" or name == "--test-list" or name == "--test-list-invert" or name == "--no-deps" or name == "--ignore-snapshots" or name == "--update-snapshots" or name == "-u" then
-			narrowed = true
-		end
 	end
 	-- The namespace distinguishes these selections from test names for other
 	-- runners. A custom config may name a different suite, so it gets its own
 	-- conservative, exact selection rather than being covered by the default.
 	local suite = "@jouet:playwright" .. (if workspace then ":workspace=" .. workspace else "")
-	if custom_config then return "test", partial(suite .. ":config " .. table.concat(args, " ", at)) end
-	if narrowed then return "test", partial(suite .. " " .. table.concat(args, " ", at)) end
-	local selection = runner_scope(args, at + 1).selector
+	if custom_config then suite ..= ":config" end
+	local words: { string } = {}
+	for i = at + 1, #args do
+		local word = args[i]
+		-- Preserve word boundaries for the verifier's coverage comparison.
+		if word == "" or string.find(word, "[^%w%._/%-:=@]") then
+			word = "'" .. string.gsub(word, "'", "'\\''") .. "'"
+		end
+		table.insert(words, word)
+	end
+	local selection = table.concat(words, " ")
 	-- Even an unfiltered Playwright run need not cover a project's unit tests.
-	return "test", partial(suite .. (if selection then " " .. selection else ""))
+	return "test", partial(suite .. (if selection ~= "" then " " .. selection else ""))
 end
 
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)

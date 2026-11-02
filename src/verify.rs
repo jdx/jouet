@@ -119,10 +119,19 @@ impl Run {
         }
         match (playwright(ran), playwright(wanted)) {
             (Some(a), Some(b)) => {
-                return is_playwright(&self.command)
-                    && is_playwright(&failed.command)
-                    && a == b
-                    && (ran == wanted || (ran == a && !a.ends_with(":config")));
+                if a != b
+                    || playwright_args(&self.command).is_none()
+                    || playwright_args(&failed.command).is_none()
+                {
+                    return false;
+                }
+                let (Some(ran_args), Some(wanted_args)) = (
+                    playwright_selection_args(ran),
+                    playwright_selection_args(wanted),
+                ) else {
+                    return false;
+                };
+                return playwright_covers(&ran_args, &wanted_args);
             }
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
@@ -149,12 +158,20 @@ impl Run {
     }
 }
 
+fn playwright_selection_args(selection: &str) -> Option<Vec<String>> {
+    let parsed = jouet_rules::shell::parse(selection);
+    let [command] = parsed.commands.as_slice() else {
+        return None;
+    };
+    Some(command.words.iter().skip(1).cloned().collect())
+}
+
 /// Match only the explicit Playwright invocations the checks rule recognizes.
 /// This keeps even a test literally named `@jouet:playwright` in another
 /// runner from being mistaken for a Playwright suite.
-fn is_playwright(command: &str) -> bool {
+fn playwright_args(command: &str) -> Option<Vec<String>> {
     use jouet_rules::shell::{Command, parse};
-    parse(command).commands.iter().any(|command| {
+    parse(command).commands.iter().find_map(|command| {
         let mut argv = command.argv().to_vec();
         for _ in 0..4 {
             let parsed = Command {
@@ -162,32 +179,79 @@ fn is_playwright(command: &str) -> bool {
                 ..Command::default()
             };
             let words = parsed.argv();
-            let Some(program) = parsed.program() else {
-                return false;
-            };
+            let program = parsed.program()?;
             let args: Vec<&str> = words.iter().skip(1).map(String::as_str).collect();
             if program == "jouet" && args.contains(&"test") && args.contains(&"--cmd") {
-                let Some(separator) = args.iter().position(|word| *word == "--") else {
-                    return false;
-                };
+                let separator = args.iter().position(|word| *word == "--")?;
                 argv = args[separator + 1..]
                     .iter()
                     .map(|word| (*word).to_owned())
                     .collect();
                 continue;
             }
-            return matches!(
-                (program, args.as_slice()),
-                ("playwright", ["test", ..])
-                    | ("npx" | "bunx", ["playwright", "test", ..])
-                    | ("npx" | "bunx", ["--no-install", "playwright", "test", ..])
-                    | ("pnpm" | "yarn", ["exec", "playwright", "test", ..])
-                    | ("npm", ["exec", "--", "playwright", "test", ..])
-                    | ("yarn", ["workspace", _, "exec", "playwright", "test", ..])
-            );
+            let at = match (program, args.as_slice()) {
+                ("playwright", ["test", ..]) => 1,
+                ("npx" | "bunx", ["playwright", "test", ..]) => 2,
+                ("npx" | "bunx", ["--no-install", "playwright", "test", ..])
+                | ("pnpm" | "yarn", ["exec", "playwright", "test", ..]) => 3,
+                ("npm", ["exec", "--", "playwright", "test", ..]) => 4,
+                ("yarn", ["workspace", _, "exec", "playwright", "test", ..]) => 5,
+                _ => return None,
+            };
+            return Some(args[at..].iter().map(|word| (*word).to_owned()).collect());
         }
-        false
+        None
     })
+}
+
+/// Compare only options whose values we can identify. Unknown flags keep the
+/// result conservative; positional arguments retain their shell quoting.
+fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
+    if ran == wanted || ran.is_empty() {
+        return true;
+    }
+    struct Selection {
+        options: Vec<(String, String)>,
+        names: Vec<String>,
+    }
+    fn parts(args: &[String]) -> Option<Selection> {
+        let mut options = Vec::new();
+        let mut names = Vec::new();
+        let mut i = 0;
+        while i < args.len() {
+            let word = &args[i];
+            i += 1;
+            if word.starts_with('-') {
+                let (name, inline) = word
+                    .split_once('=')
+                    .map_or((word.as_str(), None), |(n, v)| (n, Some(v)));
+                if !matches!(
+                    name,
+                    "--project" | "--config" | "-c" | "--grep" | "-g" | "--grep-invert"
+                ) {
+                    return None;
+                }
+                let value = if let Some(value) = inline {
+                    value
+                } else {
+                    let value = args.get(i)?;
+                    i += 1;
+                    value
+                };
+                options.push((name.to_string(), value.to_string()));
+            } else {
+                names.push(word.clone());
+            }
+        }
+        Some(Selection { options, names })
+    }
+    let (Some(ran), Some(wanted)) = (parts(ran), parts(wanted)) else {
+        return false;
+    };
+    ran.options == wanted.options
+        && (ran.names.is_empty()
+            || (!wanted.names.is_empty()
+                && wanted.names.iter().all(|name| ran.names.contains(name))))
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -1687,6 +1751,44 @@ mod tests {
             Some("t1"),
         );
         state.record(run("npx playwright test", 0), Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut state = Checks::default();
+        state.record(
+            run("npx playwright test --config=other.config.ts a.spec.ts", 1),
+            Some("t1"),
+        );
+        state.record(
+            run("pnpm exec playwright test --config=other.config.ts", 0),
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut state = Checks::default();
+        state.record(
+            run("npx playwright test --project chromium a.spec.ts", 1),
+            Some("t1"),
+        );
+        state.record(
+            run(
+                "npx playwright test --project firefox a.spec.ts b.spec.ts",
+                0,
+            ),
+            Some("t1"),
+        );
+        assert!(reason(&state, "t1").is_some());
+        state.record(
+            run(
+                "npx playwright test --project chromium a.spec.ts b.spec.ts",
+                0,
+            ),
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut state = Checks::default();
+        state.record(run("npx playwright test a b", 1), Some("t1"));
+        state.record(run("npx playwright test 'a b'", 0), Some("t1"));
         assert!(reason(&state, "t1").is_some());
     }
 
