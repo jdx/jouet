@@ -170,3 +170,17 @@ payload() {
 	run jouet search --limit 1 url src/lib.rs
 	assert_output "$one"
 }
+
+@test "search prints the code of the few short definitions its matches are in" {
+	run jouet search --again join_url src/lib.rs
+	assert_success
+	assert_line 'src/lib.rs: function join_url (12-14)'
+	assert_line --regexp '^13	    format!'
+	# A read of it after collapses: the session has seen it.
+	JOUET_SESSION_ID=s1 run jouet search join_url src/lib.rs
+	JOUET_SESSION_ID=s1 run --separate-stderr jouet read src/lib.rs --symbol join_url
+	assert_output --partial 'already shown'
+	# More than a few definitions: only the matches.
+	run jouet search --again 'fn ' src/lib.rs
+	refute_output --regexp '^[0-9]+	'
+}
