@@ -73,7 +73,7 @@ fn main() -> ExitCode {
         Cmd::Stack(args) => cmd::stack::run(args, &out),
         Cmd::Stats(args) => cmd::stats::run(&args, &out),
         Cmd::Cost(args) => cmd::cost::run(&args, &out),
-        Cmd::Pr(args) => return cmd::pr::run(args, &out),
+        Cmd::Pr(args) => return recorded(cmd::pr::run(args, &out)),
         Cmd::Read(args) => cmd::read::run(&args, &out),
         Cmd::Docs(args) => cmd::docs::run(&args, &out),
         Cmd::Deps(args) => cmd::deps::run(&args, &out),
@@ -88,7 +88,7 @@ fn main() -> ExitCode {
         Cmd::Trust(args) => cmd::trust::trust(&args, &out),
         Cmd::Untrust(_) => cmd::trust::untrust(&out),
         Cmd::Plugin(args) => cmd::plugin::run(&args, &out),
-        Cmd::Run(args) => return cmd::run::run(args, &out),
+        Cmd::Run(args) => return recorded(cmd::run::run(args, &out)),
         Cmd::Wind(args) => cmd::wind::run(&args, &out),
         Cmd::Unwind(args) => cmd::wind::unwind(&args, &out),
         Cmd::Task(args) => cmd::task::run(&args, &out),
@@ -99,7 +99,19 @@ fn main() -> ExitCode {
         Cmd::Completion(args) => cmd::completion::run(&args, &out),
         Cmd::Hook(_) => unreachable!("handled above"),
     };
-    exit.into()
+    recorded(exit.into())
+}
+
+/// Records the command's own exit code in the ledger (see
+/// [`ledger::record_run`]) and returns it. `pr next` and `run` exit with
+/// codes outside the shared table, so the code is read back from `exit`.
+fn recorded(exit: ExitCode) -> ExitCode {
+    let code = (0..=u8::MAX)
+        .find(|&c| ExitCode::from(c) == exit)
+        .unwrap_or(1);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    ledger::record_run(&args, i32::from(code));
+    exit
 }
 
 /// `jouet triage`, when `triage` is a routine and not a command: says to

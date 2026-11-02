@@ -1,0 +1,8 @@
+# jouet records its own runs in an agent's session ledger, found from these.
+# The binaries cargo runs for the tests are not the agent's runs, so they see
+# no session; jouet treats an empty ID as none. A test that wants a session
+# sets one.
+[env]
+JOUET_SESSION_ID = { value = "", force = true }
+CLAUDE_CODE_SESSION_ID = { value = "", force = true }
+CODEX_THREAD_ID = { value = "", force = true }

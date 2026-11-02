@@ -647,6 +647,21 @@ fn wait_hint(harness: Harness) -> Option<&'static str> {
     }
 }
 
+/// About how many tokens the primer for `harness` in `cwd` is, at four
+/// characters a token, without the notes that follow it only sometimes; 0
+/// when the settings turn it off. `jouet stats` charges it to every request.
+pub(crate) fn primer_tokens(settings: &Settings, cwd: &Path, harness: &str) -> u64 {
+    let hooks = &settings.hooks;
+    let Some(harness) = Harness::parse(harness).filter(|_| hooks.enabled && hooks.prime) else {
+        return 0;
+    };
+    let primer = session_start(&rules::load(cwd).engine, hooks.steer, hooks.verify, harness);
+    let chars = primer["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .map_or(0, |s| s.chars().count());
+    (chars as u64).div_ceil(4)
+}
+
 fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -> Value {
     // Only the rules that deny: a warning costs the agent no call.
     let rules: Vec<(&str, Option<&str>)> = if steer {

@@ -4,7 +4,9 @@ use super::Output;
 use super::audit::parse_since;
 use crate::cli::StatsArgs;
 use crate::settings::Settings;
-use jouet_audit::stats::{self, Baseline, Estimate, Ledger, Measured, StatsFilter};
+use jouet_audit::stats::{
+    self, AfterSetup, Baseline, Cost, Estimate, Ledger, Measured, StatsFilter,
+};
 use jouet_audit::{Analyzer, ClaudeCode, Codex, Filter, Reader};
 use jouet_output::exit::Exit;
 use jouet_output::{paths, time};
@@ -44,26 +46,6 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     };
     let measured = ledger.as_ref().map(|l| stats::measure(&l.entries, &filter));
     let cache = paths::state_dir().map(|d| d.join("stats").join("baselines.json"));
-
-    if args.summary {
-        // Settings::load falls back to the default for a value it cannot
-        // read, so a typo never breaks the stop hook.
-        let style = stats::SummaryStyle::parse(&Settings::load().stats.summary).unwrap_or_default();
-        // The stop hook runs this, so it reads the baselines the last full
-        // `jouet stats` saved instead of reading the history again.
-        let baselines = cache.as_deref().map(read_cache).unwrap_or_default();
-        let line = measured
-            .as_ref()
-            .and_then(|m| stats::summary(m, &stats::estimate(m, &baselines), style));
-        out.result(
-            &SummaryDoc {
-                summary: line.clone(),
-            },
-            || line.map(|l| format!("{l}\n")).unwrap_or_default(),
-        );
-        return Exit::Ok;
-    }
-
     // The history before setup is each harness's history before its first
     // ledger entry, whatever --since says.
     let mut first: BTreeMap<&str, u64> = BTreeMap::new();
@@ -79,6 +61,36 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         .chain(codex.iter().map(|r| r as &dyn Reader))
         .collect();
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    let settings = Settings::load();
+
+    if args.summary {
+        // Settings::load falls back to the default for a value it cannot
+        // read, so a typo never breaks the stop hook.
+        let style = stats::SummaryStyle::parse(&settings.stats.summary).unwrap_or_default();
+        // The stop hook runs this, so it reads the baselines the last full
+        // `jouet stats` saved instead of reading the history again.
+        let baselines = cache.as_deref().map(read_cache).unwrap_or_default();
+        let line = measured.as_ref().and_then(|m| {
+            let (after, _) = after_setup(
+                &readers,
+                &first,
+                since,
+                args.session.as_deref(),
+                &settings,
+                threads,
+            );
+            let costs = stats::costs(m, &baselines, &after);
+            stats::summary(m, &stats::estimate(m, &baselines), &costs, style)
+        });
+        out.result(
+            &SummaryDoc {
+                summary: line.clone(),
+            },
+            || line.map(|l| format!("{l}\n")).unwrap_or_default(),
+        );
+        return Exit::Ok;
+    }
+
     // The history before a harness's first ledger entry no longer changes, so
     // a saved baseline for the same cutoff is reused instead of reading
     // gigabytes of transcripts again. A harness with no ledger entries has no
@@ -90,11 +102,13 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     };
     let mut baselines = Vec::new();
     let mut scanned = ScanDoc::default();
-    for reader in readers {
+    for &reader in &readers {
         let until = first.get(reader.harness()).copied();
         if let Some(b) = saved
             .iter()
             .find(|b| until.is_some() && b.harness == reader.harness() && b.until == until)
+            // One saved without its input tokens cannot price a request.
+            .filter(|b| b.requests_with_tokens == 0 || b.input_tokens > 0)
         {
             baselines.push(b.clone());
             continue;
@@ -122,6 +136,27 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     } else {
         0
     };
+    // The history after setup changes with every session, so it is read
+    // each time; only the requests are kept.
+    let (after, after_scan) = match &measured {
+        Some(_) => after_setup(
+            &readers,
+            &first,
+            since,
+            args.session.as_deref(),
+            &settings,
+            threads,
+        ),
+        None => (Vec::new(), ScanDoc::default()),
+    };
+    let costs = measured
+        .as_ref()
+        .map(|m| stats::costs(m, &baselines, &after))
+        .unwrap_or_default();
+    let cost_tokens: u64 = costs.iter().filter_map(|c| c.input_tokens).sum();
+    let net = measured
+        .as_ref()
+        .and_then(|_| stats::net(&estimates, &costs));
     let doc = Doc {
         ledger: LedgerDoc {
             dir: dir.map(|d| d.display().to_string()),
@@ -135,10 +170,58 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         estimates: if measured.is_some() { &estimates } else { &[] },
         per_run: if measured.is_none() { &estimates } else { &[] },
         estimated_input_tokens: estimated,
+        after_setup: &after,
+        costs: &costs,
+        estimated_cost_tokens: cost_tokens,
+        net_input_tokens: net,
         scan: scanned,
+        after_setup_scan: after_scan,
     };
     out.result(&doc, || text(&doc));
     Exit::Ok
+}
+
+/// Each harness's requests after its first ledger entry (or `since`, when
+/// later), and the size of its primer: what the primer cost is priced from.
+/// A harness with no ledger entries has no history after setup.
+fn after_setup(
+    readers: &[&dyn Reader],
+    first: &BTreeMap<&str, u64>,
+    since: Option<u64>,
+    session: Option<&str>,
+    settings: &Settings,
+    threads: usize,
+) -> (Vec<AfterSetup>, ScanDoc) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut after = Vec::new();
+    let mut scanned = ScanDoc::default();
+    for &reader in readers {
+        let Some(&from) = first.get(reader.harness()) else {
+            continue;
+        };
+        let from = since.map_or(from, |s| s.max(from));
+        let filter = Filter {
+            since_ms: Some(i64::try_from(from).unwrap_or(i64::MAX).saturating_mul(1000)),
+            session: session.map(str::to_string),
+            ..Filter::default()
+        };
+        let scan = jouet_audit::scan(&[reader], &filter, Analyzer::default(), threads);
+        scanned.files += scan.stats.files;
+        scanned.bytes += scan.stats.bytes;
+        scanned.elapsed_ms += scan.stats.elapsed_ms;
+        // No transcript of the session was found: its requests are unknown,
+        // not none, so its primer goes unpriced rather than free.
+        if session.is_some() && scan.stats.files == 0 {
+            continue;
+        }
+        let report = scan.analyzer.report(0);
+        after.push(AfterSetup {
+            harness: reader.harness().to_string(),
+            requests: report.harnesses.iter().map(|h| h.totals.requests).sum(),
+            primer_tokens: super::hook::primer_tokens(settings, &cwd, reader.harness()),
+        });
+    }
+    (after, scanned)
 }
 
 /// What `baselines.json` holds. A cache from another jouet version is
@@ -200,7 +283,22 @@ struct Doc<'a> {
     per_run: &'a [Estimate],
     #[serde(skip_serializing_if = "is_zero")]
     estimated_input_tokens: u64,
+    /// Each harness's requests after setup, and its primer's size.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    after_setup: &'a [AfterSetup],
+    /// What jouet itself cost, estimated the same way.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    costs: &'a [Cost],
+    #[serde(skip_serializing_if = "is_zero")]
+    estimated_cost_tokens: u64,
+    /// Savings less costs, which may be negative; absent when a cost could
+    /// not be priced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    net_input_tokens: Option<i64>,
+    /// Reading the history before setup.
     scan: ScanDoc,
+    /// Reading the history after setup.
+    after_setup_scan: ScanDoc,
 }
 
 #[derive(Serialize)]
@@ -256,7 +354,10 @@ fn text(doc: &Doc<'_>) -> String {
         }
     }
     if doc.measured.is_some() {
-        let _ = writeln!(s, "\nestimated, against your own history before setup:");
+        let _ = writeln!(
+            s,
+            "\nestimated savings: what these runs would have cost at your rates before setup (assumed, not measured):"
+        );
     } else {
         let _ = writeln!(s, "\nwhat one jouet run would save, by your history:");
     }
@@ -290,18 +391,77 @@ fn text(doc: &Doc<'_>) -> String {
             "  no Claude Code or Codex history found, so nothing is estimated"
         );
     }
-    if doc.estimated_input_tokens > 0 {
-        let _ = writeln!(
-            s,
-            "\nestimated total: {} input tokens not re-read.",
-            tokens(doc.estimated_input_tokens)
+    if doc.measured.is_some() {
+        costs_text(&mut s, doc.costs);
+        let totals = format!(
+            "estimated savings {}, costs {}",
+            tokens(doc.estimated_input_tokens),
+            tokens(doc.estimated_cost_tokens)
         );
+        let _ = match doc.net_input_tokens {
+            Some(net) if net < 0 => writeln!(
+                s,
+                "\n{totals}: net, jouet cost {} input tokens more than it saved.",
+                tokens(net.unsigned_abs())
+            ),
+            Some(net) => writeln!(
+                s,
+                "\n{totals}: net, {} input tokens saved.",
+                tokens(net.unsigned_abs())
+            ),
+            None => writeln!(
+                s,
+                "\n{totals}: no net, since a cost above could not be priced."
+            ),
+        };
+        let mut outside: Vec<&str> = doc
+            .costs
+            .iter()
+            .filter(|c| c.outside_net)
+            .map(|c| name(&c.harness))
+            .collect();
+        outside.dedup();
+        if !outside.is_empty() {
+            let _ = writeln!(
+                s,
+                "  left out of the net, with no history before setup to price it: {}",
+                outside.join(", ")
+            );
+        }
     }
     let _ = writeln!(
         s,
         "\nMeasured figures come from the ledger; estimates price them by your own history and are not measurements."
     );
     s
+}
+
+fn costs_text(s: &mut String, costs: &[Cost]) {
+    let _ = writeln!(s, "\nestimated costs, priced the same way:");
+    if costs.is_empty() {
+        let _ = writeln!(s, "  none recorded");
+    }
+    let mut harness = None;
+    for c in costs {
+        if harness != Some(&c.harness) {
+            harness = Some(&c.harness);
+            let _ = writeln!(s, "  {}:", name(&c.harness));
+        }
+        let what = format!("{}: {}", c.kind.label(), plural(c.count, "", "").trim());
+        match (&c.refused, c.input_tokens) {
+            (Some(reason), _) => {
+                let _ = writeln!(s, "  - {what}, not estimated: {reason}");
+            }
+            (None, tok) => {
+                let _ = writeln!(
+                    s,
+                    "  - {what}, about {} input tokens",
+                    tokens(tok.unwrap_or(0))
+                );
+                let _ = writeln!(s, "      basis: {}", c.basis);
+            }
+        }
+    }
 }
 
 fn measured_text(s: &mut String, m: &Measured) {
@@ -313,7 +473,9 @@ fn measured_text(s: &mut String, m: &Measured) {
             "command".to_string(),
             "harness".into(),
             "runs".into(),
-            "failed".into(),
+            "calls failed".into(),
+            "own runs".into(),
+            "own failed".into(),
             "time".into(),
         ]];
         for c in &m.commands {
@@ -322,10 +484,16 @@ fn measured_text(s: &mut String, m: &Measured) {
                 c.harness.clone(),
                 c.runs.to_string(),
                 c.failed.to_string(),
+                c.own_runs.to_string(),
+                c.own_failed.to_string(),
                 duration(c.duration_ms),
             ]);
         }
-        table(s, &rows);
+        table(s, &rows, 2);
+        let _ = writeln!(
+            s,
+            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)"
+        );
     }
     if !m.rules.is_empty() {
         s.push('\n');
@@ -349,7 +517,7 @@ fn measured_text(s: &mut String, m: &Measured) {
                 r.then_nothing.to_string(),
             ]);
         }
-        table(s, &rows);
+        table(s, &rows, 1);
     }
     if !m.checks.is_empty() {
         let checks: Vec<String> = m
@@ -411,14 +579,15 @@ fn estimate_text(s: &mut String, e: &Estimate, measured: bool) {
     let _ = writeln!(s, "      basis: {}", e.basis);
 }
 
-fn table<const N: usize>(s: &mut String, rows: &[[String; N]]) {
+/// Columns before `left` are aligned left, the rest right.
+fn table<const N: usize>(s: &mut String, rows: &[[String; N]], left: usize) {
     let widths: Vec<usize> = (0..N)
         .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0))
         .collect();
     for row in rows {
         let _ = write!(s, "  {:<w$}", row[0], w = widths[0]);
         for (i, cell) in row.iter().enumerate().skip(1) {
-            if i == 1 && N == 5 {
+            if i < left {
                 let _ = write!(s, "  {cell:<w$}", w = widths[i]);
             } else {
                 let _ = write!(s, "  {cell:>w$}", w = widths[i]);

@@ -45,7 +45,9 @@ pub(crate) struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `test-run` (a
-    /// `jouet test` run, recorded by itself), `stop`, `override`,
+    /// `jouet test` run, recorded by itself), `jouet-run` (any jouet
+    /// command in an agent's session, with its own exit code), `stop`,
+    /// `override`,
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// or `deprecated` (a command used something on its way out).
@@ -152,6 +154,51 @@ fn deprecation_in(dir: &Path, session: Option<&str>, id: &str) -> bool {
         append(dir, &entry);
     }
     told
+}
+
+/// Records a jouet command's own exit code in an agent's session, for
+/// `jouet stats`: the hooks see only the exit code of the whole call, which
+/// may have run more than jouet. Only the command's name is kept, never its
+/// arguments; the harness is the session's, which the stats look up.
+pub(crate) fn record_run(args: &[String], code: i32) {
+    let Some(session) = crate::cmd::search::session_id() else {
+        return;
+    };
+    let settings = crate::settings::Settings::load();
+    let Some(dir) = dir().filter(|_| settings.hooks.ledger) else {
+        return;
+    };
+    append(&dir, &run_entry(&session, args, code));
+}
+
+/// `jouet edit replace` and its exit code, from `args` without the program.
+fn run_entry(session: &str, args: &[String], code: i32) -> Entry {
+    // Past the global flags, `--display MODE` with its value.
+    let mut rest = args.iter().map(String::as_str).peekable();
+    while let Some(flag) = rest.next_if(|w| w.starts_with('-')) {
+        if flag == "--display" {
+            rest.next();
+        }
+    }
+    // The command's path in jouet's own declaration, so no argument is ever
+    // kept; two levels at most, as a shape keeps.
+    let mut path: Vec<&str> = Vec::new();
+    for word in rest.take(2) {
+        path.push(word);
+        if !crate::spec::has_command(&path) {
+            path.pop();
+            break;
+        }
+    }
+    let mut entry = Entry::new("jouet", Some(session), "jouet-run");
+    entry.shape = Some(
+        std::iter::once("jouet")
+            .chain(path)
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    entry.exit_code = Some(code);
+    entry
 }
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
@@ -791,7 +838,7 @@ const SECOND: &[(&str, &str, &[&str])] = &[
             "ci", "cmd", "file", "http", "log", "pid", "port", "pr", "run",
         ],
     ),
-    ("jouet", "pr", &["status", "threads"]),
+    ("jouet", "pr", &["land", "next", "status", "threads"]),
     (
         "jouet",
         "rule",
@@ -839,6 +886,46 @@ pub(crate) fn redact_id(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_run_keeps_the_command_and_its_exit_code_never_its_arguments() {
+        let args = |line: &str| {
+            line.split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        let e = super::run_entry(
+            "s",
+            &args("--display plain edit replace src/main.rs --old a --new b"),
+            3,
+        );
+        assert_eq!(
+            (
+                e.event.as_str(),
+                e.harness.as_str(),
+                e.shape.as_deref(),
+                e.exit_code
+            ),
+            ("jouet-run", "jouet", Some("jouet edit replace"), Some(3))
+        );
+        // The path from the declaration, two levels as the hooks shape it,
+        // so the stats match the two; never an argument.
+        for (line, shape) in [
+            ("--json pr threads reply abc --body x", "jouet pr threads"),
+            ("pr threads reply abc --body x", "jouet pr threads"),
+            ("pr next 12", "jouet pr next"),
+            ("pr land 12 --yes", "jouet pr land"),
+            ("run triage", "jouet run"),
+            ("not-a-command x", "jouet"),
+        ] {
+            let e = super::run_entry("s", &args(line), 0);
+            assert_eq!(e.shape.as_deref(), Some(shape), "{line}");
+            if line.starts_with("pr ") {
+                let hooks = super::shape(&format!("jouet {line}"));
+                assert!(hooks.starts_with(shape), "{hooks}");
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

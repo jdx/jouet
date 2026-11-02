@@ -48,6 +48,9 @@ pub struct Filter {
     pub until_ms: Option<i64>,
     /// Only sessions that ran in this directory or below it.
     pub project: Option<PathBuf>,
+    /// Only this session's transcripts, its subagents' included: both
+    /// harnesses put the session ID in the file's path.
+    pub session: Option<String>,
     /// Also read what a session digest needs and an audit does not: the
     /// user's messages, each call's line and target, and the start of each
     /// failure's output.
@@ -70,11 +73,29 @@ impl Filter {
     /// Whether a file last written at `modified_ms` can hold anything recent
     /// enough.
     fn wants(&self, source: &Source) -> bool {
-        match (self.since_ms, source.modified_ms) {
+        let recent = match (self.since_ms, source.modified_ms) {
             (Some(since), Some(modified)) => modified >= since,
             _ => true,
-        }
+        };
+        recent
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|s| names_session(&source.path, s))
     }
+}
+
+/// Whether a transcript's path is a session's: a directory or file named by
+/// its ID (Claude Code's `<id>.jsonl` and `<id>/subagents/`), or a file
+/// whose name ends in it (Codex's `rollout-<time>-<id>.jsonl`). A part of an
+/// ID is not a match.
+fn names_session(path: &Path, id: &str) -> bool {
+    path.components().any(|c| {
+        let name = c.as_os_str().to_string_lossy();
+        let file = name.strip_suffix(".zst").unwrap_or(&name);
+        let stem = file.strip_suffix(".jsonl").unwrap_or(file);
+        stem == id || stem.ends_with(&format!("-{id}"))
+    })
 }
 
 /// A transcript file.
@@ -127,7 +148,8 @@ pub struct ScanStats {
     pub files: u64,
     /// Their size on disk (compressed, for `.zst`).
     pub bytes: u64,
-    /// Files left unread because they were last written before `--since`.
+    /// Files left unread because they were last written before `--since`,
+    /// or belong to another session than [`Filter::session`].
     pub skipped_old: u64,
     /// Files read whose session ran outside `--project`.
     pub other_projects: u64,
@@ -348,4 +370,32 @@ pub(crate) fn sources(paths: Vec<PathBuf>) -> Vec<Source> {
         .into_iter()
         .filter_map(|p| Source::from_path(p).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_session;
+    use std::path::Path;
+
+    #[test]
+    fn a_session_is_matched_by_its_whole_id() {
+        let id = "0860db72-3012-4957-92a2-433053abb1a9";
+        for path in [
+            format!("/h/.claude/projects/-src-x/{id}.jsonl"),
+            format!("/h/.claude/projects/-src-x/{id}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/11/02/rollout-2026-11-02T10-00-00-{id}.jsonl.zst"),
+        ] {
+            assert!(names_session(Path::new(&path), id), "{path}");
+        }
+        for path in [
+            format!("/h/.claude/projects/-src-x/{id}0.jsonl"),
+            "/h/.claude/projects/-src-x/0860db72.jsonl".to_string(),
+        ] {
+            assert!(!names_session(Path::new(&path), id), "{path}");
+        }
+        assert!(!names_session(
+            Path::new("/h/.claude/projects/-src-x/a-0860db72.jsonl"),
+            "x-0860db72"
+        ));
+    }
 }

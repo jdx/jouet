@@ -1,14 +1,17 @@
 use usage_rs::Args;
 
-/// Show what jouet saved: measured from its ledger, estimated from your history
+/// Show what jouet saved and cost: measured from its ledger, estimated from your history
 ///
 /// Counts what the hook ledger recorded (jouet command runs, rule decisions
 /// and what the agent did after a denial, checks, and failing CI logs
 /// returned as excerpts), then estimates the input tokens those runs saved
-/// against your own Claude Code and Codex history from before `jouet setup`.
-/// Every estimate shows its basis, and a kind of work with fewer than 20 runs
-/// before setup is not estimated. Without a ledger, it shows what one run of
-/// each command would save.
+/// against your own Claude Code and Codex history from before `jouet setup`,
+/// and what jouet cost the same way: stop blocks, denials, failed jouet
+/// runs, `jouet edit` failures past the old rate, and the primer on every
+/// request since setup. The net may be negative. Every estimate shows its
+/// basis, and a kind of work with fewer than 20 runs before setup is not
+/// estimated. Without a ledger, it shows what one run of each command would
+/// save.
 #[derive(Args)]
 pub(crate) struct StatsArgs {
     /// Only ledger entries since TIME: a duration ago such as 7d or 12h, a
@@ -21,7 +24,8 @@ pub(crate) struct StatsArgs {
     /// Only one session's ledger entries
     #[usage(long, value_name = "ID")]
     pub(crate) session: Option<String>,
-    /// Print one line about what jouet saved, or nothing, for a stop hook.
+    /// Print one line about what jouet saved, or what it cost when that was
+    /// more, or nothing, for a stop hook.
     /// `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its
     /// style: quips (default), plain or off
     #[usage(long)]
