@@ -1,0 +1,25 @@
+description = "Fix abbreviated short help in pallets/click#3865"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 900
+check_timeout_s = 180
+python_requirements = "requirements.lock"
+prompt = """
+Click's automatically shortened command help treats abbreviations such as
+`vs.` and `e.g.` as the end of a sentence, so text after them disappears.
+Continue past a period when the following word starts lowercase; a period at
+the end of the text or followed by an uppercase word or digit still ends the
+sentence. Preserve first-paragraph and width-limiting behavior.
+
+Fix the short-help behavior, add tests, and commit your change.
+"""
+
+[source]
+git = "~/src/click-bench-source"
+commit = "d036881798e34289a49b18a5c550c7cf687e5a7a"
+
+[env]
+PYTHONPATH = "{workdir}/src"
