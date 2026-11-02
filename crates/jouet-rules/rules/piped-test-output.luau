@@ -257,12 +257,15 @@ local rule: JouetRule = {
 					for j, step in inner do
 						local cut = not step.nested and runs(step) and cutter(inner, j)
 						if cut then
-							local words = {}
+							local env, words = {}, {}
+							for _, text in step.env do
+								table.insert(env, assignment(text) .. " ")
+							end
 							for _, word in step.words do
 								table.insert(words, quote(word))
 							end
 							return jouet.warn(
-								`\`jouet test\` reads only what this script prints after {cut.program} cut it, and the exit code of its last command. Run \`jouet test --cmd -- {table.concat(words, " ")}\` on its own for each run instead, uncut: it keeps the whole output in a log and prints each failure, or one line of counts when the run passes.`
+								`\`jouet test\` reads only what this script prints after {cut.program} cut it, and the exit code of its last command. Run \`{table.concat(env)}jouet test --cmd -- {table.concat(words, " ")}\` on its own for each run instead, uncut: it keeps the whole output in a log and prints each failure, or one line of counts when the run passes.`
 							)
 						end
 					end

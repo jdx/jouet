@@ -41,6 +41,7 @@ fires = [
   # Inside `jouet test`, it sees only the cut output and the last exit code.
   "jouet test --cmd -- sh -c 'cargo test --bin fnox editor 2>&1 | tail -15; mise run build 2>&1 | tail -3'",
   "jouet test --cmd -- bash -lc 'go test ./... | grep -v ^ok'",
+  "jouet test --cmd -- sh -c 'RUST_LOG=debug cargo test 2>&1 | tail'",
 ]
 quiet = [
   # Left to `scoped-lint`.

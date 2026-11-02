@@ -268,6 +268,14 @@ fn is_assignment(word: &str) -> bool {
 fn shell_c_script(argv: &[String]) -> Option<&str> {
     let program = basename(argv.first()?);
     if !matches!(program, "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish") {
+        // Only a program that runs what follows its `--`: `echo -- sh -c x`
+        // prints the script, and nothing runs it.
+        if !matches!(
+            program,
+            "jouet" | "mise" | "mbx" | "uv" | "env" | "sudo" | "timeout" | "nice" | "nohup"
+        ) {
+            return None;
+        }
         let rest = argv.iter().position(|w| w == "--")?;
         return shell_c_script(&argv[rest + 1..]);
     }
@@ -818,6 +826,13 @@ mod tests {
         let script = parse("jouet test --cmd -- sh -c 'cargo test | tail -3'");
         assert_eq!(script.inner_scripts()[0].commands[1].words, ["tail", "-3"]);
         assert!(parse("echo -- sh").inner_scripts().is_empty());
+        // Not a program that prints or passes the words on.
+        assert!(
+            parse("echo -- sh -c 'git add -A'")
+                .inner_scripts()
+                .is_empty()
+        );
+        assert!(parse("printf %s -- bash -c x").inner_scripts().is_empty());
     }
 
     fn status_of(script: &str, exit_code: i32) -> Vec<Option<i32>> {
