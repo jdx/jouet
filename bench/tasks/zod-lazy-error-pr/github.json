@@ -1,0 +1,1434 @@
+{
+  "repo": "jdx/demo",
+  "rest": {
+    "/repos/jdx/demo/pulls/6519": {
+      "number": 6519,
+      "id": 3007,
+      "node_id": "PR_6519",
+      "state": "open",
+      "draft": false,
+      "locked": false,
+      "title": "perf(v4): build the safeParse error on first read",
+      "body": "Builds `result.error` on first read: a failing `safeParse` spent ~85% of its time finalizing issues and constructing the `ZodError`, which a caller that only branches on `success` never reads. The Standard Schema surface finalizes issues straight off the raw payload, so it never goes through the lazy result.\n\nMeasured against `main` (Node 26.7, Apple Silicon, load < 9, best of 4 interleaved rounds):\n\n| | main | this PR |\n| --- | --- | --- |\n| `safeParse` invalid, only `.success` read | 1057 ns | 336 ns |\n| `safeParse` invalid, `.error.issues` read | 1060 ns | 1442 ns |\n| `~standard.validate` invalid | 419 ns | 402 ns |\n| `safeParse` valid, `.parse()` throw | unchanged | unchanged |\n| Every mini bundle | — | +47 B gzipped |\n\nThe result is a literal with a getter and a setter, five lines. The alternative — one shared accessor descriptor plus a hidden state slot on each result — reads ~15% faster (273 ns / 1255 ns on the two failing rows) because every result then shares one map and the `.error` load sites stay monomorphic, but it costs ~75 B more gzipped in every bundle; at mini's scale that is the wrong trade, so the getter stays.\n\nTwo things to weigh either way:\n\n- Readers pay for the accessor; `error` has to stay own and enumerable (keys, spreads, `structuredClone`, `toEqual`), so a per-result getter is the floor, and `#private` fields would downlevel to WeakMaps under the es2020 target.\n- Error maps (`customError`, `localeError`, per-schema maps) run on the first read of `error`, against whatever config is live then, instead of at parse time. The nine tests in `issue-schema.test.ts` that watch the maps through a bare `safeParse` now read the error explicitly. Stack traces are unaffected: a `safeParse` error has had no stack since #6450.\n\nWhere it shows: benchmarks that discard the failing result or read only `.success` — the \"Invalid data\" parsing rows and the invalid-string rows on schemabenchmarks.dev, `packages/bench/error-handling.ts`, and the `.success`-only section of the old zod-compiler comparison (37x → ~10x). The moltar suite calls `.parse()` on valid data only and does not move. Standard Schema rows are already covered by #6509.\n\nAn opt-in form (`safeParse(data, { lazyError: true })`) keeps readers and the map timing unchanged but ships the same bytes.",
+      "user": {
+        "login": "jdx"
+      },
+      "html_url": "https://github.com/jdx/demo/pull/6519",
+      "url": "http://api.github.localhost/repos/jdx/demo/pulls/6519",
+      "head": {
+        "ref": "lazy-safeparse-error-pr",
+        "sha": "{{head_sha}}",
+        "label": "jdx:lazy-safeparse-error-pr",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "base": {
+        "ref": "main",
+        "sha": "{{base_sha}}",
+        "label": "jdx:main",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "merged": false,
+      "created_at": "2026-10-30T12:00:00Z",
+      "updated_at": "2026-10-30T12:00:00Z"
+    },
+    "/repos/jdx/demo/pulls": [
+      {
+        "number": 6519,
+        "id": 3007,
+        "node_id": "PR_6519",
+        "state": "open",
+        "draft": false,
+        "locked": false,
+        "title": "perf(v4): build the safeParse error on first read",
+        "body": "Builds `result.error` on first read: a failing `safeParse` spent ~85% of its time finalizing issues and constructing the `ZodError`, which a caller that only branches on `success` never reads. The Standard Schema surface finalizes issues straight off the raw payload, so it never goes through the lazy result.\n\nMeasured against `main` (Node 26.7, Apple Silicon, load < 9, best of 4 interleaved rounds):\n\n| | main | this PR |\n| --- | --- | --- |\n| `safeParse` invalid, only `.success` read | 1057 ns | 336 ns |\n| `safeParse` invalid, `.error.issues` read | 1060 ns | 1442 ns |\n| `~standard.validate` invalid | 419 ns | 402 ns |\n| `safeParse` valid, `.parse()` throw | unchanged | unchanged |\n| Every mini bundle | — | +47 B gzipped |\n\nThe result is a literal with a getter and a setter, five lines. The alternative — one shared accessor descriptor plus a hidden state slot on each result — reads ~15% faster (273 ns / 1255 ns on the two failing rows) because every result then shares one map and the `.error` load sites stay monomorphic, but it costs ~75 B more gzipped in every bundle; at mini's scale that is the wrong trade, so the getter stays.\n\nTwo things to weigh either way:\n\n- Readers pay for the accessor; `error` has to stay own and enumerable (keys, spreads, `structuredClone`, `toEqual`), so a per-result getter is the floor, and `#private` fields would downlevel to WeakMaps under the es2020 target.\n- Error maps (`customError`, `localeError`, per-schema maps) run on the first read of `error`, against whatever config is live then, instead of at parse time. The nine tests in `issue-schema.test.ts` that watch the maps through a bare `safeParse` now read the error explicitly. Stack traces are unaffected: a `safeParse` error has had no stack since #6450.\n\nWhere it shows: benchmarks that discard the failing result or read only `.success` — the \"Invalid data\" parsing rows and the invalid-string rows on schemabenchmarks.dev, `packages/bench/error-handling.ts`, and the `.success`-only section of the old zod-compiler comparison (37x → ~10x). The moltar suite calls `.parse()` on valid data only and does not move. Standard Schema rows are already covered by #6509.\n\nAn opt-in form (`safeParse(data, { lazyError: true })`) keeps readers and the map timing unchanged but ships the same bytes.",
+        "user": {
+          "login": "jdx"
+        },
+        "html_url": "https://github.com/jdx/demo/pull/6519",
+        "url": "http://api.github.localhost/repos/jdx/demo/pulls/6519",
+        "head": {
+          "ref": "lazy-safeparse-error-pr",
+          "sha": "{{head_sha}}",
+          "label": "jdx:lazy-safeparse-error-pr",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "{{base_sha}}",
+          "label": "jdx:main",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "mergeable": true,
+        "mergeable_state": "unstable",
+        "merged": false,
+        "created_at": "2026-10-30T12:00:00Z",
+        "updated_at": "2026-10-30T12:00:00Z"
+      }
+    ],
+    "/repos/jdx/demo/commits/{{head_sha}}/check-runs": {
+      "total_count": 2,
+      "check_runs": [
+        {
+          "id": 7101,
+          "node_id": "CR_7101",
+          "name": "Lint on Node latest",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:08Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 0
+          },
+          "$until": 8,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7102,
+          "node_id": "CR_7102",
+          "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:01:30Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/status": {
+      "state": "pending",
+      "statuses": [],
+      "total_count": 0,
+      "sha": "{{head_sha}}"
+    },
+    "/repos/jdx/demo/branches/main": {
+      "name": "main",
+      "commit": {
+        "sha": "{{base_sha}}"
+      },
+      "protected": false
+    },
+    "/repos/jdx/demo/actions/runs": {
+      "total_count": 1,
+      "workflow_runs": [
+        {
+          "id": 9001,
+          "node_id": "WFR_9001",
+          "name": "test",
+          "display_title": "perf(v4): build the safeParse error on first read",
+          "head_branch": "lazy-safeparse-error-pr",
+          "head_sha": "{{head_sha}}",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure",
+          "workflow_id": 501,
+          "run_number": 41,
+          "run_attempt": 1,
+          "created_at": "2026-10-30T12:00:00Z",
+          "updated_at": "2026-10-30T12:00:50Z",
+          "run_started_at": "2026-10-30T12:00:00Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+          "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+          "path": ".github/workflows/test.yml",
+          "repository": {
+            "full_name": "jdx/demo"
+          },
+          "pull_requests": [
+            {
+              "number": 6519,
+              "head": {
+                "ref": "lazy-safeparse-error-pr",
+                "sha": "{{head_sha}}"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "{{base_sha}}"
+              }
+            }
+          ],
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001": {
+      "id": 9001,
+      "node_id": "WFR_9001",
+      "name": "test",
+      "display_title": "perf(v4): build the safeParse error on first read",
+      "head_branch": "lazy-safeparse-error-pr",
+      "head_sha": "{{head_sha}}",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "workflow_id": 501,
+      "run_number": 41,
+      "run_attempt": 1,
+      "created_at": "2026-10-30T12:00:00Z",
+      "updated_at": "2026-10-30T12:00:50Z",
+      "run_started_at": "2026-10-30T12:00:00Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+      "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+      "path": ".github/workflows/test.yml",
+      "repository": {
+        "full_name": "jdx/demo"
+      },
+      "pull_requests": [
+        {
+          "number": 6519,
+          "head": {
+            "ref": "lazy-safeparse-error-pr",
+            "sha": "{{head_sha}}"
+          },
+          "base": {
+            "ref": "main",
+            "sha": "{{base_sha}}"
+          }
+        }
+      ],
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null
+      }
+    },
+    "/repos/jdx/demo/actions/runs/9001/jobs": {
+      "total_count": 2,
+      "jobs": [
+        {
+          "id": 7101,
+          "run_id": 9001,
+          "node_id": "J_7101",
+          "name": "Lint on Node latest",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "lazy-safeparse-error-pr",
+          "workflow_name": "test",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:08Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v7",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@v7",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run pnpm/action-setup@v6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run pnpm install",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run pnpm format:check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run pnpm lint:check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm check:comments",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 8,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v7",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run actions/setup-node@v7",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 3
+              },
+              {
+                "name": "Run pnpm/action-setup@v6",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 4
+              },
+              {
+                "name": "Run pnpm install",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 5
+              },
+              {
+                "name": "Run pnpm format:check",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 6
+              },
+              {
+                "name": "Run pnpm lint:check",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 7
+              },
+              {
+                "name": "Run pnpm check:comments",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 8
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 9
+              }
+            ]
+          }
+        },
+        {
+          "id": 7102,
+          "run_id": 9001,
+          "node_id": "J_7102",
+          "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "lazy-safeparse-error-pr",
+          "workflow_name": "test",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-30T12:00:00Z",
+          "completed_at": "2026-10-30T12:00:50Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v7",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@v7",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run pnpm/action-setup@v6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run pnpm install",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run pnpm build",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run pnpm add typescript@latest -w",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm test",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 8
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v7",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run actions/setup-node@v7",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 3
+              },
+              {
+                "name": "Run pnpm/action-setup@v6",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 4
+              },
+              {
+                "name": "Run pnpm install",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 5
+              },
+              {
+                "name": "Run pnpm build",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 6
+              },
+              {
+                "name": "Run pnpm add typescript@latest -w",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 7
+              },
+              {
+                "name": "Run pnpm test",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 8
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 9
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/jobs/7101": {
+      "id": 7101,
+      "run_id": 9001,
+      "node_id": "J_7101",
+      "name": "Lint on Node latest",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "lazy-safeparse-error-pr",
+      "workflow_name": "test",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-30T12:00:00Z",
+      "completed_at": "2026-10-30T12:00:08Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run actions/setup-node@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Run pnpm/action-setup@v6",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Run pnpm install",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Run pnpm format:check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Run pnpm lint:check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "Run pnpm check:comments",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 8,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v7",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v7",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run pnpm/action-setup@v6",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Run pnpm install",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Run pnpm format:check",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 6
+          },
+          {
+            "name": "Run pnpm lint:check",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 7
+          },
+          {
+            "name": "Run pnpm check:comments",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 8
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 9
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102": {
+      "id": 7102,
+      "run_id": 9001,
+      "node_id": "J_7102",
+      "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "lazy-safeparse-error-pr",
+      "workflow_name": "test",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-30T12:00:00Z",
+      "completed_at": "2026-10-30T12:00:50Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run actions/setup-node@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Run pnpm/action-setup@v6",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Run pnpm install",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Run pnpm build",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Run pnpm add typescript@latest -w",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "Run pnpm test",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 8
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v7",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v7",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run pnpm/action-setup@v6",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Run pnpm install",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Run pnpm build",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 6
+          },
+          {
+            "name": "Run pnpm add typescript@latest -w",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 7
+          },
+          {
+            "name": "Run pnpm test",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 8
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 9
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7101/logs": "2026-08-29T23:24:35.1586330Z ##[group]Run pnpm format:check\n2026-08-29T23:24:35.1586707Z pnpm format:check\n2026-08-29T23:24:35.1614233Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:35.1614668Z env:\n2026-08-29T23:24:35.1615011Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:35.1615383Z ##[endgroup]\n2026-08-29T23:24:35.4122287Z \n2026-08-29T23:24:35.4123635Z > @ format:check /home/runner/work/zod/zod\n2026-08-29T23:24:35.4124466Z > biome check .\n2026-08-29T23:24:35.4124688Z \n2026-08-29T23:24:36.4142812Z Checked 442 files in 957ms. No fixes applied.\n2026-08-29T23:24:36.4287507Z ##[group]Run pnpm lint:check\n2026-08-29T23:24:36.4287896Z pnpm lint:check\n2026-08-29T23:24:36.4313369Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:36.4313779Z env:\n2026-08-29T23:24:36.4314132Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:36.4314569Z ##[endgroup]\n2026-08-29T23:24:36.6816405Z \n2026-08-29T23:24:36.6817272Z > @ lint:check /home/runner/work/zod/zod\n2026-08-29T23:24:36.6818022Z > biome lint .\n2026-08-29T23:24:36.6818351Z \n2026-08-29T23:24:37.2727069Z Checked 442 files in 546ms. No fixes applied.\n2026-08-29T23:24:37.2986565Z ##[group]Run pnpm check:comments\n2026-08-29T23:24:37.2987069Z pnpm check:comments\n2026-08-29T23:24:37.3031080Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:37.3032022Z env:\n2026-08-29T23:24:37.3032534Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:37.3033106Z ##[endgroup]\n2026-08-29T23:24:37.5507652Z \n2026-08-29T23:24:37.5508872Z > @ check:comments /home/runner/work/zod/zod\n2026-08-29T23:24:37.5509428Z > tsx scripts/check-comments.ts\n2026-08-29T23:24:37.5509809Z \n2026-08-29T23:24:38.9887268Z ✅ No stacked comment lines\n2026-08-29T23:24:38.9890544Z (node:2430) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.\n2026-08-29T23:24:38.9891945Z (Use `node --trace-deprecation ...` to show where the warning was created)\n",
+    "/repos/jdx/demo/actions/jobs/7102/logs": {
+      "$text": "2026-08-29T23:24:44.6752980Z ##[group]Run pnpm test\n2026-08-29T23:24:44.6753323Z pnpm test\n2026-08-29T23:24:44.6799580Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:44.6799898Z env:\n2026-08-29T23:24:44.6800220Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:44.6800618Z ##[endgroup]\n2026-08-29T23:24:44.8989627Z \n2026-08-29T23:24:44.8989949Z > @ test /home/runner/work/zod/zod\n2026-08-29T23:24:44.8990308Z > vitest run\n2026-08-29T23:24:44.8990449Z \n2026-08-29T23:24:45.0988133Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.0989170Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.1267657Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.1268273Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.1424471Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.1425146Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.2279966Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.2280590Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.2304475Z \n2026-08-29T23:24:45.2305497Z  RUN  v4.1.5 /home/runner/work/zod/zod\n2026-08-29T23:24:45.2305902Z \n2026-08-29T23:24:58.2645186Z  ❯  compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts (9 tests | 9 failed) 49ms\n2026-08-29T23:24:58.2647119Z    × check-originated issues expose the owning schema 21ms\n2026-08-29T23:24:58.2654806Z    × schema-originated issues expose the owning schema 2ms\n2026-08-29T23:24:58.2655960Z    × refinements attribute to the refined schema, not the internal check schema 3ms\n2026-08-29T23:24:58.2671723Z    × the innermost schema owns the issue 12ms\n2026-08-29T23:24:58.2672917Z    × issues carrying no usable `inst` still get the owning schema 2ms\n2026-08-29T23:24:58.2700944Z    × async checks expose the owning schema 1ms\n2026-08-29T23:24:58.2701894Z    × the owning schema is the clone `.meta()` registered, not the pre-metadata schema 1ms\n2026-08-29T23:24:58.2702797Z    × `inst` keeps its meaning and `schema` stays off the finalized issue 1ms\n2026-08-29T23:24:58.2704350Z    × every error map kind receives the owning schema 3ms\n2026-08-29T23:25:18.9949518Z  ❯  zod  src/v4/classic/tests/issue-schema.test.ts (9 tests | 9 failed) 30ms\n2026-08-29T23:25:18.9951019Z    × check-originated issues expose the owning schema 16ms\n2026-08-29T23:25:18.9952614Z    × schema-originated issues expose the owning schema 2ms\n2026-08-29T23:25:18.9953851Z    × refinements attribute to the refined schema, not the internal check schema 2ms\n2026-08-29T23:25:18.9954892Z    × the innermost schema owns the issue 3ms\n2026-08-29T23:25:18.9955891Z    × issues carrying no usable `inst` still get the owning schema 1ms\n2026-08-29T23:25:18.9957084Z    × async checks expose the owning schema 1ms\n2026-08-29T23:25:18.9958239Z    × the owning schema is the clone `.meta()` registered, not the pre-metadata schema 1ms\n2026-08-29T23:25:18.9959477Z    × `inst` keeps its meaning and `schema` stays off the finalized issue 1ms\n2026-08-29T23:25:18.9961140Z    × every error map kind receives the owning schema 2ms\n2026-08-29T23:25:32.7650492Z \n2026-08-29T23:25:32.7651304Z ⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯\n2026-08-29T23:25:32.7651728Z \n2026-08-29T23:25:32.7654923Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > check-originated issues expose the owning schema\n2026-08-29T23:25:32.7660454Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n2026-08-29T23:25:32.7660819Z \n2026-08-29T23:25:32.7661084Z - Expected\n2026-08-29T23:25:32.7661591Z + Received\n2026-08-29T23:25:32.7661738Z \n2026-08-29T23:25:32.7666874Z - [\n2026-08-29T23:25:32.7667224Z -   {\n2026-08-29T23:25:32.7667763Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7668242Z -   },\n2026-08-29T23:25:32.7668540Z -   {\n2026-08-29T23:25:32.7668883Z -     \"title\": \"Max\",\n2026-08-29T23:25:32.7669207Z -   },\n2026-08-29T23:25:32.7669476Z -   {\n2026-08-29T23:25:32.7669811Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7670140Z -   },\n2026-08-29T23:25:32.7670414Z -   {\n2026-08-29T23:25:32.7670767Z -     \"title\": \"Multiple\",\n2026-08-29T23:25:32.7671111Z -   },\n2026-08-29T23:25:32.7671332Z -   {\n2026-08-29T23:25:32.7671559Z -     \"title\": \"Array\",\n2026-08-29T23:25:32.7672035Z -   },\n2026-08-29T23:25:32.7672207Z - ]\n2026-08-29T23:25:32.7672384Z + []\n2026-08-29T23:25:32.7672474Z \n2026-08-29T23:25:32.7672841Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:29:16\n2026-08-29T23:25:32.7701067Z      27|   z.array(z.string()).min(2).meta({ title: \"Array\" }).safeParse([]);\n2026-08-29T23:25:32.7702290Z      28|\n2026-08-29T23:25:32.7702891Z      29|   expect(seen).toEqual([\n2026-08-29T23:25:32.7703515Z        |                ^\n2026-08-29T23:25:32.7704101Z      30|     { title: \"Name\" },\n2026-08-29T23:25:32.7704733Z      31|     { title: \"Max\" },\n2026-08-29T23:25:32.7705087Z \n2026-08-29T23:25:32.7705429Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯\n2026-08-29T23:25:32.7705700Z \n2026-08-29T23:25:32.7707052Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > schema-originated issues expose the owning schema\n2026-08-29T23:25:32.7708474Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n2026-08-29T23:25:32.7708932Z \n2026-08-29T23:25:32.7709114Z - Expected\n2026-08-29T23:25:32.7709465Z + Received\n2026-08-29T23:25:32.7709624Z \n2026-08-29T23:25:32.7709772Z - [\n2026-08-29T23:25:32.7710055Z -   {\n2026-08-29T23:25:32.7710425Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7710768Z -   },\n2026-08-29T23:25:32.7711051Z -   {\n2026-08-29T23:25:32.7711424Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7711787Z -   },\n2026-08-29T23:25:32.7712069Z - ]\n2026-08-29T23:25:32.7712350Z + []\n2026-08-29T23:25:32.7712520Z \n2026-08-29T23:25:32.7713084Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:44:16\n2026-08-29T23:25:32.7716213Z      42|   z.email().meta({ title: \"Email\" }).safeParse(123);\n2026-08-29T23:25:32.7717458Z      43|\n2026-08-29T23:25:32.7718483Z      44|   expect(seen).toEqual([{ title: \"Name\" }, { title: \"Email\" }]);\n2026-08-29T23:25:32.7719386Z        |                ^\n2026-08-29T23:25:32.7719817Z      45| });\n2026-08-29T23:25:32.7720165Z      46|\n2026-08-29T23:25:32.7720319Z \n2026-08-29T23:25:32.7720647Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯\n2026-08-29T23:25:32.7720915Z \n2026-08-29T23:25:32.7722191Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > refinements attribute to the refined schema, not the internal check schema\n2026-08-29T23:25:32.7723857Z AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n2026-08-29T23:25:32.7724339Z \n2026-08-29T23:25:32.7724529Z - Expected\n2026-08-29T23:25:32.7724883Z + Received\n2026-08-29T23:25:32.7725052Z \n2026-08-29T23:25:32.7725180Z - [\n2026-08-29T23:25:32.7725467Z -   {\n2026-08-29T23:25:32.7725835Z -     \"title\": \"Refine\",\n2026-08-29T23:25:32.7726200Z -   },\n2026-08-29T23:25:32.7726660Z -   {\n2026-08-29T23:25:32.7727051Z -     \"title\": \"SuperRefine\",\n2026-08-29T23:25:32.7727422Z -   },\n2026-08-29T23:25:32.7727709Z - ]\n2026-08-29T23:25:32.7727980Z + []\n2026-08-29T23:25:32.7728121Z \n2026-08-29T23:25:32.7728690Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:59:16\n2026-08-29T23:25:32.7729753Z      57|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7730237Z      58|\n2026-08-29T23:25:32.7730828Z      59|   expect(seen).toEqual([{ title: \"Refine\" }, { title: \"SuperRefine\" }]…\n2026-08-29T23:25:32.7731480Z        |                ^\n2026-08-29T23:25:32.7731914Z      60| });\n2026-08-29T23:25:32.7732262Z      61|\n2026-08-29T23:25:32.7732426Z \n2026-08-29T23:25:32.7732724Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯\n2026-08-29T23:25:32.7732998Z \n2026-08-29T23:25:32.7733998Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > the innermost schema owns the issue\n2026-08-29T23:25:32.7735309Z AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n2026-08-29T23:25:32.7735765Z \n2026-08-29T23:25:32.7735947Z - Expected\n2026-08-29T23:25:32.7736284Z + Received\n2026-08-29T23:25:32.7736673Z \n2026-08-29T23:25:32.7736809Z - [\n2026-08-29T23:25:32.7737086Z -   {\n2026-08-29T23:25:32.7737445Z -     \"title\": \"Element\",\n2026-08-29T23:25:32.7737798Z -   },\n2026-08-29T23:25:32.7738083Z -   {\n2026-08-29T23:25:32.7738470Z -     \"title\": \"Target\",\n2026-08-29T23:25:32.7738840Z -   },\n2026-08-29T23:25:32.7739109Z -   {\n2026-08-29T23:25:32.7739484Z -     \"title\": \"Property\",\n2026-08-29T23:25:32.7739839Z -   },\n2026-08-29T23:25:32.7740105Z - ]\n2026-08-29T23:25:32.7740384Z + []\n2026-08-29T23:25:32.7740538Z \n2026-08-29T23:25:32.7741092Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:77:16\n2026-08-29T23:25:32.7741991Z      75|     .safeParse({ a: 1 });\n2026-08-29T23:25:32.7742527Z      76|\n2026-08-29T23:25:32.7743123Z      77|   expect(seen).toEqual([{ title: \"Element\" }, { title: \"Target\" }, { t…\n2026-08-29T23:25:32.7743765Z        |                ^\n2026-08-29T23:25:32.7744179Z      78| });\n2026-08-29T23:25:32.7744512Z      79|\n2026-08-29T23:25:32.7744669Z \n2026-08-29T23:25:32.7744971Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯\n2026-08-29T23:25:32.7745419Z \n2026-08-29T23:25:32.7746740Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > issues carrying no usable `inst` still get the owning schema\n2026-08-29T23:25:32.7748024Z AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n2026-08-29T23:25:32.7748402Z \n2026-08-29T23:25:32.7748563Z - Expected\n2026-08-29T23:25:32.7748895Z + Received\n2026-08-29T23:25:32.7749065Z \n2026-08-29T23:25:32.7749203Z - [\n2026-08-29T23:25:32.7749459Z -   {\n2026-08-29T23:25:32.7749761Z -     \"title\": \"Bare\",\n2026-08-29T23:25:32.7750076Z -   },\n2026-08-29T23:25:32.7750315Z - ]\n2026-08-29T23:25:32.7750544Z + []\n2026-08-29T23:25:32.7750676Z \n2026-08-29T23:25:32.7751158Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:96:16\n2026-08-29T23:25:32.7751886Z      94|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7752317Z      95|\n2026-08-29T23:25:32.7752953Z      96|   expect(seen).toEqual([{ title: \"Bare\" }]);\n2026-08-29T23:25:32.7753577Z        |                ^\n2026-08-29T23:25:32.7754691Z      97|   expect(shorthand.error!.issues[0].message).toEqual(\"bad stuff\");\n2026-08-29T23:25:32.7755537Z      98| });\n2026-08-29T23:25:32.7755736Z \n2026-08-29T23:25:32.7756005Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/18]⎯\n2026-08-29T23:25:32.7756627Z \n2026-08-29T23:25:32.7757591Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > async checks expose the owning schema\n2026-08-29T23:25:32.7758787Z AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n2026-08-29T23:25:32.7759169Z \n2026-08-29T23:25:32.7759322Z - Expected\n2026-08-29T23:25:32.7759617Z + Received\n2026-08-29T23:25:32.7759779Z \n2026-08-29T23:25:32.7759903Z - [\n2026-08-29T23:25:32.7760177Z -   {\n2026-08-29T23:25:32.7760530Z -     \"title\": \"Async\",\n2026-08-29T23:25:32.7760874Z -   },\n2026-08-29T23:25:32.7761140Z - ]\n2026-08-29T23:25:32.7761403Z + []\n2026-08-29T23:25:32.7761546Z \n2026-08-29T23:25:32.7762079Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:109:16\n2026-08-29T23:25:32.7762883Z     107|     .safeParseAsync(\"abc\");\n2026-08-29T23:25:32.7763393Z     108|\n2026-08-29T23:25:32.7764087Z     109|   expect(seen).toEqual([{ title: \"Async\" }]);\n2026-08-29T23:25:32.7764763Z        |                ^\n2026-08-29T23:25:32.7765170Z     110| });\n2026-08-29T23:25:32.7765483Z     111|\n2026-08-29T23:25:32.7765634Z \n2026-08-29T23:25:32.7765903Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/18]⎯\n2026-08-29T23:25:32.7766136Z \n2026-08-29T23:25:32.7767518Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > the owning schema is the clone `.meta()` registered, not the pre-metadata schema\n2026-08-29T23:25:32.7768801Z AssertionError: expected [] to deeply equal [ true ]\n2026-08-29T23:25:32.7769159Z \n2026-08-29T23:25:32.7769304Z - Expected\n2026-08-29T23:25:32.7769619Z + Received\n2026-08-29T23:25:32.7769763Z \n2026-08-29T23:25:32.7769889Z - [\n2026-08-29T23:25:32.7770151Z -   true,\n2026-08-29T23:25:32.7770407Z - ]\n2026-08-29T23:25:32.7770650Z + []\n2026-08-29T23:25:32.7770788Z \n2026-08-29T23:25:32.7771461Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:125:16\n2026-08-29T23:25:32.7772242Z     123|   labeled.safeParse(\"ab\");\n2026-08-29T23:25:32.7772720Z     124|\n2026-08-29T23:25:32.7773300Z     125|   expect(seen).toEqual([true]);\n2026-08-29T23:25:32.7773940Z        |                ^\n2026-08-29T23:25:32.7774340Z     126| });\n2026-08-29T23:25:32.7774663Z     127|\n2026-08-29T23:25:32.7774803Z \n2026-08-29T23:25:32.7775086Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/18]⎯\n2026-08-29T23:25:32.7775339Z \n2026-08-29T23:25:32.7776638Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > `inst` keeps its meaning and `schema` stays off the finalized issue\n2026-08-29T23:25:32.7778031Z AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n2026-08-29T23:25:32.7778525Z \n2026-08-29T23:25:32.7778680Z - Expected\n2026-08-29T23:25:32.7778947Z + Received\n2026-08-29T23:25:32.7779074Z \n2026-08-29T23:25:32.7779188Z - [\n2026-08-29T23:25:32.7779496Z -   \"$ZodCheckMinLength\",\n2026-08-29T23:25:32.7779842Z -   \"ZodString\",\n2026-08-29T23:25:32.7780125Z - ]\n2026-08-29T23:25:32.7780383Z + []\n2026-08-29T23:25:32.7780516Z \n2026-08-29T23:25:32.7781064Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:140:17\n2026-08-29T23:25:32.7782202Z     138|   const wrongType = z.string().safeParse(123);\n2026-08-29T23:25:32.7783103Z     139|\n2026-08-29T23:25:32.7783993Z     140|   expect(insts).toEqual([\"$ZodCheckMinLength\", \"ZodString\"]);\n2026-08-29T23:25:32.7784839Z        |                 ^\n2026-08-29T23:25:32.7785547Z     141|   expect(Object.keys(tooSmall.error!.issues[0])).not.toContain(\"schema…\n2026-08-29T23:25:32.7786595Z     142|   expect(Object.keys(wrongType.error!.issues[0])).not.toContain(\"schem…\n2026-08-29T23:25:32.7787024Z \n2026-08-29T23:25:32.7787323Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/18]⎯\n2026-08-29T23:25:32.7787577Z \n2026-08-29T23:25:32.7788585Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > every error map kind receives the owning schema\n2026-08-29T23:25:32.7789910Z AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n2026-08-29T23:25:32.7790378Z \n2026-08-29T23:25:32.7790560Z - Expected\n2026-08-29T23:25:32.7790895Z + Received\n2026-08-29T23:25:32.7791067Z \n2026-08-29T23:25:32.7791198Z - {\n2026-08-29T23:25:32.7791509Z -   \"check\": {\n2026-08-29T23:25:32.7791895Z -     \"title\": \"Check\",\n2026-08-29T23:25:32.7792248Z -   },\n2026-08-29T23:25:32.7792592Z -   \"customError\": {\n2026-08-29T23:25:32.7793005Z -     \"title\": \"Custom\",\n2026-08-29T23:25:32.7793338Z -   },\n2026-08-29T23:25:32.7793683Z -   \"localeError\": {\n2026-08-29T23:25:32.7794056Z -     \"title\": \"Locale\",\n2026-08-29T23:25:32.7794389Z -   },\n2026-08-29T23:25:32.7794693Z -   \"parse\": {\n2026-08-29T23:25:32.7795063Z -     \"title\": \"Parse\",\n2026-08-29T23:25:32.7795386Z -   },\n2026-08-29T23:25:32.7795688Z -   \"schema\": {\n2026-08-29T23:25:32.7796072Z -     \"title\": \"Schema\",\n2026-08-29T23:25:32.7796594Z -   },\n2026-08-29T23:25:32.7796863Z - }\n2026-08-29T23:25:32.7797122Z + {}\n2026-08-29T23:25:32.7797270Z \n2026-08-29T23:25:32.7797802Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:176:16\n2026-08-29T23:25:32.7798820Z     174|   z.config({ localeError });\n2026-08-29T23:25:32.7799290Z     175|\n2026-08-29T23:25:32.7799776Z     176|   expect(seen).toEqual({\n2026-08-29T23:25:32.7800315Z        |                ^\n2026-08-29T23:25:32.7800949Z     177|     check: { title: \"Check\" },\n2026-08-29T23:25:32.7801709Z     178|     schema: { title: \"Schema\" },\n2026-08-29T23:25:32.7802094Z \n2026-08-29T23:25:32.7802413Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/18]⎯\n2026-08-29T23:25:32.7802647Z \n2026-08-29T23:25:32.7803534Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > check-originated issues expose the owning schema\n2026-08-29T23:25:32.7804749Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n2026-08-29T23:25:32.7805178Z \n2026-08-29T23:25:32.7805349Z - Expected\n2026-08-29T23:25:32.7805674Z + Received\n2026-08-29T23:25:32.7805836Z \n2026-08-29T23:25:32.7805966Z - [\n2026-08-29T23:25:32.7806247Z -   {\n2026-08-29T23:25:32.7806759Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7807091Z -   },\n2026-08-29T23:25:32.7807359Z -   {\n2026-08-29T23:25:32.7807695Z -     \"title\": \"Max\",\n2026-08-29T23:25:32.7808020Z -   },\n2026-08-29T23:25:32.7808284Z -   {\n2026-08-29T23:25:32.7808634Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7808961Z -   },\n2026-08-29T23:25:32.7809224Z -   {\n2026-08-29T23:25:32.7809761Z -     \"title\": \"Multiple\",\n2026-08-29T23:25:32.7810101Z -   },\n2026-08-29T23:25:32.7810357Z -   {\n2026-08-29T23:25:32.7810697Z -     \"title\": \"Array\",\n2026-08-29T23:25:32.7811038Z -   },\n2026-08-29T23:25:32.7811297Z - ]\n2026-08-29T23:25:32.7811556Z + []\n2026-08-29T23:25:32.7811702Z \n2026-08-29T23:25:32.7812155Z  ❯ src/v4/classic/tests/issue-schema.test.ts:29:16\n2026-08-29T23:25:32.7813568Z      27|   z.array(z.string()).min(2).meta({ title: \"Array\" }).safeParse([]);\n2026-08-29T23:25:32.7814532Z      28|\n2026-08-29T23:25:32.7814991Z      29|   expect(seen).toEqual([\n2026-08-29T23:25:32.7815516Z        |                ^\n2026-08-29T23:25:32.7816048Z      30|     { title: \"Name\" },\n2026-08-29T23:25:32.7816787Z      31|     { title: \"Max\" },\n2026-08-29T23:25:32.7817085Z \n2026-08-29T23:25:32.7817383Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/18]⎯\n2026-08-29T23:25:32.7817632Z \n2026-08-29T23:25:32.7818525Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > schema-originated issues expose the owning schema\n2026-08-29T23:25:32.7819700Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n2026-08-29T23:25:32.7820135Z \n2026-08-29T23:25:32.7820293Z - Expected\n2026-08-29T23:25:32.7820615Z + Received\n2026-08-29T23:25:32.7820771Z \n2026-08-29T23:25:32.7820902Z - [\n2026-08-29T23:25:32.7821164Z -   {\n2026-08-29T23:25:32.7821511Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7821839Z -   },\n2026-08-29T23:25:32.7822106Z -   {\n2026-08-29T23:25:32.7822450Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7822786Z -   },\n2026-08-29T23:25:32.7823050Z - ]\n2026-08-29T23:25:32.7823307Z + []\n2026-08-29T23:25:32.7823456Z \n2026-08-29T23:25:32.7823885Z  ❯ src/v4/classic/tests/issue-schema.test.ts:44:16\n2026-08-29T23:25:32.7825211Z      42|   z.email().meta({ title: \"Email\" }).safeParse(123);\n2026-08-29T23:25:32.7840675Z      43|\n2026-08-29T23:25:32.7841799Z      44|   expect(seen).toEqual([{ title: \"Name\" }, { title: \"Email\" }]);\n2026-08-29T23:25:32.7842723Z        |                ^\n2026-08-29T23:25:32.7843164Z      45| });\n2026-08-29T23:25:32.7843522Z      46|\n2026-08-29T23:25:32.7843693Z \n2026-08-29T23:25:32.7844017Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/18]⎯\n2026-08-29T23:25:32.7844321Z \n2026-08-29T23:25:32.7845395Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > refinements attribute to the refined schema, not the internal check schema\n2026-08-29T23:25:32.7847202Z AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n2026-08-29T23:25:32.7847689Z \n2026-08-29T23:25:32.7847892Z - Expected\n2026-08-29T23:25:32.7848236Z + Received\n2026-08-29T23:25:32.7848411Z \n2026-08-29T23:25:32.7848551Z - [\n2026-08-29T23:25:32.7848830Z -   {\n2026-08-29T23:25:32.7849216Z -     \"title\": \"Refine\",\n2026-08-29T23:25:32.7849573Z -   },\n2026-08-29T23:25:32.7849864Z -   {\n2026-08-29T23:25:32.7850256Z -     \"title\": \"SuperRefine\",\n2026-08-29T23:25:32.7850631Z -   },\n2026-08-29T23:25:32.7850905Z - ]\n2026-08-29T23:25:32.7851174Z + []\n2026-08-29T23:25:32.7851476Z \n2026-08-29T23:25:32.7852204Z  ❯ src/v4/classic/tests/issue-schema.test.ts:59:16\n2026-08-29T23:25:32.7852974Z      57|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7853489Z      58|\n2026-08-29T23:25:32.7854160Z      59|   expect(seen).toEqual([{ title: \"Refine\" }, { title: \"SuperRefine\" }]…\n2026-08-29T23:25:32.7854812Z        |                ^\n2026-08-29T23:25:32.7855258Z      60| });\n2026-08-29T23:25:32.7855600Z      61|\n2026-08-29T23:25:32.7855753Z \n2026-08-29T23:25:32.7856068Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/18]⎯\n2026-08-29T23:25:32.7856499Z \n2026-08-29T23:25:32.7857332Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > the innermost schema owns the issue\n2026-08-29T23:25:32.7858542Z AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n2026-08-29T23:25:32.7859000Z \n2026-08-29T23:25:32.7859215Z - Expected\n2026-08-29T23:25:32.7859548Z + Received\n2026-08-29T23:25:32.7859723Z \n2026-08-29T23:25:32.7859860Z - [\n2026-08-29T23:25:32.7860142Z -   {\n2026-08-29T23:25:32.7860510Z -     \"title\": \"Element\",\n2026-08-29T23:25:32.7860885Z -   },\n2026-08-29T23:25:32.7861169Z -   {\n2026-08-29T23:25:32.7861550Z -     \"title\": \"Target\",\n2026-08-29T23:25:32.7861911Z -   },\n2026-08-29T23:25:32.7862189Z -   {\n2026-08-29T23:25:32.7862559Z -     \"title\": \"Property\",\n2026-08-29T23:25:32.7862919Z -   },\n2026-08-29T23:25:32.7863215Z - ]\n2026-08-29T23:25:32.7863492Z + []\n2026-08-29T23:25:32.7863638Z \n2026-08-29T23:25:32.7864120Z  ❯ src/v4/classic/tests/issue-schema.test.ts:77:16\n2026-08-29T23:25:32.7864958Z      75|     .safeParse({ a: 1 });\n2026-08-29T23:25:32.7865502Z      76|\n2026-08-29T23:25:32.7866121Z      77|   expect(seen).toEqual([{ title: \"Element\" }, { title: \"Target\" }, { t…\n2026-08-29T23:25:32.7867334Z        |                ^\n2026-08-29T23:25:32.7867749Z      78| });\n2026-08-29T23:25:32.7868078Z      79|\n2026-08-29T23:25:32.7868230Z \n2026-08-29T23:25:32.7868706Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/18]⎯\n2026-08-29T23:25:32.7868973Z \n2026-08-29T23:25:32.7869866Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > issues carrying no usable `inst` still get the owning schema\n2026-08-29T23:25:32.7870953Z AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n2026-08-29T23:25:32.7871322Z \n2026-08-29T23:25:32.7871478Z - Expected\n2026-08-29T23:25:32.7871757Z + Received\n2026-08-29T23:25:32.7871899Z \n2026-08-29T23:25:32.7872013Z - [\n2026-08-29T23:25:32.7872266Z -   {\n2026-08-29T23:25:32.7872589Z -     \"title\": \"Bare\",\n2026-08-29T23:25:32.7872881Z -   },\n2026-08-29T23:25:32.7873129Z - ]\n2026-08-29T23:25:32.7873367Z + []\n2026-08-29T23:25:32.7873502Z \n2026-08-29T23:25:32.7873915Z  ❯ src/v4/classic/tests/issue-schema.test.ts:96:16\n2026-08-29T23:25:32.7874589Z      94|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7875020Z      95|\n2026-08-29T23:25:32.7875668Z      96|   expect(seen).toEqual([{ title: \"Bare\" }]);\n2026-08-29T23:25:32.7876285Z        |                ^\n2026-08-29T23:25:32.7877440Z      97|   expect(shorthand.error!.issues[0].message).toEqual(\"bad stuff\");\n2026-08-29T23:25:32.7878270Z      98| });\n2026-08-29T23:25:32.7878446Z \n2026-08-29T23:25:32.7878877Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/18]⎯\n2026-08-29T23:25:32.7879122Z \n2026-08-29T23:25:32.7879845Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > async checks expose the owning schema\n2026-08-29T23:25:32.7880838Z AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n2026-08-29T23:25:32.7881220Z \n2026-08-29T23:25:32.7881375Z - Expected\n2026-08-29T23:25:32.7881666Z + Received\n2026-08-29T23:25:32.7881801Z \n2026-08-29T23:25:32.7881928Z - [\n2026-08-29T23:25:32.7882178Z -   {\n2026-08-29T23:25:32.7882485Z -     \"title\": \"Async\",\n2026-08-29T23:25:32.7882789Z -   },\n2026-08-29T23:25:32.7883039Z - ]\n2026-08-29T23:25:32.7883278Z + []\n2026-08-29T23:25:32.7883406Z \n2026-08-29T23:25:32.7883815Z  ❯ src/v4/classic/tests/issue-schema.test.ts:109:16\n2026-08-29T23:25:32.7884506Z     107|     .safeParseAsync(\"abc\");\n2026-08-29T23:25:32.7884970Z     108|\n2026-08-29T23:25:32.7885638Z     109|   expect(seen).toEqual([{ title: \"Async\" }]);\n2026-08-29T23:25:32.7886420Z        |                ^\n2026-08-29T23:25:32.7886809Z     110| });\n2026-08-29T23:25:32.7887120Z     111|\n2026-08-29T23:25:32.7887268Z \n2026-08-29T23:25:32.7887529Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/18]⎯\n2026-08-29T23:25:32.7887760Z \n2026-08-29T23:25:32.7888712Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > the owning schema is the clone `.meta()` registered, not the pre-metadata schema\n2026-08-29T23:25:32.7889761Z AssertionError: expected [] to deeply equal [ true ]\n2026-08-29T23:25:32.7890089Z \n2026-08-29T23:25:32.7890241Z - Expected\n2026-08-29T23:25:32.7890537Z + Received\n2026-08-29T23:25:32.7890695Z \n2026-08-29T23:25:32.7890807Z - [\n2026-08-29T23:25:32.7891073Z -   true,\n2026-08-29T23:25:32.7891322Z - ]\n2026-08-29T23:25:32.7891563Z + []\n2026-08-29T23:25:32.7891697Z \n2026-08-29T23:25:32.7892097Z  ❯ src/v4/classic/tests/issue-schema.test.ts:125:16\n2026-08-29T23:25:32.7892921Z     123|   labeled.safeParse(\"ab\");\n2026-08-29T23:25:32.7893380Z     124|\n2026-08-29T23:25:32.7893944Z     125|   expect(seen).toEqual([true]);\n2026-08-29T23:25:32.7894513Z        |                ^\n2026-08-29T23:25:32.7894895Z     126| });\n2026-08-29T23:25:32.7895200Z     127|\n2026-08-29T23:25:32.7895328Z \n2026-08-29T23:25:32.7895581Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/18]⎯\n2026-08-29T23:25:32.7895805Z \n2026-08-29T23:25:32.7896766Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > `inst` keeps its meaning and `schema` stays off the finalized issue\n2026-08-29T23:25:32.7897919Z AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n2026-08-29T23:25:32.7898340Z \n2026-08-29T23:25:32.7898485Z - Expected\n2026-08-29T23:25:32.7898765Z + Received\n2026-08-29T23:25:32.7898901Z \n2026-08-29T23:25:32.7899022Z - [\n2026-08-29T23:25:32.7899348Z -   \"$ZodCheckMinLength\",\n2026-08-29T23:25:32.7899693Z -   \"ZodString\",\n2026-08-29T23:25:32.7899971Z - ]\n2026-08-29T23:25:32.7900215Z + []\n2026-08-29T23:25:32.7900344Z \n2026-08-29T23:25:32.7900743Z  ❯ src/v4/classic/tests/issue-schema.test.ts:140:17\n2026-08-29T23:25:32.7901667Z     138|   const wrongType = z.string().safeParse(123);\n2026-08-29T23:25:32.7902493Z     139|\n2026-08-29T23:25:32.7903278Z     140|   expect(insts).toEqual([\"$ZodCheckMinLength\", \"ZodString\"]);\n2026-08-29T23:25:32.7903996Z        |                 ^\n2026-08-29T23:25:32.7904609Z     141|   expect(Object.keys(tooSmall.error!.issues[0])).not.toContain(\"schema…\n2026-08-29T23:25:32.7905392Z     142|   expect(Object.keys(wrongType.error!.issues[0])).not.toContain(\"schem…\n2026-08-29T23:25:32.7905767Z \n2026-08-29T23:25:32.7906014Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/18]⎯\n2026-08-29T23:25:32.7906240Z \n2026-08-29T23:25:32.7907135Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > every error map kind receives the owning schema\n2026-08-29T23:25:32.7908202Z AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n2026-08-29T23:25:32.7908616Z \n2026-08-29T23:25:32.7908770Z - Expected\n2026-08-29T23:25:32.7909054Z + Received\n2026-08-29T23:25:32.7909196Z \n2026-08-29T23:25:32.7909316Z - {\n2026-08-29T23:25:32.7909579Z -   \"check\": {\n2026-08-29T23:25:32.7909921Z -     \"title\": \"Check\",\n2026-08-29T23:25:32.7910223Z -   },\n2026-08-29T23:25:32.7910536Z -   \"customError\": {\n2026-08-29T23:25:32.7911149Z -     \"title\": \"Custom\",\n2026-08-29T23:25:32.7911499Z -   },\n2026-08-29T23:25:32.7911854Z -   \"localeError\": {\n2026-08-29T23:25:32.7912255Z -     \"title\": \"Locale\",\n2026-08-29T23:25:32.7912597Z -   },\n2026-08-29T23:25:32.7912903Z -   \"parse\": {\n2026-08-29T23:25:32.7913260Z -     \"title\": \"Parse\",\n2026-08-29T23:25:32.7913587Z -   },\n2026-08-29T23:25:32.7913886Z -   \"schema\": {\n2026-08-29T23:25:32.7914243Z -     \"title\": \"Schema\",\n2026-08-29T23:25:32.7914580Z -   },\n2026-08-29T23:25:32.7914845Z - }\n2026-08-29T23:25:32.7915129Z + {}\n2026-08-29T23:25:32.7915277Z \n2026-08-29T23:25:32.7915734Z  ❯ src/v4/classic/tests/issue-schema.test.ts:176:16\n2026-08-29T23:25:32.7916606Z     174|   z.config({ localeError });\n2026-08-29T23:25:32.7917067Z     175|\n2026-08-29T23:25:32.7917531Z     176|   expect(seen).toEqual({\n2026-08-29T23:25:32.7918062Z        |                ^\n2026-08-29T23:25:32.7918669Z     177|     check: { title: \"Check\" },\n2026-08-29T23:25:32.7919154Z     178|     schema: { title: \"Schema\" },\n2026-08-29T23:25:32.7919376Z \n2026-08-29T23:25:32.7919563Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/18]⎯\n2026-08-29T23:25:32.7919713Z \n2026-08-29T23:25:32.7919739Z \n2026-08-29T23:25:32.7920104Z  Test Files  2 failed | 573 passed (575)\n2026-08-29T23:25:32.7920712Z       Tests  18 failed | 7846 passed (7864)\n2026-08-29T23:25:32.7921133Z Type Errors  no errors\n2026-08-29T23:25:32.7921422Z    Start at  23:24:45\n2026-08-29T23:25:32.7922021Z    Duration  47.50s (transform 7.47s, setup 21.80s, import 25.25s, tests 37.03s, environment 39ms, typecheck 3.76s)\n2026-08-29T23:25:32.7922354Z \n2026-08-29T23:25:32.7922382Z \n2026-08-29T23:25:32.7947219Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Max\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n-   {\n-     \"title\": \"Multiple\",\n-   },\n-   {\n-     \"title\": \"Array\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:29:16\n\n\n2026-08-29T23:25:32.7956251Z \n2026-08-29T23:25:32.7959080Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:44:16\n\n\n2026-08-29T23:25:32.7960844Z \n2026-08-29T23:25:32.7963389Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Refine\",\n-   },\n-   {\n-     \"title\": \"SuperRefine\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:59:16\n\n\n2026-08-29T23:25:32.7964897Z \n2026-08-29T23:25:32.7967446Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Element\",\n-   },\n-   {\n-     \"title\": \"Target\",\n-   },\n-   {\n-     \"title\": \"Property\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:77:16\n\n\n2026-08-29T23:25:32.7969073Z \n2026-08-29T23:25:32.7971172Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Bare\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:96:16\n\n\n2026-08-29T23:25:32.7972538Z \n2026-08-29T23:25:32.7974780Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Async\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:109:16\n\n\n2026-08-29T23:25:32.7976168Z \n2026-08-29T23:25:32.7977571Z ##[error]AssertionError: expected [] to deeply equal [ true ]\n\n- Expected\n+ Received\n\n- [\n-   true,\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:125:16\n\n\n2026-08-29T23:25:32.7978384Z \n2026-08-29T23:25:32.7979797Z ##[error]AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n\n- Expected\n+ Received\n\n- [\n-   \"$ZodCheckMinLength\",\n-   \"ZodString\",\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:140:17\n\n\n2026-08-29T23:25:32.7980706Z \n2026-08-29T23:25:32.7982728Z ##[error]AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n\n- Expected\n+ Received\n\n- {\n-   \"check\": {\n-     \"title\": \"Check\",\n-   },\n-   \"customError\": {\n-     \"title\": \"Custom\",\n-   },\n-   \"localeError\": {\n-     \"title\": \"Locale\",\n-   },\n-   \"parse\": {\n-     \"title\": \"Parse\",\n-   },\n-   \"schema\": {\n-     \"title\": \"Schema\",\n-   },\n- }\n+ {}\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:176:16\n\n\n2026-08-29T23:25:32.7983915Z \n2026-08-29T23:25:32.7985485Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Max\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n-   {\n-     \"title\": \"Multiple\",\n-   },\n-   {\n-     \"title\": \"Array\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:29:16\n\n\n2026-08-29T23:25:32.7986728Z \n2026-08-29T23:25:32.7987947Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:44:16\n\n\n2026-08-29T23:25:32.7988787Z \n2026-08-29T23:25:32.7990057Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Refine\",\n-   },\n-   {\n-     \"title\": \"SuperRefine\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:59:16\n\n\n2026-08-29T23:25:32.7990934Z \n2026-08-29T23:25:32.7992305Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Element\",\n-   },\n-   {\n-     \"title\": \"Target\",\n-   },\n-   {\n-     \"title\": \"Property\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:77:16\n\n\n2026-08-29T23:25:32.7993216Z \n2026-08-29T23:25:32.7994285Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Bare\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:96:16\n\n\n2026-08-29T23:25:32.7995259Z \n2026-08-29T23:25:32.7996545Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Async\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:109:16\n\n\n2026-08-29T23:25:32.7997365Z \n2026-08-29T23:25:32.7998349Z ##[error]AssertionError: expected [] to deeply equal [ true ]\n\n- Expected\n+ Received\n\n- [\n-   true,\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:125:16\n\n\n2026-08-29T23:25:32.7999116Z \n2026-08-29T23:25:32.8000378Z ##[error]AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n\n- Expected\n+ Received\n\n- [\n-   \"$ZodCheckMinLength\",\n-   \"ZodString\",\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:140:17\n\n\n2026-08-29T23:25:32.8001227Z \n2026-08-29T23:25:32.8003126Z ##[error]AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n\n- Expected\n+ Received\n\n- {\n-   \"check\": {\n-     \"title\": \"Check\",\n-   },\n-   \"customError\": {\n-     \"title\": \"Custom\",\n-   },\n-   \"localeError\": {\n-     \"title\": \"Locale\",\n-   },\n-   \"parse\": {\n-     \"title\": \"Parse\",\n-   },\n-   \"schema\": {\n-     \"title\": \"Schema\",\n-   },\n- }\n+ {}\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:176:16\n\n\n2026-08-29T23:25:32.8679669Z  ELIFECYCLE  Test failed. See above for more details.\n2026-08-29T23:25:32.8990920Z ##[error]Process completed with exit code 1.\n",
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/workflows/501": {
+      "id": 501,
+      "node_id": "W_501",
+      "name": "test",
+      "path": ".github/workflows/test.yml",
+      "state": "active",
+      "html_url": "https://github.com/jdx/demo/actions/workflows/test.yml"
+    },
+    "/repos/jdx/demo/actions/workflows": {
+      "total_count": 1,
+      "workflows": [
+        {
+          "id": 501,
+          "node_id": "W_501",
+          "name": "test",
+          "path": ".github/workflows/test.yml",
+          "state": "active",
+          "html_url": "https://github.com/jdx/demo/actions/workflows/test.yml"
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001/logs": {
+      "$zip": {
+        "0_Lint on Node latest.txt": "2026-08-29T23:24:35.1586330Z ##[group]Run pnpm format:check\n2026-08-29T23:24:35.1586707Z pnpm format:check\n2026-08-29T23:24:35.1614233Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:35.1614668Z env:\n2026-08-29T23:24:35.1615011Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:35.1615383Z ##[endgroup]\n2026-08-29T23:24:35.4122287Z \n2026-08-29T23:24:35.4123635Z > @ format:check /home/runner/work/zod/zod\n2026-08-29T23:24:35.4124466Z > biome check .\n2026-08-29T23:24:35.4124688Z \n2026-08-29T23:24:36.4142812Z Checked 442 files in 957ms. No fixes applied.\n2026-08-29T23:24:36.4287507Z ##[group]Run pnpm lint:check\n2026-08-29T23:24:36.4287896Z pnpm lint:check\n2026-08-29T23:24:36.4313369Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:36.4313779Z env:\n2026-08-29T23:24:36.4314132Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:36.4314569Z ##[endgroup]\n2026-08-29T23:24:36.6816405Z \n2026-08-29T23:24:36.6817272Z > @ lint:check /home/runner/work/zod/zod\n2026-08-29T23:24:36.6818022Z > biome lint .\n2026-08-29T23:24:36.6818351Z \n2026-08-29T23:24:37.2727069Z Checked 442 files in 546ms. No fixes applied.\n2026-08-29T23:24:37.2986565Z ##[group]Run pnpm check:comments\n2026-08-29T23:24:37.2987069Z pnpm check:comments\n2026-08-29T23:24:37.3031080Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:37.3032022Z env:\n2026-08-29T23:24:37.3032534Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:37.3033106Z ##[endgroup]\n2026-08-29T23:24:37.5507652Z \n2026-08-29T23:24:37.5508872Z > @ check:comments /home/runner/work/zod/zod\n2026-08-29T23:24:37.5509428Z > tsx scripts/check-comments.ts\n2026-08-29T23:24:37.5509809Z \n2026-08-29T23:24:38.9887268Z ✅ No stacked comment lines\n2026-08-29T23:24:38.9890544Z (node:2430) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.\n2026-08-29T23:24:38.9891945Z (Use `node --trace-deprecation ...` to show where the warning was created)\n",
+        "1_Test with TypeScript latest on Node lts/* (ubuntu-latest).txt": "2026-08-29T23:24:44.6752980Z ##[group]Run pnpm test\n2026-08-29T23:24:44.6753323Z pnpm test\n2026-08-29T23:24:44.6799580Z shell: /usr/bin/bash -e {0}\n2026-08-29T23:24:44.6799898Z env:\n2026-08-29T23:24:44.6800220Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin\n2026-08-29T23:24:44.6800618Z ##[endgroup]\n2026-08-29T23:24:44.8989627Z \n2026-08-29T23:24:44.8989949Z > @ test /home/runner/work/zod/zod\n2026-08-29T23:24:44.8990308Z > vitest run\n2026-08-29T23:24:44.8990449Z \n2026-08-29T23:24:45.0988133Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.0989170Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.1267657Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.1268273Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.1424471Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.1425146Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.2279966Z Testing types with tsc and vue-tsc is an experimental feature.\n2026-08-29T23:24:45.2280590Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.\n2026-08-29T23:24:45.2304475Z \n2026-08-29T23:24:45.2305497Z  RUN  v4.1.5 /home/runner/work/zod/zod\n2026-08-29T23:24:45.2305902Z \n2026-08-29T23:24:58.2645186Z  ❯  compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts (9 tests | 9 failed) 49ms\n2026-08-29T23:24:58.2647119Z    × check-originated issues expose the owning schema 21ms\n2026-08-29T23:24:58.2654806Z    × schema-originated issues expose the owning schema 2ms\n2026-08-29T23:24:58.2655960Z    × refinements attribute to the refined schema, not the internal check schema 3ms\n2026-08-29T23:24:58.2671723Z    × the innermost schema owns the issue 12ms\n2026-08-29T23:24:58.2672917Z    × issues carrying no usable `inst` still get the owning schema 2ms\n2026-08-29T23:24:58.2700944Z    × async checks expose the owning schema 1ms\n2026-08-29T23:24:58.2701894Z    × the owning schema is the clone `.meta()` registered, not the pre-metadata schema 1ms\n2026-08-29T23:24:58.2702797Z    × `inst` keeps its meaning and `schema` stays off the finalized issue 1ms\n2026-08-29T23:24:58.2704350Z    × every error map kind receives the owning schema 3ms\n2026-08-29T23:25:18.9949518Z  ❯  zod  src/v4/classic/tests/issue-schema.test.ts (9 tests | 9 failed) 30ms\n2026-08-29T23:25:18.9951019Z    × check-originated issues expose the owning schema 16ms\n2026-08-29T23:25:18.9952614Z    × schema-originated issues expose the owning schema 2ms\n2026-08-29T23:25:18.9953851Z    × refinements attribute to the refined schema, not the internal check schema 2ms\n2026-08-29T23:25:18.9954892Z    × the innermost schema owns the issue 3ms\n2026-08-29T23:25:18.9955891Z    × issues carrying no usable `inst` still get the owning schema 1ms\n2026-08-29T23:25:18.9957084Z    × async checks expose the owning schema 1ms\n2026-08-29T23:25:18.9958239Z    × the owning schema is the clone `.meta()` registered, not the pre-metadata schema 1ms\n2026-08-29T23:25:18.9959477Z    × `inst` keeps its meaning and `schema` stays off the finalized issue 1ms\n2026-08-29T23:25:18.9961140Z    × every error map kind receives the owning schema 2ms\n2026-08-29T23:25:32.7650492Z \n2026-08-29T23:25:32.7651304Z ⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯\n2026-08-29T23:25:32.7651728Z \n2026-08-29T23:25:32.7654923Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > check-originated issues expose the owning schema\n2026-08-29T23:25:32.7660454Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n2026-08-29T23:25:32.7660819Z \n2026-08-29T23:25:32.7661084Z - Expected\n2026-08-29T23:25:32.7661591Z + Received\n2026-08-29T23:25:32.7661738Z \n2026-08-29T23:25:32.7666874Z - [\n2026-08-29T23:25:32.7667224Z -   {\n2026-08-29T23:25:32.7667763Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7668242Z -   },\n2026-08-29T23:25:32.7668540Z -   {\n2026-08-29T23:25:32.7668883Z -     \"title\": \"Max\",\n2026-08-29T23:25:32.7669207Z -   },\n2026-08-29T23:25:32.7669476Z -   {\n2026-08-29T23:25:32.7669811Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7670140Z -   },\n2026-08-29T23:25:32.7670414Z -   {\n2026-08-29T23:25:32.7670767Z -     \"title\": \"Multiple\",\n2026-08-29T23:25:32.7671111Z -   },\n2026-08-29T23:25:32.7671332Z -   {\n2026-08-29T23:25:32.7671559Z -     \"title\": \"Array\",\n2026-08-29T23:25:32.7672035Z -   },\n2026-08-29T23:25:32.7672207Z - ]\n2026-08-29T23:25:32.7672384Z + []\n2026-08-29T23:25:32.7672474Z \n2026-08-29T23:25:32.7672841Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:29:16\n2026-08-29T23:25:32.7701067Z      27|   z.array(z.string()).min(2).meta({ title: \"Array\" }).safeParse([]);\n2026-08-29T23:25:32.7702290Z      28|\n2026-08-29T23:25:32.7702891Z      29|   expect(seen).toEqual([\n2026-08-29T23:25:32.7703515Z        |                ^\n2026-08-29T23:25:32.7704101Z      30|     { title: \"Name\" },\n2026-08-29T23:25:32.7704733Z      31|     { title: \"Max\" },\n2026-08-29T23:25:32.7705087Z \n2026-08-29T23:25:32.7705429Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯\n2026-08-29T23:25:32.7705700Z \n2026-08-29T23:25:32.7707052Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > schema-originated issues expose the owning schema\n2026-08-29T23:25:32.7708474Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n2026-08-29T23:25:32.7708932Z \n2026-08-29T23:25:32.7709114Z - Expected\n2026-08-29T23:25:32.7709465Z + Received\n2026-08-29T23:25:32.7709624Z \n2026-08-29T23:25:32.7709772Z - [\n2026-08-29T23:25:32.7710055Z -   {\n2026-08-29T23:25:32.7710425Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7710768Z -   },\n2026-08-29T23:25:32.7711051Z -   {\n2026-08-29T23:25:32.7711424Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7711787Z -   },\n2026-08-29T23:25:32.7712069Z - ]\n2026-08-29T23:25:32.7712350Z + []\n2026-08-29T23:25:32.7712520Z \n2026-08-29T23:25:32.7713084Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:44:16\n2026-08-29T23:25:32.7716213Z      42|   z.email().meta({ title: \"Email\" }).safeParse(123);\n2026-08-29T23:25:32.7717458Z      43|\n2026-08-29T23:25:32.7718483Z      44|   expect(seen).toEqual([{ title: \"Name\" }, { title: \"Email\" }]);\n2026-08-29T23:25:32.7719386Z        |                ^\n2026-08-29T23:25:32.7719817Z      45| });\n2026-08-29T23:25:32.7720165Z      46|\n2026-08-29T23:25:32.7720319Z \n2026-08-29T23:25:32.7720647Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯\n2026-08-29T23:25:32.7720915Z \n2026-08-29T23:25:32.7722191Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > refinements attribute to the refined schema, not the internal check schema\n2026-08-29T23:25:32.7723857Z AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n2026-08-29T23:25:32.7724339Z \n2026-08-29T23:25:32.7724529Z - Expected\n2026-08-29T23:25:32.7724883Z + Received\n2026-08-29T23:25:32.7725052Z \n2026-08-29T23:25:32.7725180Z - [\n2026-08-29T23:25:32.7725467Z -   {\n2026-08-29T23:25:32.7725835Z -     \"title\": \"Refine\",\n2026-08-29T23:25:32.7726200Z -   },\n2026-08-29T23:25:32.7726660Z -   {\n2026-08-29T23:25:32.7727051Z -     \"title\": \"SuperRefine\",\n2026-08-29T23:25:32.7727422Z -   },\n2026-08-29T23:25:32.7727709Z - ]\n2026-08-29T23:25:32.7727980Z + []\n2026-08-29T23:25:32.7728121Z \n2026-08-29T23:25:32.7728690Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:59:16\n2026-08-29T23:25:32.7729753Z      57|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7730237Z      58|\n2026-08-29T23:25:32.7730828Z      59|   expect(seen).toEqual([{ title: \"Refine\" }, { title: \"SuperRefine\" }]…\n2026-08-29T23:25:32.7731480Z        |                ^\n2026-08-29T23:25:32.7731914Z      60| });\n2026-08-29T23:25:32.7732262Z      61|\n2026-08-29T23:25:32.7732426Z \n2026-08-29T23:25:32.7732724Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯\n2026-08-29T23:25:32.7732998Z \n2026-08-29T23:25:32.7733998Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > the innermost schema owns the issue\n2026-08-29T23:25:32.7735309Z AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n2026-08-29T23:25:32.7735765Z \n2026-08-29T23:25:32.7735947Z - Expected\n2026-08-29T23:25:32.7736284Z + Received\n2026-08-29T23:25:32.7736673Z \n2026-08-29T23:25:32.7736809Z - [\n2026-08-29T23:25:32.7737086Z -   {\n2026-08-29T23:25:32.7737445Z -     \"title\": \"Element\",\n2026-08-29T23:25:32.7737798Z -   },\n2026-08-29T23:25:32.7738083Z -   {\n2026-08-29T23:25:32.7738470Z -     \"title\": \"Target\",\n2026-08-29T23:25:32.7738840Z -   },\n2026-08-29T23:25:32.7739109Z -   {\n2026-08-29T23:25:32.7739484Z -     \"title\": \"Property\",\n2026-08-29T23:25:32.7739839Z -   },\n2026-08-29T23:25:32.7740105Z - ]\n2026-08-29T23:25:32.7740384Z + []\n2026-08-29T23:25:32.7740538Z \n2026-08-29T23:25:32.7741092Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:77:16\n2026-08-29T23:25:32.7741991Z      75|     .safeParse({ a: 1 });\n2026-08-29T23:25:32.7742527Z      76|\n2026-08-29T23:25:32.7743123Z      77|   expect(seen).toEqual([{ title: \"Element\" }, { title: \"Target\" }, { t…\n2026-08-29T23:25:32.7743765Z        |                ^\n2026-08-29T23:25:32.7744179Z      78| });\n2026-08-29T23:25:32.7744512Z      79|\n2026-08-29T23:25:32.7744669Z \n2026-08-29T23:25:32.7744971Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯\n2026-08-29T23:25:32.7745419Z \n2026-08-29T23:25:32.7746740Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > issues carrying no usable `inst` still get the owning schema\n2026-08-29T23:25:32.7748024Z AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n2026-08-29T23:25:32.7748402Z \n2026-08-29T23:25:32.7748563Z - Expected\n2026-08-29T23:25:32.7748895Z + Received\n2026-08-29T23:25:32.7749065Z \n2026-08-29T23:25:32.7749203Z - [\n2026-08-29T23:25:32.7749459Z -   {\n2026-08-29T23:25:32.7749761Z -     \"title\": \"Bare\",\n2026-08-29T23:25:32.7750076Z -   },\n2026-08-29T23:25:32.7750315Z - ]\n2026-08-29T23:25:32.7750544Z + []\n2026-08-29T23:25:32.7750676Z \n2026-08-29T23:25:32.7751158Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:96:16\n2026-08-29T23:25:32.7751886Z      94|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7752317Z      95|\n2026-08-29T23:25:32.7752953Z      96|   expect(seen).toEqual([{ title: \"Bare\" }]);\n2026-08-29T23:25:32.7753577Z        |                ^\n2026-08-29T23:25:32.7754691Z      97|   expect(shorthand.error!.issues[0].message).toEqual(\"bad stuff\");\n2026-08-29T23:25:32.7755537Z      98| });\n2026-08-29T23:25:32.7755736Z \n2026-08-29T23:25:32.7756005Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/18]⎯\n2026-08-29T23:25:32.7756627Z \n2026-08-29T23:25:32.7757591Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > async checks expose the owning schema\n2026-08-29T23:25:32.7758787Z AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n2026-08-29T23:25:32.7759169Z \n2026-08-29T23:25:32.7759322Z - Expected\n2026-08-29T23:25:32.7759617Z + Received\n2026-08-29T23:25:32.7759779Z \n2026-08-29T23:25:32.7759903Z - [\n2026-08-29T23:25:32.7760177Z -   {\n2026-08-29T23:25:32.7760530Z -     \"title\": \"Async\",\n2026-08-29T23:25:32.7760874Z -   },\n2026-08-29T23:25:32.7761140Z - ]\n2026-08-29T23:25:32.7761403Z + []\n2026-08-29T23:25:32.7761546Z \n2026-08-29T23:25:32.7762079Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:109:16\n2026-08-29T23:25:32.7762883Z     107|     .safeParseAsync(\"abc\");\n2026-08-29T23:25:32.7763393Z     108|\n2026-08-29T23:25:32.7764087Z     109|   expect(seen).toEqual([{ title: \"Async\" }]);\n2026-08-29T23:25:32.7764763Z        |                ^\n2026-08-29T23:25:32.7765170Z     110| });\n2026-08-29T23:25:32.7765483Z     111|\n2026-08-29T23:25:32.7765634Z \n2026-08-29T23:25:32.7765903Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/18]⎯\n2026-08-29T23:25:32.7766136Z \n2026-08-29T23:25:32.7767518Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > the owning schema is the clone `.meta()` registered, not the pre-metadata schema\n2026-08-29T23:25:32.7768801Z AssertionError: expected [] to deeply equal [ true ]\n2026-08-29T23:25:32.7769159Z \n2026-08-29T23:25:32.7769304Z - Expected\n2026-08-29T23:25:32.7769619Z + Received\n2026-08-29T23:25:32.7769763Z \n2026-08-29T23:25:32.7769889Z - [\n2026-08-29T23:25:32.7770151Z -   true,\n2026-08-29T23:25:32.7770407Z - ]\n2026-08-29T23:25:32.7770650Z + []\n2026-08-29T23:25:32.7770788Z \n2026-08-29T23:25:32.7771461Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:125:16\n2026-08-29T23:25:32.7772242Z     123|   labeled.safeParse(\"ab\");\n2026-08-29T23:25:32.7772720Z     124|\n2026-08-29T23:25:32.7773300Z     125|   expect(seen).toEqual([true]);\n2026-08-29T23:25:32.7773940Z        |                ^\n2026-08-29T23:25:32.7774340Z     126| });\n2026-08-29T23:25:32.7774663Z     127|\n2026-08-29T23:25:32.7774803Z \n2026-08-29T23:25:32.7775086Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/18]⎯\n2026-08-29T23:25:32.7775339Z \n2026-08-29T23:25:32.7776638Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > `inst` keeps its meaning and `schema` stays off the finalized issue\n2026-08-29T23:25:32.7778031Z AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n2026-08-29T23:25:32.7778525Z \n2026-08-29T23:25:32.7778680Z - Expected\n2026-08-29T23:25:32.7778947Z + Received\n2026-08-29T23:25:32.7779074Z \n2026-08-29T23:25:32.7779188Z - [\n2026-08-29T23:25:32.7779496Z -   \"$ZodCheckMinLength\",\n2026-08-29T23:25:32.7779842Z -   \"ZodString\",\n2026-08-29T23:25:32.7780125Z - ]\n2026-08-29T23:25:32.7780383Z + []\n2026-08-29T23:25:32.7780516Z \n2026-08-29T23:25:32.7781064Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:140:17\n2026-08-29T23:25:32.7782202Z     138|   const wrongType = z.string().safeParse(123);\n2026-08-29T23:25:32.7783103Z     139|\n2026-08-29T23:25:32.7783993Z     140|   expect(insts).toEqual([\"$ZodCheckMinLength\", \"ZodString\"]);\n2026-08-29T23:25:32.7784839Z        |                 ^\n2026-08-29T23:25:32.7785547Z     141|   expect(Object.keys(tooSmall.error!.issues[0])).not.toContain(\"schema…\n2026-08-29T23:25:32.7786595Z     142|   expect(Object.keys(wrongType.error!.issues[0])).not.toContain(\"schem…\n2026-08-29T23:25:32.7787024Z \n2026-08-29T23:25:32.7787323Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/18]⎯\n2026-08-29T23:25:32.7787577Z \n2026-08-29T23:25:32.7788585Z  FAIL   compile-mode  packages/zod/src/v4/classic/tests/issue-schema.test.ts > every error map kind receives the owning schema\n2026-08-29T23:25:32.7789910Z AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n2026-08-29T23:25:32.7790378Z \n2026-08-29T23:25:32.7790560Z - Expected\n2026-08-29T23:25:32.7790895Z + Received\n2026-08-29T23:25:32.7791067Z \n2026-08-29T23:25:32.7791198Z - {\n2026-08-29T23:25:32.7791509Z -   \"check\": {\n2026-08-29T23:25:32.7791895Z -     \"title\": \"Check\",\n2026-08-29T23:25:32.7792248Z -   },\n2026-08-29T23:25:32.7792592Z -   \"customError\": {\n2026-08-29T23:25:32.7793005Z -     \"title\": \"Custom\",\n2026-08-29T23:25:32.7793338Z -   },\n2026-08-29T23:25:32.7793683Z -   \"localeError\": {\n2026-08-29T23:25:32.7794056Z -     \"title\": \"Locale\",\n2026-08-29T23:25:32.7794389Z -   },\n2026-08-29T23:25:32.7794693Z -   \"parse\": {\n2026-08-29T23:25:32.7795063Z -     \"title\": \"Parse\",\n2026-08-29T23:25:32.7795386Z -   },\n2026-08-29T23:25:32.7795688Z -   \"schema\": {\n2026-08-29T23:25:32.7796072Z -     \"title\": \"Schema\",\n2026-08-29T23:25:32.7796594Z -   },\n2026-08-29T23:25:32.7796863Z - }\n2026-08-29T23:25:32.7797122Z + {}\n2026-08-29T23:25:32.7797270Z \n2026-08-29T23:25:32.7797802Z  ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:176:16\n2026-08-29T23:25:32.7798820Z     174|   z.config({ localeError });\n2026-08-29T23:25:32.7799290Z     175|\n2026-08-29T23:25:32.7799776Z     176|   expect(seen).toEqual({\n2026-08-29T23:25:32.7800315Z        |                ^\n2026-08-29T23:25:32.7800949Z     177|     check: { title: \"Check\" },\n2026-08-29T23:25:32.7801709Z     178|     schema: { title: \"Schema\" },\n2026-08-29T23:25:32.7802094Z \n2026-08-29T23:25:32.7802413Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/18]⎯\n2026-08-29T23:25:32.7802647Z \n2026-08-29T23:25:32.7803534Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > check-originated issues expose the owning schema\n2026-08-29T23:25:32.7804749Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n2026-08-29T23:25:32.7805178Z \n2026-08-29T23:25:32.7805349Z - Expected\n2026-08-29T23:25:32.7805674Z + Received\n2026-08-29T23:25:32.7805836Z \n2026-08-29T23:25:32.7805966Z - [\n2026-08-29T23:25:32.7806247Z -   {\n2026-08-29T23:25:32.7806759Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7807091Z -   },\n2026-08-29T23:25:32.7807359Z -   {\n2026-08-29T23:25:32.7807695Z -     \"title\": \"Max\",\n2026-08-29T23:25:32.7808020Z -   },\n2026-08-29T23:25:32.7808284Z -   {\n2026-08-29T23:25:32.7808634Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7808961Z -   },\n2026-08-29T23:25:32.7809224Z -   {\n2026-08-29T23:25:32.7809761Z -     \"title\": \"Multiple\",\n2026-08-29T23:25:32.7810101Z -   },\n2026-08-29T23:25:32.7810357Z -   {\n2026-08-29T23:25:32.7810697Z -     \"title\": \"Array\",\n2026-08-29T23:25:32.7811038Z -   },\n2026-08-29T23:25:32.7811297Z - ]\n2026-08-29T23:25:32.7811556Z + []\n2026-08-29T23:25:32.7811702Z \n2026-08-29T23:25:32.7812155Z  ❯ src/v4/classic/tests/issue-schema.test.ts:29:16\n2026-08-29T23:25:32.7813568Z      27|   z.array(z.string()).min(2).meta({ title: \"Array\" }).safeParse([]);\n2026-08-29T23:25:32.7814532Z      28|\n2026-08-29T23:25:32.7814991Z      29|   expect(seen).toEqual([\n2026-08-29T23:25:32.7815516Z        |                ^\n2026-08-29T23:25:32.7816048Z      30|     { title: \"Name\" },\n2026-08-29T23:25:32.7816787Z      31|     { title: \"Max\" },\n2026-08-29T23:25:32.7817085Z \n2026-08-29T23:25:32.7817383Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/18]⎯\n2026-08-29T23:25:32.7817632Z \n2026-08-29T23:25:32.7818525Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > schema-originated issues expose the owning schema\n2026-08-29T23:25:32.7819700Z AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n2026-08-29T23:25:32.7820135Z \n2026-08-29T23:25:32.7820293Z - Expected\n2026-08-29T23:25:32.7820615Z + Received\n2026-08-29T23:25:32.7820771Z \n2026-08-29T23:25:32.7820902Z - [\n2026-08-29T23:25:32.7821164Z -   {\n2026-08-29T23:25:32.7821511Z -     \"title\": \"Name\",\n2026-08-29T23:25:32.7821839Z -   },\n2026-08-29T23:25:32.7822106Z -   {\n2026-08-29T23:25:32.7822450Z -     \"title\": \"Email\",\n2026-08-29T23:25:32.7822786Z -   },\n2026-08-29T23:25:32.7823050Z - ]\n2026-08-29T23:25:32.7823307Z + []\n2026-08-29T23:25:32.7823456Z \n2026-08-29T23:25:32.7823885Z  ❯ src/v4/classic/tests/issue-schema.test.ts:44:16\n2026-08-29T23:25:32.7825211Z      42|   z.email().meta({ title: \"Email\" }).safeParse(123);\n2026-08-29T23:25:32.7840675Z      43|\n2026-08-29T23:25:32.7841799Z      44|   expect(seen).toEqual([{ title: \"Name\" }, { title: \"Email\" }]);\n2026-08-29T23:25:32.7842723Z        |                ^\n2026-08-29T23:25:32.7843164Z      45| });\n2026-08-29T23:25:32.7843522Z      46|\n2026-08-29T23:25:32.7843693Z \n2026-08-29T23:25:32.7844017Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/18]⎯\n2026-08-29T23:25:32.7844321Z \n2026-08-29T23:25:32.7845395Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > refinements attribute to the refined schema, not the internal check schema\n2026-08-29T23:25:32.7847202Z AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n2026-08-29T23:25:32.7847689Z \n2026-08-29T23:25:32.7847892Z - Expected\n2026-08-29T23:25:32.7848236Z + Received\n2026-08-29T23:25:32.7848411Z \n2026-08-29T23:25:32.7848551Z - [\n2026-08-29T23:25:32.7848830Z -   {\n2026-08-29T23:25:32.7849216Z -     \"title\": \"Refine\",\n2026-08-29T23:25:32.7849573Z -   },\n2026-08-29T23:25:32.7849864Z -   {\n2026-08-29T23:25:32.7850256Z -     \"title\": \"SuperRefine\",\n2026-08-29T23:25:32.7850631Z -   },\n2026-08-29T23:25:32.7850905Z - ]\n2026-08-29T23:25:32.7851174Z + []\n2026-08-29T23:25:32.7851476Z \n2026-08-29T23:25:32.7852204Z  ❯ src/v4/classic/tests/issue-schema.test.ts:59:16\n2026-08-29T23:25:32.7852974Z      57|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7853489Z      58|\n2026-08-29T23:25:32.7854160Z      59|   expect(seen).toEqual([{ title: \"Refine\" }, { title: \"SuperRefine\" }]…\n2026-08-29T23:25:32.7854812Z        |                ^\n2026-08-29T23:25:32.7855258Z      60| });\n2026-08-29T23:25:32.7855600Z      61|\n2026-08-29T23:25:32.7855753Z \n2026-08-29T23:25:32.7856068Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/18]⎯\n2026-08-29T23:25:32.7856499Z \n2026-08-29T23:25:32.7857332Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > the innermost schema owns the issue\n2026-08-29T23:25:32.7858542Z AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n2026-08-29T23:25:32.7859000Z \n2026-08-29T23:25:32.7859215Z - Expected\n2026-08-29T23:25:32.7859548Z + Received\n2026-08-29T23:25:32.7859723Z \n2026-08-29T23:25:32.7859860Z - [\n2026-08-29T23:25:32.7860142Z -   {\n2026-08-29T23:25:32.7860510Z -     \"title\": \"Element\",\n2026-08-29T23:25:32.7860885Z -   },\n2026-08-29T23:25:32.7861169Z -   {\n2026-08-29T23:25:32.7861550Z -     \"title\": \"Target\",\n2026-08-29T23:25:32.7861911Z -   },\n2026-08-29T23:25:32.7862189Z -   {\n2026-08-29T23:25:32.7862559Z -     \"title\": \"Property\",\n2026-08-29T23:25:32.7862919Z -   },\n2026-08-29T23:25:32.7863215Z - ]\n2026-08-29T23:25:32.7863492Z + []\n2026-08-29T23:25:32.7863638Z \n2026-08-29T23:25:32.7864120Z  ❯ src/v4/classic/tests/issue-schema.test.ts:77:16\n2026-08-29T23:25:32.7864958Z      75|     .safeParse({ a: 1 });\n2026-08-29T23:25:32.7865502Z      76|\n2026-08-29T23:25:32.7866121Z      77|   expect(seen).toEqual([{ title: \"Element\" }, { title: \"Target\" }, { t…\n2026-08-29T23:25:32.7867334Z        |                ^\n2026-08-29T23:25:32.7867749Z      78| });\n2026-08-29T23:25:32.7868078Z      79|\n2026-08-29T23:25:32.7868230Z \n2026-08-29T23:25:32.7868706Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/18]⎯\n2026-08-29T23:25:32.7868973Z \n2026-08-29T23:25:32.7869866Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > issues carrying no usable `inst` still get the owning schema\n2026-08-29T23:25:32.7870953Z AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n2026-08-29T23:25:32.7871322Z \n2026-08-29T23:25:32.7871478Z - Expected\n2026-08-29T23:25:32.7871757Z + Received\n2026-08-29T23:25:32.7871899Z \n2026-08-29T23:25:32.7872013Z - [\n2026-08-29T23:25:32.7872266Z -   {\n2026-08-29T23:25:32.7872589Z -     \"title\": \"Bare\",\n2026-08-29T23:25:32.7872881Z -   },\n2026-08-29T23:25:32.7873129Z - ]\n2026-08-29T23:25:32.7873367Z + []\n2026-08-29T23:25:32.7873502Z \n2026-08-29T23:25:32.7873915Z  ❯ src/v4/classic/tests/issue-schema.test.ts:96:16\n2026-08-29T23:25:32.7874589Z      94|     .safeParse(\"abc\");\n2026-08-29T23:25:32.7875020Z      95|\n2026-08-29T23:25:32.7875668Z      96|   expect(seen).toEqual([{ title: \"Bare\" }]);\n2026-08-29T23:25:32.7876285Z        |                ^\n2026-08-29T23:25:32.7877440Z      97|   expect(shorthand.error!.issues[0].message).toEqual(\"bad stuff\");\n2026-08-29T23:25:32.7878270Z      98| });\n2026-08-29T23:25:32.7878446Z \n2026-08-29T23:25:32.7878877Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/18]⎯\n2026-08-29T23:25:32.7879122Z \n2026-08-29T23:25:32.7879845Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > async checks expose the owning schema\n2026-08-29T23:25:32.7880838Z AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n2026-08-29T23:25:32.7881220Z \n2026-08-29T23:25:32.7881375Z - Expected\n2026-08-29T23:25:32.7881666Z + Received\n2026-08-29T23:25:32.7881801Z \n2026-08-29T23:25:32.7881928Z - [\n2026-08-29T23:25:32.7882178Z -   {\n2026-08-29T23:25:32.7882485Z -     \"title\": \"Async\",\n2026-08-29T23:25:32.7882789Z -   },\n2026-08-29T23:25:32.7883039Z - ]\n2026-08-29T23:25:32.7883278Z + []\n2026-08-29T23:25:32.7883406Z \n2026-08-29T23:25:32.7883815Z  ❯ src/v4/classic/tests/issue-schema.test.ts:109:16\n2026-08-29T23:25:32.7884506Z     107|     .safeParseAsync(\"abc\");\n2026-08-29T23:25:32.7884970Z     108|\n2026-08-29T23:25:32.7885638Z     109|   expect(seen).toEqual([{ title: \"Async\" }]);\n2026-08-29T23:25:32.7886420Z        |                ^\n2026-08-29T23:25:32.7886809Z     110| });\n2026-08-29T23:25:32.7887120Z     111|\n2026-08-29T23:25:32.7887268Z \n2026-08-29T23:25:32.7887529Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/18]⎯\n2026-08-29T23:25:32.7887760Z \n2026-08-29T23:25:32.7888712Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > the owning schema is the clone `.meta()` registered, not the pre-metadata schema\n2026-08-29T23:25:32.7889761Z AssertionError: expected [] to deeply equal [ true ]\n2026-08-29T23:25:32.7890089Z \n2026-08-29T23:25:32.7890241Z - Expected\n2026-08-29T23:25:32.7890537Z + Received\n2026-08-29T23:25:32.7890695Z \n2026-08-29T23:25:32.7890807Z - [\n2026-08-29T23:25:32.7891073Z -   true,\n2026-08-29T23:25:32.7891322Z - ]\n2026-08-29T23:25:32.7891563Z + []\n2026-08-29T23:25:32.7891697Z \n2026-08-29T23:25:32.7892097Z  ❯ src/v4/classic/tests/issue-schema.test.ts:125:16\n2026-08-29T23:25:32.7892921Z     123|   labeled.safeParse(\"ab\");\n2026-08-29T23:25:32.7893380Z     124|\n2026-08-29T23:25:32.7893944Z     125|   expect(seen).toEqual([true]);\n2026-08-29T23:25:32.7894513Z        |                ^\n2026-08-29T23:25:32.7894895Z     126| });\n2026-08-29T23:25:32.7895200Z     127|\n2026-08-29T23:25:32.7895328Z \n2026-08-29T23:25:32.7895581Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/18]⎯\n2026-08-29T23:25:32.7895805Z \n2026-08-29T23:25:32.7896766Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > `inst` keeps its meaning and `schema` stays off the finalized issue\n2026-08-29T23:25:32.7897919Z AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n2026-08-29T23:25:32.7898340Z \n2026-08-29T23:25:32.7898485Z - Expected\n2026-08-29T23:25:32.7898765Z + Received\n2026-08-29T23:25:32.7898901Z \n2026-08-29T23:25:32.7899022Z - [\n2026-08-29T23:25:32.7899348Z -   \"$ZodCheckMinLength\",\n2026-08-29T23:25:32.7899693Z -   \"ZodString\",\n2026-08-29T23:25:32.7899971Z - ]\n2026-08-29T23:25:32.7900215Z + []\n2026-08-29T23:25:32.7900344Z \n2026-08-29T23:25:32.7900743Z  ❯ src/v4/classic/tests/issue-schema.test.ts:140:17\n2026-08-29T23:25:32.7901667Z     138|   const wrongType = z.string().safeParse(123);\n2026-08-29T23:25:32.7902493Z     139|\n2026-08-29T23:25:32.7903278Z     140|   expect(insts).toEqual([\"$ZodCheckMinLength\", \"ZodString\"]);\n2026-08-29T23:25:32.7903996Z        |                 ^\n2026-08-29T23:25:32.7904609Z     141|   expect(Object.keys(tooSmall.error!.issues[0])).not.toContain(\"schema…\n2026-08-29T23:25:32.7905392Z     142|   expect(Object.keys(wrongType.error!.issues[0])).not.toContain(\"schem…\n2026-08-29T23:25:32.7905767Z \n2026-08-29T23:25:32.7906014Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/18]⎯\n2026-08-29T23:25:32.7906240Z \n2026-08-29T23:25:32.7907135Z  FAIL   zod  src/v4/classic/tests/issue-schema.test.ts > every error map kind receives the owning schema\n2026-08-29T23:25:32.7908202Z AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n2026-08-29T23:25:32.7908616Z \n2026-08-29T23:25:32.7908770Z - Expected\n2026-08-29T23:25:32.7909054Z + Received\n2026-08-29T23:25:32.7909196Z \n2026-08-29T23:25:32.7909316Z - {\n2026-08-29T23:25:32.7909579Z -   \"check\": {\n2026-08-29T23:25:32.7909921Z -     \"title\": \"Check\",\n2026-08-29T23:25:32.7910223Z -   },\n2026-08-29T23:25:32.7910536Z -   \"customError\": {\n2026-08-29T23:25:32.7911149Z -     \"title\": \"Custom\",\n2026-08-29T23:25:32.7911499Z -   },\n2026-08-29T23:25:32.7911854Z -   \"localeError\": {\n2026-08-29T23:25:32.7912255Z -     \"title\": \"Locale\",\n2026-08-29T23:25:32.7912597Z -   },\n2026-08-29T23:25:32.7912903Z -   \"parse\": {\n2026-08-29T23:25:32.7913260Z -     \"title\": \"Parse\",\n2026-08-29T23:25:32.7913587Z -   },\n2026-08-29T23:25:32.7913886Z -   \"schema\": {\n2026-08-29T23:25:32.7914243Z -     \"title\": \"Schema\",\n2026-08-29T23:25:32.7914580Z -   },\n2026-08-29T23:25:32.7914845Z - }\n2026-08-29T23:25:32.7915129Z + {}\n2026-08-29T23:25:32.7915277Z \n2026-08-29T23:25:32.7915734Z  ❯ src/v4/classic/tests/issue-schema.test.ts:176:16\n2026-08-29T23:25:32.7916606Z     174|   z.config({ localeError });\n2026-08-29T23:25:32.7917067Z     175|\n2026-08-29T23:25:32.7917531Z     176|   expect(seen).toEqual({\n2026-08-29T23:25:32.7918062Z        |                ^\n2026-08-29T23:25:32.7918669Z     177|     check: { title: \"Check\" },\n2026-08-29T23:25:32.7919154Z     178|     schema: { title: \"Schema\" },\n2026-08-29T23:25:32.7919376Z \n2026-08-29T23:25:32.7919563Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/18]⎯\n2026-08-29T23:25:32.7919713Z \n2026-08-29T23:25:32.7919739Z \n2026-08-29T23:25:32.7920104Z  Test Files  2 failed | 573 passed (575)\n2026-08-29T23:25:32.7920712Z       Tests  18 failed | 7846 passed (7864)\n2026-08-29T23:25:32.7921133Z Type Errors  no errors\n2026-08-29T23:25:32.7921422Z    Start at  23:24:45\n2026-08-29T23:25:32.7922021Z    Duration  47.50s (transform 7.47s, setup 21.80s, import 25.25s, tests 37.03s, environment 39ms, typecheck 3.76s)\n2026-08-29T23:25:32.7922354Z \n2026-08-29T23:25:32.7922382Z \n2026-08-29T23:25:32.7947219Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Max\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n-   {\n-     \"title\": \"Multiple\",\n-   },\n-   {\n-     \"title\": \"Array\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:29:16\n\n\n2026-08-29T23:25:32.7956251Z \n2026-08-29T23:25:32.7959080Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:44:16\n\n\n2026-08-29T23:25:32.7960844Z \n2026-08-29T23:25:32.7963389Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Refine\",\n-   },\n-   {\n-     \"title\": \"SuperRefine\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:59:16\n\n\n2026-08-29T23:25:32.7964897Z \n2026-08-29T23:25:32.7967446Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Element\",\n-   },\n-   {\n-     \"title\": \"Target\",\n-   },\n-   {\n-     \"title\": \"Property\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:77:16\n\n\n2026-08-29T23:25:32.7969073Z \n2026-08-29T23:25:32.7971172Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Bare\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:96:16\n\n\n2026-08-29T23:25:32.7972538Z \n2026-08-29T23:25:32.7974780Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Async\",\n-   },\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:109:16\n\n\n2026-08-29T23:25:32.7976168Z \n2026-08-29T23:25:32.7977571Z ##[error]AssertionError: expected [] to deeply equal [ true ]\n\n- Expected\n+ Received\n\n- [\n-   true,\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:125:16\n\n\n2026-08-29T23:25:32.7978384Z \n2026-08-29T23:25:32.7979797Z ##[error]AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n\n- Expected\n+ Received\n\n- [\n-   \"$ZodCheckMinLength\",\n-   \"ZodString\",\n- ]\n+ []\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:140:17\n\n\n2026-08-29T23:25:32.7980706Z \n2026-08-29T23:25:32.7982728Z ##[error]AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n\n- Expected\n+ Received\n\n- {\n-   \"check\": {\n-     \"title\": \"Check\",\n-   },\n-   \"customError\": {\n-     \"title\": \"Custom\",\n-   },\n-   \"localeError\": {\n-     \"title\": \"Locale\",\n-   },\n-   \"parse\": {\n-     \"title\": \"Parse\",\n-   },\n-   \"schema\": {\n-     \"title\": \"Schema\",\n-   },\n- }\n+ {}\n\n ❯ packages/zod/src/v4/classic/tests/issue-schema.test.ts:176:16\n\n\n2026-08-29T23:25:32.7983915Z \n2026-08-29T23:25:32.7985485Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(4) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Max\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n-   {\n-     \"title\": \"Multiple\",\n-   },\n-   {\n-     \"title\": \"Array\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:29:16\n\n\n2026-08-29T23:25:32.7986728Z \n2026-08-29T23:25:32.7987947Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Name' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Name\",\n-   },\n-   {\n-     \"title\": \"Email\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:44:16\n\n\n2026-08-29T23:25:32.7988787Z \n2026-08-29T23:25:32.7990057Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Refine' }, …(1) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Refine\",\n-   },\n-   {\n-     \"title\": \"SuperRefine\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:59:16\n\n\n2026-08-29T23:25:32.7990934Z \n2026-08-29T23:25:32.7992305Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Element' }, …(2) ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Element\",\n-   },\n-   {\n-     \"title\": \"Target\",\n-   },\n-   {\n-     \"title\": \"Property\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:77:16\n\n\n2026-08-29T23:25:32.7993216Z \n2026-08-29T23:25:32.7994285Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Bare' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Bare\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:96:16\n\n\n2026-08-29T23:25:32.7995259Z \n2026-08-29T23:25:32.7996545Z ##[error]AssertionError: expected [] to deeply equal [ { title: 'Async' } ]\n\n- Expected\n+ Received\n\n- [\n-   {\n-     \"title\": \"Async\",\n-   },\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:109:16\n\n\n2026-08-29T23:25:32.7997365Z \n2026-08-29T23:25:32.7998349Z ##[error]AssertionError: expected [] to deeply equal [ true ]\n\n- Expected\n+ Received\n\n- [\n-   true,\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:125:16\n\n\n2026-08-29T23:25:32.7999116Z \n2026-08-29T23:25:32.8000378Z ##[error]AssertionError: expected [] to deeply equal [ '$ZodCheckMinLength', 'ZodString' ]\n\n- Expected\n+ Received\n\n- [\n-   \"$ZodCheckMinLength\",\n-   \"ZodString\",\n- ]\n+ []\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:140:17\n\n\n2026-08-29T23:25:32.8001227Z \n2026-08-29T23:25:32.8003126Z ##[error]AssertionError: expected {} to deeply equal { check: { title: 'Check' }, …(4) }\n\n- Expected\n+ Received\n\n- {\n-   \"check\": {\n-     \"title\": \"Check\",\n-   },\n-   \"customError\": {\n-     \"title\": \"Custom\",\n-   },\n-   \"localeError\": {\n-     \"title\": \"Locale\",\n-   },\n-   \"parse\": {\n-     \"title\": \"Parse\",\n-   },\n-   \"schema\": {\n-     \"title\": \"Schema\",\n-   },\n- }\n+ {}\n\n ❯ src/v4/classic/tests/issue-schema.test.ts:176:16\n\n\n2026-08-29T23:25:32.8679669Z  ELIFECYCLE  Test failed. See above for more details.\n2026-08-29T23:25:32.8990920Z ##[error]Process completed with exit code 1.\n"
+      },
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/pulls/6519/reviews": [
+      {
+        "id": 4401,
+        "node_id": "PRR_1",
+        "user": {
+          "login": "pullfrog[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-30T09:15:00Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/6519#pullrequestreview-4401"
+      }
+    ],
+    "/repos/jdx/demo/issues/6519/comments": [],
+    "/repos/jdx/demo/activity": []
+  },
+  "graphql": {
+    "viewer": {
+      "__typename": "User",
+      "login": "jdx",
+      "id": "U_jdx",
+      "name": "jdx"
+    },
+    "repository": {
+      "__typename": "Repository",
+      "id": "R_demo",
+      "name": "demo",
+      "nameWithOwner": "jdx/demo",
+      "url": "https://github.com/jdx/demo",
+      "owner": {
+        "__typename": "User",
+        "login": "jdx",
+        "id": "U_jdx",
+        "name": "jdx"
+      },
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "viewerPermission": "ADMIN",
+      "isPrivate": false,
+      "pullRequests": {
+        "nodes": [
+          {
+            "__typename": "PullRequest",
+            "id": "PR_6519",
+            "number": 6519,
+            "databaseId": 36519,
+            "title": "perf(v4): build the safeParse error on first read",
+            "body": "Builds `result.error` on first read: a failing `safeParse` spent ~85% of its time finalizing issues and constructing the `ZodError`, which a caller that only branches on `success` never reads. The Standard Schema surface finalizes issues straight off the raw payload, so it never goes through the lazy result.\n\nMeasured against `main` (Node 26.7, Apple Silicon, load < 9, best of 4 interleaved rounds):\n\n| | main | this PR |\n| --- | --- | --- |\n| `safeParse` invalid, only `.success` read | 1057 ns | 336 ns |\n| `safeParse` invalid, `.error.issues` read | 1060 ns | 1442 ns |\n| `~standard.validate` invalid | 419 ns | 402 ns |\n| `safeParse` valid, `.parse()` throw | unchanged | unchanged |\n| Every mini bundle | — | +47 B gzipped |\n\nThe result is a literal with a getter and a setter, five lines. The alternative — one shared accessor descriptor plus a hidden state slot on each result — reads ~15% faster (273 ns / 1255 ns on the two failing rows) because every result then shares one map and the `.error` load sites stay monomorphic, but it costs ~75 B more gzipped in every bundle; at mini's scale that is the wrong trade, so the getter stays.\n\nTwo things to weigh either way:\n\n- Readers pay for the accessor; `error` has to stay own and enumerable (keys, spreads, `structuredClone`, `toEqual`), so a per-result getter is the floor, and `#private` fields would downlevel to WeakMaps under the es2020 target.\n- Error maps (`customError`, `localeError`, per-schema maps) run on the first read of `error`, against whatever config is live then, instead of at parse time. The nine tests in `issue-schema.test.ts` that watch the maps through a bare `safeParse` now read the error explicitly. Stack traces are unaffected: a `safeParse` error has had no stack since #6450.\n\nWhere it shows: benchmarks that discard the failing result or read only `.success` — the \"Invalid data\" parsing rows and the invalid-string rows on schemabenchmarks.dev, `packages/bench/error-handling.ts`, and the `.success`-only section of the old zod-compiler comparison (37x → ~10x). The moltar suite calls `.parse()` on valid data only and does not move. Standard Schema rows are already covered by #6509.\n\nAn opt-in form (`safeParse(data, { lazyError: true })`) keeps readers and the map timing unchanged but ships the same bytes.",
+            "state": "OPEN",
+            "isDraft": false,
+            "closed": false,
+            "merged": false,
+            "url": "https://github.com/jdx/demo/pull/6519",
+            "author": {
+              "__typename": "User",
+              "login": "jdx",
+              "id": "U_jdx",
+              "name": "jdx"
+            },
+            "headRefName": "lazy-safeparse-error-pr",
+            "headRefOid": "{{head_sha}}",
+            "baseRefName": "main",
+            "baseRefOid": "{{base_sha}}",
+            "headRepository": {
+              "__typename": "Repository",
+              "name": "demo",
+              "nameWithOwner": "jdx/demo",
+              "id": "R_demo"
+            },
+            "headRepositoryOwner": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "isCrossRepository": false,
+            "maintainerCanModify": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "UNSTABLE",
+            "reviewDecision": null,
+            "additions": 90,
+            "deletions": 30,
+            "changedFiles": 4,
+            "createdAt": "2026-10-30T12:00:00Z",
+            "updatedAt": "2026-10-30T12:00:00Z",
+            "closedAt": null,
+            "mergedAt": null,
+            "commits": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "__typename": "PullRequestCommit",
+                  "id": "PRC_1",
+                  "commit": {
+                    "__typename": "Commit",
+                    "id": "COMMIT_head",
+                    "oid": "{{head_sha}}",
+                    "abbreviatedOid": "{{head_short}}",
+                    "statusCheckRollup": {
+                      "__typename": "StatusCheckRollup",
+                      "state": "FAILURE",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7101",
+                            "databaseId": 7101,
+                            "name": "Lint on Node latest",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                            "startedAt": "2026-10-30T12:00:00Z",
+                            "completedAt": "2026-10-30T12:00:08Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "test"
+                                }
+                              }
+                            },
+                            "$until": 8,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7102",
+                            "databaseId": 7102,
+                            "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-10-30T12:00:00Z",
+                            "completedAt": "2026-10-30T12:00:50Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "test"
+                                }
+                              }
+                            },
+                            "$until": 90,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          }
+                        ]
+                      },
+                      "$until": 50,
+                      "$before": {
+                        "state": "PENDING"
+                      },
+                      "id": "SCR_1"
+                    },
+                    "messageHeadline": "fix: keep the async rerun when a sync Standard Schema validate meets a promise",
+                    "committedDate": "2026-10-30T12:00:00Z",
+                    "authors": {
+                      "nodes": [
+                        {
+                          "name": "jdx",
+                          "email": "jdx@example.invalid",
+                          "user": {
+                            "login": "jdx"
+                          }
+                        }
+                      ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
+                    }
+                  }
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "__typename": "StatusCheckRollup",
+              "state": "FAILURE",
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7101",
+                    "databaseId": 7101,
+                    "name": "Lint on Node latest",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-10-30T12:00:00Z",
+                    "completedAt": "2026-10-30T12:00:08Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "test"
+                        }
+                      }
+                    },
+                    "$until": 8,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7102",
+                    "databaseId": 7102,
+                    "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-10-30T12:00:00Z",
+                    "completedAt": "2026-10-30T12:00:50Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "test"
+                        }
+                      }
+                    },
+                    "$until": 90,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  }
+                ]
+              },
+              "$until": 50,
+              "$before": {
+                "state": "PENDING"
+              },
+              "id": "SCR_2"
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "reviews": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "comments": {
+              "nodes": []
+            },
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "packages/zod/src/v4/core/schemas.ts",
+                  "line": 348,
+                  "startLine": null,
+                  "originalLine": 348,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo1",
+                        "databaseId": 55501,
+                        "fullDatabaseId": "55501",
+                        "url": "https://github.com/jdx/demo/pull/6519#discussion_r55501",
+                        "createdAt": "2026-10-30T09:10:00Z",
+                        "updatedAt": "2026-10-30T09:10:00Z",
+                        "body": "The async re-run sits outside the `try` and outside any `async` function, so a synchronously-throwing check now escapes `validate()` as a thrown exception. The old path went through `_safeParseAsync`, an `async` arrow, which converted that same throw into a rejected promise — verified both ways against `main`:\n\n```ts\nz.string().refine(() => { throw new Error(\"boom\"); })[\"~standard\"].validate(\"abc\");\n// main:      returns a promise, rejects with \"boom\"\n// this PR:   throws \"boom\" synchronously\n```\n\n`StandardSchemaV1.Props[\"validate\"]` is typed `Result | Promise<Result>`, and the common consumer shape (`const r = schema[\"~standard\"].validate(v); if (r instanceof Promise) r = await r;`) doesn't wrap that first call, so this surfaces as an uncaught exception downstream. Neither `classic/tests/standard-schema.test.ts` nor the mini equivalent covers a sync-throwing check — they only exercise `.refine(async …)`.\n\n<details><summary>Technical details</summary>\n\n````markdown\n# `~standard.validate` can throw synchronously\n\n## Affected sites\n- `packages/zod/src/v4/core/schemas.ts:346-350` — `catch (_) {}` swallows the sync attempt's throw, then the unguarded `inst._zod.run({ value, issues: [] }, actx)` on line 348 re-throws it out of `validate()`. A schema that throws deterministically throws under both contexts, so the second run reproduces the first.\n- `packages/zod/src/v4/core/parse.ts:103` (on `main`) — `_safeParseAsync` was `async`, which is what previously turned the sync throw into a rejection.\n- `packages/zod/src/v4/classic/schemas.ts:282-289` — classic spreads `core.standardProps(this)` verbatim, so it inherits this.\n\n## Required outcome\n- Once `validate` has committed to the async branch, every failure from that branch surfaces as a rejected promise, never a synchronous throw.\n- A test in `classic/tests/standard-schema.test.ts` pinning a synchronously-throwing `.refine()` / `.check()` through `~standard`, asserting a rejection rather than a throw. It has to fail on the current commit.\n\n## Suggested approach (optional)\nBring the second `run` back under a promise boundary, e.g. an `async` IIFE or `Promise.resolve().then(...)`, and weigh the bytes against the three mini fixtures the same way the getter-vs-descriptor choice was weighed.\n````\n\n</details>",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_pullfrog",
+                          "login": "pullfrog"
+                        },
+                        "path": "packages/zod/src/v4/core/schemas.ts",
+                        "line": 348,
+                        "originalLine": 348,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "projectCards": {
+              "nodes": []
+            },
+            "projectItems": {
+              "nodes": []
+            },
+            "milestone": null,
+            "autoMergeRequest": null,
+            "reactionGroups": [],
+            "files": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "packages/treeshake/bundle-size.test.ts",
+                  "additions": 6,
+                  "deletions": 3
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "packages/zod/src/v4/classic/tests/error.test.ts",
+                  "additions": 40,
+                  "deletions": 1
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "packages/zod/src/v4/core/parse.ts",
+                  "additions": 32,
+                  "deletions": 12
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "packages/zod/src/v4/core/schemas.ts",
+                  "additions": 12,
+                  "deletions": 14
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "object": {
+        "__typename": "Commit",
+        "id": "COMMIT_head",
+        "oid": "{{head_sha}}",
+        "abbreviatedOid": "{{head_short}}",
+        "statusCheckRollup": {
+          "__typename": "StatusCheckRollup",
+          "state": "FAILURE",
+          "contexts": {
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7101",
+                "databaseId": 7101,
+                "name": "Lint on Node latest",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-10-30T12:00:00Z",
+                "completedAt": "2026-10-30T12:00:08Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "test"
+                    }
+                  }
+                },
+                "$until": 8,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7102",
+                "databaseId": 7102,
+                "name": "Test with TypeScript latest on Node lts/* (ubuntu-latest)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-10-30T12:00:00Z",
+                "completedAt": "2026-10-30T12:00:50Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "test"
+                    }
+                  }
+                },
+                "$until": 90,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              }
+            ]
+          },
+          "$until": 50,
+          "$before": {
+            "state": "PENDING"
+          },
+          "id": "SCR_3"
+        },
+        "messageHeadline": "fix: keep the async rerun when a sync Standard Schema validate meets a promise",
+        "committedDate": "2026-10-30T12:00:00Z",
+        "authors": {
+          "nodes": [
+            {
+              "name": "jdx",
+              "email": "jdx@example.invalid",
+              "user": {
+                "login": "jdx"
+              }
+            }
+          ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
+        }
+      }
+    }
+  }
+}
