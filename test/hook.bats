@@ -662,3 +662,30 @@ claude_payload() {
 	# macOS puts the test directory under /private/tmp.
 	assert_output --regexp "^In (/private)?$PWD/scratch: Files changed after the last test run passed"
 }
+
+@test "session-start names the project's checks from a trusted .jouet/project.toml" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '[checks]\nfull = "mise run test"\n[checks.focused]\nbats = "jouet test --cmd -- mise run test:bats -- test/NAME.bats"\n' >repo/.jouet/project.toml
+	start() {
+		jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", source: "startup", cwd: $cwd}' |
+			jouet hook claude session-start | jq -r '.hookSpecificOutput.additionalContext'
+	}
+	# Not before a person trusts it: it is text every session reads.
+	run start
+	refute_output --partial "this project's checks"
+	(cd repo && jouet trust --yes >/dev/null)
+	run start
+	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
+}
+
+@test "trust refuses a .jouet/project.toml that does not parse" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '[checks]\nfast = "cargo test"\n' >repo/.jouet/project.toml
+	cd repo
+	run jouet trust --yes
+	assert_failure
+	assert_output --partial "project.toml does not parse: unknown field"
+	assert_output --partial "not trusting"
+}

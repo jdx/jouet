@@ -36,6 +36,23 @@ Where the project needs it, the agent adapts the test configuration, adds a task
 
 It then checks what it changed, and reports the full and focused check commands, the slow checks it knows of, what passed, and what is still missing, whether that needs more configuration or a change to jouet. A dry run of test selection is reported as a dry run, not as tests passing. [Self-winding](/winding) carries on from there, proposing rules and tasks as sessions go by.
 
+## The project's checks
+
+The skill records the checks it established in `.jouet/project.toml`, which you commit with the project:
+
+```toml
+[checks]
+full = "mise run test"
+lint = "jouet diag check --changed"
+before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
+
+[checks.focused]
+unit = "jouet test --affected"
+bats = "jouet test --cmd -- mise run test:bats -- test/NAME.bats"
+```
+
+Once the repository's jouet files are trusted, the session-start primer names them in one line: `jouet: this project's checks (.jouet/project.toml): bats …; unit …; full suite …; before pushing …`. Every later session then starts knowing how this project runs its focused tests and what CI enforces, instead of looking for it. In the benchmark, agents that did not know a project's focused bats command spent several requests finding a way to run it. The keys are `full`, `lint`, `before_push` (a list) and `focused` (a table, by what each check covers). An unknown key makes the file unreadable, so a typo is not silently dropped.
+
 ## Trust and existing files
 
 Trusting a repository's rules stays with you. When something the agent added cannot run until the repository is trusted, it says which files need your review. It does not run `jouet trust` or work around a refusal.
