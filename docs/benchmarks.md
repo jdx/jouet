@@ -43,7 +43,7 @@ Each `task.toml` notes which jouet levels the task can exercise: what `jouet tes
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
 
-The opt-in Requests task installs hash-locked test dependencies and the checkout into an isolated Python environment before each run. Its independent checker prepares multipart requests without network access, exercising temporary files, dynamically proxied streams and ordinary file values.
+The opt-in Requests task installs hash-locked test dependencies, the project's pinned Ruff version, and the checkout into an isolated Python environment before each run. Its independent checker prepares multipart requests without network access, exercising temporary files, dynamically proxied streams and ordinary file values.
 
 The opt-in `jactionlint-dependabot-groups` task reproduces [jdx/jactionlint#313](https://github.com/jdx/jactionlint/issues/313) from the parent of its fix. It needs a local clone at `~/src/jactionlint`, Go 1.27.1, Go 1.27.3 and the project's modules in `~/go/pkg/mod`. Run it with `MISE_ENV=bench MISE_GO_VERSION=1.27.1 mise run bench:agents --tasks jactionlint-dependabot-groups`: the project uses Go 1.27.1 for formatting and staticcheck, and Go 1.27.3 for builds and tests. Before each timed run, mise installs the project's tools in that run's isolated home. Its independent check exercises the public parser with both valid grouped updates and genuine duplicates.
 
