@@ -409,10 +409,8 @@ pub(crate) fn pipeline_shapes(command: &str) -> Vec<Vec<(String, String)>> {
         if let Some(program) = program {
             pipeline.push((program, shaped));
         }
-        if !matches!(op, Some("|" | "|&")) {
-            if !pipeline.is_empty() {
-                pipelines.push(std::mem::take(&mut pipeline));
-            }
+        if !matches!(op, Some("|" | "|&")) && !pipeline.is_empty() {
+            pipelines.push(std::mem::take(&mut pipeline));
         }
     }
     pipelines
