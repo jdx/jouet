@@ -606,14 +606,23 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     assert!(environment_cause(libtest, &[]).is_some());
     // No database or service running here.
     for line in [
-        "    db_test.go:12: failed to connect to `user=app database=app`:",
         "psql: error: could not connect to server: No such file or directory",
-        "sqlalchemy.exc.OperationalError: connection to server at \"localhost\" (::1), port 5432 failed",
+        "sqlalchemy.exc.OperationalError: connection to server at \"localhost\" (::1), port 5432 failed: Connection refused",
+        "psql: error: connection to server on socket \"/tmp/.s.PGSQL.5432\" failed: No such file or directory",
         "Error: connect ECONNREFUSED 127.0.0.1:6379",
         "        dial error: dial tcp 127.0.0.1:5432: connect: connection refused",
     ] {
         let text = format!("1..1\nnot ok 1 a\n# {line}\n");
         assert!(environment_cause(&text, &[]).is_some(), "{line}");
+    }
+    // A database that answers and refuses the login, or has no such
+    // database, is the change's.
+    for line in [
+        "connection to server at \"localhost\" (::1), port 5432 failed: FATAL:  password authentication failed for user \"app\"",
+        "failed to connect to `user=app database=app`: server error: FATAL: database \"app\" does not exist",
+    ] {
+        let text = format!("1..1\nnot ok 1 a\n# {line}\n");
+        assert_eq!(environment_cause(&text, &[]), None, "{line}");
     }
     // A refused connection to another host may be the change's own.
     assert_eq!(
