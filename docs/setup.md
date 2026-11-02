@@ -29,7 +29,7 @@ jouet setup codex --dry-run     # show the diff, write nothing
 jouet setup codex --uninstall   # remove what jouet added
 ```
 
-Setup prints a line for each file it created, updated, removed, kept or left unchanged, then a `note:` for anything left for you to do:
+Setup prints a line for each file it created, updated, removed, linked, kept or left unchanged, then a `note:` for anything left for you to do:
 
 ```text
 $ jouet setup codex
@@ -43,7 +43,7 @@ Codex, Cursor, Gemini CLI and Copilot each have a step of their own before the h
 
 The hooks find `jouet` on `PATH` and do nothing where it is missing; setup says so when it is not on `PATH` where you run it (see [when jouet is not on PATH](#when-jouet-is-not-on-path)). Besides jouet-init, setup does not install the usage [skill](#the-skill-and-agent-help) unless you pass `--skill`, or the hooks or the primer are turned off in the [settings](#settings): the primer already tells the agent what that skill would, in every session. In a [fnox](#fnox) project, setup also recommends starting the agent under fnox's credential proxy.
 
-`--dry-run` prints each file's diff and writes nothing. With `--json`, the report is one document: `harness`, `scope` (`global` or `project`), `shared`, `dry_run` and `uninstall` when set, `files` (each with its `path`, an `action` of `create`, `update`, `remove`, `unchanged` or `keep`, and a `diff` when it changes), `notes`, and `benchmark_prompt` with [`--benchmark`](#compare-a-project).
+`--dry-run` prints each file's diff and writes nothing. With `--json`, the report is one document: `harness`, `scope` (`global` or `project`), `shared`, `dry_run` and `uninstall` when set, `files` (each with its `path`, an `action` of `create`, `update`, `remove`, `link`, `unchanged` or `keep`, and a `diff` when it changes), `notes`, and `benchmark_prompt` with [`--benchmark`](#compare-a-project).
 
 ### What setup changes
 
@@ -348,7 +348,7 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-too
 
 So a contributor without jouet, an app started with a shorter `PATH` than your shell's, or a version manager's shim for a jouet that is not installed (a project that pins jouet in `mise.toml` before `mise install` has run) gets no hooks rather than an error on every tool call. The check runs `jouet --version`, not `command -v jouet`, which a shim passes. setup says so when jouet is not on `PATH` where you run it. A stop handler with hk's stop hook merged in runs hk's alone when jouet is missing.
 
-The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex pre-tool-use }`.
+The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex pre-tool-use }`.
 
 Cursor, Gemini CLI and Copilot read a hook's stdout as JSON even when it has nothing to say, so their guard prints `{}` instead: `sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'`. Copilot's handlers have a `bash` and a `powershell` command. Cursor and Gemini CLI have one command, which they run with PowerShell on Windows, so a `--global` install made on Windows gets the PowerShell form; a `--shared` one gets `sh -c`, for everyone else who clones the repository.
 

@@ -216,7 +216,12 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                 };
                 Ok(vec![file, (link, None)])
             }
-            None if is_link(dir) => {
+            // A shared install's link, which setup made: anyone else's link
+            // reaches plan_skill, which keeps a skill jouet did not write.
+            None if harness == Harness::Claude
+                && scope != Scope::Global
+                && std::fs::read_link(dir).is_ok_and(|t| t == link_target(path)) =>
+            {
                 // The link goes, and the shared file it names unless another
                 // harness here still has jouet's hooks and reads it.
                 let mut changes = vec![(
@@ -232,6 +237,26 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                     changes.push(plan_skill(&shared, None)?);
                 }
                 Ok(changes)
+            }
+            // Claude Code's copy, through a link on `.claude/skills` as a
+            // whole, that another harness here still reads.
+            None if harness == Harness::Claude
+                && scope != Scope::Global
+                && others_read_it
+                && dir.parent().is_some_and(is_link)
+                && claude_links_to(&project, &shared) =>
+            {
+                let change = FileChange {
+                    path: path.display().to_string(),
+                    action: Action::Keep,
+                    diff: String::new(),
+                    contents: None,
+                };
+                let note = format!(
+                    "kept {}: another harness here still has jouet's hooks and reads it",
+                    path.display()
+                );
+                Ok(vec![(change, Some(note))])
             }
             // Another harness's copy that Claude Code's link still names.
             None if harness != Harness::Claude
@@ -709,7 +734,11 @@ fn linkable(skill: &Path) -> bool {
     }
     match std::fs::symlink_metadata(dir) {
         Err(e) => e.kind() == std::io::ErrorKind::NotFound,
-        Ok(meta) if meta.file_type().is_symlink() => true,
+        // jouet's own link, or one whose target is gone; never a link of
+        // someone's to a skill of their own.
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::read_link(dir).is_ok_and(|t| t == link_target(skill)) || !dir.exists()
+        }
         Ok(meta) if meta.is_dir() => {
             std::fs::read_dir(dir).is_ok_and(|entries| entries.count() == 1)
                 && matches!(read(skill), Ok(Some(text)) if stamped_by_jouet(&text))

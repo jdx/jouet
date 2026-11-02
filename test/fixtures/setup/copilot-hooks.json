@@ -5,7 +5,7 @@
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot session-start'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot session-start } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot session-start } else { '{}' }",
         "timeoutSec": 10
       }
     ],
@@ -13,7 +13,7 @@
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot pre-tool-use'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot pre-tool-use } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot pre-tool-use } else { '{}' }",
         "matcher": "bash|powershell|view|create|edit|str_replace_editor|grep|rg",
         "timeoutSec": 10
       }
@@ -22,14 +22,14 @@
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-tool-use'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot post-tool-use } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot post-tool-use } else { '{}' }",
         "matcher": "bash|powershell|view",
         "timeoutSec": 10
       },
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-edit'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot post-edit } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot post-edit } else { '{}' }",
         "matcher": "create|edit|str_replace_editor",
         "timeoutSec": 10
       }
@@ -38,7 +38,7 @@
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot post-tool-use-failure'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot post-tool-use-failure } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot post-tool-use-failure } else { '{}' }",
         "matcher": "bash|powershell",
         "timeoutSec": 10
       }
@@ -47,7 +47,7 @@
       {
         "type": "command",
         "bash": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook copilot stop'",
-        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot stop } else { '{}' }",
+        "powershell": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot stop } else { '{}' }",
         "timeoutSec": 10
       }
     ]

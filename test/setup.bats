@@ -355,6 +355,35 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert [ -f .claude/skills/jouet-init/SKILL.md ]
 }
 
+@test "a link of your own to another skill is never replaced or removed" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p mine/jouet-init .claude/skills
+	echo "my skill" >mine/jouet-init/SKILL.md
+	ln -s ../../mine/jouet-init .claude/skills/jouet-init
+	run --separate-stderr jouet setup claude --shared
+	assert_success
+	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
+	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
+	run --separate-stderr jouet setup claude --shared --uninstall
+	assert_success
+	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
+	assert_content mine/jouet-init/SKILL.md $'my skill\n'
+}
+
+@test "uninstalling Claude Code keeps the skill another harness reads through a linked .claude/skills" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p .agents/skills .claude
+	ln -s ../.agents/skills .claude/skills
+	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared >/dev/null
+	run --separate-stderr jouet setup claude --shared --uninstall
+	assert_success
+	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
+	assert [ -f .agents/skills/jouet-init/SKILL.md ]
+}
+
 @test "an earlier setup's own Claude Code skill directory becomes the link" {
 	init_repo
 	jouet setup claude --shared >/dev/null

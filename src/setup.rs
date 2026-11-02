@@ -274,20 +274,21 @@ impl Harness {
     }
 
     /// The command for PowerShell, which Codex, Copilot, and Cursor and
-    /// Gemini CLI on Windows run hooks with.
+    /// Gemini CLI on Windows run hooks with. Its guard tests the probe's
+    /// exit status, not what it printed.
     fn powershell(self, event: &str, hk: Option<&str>) -> String {
         let name = self.name();
         match hk {
             None if self.wants_json() => format!(
-                "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} }} else {{ '{{}}' }}"
+                "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) {{ jouet hook {name} {event} }} else {{ '{{}}' }}"
             ),
             None => {
                 format!(
-                    "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} }}"
+                    "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) {{ jouet hook {name} {event} }}"
                 )
             }
             Some(hk) => format!(
-                "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} --hk \"{hk}\" }} else {{ {hk} }}"
+                "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) {{ jouet hook {name} {event} --hk \"{hk}\" }} else {{ {hk} }}"
             ),
         }
     }
@@ -638,7 +639,7 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex session-start'",
-            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex session-start }",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex session-start }",
             "timeout": 10
           }
         ]
@@ -651,7 +652,7 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex pre-tool-use'",
-            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex pre-tool-use }",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex pre-tool-use }",
             "timeout": 10
           }
         ]
@@ -664,7 +665,7 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex post-edit'",
-            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex post-edit }",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex post-edit }",
             "timeout": 10
           }
         ]
@@ -676,7 +677,7 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex stop'",
-            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex stop }",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex stop }",
             "timeout": 10
           }
         ]
@@ -886,7 +887,7 @@ mod tests {
         let jouet = &doc["hooks"]["Stop"][0]["hooks"][0];
         assert_eq!(
             jouet["commandWindows"],
-            "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex stop --hk \"hk agent stop-hook --target codex\" } else { hk agent stop-hook --target codex }"
+            "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook codex stop --hk \"hk agent stop-hook --target codex\" } else { hk agent stop-hook --target codex }"
         );
         assert_eq!(jouet["timeout"], 120);
         // A handler with other keys, or a command that is more than words,
@@ -1110,7 +1111,7 @@ mod tests {
         assert_eq!(stop["type"], "command");
         assert_eq!(
             stop["powershell"],
-            "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot stop } else { '{}' }"
+            "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet hook copilot stop } else { '{}' }"
         );
         assert_eq!(stop["timeoutSec"], 10);
         let mut removed = copilot;
@@ -1164,7 +1165,7 @@ mod tests {
         ));
         assert!(!is_jouet(&json!({"command": "echo jouet hook"})));
         assert!(!is_jouet(
-            &json!({"command": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet edit }"})
+            &json!({"command": "if ((Get-Command jouet -ErrorAction Ignore) -and $(jouet --version *> $null; $LASTEXITCODE -eq 0)) { jouet edit }"})
         ));
         assert!(!is_jouet(
             &json!({"command": "sh -c 'echo jouet hook; command -v jouet'"})
