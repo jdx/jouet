@@ -6,7 +6,8 @@ use crate::cli::SearchArgs;
 use jouet_output::exit::Exit;
 use jouet_search::memory::Memory;
 use jouet_search::search::{self, Budget, Error, Options};
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// The default total budget in bytes: about 1,500 tokens.
@@ -85,8 +86,15 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         report: &report,
         scope: scope.as_ref(),
     };
+    // Text only: JSON carries no code. `--again` shows without recording.
+    let bodies = if args.files_with_matches || out.json {
+        String::new()
+    } else {
+        small_definitions(&report, !args.again)
+    };
     out.result(&doc, || {
         let mut text = search::render(&report, args.files_with_matches);
+        text.push_str(&bodies);
         if let Some(scope) = &scope {
             text.push_str(&super::scope::render(scope));
         }
@@ -97,6 +105,75 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
     } else {
         Exit::Ok
     }
+}
+
+/// The most definitions a search prints the code of, and the most lines
+/// each may have.
+const BODIES: usize = 2;
+const BODY_LINES: u32 = 40;
+
+/// The code of the definitions a search's matches are in, when they are
+/// few and short: the agent would read them next, in a call of their own.
+/// Recorded as read when `record`, so a `jouet read` of one after collapses.
+fn small_definitions(report: &search::Report, record: bool) -> String {
+    let mut defs: Vec<(&str, &search::Symbol)> = Vec::new();
+    for file in &report.files {
+        if file.more > 0 {
+            return String::new();
+        }
+        for hit in &file.shown {
+            // A match outside every definition is shown as it is.
+            let Some(symbol) = &hit.symbol else {
+                continue;
+            };
+            if !defs.iter().any(|(p, s)| *p == file.path && *s == symbol) {
+                defs.push((&file.path, symbol));
+            }
+        }
+    }
+    if defs.is_empty()
+        || defs.len() > BODIES
+        || !report.omitted.is_empty()
+        || defs
+            .iter()
+            .any(|(_, s)| s.end.saturating_sub(s.start) + 1 > BODY_LINES)
+    {
+        return String::new();
+    }
+    let mut memory = session_memory("read");
+    let mut text = String::new();
+    for (path, symbol) in defs {
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let lines: Vec<&str> = source.lines().collect();
+        let (start, end) = (
+            symbol.start as usize,
+            (symbol.end as usize).min(lines.len()),
+        );
+        if start == 0 || start > end {
+            continue;
+        }
+        let _ = writeln!(
+            text,
+            "{path}: {} {} ({start}-{end})",
+            symbol.kind, symbol.name
+        );
+        for (i, line) in lines[start - 1..end].iter().enumerate() {
+            let _ = writeln!(text, "{}\t{line}", start + i);
+        }
+        let file = Path::new(path);
+        if record && let Some(stamp) = jouet_search::memory::Stamp::read(file) {
+            memory.record(
+                &jouet_search::memory::key(file),
+                stamp,
+                symbol.start,
+                symbol.end,
+            );
+        }
+    }
+    memory.save();
+    text
 }
 
 /// The agent session's id: `JOUET_SESSION_ID`, else the one Claude Code or

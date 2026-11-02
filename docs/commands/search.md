@@ -56,6 +56,8 @@ Long lines are cut at 200 bytes, with the number of bytes left out. `-l` lists t
 
 Matches are grouped by file, then by the definition they are in. The heading names the function, method, class or module and its lines, so a match reads in context without opening the file, and [`jouet read FILE --symbol NAME`](/commands/read) or `--range 6:9` prints only that definition. Definitions come from tree-sitter for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. Other files, and matches outside any definition, are listed under the file alone.
 
+When every match is in at most two definitions of up to 40 lines each, and nothing was left out, the search prints their code after the matches, numbered as `jouet read` prints it: the agent would otherwise read them in a call of its own, at the cost of the whole context again. In an agent session the lines count as read, so a `jouet read --symbol` of one afterwards collapses to `already shown`. `--files-with-matches` prints no code.
+
 Each file's definitions are cached by its size and modification time in `$XDG_CACHE_HOME/jouet/defs/` (`~/.cache/jouet/defs/` without it), since parsing a large file takes tens of milliseconds and an agent searches the same files again and again. Cached definitions untouched for a month are removed.
 
 ## Budgets
