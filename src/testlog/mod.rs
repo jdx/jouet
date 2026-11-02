@@ -252,6 +252,17 @@ regexes! {
 /// `ENVIRONMENT`): the first such line, cut short. None when any failure
 /// says nothing of the kind, as one the change caused.
 pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String> {
+    // Before failures of one name merge, each with lines of its own must
+    // blame the machine too: two suites can share a test name, and a merged
+    // failure keeps only the longer block.
+    if !parse(&clean(text), formats)
+        .found
+        .iter()
+        .filter(|f| f.lines.iter().any(|l| !l.trim().is_empty()))
+        .all(|f| f.lines.iter().any(|l| ENVIRONMENT.is_match(l)))
+    {
+        return None;
+    }
     let digest = digest_with(text, true, 0, formats);
     let mut first = None;
     for failure in &digest.failures {
@@ -259,6 +270,27 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
     first
+}
+
+/// What every runner jouet knows, and each of `formats`, finds in `lines`,
+/// before failures of one name are merged.
+fn parse(lines: &[String], formats: &[Format]) -> Parsed {
+    let mut parsed = Parsed::default();
+    libtest(lines, &mut parsed);
+    nextest(lines, &mut parsed);
+    rustc(lines, &mut parsed);
+    rustfmt(lines, &mut parsed);
+    tsc(lines, &mut parsed);
+    go(lines, &mut parsed);
+    pytest(lines, &mut parsed);
+    unittest(lines, &mut parsed);
+    jest(lines, &mut parsed);
+    vitest(lines, &mut parsed);
+    tap(lines, &mut parsed);
+    for format in formats {
+        format.apply(lines, &mut parsed);
+    }
+    parsed
 }
 
 /// [`digest_with`] jouet's own formats alone.
@@ -274,21 +306,7 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 /// no cap.
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
     let lines = clean(text);
-    let mut parsed = Parsed::default();
-    libtest(&lines, &mut parsed);
-    nextest(&lines, &mut parsed);
-    rustc(&lines, &mut parsed);
-    rustfmt(&lines, &mut parsed);
-    tsc(&lines, &mut parsed);
-    go(&lines, &mut parsed);
-    pytest(&lines, &mut parsed);
-    unittest(&lines, &mut parsed);
-    jest(&lines, &mut parsed);
-    vitest(&lines, &mut parsed);
-    tap(&lines, &mut parsed);
-    for format in formats {
-        format.apply(&lines, &mut parsed);
-    }
+    let parsed = parse(&lines, formats);
     let mut found = merge(parsed.found);
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
