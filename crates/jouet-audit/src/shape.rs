@@ -400,6 +400,70 @@ pub(crate) fn program_shapes(command: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+type Stage = Vec<(String, String)>;
+type Pipeline = Vec<Stage>;
+
+/// Programs grouped by shell pipeline. A subshell is one stage of its outer
+/// pipeline, while its own pipelines are also recorded separately.
+pub(crate) fn pipeline_shapes(command: &str) -> Vec<Pipeline> {
+    fn group<'a>(toks: &'a [Tok], at: &mut usize, out: &mut Vec<Pipeline>, nested: bool) -> Stage {
+        let mut all = Vec::new();
+        let mut pipeline = Vec::new();
+        let mut simple: Vec<&'a Tok> = Vec::new();
+        let mut after_pipe = false;
+        while *at < toks.len() {
+            let tok = &toks[*at];
+            *at += 1;
+            if let Tok::Op(op) = tok {
+                if !simple.is_empty() {
+                    let (shaped, program) = shape_simple(&simple);
+                    if let Some(program) = program {
+                        let item = (program, shaped);
+                        all.push(item.clone());
+                        pipeline.push(vec![item]);
+                    }
+                    simple.clear();
+                    after_pipe = false;
+                }
+                match *op {
+                    "(" => {
+                        let inner = group(toks, at, out, true);
+                        all.extend(inner.clone());
+                        pipeline.push(inner);
+                        after_pipe = false;
+                    }
+                    "|" | "|&" => after_pipe = true,
+                    "\n" if after_pipe => {}
+                    ")" if nested => break,
+                    _ => {
+                        if !pipeline.is_empty() {
+                            out.push(std::mem::take(&mut pipeline));
+                        }
+                        after_pipe = false;
+                    }
+                }
+            } else {
+                simple.push(tok);
+            }
+        }
+        if !simple.is_empty() {
+            let (shaped, program) = shape_simple(&simple);
+            if let Some(program) = program {
+                let item = (program, shaped);
+                all.push(item.clone());
+                pipeline.push(vec![item]);
+            }
+        }
+        if !pipeline.is_empty() {
+            out.push(pipeline);
+        }
+        all
+    }
+    let mut pipelines = Vec::new();
+    group(&lex(command), &mut 0, &mut pipelines, false);
+    pipelines
+}
+
 /// Splits tokens into simple commands, each with the operator after it.
 fn simple_commands(toks: &[Tok]) -> Vec<(Vec<&Tok>, Option<&'static str>)> {
     let mut out = Vec::new();
@@ -714,6 +778,101 @@ fn subcommands(
                 return i;
             }
             (&["tasks", "settings", "plugins", "cache"], &["run", "r"])
+        }
+        "uv" if ident(i).as_deref() == Some("run") => {
+            parts.push("run".into());
+            i += 1;
+            while let Some(Tok::Word(w)) = items.get(i) {
+                if w.quoted || w.dynamic || !w.text.starts_with('-') {
+                    break;
+                }
+                let option = w.text.split('=').next().unwrap_or("");
+                if option == "--" {
+                    parts.push("--".into());
+                    i += 1;
+                    break;
+                }
+                if matches!(option, "-m" | "--module") {
+                    parts.push(option.into());
+                    i += 1;
+                    break;
+                }
+                let value = matches!(
+                    option,
+                    "-w" | "--with"
+                        | "--with-editable"
+                        | "--with-requirements"
+                        | "-p"
+                        | "--python"
+                        | "--extra"
+                        | "--no-extra"
+                        | "--group"
+                        | "--no-group"
+                        | "--only-group"
+                        | "--package"
+                        | "--env-file"
+                        | "--directory"
+                        | "--project"
+                        | "--config-file"
+                        | "--cache-dir"
+                        | "--index"
+                        | "--default-index"
+                        | "-i"
+                        | "--index-url"
+                        | "--extra-index-url"
+                        | "-f"
+                        | "--find-links"
+                );
+                let switch = matches!(
+                    option,
+                    "-q" | "-v"
+                        | "-n"
+                        | "--quiet"
+                        | "--verbose"
+                        | "--no-cache"
+                        | "--no-sync"
+                        | "--locked"
+                        | "--frozen"
+                        | "--offline"
+                        | "--isolated"
+                        | "--active"
+                        | "--no-project"
+                        | "--no-dev"
+                        | "--only-dev"
+                        | "--all-extras"
+                        | "--all-groups"
+                        | "--all-packages"
+                        | "--no-default-groups"
+                        | "--no-editable"
+                        | "--no-env-file"
+                        | "--no-index"
+                        | "--no-config"
+                        | "--no-progress"
+                        | "--managed-python"
+                        | "--no-managed-python"
+                        | "--no-python-downloads"
+                );
+                if !value && !switch {
+                    return i;
+                }
+                parts.push(flag(&w.text));
+                i += 1;
+                if value && !w.text.contains('=') {
+                    if items.get(i).is_none() {
+                        return i;
+                    }
+                    parts.push("<v>".into());
+                    i += 1;
+                }
+            }
+            let rest: Vec<&Tok> = items[i..].to_vec();
+            let (inner, inner_program) = shape_simple(&rest);
+            if inner_program.is_some() {
+                parts.push(inner);
+                *runs = inner_program;
+                return items.len();
+            }
+            return i;
         }
         "npm" | "pnpm" | "yarn" | "bun" | "aube" => (&[], &["run", "exec"]),
         "docker" | "podman" => (
