@@ -1,7 +1,7 @@
 //! What a call was for.
 
 use crate::event::{Call, Tool};
-use crate::shape::program_shapes;
+use crate::shape::{is_python, program_shapes};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -268,7 +268,19 @@ pub(crate) fn categorize_command(command: &str) -> Category {
     }
     let programs: Vec<&str> = shapes.iter().map(|(program, _)| program.as_str()).collect();
     let runs = |p: &str| programs.contains(&p);
-    if jouet("test") || programs.iter().any(|p| is_build(p, command)) {
+    let python_test = shapes.iter().any(|(program, shaped)| {
+        is_python(program)
+            && shaped
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(3)
+                .any(|words| {
+                    words[0] == program
+                        && words[1] == "-m"
+                        && matches!(words[2], "pytest" | "unittest")
+                })
+    });
+    if jouet("test") || python_test || programs.iter().any(|p| is_build(p, command)) {
         return Category::BuildTestLint;
     }
     if sleeps || runs("pgrep") || runs("wait") {
@@ -384,6 +396,26 @@ mod tests {
         assert_eq!(cat("pgrep -f server"), Category::ProcessPolling);
         assert_eq!(cat("curl -s https://example.com"), Category::Web);
         assert_eq!(cat("echo hi"), Category::Other);
+    }
+
+    #[test]
+    fn categorizes_python_test_modules_without_matching_arguments() {
+        for command in [
+            "python -m pytest -q tests",
+            "python3 -m unittest discover",
+            "python3.13 -m pytest tests/test_a.py",
+            "mise x -- python3 -m pytest tests",
+        ] {
+            assert_eq!(cat(command), Category::BuildTestLint, "{command}");
+        }
+        for command in [
+            "python -m http.server",
+            "python -c 'print(\"pytest\")'",
+            "rg pytest tests | head",
+            "echo 'python -m pytest'",
+        ] {
+            assert_ne!(cat(command), Category::BuildTestLint, "{command}");
+        }
     }
 
     #[test]

@@ -590,6 +590,15 @@ fn flags(items: &[&Tok], mut i: usize, parts: &mut Vec<String>) -> usize {
 /// Keeps the subcommands of programs that have them, returning where the
 /// remaining arguments start.
 /// `mise x TOOL -- CMD` sets `runs` to the program CMD runs.
+pub(crate) fn is_python(program: &str) -> bool {
+    program.strip_prefix("python").is_some_and(|version| {
+        version.is_empty()
+            || version
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
 fn subcommands(
     program: &str,
     items: &[&Tok],
@@ -758,7 +767,7 @@ fn subcommands(
         }
         "rustup" => (&["toolchain", "target", "component"], &[]),
         "go" => (&["mod"], &[]),
-        "python" | "python3" => {
+        python if is_python(python) => {
             // `python3 -m pytest`: the module is the program that runs.
             if let Some(Tok::Word(w)) = items.get(i)
                 && w.text == "-m"
