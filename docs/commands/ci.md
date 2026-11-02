@@ -190,7 +190,7 @@ A job that failed only because another one did, such as a `needs:` job that repo
 
 A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and `--rerun` refuses it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
 
-`--rerun` also reruns a run that was cancelled before anything failed, such as one GitHub cancelled while it was queued behind another run of the same concurrency group: there is nothing to judge, and a rerun runs it. When a failure's cause was fixed outside the repository, such as a missing secret, an access a registry refused, or an outage, its log still reads as `real` or `unknown`. `--rerun --force` reruns its failed jobs whatever the verdict, and a refusal names that command.
+`--rerun` also reruns a run that was cancelled before anything failed, such as one GitHub cancelled while it was queued behind another run of the same concurrency group: there is nothing to judge, and a rerun runs it. When a failure's cause was fixed outside the repository, such as a missing secret, an access a registry refused, or an outage, its log still reads as `real` or `unknown`. `--rerun --force` reruns its failed jobs whatever the verdict. A refusal of an `unknown` failure names that command; a refusal of a `real` one does not, since a rerun repeats it.
 
 ## Entire Gates
 
