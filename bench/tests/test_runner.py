@@ -709,8 +709,9 @@ class TasksTest(unittest.TestCase):
             (task_dir / "solve.py").write_text("import bench_sample\nfrom pathlib import Path\nPath('answer').write_text(bench_sample.VALUE)\n")
             (task_dir / "check.py").write_text("import bench_sample\nfrom pathlib import Path\nassert Path('answer').read_text() == bench_sample.VALUE\n")
             task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
-            with patch.object(tasks, "load", return_value=task), contextlib.redirect_stdout(io.StringIO()):
-                result = agents.cmd_check_tasks(argparse.Namespace(tasks=["sample"], jouet=root / "unused"))
+            with patch.object(tasks, "load", return_value=task), patch.object(tasks, "all_names", return_value=["sample"]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result = agents.cmd_check_tasks(argparse.Namespace(tasks=["sample"], tasks_dir=[], jouet=root / "unused"))
             self.assertEqual(result, 0)
 
     def test_python_environment_rejects_requirements_outside_task(self):
@@ -833,6 +834,140 @@ class TasksTest(unittest.TestCase):
                 fixture = task.github_fixture({"head_sha": "a" * 40, "base_sha": "b" * 40})
                 self.assertNotIn("{{", json.dumps(fixture), name)
                 self.assertNotIn("api.github.com", json.dumps(fixture), name)
+
+
+class ExternalTasksTest(unittest.TestCase):
+    """Tasks in directories outside bench/tasks/, from --tasks-dir or JOUET_BENCH_TASKS."""
+
+    def setUp(self):
+        from unittest.mock import patch
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        env = patch.dict("os.environ")
+        env.start()
+        self.addCleanup(env.stop)
+        import os
+
+        os.environ.pop("JOUET_BENCH_TASKS", None)
+        self.addCleanup(tasks.EXTRA_DIRS.clear)
+
+    def task(self, parent: str, name: str) -> Path:
+        d = self.root / parent / name
+        (d / "repo").mkdir(parents=True)
+        (d / "repo" / "README").write_text("an example project\n")
+        (d / "task.toml").write_text(
+            'description = "write the answer"\nprompt = "Write 42 to answer."\nchore = "bug-fix"\nopt_in = true\n'
+        )
+        # Uses the shared helpers, as the tasks in bench/tasks/ do.
+        (d / "check.py").write_text(
+            "import os, sys\nsys.path.insert(0, os.environ['BENCH_CHECK_HELPERS'])\n"
+            "from pathlib import Path\nfrom _check import expect, finish\n"
+            "expect(Path('answer').exists() and Path('answer').read_text() == '42', 'no answer')\nfinish()\n"
+        )
+        (d / "solve.py").write_text("from pathlib import Path\nPath('answer').write_text('42')\n")
+        return d
+
+    def test_tasks_dir_adds_its_tasks(self):
+        d = self.task("private", "example-fix")
+        tasks.EXTRA_DIRS[:] = [self.root / "private"]
+        self.assertIn("example-fix", tasks.all_names())
+        self.assertIn("smoke", tasks.all_names())
+        self.assertEqual(tasks.load("example-fix").dir, d.resolve())
+
+    def test_environment_lists_directories(self):
+        import os
+
+        self.task("one", "first-fix")
+        self.task("two", "second-fix")
+        os.environ["JOUET_BENCH_TASKS"] = os.pathsep.join([str(self.root / "one"), "", str(self.root / "two")])
+        names = tasks.all_names()
+        self.assertIn("first-fix", names)
+        self.assertIn("second-fix", names)
+        self.assertEqual(tasks.directories()[1:], [(self.root / "one").resolve(), (self.root / "two").resolve()])
+
+    def test_a_name_in_two_directories_is_an_error(self):
+        self.task("one", "example-fix")
+        self.task("two", "example-fix")
+        tasks.EXTRA_DIRS[:] = [self.root / "one", self.root / "two"]
+        with self.assertRaisesRegex(ValueError, "example-fix is in both"):
+            tasks.all_names()
+        tasks.EXTRA_DIRS[:] = [self.root / "one"]
+        self.task("three", "smoke")
+        tasks.EXTRA_DIRS.append(self.root / "three")
+        with self.assertRaisesRegex(ValueError, "smoke is in both"):
+            tasks.load("smoke")
+
+    def test_the_same_directory_twice_is_read_once(self):
+        self.task("one", "example-fix")
+        tasks.EXTRA_DIRS[:] = [self.root / "one", self.root / "one" / ".." / "one"]
+        self.assertIn("example-fix", tasks.all_names())
+
+    def test_check_tasks_proves_an_external_task(self):
+        import argparse
+        import contextlib
+        import io
+
+        import agents
+
+        self.task("private", "example-fix")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = agents.cmd_check_tasks(
+                argparse.Namespace(tasks=["example-fix"], tasks_dir=[self.root / "private"], jouet=self.root / "unused")
+            )
+        self.assertEqual(result, 0)
+        self.assertIn("ok   example-fix: check passes when solved", out.getvalue())
+
+    def test_check_tasks_refuses_a_missing_directory_or_an_unknown_task(self):
+        import argparse
+        import contextlib
+        import io
+
+        import agents
+
+        self.task("private", "example-fix")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            missing = agents.cmd_check_tasks(
+                argparse.Namespace(tasks=None, tasks_dir=[self.root / "absent"], jouet=self.root / "unused")
+            )
+            unknown = agents.cmd_check_tasks(
+                argparse.Namespace(tasks=["other"], tasks_dir=[self.root / "private"], jouet=self.root / "unused")
+            )
+        self.assertEqual((missing, unknown), (2, 2))
+        self.assertIn("no task directory at", err.getvalue())
+        self.assertIn("unknown task: other", err.getvalue())
+
+    def test_run_records_the_task_directory(self):
+        import argparse
+        import contextlib
+        import io
+        import json
+        from unittest.mock import patch
+
+        import agents
+
+        self.task("private", "example-fix")
+        args = agents.parse_args(
+            ["run", "--tasks-dir", str(self.root / "private"), "--tasks", "example-fix", "--harness", "claude",
+             "--arms", "plain", "--rounds", "1", "--seed", "1", "--out", str(self.root / "out")]
+        )
+
+        def suite(planned, opts, out, log, on_snapshot=None):
+            task = tasks.load(planned[0].task)
+            return [{"id": planned[0].id, "task": task.name, "task_dir": str(task.dir.parent), "harness": "claude",
+                     "arm": "plain", "round": 1, "success": True, "usage": {}}]
+
+        with patch.object(arms, "resolve", return_value=Path("/bin/true")), \
+                patch.object(arms, "auth_status", return_value="test"), \
+                patch.object(runner, "version", return_value="test"), \
+                patch.object(runner, "run_suite", side_effect=suite), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(agents.cmd_run(args), 0)
+        meta = json.loads((self.root / "out" / "meta.json").read_text())
+        self.assertIn(str((self.root / "private").resolve()), meta["task_dirs"])
 
 
 class ReportTest(unittest.TestCase):

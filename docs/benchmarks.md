@@ -150,6 +150,7 @@ python3 bench/agents.py report bench/results/<id>   # rewrite a summary
 |---|---|---|
 | `--harness` | `claude,codex` | which harnesses |
 | `--tasks` | every task | which tasks |
+| `--tasks-dir` | none | another directory of tasks, searched after `bench/tasks/`; repeatable. `JOUET_BENCH_TASKS` adds more, as a path list |
 | `--arms` | `plain,jouet` | which arms |
 | `--rounds` | 3 | runs per task, harness and arm |
 | `--seed` | the time | the arm order in each round |
@@ -168,11 +169,22 @@ A run stopped by its timeout or a budget counts as a failure, and the report say
 Results go to `bench/results/<timestamp>/`, which git ignores:
 
 - `meta.json`: versions, models, seed, budget, benchmark checkout commit and the SHA-256 of the jouet binary snapshot used by the suite. The commit is the benchmark checkout's HEAD; it does not capture uncommitted changes or establish which source built an externally supplied `--jouet` binary. Older records do not have the binary hash;
-- `runs.jsonl`: one record per run;
+- `runs.jsonl`: one record per run, with the directory its task came from (`task_dir`);
 - `summary.json` and `summary.md`: the comparison;
 - `runs/<task>.<harness>.<arm>.r<round>/`: the agent's event stream, its transcripts, `jouet audit`'s report, the check's output and, for PR tasks, every request the fake GitHub saw and its final state.
 
 Each run's `changed_paths` lists paths whose contents or Git index entries changed between setup and the checker, including committed, staged and untracked changes. The summary shows up to ten paths per run and points to `runs.jsonl` when more were recorded; `summary.json` retains the full list. Staging an existing file can list it even when its contents did not change. This is evidence for a scope review, not a pass/fail judgment or a substitute for reviewing the diff. Ignored files and changes inside submodules are not included. `null` means the snapshots could not be compared; it does not mean nothing changed. The snapshots use a temporary Git index and do not change the agent's index.
+
+### Tasks outside this repository
+
+Some tasks cannot be published: their source is a private repository, or their fixture names one. Keep those in a directory of your own, laid out like `bench/tasks/`, one directory per task, and name it with `--tasks-dir` (repeatable) or `JOUET_BENCH_TASKS` (a path list, `:`-separated on Unix). Both `run` and `check-tasks` read the same directories. A task's name is its directory's name, and a name found in more than one directory is an error rather than an override.
+
+```sh
+python3 bench/agents.py check-tasks --tasks-dir ~/bench-private --tasks invoice-rounding
+JOUET_BENCH_TASKS=~/bench-private mise run bench:agents --tasks invoice-rounding --harness claude
+```
+
+A check or reference solution outside `bench/tasks/` can still use the shared helpers: `BENCH_CHECK_HELPERS` names the directory holding `_check.py`, so the script starts with `sys.path.insert(0, os.environ["BENCH_CHECK_HELPERS"])`. `meta.json` lists the directories a suite read (`task_dirs`), so a results directory says where its tasks came from. `mise run test:bench` reads only `bench/tasks/` unless `JOUET_BENCH_TASKS` is set.
 
 ### In CI
 

@@ -501,6 +501,7 @@ def execute(
         "id": p.id,
         "round": p.round,
         "task": p.task,
+        "task_dir": str(task.dir.parent),
         "harness": p.harness,
         "arm": p.arm,
         "success": check["passed"] and not agent["stopped"] and agent["exit_code"] == 0,
