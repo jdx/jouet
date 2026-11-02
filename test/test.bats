@@ -627,6 +627,28 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
+@test "--baseline says when an unnamed failure was not run at the merge base" {
+	printf 'base\n' >tracked
+	export RUNS_FILE="$BATS_TEST_TMPDIR/unnamed-runs"
+	printf '#!/bin/sh\necho run >>"$RUNS_FILE"\necho "the tool failed"\nexit 1\n' >fail-command
+	chmod +x fail-command
+	git add tracked fail-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >>tracked
+
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	assert_output --partial 'baseline: not compared: the output names no recognised failure; the merge-base command was not run'
+	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 1
+
+	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command
+	assert_failure 1
+	assert_stderr --partial 'not compared: the output names no recognised failure; the merge-base command was not run'
+	assert_equal "$(jq -r '.ok' <<<"$output")" false
+	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
+}
+
 @test "--baseline passes a run whose every failure also fails at the merge base" {
 	# The test file is rewritten within a second to the same size, which
 	# Python's bytecode cache cannot tell from the old one.
