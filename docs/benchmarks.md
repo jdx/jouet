@@ -138,7 +138,7 @@ python3 bench/agents.py report bench/results/<id>   # rewrite a summary
 | `--max-total-tokens` | 60,000,000 | skip the remaining runs once the suite has spent this |
 | `--timeout` | each task's | cap every task's timeout, in seconds |
 | `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs. It is copied once when the suite starts, so a rebuild during the suite neither changes nor removes what is measured |
-| `--keep-work` | off | keep each run's work tree and home, for debugging |
+| `--keep-work` | off | keep each run's work tree and home, for debugging; its result records `workdir` and `tmp_dir` |
 
 A run stopped by its timeout or a budget counts as a failure, and the report says which stopped it.
 
