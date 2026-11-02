@@ -53,7 +53,7 @@ The table shows the optional usage skill. The onboarding skill is installed besi
 |---|---|---|---|
 | Claude Code | `--global` (default) | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR` if set) | `~/.claude/skills/jouet/SKILL.md` (`$CLAUDE_CONFIG_DIR/skills` if set) |
 | Claude Code | `--project` | `.claude/settings.local.json` | `.claude/skills/jouet/SKILL.md` |
-| Claude Code | `--shared` | `.claude/settings.json` | `.claude/skills/jouet/SKILL.md` |
+| Claude Code | `--shared` | `.claude/settings.json` | `.agents/skills/jouet/SKILL.md`, linked from `.claude/skills/jouet` |
 | Codex | `--global` (default) | `~/.codex/hooks.json` (`$CODEX_HOME` if set) | `~/.agents/skills/jouet/SKILL.md` |
 | Codex | `--shared` | `.codex/hooks.json` | `.agents/skills/jouet/SKILL.md` |
 | Cursor | `--global` (default) | `~/.cursor/hooks.json` | `~/.agents/skills/jouet/SKILL.md` |
@@ -64,7 +64,7 @@ The table shows the optional usage skill. The onboarding skill is installed besi
 | Copilot | `--shared` | `.github/hooks/jouet.json` | `.agents/skills/jouet/SKILL.md` |
 
 - **`--project` is yours alone.** It writes at the root of the enclosing git repository (the current directory outside one), into Claude Code's `.claude/settings.local.json`, which Claude Code reads alongside `settings.json` but which is not meant to be committed. From a linked worktree it writes the main checkout's, except on Windows (see [worktrees](#worktrees)). Claude Code ignores that file in git once it has written to it itself; until then, and for the skill, setup says when git does not ignore them, so you can list them in `.gitignore` or `.git/info/exclude`.
-- **`--shared` is for everyone who clones the repository.** It implies `--project` and writes the repository's tracked hooks file (the `--shared` rows above), for a team that has agreed to use jouet. Since the hooks do nothing where jouet is not installed, contributors without it are not broken, but they get no hooks either.
+- **`--shared` is for everyone who clones the repository.** It implies `--project` and writes the repository's tracked hooks file (the `--shared` rows above), for a team that has agreed to use jouet. Since the hooks do nothing where jouet is not installed, contributors without it are not broken, but they get no hooks either. Every harness reads the same skill text, so the repository keeps one copy of each skill, in `.agents/skills`, and Claude Code's `.claude/skills/NAME` is a relative link to it. Where `.claude/skills` is already a link to `.agents/skills`, setup adds none; where links cannot be made, as on Windows without the right to make them, it writes Claude Code's copy as a file. Uninstalling Claude Code removes the link, and the shared copy too unless another harness here still has jouet's hooks.
 - **Only Claude Code has a project hooks file of your own.** Codex reads project hooks only from the repository's `.codex/hooks.json` and `.codex/config.toml`, Cursor from `.cursor/hooks.json`, Gemini CLI from `.gemini/settings.json` and Copilot from `.github/hooks/*.json`, so `--project` is refused for them (exit 2): use `--global`, or `--shared` to install there for everyone. `--global` together with `--project` or `--shared` is refused as well.
 - **Merges, never clobbers.** jouet adds its own matcher group (in Cursor's and Copilot's files, its own handler) to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone. A file that is a symlink, as dotfile managers make them, is written through to the file it names, keeping that file's permissions.
 - **Re-running is a no-op.** jouet recognises its entries by their command, which runs `jouet hook ...`, and only rewrites them when they differ from what this version installs. Entries an older version installed, such as the bare `jouet hook claude stop`, are replaced in place, not duplicated.
@@ -340,17 +340,17 @@ The sections below are reference for how the hooks fit each harness.
 
 ### When jouet is not on PATH
 
-Each hook's command checks for jouet first and exits 0 silently when it is not on `PATH`, the way the Entire CLI's hooks do:
+Each hook's command checks that jouet runs first, and exits 0 silently when it does not, the way the Entire CLI's hooks do:
 
 ```sh
-sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'
+sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'
 ```
 
-So a contributor without jouet, or an app started with a shorter `PATH` than your shell's, gets no hooks rather than an error on every tool call. setup says so when jouet is not on `PATH` where you run it. A stop handler with hk's stop hook merged in runs hk's alone when jouet is missing.
+So a contributor without jouet, an app started with a shorter `PATH` than your shell's, or a version manager's shim for a jouet that is not installed (a project that pins jouet in `mise.toml` before `mise install` has run) gets no hooks rather than an error on every tool call. The check runs `jouet --version`, not `command -v jouet`, which a shim passes. setup says so when jouet is not on `PATH` where you run it. A stop handler with hk's stop hook merged in runs hk's alone when jouet is missing.
 
-The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }`.
+The command is `sh -c` because Codex runs hooks with your login shell, which may not be a POSIX one. On Windows, Claude Code runs hooks with Git Bash, which has `sh`; without Git Bash it falls back to PowerShell, where this command fails, as a bare `jouet` would when it is missing. Codex runs them with PowerShell, so its handlers also get a `commandWindows`: `if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex pre-tool-use }`.
 
-Cursor, Gemini CLI and Copilot read a hook's stdout as JSON even when it has nothing to say, so their guard prints `{}` instead: `sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'`. Copilot's handlers have a `bash` and a `powershell` command. Cursor and Gemini CLI have one command, which they run with PowerShell on Windows, so a `--global` install made on Windows gets the PowerShell form; a `--shared` one gets `sh -c`, for everyone else who clones the repository.
+Cursor, Gemini CLI and Copilot read a hook's stdout as JSON even when it has nothing to say, so their guard prints `{}` instead: `sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'`. Copilot's handlers have a `bash` and a `powershell` command. Cursor and Gemini CLI have one command, which they run with PowerShell on Windows, so a `--global` install made on Windows gets the PowerShell form; a `--shared` one gets `sh -c`, for everyone else who clones the repository.
 
 The hooks find jouet on `PATH` rather than at the path of the jouet that ran setup. That path changes on every upgrade with mise, Homebrew and other version managers, differs between machines that share a settings file, and means nothing to anyone else in a `--shared` install. A hook pointing at a path that is gone would skip as silently, but on every machine after every upgrade.
 

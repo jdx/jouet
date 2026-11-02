@@ -248,9 +248,11 @@ impl Harness {
         matches!(self, Self::Cursor | Self::Gemini | Self::Copilot)
     }
 
-    /// The hook's command. The guard makes a missing `jouet` (a contributor
-    /// without it, or an app started with a shorter `PATH`) a silent no-op
-    /// rather than an error on every tool call. It is `sh -c` because Codex
+    /// The hook's command. The guard makes a `jouet` that cannot run (a
+    /// contributor without it, an app started with a shorter `PATH`, or a
+    /// version manager's shim for a version not installed) a silent no-op
+    /// rather than an error on every tool call: it runs `jouet --version`,
+    /// not `command -v`, which a shim passes. It is `sh -c` because Codex
     /// runs hooks with the login shell, which may not be a POSIX one. Claude
     /// Code runs hooks with Git Bash on Windows, where `sh` is too.
     ///
@@ -260,13 +262,13 @@ impl Harness {
         let name = self.name();
         match hk {
             None if self.wants_json() => format!(
-                "sh -c 'command -v jouet >/dev/null 2>&1 || {{ echo {{}}; exit 0; }}; exec jouet hook {name} {event}'"
+                "sh -c 'jouet --version >/dev/null 2>&1 || {{ echo {{}}; exit 0; }}; exec jouet hook {name} {event}'"
             ),
             None => format!(
-                "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook {name} {event}'"
+                "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook {name} {event}'"
             ),
             Some(hk) => format!(
-                "sh -c 'command -v jouet >/dev/null 2>&1 || exec {hk}; exec jouet hook {name} {event} --hk \"{hk}\"'"
+                "sh -c 'jouet --version >/dev/null 2>&1 || exec {hk}; exec jouet hook {name} {event} --hk \"{hk}\"'"
             ),
         }
     }
@@ -277,15 +279,15 @@ impl Harness {
         let name = self.name();
         match hk {
             None if self.wants_json() => format!(
-                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} }} else {{ '{{}}' }}"
+                "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} }} else {{ '{{}}' }}"
             ),
             None => {
                 format!(
-                    "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} }}"
+                    "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} }}"
                 )
             }
             Some(hk) => format!(
-                "if (Get-Command jouet -ErrorAction Ignore) {{ jouet hook {name} {event} --hk \"{hk}\" }} else {{ {hk} }}"
+                "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) {{ jouet hook {name} {event} --hk \"{hk}\" }} else {{ {hk} }}"
             ),
         }
     }
@@ -366,7 +368,9 @@ fn is_jouet(handler: &Value) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|command| {
                 runs_jouet_hook(&jouet_rules::shell::parse(command))
-                    || (command.starts_with("if (Get-Command jouet ")
+                    // Before and after the guard ran `jouet --version` too.
+                    || ((command.starts_with("if (Get-Command jouet ")
+                        || command.starts_with("if ((Get-Command jouet "))
                         && command.contains("{ jouet hook "))
             })
     })
@@ -633,8 +637,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex session-start'",
-            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex session-start }",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex session-start'",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex session-start }",
             "timeout": 10
           }
         ]
@@ -646,8 +650,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex pre-tool-use'",
-            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex pre-tool-use }",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex pre-tool-use'",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex pre-tool-use }",
             "timeout": 10
           }
         ]
@@ -659,8 +663,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex post-edit'",
-            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex post-edit }",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex post-edit'",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex post-edit }",
             "timeout": 10
           }
         ]
@@ -671,8 +675,8 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook codex stop'",
-            "commandWindows": "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex stop }",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook codex stop'",
+            "commandWindows": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex stop }",
             "timeout": 10
           }
         ]
@@ -728,7 +732,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
             "timeout": 10
           }
         ]
@@ -749,7 +753,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
             "timeout": 10
           }
         ]
@@ -770,7 +774,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
             "timeout": 10
           }
         ]
@@ -782,7 +786,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
             "timeout": 10
           }
         ]
@@ -792,7 +796,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
             "timeout": 10
           }
         ]
@@ -804,7 +808,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
             "timeout": 10
           }
         ]
@@ -842,7 +846,7 @@ mod tests {
         let jouet = &stops[1]["hooks"][0];
         assert_eq!(
             jouet["command"],
-            "sh -c 'command -v jouet >/dev/null 2>&1 || exec hk agent stop-hook --target claude-code --timeout 570; exec jouet hook claude stop --hk \"hk agent stop-hook --target claude-code --timeout 570\"'"
+            "sh -c 'jouet --version >/dev/null 2>&1 || exec hk agent stop-hook --target claude-code --timeout 570; exec jouet hook claude stop --hk \"hk agent stop-hook --target claude-code --timeout 570\"'"
         );
         assert_eq!(jouet["timeout"], 600);
         assert!(has_hk_stop(&doc));
@@ -882,7 +886,7 @@ mod tests {
         let jouet = &doc["hooks"]["Stop"][0]["hooks"][0];
         assert_eq!(
             jouet["commandWindows"],
-            "if (Get-Command jouet -ErrorAction Ignore) { jouet hook codex stop --hk \"hk agent stop-hook --target codex\" } else { hk agent stop-hook --target codex }"
+            "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook codex stop --hk \"hk agent stop-hook --target codex\" } else { hk agent stop-hook --target codex }"
         );
         assert_eq!(jouet["timeout"], 120);
         // A handler with other keys, or a command that is more than words,
@@ -925,7 +929,7 @@ mod tests {
         assert_eq!(pre.as_array().unwrap().len(), 1);
         assert_eq!(
             pre[0]["hooks"][0]["command"],
-            "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"
+            "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"
         );
     }
 
@@ -973,7 +977,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'",
             "timeout": 10
           }
         ]
@@ -984,7 +988,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
             "timeout": 10
           }
         ]
@@ -996,7 +1000,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'",
             "timeout": 10
           }
         ]
@@ -1008,7 +1012,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use'",
             "timeout": 10
           }
         ]
@@ -1018,7 +1022,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
             "timeout": 10
           }
         ]
@@ -1030,7 +1034,7 @@ mod tests {
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-tool-use-failure'",
             "timeout": 10
           }
         ]
@@ -1077,7 +1081,7 @@ mod tests {
   "version": 1,
   "preToolUse": [
     {
-      "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor pre-tool-use'",
+      "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor pre-tool-use'",
       "matcher": "Shell|Read|Grep",
       "timeout": 10
     }
@@ -1106,7 +1110,7 @@ mod tests {
         assert_eq!(stop["type"], "command");
         assert_eq!(
             stop["powershell"],
-            "if (Get-Command jouet -ErrorAction Ignore) { jouet hook copilot stop } else { '{}' }"
+            "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet hook copilot stop } else { '{}' }"
         );
         assert_eq!(stop["timeoutSec"], 10);
         let mut removed = copilot;
@@ -1123,7 +1127,7 @@ mod tests {
         assert_eq!(before["hooks"][0]["timeout"], 10_000);
         assert_eq!(
             doc["hooks"]["AfterAgent"][0]["hooks"][0]["command"],
-            "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"
+            "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"
         );
         assert_eq!(installed(doc.clone(), Harness::Gemini), doc);
     }
@@ -1160,7 +1164,7 @@ mod tests {
         ));
         assert!(!is_jouet(&json!({"command": "echo jouet hook"})));
         assert!(!is_jouet(
-            &json!({"command": "if (Get-Command jouet -ErrorAction Ignore) { jouet edit }"})
+            &json!({"command": "if ((Get-Command jouet -ErrorAction Ignore) -and (jouet --version 2>$null)) { jouet edit }"})
         ));
         assert!(!is_jouet(
             &json!({"command": "sh -c 'echo jouet hook; command -v jouet'"})
