@@ -58,6 +58,11 @@ pub(crate) struct CiExplainArgs {
     /// Rerun the failed jobs if every one is flaky or infrastructure
     #[usage(long)]
     pub(crate) rerun: bool,
+    /// With --rerun, rerun the failed jobs whatever their verdict, for a
+    /// cause fixed outside the repository: a secret, an access, a registry
+    /// or service outage
+    #[usage(long)]
+    pub(crate) force: bool,
     /// Lines of each failure log to show (default 40; 0 shows the whole
     /// failed step)
     #[usage(long, value_name = "N")]

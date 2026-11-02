@@ -107,7 +107,8 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 2. Fill in the examples first: the calls the rule must fire on, and the near misses it must leave alone.
 3. Fill in the matcher and the message.
 4. Run `jouet rule test NAME` until every example passes, and `jouet rule test NAME --replay` to see what the rule would have done to the calls jouet's hooks have already seen.
-5. `jouet rule promote NAME` switches it from warn to deny once it passes its examples. `--reason` records why, and `jouet rule log` shows every change made to your rules. Only rules in `~/.config/jouet/rules` can be promoted: built-in rules are part of jouet, and a repository's change through a reviewed PR.
+5. Make sure a denied call has a way through. The `message` should name something that does what the agent was trying to do, and works in every case the rule fires on. Where a case is left that it cannot handle, such as a run whose cause was fixed outside the repository, the command it names needs an explicit way past the check (`jouet ci explain --rerun --force`), or the rule should only warn. A deny that leaves a correct agent no path is a bug in the rule.
+6. `jouet rule promote NAME` switches it from warn to deny once it passes its examples. `--reason` records why, and `jouet rule log` shows every change made to your rules. Only rules in `~/.config/jouet/rules` can be promoted: built-in rules are part of jouet, and a repository's change through a reviewed PR.
 
 Writing the examples first follows [ast-grep](https://ast-grep.github.io/guide/test-rule.html)'s valid and invalid rule tests. They say what the rule is for more exactly than its `why` does, and jouet holds every rule to them before it can block anything.
 

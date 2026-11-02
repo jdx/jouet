@@ -184,17 +184,67 @@ pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<S
 }
 
 /// The first 16 bytes of the SHA-256 of `MODE OID PATH\0` for each file, in
-/// path order, as hex.
+/// path order, as hex; then a `.` and the same over the files that are not
+/// [`prose`], which [`code_part`] reads, so a check can tell a change to the
+/// docs alone from one a test could see.
 fn digest(files: &BTreeMap<String, (String, String)>) -> String {
-    let mut hash = Sha256::new();
+    let hex = |hash: Sha256| -> String {
+        hash.finalize()
+            .iter()
+            .take(16)
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    let mut all = Sha256::new();
+    let mut code = Sha256::new();
     for (path, (mode, oid)) in files {
-        hash.update(format!("{mode} {oid} {path}\0").as_bytes());
+        let line = format!("{mode} {oid} {path}\0");
+        all.update(line.as_bytes());
+        if !prose(path) {
+            code.update(line.as_bytes());
+        }
     }
-    hash.finalize()
+    format!("{}.{}", hex(all), hex(code))
+}
+
+/// The part of a tree from [`work_tree`] or [`commit_tree`] that leaves out
+/// prose files; a tree from before it had one is its own.
+pub fn code_part(tree: &str) -> &str {
+    tree.split_once('.').map_or(tree, |(_, code)| code)
+}
+
+/// Whether `path` is prose that a test rarely reads: Markdown,
+/// reStructuredText, AsciiDoc or plain text, or a licence, changelog,
+/// notice or authors file with no other extension (`LICENSE`,
+/// `LICENSE-MIT`, `NOTICE`), never source that only starts with one of
+/// those names (`license.rs`).
+fn prose(path: &str) -> bool {
+    const TEXT: [&str; 6] = ["md", "mdx", "markdown", "rst", "adoc", "txt"];
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let lower = name.to_ascii_lowercase();
+    let (stem, extension) = match lower.rsplit_once('.') {
+        Some((stem, extension)) => (stem, Some(extension)),
+        None => (lower.as_str(), None),
+    };
+    if extension.is_some_and(|e| TEXT.contains(&e)) {
+        return true;
+    }
+    extension.is_none()
+        && [
+            "license",
+            "licence",
+            "changelog",
+            "notice",
+            "authors",
+            "copying",
+        ]
         .iter()
-        .take(16)
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .any(|n| {
+            stem == *n
+                || stem
+                    .strip_prefix(n)
+                    .is_some_and(|rest| rest.starts_with('-'))
+        })
 }
 
 #[cfg(test)]
@@ -222,6 +272,47 @@ mod tests {
             .status
             .success();
         assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn a_change_to_prose_alone_keeps_the_code_part() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path();
+        run(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.rs"), "one").unwrap();
+        std::fs::create_dir(dir.join("docs")).unwrap();
+        std::fs::write(dir.join("docs/guide.md"), "one").unwrap();
+        run(dir, &["add", "."]);
+        let before = work_tree(Some(dir), T).unwrap();
+        std::fs::write(dir.join("docs/guide.md"), "two").unwrap();
+        std::fs::write(dir.join("CHANGELOG.md"), "new").unwrap();
+        let docs = work_tree(Some(dir), T).unwrap();
+        assert_ne!(before, docs);
+        assert_eq!(code_part(&before), code_part(&docs));
+        std::fs::write(dir.join("a.rs"), "two").unwrap();
+        let code = work_tree(Some(dir), T).unwrap();
+        assert_ne!(code_part(&docs), code_part(&code));
+        // A tree from before the code part had one is its own.
+        assert_eq!(code_part("abc"), "abc");
+        for path in [
+            "LICENSE",
+            "LICENSE-MIT",
+            "docs/a.md",
+            "NOTICE",
+            "notes.txt",
+            "CHANGELOG.md",
+        ] {
+            assert!(prose(path), "{path}");
+        }
+        for path in [
+            "src/license.rs",
+            "licenses.py",
+            "notice_handler.go",
+            "authors/mod.rs",
+            "Makefile",
+        ] {
+            assert!(!prose(path), "{path}");
+        }
     }
 
     #[test]
