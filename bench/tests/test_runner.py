@@ -795,6 +795,16 @@ class TasksTest(unittest.TestCase):
     def test_checkout_roots_include_the_current_worktree(self):
         self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
 
+    def test_report_does_not_inspect_external_task_directories(self):
+        import agents
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"JOUET_BENCH_TASKS": "/missing-tasks"}), \
+             patch.object(tasks, "checkout_roots", side_effect=AssertionError("not needed")), \
+             patch.object(agents, "cmd_report", return_value=0) as report:
+            self.assertEqual(agents.main(["report", "/results"]), 0)
+            report.assert_called_once()
+
     def test_check_tasks_reports_history_preparation_errors(self):
         import subprocess
 

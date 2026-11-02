@@ -389,7 +389,7 @@ def probe(task: tasks.Task, root: Path, jouet_bin: Path) -> list[str]:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     extra_dirs = [*getattr(args, "tasks_dir", []), *(Path(p) for p in os.environ.get("JOUET_BENCH_TASKS", "").split(os.pathsep) if p)]
-    if extra_dirs:
+    if args.command in ("run", "check-tasks") and extra_dirs:
         try:
             checkouts = tasks.checkout_roots(runner.REPO_ROOT)
         except (OSError, RuntimeError, subprocess.CalledProcessError):
