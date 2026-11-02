@@ -644,12 +644,12 @@ SH
 
 	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
 	assert_failure 1
-	assert_output --partial 'baseline: not compared: the output names no recognised failure; the merge-base command was not run'
+	assert_output --partial 'baseline: not compared: failure names are missing or cannot be matched safely; the merge-base command was not run'
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 1
 
 	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command
 	assert_failure 1
-	assert_stderr --partial 'not compared: the output names no recognised failure; the merge-base command was not run'
+	assert_stderr --partial 'not compared: failure names are missing or cannot be matched safely; the merge-base command was not run'
 	assert_equal "$(jq -r '.ok' <<<"$output")" false
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
 }

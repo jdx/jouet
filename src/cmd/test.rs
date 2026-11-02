@@ -329,7 +329,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             // Said only when asked for: a failing build names no test.
             None if !args.baseline => Ok(None),
             None => Err(baseline::NotCompared::from(
-                "not compared: the output names no recognised failure; the merge-base command was not run"
+                "not compared: failure names are missing or cannot be matched safely; the merge-base command was not run"
                     .to_string(),
             )),
             Some(named) => {
