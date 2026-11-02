@@ -546,6 +546,43 @@ tap_script() {
 	assert_success
 }
 
+@test "--cmd reports RSpec failures and rejects contradictory success" {
+	mkdir bin
+	cat >bin/rspec <<'SH'
+#!/bin/sh
+cat <<'OUTPUT'
+Failures:
+
+  1) a meaningful example
+     Failure/Error: expect(actual).to eq(expected)
+       expected: 2
+            got: 1
+     # ./spec/example_spec.rb:12
+
+Finished in 0.1 seconds
+1 example, 1 failure
+OUTPUT
+exit "${RSPEC_EXIT:-1}"
+SH
+	chmod +x bin/rspec
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- rspec
+	assert_failure 1
+	assert_output --partial 'FAIL a meaningful example'
+	assert_output --partial 'expected: 2'
+	PATH="$PWD/bin:$PATH" RSPEC_EXIT=0 run --separate-stderr jouet test --cmd -- rspec
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	printf '#!/bin/sh\nprintf "0 examples, 0 failures\\n"\n' >bin/rspec
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- rspec missing_spec
+	assert_failure 4
+	assert_output --partial 'no test ran'
+	printf '#!/bin/sh\nprintf "0 examples, 0 failures, 1 error occurred outside of examples\\n"\n' >bin/rspec
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- rspec
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	refute_output --partial 'no test ran'
+}
+
 @test "a successful test command that reports failures is not accepted as passing" {
 	mkdir bin
 	cat >bin/cargo <<'SH'
