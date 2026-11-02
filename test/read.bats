@@ -123,6 +123,29 @@ RS
 	assert_line --index 2 '... 16 more lines (--range 3:18, or raise --max-lines)'
 }
 
+@test "read shares its line cap across selections and remembers only shown lines" {
+	export JOUET_SESSION_ID=s1
+	run --separate-stderr jouet read src/lib.rs --range 1:2 --range 6:9 --range 12:14 --max-lines 3
+	assert_success
+	assert_line --partial 'pub fn download'
+	assert_output --partial '... 3 more lines (--range 7:9, or raise --max-lines)'
+	assert_output --partial 'lines 12-14: 3 lines not shown (--range 12:14, or raise --max-lines)'
+	refute_output --partial '12	fn join_url'
+
+	# The cap did not record the omitted lines as shown.
+	run --separate-stderr jouet read src/lib.rs --range 6:9
+	refute_output --partial 'already shown'
+	assert_line --partial '    }'
+
+	run --separate-stderr jouet read src/lib.rs --json --again --range 1:2 --range 6:9 --range 12:14 --max-lines 3
+	assert_success
+	assert_equal "$(jq -c '[.sections | length, .[1].start, .[1].end, .[1].more]' <<<"$output")" '[2,6,6,3]'
+	assert_equal "$(jq -r '.notes[0]' <<<"$output")" 'lines 12-14: 3 lines not shown (--range 12:14, or raise --max-lines)'
+
+	run --separate-stderr jouet read src/lib.rs --again --range 1:2 --range 6:9 --max-lines 0
+	assert_line --partial '    }'
+}
+
 @test "edit by symbol survives a reformat, indents the new text and notes a changed signature" {
 	# A formatter wraps the call; a search block for the old text would miss.
 	cat >src/lib.rs <<'RS'

@@ -266,12 +266,14 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     // what the session saw before the call collapses, and a section of this
     // call that overlaps another does not.
     let printed = std::cell::RefCell::new(Vec::new());
+    let omitted = std::cell::RefCell::new(Vec::new());
+    let remaining = std::cell::Cell::new(max);
     let section = |symbol: Option<String>, start: usize, end: usize, memory: &Memory| {
         let end = end.min(lines.len());
         let seen =
             stamp.is_some_and(|stamp| memory.shown_range(&key, stamp, to_u32(start), to_u32(end)));
         if seen {
-            return Section {
+            return Some(Section {
                 symbol,
                 start,
                 end,
@@ -281,17 +283,31 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 callers: Vec::new(),
                 caller_count: 0,
                 origin: None,
-            };
+            });
         }
-        let shown_end = if max == 0 {
-            end
+        let count = end - start + 1;
+        let shown = if max == 0 {
+            count
         } else {
-            end.min(start + max - 1)
+            count.min(remaining.get())
         };
+        if shown == 0 {
+            let what = symbol
+                .as_deref()
+                .map_or_else(|| format!("lines {start}-{end}"), str::to_string);
+            omitted.borrow_mut().push(format!(
+                "{what}: {count} lines not shown (--range {start}:{end}, or raise --max-lines)"
+            ));
+            return None;
+        }
+        if max != 0 {
+            remaining.set(remaining.get() - shown);
+        }
+        let shown_end = start + shown - 1;
         printed
             .borrow_mut()
             .push((to_u32(start), to_u32(shown_end)));
-        Section {
+        Some(Section {
             symbol,
             start,
             end: shown_end,
@@ -301,7 +317,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             callers: Vec::new(),
             caller_count: 0,
             origin: None,
-        }
+        })
     };
     let outline = || symbols::outline(file, &bytes);
     // Each --symbol, then each --range, in the order given: several in one
@@ -316,12 +332,14 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
             Ok(found) => {
                 for l in found {
                     let label = describe(&l);
-                    let mut read_section = section(
+                    let Some(mut read_section) = section(
                         Some(label),
                         l.def.start as usize,
                         l.def.end as usize,
                         &memory,
-                    );
+                    ) else {
+                        continue;
+                    };
                     (read_section.callers, read_section.caller_count) =
                         graph_callers(file, l.def.line);
                     read.sections.push(read_section);
@@ -341,7 +359,9 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 ),
             );
         };
-        read.sections.push(section(None, start, end, &memory));
+        if let Some(read_section) = section(None, start, end, &memory) {
+            read.sections.push(read_section);
+        }
     }
     if !missing.is_empty() {
         let names: Vec<String> = missing.iter().map(|n| format!("`{n}`")).collect();
@@ -362,6 +382,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         // The sections asked for, above.
     } else if let Some(whole) = (args.outline && !lines.is_empty() && lines.len() <= SHORT)
         .then(|| section(None, 1, lines.len(), &memory))
+        .flatten()
         .filter(|s| !s.already_shown)
     {
         // A short file whole, with its outline when jouet can read one. One
@@ -376,11 +397,18 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                 return out.error(Exit::Usage, &select_error(&SelectError::Unsupported, path));
             }
             // A long file jouet cannot outline: its start, with a marker.
-            None => read.sections.push(section(None, 1, lines.len(), &memory)),
+            None => {
+                if let Some(read_section) = section(None, 1, lines.len(), &memory) {
+                    read.sections.push(read_section);
+                }
+            }
         }
-    } else if !lines.is_empty() {
-        read.sections.push(section(None, 1, lines.len(), &memory));
+    } else if !lines.is_empty()
+        && let Some(read_section) = section(None, 1, lines.len(), &memory)
+    {
+        read.sections.push(read_section);
     }
+    read.notes.extend(omitted.into_inner());
     if let Some(stamp) = stamp {
         for (start, end) in printed.take() {
             memory.record(&key, stamp, start, end);
