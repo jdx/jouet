@@ -548,9 +548,12 @@ fn from_root(name: &str, checkout: &Path) -> String {
         .into_iter()
         .chain(std::iter::once(checkout))
     {
-        let slash = dir.to_string_lossy().replace('\\', "/");
+        let raw = dir.to_string_lossy();
+        let slash = raw.replace('\\', "/");
         let slash = slash.trim_end_matches('/');
         for prefix in [
+            format!("{raw}/"),
+            format!("{raw}\\"),
             format!("{slash}/"),
             format!("{}\\", slash.replace('/', "\\")),
         ] {
@@ -760,6 +763,10 @@ mod tests {
         assert_eq!(
             from_root(r"at C:\work\project-other\file.rs:3", root),
             r"at C:\work\project-other\file.rs:3"
+        );
+        assert_eq!(
+            from_root(r"at /tmp/a\b/file.rs:3", Path::new(r"/tmp/a\b")),
+            "at file.rs:3"
         );
     }
 
