@@ -14,7 +14,7 @@ tests = "packages/zod/src/v4/classic/tests"
 # What CI failed, as the agent left it: the issue-schema tests must pass in
 # both vitest projects, none skipped or removed (9 tests, each run twice).
 report = Path("vitest-report.json")
-subprocess.run(
+own = subprocess.run(
     ["node_modules/.bin/vitest", "run", f"{tests}/issue-schema.test.ts", "--reporter=json",
      f"--outputFile={report}"],
     capture_output=True, text=True, timeout=240,
@@ -22,9 +22,15 @@ subprocess.run(
 results = json.loads(report.read_text()) if report.exists() else {}
 report.unlink(missing_ok=True)
 passed = results.get("numPassedTests", 0)
+failures = [
+    f"{a['fullName']}: {''.join(a.get('failureMessages') or []).strip()[:300]}"
+    for file in results.get("testResults", []) for a in file.get("assertionResults", [])
+    if a.get("status") == "failed"
+]
+details = "\n".join(failures) or (own.stdout + own.stderr)[-3000:]
 expect(results.get("numFailedTests", 1) == 0 and passed >= 18,
        f"the issue-schema tests CI failed do not all pass in the work tree: {passed} passed, "
-       f"{results.get('numFailedTests')} failed")
+       f"{results.get('numFailedTests')} failed:\n{details}")
 
 # The upstream tests, which the agent never saw, replace whatever is in the
 # work tree: the issue-schema tests CI failed (227d555), the review's
