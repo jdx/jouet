@@ -10,5 +10,7 @@ python = "3.13"
 gh = "2"
 uv = "0.13.6"
 # Real Go tasks resolve this tool from the benchmark environment in both arms.
-go = "1.27.1"
+go = "1.26.2"
+golangci-lint = "2.11.3"
+typos = "1.47.2"
 pnpm = "10.12.1"
