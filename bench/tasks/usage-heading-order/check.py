@@ -17,8 +17,11 @@ shutil.copyfile(
 
 def run(*cmd: str) -> tuple[bool, str]:
     env = {**os.environ, "MISE_TRUSTED_CONFIG_PATHS": os.getcwd()}
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=1100)
-    return proc.returncode == 0, (proc.stdout + proc.stderr)[-3000:]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, timeout=1100)
+    output = proc.stdout
+    if len(output) > 8000:
+        output = f"... {len(output) - 8000} earlier characters omitted\n" + output[-8000:]
+    return proc.returncode == 0, output
 
 
 ok, out = run("cargo", "test", "-p", "usage-conformance", "--test", "heading_help")
