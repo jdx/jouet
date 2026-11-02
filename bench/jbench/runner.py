@@ -503,7 +503,7 @@ def execute(
         "task": p.task,
         "harness": p.harness,
         "arm": p.arm,
-        "success": check["passed"] and not agent["stopped"],
+        "success": check["passed"] and not agent["stopped"] and agent["exit_code"] == 0,
         "check": {k: v for k, v in check.items() if k != "output"},
         "stopped": agent["stopped"],
         "exit_code": agent["exit_code"],

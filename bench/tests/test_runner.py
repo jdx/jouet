@@ -186,6 +186,34 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(records[1]["success"])
         self.assertTrue(any("environment setup already failed" in message for message in messages))
 
+    def test_agent_exit_is_part_of_success(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            agent = {"lines": [], "session": None, "stopped": None, "exit_code": 1, "wall_s": 1}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", return_value=agent), \
+                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner, "audit", return_value={}), \
+                    patch.object(runner.tasks_mod, "run_check", return_value={"passed": True, "exit_code": 0, "output": "ok"}):
+                failed = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                self.assertTrue(failed["check"]["passed"])
+                self.assertFalse(failed["success"])
+                self.assertEqual(failed["exit_code"], 1)
+                self.assertNotIn("error", failed)
+
+                agent["exit_code"] = 0
+                passed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                self.assertTrue(passed["success"])
+
     def test_capacity_error_skips_check_and_is_not_a_task_failure(self):
         from unittest.mock import patch
 
