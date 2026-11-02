@@ -5,9 +5,9 @@
 //! come from GitHub's per-state totals; listing the checks themselves is what
 //! makes a status query slow (50 PRs with their checks can pass GitHub's 10s
 //! timeout), so the names of failing checks are fetched in follow-up queries
-//! only for PRs that have failures. Review threads come 100 to a page and the
-//! rare PR with more is paged the same way, so counts and names are never cut
-//! short.
+//! only for PRs that have failures. All context pages are then read so older
+//! workflow runs can be distinguished from their replacements. Review threads
+//! come 100 to a page and the rare PR with more is paged the same way.
 
 use super::target::{Repo, Target};
 use crate::Client;
@@ -165,7 +165,9 @@ pub(crate) fn query(lookups: &[Lookup]) -> (String, Value) {
                     body,
                     "  l{i}: node(id: $id{i}) {{ ... on StatusCheckRollup {{ \
                      contexts(first: 100, after: $c{i}) {{ pageInfo {{ hasNextPage endCursor }} \
-                     nodes {{ ... on CheckRun {{ name conclusion }} ... on StatusContext {{ context state }} }} }} }} }}"
+                     nodes {{ ... on CheckRun {{ name status conclusion \
+                       checkSuite {{ branch {{ name }} app {{ slug }} workflowRun {{ event runNumber runAttempt workflow {{ id }} }} }} }} \
+                       ... on StatusContext {{ context state }} }} }} }} }}"
                 );
             }
             // Never sent to GitHub, whose `--mine` is a search.
@@ -304,12 +306,75 @@ struct RawCount {
 
 /// A check run (`name`, `conclusion`) or a commit status
 /// (`context`, `state`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RawContext {
     name: Option<String>,
+    status: Option<String>,
     conclusion: Option<String>,
+    check_suite: Option<RawCheckSuite>,
     context: Option<String>,
     state: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawCheckSuite {
+    app: Option<RawApp>,
+    branch: Option<RawBranch>,
+    workflow_run: Option<RawWorkflowRun>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawBranch {
+    name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawApp {
+    slug: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawWorkflowRun {
+    workflow: Option<RawWorkflow>,
+    event: Option<String>,
+    run_number: Option<u64>,
+    run_attempt: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawWorkflow {
+    id: String,
+}
+
+type WorkflowKey<'a> = (&'a str, &'a str, &'a str, &'a str, &'a str);
+
+impl RawContext {
+    fn name_and_state(&self) -> Option<(&str, &str)> {
+        if let Some(name) = self.name.as_deref() {
+            Some((name, self.conclusion.as_deref().or(self.status.as_deref())?))
+        } else {
+            Some((self.context.as_deref()?, self.state.as_deref()?))
+        }
+    }
+
+    // Only group runs when the app and workflow both identify their origin.
+    fn workflow_identity(&self) -> Option<(WorkflowKey<'_>, (u64, u64))> {
+        let suite = self.check_suite.as_ref()?;
+        let run = suite.workflow_run.as_ref()?;
+        Some((
+            (
+                self.name.as_deref()?,
+                suite.app.as_ref()?.slug.as_str(),
+                suite.branch.as_ref()?.name.as_str(),
+                run.event.as_deref()?,
+                run.workflow.as_ref()?.id.as_str(),
+            ),
+            (run.run_number?, run.run_attempt?),
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,9 +414,10 @@ pub struct Fetched {
     status: PrStatus,
     threads_after: Option<String>,
     rollup_id: Option<String>,
-    /// Set while failing checks are still unnamed: the cursor to list them
-    /// from, `None` for the first page.
+    /// Set while check contexts are still being read: the cursor to list
+    /// them from, `None` for the first page.
     contexts_after: Option<Option<String>>,
+    contexts: Vec<RawContext>,
 }
 
 impl Fetched {
@@ -387,6 +453,7 @@ impl Fetched {
             threads_after: None,
             rollup_id: None,
             contexts_after: None,
+            contexts: Vec::new(),
         }
     }
 
@@ -414,24 +481,43 @@ impl Fetched {
         self.threads_after = next_cursor(threads.page_info);
     }
 
-    /// Adds failing names from a page of contexts. Pages are fetched only
-    /// while some failing check is still unnamed.
+    /// Collects all pages before ignoring superseded workflow runs.
     fn add_contexts(&mut self, contexts: RawContexts) {
-        let checks = &mut self.status.checks;
-        for c in contexts.nodes {
-            let (name, state) = match (c.name, c.context) {
-                (Some(name), _) => (name, c.conclusion),
-                (None, Some(context)) => (context, c.state),
-                (None, None) => continue,
-            };
-            if state.as_deref().map(bucket) == Some(Bucket::Fail) {
-                checks.failing.push(name);
+        self.contexts.extend(contexts.nodes);
+        self.contexts_after = next_cursor(contexts.page_info).map(Some);
+        if self.contexts_after.is_some() {
+            return;
+        }
+        let mut latest = std::collections::HashMap::new();
+        for c in &self.contexts {
+            if let Some((key, id)) = c.workflow_identity() {
+                latest
+                    .entry(key)
+                    .and_modify(|n: &mut (u64, u64)| *n = (*n).max(id))
+                    .or_insert(id);
             }
         }
-        let named_all = checks.failing.len() >= checks.fail as usize;
-        self.contexts_after = next_cursor(contexts.page_info)
-            .filter(|_| !named_all)
-            .map(Some);
+        let checks = &mut self.status.checks;
+        for c in &self.contexts {
+            let Some((name, state)) = c.name_and_state() else {
+                continue;
+            };
+            let bucket = bucket(state);
+            let superseded = c
+                .workflow_identity()
+                .is_some_and(|(key, id)| latest.get(&key).is_some_and(|newest| id < *newest));
+            if superseded {
+                let count = match bucket {
+                    Bucket::Pass => &mut checks.pass,
+                    Bucket::Fail => &mut checks.fail,
+                    Bucket::Pending => &mut checks.pending,
+                    Bucket::Skipped => &mut checks.skipped,
+                };
+                *count = count.saturating_sub(1);
+            } else if bucket == Bucket::Fail {
+                checks.failing.push(name.to_owned());
+            }
+        }
     }
 
     /// The PR as fetched so far, for adding what Entire says.
@@ -689,6 +775,7 @@ pub(crate) fn read_pr(value: &Value) -> Result<Fetched, String> {
         threads_after: None,
         rollup_id: None,
         contexts_after: None,
+        contexts: Vec::new(),
     };
     fetched.add_threads(raw.review_threads);
     if let Some(rollup) = commit.and_then(|c| c.status_check_rollup) {

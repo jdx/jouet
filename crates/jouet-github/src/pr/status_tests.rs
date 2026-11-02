@@ -126,6 +126,37 @@ fn failing_check_names_are_fetched_only_for_prs_with_failures() {
 }
 
 #[test]
+fn superseded_workflow_runs_do_not_report_old_failures() {
+    let mut pr = fetch_batch().prs.remove(0);
+    pr.status.checks = Checks {
+        pass: 1,
+        fail: 3,
+        pending: 1,
+        ..Checks::default()
+    };
+    let first = json!({"pageInfo": {"hasNextPage": true, "endCursor": "next"}, "nodes": [
+        {"name": "title", "status": "COMPLETED", "conclusion": "CANCELLED", "databaseId": 1,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 1, "runAttempt": 1, "workflow": {"id": "one"}}}},
+        {"name": "title", "status": "COMPLETED", "conclusion": "FAILURE", "databaseId": 2,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 1, "runAttempt": 1, "workflow": {"id": "two"}}}},
+        {"name": "unknown", "conclusion": "FAILURE"}
+    ]});
+    pr.add_contexts(serde_json::from_value(first).unwrap());
+    assert!(pr.contexts_after.is_some());
+    let second = json!({"pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [
+        {"name": "title", "status": "COMPLETED", "conclusion": "SUCCESS", "databaseId": 3,
+         "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"}, "workflowRun": {"event": "pull_request", "runNumber": 2, "runAttempt": 1, "workflow": {"id": "one"}}}},
+        {"name": "other", "status": "IN_PROGRESS", "conclusion": null}
+    ]});
+    pr.add_contexts(serde_json::from_value(second).unwrap());
+    assert!(pr.contexts_after.is_none());
+    assert_eq!(pr.status.checks.pass, 1);
+    assert_eq!(pr.status.checks.fail, 2);
+    assert_eq!(pr.status.checks.pending, 1);
+    assert_eq!(pr.status.checks.failing, ["title", "unknown"]);
+}
+
+#[test]
 fn attention_is_derived_from_the_fields() {
     let mut result = fetch_batch();
     let page = result.prs[0].pages().remove(0);
