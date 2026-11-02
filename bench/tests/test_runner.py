@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from jbench import report, runner, stats, tasks
+from jbench import arms, report, runner, stats, tasks
 from jbench.harness import HARNESSES
 
 
@@ -283,6 +283,36 @@ class TasksTest(unittest.TestCase):
             self.assertEqual(tasks.git(workdir, "symbolic-ref", "refs/remotes/origin/HEAD"), "refs/remotes/origin/main")
             self.assertTrue((Path(d) / "run" / "origin.git").is_dir())
 
+
+    def test_setup_runs_in_the_work_tree_and_must_leave_it_clean(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            smoke = tasks.load("smoke")
+            ignored = dataclasses.replace(smoke, setup=["mkdir __pycache__", "touch __pycache__/x.pyc"])
+            tasks.prepare(ignored, root / "ignored")
+            self.assertTrue((root / "ignored" / "__pycache__" / "x.pyc").exists())
+            dirty = dataclasses.replace(smoke, setup=["touch {workdir}/stray.txt"])
+            with self.assertRaisesRegex(RuntimeError, "stray.txt"):
+                tasks.prepare(dirty, root / "dirty")
+            failing = dataclasses.replace(smoke, setup=["false"])
+            with self.assertRaisesRegex(RuntimeError, "exited 1"):
+                tasks.prepare(failing, root / "failing")
+
+    def test_a_bare_tool_name_links_the_host_program(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            bin_dir = Path(d) / "bin"
+            bin_dir.mkdir()
+            task = dataclasses.replace(tasks.load("smoke"), tools={"git": "git"})
+            env = {"PATH": str(bin_dir)}
+            task.agent_env(env, bin_dir, Path(d))
+            self.assertEqual((bin_dir / "git").resolve(), arms.resolve("git"))
+            missing = dataclasses.replace(task, tools={"nope": "no-such-program-here"})
+            with self.assertRaisesRegex(RuntimeError, "no-such-program-here"):
+                missing.agent_env(env, bin_dir, Path(d))
 
     def test_every_task_loads(self):
         names = tasks.all_names()

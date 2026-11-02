@@ -1,0 +1,80 @@
+diff --git a/packages/zod/src/v4/classic/tests/bigint.test.ts b/packages/zod/src/v4/classic/tests/bigint.test.ts
+index bbdbc53c..3fc73b3c 100644
+--- a/packages/zod/src/v4/classic/tests/bigint.test.ts
++++ b/packages/zod/src/v4/classic/tests/bigint.test.ts
+@@ -53,6 +53,12 @@ test("min max getters", () => {
+   expect(z.bigint().max(BigInt(5)).max(BigInt(1)).maxValue).toEqual(BigInt(1));
+ });
+ 
++test("a format check applied after min/max does not widen minValue/maxValue back out", () => {
++  const schema = z.bigint().min(0n).max(23n).check(z.int64());
++  expect(schema.minValue).toEqual(0n);
++  expect(schema.maxValue).toEqual(23n);
++});
++
+ test("bigint formats are distinct at the type level", () => {
+   expectTypeOf(z.int64()._zod.def.format).toEqualTypeOf<"int64">();
+   expectTypeOf(z.uint64()._zod.def.format).toEqualTypeOf<"uint64">();
+diff --git a/packages/zod/src/v4/classic/tests/to-json-schema.test.ts b/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
+index ad1ad33e..2e149b47 100644
+--- a/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
++++ b/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
+@@ -757,6 +757,26 @@ describe("toJSONSchema", () => {
+     `);
+   });
+ 
++  test("number constraints order independence with int()", () => {
++    // .int() applied last should not overwrite the tighter bounds .min()/.max() already stored
++    expect(z.toJSONSchema(z.number().int().min(0).max(23))).toMatchInlineSnapshot(`
++      {
++        "$schema": "https://json-schema.org/draft/2020-12/schema",
++        "maximum": 23,
++        "minimum": 0,
++        "type": "integer",
++      }
++    `);
++    expect(z.toJSONSchema(z.number().min(0).max(23).int())).toMatchInlineSnapshot(`
++      {
++        "$schema": "https://json-schema.org/draft/2020-12/schema",
++        "maximum": 23,
++        "minimum": 0,
++        "type": "integer",
++      }
++    `);
++  });
++
+   test("target normalization draft-04 and draft-07", () => {
+     // Test that both old (draft-4, draft-7) and new (draft-04, draft-07) target formats work
+ 
+diff --git a/packages/zod/src/v4/core/checks.ts b/packages/zod/src/v4/core/checks.ts
+index c98cd9c0..ed66f386 100644
+--- a/packages/zod/src/v4/core/checks.ts
++++ b/packages/zod/src/v4/core/checks.ts
+@@ -288,8 +288,11 @@ export const $ZodCheckNumberFormat: core.$constructor<$ZodCheckNumberFormat> = /
+     inst._zod.onattach.push((inst) => {
+       const bag = inst._zod.bag;
+       bag.format = def.format;
+-      bag.minimum = minimum;
+-      bag.maximum = maximum;
++      // narrow against bounds an earlier .min()/.max() already stored, rather than overwriting them with this format's (wider) range
++      const curMin = (bag.minimum ?? Number.NEGATIVE_INFINITY) as number;
++      if (minimum > curMin) bag.minimum = minimum;
++      const curMax = (bag.maximum ?? Number.POSITIVE_INFINITY) as number;
++      if (maximum < curMax) bag.maximum = maximum;
+       if (isInt) bag.pattern = regexes.integer;
+     });
+ 
+@@ -416,8 +419,11 @@ export const $ZodCheckBigIntFormat: core.$constructor<$ZodCheckBigIntFormat> = /
+     inst._zod.onattach.push((inst) => {
+       const bag = inst._zod.bag;
+       bag.format = def.format;
+-      bag.minimum = minimum;
+-      bag.maximum = maximum;
++      // narrow against bounds an earlier .min()/.max() already stored, rather than overwriting them with this format's (wider) range
++      const curMin = (bag.minimum ?? Number.NEGATIVE_INFINITY) as bigint | number;
++      if (minimum > curMin) bag.minimum = minimum;
++      const curMax = (bag.maximum ?? Number.POSITIVE_INFINITY) as bigint | number;
++      if (maximum < curMax) bag.maximum = maximum;
+     });
+ 
+     inst._zod.check = (payload) => {

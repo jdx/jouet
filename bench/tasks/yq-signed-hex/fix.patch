@@ -1,0 +1,95 @@
+diff --git a/pkg/yqlib/json_test.go b/pkg/yqlib/json_test.go
+index 1f5f926b..1fbb9a69 100644
+--- a/pkg/yqlib/json_test.go
++++ b/pkg/yqlib/json_test.go
+@@ -189,6 +189,38 @@ var jsonScenarios = []formatScenario{
+ 		expected:     "{\n  \"cat\": \"meow\"\n}\n",
+ 		scenarioType: "encode",
+ 	},
++	{
++		description:  "Encode json: signed hex int",
++		skipDoc:      true,
++		input:        `+0x12`,
++		indent:       0,
++		expected:     "18\n",
++		scenarioType: "encode",
++	},
++	{
++		description:  "Encode json: negative hex int",
++		skipDoc:      true,
++		input:        `-0x12`,
++		indent:       0,
++		expected:     "-18\n",
++		scenarioType: "encode",
++	},
++	{
++		description:  "Encode json: signed octal int",
++		skipDoc:      true,
++		input:        `+0o22`,
++		indent:       0,
++		expected:     "18\n",
++		scenarioType: "encode",
++	},
++	{
++		description:  "Encode json: negative octal int",
++		skipDoc:      true,
++		input:        `-0o22`,
++		indent:       0,
++		expected:     "-18\n",
++		scenarioType: "encode",
++	},
+ 	{
+ 		description:  "Encode json: simple - in one line",
+ 		input:        `cat: meow # this is a comment, and it will be dropped.`,
+diff --git a/pkg/yqlib/lib.go b/pkg/yqlib/lib.go
+index 876353ac..433a5572 100644
+--- a/pkg/yqlib/lib.go
++++ b/pkg/yqlib/lib.go
+@@ -161,12 +161,21 @@ func parseInt64(numberString string) (string, int64, error) {
+ 		numberString = strings.ReplaceAll(numberString, "_", "")
+ 	}
+ 
+-	if strings.HasPrefix(numberString, "0x") ||
+-		strings.HasPrefix(numberString, "0X") {
+-		num, err := strconv.ParseInt(numberString[2:], 16, 64)
++	// A leading +/- sign would hide the 0x/0o prefix below, so peel it off and
++	// hand it back to ParseInt with the digits.
++	sign := ""
++	digits := numberString
++	if len(digits) > 0 && (digits[0] == '+' || digits[0] == '-') {
++		sign = digits[:1]
++		digits = digits[1:]
++	}
++
++	if strings.HasPrefix(digits, "0x") ||
++		strings.HasPrefix(digits, "0X") {
++		num, err := strconv.ParseInt(sign+digits[2:], 16, 64)
+ 		return "0x%X", num, err
+-	} else if strings.HasPrefix(numberString, "0o") {
+-		num, err := strconv.ParseInt(numberString[2:], 8, 64)
++	} else if strings.HasPrefix(digits, "0o") {
++		num, err := strconv.ParseInt(sign+digits[2:], 8, 64)
+ 		return "0o%o", num, err
+ 	}
+ 	num, err := strconv.ParseInt(numberString, 10, 64)
+diff --git a/pkg/yqlib/lib_test.go b/pkg/yqlib/lib_test.go
+index 3d031430..f35ebb4f 100644
+--- a/pkg/yqlib/lib_test.go
++++ b/pkg/yqlib/lib_test.go
+@@ -143,6 +143,16 @@ var parseInt64Scenarios = []parseInt64Scenario{
+ 		numberString:         "0o10",
+ 		expectedParsedNumber: 8,
+ 	},
++	{
++		numberString:         "+0x12",
++		expectedParsedNumber: 18,
++		expectedFormatString: "0x12",
++	},
++	{
++		numberString:         "+0o22",
++		expectedParsedNumber: 18,
++		expectedFormatString: "0o22",
++	},
+ }
+ 
+ func TestParseInt64(t *testing.T) {

@@ -1,0 +1,73 @@
+description = "Fix a real commander.js bug from its issue (tj/commander.js#2342): configureOutput() on a command changes the command it copied settings from; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real JavaScript CLI library: it runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1200
+check_timeout_s = 300
+# jouet levels: out of the box, `jouet test` digests jest's output, and
+# `--affected` selects through jest's dependency graph, though for
+# `lib/command.js` that is all 104 test files. `npm test` also runs
+# tsd and tsc, whose output jouet reads too. No format is needed; a Luau rule
+# could steer agents from `npm test` to the one jest file while they iterate.
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (tj/commander.js#2350, 68199e6).
+prompt = '''
+copyInheritedSettings and configureOutput have side-effects
+
+Hi - noticed something that maybe isn't desired behaviour with the above two methods. Since `copyInheritedSettings` sets `this._outputConfiguration = sourceCommand._outputConfiguration` and `configureOutput` does `Object.assign(...)` - this means that one command can change another command's settings unexpectedly:
+
+```ts
+import {program, Command} from 'commander'
+
+const one = new Command('one')
+  .description('A very very very very very very very very very very very very very very very very very very very very very very very very long description')
+  .action(() => console.log('hi i am one'))
+  .configureOutput({
+    writeOut: str => console.log(str + '🚀🚀🚀🚀'),
+    getOutHelpWidth: () => 70,
+  })
+
+const two = new Command('two')
+  .copyInheritedSettings(one)
+  .description('Another very very very very very very very very very very very very very very very very very very very very very very very very long description')
+  .action(() => console.log('hi i am two'))
+  .configureOutput({
+    getOutHelpWidth: () => 200,
+  })
+
+program
+  .addCommand(one)
+  .addCommand(two)
+
+program.parse()
+```
+
+When you do `mycommand one --help` it uses 200 for the help width, not 70 as I'd expect. (Note: `mycommand two --help` prints the `🚀🚀🚀🚀` at the bottom, which _is_ correct/expected, IMO).
+
+Suggested solution: use a spread operator in either/both of the methods.
+
+Fix this in commander.js, with a test, and commit.
+'''
+
+# An offline install from the user's npm cache: run `npm ci` once in
+# ~/src/commander.js at this commit to fill it.
+setup = ["npm ci --offline --no-audit --no-fund --ignore-scripts"]
+
+# commander.js at the fix's base on release/14.x, the parent of 68199e6.
+[source]
+git = "~/src/commander.js"
+commit = "672e3806c68421f91b3a1f628f6207b8b26d1a2c"
+
+[tools]
+npm = "npm"
+npx = "npx"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "npx jest tests/command.configureOutput.test.js",
+    "npm test",
+]
