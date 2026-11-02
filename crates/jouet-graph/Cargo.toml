@@ -1,6 +1,6 @@
 [package]
 name = "jouet-graph"
-version = "0.0.1"
+version = "0.0.2"
 description = "The code graph behind jouet graph: symbols, callers, impact and affected tests, derived from codegraph"
 keywords = ["agents", "code-graph", "tree-sitter", "sqlite"]
 categories = ["development-tools"]

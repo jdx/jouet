@@ -1,6 +1,6 @@
 [package]
 name = "jouet-secrets"
-version = "0.0.1"
+version = "0.0.2"
 description = "Secret scanning with gitleaks' rules, behind jouet secrets scan and jouet commit"
 keywords = ["agents", "secrets", "gitleaks", "git"]
 categories = ["development-tools"]

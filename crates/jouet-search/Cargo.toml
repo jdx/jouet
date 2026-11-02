@@ -1,6 +1,6 @@
 [package]
 name = "jouet-search"
-version = "0.0.1"
+version = "0.0.2"
 description = "Budgeted search with session memory, grouped by definition, behind jouet search"
 keywords = ["agents", "search", "tree-sitter", "grep"]
 categories = ["development-tools", "text-processing"]
