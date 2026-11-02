@@ -382,6 +382,31 @@ def probe(task: tasks.Task, root: Path, jouet_bin: Path) -> list[str]:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    extra_dirs = [*getattr(args, "tasks_dir", []), *(Path(p) for p in os.environ.get("JOUET_BENCH_TASKS", "").split(os.pathsep) if p)]
+    if extra_dirs:
+        try:
+            checkouts = tasks.checkout_roots(runner.REPO_ROOT)
+        except (OSError, RuntimeError, subprocess.CalledProcessError):
+            print("cannot verify jouet worktree locations", file=sys.stderr)
+            return 2
+        def in_checkout(path: Path) -> bool:
+            return any(path.is_relative_to(root) for root in checkouts)
+
+        if args.command == "run" and not args.dry_run and args.out is None:
+            print("--tasks-dir requires an explicit --out for run results", file=sys.stderr)
+            return 2
+        if args.command == "run" and args.out is not None and in_checkout(args.out.expanduser().resolve()):
+            print("--tasks-dir requires --out outside the jouet checkout", file=sys.stderr)
+            return 2
+        for task_dir in extra_dirs:
+            if in_checkout(task_dir.expanduser().resolve()):
+                print("external task directories must be outside the jouet checkout", file=sys.stderr)
+                return 2
+        if args.command == "run":
+            cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").expanduser().resolve()
+            if in_checkout(cache):
+                print("--tasks-dir requires XDG_CACHE_HOME outside the jouet checkout", file=sys.stderr)
+                return 2
     return {"run": cmd_run, "report": cmd_report, "check-tasks": cmd_check_tasks}[args.command](args)
 
 
