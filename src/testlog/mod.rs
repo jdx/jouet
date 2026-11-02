@@ -59,7 +59,17 @@ pub(crate) struct Digest {
 /// Whether the output says a run selected no test: TAP's empty plan,
 /// libtest running none in every binary, pytest, jest or go saying so.
 fn no_tests(lines: &[String]) -> bool {
-    let said = lines.iter().any(|l| NO_TESTS.is_match(l));
+    // A Go package that ran a test shows it only in its plain `ok` line,
+    // which the counts do not see: that is a run.
+    let go = |empty: bool| {
+        lines
+            .iter()
+            .any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
+    };
+    if go(false) {
+        return false;
+    }
+    let said = go(true) || lines.iter().any(|l| NO_TESTS.is_match(l));
     let mut libtest = lines
         .iter()
         .filter_map(|l| LIBTEST_RUNNING.captures(l))
@@ -147,6 +157,9 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
     LIBTEST_RUNNING = r"^running (\d+) tests?$";
+    // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
+    // `[no tests to run]` after it when the package ran none.
+    GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|=+ no tests ran|No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.

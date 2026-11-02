@@ -469,6 +469,15 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
     ] {
         assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
     }
+    // Go package by package: empty only when every package ran none.
+    let go_empty = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.003s [no tests to run]\n";
+    assert!(digest(go_empty, false, DEFAULT_BUDGET).no_tests);
+    let go_one = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.120s\n";
+    assert!(!digest(go_one, false, DEFAULT_BUDGET).no_tests);
+    // An empty cargo suite, then Go tests that ran: Go's plain lines are
+    // not counted as passes, but they show a run.
+    let mixed = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\nok  \tgithub.com/a/b\t0.120s\n";
+    assert!(!digest(mixed, false, DEFAULT_BUDGET).no_tests);
     // A build says nothing about tests.
     assert!(
         !digest(
