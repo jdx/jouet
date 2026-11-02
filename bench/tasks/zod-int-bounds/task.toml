@@ -84,11 +84,11 @@ This matters when `toJSONSchema()` is used to produce an OpenAPI contract: apply
 Fix this in zod, with a test, and commit.
 '''
 
-# The pnpm the base pins (`mise install pnpm@10.12.1`); the host's newer pnpm
+# The benchmark environment pins the pnpm the base requires; a newer pnpm
 # would try to fetch it. The install is offline, from the user's pnpm store,
 # so run `pnpm install` once in ~/src/zod at this commit to fill it. Scripts
 # are skipped: husky would install git hooks in the work tree.
-setup = ["~/.local/share/mise/installs/pnpm/10.12.1/pnpm install --offline --frozen-lockfile --ignore-scripts"]
+setup = ["pnpm install --offline --frozen-lockfile --ignore-scripts"]
 
 # zod at the fix's base, the parent of 7a00236.
 [source]
@@ -96,7 +96,7 @@ git = "~/src/zod"
 commit = "5489a532e65ee3f5ab0959ff8a5da346ced96f2a"
 
 [tools]
-pnpm = "~/.local/share/mise/installs/pnpm/10.12.1/pnpm"
+pnpm = "pnpm"
 
 # Timed once, for the cost note every run starts with (bench/jbench/costs.py).
 [cost]

@@ -11,3 +11,4 @@ gh = "2"
 uv = "0.13.6"
 # Real Go tasks resolve this tool from the benchmark environment in both arms.
 go = "1.27.1"
+pnpm = "10.12.1"
