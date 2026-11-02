@@ -456,10 +456,11 @@ def copy_source(source: dict[str, str | bool], workdir: Path) -> None:
     """
     repo = Path(str(source["git"])).expanduser().resolve()
     commit = str(source["commit"])
+    revision = git(repo, "rev-parse", f"{commit}^{{commit}}")
     workdir.mkdir(parents=True)
     git(workdir, "init", "-q", "-b", "main")
-    git(workdir, "fetch", "-q", "--no-tags", "--depth=1", str(repo), commit)
-    git(workdir, "read-tree", "--reset", "-u", "FETCH_HEAD^{tree}")
+    git(workdir, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--depth=1", str(repo), revision)
+    git(workdir, "read-tree", "--reset", "-u", f"{revision}^{{tree}}")
     tree = git(workdir, "write-tree")
     want = git(repo, "rev-parse", f"{commit}^{{tree}}")
     if tree != want:
@@ -497,8 +498,8 @@ def copy_history(source: dict[str, str | bool], workdir: Path) -> None:
     workdir.mkdir(parents=True)
     git(workdir, "init", "-q", "-b", "main")
     try:
-        git(workdir, "fetch", "-q", "--no-tags", str(repo), commit)
-        git(workdir, "checkout", "-q", "-B", "main", "FETCH_HEAD")
+        git(workdir, "fetch", "-q", "--no-tags", "--no-write-fetch-head", str(repo), commit)
+        git(workdir, "checkout", "-q", "-B", "main", commit)
     except (OSError, subprocess.CalledProcessError) as error:
         raise EnvironmentSetupError("history mode could not copy the pinned source history") from error
     if git(workdir, "rev-parse", "HEAD") != commit:

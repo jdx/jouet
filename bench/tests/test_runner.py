@@ -665,6 +665,7 @@ class TasksTest(unittest.TestCase):
                                        setup=["true"])
             workdir = root / "work"
             tasks.prepare(task, workdir)
+            self.assertFalse((workdir / ".git" / "FETCH_HEAD").exists())
             self.assertEqual((workdir / "hidden.txt").read_text(), "included in the commit\n")
             self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
             modified = dataclasses.replace(task, setup=["sh -c 'printf altered > crlf.txt'"])
@@ -700,10 +701,15 @@ class TasksTest(unittest.TestCase):
             self.assertNotEqual(missing.returncode, 0)
             self.assertEqual((work / "file").read_text(), "pinned")
             self.assertEqual(tasks.git(work, "remote", "get-url", "origin"), str(root / "origin.git"))
+            self.assertNotIn(str(source.resolve()), (work / ".git" / "FETCH_HEAD").read_text())
             self.assertEqual(tasks.git(work, "remote", "get-url", "--push", "origin"), os.devnull)
             pushed = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/other"], cwd=work, capture_output=True)
             self.assertNotEqual(pushed.returncode, 0)
             self.assertEqual(tasks.git(source, "log", "-1", "--format=%s"), "later")
+            no_upstream = dataclasses.replace(task, upstream=False)
+            no_origin = root / "no-origin"
+            tasks.prepare(no_upstream, no_origin)
+            self.assertFalse((no_origin / ".git" / "FETCH_HEAD").exists())
 
     def test_history_source_rejects_partial_and_shallow_clones(self):
         import dataclasses
