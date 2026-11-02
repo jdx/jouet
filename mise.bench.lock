@@ -176,6 +176,53 @@ url = "https://dl.google.com/go/go1.27.1.darwin-amd64.tar.gz"
 checksum = "sha256:a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d"
 url = "https://dl.google.com/go/go1.27.1.windows-amd64.zip"
 
+[[tools.pnpm]]
+version = "10.12.1"
+backend = "aqua:pnpm/pnpm"
+specifiers = ["10.12.1"]
+
+[tools.pnpm."platforms.linux-arm64"]
+checksum = "sha256:c2f9e9d42d81f9f40a0f895513d014a08d5ecb0abc9e15c426ecfde6f492706b"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-linux-arm64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048789"
+
+[tools.pnpm."platforms.linux-arm64-musl"]
+checksum = "sha256:c2f9e9d42d81f9f40a0f895513d014a08d5ecb0abc9e15c426ecfde6f492706b"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-linux-arm64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048789"
+
+[tools.pnpm."platforms.linux-x64"]
+checksum = "sha256:eb2dc1f109bca046ce734d062c8dd8f34db2b58a115992f9b086456efd7b2305"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-linux-x64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048788"
+
+[tools.pnpm."platforms.linux-x64-musl"]
+checksum = "sha256:eb2dc1f109bca046ce734d062c8dd8f34db2b58a115992f9b086456efd7b2305"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-linux-x64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048788"
+
+[tools.pnpm."platforms.macos-arm64"]
+checksum = "sha256:8b39b2129a19eeec9511eb7cdde2450b604e389551d59ad738167f7495b56d52"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-macos-arm64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048784"
+
+[tools.pnpm."platforms.macos-x64"]
+checksum = "sha256:4c78e34022bfecfae60c041148a8022858b80b50e3b31c8fa8ba7b2b6259dd4a"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-macos-x64"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048787"
+
+[tools.pnpm."platforms.windows-x64"]
+checksum = "sha256:9b802759436b3bccfe0a78cb0b86e937ac44902ec16597260f59d5394602f092"
+checksum_source = "mise-versions"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-win-x64.exe"
+url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048782"
+
 [[tools.python]]
 version = "3.13.18"
 backend = "core:python"
