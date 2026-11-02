@@ -6,6 +6,8 @@ test('running balances refresh after repeated edits', async ({ browser }) => {
   const page = await browser.newPage();
   try {
     await page.goto('/');
+    // Confirm the runner's configured browser context is used for this page.
+    expect(await page.evaluate(() => navigator.userAgent)).toBe('playwright');
     await new ConfigurationPage(page).createTestFile();
     const account = await new Navigation(page).createAccount({
       name: 'Balance check', offBudget: false, balance: 0,
