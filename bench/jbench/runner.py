@@ -24,6 +24,7 @@ from typing import Any
 from . import arms as arms_mod
 from . import costs as costs_mod
 from . import credentials
+from . import init as init_mod
 from . import tasks as tasks_mod
 from .fake_github import FakeGitHub
 from .harness import HARNESSES, Harness
@@ -422,6 +423,12 @@ def execute(
     keep = out_dir / "runs" / p.id
     keep.mkdir(parents=True, exist_ok=True)
     shas = tasks_mod.prepare(task, workdir)
+    init = None
+    if arm.init:
+        # Made once per task and build, by running the skill, then reused.
+        init = init_mod.prepared(task, harness, shas, opts, work_root, run_agent)
+        if head := init_mod.apply(workdir, init["patch"]):
+            shas["head_sha"] = head
     if note := (opts.get("cost_notes") or {}).get(task.name):
         costs_mod.apply(workdir, note, shas["head_sha"])
     fixture = task.github_fixture(shas)
@@ -440,7 +447,9 @@ def execute(
         )
         task.agent_env(env, run_dir / "bin", workdir)
         environment = tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", keep / "environment.log")
-        setup =arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
+        setup = arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
+        if arm.init:
+            init_mod.trust(env, workdir)
         if arm.jouet:
             # After setup, so that turning priming off here measures a
             # session without the primer rather than one with the skill.
@@ -513,6 +522,7 @@ def execute(
         "ledger": ledger(env) if arm.jouet else None,
         "github": github,
         "setup": ran["setup"],
+        "init": {"cached": init["cached"], **init["meta"]} if init else None,
         "environment": ran["environment"],
         "changed_paths": changes,
         "credentials": ran["credentials"],

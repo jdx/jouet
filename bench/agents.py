@@ -57,7 +57,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run = sub.add_parser("run", help="run the suite (or print its plan with --dry-run)")
     run.add_argument("--harness", type=csv, default=["claude", "codex"], help="claude,codex (default both)")
     run.add_argument("--tasks", type=csv, help="task names (default every task)")
-    run.add_argument("--arms", type=csv, default=["plain", "jouet"], help="plain,jouet (default both)")
+    run.add_argument("--arms", type=csv, default=["plain", "jouet"], help="plain, jouet and jouet-init (default plain,jouet)")
     run.add_argument("--rounds", type=int, default=DEFAULTS["rounds"], help="runs per task, harness and arm")
     run.add_argument("--seed", type=int, help="shuffles the arm order in each round (default: the time)")
     run.add_argument("--smoke", action="store_true", help="only the smoke task, one round, labelled a smoke test")
