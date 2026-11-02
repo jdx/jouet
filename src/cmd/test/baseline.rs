@@ -144,10 +144,12 @@ pub(super) fn base(root: &Path, since: Option<&str>) -> Result<affected::Base, a
 }
 
 /// Whether [`compare`] may run a failed job at the merge base when nothing
-/// is kept for it ([`known`]), or only use what is kept.
+/// is kept for it ([`known`]), retry an inconclusive run, or only use what is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Mode {
     Run,
+    /// An explicit retry may replace an inconclusive cached run.
+    Retry,
     Kept,
 }
 
@@ -226,9 +228,10 @@ impl Drop for Checkout<'_> {
 }
 
 /// Sorts each failed job's failures into those the merge base has too and
-/// the new ones, from what [`known`] keeps for the job at `base`, or, with
-/// [`Mode::Run`], by running it again in a worktree of `base` and keeping
-/// what came of it. None in [`Mode::Kept`] when a job has nothing kept.
+/// the new ones, from what [`known`] keeps for the job at `base`, or by
+/// running it again in a worktree of `base` and keeping what came of it.
+/// [`Mode::Retry`] also retries an inconclusive cached run; [`Mode::Kept`]
+/// returns None when a job has nothing kept.
 pub(super) fn compare(
     root: &Path,
     base: affected::Base,
@@ -248,9 +251,8 @@ pub(super) fn compare(
         let key = command_key(job, root);
         let kept = known::lookup(root, &base.merge_base, &key);
         let outcome = match (kept, mode) {
-            (Some(outcome), _) => outcome,
-            (None, Mode::Kept) => return Ok(None),
-            (None, Mode::Run) => {
+            (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
+            | (None, Mode::Run | Mode::Retry) => {
                 let tree = checkout.tree()?.to_path_buf();
                 let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
                 let at_base = Job {
@@ -267,9 +269,6 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    // A run that failed before naming any test, such as a
-                    // tool it needs missing from the checkout, says nothing
-                    // about them.
                     match failure_names(&output, formats, &tree) {
                         Some(names) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
@@ -287,6 +286,8 @@ pub(super) fn compare(
                 known::keep(root, &base.merge_base, &key, outcome.clone());
                 outcome
             }
+            (Some(outcome), _) => outcome,
+            (None, Mode::Kept) => return Ok(None),
         };
         let (at_base, reached): (BTreeSet<String>, u64) = match outcome {
             known::Outcome::Passed => (BTreeSet::new(), u64::MAX),
