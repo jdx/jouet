@@ -57,7 +57,7 @@ impl Baseline {
                 n => format!("all {n} failures also fail"),
             };
             format!(
-                "baseline: {all} at {at}, so none is from this change; counted as passing: {}\n",
+                "baseline: {all} at {at}; matching names do not establish the same cause; counted as passing: {}\n",
                 list(&self.pre_existing)
             )
         } else {
@@ -377,6 +377,14 @@ pub(super) fn compare(
                 });
             }
         };
+        // A broken checkout can make every test fail in setup. Matching names
+        // in that run do not establish that the current failures existed.
+        if reached > 1 && u64::try_from(at_base.len()).unwrap_or(u64::MAX) >= reached {
+            return Err(NotCompared::from(format!(
+                "all {reached} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                base.name
+            )));
+        }
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;

@@ -717,6 +717,35 @@ SH
 	assert_output '[1]'
 }
 
+@test "--baseline does not equate failures when every base test failed in setup" {
+	printf 'base\n' >tracked
+	cat >check-command <<'SH'
+#!/bin/sh
+echo '1..3'
+if [ "$(cat tracked)" = base ]; then
+  printf 'not ok 1 target\n# setup failed\nnot ok 2 another\n# setup failed\nnot ok 3 third\n# setup failed\n'
+else
+  printf 'not ok 1 target\n# assertion failed\nok 2 another\nok 3 third\n'
+fi
+exit 1
+SH
+	chmod +x check-command
+	git add tracked check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >tracked
+
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'all 3 tests failed at'
+	assert_output --partial 'failures cannot be compared safely'
+
+	# The kept baseline has the same limitation on a later run.
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'all 3 tests failed at'
+}
+
 @test "--baseline passes a run whose every failure also fails at the merge base" {
 	# The test file is rewritten within a second to the same size, which
 	# Python's bytecode cache cannot tell from the old one.
