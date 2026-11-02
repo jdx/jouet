@@ -245,8 +245,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // How long the slowest failed suite took, which decides whether a
     // `--cmd` run is cheap enough to run again at the merge base.
     let mut slowest_failure = 0;
-    // The lines the change adds, read once, for naming its passing tests.
-    let mut added: Option<String> = None;
+    // The lines the change adds, for naming its passing tests: read before
+    // anything runs, so files a run writes are not taken for the change.
+    let added = if args.dry_run {
+        String::new()
+    } else {
+        added_lines(&cwd)
+    };
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
@@ -287,8 +292,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = String::from_utf8_lossy(&output);
             let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
-                let added = added.get_or_insert_with(|| added_lines(&job.dir));
-                digest.passed_changed = changed_tests(&digest.passed_all, added);
+                digest.passed_changed = changed_tests(&digest.passed_all, &added);
             }
             let empty_test = args.cmd
                 && code == 0

@@ -1275,4 +1275,11 @@ SH
 	run --separate-stderr jouet test --cmd -- ./run-tests
 	assert_success
 	assert_output --partial '10 passed, among them the changed theta works'
+	# What the run writes is not the change: a report naming three tests.
+	rm new.bats
+	printf '#!/bin/sh\n./run-tests | grep -E "alpha|beta|gamma" >report.txt\n./run-tests\n' >run-and-report
+	chmod +x run-and-report
+	run --separate-stderr jouet test --cmd -- ./run-and-report
+	assert_success
+	refute_output --partial 'among them'
 }
