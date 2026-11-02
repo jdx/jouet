@@ -387,10 +387,16 @@ pub fn shape(command: &str) -> String {
 
 /// The program each simple command runs, after assignments and wrappers
 /// such as `env` and `timeout`.
-pub(crate) fn programs(command: &str) -> Vec<String> {
+/// The shaped simple commands actually run, without the display limit on
+/// `shape`. Quoted arguments are placeholders, so they cannot look like a
+/// command in a different simple command.
+pub(crate) fn program_shapes(command: &str) -> Vec<(String, String)> {
     simple_commands(&lex(command))
         .into_iter()
-        .filter_map(|(simple, _)| shape_simple(&simple).1)
+        .filter_map(|(simple, _)| {
+            let (shaped, program) = shape_simple(&simple);
+            program.map(|program| (program, shaped))
+        })
         .collect()
 }
 
@@ -722,7 +728,34 @@ fn subcommands(
             ],
             &[],
         ),
-        "jouet" => (&["pr", "wait", "edit", "threads", "rule"], &[]),
+        "jouet" => {
+            while let Some(Tok::Word(w)) = items.get(i) {
+                if w.quoted {
+                    break;
+                }
+                match w.text.as_str() {
+                    "--json" => {
+                        parts.push("--json".into());
+                        i += 1;
+                    }
+                    "--display" => {
+                        parts.push("--display".into());
+                        if items.get(i + 1).is_some() {
+                            parts.push("<v>".into());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    t if t.starts_with("--display=") => {
+                        parts.push("--display=<v>".into());
+                        i += 1;
+                    }
+                    _ => break,
+                }
+            }
+            (&["pr", "wait", "edit", "threads", "rule"], &[])
+        }
         "rustup" => (&["toolchain", "target", "component"], &[]),
         "go" => (&["mod"], &[]),
         "python" | "python3" => {
@@ -1054,7 +1087,10 @@ mod tests {
     #[test]
     fn finds_the_programs_wrappers_run() {
         assert_eq!(
-            programs("FOO=1 sudo -u root timeout 5 cargo test | tee log"),
+            program_shapes("FOO=1 sudo -u root timeout 5 cargo test | tee log")
+                .into_iter()
+                .map(|(program, _)| program)
+                .collect::<Vec<_>>(),
             ["cargo", "tee"]
         );
     }
