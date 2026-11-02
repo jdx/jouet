@@ -41,6 +41,8 @@ Each `task.toml` notes which jouet levels the task can exercise: what `jouet tes
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
 
+The opt-in `jactionlint-dependabot-groups` task reproduces [jdx/jactionlint#313](https://github.com/jdx/jactionlint/issues/313) from the parent of its fix. It needs a local clone at `~/src/jactionlint`, Go 1.27.1, Go 1.27.3 and the project's modules in `~/go/pkg/mod`. Run it with `MISE_ENV=bench MISE_GO_VERSION=1.27.1 mise run bench:agents --tasks jactionlint-dependabot-groups`: the project uses Go 1.27.1 for formatting and staticcheck, and Go 1.27.3 for builds and tests. Before each timed run, mise installs the project's tools in that run's isolated home. Its independent check exercises the public parser with both valid grouped updates and genuine duplicates.
+
 The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://github.com/astral-sh/ruff/issues/29365) from the parent of its upstream fix. It needs a local Ruff Git repository at `~/src/ruff-bench-source` containing commit `83a3afc3156d73ae4296f3fa74ede28e4c72bfcd`, Rust 1.99.0, and the project's Cargo dependencies. Ruff's project instructions also require `uv` for its `prek` checks; verify it is available in both isolated arms, and report when a run cannot perform those checks. The independent check builds Ruff and exercises both conditional-iterable fixes and a named-expression case. It is excluded from the default suite because the project is large and each isolated run must build it.
 
 ### Arms
@@ -59,6 +61,8 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 - a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, `uv` and `uvx`, when installed on the host, are available to both arms for projects whose checks use them.
 
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
+
+A task may also specify `isolated_setup` as lists of command arguments. The harness runs each command directly in the run's environment before timing, with output in `environment.log`; failures or changes to tracked or nonignored checkout files make the setup fail. Ignored dependencies may be installed in the checkout. Only use commands appropriate for the task, since they run project tools and can access the network.
 
 The isolated home's login profiles restore that `PATH` after system profiles run. On macOS, `path_helper` otherwise puts system tools ahead of the run's tools and can expose host-installed programs to the plain arm.
 
