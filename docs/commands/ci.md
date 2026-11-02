@@ -109,7 +109,7 @@ The first word of the text result is `PASS`, `FAIL`, or `ERROR` when jactionlint
 `jouet ci explain` says whether each failed GitHub Actions job is **flaky**, **infrastructure** or **real**, gives the evidence for that verdict, and reruns only what a rerun can fix. An agent that reruns CI on every red check spends runs on real failures. Worse, it can "fix" a flake by changing code that was never broken. `ci explain` gives it a reason either way.
 
 ```text
-jouet ci explain [PR | RUN_URL | JOB_URL] [--run ID] [--job ID] [--repo OWNER/NAME] [--rerun] [--log-lines N]
+jouet ci explain [PR | RUN_URL | JOB_URL] [--run ID] [--job ID] [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
 ```
 
 It takes the same targets as `jouet wait ci`. A PR is a number, URL, `OWNER/REPO#N` or branch, and defaults to the current branch's PR; for a PR it explains the latest run of each workflow on its head. `--run ID` and `--job ID` name a run or one job, and so does an Actions URL. The flags are listed in the [CLI reference](/cli/ci/explain).
@@ -189,6 +189,8 @@ Jobs that failed the same way are reported together and judged once. Jobs that f
 A job that failed only because another one did, such as a `needs:` job that reports the result and has no failure of its own, *follows* that job and gets no verdict. So does a job cancelled after another one failed.
 
 A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and `--rerun` refuses it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
+
+`--rerun` also reruns a run that was cancelled before anything failed, such as one GitHub cancelled while it was queued behind another run of the same concurrency group: there is nothing to judge, and a rerun runs it. When a failure's cause was fixed outside the repository, such as a missing secret, an access a registry refused, or an outage, its log still reads as `real` or `unknown`. `--rerun --force` reruns its failed jobs whatever the verdict, and a refusal names that command.
 
 ## Entire Gates
 

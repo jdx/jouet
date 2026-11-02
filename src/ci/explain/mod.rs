@@ -72,6 +72,9 @@ pub(crate) enum Target {
 pub(crate) struct Request {
     pub(crate) target: Target,
     pub(crate) rerun: bool,
+    /// Rerun whatever the verdict: the cause was fixed outside the
+    /// repository.
+    pub(crate) force: bool,
     pub(crate) log_lines: usize,
 }
 
@@ -415,7 +418,25 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
         (Some(n), Some(doc)) => entire_gates(&mut gh, n, doc, !failed.is_empty()),
         _ => None,
     };
-    let mut rerun = rerun_plan(&reports, &again, in_progress);
+    // Runs cancelled before any job failed: nothing was judged, and a rerun
+    // runs them.
+    let cancelled: Vec<u64> = runs
+        .iter()
+        .filter(|r| r.completed() && r.conclusion == "cancelled")
+        .filter(|r| {
+            reports
+                .iter()
+                .any(|rep| rep.run_id == r.id && rep.jobs.is_empty())
+        })
+        .map(|r| r.id)
+        .collect();
+    let mut rerun = rerun_plan(
+        &reports,
+        &again,
+        in_progress,
+        !cancelled.is_empty(),
+        req.force,
+    );
     if req.rerun {
         if !rerun.allowed {
             return Err(Refusal {
@@ -434,6 +455,12 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
                 None => format!("/actions/runs/{}/rerun-failed-jobs", run.id),
             };
             gh.rerun(&path, run.id).map_err(remote)?;
+        }
+        if only_job.is_none() {
+            for id in &cancelled {
+                gh.rerun(&format!("/actions/runs/{id}/rerun"), *id)
+                    .map_err(remote)?;
+            }
         }
         rerun.started = true;
     }
@@ -1167,7 +1194,13 @@ fn elsewhere(
 }
 
 /// Whether `--rerun` may rerun the failed jobs, and the command that does.
-fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool) -> Rerun {
+fn rerun_plan(
+    reports: &[RunReport],
+    target: &str,
+    in_progress: bool,
+    cancelled: bool,
+    force: bool,
+) -> Rerun {
     let failed: Vec<&JobReport> = reports.iter().flat_map(|r| &r.jobs).collect();
     let refuse = |reason: String| Rerun {
         allowed: false,
@@ -1176,6 +1209,22 @@ fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool) -> Rerun {
         jobs: Vec::new(),
         started: false,
     };
+    let command = |flags: &str| {
+        if target.is_empty() {
+            format!("jouet ci explain --rerun{flags}")
+        } else {
+            format!("jouet ci explain {target} --rerun{flags}")
+        }
+    };
+    if failed.is_empty() && cancelled && !in_progress {
+        return Rerun {
+            allowed: true,
+            reason: "the run was cancelled before anything failed, so a rerun runs it".into(),
+            command: Some(command("")),
+            jobs: Vec::new(),
+            started: false,
+        };
+    }
     if failed.is_empty() {
         return refuse(if in_progress {
             // Name the wait, so a still-going run is not read as a pass.
@@ -1195,14 +1244,21 @@ fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool) -> Rerun {
         .filter(|j| !j.verdict.rerunnable())
         .map(|j| format!("{} ({})", j.name, j.verdict.as_str()))
         .collect();
-    if !blocking.is_empty() {
+    if !blocking.is_empty() && !force {
         let real = failed.iter().any(|j| j.verdict == Verdict::Real);
-        let why = if real {
-            "a rerun repeats a real failure"
-        } else {
-            "a failure without a diagnosis is not rerun blind"
-        };
-        return refuse(format!("{why}: {}", short_list(&blocking)));
+        // A real failure is not offered --force: it is there for the cause
+        // a log cannot show was fixed, not to rerun what fails again.
+        if real {
+            return refuse(format!(
+                "a rerun repeats a real failure: {}",
+                short_list(&blocking)
+            ));
+        }
+        return refuse(format!(
+            "a failure without a diagnosis is not rerun blind: {}. If its cause was fixed outside the repository (a secret, an access, a registry or service outage), `{}` reruns it anyway",
+            short_list(&blocking),
+            command(" --force")
+        ));
     }
     if let Some(r) = reports.iter().find(|r| r.in_progress) {
         return refuse(format!(
@@ -1210,15 +1266,14 @@ fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool) -> Rerun {
             r.run_id, r.run_id
         ));
     }
-    let command = if target.is_empty() {
-        "jouet ci explain --rerun".to_string()
-    } else {
-        format!("jouet ci explain {target} --rerun")
-    };
     Rerun {
         allowed: true,
-        reason: "every failed job is flaky or infrastructure".into(),
-        command: Some(command),
+        reason: if blocking.is_empty() {
+            "every failed job is flaky or infrastructure".into()
+        } else {
+            format!("forced, whatever the verdict: {}", short_list(&blocking))
+        },
+        command: Some(command(if blocking.is_empty() { "" } else { " --force" })),
         jobs: failed.iter().map(|j| j.name.clone()).collect(),
         started: false,
     }
@@ -1250,14 +1305,69 @@ mod tests {
             jobs: Vec::new(),
             following: Vec::new(),
         };
-        let plan = rerun_plan(&[run(vec![15116])], "", true);
+        let plan = rerun_plan(&[run(vec![15116])], "", true, false, false);
         assert!(!plan.allowed);
         assert!(
             plan.reason.contains("`jouet wait ci 15116`"),
             "{}",
             plan.reason
         );
-        let plan = rerun_plan(&[run(Vec::new())], "", true);
+        let plan = rerun_plan(&[run(Vec::new())], "", true, false, false);
         assert!(plan.reason.contains("`jouet wait ci`"), "{}", plan.reason);
+    }
+
+    #[test]
+    fn a_cancelled_run_reruns_and_force_reruns_any_verdict() {
+        let report = |jobs: Vec<JobReport>| RunReport {
+            run_id: 7,
+            workflow: "release".into(),
+            head_sha: "abc".into(),
+            head_branch: "main".into(),
+            attempt: 1,
+            url: String::new(),
+            prs: Vec::new(),
+            in_progress: false,
+            jobs,
+            following: Vec::new(),
+        };
+        // Cancelled before anything failed: nothing to judge.
+        let plan = rerun_plan(&[report(Vec::new())], "--run 7", false, true, false);
+        assert!(plan.allowed, "{}", plan.reason);
+        assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, false, false).allowed);
+        let job = || JobReport {
+            name: "Release".into(),
+            job_id: 1,
+            url: String::new(),
+            os: None,
+            verdict: Verdict::Unknown,
+            failed_step: None,
+            tests: Vec::new(),
+            location: None,
+            errors: Vec::new(),
+            infrastructure: None,
+            main_broken: false,
+            evidence: Vec::new(),
+            group: 0,
+            log_excerpt: Vec::new(),
+            log_truncated: false,
+            log_path: None,
+        };
+        // Refused without --force, and the refusal names it.
+        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, false, false);
+        assert!(!plan.allowed);
+        assert!(
+            plan.reason
+                .contains("`jouet ci explain --run 7 --rerun --force`"),
+            "{}",
+            plan.reason
+        );
+        let mut real = job();
+        real.verdict = Verdict::Real;
+        let plan = rerun_plan(&[report(vec![real])], "--run 7", false, false, false);
+        assert!(!plan.reason.contains("--force"), "{}", plan.reason);
+        assert!(plan.reason.contains("real failure"), "{}", plan.reason);
+        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, false, true);
+        assert!(plan.allowed, "{}", plan.reason);
+        assert!(plan.reason.starts_with("forced"), "{}", plan.reason);
     }
 }

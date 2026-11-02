@@ -15,5 +15,6 @@ For each failed GitHub Actions job of a PR's latest runs, a run or one job: the 
 - **`--run <ID>`** — Explain this Actions run instead of a PR
 - **`--job <ID>`** — Explain this one Actions job
 - **`--rerun`** — Rerun the failed jobs if every one is flaky or infrastructure
+- **`--force`** — With --rerun, rerun the failed jobs whatever their verdict, for a cause fixed outside the repository: a secret, an access, a registry or service outage
 - **`--log-lines <N>`** — Lines of each failure log to show (default 40; 0 shows the whole failed step)
 - **`-h --help`** — Print help

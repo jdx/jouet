@@ -43,6 +43,7 @@ fn run_explain(a: &CiExplainArgs, out: &Output) -> Exit {
     let req = explain::Request {
         target,
         rerun: a.rerun,
+        force: a.force,
         log_lines: a.log_lines.unwrap_or(EXPLAIN_LOG_LINES),
     };
     match explain::explain(&mut Client::from_env(), &req) {

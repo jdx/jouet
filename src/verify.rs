@@ -960,8 +960,8 @@ impl Checks {
         )))
     }
 
-    /// Files changed after the newest test run passed, and no test run has
-    /// passed at the files now. Any passing run counts, a partial one too:
+    /// Files other than prose changed after the newest test run passed, and
+    /// no test run has passed at the files now. Any passing run counts, a partial one too:
     /// the tests a change affects are enough here, as the full suite runs
     /// on CI. A failed newest run is a failure reason instead.
     fn untested_reason(
@@ -974,10 +974,16 @@ impl Checks {
             return None;
         }
         let now = tree()?;
+        // A change to prose alone (docs, a changelog) is one no test run
+        // needs to follow.
+        let code = jouet_rules::tree::code_part(&now);
         let passed_now = self.passes.get(&Kind::Test).is_some_and(|passes| {
-            passes
-                .iter()
-                .any(|p| self.same_files(p.tree.as_deref(), Some(now.as_str())))
+            passes.iter().any(|p| {
+                self.same_files(p.tree.as_deref(), Some(now.as_str()))
+                    || p.tree
+                        .as_deref()
+                        .is_some_and(|t| jouet_rules::tree::code_part(t) == code)
+            })
         });
         if passed_now {
             return None;
@@ -1739,6 +1745,11 @@ mod tests {
         // Any passing run at the files now clears it.
         state.record([test("cargo test -p b", 0, "-p b")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+        // A change to prose alone keeps the code part, and asks for no run.
+        let mut docs = Checks::default();
+        docs.record([test("cargo test -p a", 0, "-p a")], Some("all1.code1"));
+        assert_eq!(reason(&docs, "all2.code1"), None);
+        assert!(reason(&docs, "all3.code2").is_some());
         // An unknown tree (a Codex session) cannot be compared.
         assert_eq!(state.block_reason(|| None, false), None);
         // A partial lint or build run is not asked about.
