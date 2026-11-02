@@ -8,6 +8,7 @@ than on one. Each pair (task, harness, round) is what the report compares.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -100,6 +101,10 @@ class Planned:
     @property
     def id(self) -> str:
         return f"{self.task}.{self.harness}.{self.arm}.r{self.round}"
+
+    @property
+    def directory(self) -> str:
+        return hashlib.sha256(self.id.encode()).hexdigest()[:16]
 
 
 def plan(task_names: list[str], harnesses: list[str], arm_names: list[str], rounds: int, seed: int) -> list[Planned]:
@@ -408,9 +413,12 @@ def execute(
     task = tasks_mod.load(p.task)
     harness = HARNESSES[p.harness]
     arm = arms_mod.ARMS[p.arm]
-    run_dir = work_root / p.id
+    # Keep task names out of paths: programs and tests can inspect their
+    # working and temporary directories, so those names can change behavior.
+    run_name = p.directory
+    run_dir = work_root / run_name
     workdir = run_dir / "work"
-    tmp_dir = Path(opts["tmp_root"]) / p.id
+    tmp_dir = Path(opts["tmp_root"]) / run_name
     keep = out_dir / "runs" / p.id
     keep.mkdir(parents=True, exist_ok=True)
     shas = tasks_mod.prepare(task, workdir)
@@ -512,6 +520,9 @@ def execute(
     }
     if capacity:
         record["error"] = "Codex model at capacity before the run completed"
+    if opts.get("keep_work"):
+        record["workdir"] = str(workdir)
+        record["tmp_dir"] = str(tmp_dir)
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
     copy_transcripts(ran["config_dir"], keep / "transcripts")
@@ -609,6 +620,9 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
+                if opts.get("keep_work"):
+                    record["workdir"] = str(work_root / p.directory / "work")
+                    record["tmp_dir"] = str(tmp_root / p.directory)
             records.append(record)
             budget.spent += (record.get("usage") or {}).get("input_tokens", 0) + (record.get("usage") or {}).get(
                 "output_tokens", 0

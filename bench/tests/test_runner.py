@@ -211,6 +211,9 @@ class PlanTest(unittest.TestCase):
                 self.assertIn("capacity", record["error"])
                 self.assertFalse(record["success"])
                 self.assertIsNone(record["check"]["exit_code"])
+                self.assertTrue(Path(record["workdir"]).is_dir())
+                self.assertNotIn("smoke", Path(record["workdir"]).parent.name)
+                self.assertNotIn("smoke", Path(record["tmp_dir"]).name)
 
                 # Capacity can interrupt a session after it has spent tokens
                 # and run tools; the partial attempt is still not a task result.
@@ -221,6 +224,7 @@ class PlanTest(unittest.TestCase):
                 check.assert_not_called()
                 self.assertIn("capacity", interrupted["error"])
                 self.assertEqual(interrupted["usage"]["input_tokens"], 123)
+                self.assertNotEqual(record["workdir"], interrupted["workdir"])
 
                 # A stopped run keeps its timeout classification even if
                 # the stream also reported capacity.
