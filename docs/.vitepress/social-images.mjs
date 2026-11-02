@@ -141,8 +141,8 @@ function homeSvg() {
     <g font-family="Space Grotesk">
       <text x="610" y="292" font-size="132" letter-spacing="-5" ${bold(colors.text, 3)}>jouet</text>
       <text x="616" y="180" font-size="26" fill="${colors.muted}">“zhweh” · French for “toy”</text>
-      <text x="616" y="366" font-size="40" ${bold(colors.coral, 0.8)}>Wind-up tools</text>
-      <text x="616" y="418" font-size="40" ${bold(colors.coral, 0.8)}>for coding agents</text>
+      <text x="616" y="366" font-size="40" ${bold(colors.coral, 0.8)}>Spend fewer tokens.</text>
+      <text x="616" y="418" font-size="40" ${bold(colors.coral, 0.8)}>Get there faster.</text>
       <text x="616" y="520" font-size="26" fill="${colors.muted}">jouet.jdx.dev</text>
     </g>
   </svg>`;

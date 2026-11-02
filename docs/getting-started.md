@@ -7,7 +7,7 @@ description: Install jouet with mise, cargo or a release archive, make a first e
 jouet is one static binary with no runtime dependencies. It runs on Linux, macOS (Apple Silicon) and Windows.
 
 ::: warning Early development
-[`jouet edit`](/commands/edit), [`jouet pr status`](/commands/pr-status), [`jouet pr threads`](/commands/pr-threads) and [`jouet wait`](/commands/wait) have shipped. Commands, flags, exit codes and JSON output may still change incompatibly between releases.
+Benefits vary by project. Your language, framework, test runner or agent harness may need configuration or changes to jouet itself before you see savings. Broad ecosystem support is still being worked out before 1.0, and commands, flags, exit codes and JSON output may change incompatibly between releases. See [what to expect](/why#early-development).
 :::
 
 ## Install

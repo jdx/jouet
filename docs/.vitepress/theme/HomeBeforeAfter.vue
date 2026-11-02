@@ -157,10 +157,11 @@ function select(index: number, focus = false) {
       <HomeHeading
         id="jouet-before-after"
         eyebrow="Before and after"
-        title="The chore, minus the script"
+        title="Fewer scripts. Fewer retries."
       >
-        Agents write these scripts by hand in session after session. They look
-        right and usually work, which is why the failures are easy to miss.
+        A heredoc for a simple edit, another turn to poll CI, a retry after a
+        partial write: small chores spend tokens and time. These examples show
+        how jouet handles the mechanics in one call.
       </HomeHeading>
 
       <div class="tabs" role="tablist" aria-label="Examples">

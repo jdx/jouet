@@ -19,23 +19,22 @@ export default {
       "home-hero-image": () => h(HomeRobot),
       "home-hero-actions-after": () => h(HomeQuickStart),
       "home-features-before": () => [
-        h(HomeBeforeAfter),
         h("div", { class: "jouet-section JouetCommandsHeading" }, [
           h("div", { class: "jouet-container" }, [
             h(
               HomeHeading,
               {
                 id: "jouet-commands",
-                eyebrow: "Commands",
-                title: "One command per chore",
+                eyebrow: "How it works",
+                title: "Give the repetitive work to code",
               },
               () =>
-                "Each command replaces a script agents keep rewriting.",
+                "Keep the model focused on decisions. Let jouet handle navigation, edits, waits and the workflows worth reusing.",
             ),
           ]),
         ]),
       ],
-      "home-features-after": () => h(HomeConventions),
+      "home-features-after": () => [h(HomeBeforeAfter), h(HomeConventions)],
       "layout-bottom": () => [h(EndevSponsors), h(EndevFooter)],
     });
   },

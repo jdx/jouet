@@ -1,12 +1,12 @@
 ---
 layout: home
-title: Wind-up tools for coding agents
-description: jouet turns the shell chores coding agents keep scripting by hand into single commands that never prompt and exit with a code an agent can act on.
+title: Spend fewer tokens. Get there faster.
+description: jouet helps coding agents use fewer tokens and finish work faster with a code graph, checked edits, executable workflows and improvements learned across sessions.
 
 hero:
   name: 'jouet <span class="jouet-gloss">pronounced “zhweh” · French for “toy”</span>'
-  text: "Wind-up tools for coding agents"
-  tagline: "Agents keep rebuilding the same shell chores by hand, and get them subtly wrong. jouet turns each one into a single command that never prompts, never cuts output silently, and exits with a code an agent can act on."
+  text: "Spend fewer tokens. Get there faster."
+  tagline: "A toolkit that helps your coding agent read less, skip repetitive work and learn from its mistakes across sessions. A code graph, checked edits and reusable workflows, through the shell it already uses."
   image:
     src: /logo.svg
     alt: The jouet logo, a coral wind-up tin robot with a brass key on top
@@ -19,20 +19,28 @@ hero:
       link: /why
 
 features:
-  - title: 'jouet edit <span class="jouet-status is-ready">available</span>'
-    details: Exact, all-or-nothing edits across files, from search/replace blocks, a Codex-style patch or JSON. A failed edit writes nothing and shows the closest match.
-    link: /commands/edit
-    linkText: Read the guide
-  - title: 'jouet wait <span class="jouet-status is-ready">available</span>'
-    details: Blocks until CI finishes, a PR is ready, or a file, log line, port, URL, process or command is, then prints one summary. A CI failure comes with the failed step's log.
-    link: /commands/wait
-    linkText: Read the guide
-  - title: 'jouet pr status <span class="jouet-status is-ready">available</span>'
-    details: One line per PR with what needs attention, from one batched query. <code>pr threads</code> lists, replies to and resolves review threads without hand-written GraphQL.
-    link: /commands/pr-status
-    linkText: Read the guide
-  - title: 'jouet setup <span class="jouet-status is-ready">available</span>'
-    details: Hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Rules deny an agent's costly habits and name the command to use instead, and it cannot finish while its last test run failed.
+  - title: Less context, fewer tokens
+    details: Budgeted searches and reads show the relevant definitions and remember what the session already saw. Test output puts failures first and saves the full log for when it is needed.
+    link: /commands/search
+    linkText: Search without flooding context
+  - title: Less waiting, fewer turns
+    details: One call waits for CI and returns the failed step's log. Batched PR queries replace per-PR loops, and affected-test selection shortens the agent's edit and test cycle.
+    link: /commands/test
+    linkText: Run the tests a change affects
+  - title: A code graph to navigate
+    details: Find callers, dependencies and the tests a change reaches. Build a repository map within a token budget so the agent can explore through focused queries. No daemon or language server to run.
+    link: /commands/graph
+    linkText: Explore the code graph
+  - title: Better habits, built in
+    details: A simple replacement takes one command instead of a Python heredoc. Hooks catch costly patterns as they happen and point the agent to checked edits, waits and other tools.
     link: /setup
-    linkText: Read the guide
+    linkText: Set up your agent
+  - title: Like skills with executable workflows
+    details: Turn a repeated procedure into a tested Luau routine over jouet's primitives. The agent calls it once, with declared capabilities and previews for writes, instead of reasoning through each step again.
+    link: /routines
+    linkText: Write a routine
+  - title: Improves across sessions
+    details: A local ledger spots repeated failures and costly habits. jouet proposes rules and tasks; session review can suggest routines and project guidance. You or your agent choose what to adopt. New rules warn first.
+    link: /winding
+    linkText: How self-winding works
 ---

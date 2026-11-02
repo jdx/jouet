@@ -1,10 +1,41 @@
 ---
-description: Coding agents rebuild the same few shell chores by hand and get them subtly wrong. What jouet replaces, how, and what comes next.
+description: How jouet aims to reduce tokens and speed up coding agents through focused context, executable workflows and improvements learned across sessions, and what to expect before 1.0.
 ---
 
 # Why jouet
 
-Coding agents spend a large share of their shell calls rebuilding the same few chores by hand, and they get them subtly wrong. jouet turns each of those chores into one command.
+The goal of jouet is to help coding agents use fewer tokens and finish work faster. An agent should spend its context and reasoning on the problem you gave it. Writing a Python heredoc to replace a string, rediscovering the same code, or taking another model turn to ask whether CI is done all take away from that.
+
+jouet gives the agent commands that handle those mechanics, hooks that steer it toward them, and a feedback loop that proposes improvements from what happens in real sessions.
+
+## Where the savings come from
+
+- **Read less.** [`jouet search`](/commands/search) groups matches by definition and remembers what the session already saw. [`jouet read`](/commands/read) can show an outline or one symbol. Both keep the agent from filling context with whole files it does not need.
+- **Navigate through a code graph.** [`jouet graph`](/commands/graph) links definitions, calls, imports and inheritance. The agent can ask for callers, a change's impact or the tests it reaches. [`jouet read --map`](/commands/read#the-repository-map) uses that graph to fit the repository's important definitions into a token budget. The graph uses tree-sitter and needs no daemon or language server; language and framework coverage still varies.
+- **Avoid extra turns and retries.** [`jouet wait`](/commands/wait) handles polling in one call and brings back the failure log. [`jouet edit`](/commands/edit) checks every replacement before writing anything. [`jouet test --affected`](/commands/test) selects the tests a change reaches and returns failures with their errors, with the full log saved.
+- **Run repeated workflows as code.** A procedure the agent reasons through step by step each time can become one tested routine.
+
+Smaller tool results leave less context to carry forward. A workflow handled in one call avoids the model turns spent planning, writing and debugging its intermediate steps. Those are the mechanisms jouet targets; the size of the benefit depends on the work and the agent.
+
+## Like skills with executable workflows
+
+Skills give agents reusable instructions. jouet's [routines](/routines) let you or your agent put the repeatable parts into executable code: a small Luau program over primitives for GitHub, git, waits, edits and project tasks. For example, the built-in `land` routine checks what a PR needs next, waits if CI is running, then merges when it is ready.
+
+The model calls the routine once. Its loops and conditions run as code, with declared capabilities, recorded-response tests and previews for writes. A routine gives a procedure consistent behavior across sessions, and you can extend jouet for your workflow without adding a Rust command.
+
+## It improves across sessions
+
+[`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Built-in [rules](/rules) catch patterns such as Python edit scripts and sleep-poll loops and name the command to use instead. A short session primer points the agent to `jouet agent-help` to discover commands as needed.
+
+The hooks keep a local ledger of command shapes and outcomes. [Self-winding](/winding) notices recurring failures, long sleeps and repeated command sequences, then drafts rules or flags work worth turning into a task. Session review can propose routines, project guidance and fixes to jouet itself based on corrections and wasted effort.
+
+You or your agent choose which proposals to adopt. Draft rules warn first, automatic promotion is opt-in, and `jouet unwind` can propose retiring rules that are not helping. Self-improvement here means improving the tools and guidance future sessions use.
+
+## Early development
+
+jouet is pre-1.0. Benefits vary by language, framework, test runner and agent harness. Your project may need configuration, a custom rule or routine, or changes to jouet itself before it works well. You may not see token savings or faster sessions right away. Broad ecosystem support is still being worked out, and commands, flags, exit codes and JSON output may change incompatibly between releases.
+
+[`jouet audit`](/commands/audit) shows where your Claude Code and Codex sessions spend tokens and time. [`jouet stats`](/commands/stats) records jouet usage and estimates token savings against your own history. Those estimates are not measured benchmark savings. [Comparative benchmarks](/benchmarks) are still being developed to check tokens, elapsed time and task success together.
 
 ## What agents do today
 
@@ -155,20 +186,6 @@ The `until` loop above would still be polling: a failed check never makes `gh pr
 | [`jouet pr threads`](/commands/pr-threads) | Raw `reviewThreads` queries, replies and resolves |
 
 Every command follows the same [conventions](/conventions), so an agent learns them once: it never prompts or needs a TTY, its output adapts to whoever is reading, `--json` prints exactly one document, nothing is cut without saying so, and one table of exit codes separates "the answer is no" from "I refused to do that".
-
-## What jouet is not
-
-- **An output compressor.** Shrinking arbitrary command output is [rtk](https://github.com/rtk-ai/rtk)'s job.
-- **A worktree, stacked-PR or memory tool.** Each of those already has a healthy dedicated tool.
-- **An IDE.** `jouet search` reads definitions with tree-sitter, not language servers, so it matches names, not resolved types; there is no server to run.
-- **Interactive.** Every command works without a TTY and never prompts.
-- **Multi-host, yet.** The PR commands start with GitHub.
-
-## What comes next
-
-The commands are the first layer. The second helps agents use them without being told every time: [`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot that catch a costly pattern as the agent runs it and point to the command that replaces it, driven by [rules](/rules) you can add to.
-
-Next is a report built from your own agent sessions that shows where their time and tokens go. It does not exist yet, and the details will change as it is built.
 
 ## The name
 
