@@ -8,7 +8,7 @@ use jouet_audit::stats::{self, Baseline, Estimate, Ledger, Measured, StatsFilter
 use jouet_audit::{Analyzer, ClaudeCode, Codex, Filter, Reader};
 use jouet_output::exit::Exit;
 use jouet_output::{paths, time};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -79,10 +79,26 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         .chain(codex.iter().map(|r| r as &dyn Reader))
         .collect();
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    // The history before a harness's first ledger entry no longer changes, so
+    // a saved baseline for the same cutoff is reused instead of reading
+    // gigabytes of transcripts again. A harness with no ledger entries has no
+    // cutoff and is always read.
+    let saved = if args.rescan {
+        Vec::new()
+    } else {
+        cache.as_deref().map(read_cache).unwrap_or_default()
+    };
     let mut baselines = Vec::new();
     let mut scanned = ScanDoc::default();
     for reader in readers {
         let until = first.get(reader.harness()).copied();
+        if let Some(b) = saved
+            .iter()
+            .find(|b| until.is_some() && b.harness == reader.harness() && b.until == until)
+        {
+            baselines.push(b.clone());
+            continue;
+        }
         let filter = Filter {
             until_ms: until.map(|t| i64::try_from(t).unwrap_or(i64::MAX).saturating_mul(1000)),
             ..Filter::default()
@@ -125,10 +141,20 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
+/// What `baselines.json` holds. A cache from another jouet version is
+/// ignored, since a release may read the history differently.
+#[derive(Serialize, Deserialize)]
+struct Cache {
+    version: String,
+    baselines: Vec<Baseline>,
+}
+
 fn read_cache(path: &Path) -> Vec<Baseline> {
     std::fs::read(path)
         .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .and_then(|bytes| serde_json::from_slice::<Cache>(&bytes).ok())
+        .filter(|c| c.version == env!("CARGO_PKG_VERSION"))
+        .map(|c| c.baselines)
         .unwrap_or_default()
 }
 
@@ -137,7 +163,11 @@ fn write_cache(path: &Path, baselines: &[Baseline]) {
     let Some(dir) = path.parent() else {
         return;
     };
-    let Ok(json) = serde_json::to_vec(baselines) else {
+    let cache = Cache {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        baselines: baselines.to_vec(),
+    };
+    let Ok(json) = serde_json::to_vec(&cache) else {
         return;
     };
     if std::fs::create_dir_all(dir).is_ok() {
