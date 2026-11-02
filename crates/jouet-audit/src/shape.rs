@@ -768,9 +768,30 @@ fn subcommands(
         "rustup" => (&["toolchain", "target", "component"], &[]),
         "go" => (&["mod"], &[]),
         python if is_python(python) => {
-            // `python3 -m pytest`: the module is the program that runs.
+            // Python's interpreter flags may precede -m. Stop at a script,
+            // -c or -- so arguments to one cannot be mistaken for a module.
+            while let Some(Tok::Word(w)) = items.get(i) {
+                if w.quoted
+                    || w.dynamic
+                    || !w.text.starts_with('-')
+                    || matches!(w.text.as_str(), "-m" | "-c" | "--")
+                {
+                    break;
+                }
+                parts.push(flag(&w.text));
+                i += 1;
+                if matches!(w.text.as_str(), "-W" | "-X" | "--check-hash-based-pycs") {
+                    if items.get(i).is_none() {
+                        return i;
+                    }
+                    parts.push("<v>".into());
+                    i += 1;
+                }
+            }
             if let Some(Tok::Word(w)) = items.get(i)
                 && w.text == "-m"
+                && !w.quoted
+                && !w.dynamic
                 && let Some(module) = ident(i + 1)
             {
                 parts.push("-m".into());

@@ -273,12 +273,8 @@ pub(crate) fn categorize_command(command: &str) -> Category {
             && shaped
                 .split_whitespace()
                 .collect::<Vec<_>>()
-                .windows(3)
-                .any(|words| {
-                    words[0] == program
-                        && words[1] == "-m"
-                        && matches!(words[2], "pytest" | "unittest")
-                })
+                .windows(2)
+                .any(|words| words[0] == "-m" && matches!(words[1], "pytest" | "unittest"))
     });
     if jouet("test") || python_test || programs.iter().any(|p| is_build(p, command)) {
         return Category::BuildTestLint;
@@ -405,12 +401,17 @@ mod tests {
             "python3 -m unittest discover",
             "python3.13 -m pytest tests/test_a.py",
             "mise x -- python3 -m pytest tests",
+            "python -I -m pytest",
+            "python3 -W ignore -X dev -m unittest discover",
         ] {
             assert_eq!(cat(command), Category::BuildTestLint, "{command}");
         }
         for command in [
             "python -m http.server",
             "python -c 'print(\"pytest\")'",
+            "python -c 'print(1)' -m pytest",
+            "python script.py -m pytest",
+            "python -W pytest script.py",
             "rg pytest tests | head",
             "echo 'python -m pytest'",
         ] {
