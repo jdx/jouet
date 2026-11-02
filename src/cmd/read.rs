@@ -24,7 +24,7 @@ pub(crate) fn run(args: &ReadArgs, out: &Output) -> Exit {
     if !args.map {
         return read_file(args, out);
     }
-    if args.outline || args.symbol.is_some() || args.range.is_some() {
+    if args.outline || !args.symbol.is_empty() || !args.range.is_empty() {
         return out.error(
             Exit::Usage,
             "--map reads a directory; --outline, --symbol and --range read a file",
@@ -225,13 +225,14 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     if args.budget.is_some() || !args.focus.is_empty() {
         return out.error(Exit::Usage, "--budget and --focus are for --map");
     }
-    let modes = usize::from(args.outline)
-        + usize::from(args.symbol.is_some())
-        + usize::from(args.range.is_some());
-    if modes > 1 {
-        return out.error(Exit::Usage, "give one of --outline, --symbol and --range");
+    let selects = !args.symbol.is_empty() || !args.range.is_empty();
+    if args.outline && selects {
+        return out.error(
+            Exit::Usage,
+            "--outline goes alone; --symbol and --range go together",
+        );
     }
-    if args.why && args.symbol.is_none() && args.range.is_none() {
+    if args.why && !selects {
         return out.error(Exit::Usage, "--why goes with --symbol or --range");
     }
     let file = Path::new(path);
@@ -299,18 +300,10 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         }
     };
     let outline = || symbols::outline(file, &bytes);
-    if let Some(range) = &args.range {
-        let Some((start, end)) = parse_range(range, lines.len()) else {
-            return out.error(
-                Exit::Usage,
-                &format!(
-                    "--range takes A:B, A: or :B within the file's {} lines, not `{range}`",
-                    lines.len()
-                ),
-            );
-        };
-        read.sections.push(section(None, start, end, &mut memory));
-    } else if let Some(name) = &args.symbol {
+    // Each --symbol, then each --range, in the order given: several in one
+    // call cost one request, not one each.
+    let mut missing = Vec::new();
+    for name in &args.symbol {
         let selector = match Selector::parse(name) {
             Ok(selector) => selector,
             Err(e) => return out.error(Exit::Usage, &select_error(&e, path)),
@@ -330,17 +323,39 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                     read.sections.push(read_section);
                 }
             }
-            Err(SelectError::NotFound) => {
-                let defs: Vec<String> =
-                    outline().unwrap_or_default().iter().map(describe).collect();
-                return out.error_with_hint(
-                    Exit::NotFound,
-                    &format!("{path} has no definition matching `{name}`"),
-                    Some(&format!("it defines: {}", defs.join(", "))),
-                );
-            }
+            Err(SelectError::NotFound) => missing.push(name.as_str()),
             Err(e) => return out.error(Exit::Usage, &select_error(&e, path)),
         }
+    }
+    for range in &args.range {
+        let Some((start, end)) = parse_range(range, lines.len()) else {
+            return out.error(
+                Exit::Usage,
+                &format!(
+                    "--range takes A:B, A: or :B within the file's {} lines, not `{range}`",
+                    lines.len()
+                ),
+            );
+        };
+        read.sections.push(section(None, start, end, &mut memory));
+    }
+    if !missing.is_empty() {
+        let names: Vec<String> = missing.iter().map(|n| format!("`{n}`")).collect();
+        let what = format!("{path} has no definition matching {}", names.join(", "));
+        // Nothing else to show: the error, with what the file does define.
+        if read.sections.is_empty() {
+            let defs: Vec<String> = outline().unwrap_or_default().iter().map(describe).collect();
+            return out.error_with_hint(
+                Exit::NotFound,
+                &what,
+                Some(&format!("it defines: {}", defs.join(", "))),
+            );
+        }
+        read.notes.push(what);
+    }
+    let selected = !args.symbol.is_empty() || !args.range.is_empty();
+    if selected {
+        // The sections asked for, above.
     } else if let Some(whole) = (args.outline && !lines.is_empty() && lines.len() <= SHORT)
         .then(|| section(None, 1, lines.len(), &mut memory))
         .filter(|s| !s.already_shown)
@@ -369,7 +384,7 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     if args.why {
         origins(path, &mut read);
     }
-    let implicit_outline = !args.outline && args.symbol.is_none() && args.range.is_none();
+    let implicit_outline = !args.outline && !selected;
     // An outline is held to --max-lines too.
     let outline_total = read.outline.len();
     if max != 0 && read.outline.len() > max {

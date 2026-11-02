@@ -255,3 +255,19 @@ payload() {
 	run --separate-stderr jouet read
 	assert_failure 2
 }
+
+@test "read takes several --symbol and --range in one call" {
+	run --separate-stderr jouet read src/lib.rs --symbol Client::download --symbol join_url --range 1:2
+	assert_success
+	assert_line 'src/lib.rs: method Client::download (6-9)'
+	assert_line --partial 'src/lib.rs: function join_url (12-14)'
+	assert_line --regexp '^1	pub struct Client'
+	# A name that matches nothing is noted, while the rest are read.
+	run --separate-stderr jouet read src/lib.rs --symbol join_url --symbol upload
+	assert_success
+	assert_output --partial 'join_url'
+	assert_output --regexp 'no definition matching .upload.'
+	# --outline goes alone.
+	run --separate-stderr jouet read src/lib.rs --outline --symbol join_url
+	assert_failure 2
+}
