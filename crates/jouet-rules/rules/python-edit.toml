@@ -21,8 +21,10 @@ fires = [
   "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('a.rs')\np.write_text(p.read_text().replace('a', 'b'))\nEOF",
   "python3 -c \"s=open('f').read().replace('x','y'); open('f','w').write(s)\"",
   "cd src && python3.12 <<EOF\nt = open('x').read()\nt = t.replace('a', 'b')\nopen('x', 'w').write(t)\nEOF",
-  # Cutting by `.index()` and writing back, with no `.replace(`.
-  "python3 - <<'PY'\np='src/config_root.rs'\ns=open(p).read()\na=s.index('/// The git checkout')\nb=s.index('mod tests')\ns=s[:a]+s[b:]\nopen(p,'w').write(s)\nPY",
+  # Finding the place by `.find()`, which returns -1 on a miss.
+  "python3 - <<'PY'\np='src/config_root.rs'\ns=open(p).read()\na=s.find('/// The git checkout')\ns=s[:a]+s[a+10:]\nopen(p,'w').write(s)\nPY",
+  # `.index()` raises on a miss, but its `.replace(` would not.
+  "python3 - <<'PY'\np='a.rs'\ns=open(p).read()\na=s.index('fn x')\ns=s[:a]+s[a:].replace(v, w)\nopen(p,'w').write(s)\nPY",
   "python3 - <<'EOF'\nimport re\nt = open(\"a.rs\").read()\nopen('a.rs', 'w').write(re.sub(r'old', 'new', t))\nEOF",
   "python3 -c \"from pathlib import Path; Path('a.rs').write_text(Path('a.rs').read_text()[:-1])\"",
 ]
@@ -36,6 +38,8 @@ quiet = [
   # Code that stops on a miss cannot silently change nothing.
   "python3 - <<'EOF'\np = 'a.rs'\ns = open(p).read()\nassert 'old' in s\nopen(p, 'w').write(s.replace('old', 'new'))\nEOF",
   "python3 - <<'EOF'\nimport sys\ns = open('a.rs').read()\nif 'old' not in s: sys.exit('no match')\nopen('a.rs', 'w').write(s.replace('old', 'new'))\nEOF",
+  # Cutting by `.index()`, which raises on a miss, so nothing is written.
+  "python3 - <<'PY'\np='src/config_root.rs'\ns=open(p).read()\na=s.index('/// The git checkout')\nb=s.index('mod tests')\ns=s[:a]+s[b:]\nopen(p,'w').write(s)\nPY",
   # A structured rewrite, which `jouet edit` cannot do.
   "python3 - <<'EOF'\nimport json\np = 'package.json'\nd = json.load(open(p))\nd['version'] = '1.0.0'\njson.dump(d, open(p, 'w'), indent=2)\nEOF",
 ]
