@@ -26,10 +26,10 @@ export default {
               {
                 id: "jouet-commands",
                 eyebrow: "How it works",
-                title: "Give the repetitive work to code",
+                title: "Measure. Learn. Improve the next run.",
               },
               () =>
-                "Keep the model focused on decisions. Let jouet handle navigation, edits, waits and the workflows worth reusing.",
+                "Make the cost of work visible, give the agent better choices, and keep what helps for the next session.",
             ),
           ]),
         ]),

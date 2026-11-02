@@ -1,21 +1,31 @@
 ---
-description: How jouet aims to reduce tokens and speed up coding agents through focused context, executable workflows and improvements learned across sessions, and what to expect before 1.0.
+description: How jouet helps coding agents measure costs, learn from wasted effort and carry better workflows into future sessions, and what to expect before 1.0.
 ---
 
 # Why jouet
 
-The goal of jouet is to help coding agents use fewer tokens and finish work faster. An agent should spend its context and reasoning on the problem you gave it. Writing a Python heredoc to replace a string, rediscovering the same code, or taking another model turn to ask whether CI is done all take away from that.
+The goal of jouet is to help coding agents use fewer tokens and finish work faster by improving how they work from one session to the next. It measures what the work costs, makes expensive choices visible, and helps turn lessons from real sessions into reusable tools and guidance.
 
-jouet gives the agent commands that handle those mechanics, hooks that steer it toward them, and a feedback loop that proposes improvements from what happens in real sessions.
+An agent can make a reasonable-looking choice and still waste most of a session. It starts a slow rebuild after one edit, then rebuilds again after the next. It repeats an approach that failed yesterday. It reasons through a procedure it has already carried out dozens of times. Better decisions need a history of what happened and a way to act on it.
 
-## Where the savings come from
+## Measure, learn, reuse
 
-- **Read less.** [`jouet search`](/commands/search) groups matches by definition and remembers what the session already saw. [`jouet read`](/commands/read) can show an outline or one symbol. Both keep the agent from filling context with whole files it does not need.
-- **Navigate through a code graph.** [`jouet graph`](/commands/graph) links definitions, calls, imports and inheritance. The agent can ask for callers, a change's impact or the tests it reaches. [`jouet read --map`](/commands/read#the-repository-map) uses that graph to fit the repository's important definitions into a token budget. The graph uses tree-sitter and needs no daemon or language server; language and framework coverage still varies.
-- **Avoid extra turns and retries.** [`jouet wait`](/commands/wait) handles polling in one call and brings back the failure log. [`jouet edit`](/commands/edit) checks every replacement before writing anything. [`jouet test --affected`](/commands/test) selects the tests a change reaches and returns failures with their errors, with the full log saved.
-- **Run repeated workflows as code.** A procedure the agent reasons through step by step each time can become one tested routine.
+1. **Measure the work.** [`jouet cost`](/commands/cost) records how long builds, tests and lints take. [`jouet audit`](/commands/audit) reads Claude Code and Codex sessions to show where tokens and time go, including repeated reads, polling and failed edits.
+2. **Make the next decision better.** The session-start primer names the slowest checks from the timing history. The agent can finish the edits a slow run checks before starting it, or use a focused check while iterating. A rebuild that takes minutes is visible before the agent repeats it.
+3. **Learn from what went wrong.** [Self-winding](/winding) notices recurring failures, costly habits and repeated command sequences. Session review uses user corrections and wasted effort to propose rules, tasks, routines and project guidance.
+4. **Carry the lesson forward.** Adopted rules steer future calls. Tasks and routines give later sessions a procedure they can run. `jouet unwind` can propose retiring rules that are not helping.
 
-Smaller tool results leave less context to carry forward. A workflow handled in one call avoids the model turns spent planning, writing and debugging its intermediate steps. Those are the mechanisms jouet targets; the size of the benefit depends on the work and the agent.
+This is a feedback loop around the agent's work. jouet supplies measurements and proposals; the agent uses them to plan, and you or the agent decide which improvements to adopt. Draft rules warn first, and automatic promotion is opt-in.
+
+## Know what an expensive run costs
+
+Agents often learn that a check is slow only after waiting for it. `jouet cost` keeps timings from previous runs as git notes. Its estimates prefer this machine's own history; timings shared from other machines, such as CI, can be scaled using commands timed in both places. The session primer surfaces slow checks automatically, and the agent can ask for the full list:
+
+```sh
+jouet cost
+```
+
+Knowing those costs helps the agent group edits before a slow run, choose checks appropriate to the change and avoid unnecessary rebuilds. It gives the agent evidence for planning; it does not automatically schedule checks or guarantee a faster run. [How the estimates work →](/commands/cost)
 
 ## Like skills with executable workflows
 
@@ -23,13 +33,15 @@ Skills give agents reusable instructions. jouet's [routines](/routines) let you 
 
 The model calls the routine once. Its loops and conditions run as code, with declared capabilities, recorded-response tests and previews for writes. A routine gives a procedure consistent behavior across sessions, and you can extend jouet for your workflow without adding a Rust command.
 
-## It improves across sessions
+## Tools that support the loop
 
-[`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. Built-in [rules](/rules) catch patterns such as Python edit scripts and sleep-poll loops and name the command to use instead. A short session primer points the agent to `jouet agent-help` to discover commands as needed.
+[`jouet setup`](/setup) installs hooks for Claude Code, Codex, Cursor, Gemini CLI and Copilot. They record outcomes and steer the agent toward useful commands, which it can discover through `jouet agent-help` as needed. A few examples:
 
-The hooks keep a local ledger of command shapes and outcomes. [Self-winding](/winding) notices recurring failures, long sleeps and repeated command sequences, then drafts rules or flags work worth turning into a task. Session review can propose routines, project guidance and fixes to jouet itself based on corrections and wasted effort.
+- A [code graph](/commands/graph) answers questions about callers, dependencies and the tests a change reaches. [Budgeted searches](/commands/search) and [focused reads](/commands/read) narrow exploration and remember what the session has already seen.
+- [Checked edits](/commands/edit) replace Python heredocs for simple replacements and refuse stale matches before writing any file.
+- [Waits](/commands/wait) handle polling in one call and return the failure log. [Affected-test selection](/commands/test) narrows a test run to what the change reaches.
 
-You or your agent choose which proposals to adopt. Draft rules warn first, automatic promotion is opt-in, and `jouet unwind` can propose retiring rules that are not helping. Self-improvement here means improving the tools and guidance future sessions use.
+These tools give the agent concrete ways to spend less context, avoid extra turns and reduce retries. They support the feedback loop, and their value depends on the project and the work.
 
 ## Early development
 

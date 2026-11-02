@@ -156,12 +156,14 @@ function select(index: number, focus = false) {
     <div class="jouet-container">
       <HomeHeading
         id="jouet-before-after"
-        eyebrow="Before and after"
-        title="Fewer scripts. Fewer retries."
+        eyebrow="Some of the tools behind the loop"
+        title="Give the agent better ways to work"
       >
-        A heredoc for a simple edit, another turn to poll CI, a retry after a
-        partial write: small chores spend tokens and time. These examples show
-        how jouet handles the mechanics in one call.
+        A <a href="/commands/graph">code graph</a> and
+        <a href="/commands/search">budgeted searches and reads</a> narrow
+        exploration. <a href="/commands/test">Affected tests</a> shorten
+        iteration. Checked edits and waits replace the scripts and polling
+        that keep wasting turns. These examples show a few of those tools.
       </HomeHeading>
 
       <div class="tabs" role="tablist" aria-label="Examples">
@@ -391,6 +393,11 @@ function select(index: number, focus = false) {
 </template>
 
 <style scoped>
+a {
+  color: var(--vp-c-brand-1);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .tabs {
   display: flex;
   flex-wrap: wrap;
