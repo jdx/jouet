@@ -128,7 +128,7 @@ Pester tests stay at the root, since they run the binary.
   parser and the JSON schema (`jouet rule schema`, published as `docs/public/schema/rules.json`;
   regenerate it with `jouet rule schema >docs/public/schema/rules.json`, or a bats test fails).
   Matching is plain Rust (`matcher.rs`), so a rule without a script never starts a Luau VM; keep
-  the matcher small, and give a rule with real logic a `script` instead (only `checks` has one).
+  the matcher small, and give a rule with real logic a `script` instead, as `checks` and a dozen others do.
   Scripts are written against the public `jouet` module (`crates/jouet-rules/jouet.d.luau`,
   printed by `jouet rule types`). User and repository rules may only add decisions; keep that
   floor (no replacing built-in rules, no locking out `jouet`) when changing the engine. A rule's

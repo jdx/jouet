@@ -811,7 +811,7 @@ pub(crate) fn unwind(args: &UnwindArgs, out: &Output) -> Exit {
     };
     out.result(&report, || {
         if report.proposals.is_empty() && report.tasks.is_empty() {
-            return "nothing to unwind: no rule of yours is noisy, nearly always overridden or broken, and no task jouet added goes unused\n".into();
+            return "nothing to unwind: no rule of yours is noisy, overridden at least half the time or broken, and no task jouet added goes unused\n".into();
         }
         let mut text = String::new();
         for t in &report.tasks {

@@ -136,8 +136,10 @@ export type JouetRule = {
 	-- Tool calls the rule must fire on (deny, warn or record), and near
 	-- misses it must stay quiet on, run by `jouet rule test`. They check what
 	-- `check` returns, before the mode turns a deny into a warning. A rule
-	-- of yours or a repository's without both kinds only warns, and cannot
-	-- be promoted to deny or shared. They run without probes, so they give
+	-- of yours without both kinds only warns, and cannot be promoted to
+	-- deny or shared; one from outside (a repository's, a plugin's or the
+	-- system's) without both, or failing one, is broken and does not run.
+	-- They run without probes, so they give
 	-- the same answer anywhere: every probe returns nil and a reason.
 	examples: {
 		fires: { JouetExample },
@@ -313,7 +315,8 @@ export type JouetGit = typeof(setmetatable(
 		-- the work tree there instead (a `cd`'s, from `jouet.dirs`).
 		state: (dir: string?) -> (JouetGitState?, string?),
 		-- A hash of the content of every tracked file in the work tree,
-		-- staged or not; untracked and ignored files are left out. A commit
+		-- staged or not, and of untracked files that are not ignored, unless
+		-- there are more than 1,000 of them. A commit
 		-- with the same content hashes the same. The `tree` of a recorded run.
 		-- With `dir`, of the work tree there instead (as `jouet.record`'s).
 		tree: (dir: string?) -> (string?, string?),

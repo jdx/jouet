@@ -114,11 +114,12 @@ pub(crate) struct WindProposeArgs {
     pub(crate) file: Option<String>,
 }
 
-/// Propose retiring rules that are noisy or always overridden, and unused tasks
+/// Propose retiring rules that are noisy or often overridden, and unused tasks
 ///
 /// Lists your rules and a trusted repository's that the hook ledger shows
-/// are nearly always overridden, fire on a large share of calls, or no
-/// longer load. Built-in rules are never proposed. --apply moves your own
+/// are overridden at least half the time over five or more firings, fire
+/// on a tenth or more of shell calls (at least 20 times), or no longer
+/// load. Built-in rules are never proposed. --apply moves your own
 /// rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules
 /// change through a PR. It also lists the mise tasks `jouet task apply` added
 /// that no agent session has run in the 21 days since, and still run what

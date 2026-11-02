@@ -58,7 +58,7 @@ pub(crate) struct TestArgs {
     /// else the default branch)
     #[usage(long, value_name = "REF")]
     pub(crate) since: Option<String>,
-    /// Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
+    /// Use only this adapter: vitest, jest, pytest, unittest, cargo or graph (Go, Ruby and Java, from the code graph)
     #[usage(long, value_name = "NAME")]
     pub(crate) adapter: Option<String>,
     /// Print what would run and why, running nothing

@@ -21,7 +21,7 @@ Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when no runne
 ## Flags
 - **`--affected`** — Run only the tests the changes affect
 - **`--since <REF>`** — Measure changes from the merge base with REF (default: the upstream, else the default branch)
-- **`--adapter <NAME>`** — Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
+- **`--adapter <NAME>`** — Use only this adapter: vitest, jest, pytest, unittest, cargo or graph (Go, Ruby and Java, from the code graph)
 - **`--dry-run`** — Print what would run and why, running nothing
 - **`--cmd`** — Run the words after `--` as the command, instead of the test task
 - **`--baseline`** — When the run fails, run it again at the merge base (with --since, of REF) and pass it if every failure also fails there
