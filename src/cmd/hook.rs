@@ -9,6 +9,7 @@
 //! reported on stderr. Exit code 2, which harnesses read as "block", is
 //! never used.
 
+use crate::agents;
 use crate::cli::HookArgs;
 use crate::cmd;
 use crate::fnox;
@@ -48,6 +49,7 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         }
         if event == "session-start" {
             verify::prune_sessions();
+            agents::prune_calls();
         }
         let settings = Settings::load();
         let hk: Vec<String> = args
@@ -170,12 +172,15 @@ fn handle(
         // tree a formatting call started from.
         "pre-tool-use" if !hooks.steer && hooks.verify => {
             note_formatting(payload, &Call::from_hook(payload, harness.name()), true);
+            if harness == Harness::Claude {
+                agents::note_call(payload);
+            }
             None
         }
         "pre-tool-use" if hooks.steer => {
             let engine = load(payload)?;
             let mut call = Call::from_hook(payload, harness.name());
-            call.seen = seen(&call, log.session);
+            call.seen = seen(&call, log.session, agents::of_payload(payload));
             let read = reads::of(&call);
             call.read_lines = read.as_deref().and_then(reads::line_count);
             call.code_lines = read.as_deref().and_then(reads::code_line_count);
@@ -193,6 +198,9 @@ fn handle(
             }
             if hooks.verify && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
                 note_formatting(payload, &call, true);
+            }
+            if harness == Harness::Claude && outcome.as_ref().is_none_or(|o| o.deny.is_none()) {
+                agents::note_call(payload);
             }
             // A warning waits for the call's post-tool-use hook where the
             // harness has nowhere else to put it.
@@ -212,7 +220,10 @@ fn handle(
         "post-tool-use" | "post-tool-use-failure" => {
             let call = Call::from_hook(payload, harness.name());
             if call.exit_code == Some(0) {
-                remember(&call, log.session);
+                remember(&call, log.session, agents::of_payload(payload));
+            }
+            if harness == Harness::Claude {
+                agents::end_call(payload);
             }
             let (records, ran) = if hooks.verify {
                 record(payload, &call)
@@ -341,20 +352,21 @@ fn pending_path(payload: &Value) -> Option<PathBuf> {
 /// Whether the session was already shown everything the call reads, for
 /// the matchers' `seen`; `None` when the call reads nothing jouet can
 /// account for, or there is no session.
-fn seen(call: &Call, session: Option<&str>) -> Option<bool> {
+fn seen(call: &Call, session: Option<&str>, agent: Option<&str>) -> Option<bool> {
     let reads = reads::of(call)?;
-    let memory = Memory::open(&cmd::search::seen_dir()?, session?);
+    let memory = Memory::open(&cmd::search::seen_dir()?, &agents::key(session?, agent));
     Some(reads::seen(&memory, &reads))
 }
 
-/// Adds what a successful call read to the session's memory.
-fn remember(call: &Call, session: Option<&str>) {
+/// Adds what a successful call read to the memory of the session's agent
+/// that made it.
+fn remember(call: &Call, session: Option<&str>, agent: Option<&str>) {
     let (Some(reads), Some(dir), Some(session)) =
         (reads::of(call), cmd::search::seen_dir(), session)
     else {
         return;
     };
-    let mut memory = Memory::open(&dir, session);
+    let mut memory = Memory::open(&dir, &agents::key(session, agent));
     reads::record(&mut memory, &reads);
     memory.save();
 }
@@ -856,8 +868,10 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
                 .unwrap_or_default();
             testlog::environment_cause(text, &formats)
         });
+    let lead = agents::of_payload(payload).is_none();
     let _ = verify::update(&path, |state| {
         for (dir, root, tree) in &trees {
+            state.by(root, lead);
             let here: Vec<Record> = records
                 .iter()
                 .filter(|r| r.dir.as_deref() == *dir)
@@ -888,7 +902,9 @@ fn note_formatting(payload: &Value, call: &Call, started: bool) {
     };
     let root = verify::root_of(&cwd);
     let tree = jouet_rules::tree::work_tree(Some(&cwd), TREE_TIMEOUT).ok();
+    let lead = agents::of_payload(payload).is_none();
     let _ = verify::update(&path, |state| {
+        state.by(&root, lead);
         let checks = state.checks_mut(&root);
         if started {
             checks.formatting_started(tree.as_deref());
@@ -932,16 +948,14 @@ pub(crate) fn mark_own_run(cwd: &Path, command: &str, running: bool) {
     if !settings.hooks.enabled || !settings.hooks.verify {
         return;
     }
-    let Some(path) = jouet_git::session::id_from_env()
-        .as_deref()
-        .and_then(verify::state_path)
-    else {
+    let Some((path, lead)) = own_state() else {
         return;
     };
     let root = verify::root_of(cwd);
     let pid = std::process::id();
     let _ = verify::update(&path, |state| {
         if running {
+            state.by(&root, lead);
             let command = command.to_string();
             state.start_run(&root, verify::Running { pid, command });
         } else {
@@ -958,14 +972,23 @@ pub(crate) fn mark_unverifiable(cwd: &Path, command: &str) {
     if !settings.hooks.enabled || !settings.hooks.verify {
         return;
     }
-    let Some(path) = jouet_git::session::id_from_env()
-        .as_deref()
-        .and_then(verify::state_path)
-    else {
+    let Some((path, lead)) = own_state() else {
         return;
     };
     let root = verify::root_of(cwd);
-    let _ = verify::update(&path, |state| state.mark_unverifiable(&root, command));
+    let _ = verify::update(&path, |state| {
+        state.by(&root, lead);
+        state.mark_unverifiable(&root, command);
+    });
+}
+
+/// The state file of the session this `jouet test` runs in, and whether its
+/// lead ran it rather than a subagent. One the hooks cannot place counts as
+/// a subagent's: a tree only it ran in is not held against the lead.
+fn own_state() -> Option<(PathBuf, bool)> {
+    let session = jouet_git::session::id_from_env()?;
+    let lead = agents::caller(&session, "test").is_lead();
+    Some((verify::state_path(&session)?, lead))
 }
 
 /// Records a `jouet test` run as the checks see it; `environment` is what
@@ -992,10 +1015,11 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32, environm
     let tree = jouet_rules::tree::work_tree(Some(cwd), TREE_TIMEOUT).ok();
     let session = jouet_git::session::id_from_env();
     if hooks.verify
-        && let Some(path) = session.as_deref().and_then(verify::state_path)
+        && let Some((path, lead)) = own_state()
     {
         let root = verify::root_of(cwd);
         let _ = verify::update(&path, |state| {
+            state.by(&root, lead);
             state.record(&root, records.clone(), tree.as_deref());
             if let Some(cause) = environment {
                 for record in &records {

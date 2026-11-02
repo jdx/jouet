@@ -64,7 +64,7 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
     let mut memory = if args.again || args.files_with_matches {
         Memory::none()
     } else {
-        session_memory()
+        session_memory("search")
     };
     let report = match search::run(&options, &mut memory) {
         Ok(report) => report,
@@ -112,10 +112,13 @@ pub(crate) fn session_id() -> Option<String> {
     .find(|v| !v.trim().is_empty())
 }
 
-/// What this session has been shown, kept where the hooks keep it too.
-pub(crate) fn session_memory() -> Memory {
-    match (seen_dir(), session_id()) {
-        (Some(dir), Some(id)) => Memory::open(&dir, &id),
+/// What this session's agent has been shown, kept where the hooks keep it
+/// too, for the jouet `subcommand` running. A subagent's is its own; when
+/// the hooks cannot say which agent ran it, nothing is remembered.
+pub(crate) fn session_memory(subcommand: &str) -> Memory {
+    let key = session_id().and_then(|id| crate::agents::command_key(&id, subcommand));
+    match (seen_dir(), key) {
+        (Some(dir), Some(key)) => Memory::open(&dir, &key),
         _ => Memory::none(),
     }
 }

@@ -7,3 +7,8 @@ developers.openai.com/codex/hooks and the input schemas in
 codex-rs/hooks/schema/generated). The tests set `cwd` and the command where
 they need their own; `tests/graph.rs` puts its work tree in place of
 `/work/app`.
+
+`claude/` holds Claude Code's, for a subagent's calls (the Agent tool) and the
+lead's stop, in the fields of Claude Code's hook input schema
+(code.claude.com/docs/en/hooks): a subagent's carry the lead's `session_id`
+and their own `agent_id` and `agent_type`; the lead's have no `agent_id`.

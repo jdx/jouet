@@ -557,3 +557,87 @@ E"
 	run jq -r '.hookSpecificOutput.permissionDecision' <<<"$output"
 	assert_output "deny"
 }
+
+# A recorded Claude Code payload from test/fixtures/hooks/claude, with the
+# jq filter FILTER applied: `claude_payload subagent-pre-tool-use '.cwd = "x"'`.
+claude_payload() {
+	jq -c "${2:-.}" "$PROJECT_ROOT/test/fixtures/hooks/claude/$1.json"
+}
+
+@test "a subagent's reads are its own, not its siblings' or the lead's" {
+	printf 'fn a() {}\nfn b() {}\nfn c() {}\n' >lib.rs
+	read_by() {
+		claude_payload subagent-post-tool-use \
+			"$1 | .cwd = \"$PWD\" | .tool_input.file_path = \"$PWD/lib.rs\" | .hook_event_name = \"$2\""
+	}
+	jouet hook claude post-tool-use <<<"$(read_by . PostToolUse)"
+
+	# The subagent that read it is told; a sibling and the lead are not.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(read_by . PreToolUse)"
+	assert_output --partial '[jouet rule: reread]'
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(read_by '.agent_id = "b8e2d0c4a6f1"' PreToolUse)"
+	assert_output ""
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(read_by 'del(.agent_id, .agent_type)' PreToolUse)"
+	assert_output ""
+}
+
+@test "jouet read in a subagent's Bash call remembers for that subagent only" {
+	printf 'fn fetch() {}\n' >lib.rs
+	export CLAUDE_CODE_SESSION_ID=s1
+	# Bash as Claude Code runs it: the pre-tool-use hook, the command with
+	# only the session in its environment, then the post-tool-use hook.
+	bash_by() {
+		local call
+		call="$(claude_payload subagent-pre-tool-use \
+			"$1 | .cwd = \"$PWD\" | .tool_input.command = \"jouet read lib.rs --symbol fetch\"")"
+		jouet hook claude pre-tool-use <<<"$call" >/dev/null
+		jouet read lib.rs --symbol fetch
+		jouet hook claude post-tool-use <<<"$(jq -c '.hook_event_name = "PostToolUse"' <<<"$call")"
+	}
+
+	run --separate-stderr bash_by .
+	assert_line --index 0 'lib.rs: function fetch (1-1)'
+	run --separate-stderr bash_by '.agent_id = "b8e2d0c4a6f1"'
+	assert_line --index 0 'lib.rs: function fetch (1-1)'
+	run --separate-stderr bash_by 'del(.agent_id, .agent_type)'
+	assert_line --index 0 'lib.rs: function fetch (1-1)'
+	run --separate-stderr bash_by .
+	assert_output --partial 'already shown, unchanged'
+	run --separate-stderr bash_by 'del(.agent_id, .agent_type)'
+	assert_output --partial 'already shown, unchanged'
+
+	# Two agents' reads running at once: it cannot tell whose, so it
+	# collapses nothing.
+	claude_payload subagent-pre-tool-use '.tool_use_id = "toolu_other" | .agent_id = "c0"' |
+		jouet hook claude pre-tool-use >/dev/null
+	run --separate-stderr bash_by .
+	assert_line --index 0 'lib.rs: function fetch (1-1)'
+}
+
+@test "the lead's stop is not held up by a subagent's scratch repository" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	git init -q scratch
+	echo 'x = 1' >scratch/a.py
+	git -C scratch add a.py
+	claude_payload subagent-post-tool-use \
+		".cwd = \"$PWD/scratch\" | .tool_name = \"Bash\" | .tool_input = {command: \"cargo test --workspace\"} | del(.tool_response)" |
+		jouet hook claude post-tool-use
+	echo 'x = 2' >scratch/a.py
+	stop() {
+		claude_payload stop ".cwd = \"$PWD/repo\"" | jouet hook claude stop | jq -r '.reason // empty'
+	}
+
+	run stop
+	assert_output ""
+
+	# Once the lead runs something there, the tree is the lead's too.
+	jq -cn --arg cwd "$PWD/scratch" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {command: "cargo test --workspace"}}' |
+		jouet hook claude post-tool-use
+	echo 'x = 3' >scratch/a.py
+	run stop
+	# macOS puts the test directory under /private/tmp.
+	assert_output --regexp "^In (/private)?$PWD/scratch: Files changed after the last test run passed"
+}
