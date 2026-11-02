@@ -641,6 +641,11 @@ mod tests {
         assert!(!evidence.names.is_empty());
         assert!(evidence.details.is_empty());
 
+        let pytest_summary = "FAILED tests/test_a.py::test_x - AssertionError: failure\n";
+        let evidence = failure_evidence(pytest_summary, &[], Path::new("/x"), false).unwrap();
+        assert!(!evidence.names.is_empty());
+        assert!(evidence.details.is_empty());
+
         let repeated = "test same ... FAILED\n---- same stdout ----\nfirst cause\n---- same stdout ----\nsecond cause\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
         let evidence = failure_evidence(repeated, &[], Path::new("/x"), false).unwrap();
         assert!(evidence.details.is_empty());
