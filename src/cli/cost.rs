@@ -11,6 +11,13 @@ use usage_rs::{Args, Subcommands};
 /// this machine's time to theirs over the commands timed in both places, or
 /// shown as they are when there are none. CI keeps its timings with `jouet
 /// cost push` after its runs; `jouet cost fetch` brings them here.
+///
+/// With [cost] sequences = true (JOUET_COST_SEQUENCES=1), `jouet test`
+/// records local start and finish observations for each recognized check in
+/// an identified agent session. `--sequences` shows the second check's
+/// median duration after the first for at least three adjacent recorded
+/// pairs in the same session and worktree. Other work and cache changes may
+/// intervene; these observations do not measure savings or prove cache reuse.
 #[derive(Args)]
 #[usage(args_conflicts_with_subcommands)]
 pub(crate) struct CostArgs {
@@ -19,6 +26,9 @@ pub(crate) struct CostArgs {
     /// List only the commands estimated to take at least DUR, such as 30s
     #[usage(long, value_name = "DUR")]
     pub(crate) min: Option<String>,
+    /// Show opt-in local observations of successive recorded checks
+    #[usage(long)]
+    pub(crate) sequences: bool,
 }
 
 #[derive(Subcommands)]

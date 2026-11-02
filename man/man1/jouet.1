@@ -1046,6 +1046,8 @@ Print help
 Show what builds, tests and lints cost here, from timings kept in git notes
 
 `jouet test` and the hooks time each build, test and lint run and keep it as a git note on HEAD under refs/notes/jouet\-cost (`[cost] record` in the config file or JOUET_COST_RECORD turns it off). This lists each command, or each family of commands such as one e2e test, costliest first, read from up to 200 first\-parent commits back. Timings from other machines, such as CI's, are scaled to this one: by the median ratio of this machine's time to theirs over the commands timed in both places, or shown as they are when there are none. CI keeps its timings with `jouet cost push` after its runs; `jouet cost fetch` brings them here.
+
+With [cost] sequences = true (JOUET_COST_SEQUENCES=1), `jouet test` records local start and finish observations for each recognized check in an identified agent session. `\-\-sequences` shows the second check's median duration after the first for at least three adjacent recorded pairs in the same session and worktree. Other work and cache changes may intervene; these observations do not measure savings or prove cache reuse.
 .PP
 \fBUsage:\fR jouet cost [OPTIONS] [COMMAND]
 .PP
@@ -1054,6 +1056,9 @@ Show what builds, tests and lints cost here, from timings kept in git notes
 .TP
 \fB\-\-min\fR \fI<DUR>\fR
 List only the commands estimated to take at least DUR, such as 30s
+.TP
+\fB\-\-sequences\fR
+Show opt\-in local observations of successive recorded checks
 .TP
 \fB\-h, \-\-help\fR
 Print help
