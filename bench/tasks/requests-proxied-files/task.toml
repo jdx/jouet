@@ -1,0 +1,23 @@
+description = "Fix proxied multipart file uploads in psf/requests#7502"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 900
+check_timeout_s = 180
+python_requirements = "requirements.lock"
+isolated_setup = [["python3", "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", "{workdir}"]]
+prompt = """
+Preparing a multipart upload fails when a file-like object forwards its read
+method dynamically, for example a NamedTemporaryFile wrapper. Make Requests
+accept such file objects while preserving normal multipart upload behavior.
+Add tests and commit your change.
+"""
+
+[source]
+git = "~/src/requests-bench-source"
+commit = "661970d171d9c3e12e4c789c4768db647d8c4da0"
+
+[env]
+PYTHONPATH = "{workdir}/src"

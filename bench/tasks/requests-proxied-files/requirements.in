@@ -1,0 +1,14 @@
+setuptools
+wheel
+pytest
+pytest-httpbin==2.1.0
+httpbin~=0.10.0
+pytest-cov
+pytest-mock
+pytest-xdist
+trustme
+PySocks
+charset-normalizer>=2,<4
+idna>=2.5,<4
+urllib3>=1.26,<3
+certifi>=2023.5.7
