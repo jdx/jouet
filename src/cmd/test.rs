@@ -296,6 +296,20 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             }
         }
     }
+    // Every failed suite blames the machine: said here, where the agent
+    // reads it, and not run again at the merge base, which fails the same
+    // way on this machine.
+    let blamed = (!environment.is_empty() && environment.iter().all(Option::is_some))
+        .then(|| environment.iter().flatten().next().cloned())
+        .flatten();
+    if let Some(line) = &blamed
+        && !out.json
+    {
+        emit(&format!(
+            "environment: the failure blames this machine, not the change (`{line}`); finishing is not held up for it\n"
+        ));
+    }
+    let base = base.filter(|_| blamed.is_none() || args.baseline);
     if let (Some(base), Exit::Failed) = (base, exit) {
         let named: Option<Vec<_>> = failed
             .into_iter()
@@ -359,11 +373,6 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // hooks.
     if runs {
         crate::cost::record(&cwd, &timed);
-        let blamed = environment
-            .iter()
-            .all(Option::is_some)
-            .then(|| environment.iter().flatten().next().cloned())
-            .flatten();
         super::hook::record_own_run(
             &cwd,
             &own_command(),
