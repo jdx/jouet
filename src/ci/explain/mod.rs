@@ -1178,7 +1178,14 @@ fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool) -> Rerun {
     };
     if failed.is_empty() {
         return refuse(if in_progress {
-            "nothing has failed yet; the run is still in progress".into()
+            // Name the wait, so a still-going run is not read as a pass.
+            let pr = reports.iter().find_map(|r| r.prs.first());
+            let wait = pr.map_or("jouet wait ci".to_string(), |n| {
+                format!("jouet wait ci {n}")
+            });
+            format!(
+                "nothing has failed yet; the run is still in progress (`{wait}` waits for its checks)"
+            )
         } else {
             "nothing failed".into()
         });
@@ -1223,4 +1230,34 @@ pub(crate) fn short_list(items: &[String]) -> String {
         return verdict::join_and(items);
     }
     format!("{} and {} more", items[..3].join(", "), items.len() - 3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_still_going_says_how_to_wait_for_it() {
+        let run = |prs: Vec<u64>| RunReport {
+            run_id: 9001,
+            workflow: "ci".into(),
+            head_sha: "abc".into(),
+            head_branch: "fix".into(),
+            attempt: 1,
+            url: String::new(),
+            prs,
+            in_progress: true,
+            jobs: Vec::new(),
+            following: Vec::new(),
+        };
+        let plan = rerun_plan(&[run(vec![15116])], "", true);
+        assert!(!plan.allowed);
+        assert!(
+            plan.reason.contains("`jouet wait ci 15116`"),
+            "{}",
+            plan.reason
+        );
+        let plan = rerun_plan(&[run(Vec::new())], "", true);
+        assert!(plan.reason.contains("`jouet wait ci`"), "{}", plan.reason);
+    }
 }

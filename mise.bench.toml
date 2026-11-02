@@ -9,3 +9,5 @@ codex = { version = "latest", minimum_release_age = "0s" }
 python = "3.13"
 gh = "2"
 uv = "0.13.6"
+# Real Go tasks resolve this tool from the benchmark environment in both arms.
+go = "1.27.1"

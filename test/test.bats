@@ -463,7 +463,8 @@ tap_script() {
 	run --separate-stderr jouet test --cmd -- ./run-tests
 
 	assert_success
-	assert_output --regexp '^cmd: passed in [0-9.]+s: 3 passed \(full log: .+\.log\)$'
+	# A small run names its tests, so the agent sees its own ran.
+	assert_output --regexp '^cmd: passed in [0-9.]+s: 3 passed \(case 1, case 2, case 3\) \(full log: .+\.log\)$'
 	assert_equal "${#lines[@]}" 1
 	assert_equal "$stderr" ""
 	log="${output##*full log: }"
@@ -871,4 +872,15 @@ SCRIPT
 	JOUET_TEST_BASELINE=off run --separate-stderr jouet test
 	assert_failure 1
 	refute_output --partial 'baseline:'
+}
+
+@test "a program not on PATH names its versioned sibling" {
+	mkdir -p bin
+	printf '#!/bin/sh\nexit 0\n' >bin/frob3
+	printf '#!/bin/sh\nexit 0\n' >bin/frob3.12
+	chmod +x bin/frob3 bin/frob3.12
+	PATH="$PWD/bin:$PATH" run jouet test --cmd -- frob -V
+	assert_failure
+	assert_output --partial 'running frob: No such file or directory'
+	assert_output --regexp '.frob3. is on PATH'
 }

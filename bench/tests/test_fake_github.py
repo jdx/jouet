@@ -12,6 +12,7 @@ FIXTURE = {
         "/repos/jdx/demo/pulls/7": {"number": 7, "head": {"sha": "abc"}},
         "/repos/jdx/demo/actions/jobs/1/logs": {"$text": "the log", "$until": 30, "$before": {"$status": 404}},
         "/repos/jdx/demo/actions/runs/1/logs": {"$zip": {"0_test.txt": "the log"}},
+        "/repos/jdx/demo/actions/runs/1/jobs": {"total_count": 1, "jobs": [{"id": 1}]},
     },
     "graphql": {
         "viewer": {"__typename": "User", "login": "jdx"},
@@ -89,6 +90,11 @@ class ServerTest(unittest.TestCase):
             summary = fake.world.summary()
         self.assertEqual(summary["requests"], 3)
         self.assertEqual(summary["unanswered_examples"], ["GET /repos/jdx/demo/nope -> 404"])
+
+    def test_an_attempts_jobs_are_the_runs_jobs(self):
+        with FakeGitHub(FIXTURE) as fake:
+            status, _, body = get(fake.url + "/repos/jdx/demo/actions/runs/1/attempts/1/jobs?per_page=100")
+        self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
 
     def test_text_status_and_zip(self):
         with FakeGitHub(FIXTURE) as fake:

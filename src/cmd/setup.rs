@@ -107,7 +107,8 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     };
     let project = project_root(&cwd, harness, scope);
     let config = harness.config_path(scope, &home, &project);
-    let skill = harness.skill_path(scope, &home, &project);
+    let skill = harness.skill_path(scope, &home, &project, "jouet");
+    let init_skill = harness.skill_path(scope, &home, &project, "jouet-init");
     // Every harness but Claude Code reads the shared `.agents/skills`, in
     // Codex's shape.
     let format = match harness {
@@ -126,16 +127,20 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         Scope::Local => Some(Scope::Shared),
         Scope::Shared => Some(Scope::Local),
     };
-    let (other_config, other_skill) = match other_scope {
+    let (other_config, other_skills) = match other_scope {
         Some(other) => {
             let root = project_root(&cwd, harness, other);
             let existing = |path: PathBuf| Some(path).filter(|p| p.exists());
             (
                 existing(harness.config_path(other, &home, &root)).filter(|p| *p != config),
-                existing(harness.skill_path(other, &home, &root)).filter(|p| *p != skill),
+                ["jouet", "jouet-init"]
+                    .into_iter()
+                    .filter_map(|name| existing(harness.skill_path(other, &home, &root, name)))
+                    .filter(|p| *p != skill && *p != init_skill)
+                    .collect::<Vec<_>>(),
             )
         }
-        None => (None, None),
+        None => (None, Vec::new()),
     };
     match plan_config(&config, harness, scope, args.uninstall) {
         Ok(change) => files.push(change),
@@ -177,15 +182,24 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         }
     }
 
-    if args.uninstall
-        && let Some(other) = other_skill
-    {
-        match plan_skill(&other, None) {
-            Ok((change, note)) => {
-                files.push(change);
-                notes.extend(note);
+    let init_text = (!args.uninstall).then(|| stamp(&skill::init(format)));
+    match plan_skill(&init_skill, init_text) {
+        Ok((change, note)) => {
+            files.push(change);
+            notes.extend(note);
+        }
+        Err(message) => return out.error(Exit::Precondition, &message),
+    }
+
+    if args.uninstall {
+        for other in other_skills {
+            match plan_skill(&other, None) {
+                Ok((change, note)) => {
+                    files.push(change);
+                    notes.extend(note);
+                }
+                Err(message) => return out.error(Exit::Precondition, &message),
             }
-            Err(message) => return out.error(Exit::Precondition, &message),
         }
     }
 
@@ -202,10 +216,21 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     if !args.uninstall {
         let written: Vec<&Path> = std::iter::once(config.as_path())
             .chain(want_skill.then_some(skill.as_path()))
+            .chain(std::iter::once(init_skill.as_path()))
             .collect();
         notes.extend(install_notes(
             harness, scope, &home, &project, &written, changed,
         ));
+        if !args.dry_run {
+            let invocation = match harness {
+                Harness::Claude => "/jouet-init",
+                Harness::Codex => "$jouet-init",
+                _ => "Use the jouet-init skill to configure jouet for this project",
+            };
+            notes.push(format!(
+                "next: start a new agent session in your project and ask: {invocation}"
+            ));
+        }
     }
     let report = Report {
         harness: harness.name(),

@@ -24,6 +24,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import re
 import threading
 import time
 import zipfile
@@ -33,6 +34,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from . import graphql
+
+
+ATTEMPT_JOBS = re.compile(r"(/actions/runs/\d+)/attempts/\d+/jobs")
 
 
 def materialize(tree: Any, elapsed: float) -> Any:
@@ -170,7 +174,10 @@ class World:
         bare = urlsplit(path).path.rstrip("/")
         elapsed = self.elapsed()
         if method == "GET":
-            for key in (path, bare):
+            # A fixture's run has one attempt, so an attempt's jobs are the
+            # run's jobs, which is what GitHub answers for its latest attempt.
+            whole = ATTEMPT_JOBS.sub(r"\1/jobs", path)
+            for key in (path, bare, whole, urlsplit(whole).path.rstrip("/")):
                 if key in self.fixture.get("rest", {}):
                     return self.canned(self.fixture["rest"][key], elapsed)
             prefix = f"/repos/{repo}/pulls/"
