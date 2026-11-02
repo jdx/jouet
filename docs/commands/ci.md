@@ -109,10 +109,11 @@ The first word of the text result is `PASS`, `FAIL`, or `ERROR` when jactionlint
 `jouet ci explain` says whether each failed GitHub Actions job is **flaky**, **infrastructure** or **real**, gives the evidence for that verdict, and reruns only what a rerun can fix. An agent that reruns CI on every red check spends runs on real failures. Worse, it can "fix" a flake by changing code that was never broken. `ci explain` gives it a reason either way.
 
 ```text
-jouet ci explain [PR | RUN_URL | JOB_URL] [--run ID] [--job ID] [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
+jouet ci explain [PR | RUN_URL | JOB_URL] [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
+jouet ci explain (--run ID | --job ID) [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
 ```
 
-It takes the same targets as `jouet wait ci`. A PR is a number, URL, `OWNER/REPO#N` or branch, and defaults to the current branch's PR; for a PR it explains the latest run of each workflow on its head. `--run ID` and `--job ID` name a run or one job, and so does an Actions URL. The flags are listed in the [CLI reference](/cli/ci/explain).
+It takes the same targets as `jouet wait ci`. A PR is a number, URL, `OWNER/REPO#N` or branch, and defaults to the current branch's PR; for a PR it explains the latest run of each workflow on its head. `--run ID` and `--job ID` name a run or one job, and so does an Actions URL; give only one of these targets. The flags are listed in the [CLI reference](/cli/ci/explain).
 
 ```output
 $ jouet ci explain --run 41193844808 --log-lines 8
