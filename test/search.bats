@@ -165,4 +165,8 @@ payload() {
 	run jouet search --max 1 url src/lib.rs
 	assert_success
 	assert_output "$one"
+	run jouet search --max-results 1 url src/lib.rs
+	assert_output "$one"
+	run jouet search --limit 1 url src/lib.rs
+	assert_output "$one"
 }
