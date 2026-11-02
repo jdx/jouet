@@ -284,6 +284,19 @@ fn numbered_text_without_an_rspec_failure_is_not_a_failure() {
 }
 
 #[test]
+fn rspec_reports_an_empty_selection_only_when_all_summaries_are_empty() {
+    assert!(digest("0 examples, 0 failures\n", false, DEFAULT_BUDGET).no_tests);
+    assert!(
+        !digest(
+            "0 examples, 0 failures\n1 example, 0 failures\n",
+            false,
+            DEFAULT_BUDGET
+        )
+        .no_tests
+    );
+}
+
+#[test]
 fn colour_carriage_returns_and_task_prefixes_are_cleaned() {
     let text = "[test:e2e] 1..2\n[test:e2e] ok 1 a\n[test:e2e] progress 10%\rprogress 100%\n[test:e2e] \x1b[31mnot ok 2 b\x1b[0m\n[test:e2e] # it broke\n";
     let d = digest(text, true, DEFAULT_BUDGET);

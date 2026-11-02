@@ -76,7 +76,7 @@ pub(crate) struct Digest {
 }
 
 /// Whether the output says a run selected no test: TAP's empty plan,
-/// libtest running none in every binary, pytest, jest or go saying so.
+/// libtest running none in every binary, or a supported runner saying so.
 fn no_tests(lines: &[String]) -> bool {
     // A Go package that ran a test shows it only in its plain `ok` line,
     // which the counts do not see: that is a run.
@@ -94,7 +94,12 @@ fn no_tests(lines: &[String]) -> bool {
         .filter_map(|l| LIBTEST_RUNNING.captures(l))
         .peekable();
     let none_in_libtest = libtest.peek().is_some() && libtest.all(|c| &c[1] == "0");
-    said || none_in_libtest
+    let mut rspec = lines
+        .iter()
+        .filter_map(|line| RSPEC_SUMMARY.captures(line))
+        .peekable();
+    let none_in_rspec = rspec.peek().is_some() && rspec.all(|c| &c[1] == "0");
+    said || none_in_libtest || none_in_rspec
 }
 
 /// The most passing tests a digest names.
