@@ -94,10 +94,20 @@ class PlanTest(unittest.TestCase):
                     patch.object(runner, "audit", return_value={}), \
                     patch.object(runner.tasks_mod, "run_check") as check:
                 record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
-            check.assert_not_called()
-            self.assertIn("capacity", record["error"])
-            self.assertFalse(record["success"])
-            self.assertIsNone(record["check"]["exit_code"])
+                check.assert_not_called()
+                self.assertIn("capacity", record["error"])
+                self.assertFalse(record["success"])
+                self.assertIsNone(record["check"]["exit_code"])
+
+                # A stopped run keeps its timeout classification even if
+                # the stream also reported capacity.
+                agent["stopped"] = "timeout"
+                check.return_value = {"passed": True, "exit_code": 0, "output": "ok"}
+                stopped = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                check.assert_called_once()
+                self.assertNotIn("error", stopped)
+                self.assertEqual(stopped["stopped"], "timeout")
+                self.assertFalse(stopped["success"])
 
 
 class StopTest(unittest.TestCase):
