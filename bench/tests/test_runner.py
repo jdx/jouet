@@ -812,6 +812,25 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(cell["paired"]["input_tokens"]["median_diff"], -50)
         self.assertEqual(cell["paired_when_both_pass"]["input_tokens"]["median_diff"], -200)
 
+    def test_markdown_shows_change_evidence_without_silent_truncation(self):
+        paths = ["name`with\nnewline"] + [f"file-{i}.txt" for i in range(11)]
+        records = [
+            {"task": "smoke", "harness": "codex", "arm": "plain", "round": 1,
+             "success": True, "changed_paths": []},
+            {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
+             "success": True, "changed_paths": paths},
+            {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 2,
+             "success": False, "changed_paths": None},
+        ]
+        summary = report.summarize(records, {})
+        text = report.markdown(summary)
+        self.assertIn("**plain changed paths (round 1):** none observed", text)
+        self.assertIn('"file-0.txt"', text)
+        self.assertIn('``["name`with\\nnewline"', text)
+        self.assertIn("2 more (full list: runs.jsonl)", text)
+        self.assertIn("**jouet changed paths (round 2):** unavailable", text)
+        self.assertEqual(summary["cells"][0]["arms"]["jouet"]["changes"][0]["paths"], paths)
+
     def test_paired_outcomes_exclude_errors_and_unpaired_runs(self):
         def record(arm, round_number, success, **extra):
             return {"task": "t", "harness": "codex", "arm": arm, "round": round_number,
