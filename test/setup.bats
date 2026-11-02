@@ -99,7 +99,7 @@ hook_command() {
 	run --separate-stderr jouet setup claude
 	assert_line --partial 'ask: /jouet-init'
 	run --separate-stderr jouet setup codex
-	assert_line --partial 'ask: $jouet-init'
+	assert_line --partial "ask: \$jouet-init"
 }
 
 @test "onboarding is idempotent, uninstalled when unedited, and preserves local edits" {
