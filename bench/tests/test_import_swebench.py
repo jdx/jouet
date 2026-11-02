@@ -166,6 +166,8 @@ class LogTest(unittest.TestCase):
     def test_duplicate_names_keep_a_failure(self):
         log = "a/tests/test_x.py[1]\ntest_same F\nb/tests/test_y.py[1]\ntest_same ok\n"
         self.assertEqual(_swebench.parse_sympy(log), {"test_same": "fail"})
+        log = "a/tests/test_x.py[1]\ntest_same s\nb/tests/test_y.py[1]\ntest_same ok\n"
+        self.assertEqual(_swebench.parse_sympy(log), {"test_same": "skip"})
 
     def test_sympy(self):
         log = "sympy/core/tests/test_x.py[4] \ntest_a ok\ntest_b F\ntest_c E\ntest_d f\n"

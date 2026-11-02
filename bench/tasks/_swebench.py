@@ -48,15 +48,11 @@ def parse_django(log: str) -> dict[str, str]:
 
 
 def record(statuses: dict[str, str], name: str, status: str) -> None:
-    """Two tests can share a name, as sympy's do across files: a failure of
-    either is the name's failure."""
+    """Two tests can share a name, as sympy's do across files: the name gets
+    the worse result, so a failure or a skip of either is not a pass."""
+    rank = {FAIL: 0, SKIP: 1, PASS: 2}
     previous = statuses.get(name)
-    if FAIL in (previous, status):
-        statuses[name] = FAIL
-    elif PASS in (previous, status):
-        statuses[name] = PASS
-    else:
-        statuses[name] = status
+    statuses[name] = status if previous is None or rank[status] < rank[previous] else previous
 
 
 def django_status(word: str) -> str | None:
