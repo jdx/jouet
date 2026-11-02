@@ -81,7 +81,7 @@ transcript() {
 	local id=$1
 	shift
 	local dir base
-	dir="$HOME/.claude/projects/$(printf '%s' "$ROOT" | LC_ALL=C tr -c '[:alnum:]' '-')"
+	dir="$HOME/.claude/projects/$(printf '%s' "$ROOT" | perl -CSDA -pe 's/[^A-Za-z0-9]/-/g')"
 	base=$(date -u +'%Y-%m-%dT%H:%M')
 	mkdir -p "$dir"
 	local file="$dir/$id.jsonl" n=0
@@ -152,6 +152,24 @@ ran() {
 	run --separate-stderr jouet wind show t1
 	assert_success
 	assert_line "t1 (pending): mise task \`build-test\`, ran 3 times in 2 sessions"
+}
+
+@test "propose reads transcripts for a project with a Unicode path" {
+	mkdir -p 'café_🧸'
+	cd 'café_🧸'
+	git init -q
+	git config user.email a@example.com
+	git config user.name a
+	printf '[tools]\nrust = "1"\n' >mise.toml
+	touch Cargo.toml
+	git add mise.toml Cargo.toml
+	git commit -qm init
+	ROOT=$(pwd -P)
+	sessions
+
+	run --separate-stderr jouet task propose
+	assert_success
+	assert_line "read 2 sessions in $ROOT since 14d"
 }
 
 @test "propose suggests mise.local.toml where the repository shares no mise config" {
