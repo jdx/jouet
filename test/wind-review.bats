@@ -143,10 +143,11 @@ JSON
 
 	mkdir other
 	git -C other init -q
-	cd other
-	run primer unrelated-session
-	refute_output --partial 'p1'
-	cd ..
+	(
+		cd other
+		run primer unrelated-session
+		refute_output --partial 'p1'
+	)
 	run primer next-session
 	assert_line --partial 'jouet wind review proposed an AGENTS.md note (p1): Say that tests run through mise.'
 
