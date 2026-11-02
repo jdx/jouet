@@ -450,3 +450,19 @@ fn a_panics_backtrace_folds_so_its_message_is_shown() {
         "{lines:#?}"
     );
 }
+
+#[test]
+fn a_failure_that_blames_the_machine_is_told_apart() {
+    let dbus = "1..2\nok 1 edit command accepts an editor command\nnot ok 2 edit command: create, edit, and remove keychain secrets\n# WARN fnox_core::keyring_store: Failed to initialize OS keyring store: Platform failure: DBus error: Using X11 for dbus-daemon autolaunch\n# (in test file test/edit.bats, line 120)\n";
+    assert!(environment_cause(dbus, &[]).unwrap().contains("DBus error"));
+    let lua = "error: failed to run custom build command for `mlua-sys v0.6.8`\n\nCaused by:\n  process didn't exit successfully: `/w/target/debug/build/mlua-sys/out/build_script_build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-env-changed=LUA_INC\n  --- stderr\n\n  thread 'main' panicked at build/find_normal.rs:\n  could not find system library 'lua5.1' required by the 'mlua-sys' crate\n";
+    assert!(environment_cause(lua, &[]).is_some());
+    // One failure the change caused, beside the machine's: not the machine's.
+    let mixed = "1..2\nnot ok 1 a\n# DBus error: no bus\nnot ok 2 b\n# expected 1, got 2\n";
+    assert_eq!(environment_cause(mixed, &[]), None);
+    // A missing command is most often a binary the change did not build.
+    assert_eq!(
+        environment_cause("1..1\nnot ok 1 a\n# fnox: command not found\n", &[]),
+        None
+    );
+}

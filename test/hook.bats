@@ -243,6 +243,24 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a failure whose output blames the machine is a note, not a block" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	jq -cn --arg cwd "$PWD/repo" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		  tool_input: {command: "bats test/edit.bats"},
+		  error: "Exit code 1\n1..1\nnot ok 1 keychain secrets\n# Failed to initialize OS keyring store: Platform failure: DBus error: no session bus\n"}' |
+		jouet hook claude post-tool-use-failure
+	run --separate-stderr sh -c "jq -cn --arg cwd '$PWD/repo' '{session_id: \"s1\", cwd: \$cwd, stop_hook_active: false}' | jouet hook claude stop"
+	run jq -r '[.decision // "none", .systemMessage // ""] | @tsv' <<<"$output"
+	assert_output --partial 'none'
+	assert_output --partial 'blame the machine'
+	# Said once.
+	run --separate-stderr sh -c "jq -cn --arg cwd '$PWD/repo' '{session_id: \"s1\", cwd: \$cwd, stop_hook_active: false}' | jouet hook claude stop"
+	assert_output ''
+}
+
 @test "a jouet test run still going holds up nothing, and its end restores the check" {
 	git init -q repo
 	ran 'cargo test --workspace' 101

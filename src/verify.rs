@@ -60,6 +60,11 @@ pub(crate) struct Run {
     /// The work tree the run saw, when it could be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<String>,
+    /// For a failed run whose every failure blames the machine (no D-Bus,
+    /// a missing system library, no network): the line that says so. Such
+    /// a failure does not hold up finishing; the stop says it in a note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
 }
 
 impl Run {
@@ -70,6 +75,7 @@ impl Run {
             full: record.full,
             selector: record.selector,
             tree: tree.map(str::to_string),
+            environment: None,
         }
     }
 
@@ -220,6 +226,10 @@ pub(crate) struct Checks {
     /// second, so `cargo fmt` after the tests asks for no second run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub formatted: Vec<(String, String)>,
+    /// The failures blamed on the machine that a stop has noted (see
+    /// [`noted_key`]).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub noted: BTreeSet<String>,
     /// Every reason the stop hook has raised here, each with the run it is
     /// about (its tree): a reason is raised once for that run, not again at
     /// each stop after files change, until a new run gives it a new key.
@@ -346,6 +356,15 @@ fn told_key(about: &str, run: &Run) -> String {
         run.command,
         run.exit_code,
         run.tree.as_deref().unwrap_or("")
+    )
+}
+
+/// A failure as [`Checks::noted`] keeps it: its command and tree.
+fn noted_key(failed: &Run) -> String {
+    format!(
+        "{}\u{0}{}",
+        failed.command,
+        failed.tree.as_deref().unwrap_or("")
     )
 }
 
@@ -553,6 +572,68 @@ impl State {
             });
             checks.answered.extend(raised.answering.iter().cloned());
             checks.told.extend(raised.told.iter().cloned());
+        }
+    }
+
+    /// Marks the newest failure of `command` in the work tree at `root` as
+    /// the machine's, by the line of its output that says so.
+    pub(crate) fn mark_environment(&mut self, root: &str, command: &str, cause: &str) {
+        let Some(checks) = self.trees.get_mut(root) else {
+            return;
+        };
+        for failures in checks.failures.values_mut() {
+            if let Some(failed) = failures.iter_mut().rev().find(|f| f.command == command) {
+                failed.environment = Some(cause.to_string());
+            }
+        }
+        for run in checks.runs.values_mut() {
+            if run.command == command && !run.passed() {
+                run.environment = Some(cause.to_string());
+            }
+        }
+    }
+
+    /// One line for each failure the stop let through as the machine's, in
+    /// any work tree, for the person to see, each once: those already said
+    /// are kept in [`Checks::noted`] by [`State::noted`].
+    pub(crate) fn environment_notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        for (root, checks) in &self.trees {
+            for failed in checks.failures.values().flatten() {
+                if checks.noted.contains(&noted_key(failed)) {
+                    continue;
+                }
+                if let Some(cause) = &failed.environment {
+                    let at = if root.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" in {root}")
+                    };
+                    let note = format!(
+                        "jouet did not hold up finishing for `{}`{at}: its failures blame the machine, not the change ({cause}).",
+                        shown(&failed.command)
+                    );
+                    if !notes.contains(&note) {
+                        notes.push(note);
+                    }
+                }
+            }
+        }
+        notes
+    }
+
+    /// Keeps the environment failures [`State::environment_notes`] gave as
+    /// said, so a later stop does not say them again.
+    pub(crate) fn noted(&mut self) {
+        for checks in self.trees.values_mut() {
+            let keys: Vec<String> = checks
+                .failures
+                .values()
+                .flatten()
+                .filter(|f| f.environment.is_some())
+                .map(noted_key)
+                .collect();
+            checks.noted.extend(keys);
         }
     }
 
@@ -875,6 +956,8 @@ impl Checks {
                 full.chain(partial)
                     .filter(|failed| !passed_now(kind, failed))
                     .filter(|failed| !self.answered.contains(&same_run(&failed.command)))
+                    // The machine's, not the change's: a note, not a block.
+                    .filter(|failed| failed.environment.is_none())
                     .map(|failed| {
                         let reason = self.failure_reason(*kind, failed);
                         let key = told_key(kind.name(), failed);
@@ -1302,6 +1385,33 @@ mod tests {
         ] {
             assert!(!formats(no), "{no}");
         }
+    }
+
+    #[test]
+    fn a_failure_blamed_on_the_machine_holds_nothing_up_and_is_noted_once() {
+        let mut state = State::default();
+        state.record(
+            "/home",
+            [test("bats test/edit.bats", 1, "test/edit.bats")],
+            Some("t1"),
+        );
+        state.mark_environment("/home", "bats test/edit.bats", "DBus error: no session bus");
+        assert_eq!(
+            state.block("/home", |_| Some("t1".into()), |_| false, |_| true),
+            None
+        );
+        let notes = state.environment_notes();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("DBus error"), "{notes:?}");
+        state.noted();
+        assert!(state.environment_notes().is_empty());
+        // A failure that does not blame the machine still blocks.
+        state.record("/home", [test("cargo test -p a", 101, "-p a")], Some("t1"));
+        assert!(
+            state
+                .block("/home", |_| Some("t1".into()), |_| false, |_| true)
+                .is_some()
+        );
     }
 
     #[test]

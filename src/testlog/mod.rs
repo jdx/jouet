@@ -125,6 +125,11 @@ regexes! {
     ANSI = "\x1b\\[[0-9;?]*[ -/]*[@-~]";
     TASK_PREFIX = r"^\[[^\]\s]+\] ";
     COUNT = r"\b(\d+) (passed|failed|errors?|skipped|ignored|todo|pending)\b";
+    // A line that blames the machine, not the code: no D-Bus or keyring, a
+    // system library missing, no network, an API's rate limit. Not a
+    // missing command or file, which is most often the change's own (a
+    // binary it did not build).
+    ENVIRONMENT = r"(?i)(dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|api rate limit exceeded)";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_BLOCK = r"^---- (.+) stdout ----$";
@@ -191,6 +196,20 @@ regexes! {
     TAP_OK = r"^ok \d+ ";
     TAP_SKIP = r"(?i)^ok \d+ .*# skip\b";
     TAP_NOT_OK = r"^not ok \d+ (.+?)(?: # .*)?$";
+}
+
+/// What a failed run's `text` blames on the machine, when each failure
+/// it names, or its end when it names none, has a line that does (see
+/// `ENVIRONMENT`): the first such line, cut short. None when any failure
+/// says nothing of the kind, as one the change caused.
+pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String> {
+    let digest = digest_with(text, true, 0, formats);
+    let mut first = None;
+    for failure in &digest.failures {
+        let line = failure.lines.iter().find(|l| ENVIRONMENT.is_match(l))?;
+        first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
+    }
+    first
 }
 
 /// [`digest_with`] jouet's own formats alone.
