@@ -154,6 +154,12 @@ ran() {
 	assert_line "t1 (pending): mise task \`build-test\`, ran 3 times in 2 sessions"
 }
 
+unicode_sessions() {
+	local ROOT
+	ROOT=$(pwd -P)
+	sessions
+}
+
 @test "propose reads transcripts for a project with a Unicode path" {
 	mkdir -p 'café_🧸'
 	cd 'café_🧸'
@@ -164,12 +170,11 @@ ran() {
 	touch Cargo.toml
 	git add mise.toml Cargo.toml
 	git commit -qm init
-	ROOT=$(pwd -P)
-	sessions
+	unicode_sessions
 
 	run --separate-stderr jouet task propose
 	assert_success
-	assert_line "read 2 sessions in $ROOT since 14d"
+	assert_line "read 2 sessions in $(pwd -P) since 14d"
 }
 
 @test "propose suggests mise.local.toml where the repository shares no mise config" {
