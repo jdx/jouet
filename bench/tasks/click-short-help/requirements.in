@@ -1,0 +1,2 @@
+pytest==8.4.2
+flit-core==3.12.0
