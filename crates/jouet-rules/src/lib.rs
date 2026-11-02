@@ -347,8 +347,8 @@ pub struct Rule {
     /// Its examples, as far as they could be read.
     pub examples: Vec<Case>,
     /// Why its examples do not cover both kinds, or could not be read, such
-    /// as `it has no examples`. A rule of yours or a repository's with a
-    /// reason here only warns, and cannot be promoted or shared.
+    /// as `it has no examples`. A rule of yours with a reason here only
+    /// warns, and cannot be promoted or shared; one from outside is broken.
     pub missing_examples: Option<String>,
     pub format: Format,
     /// The line its `[[rule]]` table starts on, in a TOML file.

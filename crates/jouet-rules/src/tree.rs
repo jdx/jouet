@@ -1,5 +1,6 @@
 //! The tree a check ran against: a hash of the content of every tracked
-//! file in the work tree, staged or not.
+//! file in the work tree, staged or not, and of untracked files that are
+//! not ignored.
 //!
 //! It is built from git's own object ids, read without writing anything to
 //! the repository: `git ls-files -s` for the index, then `git hash-object`

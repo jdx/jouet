@@ -8,9 +8,11 @@
 //! ```
 //!
 //! A Luau rule file lists them in its table's `examples`, in the same
-//! shapes. Every rule declares at least one of each. A rule of yours or a
-//! repository's without them still runs, but only warns, and cannot be
-//! promoted to deny or shared until it has them and passes them.
+//! shapes. Every rule declares at least one of each. A rule of yours
+//! without them still runs, but only warns, and cannot be promoted to deny
+//! or shared until it has them and passes them. One from outside (a
+//! repository's, a plugin's or the system's) that lacks or fails them is
+//! broken and does not run.
 
 use crate::decl::{CaseDecl, CaseTable, ExamplesDecl, ExpectAction};
 use crate::{Action, Body, Call, Engine, Event, Kind, Record, Rule, State};

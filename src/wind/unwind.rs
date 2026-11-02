@@ -1,5 +1,5 @@
 //! Proposing rules to retire: user and repository rules that are noisy,
-//! nearly always overridden, or broken. Built-in rules are never proposed;
+//! overridden at least half the time, or broken. Built-in rules are never proposed;
 //! they are jouet's floor.
 
 use super::Paths;

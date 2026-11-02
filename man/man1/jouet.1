@@ -328,7 +328,7 @@ Record what a review proposed, to show at the next session start
 Check your agents' memories for workarounds whose bug looks fixed
 .TP
 \fBunwind\fR
-Propose retiring rules that are noisy or always overridden, and unused tasks
+Propose retiring rules that are noisy or often overridden, and unused tasks
 .TP
 \fBtask\fR
 Propose mise tasks for commands agents keep repeating, and add one
@@ -1838,7 +1838,7 @@ Run only the tests the changes affect
 Measure changes from the merge base with REF (default: the upstream, else the default branch)
 .TP
 \fB\-\-adapter\fR \fI<NAME>\fR
-Use only this adapter: vitest, jest, pytest or graph (Go, Ruby and Java, from the code graph)
+Use only this adapter: vitest, jest, pytest, unittest, cargo or graph (Go, Ruby and Java, from the code graph)
 .TP
 \fB\-\-dry\-run\fR
 Print what would run and why, running nothing
@@ -2866,9 +2866,9 @@ Also record what it finds as notes, two a day at most, to show at session starts
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET UNWIND"
-Propose retiring rules that are noisy or always overridden, and unused tasks
+Propose retiring rules that are noisy or often overridden, and unused tasks
 
-Lists your rules and a trusted repository's that the hook ledger shows are nearly always overridden, fire on a large share of calls, or no longer load. Built\-in rules are never proposed. \-\-apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR. It also lists the mise tasks `jouet task apply` added that no agent session has run in the 21 days since, and still run what jouet wrote; \-\-apply removes them with `mise tasks rm`.
+Lists your rules and a trusted repository's that the hook ledger shows are overridden at least half the time over five or more firings, fire on a tenth or more of shell calls (at least 20 times), or no longer load. Built\-in rules are never proposed. \-\-apply moves your own rules to ~/.config/jouet/rules/retired/ and logs it; a repository's rules change through a PR. It also lists the mise tasks `jouet task apply` added that no agent session has run in the 21 days since, and still run what jouet wrote; \-\-apply removes them with `mise tasks rm`.
 .PP
 \fBUsage:\fR jouet unwind [OPTIONS]
 .PP

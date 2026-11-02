@@ -154,8 +154,10 @@ pub(crate) struct Estimate {
     pub kind: String,
     pub ms: u64,
     /// Samples taken on this machine.
+    #[serde(skip_serializing_if = "is_zero")]
     pub here: usize,
     /// Samples taken elsewhere.
+    #[serde(skip_serializing_if = "is_zero")]
     pub elsewhere: usize,
     /// The scale applied to the samples from elsewhere; None when the
     /// estimate is this machine's own median.
@@ -327,6 +329,10 @@ fn median_f(values: &[f64]) -> Option<f64> {
         n if n % 2 == 1 => Some(v[n / 2]),
         n => Some((v[n / 2 - 1] + v[n / 2]) / 2.0),
     }
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[cfg(test)]

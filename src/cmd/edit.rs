@@ -465,9 +465,8 @@ impl edit::Symbols for TreeSitter {
 const CALLERS_SHOWN: usize = 10;
 
 /// For each definition whose signature a symbol edit changed, its callers
-/// in files the edit does not change: from the code graph when the work
-/// tree has one, else references to its name matched by text, so some may
-/// be another definition's.
+/// in files the edit does not change, from the code graph. A work tree
+/// without one, or a definition the graph does not know, lists none.
 fn callers(report: &Report) -> Vec<Callers> {
     let changed: Vec<(&str, &edit::SignatureChange)> = report
         .files

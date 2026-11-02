@@ -73,9 +73,6 @@ pub(crate) struct Entry {
     /// it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deprecation: Option<String>,
-    /// For a `skip-verify`: the reason given, with credentials redacted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decisions: Vec<Decision>,
 }

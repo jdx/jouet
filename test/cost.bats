@@ -20,8 +20,12 @@ setup() {
 	assert_success
 	run --separate-stderr jouet cost --json
 	assert_success
-	run jq -r '.commands[] | select(.key == "python3 -m tornado.test.runtests tornado.test.web_test") | .kind' <<<"$output"
+	local json="$output"
+	run jq -r '.commands[] | select(.key == "python3 -m tornado.test.runtests tornado.test.web_test") | .kind' <<<"$json"
 	assert_output 'test'
+	# Timed only here, it leaves out the zero count of runs elsewhere.
+	run jq -c '.commands[0] | [.here, has("elsewhere")]' <<<"$json"
+	assert_output '[1,false]'
 }
 
 @test "uses the Codex thread ID when no jouet session ID is set" {
