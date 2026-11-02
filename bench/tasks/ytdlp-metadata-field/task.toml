@@ -15,10 +15,14 @@ single field name; templated output and explicit regular expressions should
 continue to work.
 
 Fix the metadata parser in yt-dlp, add tests, and commit your change. The
-problem can be exercised with synthetic metadata; a network download is not
-needed.
+problem can be exercised with synthetic metadata. Do not run live download
+tests or contact external media services; use the project's core tests.
 """
 
 [source]
 git = "~/src/yt-dlp"
 commit = "ba499ab0dcf2486d97f739e155264b305e0abd26"
+
+[env]
+# yt-dlp's default core test command excludes the live download tests.
+PYTEST_ADDOPTS = "-m 'not download'"
