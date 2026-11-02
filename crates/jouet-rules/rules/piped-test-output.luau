@@ -255,7 +255,10 @@ local rule: JouetRule = {
 				if script then
 					local inner = jouet.parse(script)
 					for j, step in inner do
-						local cut = not step.nested and runs(step) and cutter(inner, j)
+						local cut: JouetCommand? = nil
+						if not step.nested and runs(step) then
+							cut = cutter(inner, j)
+						end
 						if cut then
 							local env, words = {}, {}
 							for _, text in step.env do

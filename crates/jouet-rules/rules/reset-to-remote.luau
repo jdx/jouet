@@ -52,12 +52,13 @@ local rule: JouetRule = {
 			-- After a `cd` it cannot follow, the repository is unknown, and
 			-- the call's own would be the wrong one to ask.
 			local dir = dirs[i]
+			local project_dir = if type(dir) == "string" then dir else nil
 			local branch: string?, start: string? = nil, nil
 			if dir ~= false then
-				branch, start = target(command, dir)
+				branch, start = target(command, project_dir)
 			end
 			if branch and start then
-				local lost = jouet.git.ahead(branch, start, dir or nil)
+				local lost = jouet.git.ahead(branch, start, project_dir)
 				if lost and lost > 0 then
 					local s = if lost == 1 then "" else "s"
 					return jouet.warn(
