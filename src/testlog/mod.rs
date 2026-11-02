@@ -199,7 +199,7 @@ regexes! {
     PLAYWRIGHT_END = r"^\s*(?:\d+\)\s+.+\.(?:spec|test)\.[cm]?[jt]sx?:\d+:\d+\s+›|\d+ (?:failed|passed|skipped|flaky)\b|attachment #)";
     PLAYWRIGHT_SUMMARY = r"^\s+\d+ (?:failed|passed|skipped)(?: \([\d.hms ]+\))?\s*$";
     PLAYWRIGHT_ERROR = r"^\s*(?:(?:\w*Error|AssertionError):|Test timeout of \d+ms exceeded\b)";
-    PLAYWRIGHT_TIMEOUT = r"^\s*(?:Error:\s*)?Test timeout of \d+ms exceeded\b";
+    PLAYWRIGHT_TIMEOUT = r"^\s*(?:\w*Error:\s*)?Test timeout of \d+ms exceeded\b";
     // A line that blames the machine, not the code: no D-Bus or keyring, a
     // system library missing, no network, an API's rate limit, or no
     // database or service running on this machine (a refused connection to
