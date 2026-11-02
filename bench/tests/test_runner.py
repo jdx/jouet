@@ -8,6 +8,18 @@ from jbench import report, runner, stats, tasks
 from jbench.harness import HARNESSES
 
 
+def sample_wheel(root):
+    import zipfile
+
+    wheel = root / "bench_sample-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("bench_sample/__init__.py", "VALUE = 'installed'\n")
+        archive.writestr("bench_sample-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: bench-sample\nVersion: 1.0\n")
+        archive.writestr("bench_sample-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr("bench_sample-1.0.dist-info/RECORD", "")
+    return wheel
+
+
 class StatsTest(unittest.TestCase):
     def test_quantiles(self):
         self.assertEqual(stats.median([3, 1, 2]), 2)
@@ -34,6 +46,32 @@ class PlanTest(unittest.TestCase):
             self.assertEqual({(p.task, p.arm) for p in in_round}, {(t, a) for t in "ab" for a in ("plain", "jouet")})
         again = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
         self.assertEqual([p.id for p in planned], [p.id for p in again])
+
+    def test_failed_environment_skips_only_that_task(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "bad", "codex", "plain"),
+                   runner.Planned(1, "bad", "codex", "jouet"),
+                   runner.Planned(1, "good", "codex", "plain")]
+
+        def execute(item, *_):
+            if item.task == "bad":
+                raise tasks.EnvironmentSetupError("missing dependency")
+            return {"id": item.id, "task": item.task, "success": True, "usage": {}}
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=execute):
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+        self.assertEqual([r["task"] for r in records], ["bad", "good"])
+        self.assertIn("EnvironmentSetupError", records[0]["error"])
+        self.assertTrue(records[1]["success"])
+        self.assertTrue(any("environment setup already failed" in message for message in messages))
 
 
 class StopTest(unittest.TestCase):
@@ -231,6 +269,83 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_python_environment_is_isolated_and_available_to_the_run(self):
+        import dataclasses
+        import hashlib
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            task_dir.mkdir()
+            wheel = sample_wheel(root)
+            requirements = task_dir / "requirements.lock"
+            requirements.write_text(f"bench-sample==1.0 --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
+            home = root / "home"
+            home.mkdir()
+            workdir = root / "work"
+            workdir.mkdir()
+            env = {"HOME": str(home), "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath)),
+                   "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": str(root)}
+            info = tasks.setup_environment(task, env, workdir, root / "cache", root / "setup.log")
+            venv = home / ".venv"
+            self.assertEqual(env["VIRTUAL_ENV"], str(venv))
+            self.assertEqual(Path(env["PATH"].split(os.pathsep)[0]), venv / ("Scripts" if os.name == "nt" else "bin"))
+            self.assertFalse((workdir / ".venv").exists())
+            self.assertEqual(info["requirements_sha256"], hashlib.sha256(requirements.read_bytes()).hexdigest())
+            result = subprocess.run(["python3", "-c", "import sys, bench_sample; print(sys.prefix); print(bench_sample.VALUE)"], env=env, capture_output=True, text=True, check=True)
+            prefix, value = result.stdout.splitlines()
+            self.assertEqual(Path(prefix).resolve(), venv.resolve())
+            self.assertEqual(value, "installed")
+
+            # A changed artifact must not silently enter another run.
+            requirements.write_text("bench-sample==1.0 --hash=sha256:" + "0" * 64 + "\n")
+            other_home = root / "other-home"
+            other_home.mkdir()
+            other_env = {**env, "HOME": str(other_home), "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath))}
+            other_env.pop("VIRTUAL_ENV")
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "environment setup failed"):
+                tasks.setup_environment(task, other_env, workdir, root / "cache", root / "bad-setup.log")
+            self.assertIn("hash", (root / "bad-setup.log").read_text().lower())
+
+    def test_reference_solution_and_check_use_task_dependencies(self):
+        import argparse
+        import contextlib
+        import dataclasses
+        import hashlib
+        import io
+        from unittest.mock import patch
+        import agents
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "initial").write_text("base\n")
+            wheel = sample_wheel(root)
+            digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            (task_dir / "requirements.lock").write_text(f"{wheel.as_uri()} --hash=sha256:{digest}\n")
+            (task_dir / "solve.py").write_text("import bench_sample\nfrom pathlib import Path\nPath('answer').write_text(bench_sample.VALUE)\n")
+            (task_dir / "check.py").write_text("import bench_sample\nfrom pathlib import Path\nassert Path('answer').read_text() == bench_sample.VALUE\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="requirements.lock")
+            with patch.object(tasks, "load", return_value=task), contextlib.redirect_stdout(io.StringIO()):
+                result = agents.cmd_check_tasks(argparse.Namespace(tasks=["sample"], jouet=root / "unused"))
+            self.assertEqual(result, 0)
+
+    def test_python_environment_rejects_requirements_outside_task(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            task_dir.mkdir()
+            (root / "outside").write_text("")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, python_requirements="../outside")
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "inside the task directory"):
+                tasks.setup_environment(task, {}, root, root / "cache", root / "setup.log")
+
     def test_source_preserves_and_initializes_submodules(self):
         import dataclasses
         import os
@@ -362,6 +477,64 @@ if __name__ == "__main__":
 class CostSeedTest(unittest.TestCase):
     """A task's seed commands run once, through `jouet test --cmd`, and every
     run starts with the note they left."""
+
+    def test_unreadable_requirements_do_not_abort_other_tasks(self):
+        import dataclasses
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "requirements.lock").write_text("# locked\n")
+            bad = dataclasses.replace(tasks.load("smoke"), name="bad", dir=root,
+                                      cost_seed=["python3 -V"], python_requirements="requirements.lock")
+            good = dataclasses.replace(tasks.load("smoke"), name="good", cost_seed=[])
+            planned = [runner.Planned(1, name, "codex", "plain") for name in ("bad", "good")]
+            messages = []
+            with patch.object(tasks, "load", side_effect=lambda name: {"bad": bad, "good": good}[name]), \
+                    patch.object(Path, "read_bytes", side_effect=PermissionError("permission denied")):
+                notes = costs.seeds(planned, Path("jouet"), root, messages.append)
+            self.assertEqual(notes, {})
+            self.assertEqual(len(messages), 1)
+            self.assertIn("bad: cannot read Python requirements", messages[0])
+            self.assertIn("trials will retry setup", messages[0])
+
+    def test_seed_setup_failure_leaves_trials_to_retry(self):
+        from unittest.mock import patch
+        from jbench import costs
+
+        planned = [runner.Planned(1, "broken", "codex", "plain")]
+        messages = []
+        with patch.object(costs.tasks_mod, "load", return_value=tasks.load("smoke")), \
+                patch.object(costs, "seed", side_effect=tasks.EnvironmentSetupError("network unavailable")):
+            notes = costs.seeds(planned, Path("jouet"), Path("work"), messages.append)
+        self.assertEqual(notes, {})
+        self.assertIn("trials will retry setup", messages[0])
+
+    def test_seed_setup_failure_keeps_its_log_outside_the_work_tree(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a").write_text("a\n")
+            (task_dir / "requirements.lock").write_text("# locked\n")
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir, cost_seed=["python3 -V"],
+                                       python_requirements="requirements.lock")
+
+            def fail_setup(_task, _env, _workdir, _cache, log):
+                log.write_text("setup details\n")
+                raise tasks.EnvironmentSetupError(f"setup failed (log: {log})")
+
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup):
+                with self.assertRaises(tasks.EnvironmentSetupError):
+                    costs.seed(task, Path(sys.executable), root / "work", lambda _: None, root / "results")
+            self.assertEqual((root / "results" / "smoke.environment.log").read_text(), "setup details\n")
 
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
         import os

@@ -1,0 +1,3 @@
+# The historical project's test extra, pinned for benchmark repeatability.
+pytest==8.4.2
+pytest-rerunfailures==14.0
