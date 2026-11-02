@@ -433,13 +433,7 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
         })
         .map(|r| r.id)
         .collect();
-    let mut rerun = rerun_plan(
-        &reports,
-        &again,
-        in_progress,
-        !cancelled.is_empty(),
-        req.force,
-    );
+    let mut rerun = rerun_plan(&reports, &again, in_progress, &cancelled, req.force);
     if req.rerun {
         if !rerun.allowed {
             return Err(Refusal {
@@ -1203,7 +1197,7 @@ fn rerun_plan(
     reports: &[RunReport],
     target: &str,
     in_progress: bool,
-    cancelled: bool,
+    cancelled: &[u64],
     force: bool,
 ) -> Rerun {
     let failed: Vec<&JobReport> = reports.iter().flat_map(|r| &r.jobs).collect();
@@ -1222,7 +1216,7 @@ fn rerun_plan(
             format!("jouet ci explain {target} --rerun{flags}")
         }
     };
-    if failed.is_empty() && cancelled && !in_progress {
+    if failed.is_empty() && !cancelled.is_empty() && !in_progress {
         return Rerun {
             allowed: true,
             reason: "the run was cancelled before anything failed, so a rerun runs it".into(),
@@ -1230,7 +1224,7 @@ fn rerun_plan(
             // The run itself, since it has no failed job to name.
             jobs: reports
                 .iter()
-                .filter(|r| r.jobs.is_empty())
+                .filter(|r| cancelled.contains(&r.run_id))
                 .map(|r| format!("{} (run {}, cancelled)", r.workflow, r.run_id))
                 .collect(),
             runs: Vec::new(),
@@ -1318,14 +1312,14 @@ mod tests {
             jobs: Vec::new(),
             following: Vec::new(),
         };
-        let plan = rerun_plan(&[run(vec![15116])], "", true, false, false);
+        let plan = rerun_plan(&[run(vec![15116])], "", true, &[], false);
         assert!(!plan.allowed);
         assert!(
             plan.reason.contains("`jouet wait ci 15116`"),
             "{}",
             plan.reason
         );
-        let plan = rerun_plan(&[run(Vec::new())], "", true, false, false);
+        let plan = rerun_plan(&[run(Vec::new())], "", true, &[], false);
         assert!(plan.reason.contains("`jouet wait ci`"), "{}", plan.reason);
     }
 
@@ -1344,10 +1338,14 @@ mod tests {
             following: Vec::new(),
         };
         // Cancelled before anything failed: nothing to judge.
-        let plan = rerun_plan(&[report(Vec::new())], "--run 7", false, true, false);
+        // A passed run beside it, with no jobs either, is not named.
+        let mut passed = report(Vec::new());
+        passed.run_id = 8;
+        passed.workflow = "ci".into();
+        let plan = rerun_plan(&[report(Vec::new()), passed], "--run 7", false, &[7], false);
         assert!(plan.allowed, "{}", plan.reason);
         assert_eq!(plan.jobs, ["release (run 7, cancelled)"]);
-        assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, false, false).allowed);
+        assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, &[], false).allowed);
         let job = || JobReport {
             name: "Release".into(),
             job_id: 1,
@@ -1367,7 +1365,7 @@ mod tests {
             log_path: None,
         };
         // Refused without --force, and the refusal names it.
-        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, false, false);
+        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, &[], false);
         assert!(!plan.allowed);
         assert!(
             plan.reason
@@ -1377,10 +1375,10 @@ mod tests {
         );
         let mut real = job();
         real.verdict = Verdict::Real;
-        let plan = rerun_plan(&[report(vec![real])], "--run 7", false, false, false);
+        let plan = rerun_plan(&[report(vec![real])], "--run 7", false, &[], false);
         assert!(!plan.reason.contains("--force"), "{}", plan.reason);
         assert!(plan.reason.contains("real failure"), "{}", plan.reason);
-        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, false, true);
+        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, &[], true);
         assert!(plan.allowed, "{}", plan.reason);
         assert!(plan.reason.starts_with("forced"), "{}", plan.reason);
     }
