@@ -293,7 +293,7 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 
 One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
 
-A run that passed without running a test says so (`passed in 0.2s, but no test ran: a filter or path that matched nothing?`) when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, jest or go saying they ran none. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
+A run that passed without running a test says so when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, jest or go saying they ran none. With `--cmd`, if the command is recognised as a test and its output shows no test ran, jouet exits `4` instead of accepting the runner's successful exit; check the filter or path. An unrecognised command retains its own exit code, and an empty `--affected` plan still succeeds. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
 
 ### Your own runners: formats
 
@@ -366,7 +366,7 @@ run = "jouet test --affected"
 | `0` | the tests passed, every failure also fails at the merge base, or nothing needed to run |
 | `1` | the tests failed (the runner exited non-zero), the `--cmd` command exited non-zero, or the runner could not list the tests a change affects |
 | `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--cmd` without a command or with `--affected`, `--budget` after `--` (where it would go to the command), an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
-| `4` | no adapter or test task was found, the runner or the `--cmd` program is not installed, not in a git repository, or `.jouet/test.toml` is untrusted or has changed since it was trusted |
+| `4` | a recognised `--cmd` test ran no tests, no adapter or test task was found, the runner or the `--cmd` program is not installed, not in a git repository, or `.jouet/test.toml` is untrusted or has changed since it was trusted |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.
 

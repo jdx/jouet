@@ -280,17 +280,21 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             if let [record] = records.as_slice() {
                 timed.push(crate::cost::Sample::of(record, ms, code));
             }
+            suite.log = Some(log.display().to_string());
+            let output = std::fs::read(&log).unwrap_or_default();
+            let output = String::from_utf8_lossy(&output);
+            let digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let empty_test = args.cmd
+                && code == 0
+                && digest.no_tests
+                && matches!(records.as_slice(), [record] if record.kind == jouet_rules::Kind::Test);
             if let Some(ticket) = ticket {
                 let command = match records.as_slice() {
                     [record] => Some(record.command.as_str()),
                     _ => None,
                 };
-                ticket.finish(command, ms, code == 0);
+                ticket.finish(command, ms, code == 0 && !empty_test);
             }
-            suite.log = Some(log.display().to_string());
-            let output = std::fs::read(&log).unwrap_or_default();
-            let output = String::from_utf8_lossy(&output);
-            let digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if code != 0 {
                 environment.push(testlog::environment_cause(&output, &formats));
             }
@@ -309,12 +313,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = (job.exit)(code);
+            let suite_exit = if empty_test {
+                Exit::Precondition
+            } else {
+                (job.exit)(code)
+            };
             if suite_exit == Exit::Failed || exit == Exit::Ok {
                 exit = suite_exit;
             }
             if !out.json {
-                emit(&outcome(suite, stream));
+                emit(&outcome(suite, stream, empty_test));
             }
         }
     }
@@ -986,9 +994,10 @@ fn text(report: &Report) -> String {
 
 /// How a suite's run ended: a line with its counts and its log, and for an
 /// agent (`!streamed`) the failures it found, cut to the budget.
-fn outcome(suite: &SuiteReport, streamed: bool) -> String {
+fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
     let mut s = match suite.exit_code {
+        Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
         Some(0) => format!("{}: passed in {secs:.1}s", suite.adapter),
         Some(code) => format!("{}: failed (exit {code}) in {secs:.1}s", suite.adapter),
         None => return format!("{}: did not run\n", suite.adapter),
@@ -1007,7 +1016,9 @@ fn outcome(suite: &SuiteReport, streamed: bool) -> String {
     }
     // A pass of nothing proves nothing: say so, so the agent does not read
     // the log to find out, or take it for its test passing.
-    if digest.no_tests && suite.exit_code == Some(0) {
+    if empty_test {
+        s.push_str(": a filter or path that matched nothing? (exit 4)");
+    } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
     if streamed || suite.exit_code == Some(0) {

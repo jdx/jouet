@@ -517,6 +517,31 @@ tap_script() {
 	assert_equal "$(cat "$log")" "$(./run-tests)"
 }
 
+@test "--cmd refuses a recognised test run that selected no tests" {
+	mkdir bin
+	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo
+	chmod +x bin/cargo
+	export PATH="$PWD/bin:$PATH"
+
+	run --separate-stderr jouet test --cmd -- cargo test missing_name
+	assert_failure 4
+	assert_output --partial 'no test ran'
+	assert_output --partial '(exit 4)'
+
+	run --separate-stderr jouet test --json --cmd -- cargo test missing_name
+	assert_failure 4
+	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].no_tests]' <<<"$output")" '[false,0,true]'
+
+	# The output alone cannot turn an unrelated command into a failed check.
+	cp bin/cargo ./other-command
+	run --separate-stderr jouet test --cmd -- ./other-command
+	assert_success
+
+	printf '#!/bin/sh\nprintf "running 1 test\\ntest one ... ok\\ntest result: ok. 1 passed; 0 failed; 0 ignored\\n"\n' >bin/cargo
+	run --separate-stderr jouet test --cmd -- cargo test one
+	assert_success
+}
+
 @test "a failing run shows each failure up to the budget, then names the rest" {
 	tap_script 6 "2 3 4 5 6"
 
