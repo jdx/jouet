@@ -1,0 +1,29 @@
+description = "Fix shell completion mutating caller arguments in spf13/cobra#2257"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 900
+check_timeout_s = 180
+prompt = """
+When Cobra executes shell completion, it can overwrite the caller's argument
+array, including os.Args, while parsing flags. Applications may inspect those
+arguments from a completion callback. Preserve the caller's arguments and
+normal completion behavior, including when child traversal is enabled.
+Add tests and commit your change.
+"""
+
+[source]
+git = "~/src/cobra-bench-source"
+commit = "f2878bab8c96afd6e36968af96343b35dbb82a82"
+
+[tools]
+go = "go"
+gofmt = "gofmt"
+golangci-lint = "golangci-lint"
+
+[env]
+GOMODCACHE = "~/go/pkg/mod"
+GOPROXY = "off"
+GOTOOLCHAIN = "local"
