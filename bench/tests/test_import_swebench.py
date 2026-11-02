@@ -29,6 +29,12 @@ diff --git a/calc.py b/calc.py
  def add(a, b):
 -    return a - b
 +    return a + b
+diff --git a/legacy.py b/legacy.py
+deleted file mode 100644
+--- a/legacy.py
++++ /dev/null
+@@ -1 +0,0 @@
+-OLD = True
 """
 
 TESTS = """\
@@ -189,6 +195,7 @@ class ImportTest(unittest.TestCase):
             "    def test_zero(self):\n        self.assertEqual(add(0, 0), 0)\n"
         )
         (repo / "old_test.py").write_text("x = 1\n")
+        (repo / "legacy.py").write_text("OLD = True\n")
         git(repo, "init", "-q", "-b", "main")
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "base")
@@ -206,7 +213,7 @@ class ImportTest(unittest.TestCase):
         meta = json.loads((self.task / "swebench.json").read_text())
         self.assertEqual(meta["test_files"], ["test_calc.py"])
         self.assertEqual(meta["deleted_test_files"], ["old_test.py"])
-        self.assertEqual(meta["patch_files"], ["calc.py"])
+        self.assertEqual(meta["patch_files"], ["calc.py", "legacy.py"])
         self.assertIn("test_add", (self.task / "hidden" / "test_calc.py").read_text())
         self.assertEqual((self.task / "fix.patch").read_text(), FIX)
         raw = tomllib.loads((self.task / "task.toml").read_text())
@@ -235,6 +242,24 @@ class ImportTest(unittest.TestCase):
         solved = run("check.py")
         self.assertEqual(solved.returncode, 0, solved.stdout + solved.stderr)
         self.assertIn("committed: True", solved.stdout)
+        # The gold patch's deletion is committed with the rest.
+        self.assertNotIn("legacy.py", git(work, "ls-tree", "--name-only", "HEAD"))
+
+    def test_a_timeout_keeps_what_the_tests_printed(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["test_command"] = ["{python}", "-c", "import sys, time; print('started', flush=True); time.sleep(30)"]
+        meta["test_timeout_s"] = 2
+        meta_path.write_text(json.dumps(meta))
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("timed out", proc.stdout)
+        self.assertIn("started", proc.stdout)
+        self.assertIn("started", (self.tmp / "acme__calc-7.test.log").read_text())
 
 
 class ToolTest(unittest.TestCase):

@@ -114,6 +114,10 @@ def place_hidden(task_dir: Path, spec: dict) -> None:
             os.remove(rel)
 
 
+def save_log(spec: dict, log: str) -> None:
+    Path(os.environ.get("TMPDIR", "/tmp"), f"{spec['instance_id']}.test.log").write_text(log)
+
+
 def check(task_dir: Path) -> None:
     spec = load(task_dir)
     place_hidden(task_dir, spec)
@@ -123,12 +127,16 @@ def check(task_dir: Path) -> None:
     command = [sys.executable if arg == "{python}" else arg for arg in spec["test_command"]]
     try:
         proc = subprocess.run(command, capture_output=True, text=True, env=env, timeout=spec.get("test_timeout_s", 600))
-    except subprocess.TimeoutExpired:
-        expect(False, f"the tests timed out: {' '.join(command)}")
+    except subprocess.TimeoutExpired as error:
+        # What the runner printed before it hung, which may be bytes.
+        partial = "".join(out.decode(errors="replace") if isinstance(out, bytes) else out
+                          for out in (error.stdout, error.stderr) if out)
+        save_log(spec, partial)
+        expect(False, f"the tests timed out: {' '.join(command)}\n{partial[-3000:]}")
         finish()
         return
     log = proc.stdout + proc.stderr
-    Path(os.environ.get("TMPDIR", "/tmp"), f"{spec['instance_id']}.test.log").write_text(log)
+    save_log(spec, log)
     parser = PARSERS.get(spec["log_format"])
     if parser is None:
         expect(proc.returncode == 0, f"the tests exited {proc.returncode}:\n{log[-3000:]}")

@@ -49,6 +49,8 @@ ENVS = Path("~/src/swebench/envs")
 # An environment gets the packages released by this long after the instance.
 CUTOFF_MARGIN = timedelta(days=180)
 BUILD_TOOLS_CUTOFF = "2024-01-01T00:00:00Z"
+# The file in an environment that says `prime` finished it.
+PRIMED = ".jouet-primed"
 # The line every task from a real project ends its prompt with.
 ASK = "Fix this in {project}, with a test, and commit."
 
@@ -227,7 +229,7 @@ def write_task(record: dict, out: Path, clones: Path, envs: Path, dataset: str, 
     instance = record["instance_id"]
     repo = clone(record["repo"], clones, record["base_commit"])
     tests, deleted = patch_files(repo, record["base_commit"], record["test_patch"])
-    fixed, _ = patch_files(repo, record["base_commit"], record["patch"])
+    fixed, removed = patch_files(repo, record["base_commit"], record["patch"])
     files = sorted(tests)
     command = test_command(spec, record, files)
     task = out / task_name(instance)
@@ -253,7 +255,8 @@ def write_task(record: dict, out: Path, clones: Path, envs: Path, dataset: str, 
         "log_format": spec.log_format,
         "test_files": files,
         "deleted_test_files": deleted,
-        "patch_files": sorted(fixed),
+        # What the gold patch changes, deletions included, for `solve.py` to commit.
+        "patch_files": sorted([*fixed, *removed]),
         "fail_to_pass": record["FAIL_TO_PASS"],
         "pass_to_pass": record["PASS_TO_PASS"],
     }
@@ -318,9 +321,14 @@ def prime(task: Path, clones: Path, envs: Path) -> Path | None:
         log(f"{task.name}: not a Python project; only the clone was primed")
         return None
     env = envs.expanduser() / meta["instance_id"]
-    if (env / "bin" / "python").exists():
+    # Written last, so an interrupted prime is built again.
+    primed = env / PRIMED
+    if primed.exists():
         log(f"{task.name}: {env} is already primed")
         return env
+    if env.exists():
+        subprocess.run(["chmod", "-R", "u+w", str(env)], check=True)
+        shutil.rmtree(env)
     uv = shutil.which("uv")
     if not uv:
         raise SystemExit("prime needs uv (MISE_ENV=bench mise x -- python3 bench/import_swebench.py prime ...)")
@@ -359,6 +367,7 @@ def prime(task: Path, clones: Path, envs: Path) -> Path | None:
         except subprocess.CalledProcessError:
             shutil.rmtree(env)
             raise SystemExit(f"{task.name}: could not install its environment (above)") from None
+    primed.write_text(f"{meta['instance_id']}\n")
     subprocess.run(["chmod", "-R", "a-w", str(env)], check=True)
     log(f"{task.name}: primed {env}")
     return env
