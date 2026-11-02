@@ -86,6 +86,9 @@ fn no_tests(lines: &[String]) -> bool {
 /// The most passing tests a digest names.
 const PASSES_NAMED: usize = 8;
 
+/// The longest name a digest lists, in characters.
+const NAME_MAX: usize = 120;
+
 fn is_zero(n: &u64) -> bool {
     *n == 0
 }
@@ -169,7 +172,9 @@ regexes! {
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
-    TAP_OK_NAME = r"^ok \d+ (.+?)(?: # .*)?$";
+    // The description, without the optional `-` before it or a `#`
+    // directive after: a directive alone names no test.
+    TAP_OK_NAME = r"^ok \d+(?: -)?\s+([^#]*[^#\s])\s*(?:#.*)?$";
     LIBTEST_BLOCK = r"^---- (.+) stdout ----$";
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
@@ -303,15 +308,16 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         failures,
         more_failures,
         failures_omitted,
-        // Only when every pass is named, so a list is never a part of them.
+        // Only when every pass is named, whole, so a list is never a part
+        // of them and no name is cut to look like another.
         passed_names: if parsed.passed as usize == parsed.passed_names.len()
             && parsed.passed_names.len() <= PASSES_NAMED
-        {
-            parsed
+            && parsed
                 .passed_names
                 .iter()
-                .map(|n| n.chars().take(80).collect())
-                .collect()
+                .all(|n| n.chars().count() <= NAME_MAX)
+        {
+            parsed.passed_names.clone()
         } else {
             Vec::new()
         },

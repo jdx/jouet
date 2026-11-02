@@ -549,6 +549,17 @@ fn a_small_passing_run_names_its_tests() {
             .passed_names
             .is_empty()
     );
+    // TAP's `-` is not part of the name, and a directive alone names nothing.
+    let dash = "1..1\nok 1 - example\n";
+    assert_eq!(
+        digest(dash, false, DEFAULT_BUDGET).passed_names,
+        ["example"]
+    );
+    let todo = "1..2\nok 1 named\nok 2 # TODO pending\n";
+    assert!(digest(todo, false, DEFAULT_BUDGET).passed_names.is_empty());
+    // A name too long to show whole is not cut: none are named.
+    let long = format!("1..1\nok 1 {}\n", "x".repeat(121));
+    assert!(digest(&long, false, DEFAULT_BUDGET).passed_names.is_empty());
     let quiet = "running 2 tests\n..\ntest result: ok. 2 passed; 0 failed; 0 ignored\n";
     assert!(digest(quiet, false, DEFAULT_BUDGET).passed_names.is_empty());
 }
