@@ -700,6 +700,9 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         "psql: error: connection to server on socket \"/tmp/.s.PGSQL.5432\" failed: No such file or directory",
         "Error: connect ECONNREFUSED 127.0.0.1:6379",
         "        dial error: dial tcp 127.0.0.1:5432: connect: connection refused",
+        // Go with no network: offline, or a name that does not resolve.
+        "mise go@1.27.3 go: github.com/go-delve/delve/cmd/dlv@latest: module lookup disabled by GOPROXY=off",
+        "Get \"https://proxy.golang.org/x\": dial tcp: lookup proxy.golang.org on 127.0.0.53:53: no such host",
     ] {
         let text = format!("1..1\nnot ok 1 a\n# {line}\n");
         assert!(environment_cause(&text, &[]).is_some(), "{line}");
