@@ -28,6 +28,8 @@ const OUTPUT_TAIL: usize = 20;
 /// The most lines marked as failures shown from above an unrecognised
 /// failure's end.
 const MARKED_MAX: usize = 10;
+/// The name of an unrecognised failure's lines marked as failures.
+const MARKED: &str = "no failure recognised; lines marked as failures";
 /// Bytes past the budget that the names of failures not shown may take.
 const NAMES_SLACK: usize = 200;
 
@@ -311,7 +313,9 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
     }
     let digest = digest_with(text, true, 0, formats);
     let mut first = None;
-    for failure in &digest.failures {
+    // The lines marked as failures above an unrecognised end only point at
+    // it; the end, which keeps the rest of the output, is what is judged.
+    for failure in digest.failures.iter().filter(|f| f.name != MARKED) {
         let line = failure.lines.iter().find(|l| blames_machine(l))?;
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
@@ -446,7 +450,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         if !marked.is_empty() {
             found.push(Found {
                 at: 0,
-                name: "no failure recognised; lines marked as failures".into(),
+                name: MARKED.into(),
                 lines: marked,
             });
         }

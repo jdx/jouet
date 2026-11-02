@@ -253,6 +253,11 @@ fn an_unrecognised_failure_also_shows_lines_marked_as_failures_above_the_end() {
         d.failures[0].lines,
         ["FAIL swebench-pylint-4551: the check should pass when solved:"]
     );
+    // A machine the end blames is still blamed, whatever the marked lines say.
+    let text = "FAIL keyring: stores the token\n".to_string()
+        + &(1..=30).map(|i| format!("step {i}\n")).collect::<String>()
+        + "Error: DBus error: no bus\n";
+    assert!(environment_cause(&text, &[]).is_some());
 }
 
 #[test]
