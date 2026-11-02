@@ -21,6 +21,7 @@ mod classify;
 mod codegraph;
 mod graph;
 mod js;
+mod project_config;
 mod pyimports;
 mod python;
 
@@ -385,6 +386,11 @@ pub(crate) fn plan(
     extra: &[String],
 ) -> Result<Plan, Error> {
     let (root, project, names) = locate(cwd, only)?;
+    let pytest_extra = if names.contains(&"pytest") {
+        project_config::pytest_args(&root)?
+    } else {
+        Vec::new()
+    };
     let base = changes::base(&root, since)?;
     let changes = changes::changed(&root, &base.merge_base)?;
     let adapters: Vec<Box<dyn Adapter>> = names.iter().filter_map(|n| load(n, &project)).collect();
@@ -410,7 +416,23 @@ pub(crate) fn plan(
     let suites = adapters
         .into_iter()
         .zip(effects)
-        .map(|(adapter, files)| decide(adapter, project.clone(), files, &base, &changes, extra))
+        .map(|(adapter, files)| {
+            let configured = adapter.name() == "pytest" && !pytest_extra.is_empty();
+            let args = if configured {
+                pytest_extra.iter().chain(extra).cloned().collect::<Vec<_>>()
+            } else {
+                extra.to_vec()
+            };
+            let mut suite = decide(adapter, project.clone(), files, &base, &changes, extra, &args)?;
+            if configured && matches!(suite.decision, Decision::Affected) && suite.command.is_some() {
+                let note = "pytest arguments from .jouet/test.toml restrict this affected run; they do not apply to the full suite";
+                suite.note = Some(match suite.note {
+                    Some(previous) => format!("{previous}; {note}"),
+                    None => note.into(),
+                });
+            }
+            Ok(suite)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Plan {
         base,
@@ -521,6 +543,7 @@ fn decide(
     base: &Base,
     changes: &[Change],
     extra: &[String],
+    selection_extra: &[String],
 ) -> Result<Suite, Error> {
     let mut suite = Suite {
         adapter,
@@ -569,7 +592,7 @@ fn decide(
     }
     let selection = suite
         .adapter
-        .select(&suite.project, base, &sources, extra)?;
+        .select(&suite.project, base, &sources, selection_extra)?;
     suite.note = selection.note;
     if selection.tests.is_empty() {
         suite.decision = Decision::Nothing("no test depends on the changed files".into());

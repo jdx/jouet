@@ -3,9 +3,9 @@
 
 - **Usage:** `jouet trust [--yes] [--list]`
 
-Trust this repository's rules, routines and plugins as they are now
+Trust this repository's jouet files as they are now
 
-Covers .jouet/rules, .jouet/routines and the plugins .jouet/plugins.toml pins, together. Prints the rules, fetches the pinned plugins, and runs every rule's examples; trusts nothing (exit 1) if one fails, lacks either kind or does not load. Trust is kept against a hash of every file in them: a change on a pull or another branch needs trusting again, and going back to files trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless --yes is given, and the built-in `trust` rule denies it to an agent.
+Covers .jouet/rules, .jouet/routines, .jouet/formats, .jouet/test.toml and the plugins .jouet/plugins.toml pins, together. Prints the rules and test configuration, fetches the pinned plugins, and runs every rule's examples; trusts nothing (exit 1) if one fails, lacks either kind or does not load. Trust is kept against a hash of every file in them: a change on a pull or another branch needs trusting again, and going back to files trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless --yes is given, and the built-in `trust` rule denies it to an agent.
 
 ## Flags
 - **`--yes`** — Trust without a terminal, for a script or CI run by the user

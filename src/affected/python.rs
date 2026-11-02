@@ -175,11 +175,16 @@ impl Pytest {
 
     /// testmon's selection: the test files `pytest --testmon --collect-only`
     /// lists.
-    fn testmon(&self, project: &Project) -> Result<(Vec<String>, Option<String>), Error> {
+    fn testmon(
+        &self,
+        project: &Project,
+        extra: &[String],
+    ) -> Result<(Vec<String>, Option<String>), Error> {
         let argv = self.pytest(project)?;
         let fresh = !project.dir.join(".testmondata").exists();
         let out = Command::new(&argv[0])
             .args(&argv[1..])
+            .args(extra)
             .args(["--testmon", "--collect-only", "-q"])
             .envs(self.env())
             .current_dir(&project.dir)
@@ -495,7 +500,7 @@ impl Adapter for Pytest {
         let mut argv = self.pytest(project)?;
         argv.extend(extra.iter().cloned());
         if self.testmon {
-            let (files, note) = self.testmon(project)?;
+            let (files, note) = self.testmon(project, extra)?;
             argv.push("--testmon".into());
             return Ok(Selection {
                 tests: files

@@ -21,6 +21,66 @@ setup() {
 	init_repo
 }
 
+@test "trusted project pytest options apply to affected runs only" {
+	cp -R "$FIXTURES/pytest/." .
+	mkdir -p .jouet .venv/bin
+	printf '[pytest]\naffected_args = ["-m", "not download"]\n' >.jouet/test.toml
+	printf '#!/bin/sh\nexit 1\n' >.venv/bin/pytest
+	printf '#!/bin/sh\nexit 1\n' >.venv/bin/python
+	chmod +x .venv/bin/pytest .venv/bin/python
+	printf '.venv/\n' >.gitignore
+	git add .jouet/test.toml .gitignore pyproject.toml src tests
+	git commit -qm base
+	git checkout -qb work
+	printf '\n# change\n' >>src/calc/ops.py
+
+	run --separate-stderr jouet test --affected --since main --dry-run
+	assert_failure 4
+	assert_stderr --partial 'not trusted'
+
+	run --separate-stderr jouet trust --yes
+	assert_success
+	assert_line --partial 'affected_args'
+	run --separate-stderr jouet test --affected --since main --dry-run --json
+	assert_success
+	run jq -r '.suites[0] | [.command[], .note] | join(" ")' <<<"$output"
+	assert_output --partial '-m not download'
+	assert_output --partial 'restrict this affected run'
+
+	# Testmon must collect with the same filter as the eventual pytest run.
+	printf '#!/bin/sh\nexit 0\n' >.venv/bin/python
+	cat >.venv/bin/pytest <<'SH'
+#!/bin/sh
+printf '%s\n' "$@" >"$PYTEST_ARGS_LOG"
+printf 'tests/test_ops.py::test_add\n'
+SH
+	export PYTEST_ARGS_LOG="$BATS_TEST_TMPDIR/pytest-args"
+	run --separate-stderr jouet test --affected --since main --dry-run --json
+	assert_success
+	run cat "$PYTEST_ARGS_LOG"
+	assert_line -- '-m'
+	assert_line -- 'not download'
+	assert_line -- '--collect-only'
+
+	run --separate-stderr jouet test --dry-run --json
+	assert_success
+	run jq -r '.suites[0].command | join(" ")' <<<"$output"
+	refute_output --partial 'not download'
+
+	# A change jouet cannot safely narrow still runs the full pytest suite.
+	mkdir -p .github/workflows
+	printf 'name: CI\n' >.github/workflows/test.yml
+	run --separate-stderr jouet test --affected --since main --dry-run --json
+	assert_success
+	run jq -r '.suites[0] | [.decision, (.command | join(" "))] | join(" ")' <<<"$output"
+	assert_output --partial 'full '
+	refute_output --partial 'not download'
+
+	printf '\n# changed\n' >>.jouet/test.toml
+	run --separate-stderr jouet test --affected --since main --dry-run
+	assert_failure 4
+}
+
 # Skips the test when TOOL cannot be had, or fails it in CI, where it must be.
 need() {
 	if [[ -n "${CI:-}" ]]; then

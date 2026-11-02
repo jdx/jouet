@@ -161,7 +161,7 @@ pub(crate) enum Cmd {
     Ci(CiArgs),
     /// List and test the rules jouet's hooks run
     Rule(RuleArgs),
-    /// Trust this repository's rules, routines and plugins as they are now
+    /// Trust this repository's jouet files as they are now
     Trust(TrustArgs),
     /// Stop trusting this repository's rules, routines and plugins
     Untrust(UntrustArgs),

@@ -19,7 +19,8 @@ safety of commands defined by the project.
 Initialization does not trust the repository. Review the written files and
 run `jouet rule test .jouet/rules/project-test.toml`; a person can then decide
 whether to run `jouet trust`. Trust applies to the repository's rules,
-routines, formats and plugins, not only the file created by init.
+routines, formats, test configuration and plugins, not only the file created
+by init.
 
 `jouet init --json` returns one document with the files and tasks found and each
 proposal's path, evidence, contents and write status. No terminal is needed.

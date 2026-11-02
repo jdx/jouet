@@ -118,6 +118,8 @@ struct Trusted {
     routines: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     plugins: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    test_config: Option<String>,
 }
 
 /// This repository's set.
@@ -129,7 +131,7 @@ fn target(cwd: &Path) -> Result<Set, (Exit, String)> {
         .ok_or_else(|| {
             (
             Exit::NotFound,
-            "no .jouet/rules, .jouet/routines or .jouet/plugins.toml at the root of this repository"
+            "no .jouet/rules, .jouet/routines, .jouet/test.toml or .jouet/plugins.toml at the root of this repository"
                 .into(),
         )
         })
@@ -204,11 +206,15 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         rules: checked,
         routines: routine_names,
         plugins: pinned.plugin.keys().cloned().collect(),
+        test_config: std::fs::read_to_string(set.root.join("test.toml")).ok(),
     };
     let reviewed = |report: &Trusted| {
         let mut text = checked_text(&report.rules);
         if !report.routines.is_empty() {
             let _ = writeln!(text, "routines: {}", report.routines.join(", "));
+        }
+        if let Some(config) = &report.test_config {
+            let _ = writeln!(text, "test.toml:\n{config}");
         }
         text
     };
