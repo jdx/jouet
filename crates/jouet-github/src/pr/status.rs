@@ -489,8 +489,13 @@ impl Fetched {
             return;
         }
         let mut latest = std::collections::HashMap::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut ambiguous = std::collections::HashSet::new();
         for c in &self.contexts {
             if let Some((key, id)) = c.workflow_identity() {
+                if !seen.insert((key, id)) {
+                    ambiguous.insert(key);
+                }
                 latest
                     .entry(key)
                     .and_modify(|n: &mut (u64, u64)| *n = (*n).max(id))
@@ -503,9 +508,9 @@ impl Fetched {
                 continue;
             };
             let bucket = bucket(state);
-            let superseded = c
-                .workflow_identity()
-                .is_some_and(|(key, id)| latest.get(&key).is_some_and(|newest| id < *newest));
+            let superseded = c.workflow_identity().is_some_and(|(key, id)| {
+                !ambiguous.contains(&key) && latest.get(&key).is_some_and(|newest| id < *newest)
+            });
             if superseded {
                 let count = match bucket {
                     Bucket::Pass => &mut checks.pass,
@@ -696,7 +701,16 @@ fn read_prs(
 fn read_page(pr: &mut Fetched, lookup: &Lookup, entry: &Value) -> Result<(), String> {
     match lookup {
         Lookup::Threads { .. } => pr.add_threads(parse(&entry["reviewThreads"], "review threads")?),
-        Lookup::Contexts { .. } => pr.add_contexts(parse(&entry["contexts"], "checks")?),
+        Lookup::Contexts { after, .. } => {
+            let contexts: RawContexts = parse(&entry["contexts"], "checks")?;
+            if contexts.page_info.has_next_page
+                && after.is_some()
+                && contexts.page_info.end_cursor == *after
+            {
+                return Err("GitHub repeated a check contexts cursor".into());
+            }
+            pr.add_contexts(contexts);
+        }
         Lookup::Pr(_) | Lookup::Search { .. } | Lookup::Mine(_) => {}
     }
     Ok(())

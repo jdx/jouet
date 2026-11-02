@@ -157,6 +157,49 @@ fn superseded_workflow_runs_do_not_report_old_failures() {
 }
 
 #[test]
+fn duplicate_names_within_a_workflow_run_are_not_collapsed() {
+    let mut pr = fetch_batch().prs.remove(0);
+    pr.status.checks = Checks {
+        pass: 2,
+        fail: 1,
+        ..Checks::default()
+    };
+    let run = |number, conclusion| {
+        json!({
+            "name": "matrix", "status": "COMPLETED", "conclusion": conclusion,
+            "checkSuite": {"branch": {"name": "topic"}, "app": {"slug": "github-actions"},
+              "workflowRun": {"event": "pull_request", "runNumber": number, "runAttempt": 1, "workflow": {"id": "one"}}}
+        })
+    };
+    pr.add_contexts(
+        serde_json::from_value(json!({
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+            "nodes": [run(1, "SUCCESS"), run(1, "FAILURE"), run(2, "SUCCESS")]
+        }))
+        .unwrap(),
+    );
+    assert_eq!(pr.status.checks.pass, 2);
+    assert_eq!(pr.status.checks.fail, 1);
+    assert_eq!(pr.status.checks.failing, ["matrix"]);
+}
+
+#[test]
+fn repeated_check_cursor_returns_an_error() {
+    let mut pr = fetch_batch().prs.remove(0);
+    let lookup = Lookup::Contexts {
+        id: "rollup".into(),
+        after: Some("same".into()),
+    };
+    let entry =
+        json!({"contexts": {"pageInfo": {"hasNextPage": true, "endCursor": "same"}, "nodes": []}});
+    assert!(
+        read_page(&mut pr, &lookup, &entry)
+            .unwrap_err()
+            .contains("repeated")
+    );
+}
+
+#[test]
 fn attention_is_derived_from_the_fields() {
     let mut result = fetch_batch();
     let page = result.prs[0].pages().remove(0);
