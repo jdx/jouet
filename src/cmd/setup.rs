@@ -719,15 +719,15 @@ fn linkable(skill: &Path) -> bool {
 }
 
 /// Whether Claude Code's skill directory in `project` for the skill at the
-/// shared `path` links to it.
+/// shared `path` is that directory through a link: its own, or one on
+/// `.claude/skills` as a whole.
 fn claude_links_to(project: &Path, path: &Path) -> bool {
     let Some(name) = path.parent().and_then(Path::file_name) else {
         return false;
     };
     let dir = project.join(".claude").join("skills").join(name);
-    is_link(&dir)
-        && std::fs::canonicalize(&dir).ok()
-            == path.parent().and_then(|p| std::fs::canonicalize(p).ok())
+    let resolved = |p: &Path| std::fs::canonicalize(p).ok();
+    resolved(&dir).is_some() && resolved(&dir) == path.parent().and_then(resolved)
 }
 
 /// Makes Claude Code's skill directory `dir` the link to the shared copy,

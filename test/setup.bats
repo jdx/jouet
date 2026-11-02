@@ -341,6 +341,20 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert [ -f .claude/skills/jouet-init/SKILL.md ]
 }
 
+@test "uninstalling Codex keeps the skill Claude Code reads through a linked .claude/skills" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p .agents/skills .claude
+	ln -s ../.agents/skills .claude/skills
+	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared >/dev/null
+	assert [ ! -L .claude/skills/jouet-init ]
+	run --separate-stderr jouet setup codex --shared --uninstall
+	assert_success
+	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
+}
+
 @test "an earlier setup's own Claude Code skill directory becomes the link" {
 	init_repo
 	jouet setup claude --shared >/dev/null
