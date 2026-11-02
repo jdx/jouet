@@ -549,6 +549,19 @@ SH
 	assert_output --partial 'no test ran'
 }
 
+@test "--cmd recognizes Playwright through npx" {
+	mkdir bin
+	printf '#!/bin/sh\nprintf "Error: No tests found.\\n"\n' >bin/npx
+	chmod +x bin/npx
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- npx playwright test
+	assert_failure 4
+	assert_output --partial 'no test ran'
+
+	# Interactive mode may succeed without running tests.
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- npx playwright test --only-changed --ui
+	assert_success
+}
+
 @test "--cmd refuses a recognised test run that selected no tests" {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo
