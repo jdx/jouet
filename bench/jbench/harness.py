@@ -239,6 +239,17 @@ class Codex(Harness):
             if e.get("type") == "item.completed" and (e.get("item") or {}).get("type") == "agent_message"
         ]
         thread = next((e.get("thread_id") for e in events if e.get("type") == "thread.started"), None)
+        capacity = any(
+            e.get("type") == "turn.failed"
+            and isinstance(e.get("error"), dict)
+            and "selected model is at capacity" in str((e.get("error") or {}).get("message") or "").lower()
+            for e in events
+        )
+        acted = any(
+            e.get("type") in ("item.started", "item.completed")
+            and (e.get("item") or {}).get("type") not in ("error", "reasoning")
+            for e in events
+        )
         return Usage(
             # OpenAI counts cached input inside input_tokens.
             input_tokens=int(u.get("input_tokens") or 0),
@@ -250,7 +261,7 @@ class Codex(Harness):
             result=messages[-1] if messages else None,
             session_id=thread,
             model=model,
-            extra={"reasoning_tokens": u.get("reasoning_output_tokens")},
+            extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity and not acted},
         )
 
 
