@@ -342,7 +342,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 
 - `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them.
 - `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
-- `piped-test-output` matches a test or build runner in a call that also runs `head`, `tail` or `grep`, then follows the pipeline, and the file the output went to, to see whether it is that run's output being cut. A cut `jouet test` is told to drop the cut instead, since its output is already short and a pipe hides its exit status.
+- `piped-test-output` matches a test or build runner in a call that also runs `head`, `tail` or `grep`, then follows the pipeline, and the file the output went to, to see whether it is that run's output being cut. A cut `jouet test` is left alone, since its output is already short and it records its own result; a cut run inside its `--cmd -- sh -c` script is not, since jouet then reads only the cut output and the script's last exit code.
 - `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop.
 - `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged.
 - `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
