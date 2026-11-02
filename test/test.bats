@@ -617,7 +617,7 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 }
 
 @test "affected baseline compares the selected tests and clears only that run" {
-	export PYTHONDONTWRITEBYTECODE=1 JOUET_TEST_BASELINE=off JOUET_SESSION_ID=s1
+	export JOUET_TEST_BASELINE=off JOUET_SESSION_ID=s1
 	mkdir -p tests
 	: >tests/__init__.py
 	cat >tests/test_a.py <<'PY'
@@ -635,9 +635,9 @@ PY
 	git checkout -qb work
 	printf '\n# a change\n' >>tests/test_a.py
 
-	run --separate-stderr jouet test --affected --since main
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main
 	assert_failure 1
-	run --separate-stderr jouet test --baseline --affected --since main --json
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main --json
 	assert_success
 	run jq -r '[.affected, .baseline.pre_existing[]] | @tsv' <<<"$output"
 	assert_output --partial $'true\ttest_existing'
@@ -656,14 +656,14 @@ class Tests(unittest.TestCase):
     def test_changed(self):
         self.assertEqual(1 + 1, 2)
 PY
-	run --separate-stderr env AFFECTED_EXISTING=0 jouet test --baseline --affected --since main
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 AFFECTED_EXISTING=0 jouet test --baseline --affected --since main
 	assert_failure 1
 	assert_output --partial 'test_existing'
 	assert_output --partial 'is new'
 
 	# A new failure in an existing selected test is not cleared by the old one.
 	printf '\n    def test_new_failure(self):\n        self.fail("new failure")\n' >>tests/test_a.py
-	run --separate-stderr jouet test --baseline --affected --since main
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main
 	assert_failure 1
 	assert_output --partial 'test_new_failure'
 	assert_output --partial 'is new'
@@ -675,7 +675,7 @@ class Added(unittest.TestCase):
     def test_added(self):
         self.fail("new module")
 PY
-	run --separate-stderr jouet test --baseline --affected --since main
+	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main
 	assert_failure 1
 	assert_output --partial 'test_added'
 }
