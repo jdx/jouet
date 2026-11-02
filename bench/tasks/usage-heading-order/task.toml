@@ -8,6 +8,9 @@ upstream = true
 timeout_s = 2400
 check_timeout_s = 1200
 path = ["~/.cargo/bin"]
+# The shell-completion tests need a Bash with default completion support.
+# Resolve both shells from the benchmark environment for each isolated arm.
+setup = ["bash -c 'complete -D -W test'"]
 # The issue's title and body as its author wrote them, and one line. Nothing
 # from the fix (jdx/usage#1583, 81469fe).
 prompt = """
@@ -43,7 +46,7 @@ Seen with `usage-rs` 6.11.1; 7.1.2 builds the section list the same way.
 
 
 
-Implement this in usage, with a test, and commit.
+Implement the `display_order` approach described above in usage, with a test, and commit.
 """
 
 # usage at the fix's base, the first parent of 81469fe.
@@ -55,6 +58,10 @@ commit = "ad1549d987d432202f4f0e123ca81470a5700969"
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"
 MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+[tools]
+bash = "bash"
+zsh = "zsh"
 
 # Timed once, for the cost note every run starts with (bench/jbench/costs.py).
 [cost]
