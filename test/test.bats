@@ -576,6 +576,11 @@ SH
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- rspec missing_spec
 	assert_failure 4
 	assert_output --partial 'no test ran'
+	printf '#!/bin/sh\nprintf "0 examples, 0 failures, 1 error occurred outside of examples\\n"\n' >bin/rspec
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- rspec
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	refute_output --partial 'no test ran'
 }
 
 @test "a successful test command that reports failures is not accepted as passing" {

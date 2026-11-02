@@ -265,9 +265,9 @@ regexes! {
     UNITTEST_KIND = r"(failures|errors|skipped|expected failures|unexpected successes)=(\d+)";
     // RSpec's regular formatter and test-queue's aggregate failure section.
     RSPEC_SECTION = r"^(?:Failures:|==> Failures)$";
-    RSPEC_HEAD = r"^\s+\d+\) (.+)$";
-    RSPEC_END = r"^\s+\d+\) |^Finished in |^Failed examples:|^==> (?:Summary|Failed Examples)";
-    RSPEC_SUMMARY = r"^\s*(?:\[\s*\d+\]\s*)?(\d+) examples?, (?:(\d+) pending, )?(\d+) failures?(?:, (\d+) pending)?\b";
+    RSPEC_HEAD = r"^  \d+\) (.+)$";
+    RSPEC_END = r"^  \d+\) |^Finished in |^Failed examples:|^==> (?:Summary|Failed Examples)";
+    RSPEC_SUMMARY = r"^\s*(?:\[\s*\d+\]\s*)?(\d+) examples?, (?:(\d+) pending, )?(\d+) failures?(?:, (\d+) pending)?(?:, (\d+) errors? occurred outside of examples)?\b";
     // jest.
     JEST_HEAD = r"^\s*● (.+)$";
     JEST_FILE = r"^FAIL +(.+?)(?: \([\d.]+ s\))?$";
@@ -868,9 +868,14 @@ fn rspec(lines: &[String], out: &mut Parsed) {
                     .unwrap_or(0)
             };
             let total = number(1);
-            let failed = number(3);
+            let failed_examples = number(3);
+            let failed = failed_examples + number(5);
             let skipped = number(2) + number(4);
-            out.count(total.saturating_sub(failed + skipped), failed, skipped);
+            out.count(
+                total.saturating_sub(failed_examples + skipped),
+                failed,
+                skipped,
+            );
         }
         if RSPEC_SECTION.is_match(line) {
             section = true;

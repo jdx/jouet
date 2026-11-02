@@ -247,6 +247,9 @@ fn rspec_keeps_named_failures_and_their_assertions() {
   1) RuboCop::Config excludes a file
      Failure/Error: expect(configuration).to be_file_to_exclude('bar.rb')
        expected true, got false
+       1) first item
+       2) second item
+       expected the second item to match
      # ./spec/rubocop/config_spec.rb:625
 
   2) Another example fails
@@ -268,6 +271,12 @@ rspec ./spec/rubocop/config_spec.rb:619
             .lines
             .iter()
             .any(|line| line.contains("expected true, got false"))
+    );
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("expected the second item"))
     );
     assert!(
         d.failures[1]
@@ -294,6 +303,14 @@ fn rspec_reports_an_empty_selection_only_when_all_summaries_are_empty() {
         )
         .no_tests
     );
+}
+
+#[test]
+fn rspec_hook_errors_are_not_an_empty_test_selection() {
+    let output = "An error occurred in a before(:suite) hook.\n0 examples, 0 failures, 1 error occurred outside of examples\n";
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(d.failed, 1);
+    assert!(!d.no_tests);
 }
 
 #[test]
