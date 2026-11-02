@@ -32,7 +32,10 @@ end
 Expected: no offenses detected. Actual: Style/RedundantSelf marks the `self`
 in `*self.payload` as redundant, and its autocorrection changes the assignment.
 
-Fix the bug, add tests, and commit the change.
+This is rubocop/rubocop#16149. For this simulated task, use the synthetic
+contributor handle @benchmark-user if a changelog entry needs a handle.
+Fix the bug, add tests, and commit the change, including the project's required
+changelog entry.
 '''
 
 [source]
