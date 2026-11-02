@@ -13,6 +13,7 @@
 
 ## Subcommands
 
+- [`jouet init [--yes]`](/cli/init.md)
 - [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet claim [--for <DUR>] [--note <TEXT>] [PATHS]… [SUBCOMMAND]`](/cli/claim.md)
 - [`jouet claim ls [--all]`](/cli/claim/ls.md)
@@ -41,7 +42,7 @@
 - [`jouet pickup [FILE]`](/cli/pickup.md)
 - [`jouet sessions [--since <TIME>] [--all]`](/cli/sessions.md)
 - [`jouet stats [FLAGS]`](/cli/stats.md)
-- [`jouet cost [--min <DUR>] [SUBCOMMAND]`](/cli/cost.md)
+- [`jouet cost [--min <DUR>] [--sequences] [SUBCOMMAND]`](/cli/cost.md)
 - [`jouet cost fetch [REMOTE]`](/cli/cost/fetch.md)
 - [`jouet cost push [REMOTE]`](/cli/cost/push.md)
 - [`jouet pr <SUBCOMMAND>`](/cli/pr.md)

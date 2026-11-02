@@ -1,0 +1,175 @@
+description = "Fix a real tornado bug from its issue (tornadoweb/tornado#2990): a handler that raises asyncio.CancelledError leaves the request hanging; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real Python web framework with no dependencies to install: it runs only
+# when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1200
+check_timeout_s = 300
+# jouet levels: out of the box, `jouet test --cmd` digests the unittest
+# output of tornado's own runner (`python3 -m tornado.test.runtests`), but
+# `jouet test --affected` finds no runner (exit 4): tornado's tests are
+# `tornado/test/*_test.py`, and plain unittest fails them on their log
+# checks. Config could name the runner and the test files; a Luau routine
+# could map `tornado/web.py` to `tornado.test.web_test` and run that module.
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (tornadoweb/tornado#3695, d2bd3a8).
+prompt = '''
+asyncio task cancellations are orphaned 
+
+- *Tornado Version* 6.1
+- *Python Versions tested* Python 3.9.1 (tags/v3.9.1:1e5d33e9), Python 3.7.9 (tags/v3.7.9:13c94747)
+
+If a request handler is waiting on a task that is cancelled, then the `asyncio.CancelledError` escapes and the request handler is never "finished".  Previous to Python 3.8, this would have been caught in [web.RequestHandler._execute](https://github.com/tornadoweb/tornado/blob/6cdf82e927d962290165ba7c4cccb3e974b541c3/tornado/web.py#L1707). I suspect that it should be caught today as well so that the request handler but I am not completely sure what the correct action to take is.
+
+Currently, the control flow seems to go back to the ioloop where it is discarded which leaves the connection hanging and the request handler never "finishes".
+
+The following very contrived example shows the problem:
+```python
+#!/usr/bin/env python
+import asyncio
+import json
+import logging
+
+from tornado import ioloop, web
+
+
+class Handler(web.RequestHandler):
+    async def prepare(self):
+        super().prepare()
+        self.logger = logging.getLogger('Handler')
+
+    async def get(self):
+        self.logger.info('processing request')
+        self.work = asyncio.create_task(asyncio.sleep(10))
+
+        work_result, killed = await asyncio.gather(
+            self.do_work(), self.killer())
+
+        self.set_status(200)
+        self.write(json.dumps({'work_result': work_result, 'killed': killed}))
+
+    async def do_work(self):
+        self.logger.info('doing work')
+        try:
+            await self.work
+        except asyncio.CancelledError:
+            self.logger.warning('work cancelled!')
+            raise
+        return 10
+
+    async def killer(self):
+        await asyncio.sleep(4)
+        self.logger.info('cancelling work')
+        self.work.cancel()
+        return True
+
+    def on_finish(self):
+        super().on_finish()
+        self.logger.info('request handler has finished')
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(levelname)-15s %(name)s: %(message)s')
+    iol = ioloop.IOLoop.current()
+    app = web.Application([(r'/', Handler)])
+    app.listen(8000)
+    try:
+        iol.start()
+    except KeyboardInterrupt:
+        iol.stop()
+```
+
+When run under Python 3.7, curl'ing "127.0.0.1:8000/" results in the following log output and the client receives a 500 Internal Server Error.
+
+```
+DEBUG           asyncio: Using selector: KqueueSelector
+INFO            asyncio: poll took 2537.233 ms: 1 events
+INFO            Handler: processing request
+INFO            Handler: doing work
+INFO            asyncio: poll 3999.843 ms took 4002.786 ms: timeout
+INFO            Handler: cancelling work
+WARNING         Handler: work cancelled!
+ERROR           tornado.application: Uncaught exception GET / (127.0.0.1)
+HTTPServerRequest(protocol='http', host='127.0.0.1:8000', method='GET', uri='/', version='HTTP/1.1', remote_ip='127.0.0.1')
+Traceback (most recent call last):
+  File "/Users/daves/Temporary/coros/env37/lib/python3.7/site-packages/tornado/web.py", line 1704, in _execute
+    result = await result
+  File "tornado-testie", line 19, in get
+    self.do_work(), self.killer())
+concurrent.futures._base.CancelledError
+ERROR           tornado.access: 500 GET / (127.0.0.1) 4011.11ms
+INFO            Handler: request handler has finished
+```
+
+When run under Python 3.9, the same request results in the following log output and the client never receives a response.
+
+```
+DEBUG           asyncio: Using selector: KqueueSelector
+INFO            Handler: processing request
+INFO            Handler: doing work
+INFO            Handler: cancelling work
+WARNING         Handler: work cancelled!
+ERROR           asyncio: Exception in callback _HandlerDelegate.execute.<locals>.<lambda>(<Task cancell...do/gen.py:867>) at /Users/daves/Temporary/coros/env39/lib/python3.9/site-packages/tornado/web.py:2326
+handle: <Handle _HandlerDelegate.execute.<locals>.<lambda>(<Task cancell...do/gen.py:867>) at /Users/daves/Temporary/coros/env39/lib/python3.9/site-packages/tornado/web.py:2326 created at /Users/daves/opt/lib/python3.9/asyncio/events.py:80>
+source_traceback: Object created at (most recent call last):
+  File "/Users/daves/Temporary/coros/tornado-testie", line 51, in <module>
+    iol.start()
+  File "/Users/daves/Temporary/coros/env39/lib/python3.9/site-packages/tornado/platform/asyncio.py", line 199, in start
+    self.asyncio_loop.run_forever()
+  File "/Users/daves/opt/lib/python3.9/asyncio/base_events.py", line 596, in run_forever
+    self._run_once()
+  File "/Users/daves/opt/lib/python3.9/asyncio/base_events.py", line 1882, in _run_once
+    handle._run()
+  File "/Users/daves/opt/lib/python3.9/asyncio/events.py", line 80, in _run
+    self._context.run(self._callback, *self._args)
+Traceback (most recent call last):
+  File "/Users/daves/opt/lib/python3.9/asyncio/tasks.py", line 651, in sleep
+    return await future
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/daves/Temporary/coros/tornado-testie", line 27, in do_work
+    await self.work
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/daves/Temporary/coros/env39/lib/python3.9/site-packages/tornado/web.py", line 1704, in _execute
+    result = await result
+  File "/Users/daves/Temporary/coros/tornado-testie", line 18, in get
+    work_result, killed = await asyncio.gather(
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/daves/opt/lib/python3.9/asyncio/events.py", line 80, in _run
+    self._context.run(self._callback, *self._args)
+  File "/Users/daves/Temporary/coros/env39/lib/python3.9/site-packages/tornado/web.py", line 2326, in <lambda>
+    fut.add_done_callback(lambda f: f.result())
+asyncio.exceptions.CancelledError
+```
+
+When I add `asyncio.CancelledError` to the `except` clause on [tornado/web.py:1707](https://github.com/tornadoweb/tornado/blob/6cdf82e927d962290165ba7c4cccb3e974b541c3/tornado/web.py#L1707) , I get the same outward behavior in both Python versions though the stack traces are different.
+
+Fix this in tornado, with a test, and commit.
+'''
+
+# tornado at the fix's base, the first parent of the merge d2bd3a8.
+[source]
+git = "~/src/tornado"
+commit = "89afbd1d7e069721cd9476b7ee5760f54217c925"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "python3 -m tornado.test.runtests tornado.test.web_test",
+    "python3 -m tornado.test.runtests",
+]

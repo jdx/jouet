@@ -24,6 +24,21 @@ A task is a small fixture repository, a prompt and a success check, chosen from 
 
 Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), `repo/` (committed on `main`), an optional `pr/` (committed on the PR branch), an optional `github.json` (the fake GitHub's fixture), `check.py` (exit 0 means success) and `solve.py` (a reference solution). Commits use a fixed author and date, so a task's SHAs are the same everywhere.
 
+### Tasks from real projects
+
+Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and the fix's parent commit (`[source]`) instead of a `repo/`. The prompt is the issue's own title and body and one line asking for a fix, a test and a commit. `hidden/` holds the fix PR's own tests, which `check.py` puts in place and runs, and `solve.py` applies the upstream fix (`fix.patch`). They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
+
+Projects beyond jdx's own:
+
+| task | project | issue | language and runner | needs on the host |
+|---|---|---|---|---|
+| `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
+| `yq-signed-hex` | yq, a CLI | [mikefarah/yq#2748](https://github.com/mikefarah/yq/issues/2748) | Go, `go test` | Go, and yq's modules in `~/go/pkg/mod` (`go mod download`) |
+| `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | `mise install pnpm@10.12.1`, and one `pnpm install` in the clone to fill the store |
+| `commander-output-config` | commander.js, a CLI library | [tj/commander.js#2342](https://github.com/tj/commander.js/issues/2342) | JavaScript, jest and tsc | one `npm ci` in the clone to fill npm's cache |
+
+Each `task.toml` notes which jouet levels the task can exercise: what `jouet test` does with the project out of the box, and where TOML config or a Luau rule or routine could help. Both arms run with no network for dependencies. A JavaScript project's dependencies are installed by the task's `setup` commands, offline from your cache, after the work tree is committed and before the agent's clock starts. A setup that leaves files git does not ignore is refused. Tools the default `bin/` lacks, such as `go`, `npm` or a pinned `pnpm`, are linked from `[tools]`, by path or by a bare name found on your `PATH`.
+
 ### Arms
 
 - **plain:** the harness as installed, with no jouet on `PATH`.
@@ -37,7 +52,7 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 
 - a fresh copy of the task's repository;
 - its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
-- a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, when installed on the host, is available to both arms for projects whose test runner uses it.
+- a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel` and `uv`, when installed on the host, are available to both arms for projects whose checks use them.
 
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
 

@@ -185,7 +185,7 @@ fn a_module_no_test_imports_runs_nothing() {
     let plan = plan_in(root).unwrap();
     assert_eq!(
         nothing_reason(&plan.suites[0]),
-        "no test depends on the changed files"
+        "no tests selected for the changed files"
     );
     assert_eq!(plan.suites[0].command, None);
 }

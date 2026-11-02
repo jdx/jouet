@@ -1,0 +1,106 @@
+description = "Fix a real zod bug from its issue (colinhacks/zod#6550): toJSONSchema() loses min/max when .int() comes after them; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real TypeScript library in a pnpm monorepo: it runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1500
+check_timeout_s = 300
+# jouet levels: out of the box, `jouet test` digests vitest's output, and
+# `--affected` selects through vitest's module graph, though for
+# `core/checks.ts` that is 126 test files, nearly all. Each test runs twice,
+# under the `zod` and `compile-mode` projects, so a failure prints twice. No
+# format is needed; a Luau rule could steer agents from the root's whole
+# `pnpm test` to the one test file, or to one vitest project.
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (colinhacks/zod#6553, 7a00236).
+prompt = '''
+`toJSONSchema()`: chaining `.int()` after `.min()`/`.max()` replaces explicit bounds
+
+Calling `.int()` after explicit numeric constraints changes the generated JSON Schema, even though runtime validation behaves identically.
+
+Tested with:
+
+- Zod 4.5.4
+- Node.js 24.18.0
+- JSON Schema Draft 2020-12 and OpenAPI 3.0 targets
+
+### Minimal reproduction
+
+```ts
+import * as z from "zod";
+
+const intFirst = z.number().int().min(0).max(23);
+const intLast = z.number().min(0).max(23).int();
+
+for (const target of ["draft-2020-12", "openapi-3.0"] as const) {
+  console.log(target);
+  console.log("intFirst", z.toJSONSchema(intFirst, { target }));
+  console.log("intLast", z.toJSONSchema(intLast, { target }));
+}
+```
+
+### Actual output
+
+For both targets:
+
+```ts
+// z.number().int().min(0).max(23)
+{
+  type: "integer",
+  minimum: 0,
+  maximum: 23
+}
+
+// z.number().min(0).max(23).int()
+{
+  type: "integer",
+  minimum: -9007199254740991,
+  maximum: 9007199254740991
+}
+```
+
+Both schemas still behave identically during runtime validation:
+
+- `-1` is rejected
+- `0` is accepted
+- `1.5` is rejected
+- `23` is accepted
+- `24` is rejected
+
+### Expected output
+
+The explicit `minimum: 0` and `maximum: 23` constraints should be preserved regardless of whether `.int()` appears before or after them.
+
+At minimum, the generated schema should not describe different accepted ranges when the two Zod schemas accept the same values.
+
+This matters when `toJSONSchema()` is used to produce an OpenAPI contract: applying `.int()` last causes the published contract to lose the application's explicit range.
+
+### Related issue
+
+[#4779](https://github.com/colinhacks/zod/issues/4779) discusses the default safe-integer range emitted for an unconstrained integer. This case is different because explicit, tighter constraints are present and enforced at runtime, but are replaced only in the generated schema when `.int()` is applied last.
+
+Fix this in zod, with a test, and commit.
+'''
+
+# The pnpm the base pins (`mise install pnpm@10.12.1`); the host's newer pnpm
+# would try to fetch it. The install is offline, from the user's pnpm store,
+# so run `pnpm install` once in ~/src/zod at this commit to fill it. Scripts
+# are skipped: husky would install git hooks in the work tree.
+setup = ["~/.local/share/mise/installs/pnpm/10.12.1/pnpm install --offline --frozen-lockfile --ignore-scripts"]
+
+# zod at the fix's base, the parent of 7a00236.
+[source]
+git = "~/src/zod"
+commit = "5489a532e65ee3f5ab0959ff8a5da346ced96f2a"
+
+[tools]
+pnpm = "~/.local/share/mise/installs/pnpm/10.12.1/pnpm"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "pnpm vitest run packages/zod/src/v4/classic/tests/to-json-schema.test.ts",
+    "pnpm test",
+]

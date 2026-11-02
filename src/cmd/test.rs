@@ -228,8 +228,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
+    // What each failed suite blames on the machine; the run is the
+    // machine's only when every one of them does.
+    let mut environment: Vec<Option<String>> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
+    let sequences = crate::settings::Settings::load().cost.sequences;
     // Marked for the stop gate while it runs; a run that dies early leaves a
     // mark whose process is gone, which holds nothing up.
     if runs {
@@ -239,21 +243,40 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
             let log = log_path(i);
+            let ticket = sequences
+                .then(|| crate::cost::sequences::begin(&job.dir, i))
+                .flatten();
             let (code, ms) = match execute(job, &log, stream) {
                 Ok(ran) => ran,
-                Err(e) => return out.error(Exit::Precondition, &e),
+                Err(e) => {
+                    if let Some(ticket) = ticket {
+                        ticket.finish(None, 0, false);
+                    }
+                    return out.error(Exit::Precondition, &e);
+                }
             };
             suite.exit_code = Some(code);
             suite.duration_ms = Some(ms);
             // A job is one command; one that runs several checks is not
             // split between them.
-            if let [record] = super::hook::checks(&job.dir, &command_line(&job.argv)).as_slice() {
+            let records = super::hook::checks(&job.dir, &command_line(&job.argv));
+            if let [record] = records.as_slice() {
                 timed.push(crate::cost::Sample::of(record, ms, code));
+            }
+            if let Some(ticket) = ticket {
+                let command = match records.as_slice() {
+                    [record] => Some(record.command.as_str()),
+                    _ => None,
+                };
+                ticket.finish(command, ms, code == 0);
             }
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
             let digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            if code != 0 {
+                environment.push(testlog::environment_cause(&output, &formats));
+            }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
@@ -310,7 +333,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // hooks.
     if runs {
         crate::cost::record(&cwd, &timed);
-        super::hook::record_own_run(&cwd, &own_command(), i32::from(exit.code()));
+        let blamed = environment
+            .iter()
+            .all(Option::is_some)
+            .then(|| environment.iter().flatten().next().cloned())
+            .flatten();
+        super::hook::record_own_run(
+            &cwd,
+            &own_command(),
+            i32::from(exit.code()),
+            blamed.as_deref(),
+        );
         super::hook::mark_own_run(&cwd, &own_command(), false);
     }
     if out.json {

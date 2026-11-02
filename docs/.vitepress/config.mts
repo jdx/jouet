@@ -100,6 +100,7 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
+          { text: "jouet init", link: "/commands/init" },
           { text: "jouet test", link: "/commands/test" },
           { text: "jouet task", link: "/commands/task" },
           { text: "jouet audit", link: "/commands/audit" },

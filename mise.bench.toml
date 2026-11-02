@@ -8,3 +8,4 @@ codex = { version = "latest", minimum_release_age = "0s" }
 # The harness and its GitHub probes need these in both isolated arms.
 python = "3.13"
 gh = "2"
+uv = "0.11.2"

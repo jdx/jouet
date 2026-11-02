@@ -1,0 +1,39 @@
+diff --git a/lib/command.js b/lib/command.js
+index efbb8f6..0d14ee4 100644
+--- a/lib/command.js
++++ b/lib/command.js
+@@ -239,7 +239,11 @@ class Command extends EventEmitter {
+   configureOutput(configuration) {
+     if (configuration === undefined) return this._outputConfiguration;
+ 
+-    Object.assign(this._outputConfiguration, configuration);
++    this._outputConfiguration = Object.assign(
++      {},
++      this._outputConfiguration,
++      configuration,
++    );
+     return this;
+   }
+ 
+diff --git a/tests/command.configureOutput.test.js b/tests/command.configureOutput.test.js
+index 35eca71..eb080a7 100644
+--- a/tests/command.configureOutput.test.js
++++ b/tests/command.configureOutput.test.js
+@@ -329,6 +329,17 @@ test('when custom outputErr and writeErr and error then outputErr passed writeEr
+   );
+ });
+ 
++test('when configureOutput after copyInheritedSettings then original unchanged', () => {
++  const program = new commander.Command();
++  program.configureOutput({ getOutHelpWidth: () => 80 });
++  const copy = program.createCommand('copy');
++  copy.copyInheritedSettings(program);
++  expect(copy.configureOutput().getOutHelpWidth()).toBe(80);
++  copy.configureOutput({ getOutHelpWidth: () => 40 });
++  expect(copy.configureOutput().getOutHelpWidth()).toBe(40);
++  expect(program.configureOutput().getOutHelpWidth()).toBe(80);
++});
++
+ describe.each([['getOutHasColors'], ['getErrHasColors']])(
+   '%s',
+   (configProperty) => {

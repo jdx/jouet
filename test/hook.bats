@@ -215,7 +215,7 @@ stop_reason() {
 	assert_output ""
 }
 
-@test "a failure is raised once per tree and runs, not at every turn's stop" {
+@test "a failure is raised once for its run, not at every turn's stop or after other changes" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
 	git -C repo add main.rs
@@ -228,17 +228,37 @@ stop_reason() {
 	run stop_reason
 	assert_output ""
 
-	# The tree changed: raised again, then quiet again.
+	# Files changed with no run since: the failure was said once.
 	echo 'fn main() { todo!() }' >repo/main.rs
-	run stop_reason
-	assert_output --partial 'exited 101'
 	run stop_reason
 	assert_output ""
 
-	# A new run, even the same failure at the same tree, raises it again.
+	# A new run failing at the files now is new.
 	ran 'cargo test --workspace brew::cask' 101
 	run stop_reason
 	assert_output --partial 'exited 101'
+	# The same failure of the same files again is not.
+	ran 'cargo test --workspace brew::cask' 101
+	run stop_reason
+	assert_output ""
+}
+
+@test "a failure whose output blames the machine is a note, not a block" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	jq -cn --arg cwd "$PWD/repo" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		  tool_input: {command: "bats test/edit.bats"},
+		  error: "Exit code 1\n1..1\nnot ok 1 keychain secrets\n# Failed to initialize OS keyring store: Platform failure: DBus error: no session bus\n"}' |
+		jouet hook claude post-tool-use-failure
+	run --separate-stderr sh -c "jq -cn --arg cwd '$PWD/repo' '{session_id: \"s1\", cwd: \$cwd, stop_hook_active: false}' | jouet hook claude stop"
+	run jq -r '[.decision // "none", .systemMessage // ""] | @tsv' <<<"$output"
+	assert_output --partial 'none'
+	assert_output --partial 'blame the machine'
+	# Said once.
+	run --separate-stderr sh -c "jq -cn --arg cwd '$PWD/repo' '{session_id: \"s1\", cwd: \$cwd, stop_hook_active: false}' | jouet hook claude stop"
+	assert_output ''
 }
 
 @test "a jouet test run still going holds up nothing, and its end restores the check" {

@@ -21,6 +21,9 @@ Print help
 Print version
 .SH COMMANDS
 .TP
+\fBinit\fR
+Inspect this project and propose jouet configuration
+.TP
 \fBaudit\fR
 Report where coding\-agent sessions spend tokens and time
 .TP
@@ -274,7 +277,7 @@ Show every change made to your rules, and why
 Record something a rule could not express, for `jouet share \-\-idea`
 .TP
 \fBtrust\fR
-Trust this repository's rules, routines and plugins as they are now
+Trust this repository's jouet files as they are now
 .TP
 \fBuntrust\fR
 Stop trusting this repository's rules, routines and plugins
@@ -353,6 +356,21 @@ Install jouet's hooks into a coding agent's harness
 .TP
 \fBcompletion\fR
 Print a shell completion script
+.SH "JOUET INIT"
+Inspect this project and propose jouet configuration
+
+Reads project files and previews any supported recommendations. It does not execute project commands or trust the repository. With \-\-yes, writes the proposed files without replacing existing files; review them before deciding whether to trust the repository.
+.PP
+\fBUsage:\fR jouet init [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-yes\fR
+Write the proposed files after reviewing the preview
+.TP
+\fB\-h, \-\-help\fR
+Print help
 .SH "JOUET AUDIT"
 Report where coding\-agent sessions spend tokens and time
 
@@ -1022,12 +1040,17 @@ Only one session's ledger entries
 \fB\-\-summary\fR
 Print one line about what jouet saved, or nothing, for a stop hook. `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
 .TP
+\fB\-\-rescan\fR
+Read the history before setup again instead of reusing the baselines the last run saved
+.TP
 \fB\-h, \-\-help\fR
 Print help
 .SH "JOUET COST"
 Show what builds, tests and lints cost here, from timings kept in git notes
 
 `jouet test` and the hooks time each build, test and lint run and keep it as a git note on HEAD under refs/notes/jouet\-cost (`[cost] record` in the config file or JOUET_COST_RECORD turns it off). This lists each command, or each family of commands such as one e2e test, costliest first, read from up to 200 first\-parent commits back. Timings from other machines, such as CI's, are scaled to this one: by the median ratio of this machine's time to theirs over the commands timed in both places, or shown as they are when there are none. CI keeps its timings with `jouet cost push` after its runs; `jouet cost fetch` brings them here.
+
+With [cost] sequences = true (JOUET_COST_SEQUENCES=1), `jouet test` records local start and finish observations for each recognized check in an identified agent session. `\-\-sequences` shows the second check's median duration after the first for at least three adjacent recorded pairs in the same session and worktree. Other work and cache changes may intervene; these observations do not measure savings or prove cache reuse.
 .PP
 \fBUsage:\fR jouet cost [OPTIONS] [COMMAND]
 .PP
@@ -1036,6 +1059,9 @@ Show what builds, tests and lints cost here, from timings kept in git notes
 .TP
 \fB\-\-min\fR \fI<DUR>\fR
 List only the commands estimated to take at least DUR, such as 30s
+.TP
+\fB\-\-sequences\fR
+Show opt\-in local observations of successive recorded checks
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -2546,9 +2572,9 @@ Print help
 \fB<TEXT>\fR
 What you wanted a rule to do, and what was missing
 .SH "JOUET TRUST"
-Trust this repository's rules, routines and plugins as they are now
+Trust this repository's jouet files as they are now
 
-Covers .jouet/rules, .jouet/routines and the plugins .jouet/plugins.toml pins, together. Prints the rules, fetches the pinned plugins, and runs every rule's examples; trusts nothing (exit 1) if one fails, lacks either kind or does not load. Trust is kept against a hash of every file in them: a change on a pull or another branch needs trusting again, and going back to files trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless \-\-yes is given, and the built\-in `trust` rule denies it to an agent.
+Covers .jouet/rules, .jouet/routines, .jouet/formats, .jouet/test.toml and the plugins .jouet/plugins.toml pins, together. Prints the rules and test configuration, fetches the pinned plugins, and runs every rule's examples; trusts nothing (exit 1) if one fails, lacks either kind or does not load. Trust is kept against a hash of every file in them: a change on a pull or another branch needs trusting again, and going back to files trusted before does not. Trusting is the user's decision: without a terminal it is refused (exit 4) unless \-\-yes is given, and the built\-in `trust` rule denies it to an agent.
 .PP
 \fBUsage:\fR jouet trust [OPTIONS]
 .PP

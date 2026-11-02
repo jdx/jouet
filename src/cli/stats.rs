@@ -26,4 +26,8 @@ pub(crate) struct StatsArgs {
     /// style: quips (default), plain or off
     #[usage(long)]
     pub(crate) summary: bool,
+    /// Read the history before setup again instead of reusing the baselines
+    /// the last run saved
+    #[usage(long)]
+    pub(crate) rescan: bool,
 }

@@ -20,6 +20,7 @@ mod graph;
 mod handoff;
 mod hook;
 mod http;
+mod init;
 mod job;
 mod plugin;
 mod pr;
@@ -58,6 +59,7 @@ pub(crate) use graph::*;
 pub(crate) use handoff::*;
 pub(crate) use hook::*;
 pub(crate) use http::*;
+pub(crate) use init::*;
 pub(crate) use job::*;
 pub(crate) use plugin::*;
 pub(crate) use pr::*;
@@ -105,6 +107,8 @@ pub(crate) struct Jouet {
 
 #[derive(Subcommands)]
 pub(crate) enum Cmd {
+    /// Inspect this project and propose jouet configuration
+    Init(InitArgs),
     /// Report where coding-agent sessions spend tokens and time
     Audit(AuditArgs),
     /// Claim paths for this session, so other sessions are warned off them
@@ -157,7 +161,7 @@ pub(crate) enum Cmd {
     Ci(CiArgs),
     /// List and test the rules jouet's hooks run
     Rule(RuleArgs),
-    /// Trust this repository's rules, routines and plugins as they are now
+    /// Trust this repository's jouet files as they are now
     Trust(TrustArgs),
     /// Stop trusting this repository's rules, routines and plugins
     Untrust(UntrustArgs),

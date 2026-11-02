@@ -20,6 +20,7 @@ use crate::rules;
 use crate::settings::Settings;
 use crate::setup::Harness;
 use crate::sources::Status;
+use crate::testlog;
 use crate::verify::{self, State};
 use crate::wind;
 use jouet_rules::{Call, Engine, Event, Outcome, Record};
@@ -836,10 +837,33 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
     let repo = (!trees[0].1.is_empty())
         .then(|| jouet_output::paths::repo_key(Path::new(&trees[0].1)))
         .flatten();
+    // A failure whose output blames the machine (no D-Bus, a missing
+    // system library, no network) is marked so: it does not hold up
+    // finishing. Claude Code puts a failed call's output in `error`.
+    let cause = (call.exit_code != Some(0))
+        .then(|| payload.get("error").and_then(Value::as_str))
+        .flatten()
+        .and_then(|text| {
+            let formats = cwd
+                .as_deref()
+                .map(|c| testlog::format::load(c).0)
+                .unwrap_or_default();
+            testlog::environment_cause(text, &formats)
+        });
     let _ = verify::update(&path, |state| {
         for (dir, root, tree) in &trees {
-            let here = records.iter().filter(|r| r.dir.as_deref() == *dir).cloned();
+            let here: Vec<Record> = records
+                .iter()
+                .filter(|r| r.dir.as_deref() == *dir)
+                .cloned()
+                .collect();
+            let commands: Vec<String> = here.iter().map(|r| r.command.clone()).collect();
             state.record(root, here, tree.as_deref());
+            if let Some(cause) = &cause {
+                for command in &commands {
+                    state.mark_environment(root, command, cause);
+                }
+            }
         }
     });
     let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
@@ -938,7 +962,9 @@ pub(crate) fn mark_unverifiable(cwd: &Path, command: &str) {
     let _ = verify::update(&path, |state| state.mark_unverifiable(&root, command));
 }
 
-pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
+/// Records a `jouet test` run as the checks see it; `environment` is what
+/// its output blames on the machine, when every failure does.
+pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32, environment: Option<&str>) {
     let settings = Settings::load();
     let hooks = &settings.hooks;
     if !hooks.enabled || !(hooks.verify || hooks.ledger) {
@@ -965,6 +991,11 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32) {
         let root = verify::root_of(cwd);
         let _ = verify::update(&path, |state| {
             state.record(&root, records.clone(), tree.as_deref());
+            if let Some(cause) = environment {
+                for record in &records {
+                    state.mark_environment(&root, &record.command, cause);
+                }
+            }
         });
     }
     if hooks.ledger
@@ -1084,7 +1115,7 @@ fn session_state_path(payload: &Value) -> Option<PathBuf> {
 /// passed at the tree as it is now.
 fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> Option<Value> {
     // Jobs left running are a note, never a reason to block.
-    let note = if verify { jobs_note(payload) } else { None };
+    let mut note = if verify { jobs_note(payload) } else { None };
     let as_note = |note: Option<String>| note.map(|note| json!({ "systemMessage": note }));
     // Block at most once in a row: after one nudge, the agent's answer
     // stands, so a check that cannot pass never traps it.
@@ -1104,6 +1135,26 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
     }
     .unwrap_or_default();
     state.prune_gone();
+    // Failures blamed on the machine hold nothing up; the person hears of
+    // each once.
+    let environment = if verify {
+        state.environment_notes()
+    } else {
+        Vec::new()
+    };
+    if !environment.is_empty() {
+        note = Some(
+            note.into_iter()
+                .chain(environment)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        if harness != Harness::Codex
+            && let Some(path) = session_state_path(payload)
+        {
+            let _ = verify::update(&path, State::noted);
+        }
+    }
     let tree = std::cell::OnceCell::new();
     let now = || tree.get_or_init(|| work_tree(payload)).clone();
     let home = session_dir(payload)
@@ -1557,8 +1608,12 @@ mod tests {
         // of 40k tokens or more. Then to 1700 for listing threads and for
         // committing in the test run's call: in the benchmark's short tasks,
         // agents guessed `pr threads list` and committed in a call of its
-        // own, a request of about 20k tokens each.
-        assert!(context.len() <= 1700, "{} bytes:\n{context}", context.len());
+        // own, a request of about 20k tokens each. Then to 1900 for finding
+        // code with `jouet search` and `jouet read --symbol`: in the
+        // benchmark's usage task agents spent 14 to 18 requests on grep and
+        // sed and never used them; named here, they did, and the median run
+        // fell from 627k input tokens to 376k.
+        assert!(context.len() <= 1900, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");

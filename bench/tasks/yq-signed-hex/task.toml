@@ -1,0 +1,79 @@
+description = "Fix a real yq bug from its issue (mikefarah/yq#2748): `+0x12` fails to encode as JSON instead of printing 18; with a test, then commit"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+# A real Go CLI: it runs only when named.
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1500
+check_timeout_s = 600
+# jouet levels: out of the box, `jouet test` digests `go test` output, and
+# `--affected` selects through the code graph (`go.mod`), though for
+# `pkg/yqlib/lib.go` that is 104 test files in 4 packages. The base already
+# fails TestTomlScenarios (a dependency's error message changed), which is
+# what `jouet test --baseline` is for, and yqlib's tests rewrite
+# `pkg/yqlib/doc/`, which a commit should leave out. No format is needed; a
+# Luau rule could steer agents away from committing the regenerated docs.
+# The issue's title and body as its author wrote them, and one line. Nothing
+# from the fix (mikefarah/yq#2749, b7a06d6).
+prompt = '''
+Backtrace error with hexadecimal value preceded by a sign
+
+**Describe the bug**
+
+When a `+` or `-` sign is placed before a number in hexadecimal format, an error occurs when MarshalJSON is called.
+
+Version of yq: v4.53.2
+Operating system: Manjaro Linux
+Installed via: pacman (package manager)
+
+**Input Yaml**
+
+```yaml
++0x12
+```
+or
+```yaml
+-0x12
+```
+
+**Command**
+The command you ran:
+```
+yq <<<'+0x12'
+```
+
+**Actual behaviour**
+
+> Error: json: error calling MarshalJSON for type *yqlib.CandidateNode: strconv.ParseInt: parsing "+0x12": invalid syntax
+
+**Expected behaviour**
+
+No error and show `18`.
+
+Fix this in yq, with a test, and commit.
+'''
+
+# yq at the fix's base, the parent of b7a06d6.
+[source]
+git = "~/src/yq"
+commit = "0beddf45fa8d50cca26ef13d5c7304248450965b"
+
+[tools]
+go = "go"
+
+# The user's module cache, which must hold yq's modules (`go mod download` in
+# ~/src/yq at this commit), and no proxy: runs build offline. The build cache
+# is the run's own.
+[env]
+GOMODCACHE = "~/go/pkg/mod"
+GOPROXY = "off"
+GOTOOLCHAIN = "local"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "go build ./...",
+    "go test ./pkg/yqlib/",
+    "go test ./...",
+]
