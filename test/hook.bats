@@ -638,5 +638,6 @@ claude_payload() {
 		jouet hook claude post-tool-use
 	echo 'x = 3' >scratch/a.py
 	run stop
-	assert_output --partial "In $PWD/scratch: Files changed after the last test run passed"
+	# macOS puts the test directory under /private/tmp.
+	assert_output --regexp "^In (/private)?$PWD/scratch: Files changed after the last test run passed"
 }

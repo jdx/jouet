@@ -78,10 +78,16 @@ struct Noted {
 }
 
 /// The jouet subcommands a shell command runs: `read` for `jouet --json read
-/// x`, `run` for `joue`, after wrappers such as `env` and `timeout`.
+/// x`, `run` for `joue`, after wrappers such as `env` and `timeout`, and in
+/// scripts passed to `sh -c` and the like.
 fn subcommands(command: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
-    for command in shell::parse(command).all() {
+    add_subcommands(&shell::parse(command), &mut found);
+    found
+}
+
+fn add_subcommands(script: &shell::Script, found: &mut Vec<String>) {
+    for command in script.all() {
         let Some((program, args)) = command.argv().split_first() else {
             continue;
         };
@@ -106,7 +112,9 @@ fn subcommands(command: &str) -> Vec<String> {
             found.push(sub.to_string());
         }
     }
-    found
+    for inner in script.inner_scripts() {
+        add_subcommands(&inner, found);
+    }
 }
 
 /// Notes a Bash call about to run jouet, with the agent making it, so the
@@ -272,6 +280,10 @@ mod tests {
             ["test"]
         );
         assert_eq!(subcommands("joue pr-next"), ["run"]);
+        assert_eq!(
+            subcommands("bash -c 'cd x && jouet search foo'"),
+            ["search"]
+        );
         assert!(subcommands("echo jouet read && cargo test").is_empty());
     }
 
