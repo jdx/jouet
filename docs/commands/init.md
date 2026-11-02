@@ -13,8 +13,11 @@ Currently, a Rust project with a `test` task in `mise.toml` or `.mise.toml`
 gets a warning rule reminding the agent to consider that task when running
 the full suite. The task may cover more than `cargo test`; the rule does not
 require it on every run. Other projects are inventoried without an automatic
-rule. This is a starting point, not an assessment of test coverage or the
-safety of commands defined by the project.
+rule. When a Python project explicitly defines an `offlinetest` Makefile target
+that runs pytest with `-m "not download"`, init proposes the same marker
+filter for selected pytest runs. This excludes tests; it does not prove the
+remaining tests avoid network access. This is a starting point, not an
+assessment of test coverage or the safety of commands defined by the project.
 
 Initialization does not trust the repository. Review the written files and
 run `jouet rule test .jouet/rules/project-test.toml`; a person can then decide
