@@ -7,6 +7,7 @@ claude = { version = "latest", minimum_release_age = "0s" }
 codex = { version = "latest", minimum_release_age = "0s" }
 # The harness and its GitHub probes need these in both isolated arms.
 python = "3.13"
+node = "24.22.2"
 ruby = "4.0.9"
 gh = "2"
 uv = "0.13.6"

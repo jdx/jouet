@@ -1,0 +1,89 @@
+diff --git a/packages/desktop-client/e2e/accounts.test.ts b/packages/desktop-client/e2e/accounts.test.ts
+index 34c58060234..87b3f6c73da 100644
+--- a/packages/desktop-client/e2e/accounts.test.ts
++++ b/packages/desktop-client/e2e/accounts.test.ts
+@@ -76,6 +76,34 @@ test.describe('Accounts', () => {
+     await expect(menu.getByRole('button', { name: 'Delete' })).toBeVisible();
+   });
+ 
++  test('updates the running balance after editing a transaction amount', async () => {
++    accountPage = await navigation.createAccount({
++      name: 'Running balance',
++      offBudget: false,
++      balance: 0,
++    });
++    await accountPage.waitFor();
++    await accountPage.createSingleTransaction({
++      payee: '',
++      notes: 'editable transaction',
++      credit: '10.00',
++    });
++
++    await accountPage.accountMenuButton.click();
++    await page.getByRole('button', { name: 'Show running balance' }).click();
++
++    const transaction = accountPage.getNthTransaction(0);
++    await expect(transaction.balance).toHaveText('10.00');
++
++    await transaction.credit.click();
++    const creditInput = transaction.credit.getByRole('textbox');
++    await creditInput.selectText();
++    await creditInput.pressSequentially('25.00');
++    await page.keyboard.press('Tab');
++
++    await expect(transaction.balance).toHaveText('25.00');
++  });
++
+   test('shift-click range selection skips hidden reconciled transactions', async () => {
+     accountPage = await navigation.createAccount({
+       name: 'Range Select',
+diff --git a/packages/desktop-client/e2e/page-models/account-page.ts b/packages/desktop-client/e2e/page-models/account-page.ts
+index f73405b0999..de0cc22d955 100644
+--- a/packages/desktop-client/e2e/page-models/account-page.ts
++++ b/packages/desktop-client/e2e/page-models/account-page.ts
+@@ -159,6 +159,7 @@ export class AccountPage {
+       category: row.getByTestId('category'),
+       debit: row.getByTestId('debit'),
+       credit: row.getByTestId('credit'),
++      balance: row.getByTestId('balance'),
+     };
+   }
+ 
+diff --git a/packages/desktop-client/src/components/accounts/Account.tsx b/packages/desktop-client/src/components/accounts/Account.tsx
+index eab85d55eda..aa2afb36ae1 100644
+--- a/packages/desktop-client/src/components/accounts/Account.tsx
++++ b/packages/desktop-client/src/components/accounts/Account.tsx
+@@ -489,6 +489,9 @@ class AccountInternal extends PureComponent<
+         if (this._isOptimisticUpdate) {
+           this._isOptimisticUpdate = false;
+           const transactionsSnapshot = data;
++          const balances = this.state.showBalances
++            ? await this.calculateBalances()
++            : null;
+           // Wrap in startTransition so React treats this as a low-priority
+           // update. Without this, setState blocks the main thread for the
+           // full duration of the re-render (~40–220ms with large transaction
+@@ -497,7 +500,10 @@ class AccountInternal extends PureComponent<
+           // into chunks and yield to the browser between them, keeping the
+           // UI responsive while the row update happens in the background.
+           startTransition(() => {
+-            this.setState({ transactions: transactionsSnapshot });
++            this.setState({
++              transactions: transactionsSnapshot,
++              balances,
++            });
+           });
+           return;
+         }
+diff --git a/upcoming-release-notes/refresh-running-balance.md b/upcoming-release-notes/refresh-running-balance.md
+new file mode 100644
+index 00000000000..24f328a7a1b
+--- /dev/null
++++ b/upcoming-release-notes/refresh-running-balance.md
+@@ -0,0 +1,6 @@
++---
++category: Bugfix
++authors: [jouet-bench]
++---
++
++Refresh running balances after editing a transaction

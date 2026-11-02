@@ -1,0 +1,33 @@
+description = "Refresh account running balances after transaction edits (actualbudget/actual#8475)"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1800
+check_timeout_s = 300
+# Prepare the shared, pinned Yarn and browser caches before running; each
+# trial installs its own node_modules before the agent's clock starts.
+isolated_setup = [["node", ".yarn/releases/yarn-4.13.0.cjs", "install", "--immutable", "--immutable-cache"]]
+prompt = '''
+In the account view, the running balance does not update when an existing
+transaction's amount is edited. It shows the correct value after navigating
+away and back. Fix the live update while preserving normal transaction editing,
+add a regression test and the required release note, and commit the change.
+For this simulated contribution, use the GitHub username `jouet-bench` in the
+release note.
+'''
+
+[source]
+git = "~/src/actual-bench-source"
+commit = "501bece3a1a556b9538359ca3284d065bac285eb"
+history = true
+
+[tools]
+node = "node"
+yarn = "{workdir}/.yarn/releases/yarn-4.13.0.cjs"
+
+[env]
+CI = "1"
+PLAYWRIGHT_BROWSERS_PATH = "~/.cache/jouet-bench/playwright"
+YARN_CACHE_FOLDER = "~/.cache/jouet-bench/yarn-cache"
