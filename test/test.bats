@@ -1189,8 +1189,8 @@ PY
 	assert [ ! -e "$XDG_STATE_HOME/jouet/sessions/s10.json" ]
 }
 
-@test "a passing --cmd run of a command no rule knows counts as a partial test run when tests passed, and a failing one as nothing" {
-	printf '#!/bin/sh\necho 1..1\necho ok 1 a\nexit 0\n' >check-tasks
+@test "a passing --cmd run of a command no rule knows counts as a partial test run, unless it only listed, and a failing one as nothing" {
+	printf '#!/bin/sh\necho ok   a: check passes\nexit 0\n' >check-tasks
 	printf '#!/bin/sh\nexit 0\n' >list-tasks
 	printf '#!/bin/sh\nexit 1\n' >broken-check
 	chmod +x check-tasks list-tasks broken-check
@@ -1199,8 +1199,8 @@ PY
 	assert_success
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code, .full]' "$XDG_STATE_HOME/jouet/sessions/s20.json"
 	assert_output '["jouet test --budget 4000 --cmd -- ./check-tasks",0,false]'
-	# A pass that showed no test passing, such as a listing, is no test run.
-	run bash -c 'CLAUDE_CODE_SESSION_ID=s23 jouet test --cmd -- ./list-tasks'
+	# A pass that only listed tests is no test run.
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s23 jouet test --cmd -- ./list-tasks --list'
 	assert_success
 	run --separate-stderr jq -c '[.trees[].runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/s23.json"
 	assert_output '[]'

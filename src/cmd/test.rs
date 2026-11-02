@@ -433,13 +433,15 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // hooks.
     if runs && misuse.is_none() {
         crate::cost::record(&cwd, &timed);
-        // A `--cmd` run whose output showed tests passing, which counts
-        // even when no rule knows its command.
+        // A `--cmd` run that may have tested something, which counts even
+        // when no rule knows its command: not one whose runner said it ran
+        // no test, nor one that only listed, explained or formatted.
         let ran_tests = args.cmd
+            && !args.extra.iter().any(|w| NOT_A_TEST.contains(&w.as_str()))
             && report
                 .suites
                 .iter()
-                .any(|suite| suite.digest.as_ref().is_some_and(|d| d.passed > 0));
+                .any(|suite| suite.digest.as_ref().is_some_and(|d| !d.no_tests));
         super::hook::record_own_run(
             &cwd,
             &own_command(),
@@ -487,6 +489,24 @@ fn with_baseline() -> String {
     words.insert(at, "--baseline".into());
     format!("jouet {}", command_line(&words))
 }
+
+/// Options and subcommands that list, explain or format rather than test,
+/// as the `checks` rule reads them.
+const NOT_A_TEST: &[&str] = &[
+    "--help",
+    "-h",
+    "--version",
+    "-V",
+    "--list",
+    "--collect-only",
+    "--co",
+    "--listTests",
+    "--list-tests",
+    "fmt",
+    "format",
+    "--write",
+    "--fix",
+];
 
 fn own_command() -> String {
     let words: Vec<String> = std::env::args().skip(1).collect();
