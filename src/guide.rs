@@ -74,7 +74,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "ci",
         Some(
-            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR] --run ID` says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR]` (or `ci explain --run ID`) says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
         ),
     ),
     (
@@ -385,11 +385,15 @@ const USAGE: &[Usage] = &[
         command: "ci",
         lines: &[
             (
-                "jouet ci explain [<TARGET>] [--run ID]",
+                "jouet ci explain [<PR>]",
                 "whether each failed job is flaky, infrastructure or real, with the evidence",
             ),
             (
-                "jouet ci explain [<TARGET>] --rerun",
+                "jouet ci explain --run ID",
+                "the same for one Actions run, named without a PR",
+            ),
+            (
+                "jouet ci explain [<PR>] --rerun",
                 "rerun only when every failure is a flake or infrastructure",
             ),
             (
@@ -409,6 +413,10 @@ const USAGE: &[Usage] = &[
             (
                 "jouet pr threads reply <ID> [<PR>] --body TEXT --resolve",
                 "reply to a thread and resolve it",
+            ),
+            (
+                "jouet pr threads resolve <IDS>...",
+                "resolve threads without a reply",
             ),
             (
                 "jouet pr status [<PRS>...] [--mine]",

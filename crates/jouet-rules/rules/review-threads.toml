@@ -8,7 +8,7 @@ author = "builtin"
 created = "2026-10-30"
 needs = ["pr", "threads"]
 suggest = "jouet pr threads"
-message = "It lists, replies to and resolves review threads, where raw reviewThreads GraphQL is long and easy to get wrong (`jouet agent-help pr`)."
+message = "It lists review threads; `jouet pr threads reply ID --body TEXT --resolve` replies and resolves, and `jouet pr threads resolve ID...` resolves without a reply. Raw reviewThreads GraphQL is long and easy to get wrong (`jouet agent-help pr`)."
 
 [[rule.match]]
 command = "gh api graphql"

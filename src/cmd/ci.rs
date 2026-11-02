@@ -84,7 +84,7 @@ fn explain_target(a: &CiExplainArgs) -> Result<explain::Target, String> {
             t.as_deref(),
             a.repo.as_deref(),
         )?)),
-        _ => Err("give a PR, --run or --job, not more than one".into()),
+        _ => Err("give a PR, --run or --job, not more than one: --run and --job name the run or job by themselves (with --repo for another repository)".into()),
     }
 }
 
