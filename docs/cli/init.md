@@ -5,8 +5,8 @@
 
 Inspect this project and propose jouet configuration
 
-Reads project files and previews any supported recommendations. It does not execute project commands or trust the repository. With --yes, writes the proposed rules without replacing existing files; review them before deciding whether to trust the repository.
+Reads project files and previews any supported recommendations. It does not execute project commands or trust the repository. With --yes, writes the proposed files without replacing existing files; review them before deciding whether to trust the repository.
 
 ## Flags
-- **`--yes`** — Write the proposed rules after reviewing the preview
+- **`--yes`** — Write the proposed files after reviewing the preview
 - **`-h --help`** — Print help

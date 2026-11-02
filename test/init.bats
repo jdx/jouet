@@ -37,10 +37,42 @@ setup() {
 
 @test "unsupported projects are inventoried without inventing a rule" {
 	printf '[project]\nname = "example"\n' >pyproject.toml
-	printf 'test:\n\tpytest\nofflinetest: test\n\tpytest -m "not download"\ncheck := not-a-target\n' >Makefile
+	printf 'test:\n\tpytest\nofflinetest: test\n\tpytest -m "not slow"\ncheck := not-a-target\n' >Makefile
 	run --separate-stderr jouet init --yes --json
 	assert_success
 	run jq -c '[.files, [.tasks[].command], .proposals]' <<<"$output"
 	assert_output '[["pyproject.toml","Makefile"],["make test","make offlinetest"],[]]'
 	[[ ! -e .jouet ]]
+}
+
+@test "proposes an explicitly documented pytest marker as a partial-run option" {
+	printf '[project]\nname = "example"\n[tool.pytest.ini_options]\n' >pyproject.toml
+	cat >Makefile <<'MAKE'
+offlinetest: check
+	$(PYTHON) -m pytest -Werror -m "not download"
+MAKE
+	run --separate-stderr jouet init --json
+	assert_success
+	[[ ! -e .jouet ]]
+	run jq -r '.proposals[0] | [.path, .evidence, .caution, .content] | join("\n")' <<<"$output"
+	assert_output --partial '.jouet/test.toml'
+	assert_output --partial 'does not prove'
+	assert_output --partial 'affected_args = ["-m", "not download"]'
+
+	run --separate-stderr jouet init --yes
+	assert_success
+	run cat .jouet/test.toml
+	assert_output $'[pytest]\naffected_args = ["-m", "not download"]'
+	run --separate-stderr jouet test --affected --dry-run
+	assert_failure 4
+	assert_stderr --partial 'not trusted'
+}
+
+@test "does not infer pytest options from comments or a different target" {
+	printf '[project]\nname = "example"\n' >pyproject.toml
+	printf 'offlinetest:\n\t# pytest -m "not download"\ntest:\n\tpytest -m "not download"\n' >Makefile
+	run --separate-stderr jouet init --json
+	assert_success
+	run jq -c '.proposals' <<<"$output"
+	assert_output '[]'
 }
