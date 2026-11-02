@@ -498,10 +498,22 @@ pub(super) fn compare(
                     )
                 }
                 known::Outcome::Unnamed { exit, log } => {
+                    let missing_dependencies = setup.is_empty()
+                        && log.as_ref().is_some_and(|path| {
+                            std::fs::read_to_string(path).is_ok_and(|output| {
+                                output
+                                    .contains("Local package.json exists, but node_modules missing")
+                            })
+                        });
+                    let hint = if missing_dependencies {
+                        "; the baseline checkout reports missing node_modules: review [baseline].setup in .jouet/test.toml and trust it before retrying"
+                    } else {
+                        ""
+                    };
                     let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
                     return Err(NotCompared {
                         message: format!(
-                            "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
+                            "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{hint}{log}",
                             base.name
                         ),
                         unverifiable: true,
