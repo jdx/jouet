@@ -104,6 +104,50 @@ fn nothing_reason(suite: &Suite) -> &str {
 }
 
 #[test]
+fn go_selection_ignores_fixture_sources_but_keeps_actual_tests_in_testdata() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.22\n",
+    );
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 1 }\n",
+    );
+    write(
+        &root.join("lib/lib_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = Value() }\n",
+    );
+    write(
+        &root.join("testdata/probe/main.go"),
+        "package main\nimport \"example.test/project/lib\"\nfunc main() { _ = lib.Value() }\n",
+    );
+    write(
+        &root.join("testdata/real/real_test.go"),
+        "package real\nimport (\"testing\"; \"example.test/project/lib\")\nfunc TestValue(t *testing.T) { _ = lib.Value() }\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 2 }\n",
+    );
+
+    let plan = plan_in(root).unwrap();
+    let [suite] = plan.suites.as_slice() else {
+        panic!("one suite")
+    };
+    assert_eq!(suite.decision, Decision::Affected);
+    let paths: Vec<_> = suite.tests.iter().map(|test| test.path.as_str()).collect();
+    assert!(paths.contains(&"lib/lib_test.go"), "{paths:?}");
+    assert!(paths.contains(&"testdata/real/real_test.go"), "{paths:?}");
+    assert!(!paths.contains(&"testdata/probe/main.go"), "{paths:?}");
+}
+
+#[test]
 fn a_changed_module_selects_the_tests_that_import_it_directly_or_not() {
     let dir = repo("pytest", "");
     let root = dir.path();
