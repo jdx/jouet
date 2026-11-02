@@ -725,6 +725,12 @@ fn freeze_javascript_selection(suite: &mut Suite, extra: &[String]) -> Result<()
             return false;
         }
         let name = arg.split('=').next().unwrap_or(arg);
+        if let Some(short) = name.strip_prefix('-')
+            && !short.starts_with('-')
+            && short.chars().any(|c| matches!(c, 'o' | 'f'))
+        {
+            return true;
+        }
         let normalized: String = name
             .chars()
             .filter(|c| *c != '-')
@@ -741,6 +747,7 @@ fn freeze_javascript_selection(suite: &mut Suite, extra: &[String]) -> Result<()
                 | "lastcommit"
                 | "related"
                 | "o"
+                | "f"
         )
     }) {
         return Err(affected::Error::new(

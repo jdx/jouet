@@ -270,6 +270,12 @@ vitest (vitest's module graph): 2 test files
 	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- --changed-since=main
 	assert_failure 4
 	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- -f
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
+	run --separate-stderr jouet test --baseline --affected --since main --dry-run -- -of
+	assert_failure 4
+	assert_stderr --partial 'cannot be frozen'
 }
 
 @test "pytest without testmon follows imports, and a conftest runs the whole suite" {
