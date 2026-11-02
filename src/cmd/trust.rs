@@ -120,6 +120,9 @@ struct Trusted {
     plugins: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     test_config: Option<String>,
+    /// `.jouet/project.toml`, which the primer shows every session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<String>,
 }
 
 /// This repository's set.
@@ -131,7 +134,7 @@ fn target(cwd: &Path) -> Result<Set, (Exit, String)> {
         .ok_or_else(|| {
             (
             Exit::NotFound,
-            "no .jouet/rules, .jouet/routines, .jouet/test.toml or .jouet/plugins.toml at the root of this repository"
+            "no .jouet/rules, .jouet/routines, .jouet/test.toml, .jouet/project.toml or .jouet/plugins.toml at the root of this repository"
                 .into(),
         )
         })
@@ -207,6 +210,7 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         routines: routine_names,
         plugins: pinned.plugin.keys().cloned().collect(),
         test_config: std::fs::read_to_string(set.root.join("test.toml")).ok(),
+        project: std::fs::read_to_string(set.root.join("project.toml")).ok(),
     };
     let reviewed = |report: &Trusted| {
         let mut text = checked_text(&report.rules);
@@ -215,6 +219,9 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         }
         if let Some(config) = &report.test_config {
             let _ = writeln!(text, "test.toml:\n{config}");
+        }
+        if let Some(project) = &report.project {
+            let _ = writeln!(text, "project.toml (shown to every session):\n{project}");
         }
         text
     };
