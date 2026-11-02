@@ -26,6 +26,12 @@ impl Format {
 }
 
 pub(crate) fn run(args: &SkillArgs, out: &Output) -> Exit {
+    if args.init && args.contribute {
+        return out.error(
+            Exit::Usage,
+            "--init and --contribute cannot be used together",
+        );
+    }
     let name = args.format.as_deref().unwrap_or("claude");
     let Some(format) = Format::parse(name) else {
         return out.error(
@@ -33,13 +39,28 @@ pub(crate) fn run(args: &SkillArgs, out: &Output) -> Exit {
             &format!("--format must be claude, codex or agents-md, not `{name}`"),
         );
     };
-    let text = if args.contribute {
+    let text = if args.init {
+        init(format)
+    } else if args.contribute {
         contribute(format)
     } else {
         render(format)
     };
     out.result(&serde_json::json!({ "text": text }), || text.clone());
     Exit::Ok
+}
+
+/// Onboarding needs project-specific judgment, so it is a skill rather than
+/// a command guessing configuration from a few manifest patterns.
+pub(crate) fn init(format: Format) -> String {
+    let skill = include_str!("skill/init.md");
+    match format {
+        Format::Claude | Format::Codex => skill.to_string(),
+        Format::AgentsMd => {
+            let (_, body) = skill.split_once("\n---\n").expect("skill frontmatter");
+            format!("#{}", body.trim_start())
+        }
+    }
 }
 
 /// The skill file. Claude Code and Codex read the same `SKILL.md` shape; the

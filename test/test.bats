@@ -463,7 +463,8 @@ tap_script() {
 	run --separate-stderr jouet test --cmd -- ./run-tests
 
 	assert_success
-	assert_output --regexp '^cmd: passed in [0-9.]+s: 3 passed \(full log: .+\.log\)$'
+	# A small run names its tests, so the agent sees its own ran.
+	assert_output --regexp '^cmd: passed in [0-9.]+s: 3 passed \(case 1, case 2, case 3\) \(full log: .+\.log\)$'
 	assert_equal "${#lines[@]}" 1
 	assert_equal "$stderr" ""
 	log="${output##*full log: }"

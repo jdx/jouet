@@ -33,7 +33,7 @@ Projects beyond jdx's own:
 | task | project | issue | language and runner | needs on the host |
 |---|---|---|---|---|
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
-| `yq-signed-hex` | yq, a CLI | [mikefarah/yq#2748](https://github.com/mikefarah/yq/issues/2748) | Go, `go test` | Go, and yq's modules in `~/go/pkg/mod` (`go mod download`) |
+| `yq-signed-hex` | yq, a CLI | [mikefarah/yq#2748](https://github.com/mikefarah/yq/issues/2748) | Go, `go test` | the benchmark's pinned Go toolchain, and yq's modules in `~/go/pkg/mod` (`go mod download`) |
 | `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | `mise install pnpm@10.12.1`, and one `pnpm install` in the clone to fill the store |
 | `commander-output-config` | commander.js, a CLI library | [tj/commander.js#2342](https://github.com/tj/commander.js/issues/2342) | JavaScript, jest and tsc | one `npm ci` in the clone to fill npm's cache |
 

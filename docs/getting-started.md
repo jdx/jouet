@@ -58,9 +58,9 @@ Unpack the archive and put `jouet` (`jouet.exe` on Windows) on your `PATH`, then
 jouet --version
 ```
 
-## Connect your agent
+## Connect your agent {#tell-your-agent}
 
-For Claude Code, Codex, Cursor, Gemini CLI or Copilot, `jouet setup` adds jouet's hooks to the harness's settings file:
+For Claude Code, Codex, Cursor, Gemini CLI or Copilot, `jouet setup` adds jouet's hooks to the harness's settings file and installs the jouet-init skill:
 
 ```sh
 jouet setup claude   # or: codex, cursor, gemini, copilot
@@ -77,6 +77,16 @@ From the next session on:
 [Agent setup and hooks](/setup) covers each harness, installing for one repository only, and turning each part off.
 
 For another harness, add the snippet that `jouet skill --format agents-md` prints to its `AGENTS.md`. It points the agent at `jouet agent-help`, which always describes the installed version. The agent gets the commands that way, but no primer, rules or stop check.
+
+## Initialize your project
+
+Then start a new agent session in the project and ask it to use jouet-init: `/jouet-init` in Claude Code, `$jouet-init` in Codex, or in any harness:
+
+```text
+Use the jouet-init skill to configure jouet for this project.
+```
+
+The agent reads the project's instructions, build and test workflows, existing jouet configuration and timing history, and works out the full and focused check commands. Where the project needs it, it adapts the test configuration, adds a task or routine, or writes a warning rule, and checks what it changed. When nothing needs configuring, it says so. Trusting the repository's rules stays your decision. [Initialize a project](/project-setup) says what the skill does and doesn't do.
 
 ## See where your sessions go
 

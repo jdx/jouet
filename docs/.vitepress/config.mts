@@ -54,7 +54,7 @@ export default defineConfig({
         text: "Guide",
         link: "/getting-started",
         activeMatch:
-          "^/(getting-started|why|setup|conventions|winding|rules|routines|plugins|forges|entire-gates|stability|benchmarks)",
+          "^/(getting-started|project-setup|why|setup|conventions|winding|rules|routines|plugins|forges|entire-gates|stability|benchmarks)",
       },
       { text: "Commands", link: "/commands/edit", activeMatch: "^/commands/" },
       { text: "Reference", link: "/cli/", activeMatch: "^/cli/" },
@@ -68,6 +68,7 @@ export default defineConfig({
         text: "Start here",
         items: [
           { text: "Getting started", link: "/getting-started" },
+          { text: "Initialize a project", link: "/project-setup" },
           { text: "Why jouet", link: "/why" },
           { text: "Agent setup and hooks", link: "/setup" },
           { text: "Shared conventions", link: "/conventions" },
@@ -114,7 +115,6 @@ export default defineConfig({
           { text: "jouet ci run", link: "/commands/ci" },
           { text: "jouet ci explain", link: "/commands/ci#jouet-ci-explain" },
           { text: "jouet task", link: "/commands/task" },
-          { text: "jouet init", link: "/commands/init" },
         ],
       },
       {
