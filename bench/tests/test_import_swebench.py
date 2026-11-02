@@ -65,7 +65,7 @@ def record(**kw):
         "instance_id": "acme__calc-7",
         "repo": "acme/calc",
         "base_commit": "",
-        "problem_statement": 'add() subtracts\r\n\r\nIt says """2 - 3""" with a \\ in it.',
+        "problem_statement": 'add() subtracts 🙃\r\n\r\nIt says """2 - 3""" with a \\ in it.',
         "patch": FIX,
         "test_patch": TESTS,
         "FAIL_TO_PASS": '["test_add (test_calc.CalcTest)"]',
@@ -78,28 +78,33 @@ def record(**kw):
 
 class RecordsTest(unittest.TestCase):
     def test_lists_from_json_strings(self):
-        r = imp.normalize(record(base_commit="abc"))
+        r = imp.normalize(record(base_commit="abc1234"))
         self.assertEqual(r["FAIL_TO_PASS"], ["test_add (test_calc.CalcTest)"])
         self.assertEqual(r["PASS_TO_PASS"], ["test_zero (test_calc.CalcTest)"])
 
+    def test_unsafe_ids(self):
+        for bad in ({"instance_id": "../../etc"}, {"base_commit": "--upload-pack=x"}, {"repo": "acme/../x"}):
+            with self.assertRaises(ValueError, msg=bad):
+                imp.normalize(record(**{"base_commit": "abc1234", **bad}))
+
     def test_missing_field(self):
         with self.assertRaisesRegex(ValueError, "no patch"):
-            imp.normalize(record(base_commit="abc", patch=""))
+            imp.normalize(record(base_commit="abc1234", patch=""))
 
     def test_multi_swe_bench_fields(self):
         r = imp.normalize({
-            "org": "acme", "repo": "calc", "number": 7, "base": {"sha": "abc"},
+            "org": "acme", "repo": "calc", "number": 7, "base": {"sha": "abc1234"},
             "resolved_issues": [{"title": "add() subtracts", "body": "It does."}],
             "fix_patch": FIX, "test_patch": TESTS,
             "f2p_tests": {"calc::add": {}}, "p2p_tests": {"calc::zero": {}},
         })
-        self.assertEqual((r["instance_id"], r["repo"], r["base_commit"]), ("acme__calc-7", "acme/calc", "abc"))
+        self.assertEqual((r["instance_id"], r["repo"], r["base_commit"]), ("acme__calc-7", "acme/calc", "abc1234"))
         self.assertEqual(r["problem_statement"], "add() subtracts\n\nIt does.")
         self.assertEqual((r["FAIL_TO_PASS"], r["PASS_TO_PASS"]), (["calc::add"], ["calc::zero"]))
 
     def test_file_formats(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rows = [record(base_commit="abc")]
+            rows = [record(base_commit="abc1234")]
             for name, text in (
                 ("r.jsonl", "\n".join(json.dumps(r) for r in rows) + "\n"),
                 ("r.json", json.dumps(rows)),
@@ -157,6 +162,10 @@ class LogTest(unittest.TestCase):
             "test_a (m.tests.T)": "pass", "test_b (m.tests.T)": "fail", "A docstring's first line.": "fail",
             "test_d (m.tests.T.test_d)": "skip", "test_e (m.tests.T)": "pass",
         })
+
+    def test_duplicate_names_keep_a_failure(self):
+        log = "a/tests/test_x.py[1]\ntest_same F\nb/tests/test_y.py[1]\ntest_same ok\n"
+        self.assertEqual(_swebench.parse_sympy(log), {"test_same": "fail"})
 
     def test_sympy(self):
         log = "sympy/core/tests/test_x.py[4] \ntest_a ok\ntest_b F\ntest_c E\ntest_d f\n"
@@ -219,9 +228,17 @@ class ImportTest(unittest.TestCase):
         raw = tomllib.loads((self.task / "task.toml").read_text())
         self.assertTrue(raw["opt_in"])
         self.assertEqual(raw["source"]["commit"], self.base)
-        self.assertTrue(raw["prompt"].startswith('add() subtracts\n\nIt says """2 - 3""" with a \\ in it.'))
+        self.assertTrue(raw["prompt"].startswith('add() subtracts 🙃\n\nIt says """2 - 3""" with a \\ in it.'))
         self.assertTrue(raw["prompt"].endswith("Fix this in calc, with a test, and commit.\n"))
         self.assertNotIn("tools", raw)
+        self.assertTrue(raw["description"].endswith("acme__calc-7: add() subtracts 🙃"))
+        self.assertTrue(raw["source"]["git"].endswith("/clones/acme__calc"))
+
+    def test_no_test_targets(self):
+        spec = imp.spec_for("sympy/sympy", "1.5")
+        with self.assertRaises(SystemExit):
+            imp.write_task(imp.normalize(record(base_commit=self.base)), self.out, self.tmp / "clones",
+                           self.tmp / "envs", "Test bench", spec)
 
     def test_check_fails_unsolved_and_passes_solved(self):
         work = self.tmp / "work"

@@ -42,9 +42,21 @@ def parse_django(log: str) -> dict[str, str]:
             pending = name
             continue
         if name is not None and status is not None:
-            statuses[name] = status
+            record(statuses, name, status)
             pending = None
     return statuses
+
+
+def record(statuses: dict[str, str], name: str, status: str) -> None:
+    """Two tests can share a name, as sympy's do across files: a failure of
+    either is the name's failure."""
+    previous = statuses.get(name)
+    if FAIL in (previous, status):
+        statuses[name] = FAIL
+    elif PASS in (previous, status):
+        statuses[name] = PASS
+    else:
+        statuses[name] = status
 
 
 def django_status(word: str) -> str | None:
@@ -62,7 +74,7 @@ def parse_sympy(log: str) -> dict[str, str]:
     expected failure), `X` (an unexpected pass) or `s`."""
     statuses = {}
     for m in re.finditer(r"^(test_\w+) (ok|F|E|f|X|s|Skipped)\b", log, re.M):
-        statuses[m.group(1)] = {"ok": PASS, "f": PASS, "s": SKIP, "Skipped": SKIP}.get(m.group(2), FAIL)
+        record(statuses, m.group(1), {"ok": PASS, "f": PASS, "s": SKIP, "Skipped": SKIP}.get(m.group(2), FAIL))
     return statuses
 
 
@@ -73,7 +85,7 @@ def parse_pytest(log: str) -> dict[str, str]:
     for m in re.finditer(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED) (\S+)", log, re.M):
         if m.group(1) == "SKIPPED":
             continue  # `SKIPPED [1] path:line: reason` names no test.
-        statuses[m.group(2)] = PASS if m.group(1) in ("PASSED", "XFAIL") else FAIL
+        record(statuses, m.group(2), PASS if m.group(1) in ("PASSED", "XFAIL") else FAIL)
     return statuses
 
 

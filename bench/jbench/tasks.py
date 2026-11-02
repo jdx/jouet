@@ -121,6 +121,8 @@ class Task:
                 # A path replaces a default tool: an imported task's own
                 # Python stands in for the host's `python3`.
                 path = Path(expand(target, workdir))
+                if not path.is_absolute():
+                    path = workdir / path
                 if not path.exists():
                     raise RuntimeError(f"task {self.name} needs {path}, which does not exist")
                 link.unlink(missing_ok=True)
