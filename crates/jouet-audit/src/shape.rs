@@ -400,6 +400,24 @@ pub(crate) fn program_shapes(command: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Programs grouped by shell pipeline, without joining separate commands.
+pub(crate) fn pipeline_shapes(command: &str) -> Vec<Vec<(String, String)>> {
+    let mut pipelines = Vec::new();
+    let mut pipeline = Vec::new();
+    for (simple, op) in simple_commands(&lex(command)) {
+        let (shaped, program) = shape_simple(&simple);
+        if let Some(program) = program {
+            pipeline.push((program, shaped));
+        }
+        if !matches!(op, Some("|" | "|&")) {
+            if !pipeline.is_empty() {
+                pipelines.push(std::mem::take(&mut pipeline));
+            }
+        }
+    }
+    pipelines
+}
+
 /// Splits tokens into simple commands, each with the operator after it.
 fn simple_commands(toks: &[Tok]) -> Vec<(Vec<&Tok>, Option<&'static str>)> {
     let mut out = Vec::new();

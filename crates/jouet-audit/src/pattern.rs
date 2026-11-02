@@ -1,6 +1,7 @@
 //! Recurring habits worth a rule, found in single commands.
 
 use crate::event::Call;
+use crate::shape::pipeline_shapes;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -126,7 +127,6 @@ static TEST_HEAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(?s)(?:\bcargo\s+(?:\+\S+\s+)?(?:test|nextest|build|check|clippy)|\bmise\s+(?:run|r)\s+(?:test|lint|build|ci|e2e|t|b)",
         r"|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test|\bpytest\b|\bgo\s+test\b|\bbats\b|\bmake\s+(?:test|check)\b|\bhk\s+(?:check|run)\b)",
-        r"[^\n;]*?\|\s*(?:head|tail)\b",
     ))
     .expect("the test-output pattern compiles")
 });
@@ -171,7 +171,14 @@ pub fn detect(command: &str) -> Patterns {
     if SLEEP.is_match(command) {
         found.insert(Pattern::SleepPoll);
     }
-    if TEST_HEAD.is_match(command) {
+    if pipeline_shapes(command).iter().any(|pipeline| {
+        let mut test_seen = false;
+        pipeline.iter().any(|(program, shaped)| {
+            let cuts_test = test_seen && matches!(program.as_str(), "head" | "tail");
+            test_seen |= TEST_HEAD.is_match(shaped);
+            cuts_test
+        })
+    }) {
         found.insert(Pattern::HeadOnTestOutput);
     }
     if STALE_TOKEN.is_match(command) {
@@ -235,6 +242,18 @@ mod tests {
             Pattern::HeadOnTestOutput
         ));
         assert!(!has("git log | head", Pattern::HeadOnTestOutput));
+        assert!(!has(
+            "python --version && rg -n 'ruff|pytest' Makefile tox.ini | head -75",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(!has(
+            "cargo test && git log | head",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(has(
+            "cargo test 2>&1 | tee test.log | tail -40",
+            Pattern::HeadOnTestOutput
+        ));
     }
 
     #[test]
