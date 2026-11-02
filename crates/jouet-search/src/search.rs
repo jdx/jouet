@@ -45,6 +45,9 @@ pub struct Options {
     pub structural: Option<String>,
     /// Narrows a structural pattern's matches, file by file.
     pub filter: Option<std::sync::Arc<dyn Filter>>,
+    /// Show at most this many matches from each file, as rg's `-m`; the
+    /// rest are counted as left out.
+    pub max_count: Option<usize>,
 }
 
 /// Byte budgets for the output; `0` is no limit.
@@ -362,6 +365,9 @@ fn lay_out(report: &mut Report, found: Vec<Collected>, options: &Options, memory
                 cost += symbol
                     .as_ref()
                     .map_or(0, |s| s.kind.len() + s.name.len() + 16);
+            }
+            if options.max_count.is_some_and(|max| file.shown.len() >= max) {
+                break;
             }
             let first_shown = report.files.is_empty() && file.shown.is_empty();
             if !first_shown

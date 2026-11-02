@@ -8,11 +8,11 @@ description: Search code like rg, with the matches grouped by the function they 
 
 ```text
 jouet search PATTERN [PATH]... [-F] [-i] [-w] [-g GLOB]... [--hidden] [-l]
-             [--budget BYTES] [--file-budget BYTES] [--again]
+             [-m NUM] [--budget BYTES] [--file-budget BYTES] [--again]
              [--structural --lang LANG [--callers-of PATH#SYMBOL | --impact PATH#SYMBOL]]
 ```
 
-The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. Every flag is listed in the [CLI reference](/cli/search).
+The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. `-m NUM` (`--max-count`) shows at most NUM matches from each file, as rg's does, counting the rest as left out, and `-n` is accepted for rg's sake, since line numbers are always shown: agents reach for both by habit. Every flag is listed in the [CLI reference](/cli/search).
 
 ```output
 $ jouet search 'join_url|fetch\(' src/

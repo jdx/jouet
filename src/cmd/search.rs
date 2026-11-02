@@ -59,6 +59,7 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         filter: scope
             .clone()
             .map(|s| s as Arc<dyn jouet_search::structural::Filter>),
+        max_count: args.max_count,
     };
     let mut memory = if args.again || args.files_with_matches {
         Memory::none()

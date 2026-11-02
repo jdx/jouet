@@ -44,6 +44,8 @@ Examples:
 - **`--hidden`** — Search hidden files and directories too
 - **`-l --files-with-matches`** — List the matching files with their match counts, not the lines
 - **`--budget <BYTES>`** — The most bytes to print in total (default 6000; 0 is no limit)
+- **`-m --max-count <NUM>`** — Show at most NUM matches from each file, as rg's -m
+- **`-n --line-number`** — Accepted for rg's sake: line numbers are always shown
 - **`--file-budget <BYTES>`** — The most bytes to print from one file (default 1500; 0 is no limit)
 - **`--again`** — Show matches this session was already shown, too
 - **`--structural`** — Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any number. Needs --lang
