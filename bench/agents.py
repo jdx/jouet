@@ -6,6 +6,7 @@
     python3 bench/agents.py run --harness claude --rounds 5
     python3 bench/agents.py report bench/results/<id>
     python3 bench/agents.py check-tasks              # no agents: prove each task's check
+    python3 bench/agents.py run --tasks-dir ~/bench-tasks --tasks NAME   # a task kept elsewhere
 
 See docs/benchmarks.md for the method and its limits.
 """
@@ -42,6 +43,9 @@ DEFAULTS = {
 }
 
 
+TASKS_DIR_HELP = "another directory of tasks, after bench/tasks/ (repeatable; also JOUET_BENCH_TASKS)"
+
+
 def log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
@@ -57,6 +61,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run = sub.add_parser("run", help="run the suite (or print its plan with --dry-run)")
     run.add_argument("--harness", type=csv, default=["claude", "codex"], help="claude,codex (default both)")
     run.add_argument("--tasks", type=csv, help="task names (default every task)")
+    run.add_argument("--tasks-dir", type=Path, action="append", default=[], help=TASKS_DIR_HELP)
     run.add_argument("--arms", type=csv, default=["plain", "jouet"], help="plain, jouet and jouet-init (default plain,jouet)")
     run.add_argument("--rounds", type=int, default=DEFAULTS["rounds"], help="runs per task, harness and arm")
     run.add_argument("--seed", type=int, help="shuffles the arm order in each round (default: the time)")
@@ -103,6 +108,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     chk = sub.add_parser("check-tasks", help="prove each task's check without running an agent")
     chk.add_argument("--tasks", type=csv)
+    chk.add_argument("--tasks-dir", type=Path, action="append", default=[], help=TASKS_DIR_HELP)
     chk.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
     return parser.parse_args(argv)
 
@@ -114,8 +120,20 @@ def git_commit() -> str | None:
     return proc.stdout.strip() or None
 
 
+def use_task_dirs(args: argparse.Namespace) -> list[str] | None:
+    """Adds --tasks-dir to the task directories; None, after saying why, when they cannot be read."""
+    tasks.EXTRA_DIRS[:] = args.tasks_dir
+    try:
+        return tasks.all_names()
+    except (OSError, ValueError) as error:
+        log(f"task directories: {error}")
+        return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    names = tasks.all_names()
+    names = use_task_dirs(args)
+    if names is None:
+        return 2
     if args.smoke:
         selected = [n for n in names if tasks.load(n).smoke]
         args.rounds = 1
@@ -189,6 +207,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "jouet_version": None,
         "effort": args.effort,
         "tasks": selected,
+        "task_dirs": [str(d) for d in tasks.directories()],
         "arms": args.arms,
         "jouet_env": jouet_env,
         "harnesses": {
@@ -251,8 +270,15 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
     the fake GitHub without a request the fake cannot answer."""
     import tempfile
 
+    names = use_task_dirs(args)
+    if names is None:
+        return 2
+    unknown = [n for n in args.tasks or [] if n not in names]
+    if unknown:
+        log(f"unknown task: {', '.join(unknown)}")
+        return 2
     failures = []
-    for name in args.tasks or [n for n in tasks.all_names() if not tasks.load(n).opt_in]:
+    for name in args.tasks or [n for n in names if not tasks.load(n).opt_in]:
         task = tasks.load(name)
         with tempfile.TemporaryDirectory(prefix="jouet-bench-check-") as tmp:
             root = Path(tmp)
@@ -267,8 +293,8 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                 try:
                     tasks.setup_environment(task, base, workdir, root / "python-cache", root / f"{label}-environment.log")
                 except (OSError, RuntimeError, ValueError) as error:
-                    log = root / f"{label}-environment.log"
-                    details = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+                    env_log = root / f"{label}-environment.log"
+                    details = env_log.read_text(errors="replace")[-4000:] if env_log.exists() else ""
                     failures.append(f"{name}: environment setup failed: {error}\n{details}")
                     continue
                 fixture = task.github_fixture(shas)
@@ -278,7 +304,7 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                     fake.__enter__()
                 try:
                     if solve:
-                        env = {**base, **tasks.GIT_ENV}
+                        env = {**base, **tasks.GIT_ENV, **tasks.helpers_env()}
                         if fake:
                             env["BENCH_GITHUB_URL"] = fake.url
                         proc = subprocess.run(
