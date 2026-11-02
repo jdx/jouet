@@ -6,7 +6,7 @@ description: jouet tells a coding agent which checks are slow before it runs the
 hero:
   name: 'jouet <span class="jouet-gloss">pronounced “zhweh” · French for “toy”</span>'
   text: "Wind-up tools for coding agents"
-  tagline: "jouet tells an agent which builds and tests are slow before it runs them, and turns what keeps going wrong across sessions into rules, tasks and routines for the next one. It also has a command for each shell chore agents keep scripting by hand."
+  tagline: "jouet tells an agent which builds and tests are slow before it runs them, and turns what keeps going wrong into rules, tasks and routines for the next session. For the chores agents script by hand, it has a command each."
   image:
     src: /logo.svg
     alt: The jouet logo, a coral wind-up tin robot with a brass key on top
