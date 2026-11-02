@@ -63,8 +63,9 @@ pub(crate) struct SearchArgs {
     #[usage(long, value_name = "BYTES")]
     pub(crate) budget: Option<usize>,
     /// Show at most NUM matches from each file, as rg's -m
-    // `--max` too: agents guess it, and an unknown flag costs a request.
-    #[usage(short = 'm', long, alias = "max", value_name = "NUM")]
+    // The spellings agents guess for it too (`--max 20`, `--max-results 20`,
+    // `--limit 20`): an unknown flag costs a request.
+    #[usage(short = 'm', long, aliases = ["max", "max-results", "limit"], value_name = "NUM")]
     pub(crate) max_count: Option<usize>,
     /// Accepted for rg's sake: line numbers are always shown
     #[usage(short = 'n', long)]
