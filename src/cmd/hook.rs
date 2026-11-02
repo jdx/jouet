@@ -997,6 +997,9 @@ fn own_state() -> Option<(PathBuf, bool)> {
 /// cannot tell from a call that edits.
 pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Option<&str>) {
     let settings = Settings::load();
+    let (Some(before), Some(after)) = (before, after) else {
+        return;
+    };
     if !settings.hooks.enabled || !settings.hooks.verify || before == after {
         return;
     }
@@ -1006,9 +1009,7 @@ pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Opt
     let root = verify::root_of(cwd);
     let _ = verify::update(&path, |state| {
         state.by(&root, lead);
-        let checks = state.checks_mut(&root);
-        checks.formatting_started(before);
-        checks.formatting_ended(after);
+        state.checks_mut(&root).reformatted(before, after);
     });
 }
 

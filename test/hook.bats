@@ -219,6 +219,8 @@ stop_reason() {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
 	git -C repo add main.rs
+	git -C repo config user.name test
+	git -C repo config user.email test@example.com
 	git -C repo commit -q -m base
 	# A pre-commit hook that reformats what it commits, as hk fix does.
 	printf '#!/bin/sh\necho "fn main() { }" >main.rs\ngit add main.rs\n' >repo/.git/hooks/pre-commit
