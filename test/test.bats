@@ -630,7 +630,12 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 @test "--baseline says when an unnamed failure was not run at the merge base" {
 	printf 'base\n' >tracked
 	export RUNS_FILE="$BATS_TEST_TMPDIR/unnamed-runs"
-	printf '#!/bin/sh\necho run >>"$RUNS_FILE"\necho "the tool failed"\nexit 1\n' >fail-command
+	cat >fail-command <<'SH'
+#!/bin/sh
+echo run >>"$RUNS_FILE"
+echo "the tool failed"
+exit 1
+SH
 	chmod +x fail-command
 	git add tracked fail-command
 	git commit -qm base
