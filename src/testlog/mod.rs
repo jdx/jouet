@@ -198,8 +198,9 @@ regexes! {
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
-    // A runner refusing its own arguments, before it runs anything.
-    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:)";
+    // A runner refusing its own arguments, before it runs anything; argparse
+    // and pytest name the program, and a subcommand, first.
+    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument ))";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";

@@ -641,6 +641,14 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         .is_some()
     );
     assert!(usage_error("flag provided but not defined: -nope\n", &[]).is_some());
+    // argparse and pytest name the program first.
+    for line in [
+        "usage: pytest [options] [file_or_dir] [file_or_dir] [...]\npytest: error: unrecognized arguments: --nope\n",
+        "usage: agents.py run [-h] --tasks TASKS\nagents.py run: error: the following arguments are required: --tasks\n",
+        "usage: agents.py [-h]\nagents.py: error: argument --rounds: invalid int value: 'x'\n",
+    ] {
+        assert!(usage_error(line, &[]).is_some(), "{line}");
+    }
     // A run with tests is judged by them, whatever else it printed.
     assert_eq!(
         usage_error(
