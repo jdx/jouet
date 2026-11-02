@@ -53,16 +53,24 @@ before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
 
 [checks.focused]                           # by what each covers
 unit = "jouet test --affected"
-e2e = "jouet test --cmd -- mise run test:e2e FILE"
+e2e = "jouet test --cmd -- mise run test:e2e NAME"
 ```
+
+These are an example; write this project's own commands, not these.
 
 List only commands you confirmed from the project's tasks and instructions,
 and checked where you can (a dry-run selection, `--help`, or a run the task
 already called for). Write focused checks as `jouet test --affected` or
-`jouet test --cmd -- …`, so their results are recorded. Put what CI enforces but
-the focused checks leave out (a clippy or type check) in `before_push`. Keep it
-short: it is in every session's context. Update an existing file rather
-than replacing it.
+`jouet test --cmd -- …`, so their results are recorded. Where a command takes
+the test, file or step to run, write `NAME` in its place, whatever the project
+calls it. Set `lint` only to a command that works in this project: the example
+needs an `hk.pkl`; otherwise use the project's own lint command.
+
+Put in `before_push` what a CI workflow runs and the focused checks leave out (a
+clippy or type check). Read the workflow files; a check that only a document or
+a task mentions, or that needs a tool the project does not install, is not
+enforced and stays out. Keep the file short: it is in every session's context.
+Update an existing file rather than replacing it.
 
 ## Adapt only what helps
 
