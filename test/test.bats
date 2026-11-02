@@ -1163,6 +1163,29 @@ PY
 	assert [ ! -e "$XDG_STATE_HOME/jouet/sessions/s10.json" ]
 }
 
+@test "a passing --cmd run of a command no rule knows counts as a partial test run, and a failing one as nothing" {
+	printf '#!/bin/sh\nexit 0\n' >check-tasks
+	printf '#!/bin/sh\nexit 1\n' >broken-check
+	chmod +x check-tasks broken-check
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s20 jouet test --cmd -- ./check-tasks'
+	assert_success
+	run --separate-stderr jq -c '.trees[].runs.test | [.command, .exit_code, .full]' "$XDG_STATE_HOME/jouet/sessions/s20.json"
+	assert_output '["jouet test --cmd -- ./check-tasks",0,false]'
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s21 jouet test --cmd -- ./broken-check'
+	run --separate-stderr jq -c '[.trees[].runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/s21.json"
+	assert_output '[]'
+}
+
+@test "a run whose runner refused its arguments is no failed test run" {
+	printf '#!/bin/sh\necho "error: unexpected argument '"'"'guide'"'"' found"\nexit 1\n' >cargo-like
+	chmod +x cargo-like
+	run bash -c 'CLAUDE_CODE_SESSION_ID=s22 jouet test --cmd -- ./cargo-like'
+	assert_failure 1
+	assert_output --partial 'usage: the runner refused its arguments and ran no test'
+	run --separate-stderr jq -c '[.trees[].runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/s22.json"
+	assert_output '[]'
+}
+
 @test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
 	ran 'jouet test --cmd -- python3 -m unittest' 0
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"

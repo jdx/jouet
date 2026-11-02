@@ -196,6 +196,8 @@ regexes! {
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
+    // A runner refusing its own arguments, before it runs anything.
+    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:)";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -406,6 +408,21 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
             }
         })
         .collect()
+}
+
+/// The line where a runner refused its own arguments, when the run ran no
+/// test: clap's `error: unexpected argument`, argparse's `error:
+/// unrecognized arguments`, Go's `flag provided but not defined`. Such a
+/// run never tested anything, so it is no failed test.
+pub(crate) fn usage_error(text: &str, formats: &[Format]) -> Option<String> {
+    let digest = digest_with(text, true, 0, formats);
+    if digest.passed + digest.failed > 0 {
+        return None;
+    }
+    clean(text)
+        .into_iter()
+        .find(|l| USAGE.is_match(l))
+        .map(|l| l.trim().chars().take(120).collect())
 }
 
 /// [`digest_with`] jouet's own formats alone.

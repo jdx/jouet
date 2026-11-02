@@ -1045,7 +1045,22 @@ pub(crate) fn record_own_run(cwd: &Path, command: &str, exit_code: i32, environm
         exit_code: Some(exit_code),
         ..Call::default()
     };
-    let records = rules::load(cwd).engine.evaluate(&call).records;
+    let mut records = rules::load(cwd).engine.evaluate(&call).records;
+    // A `jouet test --cmd` of a command no rule knows, such as a project's
+    // own check script, is a test the agent ran: its pass counts as a test
+    // passing at these files, as a part of the suite. A failure of it is
+    // still not recorded, since it may be no test at all.
+    if records.is_empty() && exit_code == 0 && command.starts_with("jouet test --cmd ") {
+        records.push(Record {
+            rule: "checks".into(),
+            kind: jouet_rules::Kind::Test,
+            command: command.to_string(),
+            exit_code,
+            full: false,
+            selector: None,
+            dir: None,
+        });
+    }
     if records.is_empty() {
         return;
     }

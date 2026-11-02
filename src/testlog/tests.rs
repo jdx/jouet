@@ -604,6 +604,23 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     // libtest names a failure twice, the second time with its block.
     let libtest = "running 1 test\ntest keyring ... FAILED\n\nfailures:\n\n---- keyring stdout ----\nthread panicked: DBus error: no bus\n\nfailures:\n    keyring\n\ntest result: FAILED. 0 passed; 1 failed\n";
     assert!(environment_cause(libtest, &[]).is_some());
+    // A runner that refused its arguments ran no test.
+    assert!(
+        usage_error(
+            "error: unexpected argument 'guide' found\n\nUsage: cargo test [OPTIONS] [TESTNAME]\n",
+            &[]
+        )
+        .is_some()
+    );
+    assert!(usage_error("flag provided but not defined: -nope\n", &[]).is_some());
+    // A run with tests is judged by them, whatever else it printed.
+    assert_eq!(
+        usage_error(
+            "running 1 test\ntest a ... FAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\nerror: unexpected argument\n",
+            &[]
+        ),
+        None
+    );
     // A missing command is most often a binary the change did not build.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# fnox: command not found\n", &[]),
