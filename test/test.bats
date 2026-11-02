@@ -847,6 +847,11 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_success
 	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 6
+	jq '(.entries[] | select(.outcome == "failed")) |= del(.details_version)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
+	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 8
 }
 
 @test "--baseline passes a run whose every failure also fails at the merge base" {

@@ -16,6 +16,7 @@ use std::sync::LazyLock;
 static RUST_THREAD_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\s*thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
 });
+const DETAILS_VERSION: u32 = 1;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -168,6 +169,22 @@ pub(super) fn failure_evidence(
 ) -> Option<Evidence> {
     let names = failure_names(output, formats, root, scoped)?;
     let found = testlog::failure_details(output, formats);
+    let matches = |name: &str, f: &testlog::FailureDetail| {
+        let candidate = from_root(&f.name, root);
+        if name == candidate {
+            return true;
+        }
+        if let Some(qualified) = &f.qualified {
+            return name == from_root(qualified, root);
+        }
+        if let Some(file) = &f.pytest_file
+            && !name.starts_with(&format!("{}::", from_root(file, root)))
+        {
+            return false;
+        }
+        name.ends_with(&format!("::{candidate}"))
+            || name.ends_with(&format!("::{}", candidate.replace('.', "::")))
+    };
     let mut details = BTreeMap::new();
     let multiple_binaries = testlog::ambiguous_libtest(output);
     // A duplicate test name can be collapsed by the display digest. Refuse
@@ -176,22 +193,10 @@ pub(super) fn failure_evidence(
         || testlog::digest_with(output, false, 0, formats).failed == names.len() as u64
     {
         for name in &names {
-            let candidates: Vec<_> = found
-                .iter()
-                .filter(|f| {
-                    let candidate = from_root(&f.name, root);
-                    if *name == candidate {
-                        return true;
-                    }
-                    if let Some(qualified) = &f.qualified {
-                        return *name == from_root(qualified, root);
-                    }
-                    name.ends_with(&format!("::{candidate}"))
-                        || name.ends_with(&format!("::{}", candidate.replace('.', "::")))
-                })
-                .collect();
+            let candidates: Vec<_> = found.iter().filter(|f| matches(name, f)).collect();
             if let [failure] = candidates.as_slice()
                 && (!multiple_binaries || failure.binary.is_some())
+                && names.iter().filter(|other| matches(other, failure)).count() == 1
             {
                 let lines: Vec<_> = failure
                     .lines
@@ -365,6 +370,7 @@ pub(super) fn compare(
                         ..
                     } | known::Outcome::Failed { details: None, .. }
                 )
+                    && !matches!(outcome, known::Outcome::Failed { details_version, .. } if *details_version != Some(DETAILS_VERSION))
             })
         } else {
             None
@@ -427,6 +433,7 @@ pub(super) fn compare(
                                 ran: d.passed + d.failed + d.skipped,
                                 non_failed: Some(d.passed + d.skipped),
                                 details: Some(evidence.details),
+                                details_version: Some(DETAILS_VERSION),
                             }
                         }
                         None => known::Outcome::Unnamed {
@@ -466,6 +473,7 @@ pub(super) fn compare(
                     ran,
                     non_failed,
                     details,
+                    details_version: _,
                 } => {
                     // A broken checkout can make every test fail in setup.
                     // Matching names in that run do not establish that the
@@ -676,6 +684,19 @@ mod tests {
                 .details
                 .contains_key("tests/test_calc.py::TestStrings::test_upper")
         );
+
+        let output = "=== FAILURES ===\n___ test_same ___\nE first cause\ntests/a.py:5: AssertionError\n___ test_same ___\nE second cause\ntests/b.py:7: AssertionError\n=== short test summary info ===\nFAILED tests/a.py::test_same - AssertionError\nFAILED tests/b.py::test_same - AssertionError\n2 failed in 0.1s\n";
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.details.contains_key("tests/a.py::test_same"));
+        assert!(evidence.details.contains_key("tests/b.py::test_same"));
+        assert_ne!(
+            evidence.details["tests/a.py::test_same"],
+            evidence.details["tests/b.py::test_same"]
+        );
+
+        let missing = "=== FAILURES ===\n___ test_same ___\nE first cause\ntests/a.py:5: AssertionError\n=== short test summary info ===\nFAILED tests/a.py::test_same - AssertionError\nFAILED tests/b.py::test_same - AssertionError\n2 failed in 0.1s\n";
+        let evidence = failure_evidence(missing, &[], Path::new("/work"), false).unwrap();
+        assert!(!evidence.details.contains_key("tests/b.py::test_same"));
     }
 
     #[test]

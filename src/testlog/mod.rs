@@ -238,6 +238,7 @@ regexes! {
     // pytest.
     PYTEST_SECTION = r"^=+ (FAILURES|ERRORS) =+$";
     PYTEST_HEAD = r"^_{3,} (.+?) _{3,}$";
+    PYTEST_LOCATION = r"^([^\s:]+\.py):\d+(?::|$)";
     PYTEST_RULE = r"^(=+|!+)( .*)?$";
     PYTEST_SHORT = r"^(?:FAILED|ERROR) ([^\s(]\S*)(?: - (.+))?$";
     PYTEST_SUMMARY = r"^(?:=+ )?((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b.*$";
@@ -322,6 +323,7 @@ pub(crate) struct FailureDetail {
     pub(crate) lines: Vec<String>,
     pub(crate) binary: Option<String>,
     pub(crate) qualified: Option<String>,
+    pub(crate) pytest_file: Option<String>,
 }
 
 /// Unshortened failure blocks for baseline comparison. Summary lines alone
@@ -366,11 +368,21 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
             } else {
                 None
             };
+            let pytest_file = PYTEST_HEAD
+                .is_match(&lines[f.at])
+                .then(|| {
+                    f.lines
+                        .iter()
+                        .find_map(|line| PYTEST_LOCATION.captures(line))
+                        .map(|c| c[1].to_string())
+                })
+                .flatten();
             FailureDetail {
                 name: f.name,
                 lines: f.lines,
                 binary,
                 qualified,
+                pytest_file,
             }
         })
         .collect()
