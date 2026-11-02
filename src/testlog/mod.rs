@@ -169,6 +169,9 @@ regexes! {
     // missing command or file, which is most often the change's own (a
     // binary it did not build).
     ENVIRONMENT = r"(?i)(dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|api rate limit exceeded)";
+    // A line of an assertion: what was expected, what came instead, or a
+    // side of a diff.
+    ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -253,13 +256,52 @@ regexes! {
 /// `ENVIRONMENT`): the first such line, cut short. None when any failure
 /// says nothing of the kind, as one the change caused.
 pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String> {
+    // Before failures of one name merge, each with lines of its own must
+    // blame the machine too: two suites can share a test name, and a merged
+    // failure keeps only the longer block.
+    if !parse(&clean(text), formats)
+        .found
+        .iter()
+        .filter(|f| f.lines.iter().any(|l| !l.trim().is_empty()))
+        .all(|f| f.lines.iter().any(|l| blames_machine(l)))
+    {
+        return None;
+    }
     let digest = digest_with(text, true, 0, formats);
     let mut first = None;
     for failure in &digest.failures {
-        let line = failure.lines.iter().find(|l| ENVIRONMENT.is_match(l))?;
+        let line = failure.lines.iter().find(|l| blames_machine(l))?;
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
     first
+}
+
+/// Whether `line` blames the machine: it names a missing bus, library or
+/// network, and is not an assertion quoting one (`expected: DBus error`,
+/// a diff's side), which the change's own test can fail on.
+fn blames_machine(line: &str) -> bool {
+    ENVIRONMENT.is_match(line) && !ASSERTION.is_match(line)
+}
+
+/// What every runner jouet knows, and each of `formats`, finds in `lines`,
+/// before failures of one name are merged.
+fn parse(lines: &[String], formats: &[Format]) -> Parsed {
+    let mut parsed = Parsed::default();
+    libtest(lines, &mut parsed);
+    nextest(lines, &mut parsed);
+    rustc(lines, &mut parsed);
+    rustfmt(lines, &mut parsed);
+    tsc(lines, &mut parsed);
+    go(lines, &mut parsed);
+    pytest(lines, &mut parsed);
+    unittest(lines, &mut parsed);
+    jest(lines, &mut parsed);
+    vitest(lines, &mut parsed);
+    tap(lines, &mut parsed);
+    for format in formats {
+        format.apply(lines, &mut parsed);
+    }
+    parsed
 }
 
 /// [`digest_with`] jouet's own formats alone.
@@ -275,21 +317,7 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 /// no cap.
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
     let lines = clean(text);
-    let mut parsed = Parsed::default();
-    libtest(&lines, &mut parsed);
-    nextest(&lines, &mut parsed);
-    rustc(&lines, &mut parsed);
-    rustfmt(&lines, &mut parsed);
-    tsc(&lines, &mut parsed);
-    go(&lines, &mut parsed);
-    pytest(&lines, &mut parsed);
-    unittest(&lines, &mut parsed);
-    jest(&lines, &mut parsed);
-    vitest(&lines, &mut parsed);
-    tap(&lines, &mut parsed);
-    for format in formats {
-        format.apply(&lines, &mut parsed);
-    }
+    let parsed = parse(&lines, formats);
     let mut found = merge(parsed.found);
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();

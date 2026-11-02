@@ -516,6 +516,17 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     // One failure the change caused, beside the machine's: not the machine's.
     let mixed = "1..2\nnot ok 1 a\n# DBus error: no bus\nnot ok 2 b\n# expected 1, got 2\n";
     assert_eq!(environment_cause(mixed, &[]), None);
+    // Two suites with a test of one name: the change's failure in the
+    // second is not hidden by the machine's in the first.
+    let twice = "1..1\nnot ok 1 secrets\n# DBus error: no bus\n# (in test file a.bats, line 3)\n# from the keyring store\n1..1\nnot ok 1 secrets\n# expected 1, got 2\n";
+    assert_eq!(environment_cause(twice, &[]), None);
+    // An assertion that only quotes a machine error is the test's own.
+    let quoted =
+        "1..1\nnot ok 1 reports the bus\n# expected: DBus error: no bus\n# actual: success\n";
+    assert_eq!(environment_cause(quoted, &[]), None);
+    // libtest names a failure twice, the second time with its block.
+    let libtest = "running 1 test\ntest keyring ... FAILED\n\nfailures:\n\n---- keyring stdout ----\nthread panicked: DBus error: no bus\n\nfailures:\n    keyring\n\ntest result: FAILED. 0 passed; 1 failed\n";
+    assert!(environment_cause(libtest, &[]).is_some());
     // A missing command is most often a binary the change did not build.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# fnox: command not found\n", &[]),

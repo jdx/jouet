@@ -1162,3 +1162,26 @@ SCRIPT
 	assert_output --partial 'running frob: No such file or directory'
 	assert_output --regexp '.frob3. is on PATH'
 }
+
+@test "a failure that blames the machine is said, and not run at the merge base" {
+	# In the base commit too, so the merge base can run it.
+	printf '#!/bin/sh\necho run >>"%s/runs"\nprintf "1..1\\nnot ok 1 keychain secrets\\n# Failed to initialize OS keyring store: Platform failure: DBus error: no session bus\\n"\nexit 1\n' "$BATS_TEST_TMPDIR" >keyring.sh
+	chmod +x keyring.sh
+	git add keyring.sh
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+	run --separate-stderr jouet test --cmd -- ./keyring.sh
+	assert_failure 1
+	assert_output --partial 'environment: the failure blames this machine, not the change (`Failed to initialize OS keyring store'
+	refute_output --partial 'baseline:'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 1
+	# --baseline still compares it: it runs at the merge base, and fails the
+	# same way there.
+	run --separate-stderr jouet test --baseline --cmd -- ./keyring.sh
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
+}
