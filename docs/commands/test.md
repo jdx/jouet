@@ -166,7 +166,7 @@ The fallback for languages without a native adapter, built on jouet's [code grap
 - **Found by** `go.mod` (Go), a `Gemfile` (Ruby), `pom.xml` or `build.gradle(.kts)` (Java). It runs only where no native adapter covers the language.
 - **Selection:** the graph is brought up to date, then followed backwards from each changed file, through imports, calls, references and inheritance, to the test files that reach it, by codegraph's test conventions (`*_test.go`, `spec/` and `*_spec.rb`, `test/`, `*Test.java` and the like). For Go, only files ending in `_test.go` select test packages; other Go files in `testdata` can still connect a dependency path. Each pick shows the chain of files that reaches it.
 - **Runner:** `go test` on the selected tests' packages; `bundle exec rspec` on their files (with `.rspec` or a `spec/` directory), else minitest through `bundle exec ruby -Itest -Ilib`; `mvn test -Dtest=…` or `gradle test --tests …` on their classes, through `mvnw` or `gradlew` when the project has one. The whole suite is `go test ./...`, `bundle exec rspec` or `bundle exec rake test`, or `mvn test` or `gradle test`.
-- **The whole suite for** `go.mod`, the `Gemfile`, `.rspec`, a spec or test helper, the Maven or Gradle build, test data, a deleted file (the graph cannot follow a file that is gone), and a file the graph could not index.
+- **The whole suite for** `go.mod`, the `Gemfile`, `.rspec`, a spec or test helper, the Maven or Gradle build, test data, a deleted file (the graph cannot follow a file that is gone), and a file the graph could not index. For Go, an unparseable or unindexed Go file anywhere in the project also runs the whole suite: it could hide a path from a changed file to a test.
 
 ### Planned
 

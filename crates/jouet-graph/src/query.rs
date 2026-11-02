@@ -521,6 +521,15 @@ impl Graph {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Files of a language the graph could not fully parse or index.
+    pub fn incomplete_files(&self, language: &str) -> Result<Vec<String>, Error> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT path FROM files WHERE language = ?1 AND (error IS NOT NULL OR has_errors != 0) ORDER BY path",
+        )?;
+        let rows = stmt.query_map([language], |r| r.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The symbols most relevant to a question, best first, with their
     /// callers and callees: full-text ranking over names (split into
     /// words), qualified names, docstrings and signatures, with exact

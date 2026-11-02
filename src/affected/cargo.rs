@@ -281,6 +281,7 @@ impl Adapter for Cargo {
                 })
                 .collect(),
             command,
+            full_reason: None,
             note,
         })
     }

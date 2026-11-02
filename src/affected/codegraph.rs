@@ -153,21 +153,35 @@ impl Adapter for Graph {
         let fail = |e: jouet_graph::Error| Error::new(Exit::Failed, format!("the code graph: {e}"));
         let mut graph = jouet_graph::Graph::open(&project.root).map_err(fail)?;
         graph.refresh(None).map_err(fail)?;
+        if self.runner == Runner::Go
+            && let Some(path) = graph
+                .incomplete_files("go")
+                .map_err(fail)?
+                .into_iter()
+                .find(|path| project.inside(path).is_some())
+        {
+            return Ok(Selection {
+                tests: Vec::new(),
+                command: self.full(project, extra)?,
+                full_reason: Some(format!(
+                    "the code graph could not fully parse or index {path}"
+                )),
+                note: None,
+            });
+        }
         let changed: Vec<_> = sources.iter().map(|s| project.root.join(&s.path)).collect();
         let affected = graph.affected_tests(&changed).map_err(fail)?;
         if let Some(unknown) = affected.unknown.first() {
             // A file the graph could not index (too large, not UTF-8): the
             // whole suite, rather than a selection that may miss tests.
             return Ok(Selection {
-                tests: vec![Test {
-                    path: project.relative_to_root(&project.dir).unwrap_or_default(),
-                    via: Vec::new(),
-                }],
+                tests: Vec::new(),
                 command: self.full(project, extra)?,
-                note: Some(format!(
-                    "the code graph could not index {}, so the whole suite runs",
+                full_reason: Some(format!(
+                    "the code graph could not index {}",
                     unknown.display()
                 )),
+                note: None,
             });
         }
         let tests: Vec<Test> = affected
@@ -246,6 +260,7 @@ impl Adapter for Graph {
         Ok(Selection {
             tests,
             command: argv,
+            full_reason: None,
             note: None,
         })
     }
