@@ -209,6 +209,11 @@ fn after_setup(
         scanned.files += scan.stats.files;
         scanned.bytes += scan.stats.bytes;
         scanned.elapsed_ms += scan.stats.elapsed_ms;
+        // No transcript of the session was found: its requests are unknown,
+        // not none, so its primer goes unpriced rather than free.
+        if session.is_some() && scan.stats.files == 0 {
+            continue;
+        }
         let report = scan.analyzer.report(0);
         after.push(AfterSetup {
             harness: reader.harness().to_string(),
@@ -409,6 +414,20 @@ fn text(doc: &Doc<'_>) -> String {
                 "\n{totals}: no net, since a cost above could not be priced."
             ),
         };
+        let mut outside: Vec<&str> = doc
+            .costs
+            .iter()
+            .filter(|c| c.outside_net)
+            .map(|c| name(&c.harness))
+            .collect();
+        outside.dedup();
+        if !outside.is_empty() {
+            let _ = writeln!(
+                s,
+                "  left out of the net, with no history before setup to price it: {}",
+                outside.join(", ")
+            );
+        }
     }
     let _ = writeln!(
         s,

@@ -81,8 +81,21 @@ impl Filter {
             && self
                 .session
                 .as_ref()
-                .is_none_or(|s| source.path.to_string_lossy().contains(s.as_str()))
+                .is_none_or(|s| names_session(&source.path, s))
     }
+}
+
+/// Whether a transcript's path is a session's: a directory or file named by
+/// its ID (Claude Code's `<id>.jsonl` and `<id>/subagents/`), or a file
+/// whose name ends in it (Codex's `rollout-<time>-<id>.jsonl`). A part of an
+/// ID is not a match.
+fn names_session(path: &Path, id: &str) -> bool {
+    path.components().any(|c| {
+        let name = c.as_os_str().to_string_lossy();
+        let file = name.strip_suffix(".zst").unwrap_or(&name);
+        let stem = file.strip_suffix(".jsonl").unwrap_or(file);
+        stem == id || stem.ends_with(&format!("-{id}"))
+    })
 }
 
 /// A transcript file.
@@ -357,4 +370,32 @@ pub(crate) fn sources(paths: Vec<PathBuf>) -> Vec<Source> {
         .into_iter()
         .filter_map(|p| Source::from_path(p).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_session;
+    use std::path::Path;
+
+    #[test]
+    fn a_session_is_matched_by_its_whole_id() {
+        let id = "0860db72-3012-4957-92a2-433053abb1a9";
+        for path in [
+            format!("/h/.claude/projects/-src-x/{id}.jsonl"),
+            format!("/h/.claude/projects/-src-x/{id}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/11/02/rollout-2026-11-02T10-00-00-{id}.jsonl.zst"),
+        ] {
+            assert!(names_session(Path::new(&path), id), "{path}");
+        }
+        for path in [
+            format!("/h/.claude/projects/-src-x/{id}0.jsonl"),
+            "/h/.claude/projects/-src-x/0860db72.jsonl".to_string(),
+        ] {
+            assert!(!names_session(Path::new(&path), id), "{path}");
+        }
+        assert!(!names_session(
+            Path::new("/h/.claude/projects/-src-x/a-0860db72.jsonl"),
+            "x-0860db72"
+        ));
+    }
 }

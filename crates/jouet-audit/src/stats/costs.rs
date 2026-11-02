@@ -62,6 +62,10 @@ pub struct Cost {
     /// Why there is no estimate, when there is none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refused: Option<String>,
+    /// Its harness has no history before setup, so neither its costs nor its
+    /// savings can be priced, and the net leaves it out.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub outside_net: bool,
 }
 
 /// One harness's history after setup, as far as the costs need it.
@@ -95,6 +99,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
         .collect();
     let mut out = Vec::new();
     for harness in harnesses {
+        let start = out.len();
         let baseline = baselines.iter().find(|b| b.harness == harness);
         let price = match baseline {
             None => Err(format!("no {harness} history from before setup")),
@@ -125,6 +130,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                         tokens_text(*p)
                     ),
                     refused: None,
+                    outside_net: false,
                 },
                 Err(reason) => Cost {
                     harness: harness.to_string(),
@@ -133,6 +139,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                     input_tokens: None,
                     basis: String::new(),
                     refused: Some(reason.clone()),
+                    outside_net: false,
                 },
             }
         };
@@ -166,6 +173,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                     input_tokens: None,
                     basis: String::new(),
                     refused: Some("a warning adds no request, but its text stays in the context that later requests read; not priced".into()),
+                    outside_net: false,
                 });
             }
         }
@@ -185,6 +193,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                         count_text(a.primer_tokens)
                     ),
                     refused: None,
+                    outside_net: false,
             }),
             None => out.push(Cost {
                     harness: harness.to_string(),
@@ -193,7 +202,15 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                     input_tokens: None,
                     basis: String::new(),
                     refused: Some(format!("no {harness} history after setup was read")),
+                    outside_net: false,
             }),
+        }
+        // Nothing of a harness without a history before setup can be
+        // priced, savings included, so the net is of the others.
+        if baseline.is_none() {
+            for c in &mut out[start..] {
+                c.outside_net = true;
+            }
         }
     }
     out
@@ -232,6 +249,7 @@ fn edit_cost(
                 "too few edits before setup to compare its {failed} failures in {} runs with",
                 count_text(own_runs)
             )),
+            outside_net: false,
         });
     };
     let rate = k.failure_rate();
@@ -253,11 +271,12 @@ fn edit_cost(
 
 /// What the estimates saved less what the costs cost, in input tokens, or
 /// `None` when a cost the net needs could not be priced. A saving that was
-/// refused counts as nothing.
+/// refused counts as nothing. A harness with no history before setup is
+/// left out (see [`Cost::outside_net`]).
 pub fn net(estimates: &[Estimate], costs: &[Cost]) -> Option<i64> {
     if costs
         .iter()
-        .any(|c| c.kind.needed() && c.input_tokens.is_none())
+        .any(|c| !c.outside_net && c.kind.needed() && c.input_tokens.is_none())
     {
         return None;
     }

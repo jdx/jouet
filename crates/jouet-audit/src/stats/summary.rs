@@ -215,6 +215,7 @@ mod tests {
             input_tokens: tokens,
             basis: String::new(),
             refused: tokens.is_none().then(|| "no claude history".into()),
+            outside_net: false,
         }
     }
 

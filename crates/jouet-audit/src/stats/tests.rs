@@ -391,6 +391,18 @@ fn an_unpriced_harness_leaves_the_net_unknown_and_warnings_are_counted_not_price
     assert_eq!(codex.len(), 2);
     assert_eq!((codex[0].kind, codex[0].count), (CostKind::Warnings, 1));
     assert_eq!(codex[1].kind, CostKind::Primer);
+    // Codex has no history before setup: its costs are left out of the net
+    // rather than blanking it.
+    assert!(codex.iter().all(|c| c.outside_net));
+    let claude_read = [AfterSetup {
+        harness: "claude".into(),
+        requests: 0,
+        primer_tokens: 0,
+    }];
+    assert_eq!(
+        net(&[], &costs(&m, &baselines, &claude_read)),
+        Some(-300_000)
+    );
     assert!(codex[0].refused.as_deref().unwrap().contains("not priced"));
     // Warnings alone do not hide the net, but the primer's unread
     // requests do; with them read, the claude costs are what is left.
