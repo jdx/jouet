@@ -1,0 +1,29 @@
+description = "Fix jdx/jactionlint#313: regular and grouped Dependabot updates are not duplicates"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1200
+check_timeout_s = 600
+prompt = """
+`dependabot-syntax` reports an update with `multi-ecosystem-group` as a
+duplicate of the regular update for the same ecosystem and directory. The
+grouped update only handles dependencies matching its patterns, so the
+regular update is also needed. GitHub accepts both in the same configuration.
+
+Fix the false duplicate report in jactionlint, add tests, and commit your fix.
+Preserve detection of genuinely duplicated updates.
+"""
+
+[source]
+git = "~/src/jactionlint"
+commit = "b4a8d08fc2fd31dc29aa724c141fd1003a22eec9"
+
+[tools]
+go = "go"
+gofmt = "gofmt"
+
+[env]
+GOMODCACHE = "~/go/pkg/mod"
+GOTOOLCHAIN = "go1.27.3"
