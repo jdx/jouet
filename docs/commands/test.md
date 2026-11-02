@@ -292,7 +292,7 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 - `cargo fmt --check` and rustfmt, each place by file and line, with the diff;
 - tsc;
 - go test and go build, including a package that fails with no failed test of its own, as when `TestMain` gives up, named by the package;
-- pytest, unittest, jest and vitest;
+- pytest, unittest, RSpec, jest and vitest;
 - TAP, which bats prints;
 - any [format you declare](#your-own-runners-formats).
 
