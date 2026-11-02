@@ -33,6 +33,12 @@ pub(crate) enum Outcome {
         /// Passing and skipped tests, absent in results kept before this field.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         non_failed: Option<u64>,
+        /// Full failure-detail fingerprints; absent in older cached runs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<std::collections::BTreeMap<String, String>>,
+        /// Version of the normalization and fingerprint format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details_version: Option<u32>,
     },
     /// It failed without naming a failing test, such as when a tool it
     /// needs is missing from that checkout: nothing can be compared.

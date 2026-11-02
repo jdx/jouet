@@ -201,6 +201,7 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
     LIBTEST_RUNNING = r"^running (\d+) tests?$";
+    CARGO_TEST_BINARY = r"^\s*Running (?:unittests )?(.+?) \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
@@ -246,6 +247,7 @@ regexes! {
     // pytest.
     PYTEST_SECTION = r"^=+ (FAILURES|ERRORS) =+$";
     PYTEST_HEAD = r"^_{3,} (.+?) _{3,}$";
+    PYTEST_LOCATION = r"^([^\s:]+\.py):\d+(?::|$)";
     PYTEST_RULE = r"^(=+|!+)( .*)?$";
     PYTEST_SHORT = r"^(?:FAILED|ERROR) ([^\s(]\S*)(?: - (.+))?$";
     PYTEST_SUMMARY = r"^(?:=+ )?((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b.*$";
@@ -323,6 +325,76 @@ fn parse(lines: &[String], formats: &[Format]) -> Parsed {
         format.apply(lines, &mut parsed);
     }
     parsed
+}
+
+pub(crate) struct FailureDetail {
+    pub(crate) name: String,
+    pub(crate) lines: Vec<String>,
+    pub(crate) binary: Option<String>,
+    pub(crate) qualified: Option<String>,
+    pub(crate) pytest_file: Option<String>,
+}
+
+/// Unshortened failure blocks for baseline comparison. Summary lines alone
+/// do not contain enough evidence about a failure's cause.
+pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDetail> {
+    let lines = clean(text);
+    parse(&lines, formats)
+        .found
+        .into_iter()
+        .filter(|f| !PYTEST_SHORT.is_match(&lines[f.at]))
+        .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
+        .map(|f| {
+            let binary = LIBTEST_BLOCK
+                .is_match(&lines[f.at])
+                .then(|| {
+                    lines[..f.at]
+                        .iter()
+                        .rev()
+                        .take_while(|line| !LIBTEST_RESULT.is_match(line))
+                        .find_map(|line| CARGO_TEST_BINARY.captures(line))
+                        .and_then(|c| {
+                            let executable = std::path::Path::new(&c[2]).file_name()?.to_str()?;
+                            let executable = executable.strip_suffix(".exe").unwrap_or(executable);
+                            let (name, hash) = executable.rsplit_once('-')?;
+                            (hash.len() >= 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+                                .then(|| format!("{}::{name}", &c[1]))
+                        })
+                })
+                .flatten();
+            let qualified = if GO_RESULT.is_match(&lines[f.at]) {
+                lines[f.at + 1..]
+                    .iter()
+                    .find_map(|line| GO_PACKAGE.captures(line))
+                    .filter(|c| &c[1] == "FAIL")
+                    .map(|c| format!("{}::{}", &c[2], f.name))
+            } else if JEST_HEAD.is_match(&lines[f.at]) {
+                lines[..f.at]
+                    .iter()
+                    .rev()
+                    .find_map(|line| JEST_FILE.captures(line))
+                    .map(|c| format!("{}::{}", c[1].trim(), f.name))
+            } else {
+                None
+            };
+            let pytest_file = PYTEST_HEAD
+                .is_match(&lines[f.at])
+                .then(|| {
+                    f.lines
+                        .iter()
+                        .find_map(|line| PYTEST_LOCATION.captures(line))
+                        .map(|c| c[1].to_string())
+                })
+                .flatten();
+            FailureDetail {
+                name: f.name,
+                lines: f.lines,
+                binary,
+                qualified,
+                pytest_file,
+            }
+        })
+        .collect()
 }
 
 /// [`digest_with`] jouet's own formats alone.

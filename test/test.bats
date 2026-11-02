@@ -815,7 +815,9 @@ printf '%s\n' \
   '--- PASS: TestOK (0.00s)' \
   '--- FAIL: TestTable (0.00s)' \
   '    --- FAIL: TestTable/one (0.00s)' \
+  '        table_test.go:10: first case failed' \
   '    --- FAIL: TestTable/two (0.00s)' \
+  '        table_test.go:11: second case failed' \
   'FAIL'
 exit 1
 SH
@@ -838,6 +840,18 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_success
 	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 4
+
+	# Cached failures from before detail fingerprints also require a rerun.
+	jq '(.entries[] | select(.outcome == "failed")) |= del(.details)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
+	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 6
+	jq '(.entries[] | select(.outcome == "failed")) |= del(.details_version)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
+	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 8
 }
 
 @test "--baseline passes a run whose every failure also fails at the merge base" {
@@ -861,6 +875,15 @@ SH
 	assert_success
 	assert_output --partial 'baseline: the failure also fails at main'
 	assert_output --partial 'test_env'
+
+	# A failure with the same test name but a different cause remains unresolved,
+	# including when the merge-base result is already cached.
+	perl -pi -e 's/needs brew/different cause/' tests/test_a.py
+	run --separate-stderr jouet test --baseline
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	assert_output --partial 'test_env'
+	tests 2
 
 	# A failure the merge base does not have still fails the run.
 	tests 3
@@ -1157,6 +1180,7 @@ if [ -e "$RETRY_MARKER" ]; then
     echo "ok 1 a"
     echo "ok 2 b"
     echo "not ok 3 keychain"
+    echo "# keychain unavailable"
 else
     echo "mise ERROR No version is set for shim: fnox"
 fi
@@ -1165,7 +1189,7 @@ SCRIPT
 	git add run.sh
 	git commit -q -m base
 	git checkout -q -b work
-	printf 'echo 1..3\necho "ok 1 a"\necho "ok 2 b"\necho "not ok 3 keychain"\nexit 1\n' >run.sh
+	printf 'echo 1..3\necho "ok 1 a"\necho "ok 2 b"\necho "not ok 3 keychain"\necho "# keychain unavailable"\nexit 1\n' >run.sh
 	git commit -q -am change
 
 	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
@@ -1189,7 +1213,7 @@ SCRIPT
 	git merge -q -X ours main -m merge
 	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
 	assert_failure 1
-	assert_output --partial 'ran far fewer tests, so the failure could not be compared: keychain'
+	assert_output --partial 'failure could not be compared'
 }
 
 @test "cargo picks the changed crates and every crate that depends on them" {

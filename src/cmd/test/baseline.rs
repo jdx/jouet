@@ -7,9 +7,20 @@ use crate::testlog::{self, Format};
 use crate::{affected, known};
 use jouet_output::exit::Exit;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::LazyLock;
+
+static RUST_THREAD_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\s*thread '[^']+') \(\d+\)( panicked at )").expect("thread ID pattern")
+});
+static PYTEST_SELF_ADDRESS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\s*self = <[^<>]+ object at )0x[0-9a-fA-F]+(>)$")
+        .expect("pytest self address pattern")
+});
+const DETAILS_VERSION: u32 = 2;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -57,7 +68,7 @@ impl Baseline {
                 n => format!("all {n} failures also fail"),
             };
             format!(
-                "baseline: {all} at {at}; matching names do not establish the same cause; counted as passing: {}\n",
+                "baseline: {all} at {at} with matching failure details; counted as passing: {}\n",
                 list(&self.pre_existing)
             )
         } else {
@@ -69,7 +80,7 @@ impl Baseline {
                     (n, total) => format!("{n} of {total} failures"),
                 };
                 format!(
-                    "baseline: the run at {at} ran far fewer tests, so {which} could not be compared: {}\n",
+                    "baseline: {which} could not be compared at {at} because failure details were missing, different, ambiguous, or the run reached fewer tests: {}\n",
                     list(&self.unknown)
                 )
             } else {
@@ -85,7 +96,7 @@ impl Baseline {
                 );
                 if !self.unknown.is_empty() {
                     text.push_str(&format!(
-                        "  not reached at {at}, which ran far fewer tests: {}\n",
+                        "  could not compare details or confirm the test was reached at {at}: {}\n",
                         list(&self.unknown)
                     ));
                 }
@@ -126,9 +137,6 @@ pub(super) fn failure_names(
         return None;
     }
     if scoped {
-        if testlog::ambiguous_libtest(output) {
-            return None;
-        }
         let go = testlog::go_failure_packages(output)?;
         if !go.is_empty() {
             // Do not compare unqualified Go output, including panics or
@@ -149,6 +157,83 @@ pub(super) fn failure_names(
         }
     }
     Some(names)
+}
+
+/// Names and fingerprints of unambiguous, unshortened failure blocks.
+pub(super) struct Evidence {
+    names: BTreeSet<String>,
+    details: BTreeMap<String, String>,
+}
+
+pub(super) fn failure_evidence(
+    output: &str,
+    formats: &[Format],
+    root: &Path,
+    scoped: bool,
+) -> Option<Evidence> {
+    let names = failure_names(output, formats, root, scoped)?;
+    let found = testlog::failure_details(output, formats);
+    let matches = |name: &str, f: &testlog::FailureDetail| {
+        let candidate = from_root(&f.name, root);
+        if name == candidate {
+            return true;
+        }
+        if let Some(qualified) = &f.qualified {
+            return name == from_root(qualified, root);
+        }
+        if let Some(file) = &f.pytest_file
+            && !name.starts_with(&format!("{}::", from_root(file, root)))
+        {
+            return false;
+        }
+        name.ends_with(&format!("::{candidate}"))
+            || name.ends_with(&format!("::{}", candidate.replace('.', "::")))
+    };
+    let mut details = BTreeMap::new();
+    let multiple_binaries = testlog::ambiguous_libtest(output);
+    // A duplicate test name can be collapsed by the display digest. Refuse
+    // all details in that case, even if one binary omitted its failure block.
+    if !multiple_binaries
+        || testlog::digest_with(output, false, 0, formats).failed == names.len() as u64
+    {
+        for name in &names {
+            let candidates: Vec<_> = found.iter().filter(|f| matches(name, f)).collect();
+            if let [failure] = candidates.as_slice()
+                && (!multiple_binaries || failure.binary.is_some())
+                && names.iter().filter(|other| matches(other, failure)).count() == 1
+            {
+                let lines: Vec<_> = failure
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        let line = from_root(line, root);
+                        let line = RUST_THREAD_ID.replace(&line, "$1$2");
+                        PYTEST_SELF_ADDRESS
+                            .replace(&line, "${1}<address>${2}")
+                            .into_owned()
+                    })
+                    .collect();
+                let mut hash = Sha256::new();
+                if let Some(binary) = &failure.binary {
+                    let binary = from_root(binary, root);
+                    hash.update((binary.len() as u64).to_be_bytes());
+                    hash.update(binary.as_bytes());
+                }
+                for line in lines {
+                    hash.update((line.len() as u64).to_be_bytes());
+                    hash.update(line.as_bytes());
+                }
+                details.insert(
+                    name.clone(),
+                    hash.finalize()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                );
+            }
+        }
+    }
+    Some(Evidence { names, details })
 }
 
 /// The merge base of HEAD with `since` (the upstream or default branch when
@@ -265,7 +350,7 @@ pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
-    failed: &[(&Job, Option<BTreeSet<String>>, u64)],
+    failed: &[(&Job, Option<Evidence>, u64)],
     mode: Mode,
 ) -> Result<Option<Baseline>, NotCompared> {
     let setup = affected::project_config::baseline_setup(root).map_err(|e| {
@@ -290,8 +375,9 @@ pub(super) fn compare(
                     known::Outcome::Failed {
                         non_failed: None,
                         ..
-                    }
+                    } | known::Outcome::Failed { details: None, .. }
                 )
+                    && !matches!(outcome, known::Outcome::Failed { details_version, .. } if *details_version != Some(DETAILS_VERSION))
             })
         } else {
             None
@@ -346,13 +432,15 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    match failure_names(&output, formats, &tree, mode == Mode::Fresh) {
-                        Some(names) => {
+                    match failure_evidence(&output, formats, &tree, mode == Mode::Fresh) {
+                        Some(evidence) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
                             known::Outcome::Failed {
-                                names: names.into_iter().collect(),
+                                names: evidence.names.into_iter().collect(),
                                 ran: d.passed + d.failed + d.skipped,
                                 non_failed: Some(d.passed + d.skipped),
+                                details: Some(evidence.details),
+                                details_version: Some(DETAILS_VERSION),
                             }
                         }
                         None => known::Outcome::Unnamed {
@@ -369,56 +457,68 @@ pub(super) fn compare(
             (Some(outcome), _) => outcome,
             (None, Mode::Kept) => return Ok(None),
         };
-        let (at_base, reached): (BTreeSet<String>, u64) = match outcome {
-            known::Outcome::Passed if now.is_none() => {
-                return Err(NotCompared::from(format!(
-                    "the command passed at {}, but the current failure could not be named; it remains unresolved",
-                    base.name
-                )));
-            }
-            known::Outcome::Passed => (BTreeSet::new(), u64::MAX),
-            known::Outcome::Failed { .. } if now.is_none() => {
-                return Err(NotCompared {
-                    message: format!(
-                        "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it is not known whether they are the same and the failure remains unresolved",
-                        base.name
-                    ),
-                    unverifiable: true,
-                });
-            }
-            known::Outcome::Failed {
-                names,
-                ran,
-                non_failed,
-            } => {
-                // A broken checkout can make every test fail in setup.
-                // Matching names in that run do not establish that the
-                // current failures existed.
-                if ran > 1 && non_failed == Some(0) {
+        let (at_base, base_details, reached): (BTreeSet<String>, BTreeMap<String, String>, u64) =
+            match outcome {
+                known::Outcome::Passed if now.is_none() => {
                     return Err(NotCompared::from(format!(
-                        "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                        "the command passed at {}, but the current failure could not be named; it remains unresolved",
                         base.name
                     )));
                 }
-                (names.into_iter().collect(), ran)
-            }
-            known::Outcome::Unnamed { exit, log } => {
-                let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
-                return Err(NotCompared {
-                    message: format!(
-                        "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
-                        base.name
-                    ),
-                    unverifiable: true,
-                });
-            }
-        };
+                known::Outcome::Passed => (BTreeSet::new(), BTreeMap::new(), u64::MAX),
+                known::Outcome::Failed { .. } if now.is_none() => {
+                    return Err(NotCompared {
+                        message: format!(
+                            "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it is not known whether they are the same and the failure remains unresolved",
+                            base.name
+                        ),
+                        unverifiable: true,
+                    });
+                }
+                known::Outcome::Failed {
+                    names,
+                    ran,
+                    non_failed,
+                    details,
+                    details_version: _,
+                } => {
+                    // A broken checkout can make every test fail in setup.
+                    // Matching names in that run do not establish that the
+                    // current failures existed.
+                    if ran > 1 && non_failed == Some(0) {
+                        return Err(NotCompared::from(format!(
+                            "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                            base.name
+                        )));
+                    }
+                    (
+                        names.into_iter().collect(),
+                        details.unwrap_or_default(),
+                        ran,
+                    )
+                }
+                known::Outcome::Unnamed { exit, log } => {
+                    let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
+                    return Err(NotCompared {
+                        message: format!(
+                            "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
+                            base.name
+                        ),
+                        unverifiable: true,
+                    });
+                }
+            };
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;
-        for name in now.iter().flatten() {
+        for name in now.iter().flat_map(|e| &e.names) {
             if at_base.contains(name) {
-                pre_existing.insert(name.clone());
+                let current = now.as_ref().and_then(|e| e.details.get(name));
+                if current.is_some() && current == base_details.get(name) {
+                    pre_existing.insert(name.clone());
+                } else {
+                    unknown.insert(name.clone());
+                }
             } else if short {
                 unknown.insert(name.clone());
             } else {
@@ -441,9 +541,24 @@ pub(super) fn compare(
 fn from_root(name: &str, checkout: &Path) -> String {
     let mut name = name.to_string();
     let canonical = checkout.canonicalize().ok();
-    for dir in std::iter::once(checkout).chain(canonical.as_deref()) {
-        let prefix = format!("{}/", dir.display());
-        name = name.replace(&prefix, "");
+    // Prefer the canonical spelling: on macOS `/var/...` occurs inside
+    // `/private/var/...`, so replacing the shorter prefix first corrupts it.
+    for dir in canonical
+        .as_deref()
+        .into_iter()
+        .chain(std::iter::once(checkout))
+    {
+        let raw = dir.to_string_lossy();
+        let slash = raw.replace('\\', "/");
+        let slash = slash.trim_end_matches('/');
+        for prefix in [
+            format!("{raw}/"),
+            format!("{raw}\\"),
+            format!("{slash}/"),
+            format!("{}\\", slash.replace('/', "\\")),
+        ] {
+            name = name.replace(&prefix, "");
+        }
     }
     name
 }
@@ -536,6 +651,126 @@ mod tests {
     }
 
     #[test]
+    fn failure_evidence_compares_full_details_and_normalizes_checkout_paths() {
+        let evidence = |root: &str, detail: &str| {
+            let output = format!(
+                "test parse_input ... FAILED\n---- parse_input stdout ----\nthread 'parse_input' (1234) panicked at {root}/src/a.rs:2:\n{detail}\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n"
+            );
+            failure_evidence(&output, &[], Path::new(root), false).unwrap()
+        };
+        let here = evidence("/src/app", "assertion left: 2 right: 3");
+        let same = evidence("/tmp/base/tree", "assertion left: 2 right: 3");
+        let different = evidence("/tmp/base/tree", "ModuleNotFoundError: dependency");
+        assert_eq!(here.details, same.details);
+        assert!(!here.details.is_empty());
+        assert_ne!(here.details, different.details);
+
+        // Differences beyond the displayed excerpt still change the fingerprint.
+        let long = |last: &str| format!("{}\n{last}", "line\n".repeat(100));
+        assert_ne!(
+            evidence("/src/app", &long("first")).details,
+            evidence("/src/app", &long("second")).details
+        );
+    }
+
+    #[test]
+    fn name_only_and_ambiguous_failures_have_no_details() {
+        let names_only =
+            "test parse_input ... FAILED\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+        let evidence = failure_evidence(names_only, &[], Path::new("/x"), false).unwrap();
+        assert!(!evidence.names.is_empty());
+        assert!(evidence.details.is_empty());
+
+        let pytest_summary = "FAILED tests/test_a.py::test_x - AssertionError: failure\n";
+        let evidence = failure_evidence(pytest_summary, &[], Path::new("/x"), false).unwrap();
+        assert!(!evidence.names.is_empty());
+        assert!(evidence.details.is_empty());
+
+        let repeated = "test same ... FAILED\n---- same stdout ----\nfirst cause\n---- same stdout ----\nsecond cause\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+        let evidence = failure_evidence(repeated, &[], Path::new("/x"), false).unwrap();
+        assert!(evidence.details.is_empty());
+    }
+
+    #[test]
+    fn pytest_class_headers_match_qualified_node_ids() {
+        let output = include_str!("../../testlog/fixtures/pytest-q.txt");
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(
+            evidence
+                .details
+                .contains_key("tests/test_calc.py::TestStrings::test_upper")
+        );
+
+        let output = "=== FAILURES ===\n___ test_same ___\nE first cause\ntests/a.py:5: AssertionError\n___ test_same ___\nE second cause\ntests/b.py:7: AssertionError\n=== short test summary info ===\nFAILED tests/a.py::test_same - AssertionError\nFAILED tests/b.py::test_same - AssertionError\n2 failed in 0.1s\n";
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.details.contains_key("tests/a.py::test_same"));
+        assert!(evidence.details.contains_key("tests/b.py::test_same"));
+        assert_ne!(
+            evidence.details["tests/a.py::test_same"],
+            evidence.details["tests/b.py::test_same"]
+        );
+
+        let missing = "=== FAILURES ===\n___ test_same ___\nE first cause\ntests/a.py:5: AssertionError\n=== short test summary info ===\nFAILED tests/a.py::test_same - AssertionError\nFAILED tests/b.py::test_same - AssertionError\n2 failed in 0.1s\n";
+        let evidence = failure_evidence(missing, &[], Path::new("/work"), false).unwrap();
+        assert!(!evidence.details.contains_key("tests/b.py::test_same"));
+    }
+
+    #[test]
+    fn rust_panic_thread_ids_are_normalized_when_indented() {
+        let line = |id| format!("    thread 'test' ({id}) panicked at src/lib.rs:1:");
+        assert_eq!(
+            RUST_THREAD_ID.replace(&line(123), "$1$2"),
+            RUST_THREAD_ID.replace(&line(456), "$1$2")
+        );
+    }
+
+    #[test]
+    fn pytest_self_addresses_are_volatile_but_assertions_are_not() {
+        let output = |address: &str, assertion: &str| {
+            format!(
+                "=== FAILURES ===\n___ TestParser.test_parse ___\nself = <test_parser.TestParser object at {address}>\nE {assertion}\ntests/test_parser.py:7: AssertionError\n=== short test summary info ===\nFAILED tests/test_parser.py::TestParser::test_parse - AssertionError\n1 failed in 0.1s\n"
+            )
+        };
+        let evidence = |address, assertion| {
+            failure_evidence(&output(address, assertion), &[], Path::new("/work"), false).unwrap()
+        };
+        assert_eq!(
+            evidence("0x1234", "assert 1 == 2").details,
+            evidence("0xabcd", "assert 1 == 2").details
+        );
+        assert!(!evidence("0x1234", "assert 1 == 2").details.is_empty());
+        assert_ne!(
+            evidence("0x1234", "assert 1 == 2").details,
+            evidence("0xabcd", "assert 1 == 3").details
+        );
+        assert_ne!(
+            evidence("0x1234", "assert 0x1234 == 2").details,
+            evidence("0xabcd", "assert 0xabcd == 2").details
+        );
+    }
+
+    #[test]
+    fn checkout_paths_normalize_windows_and_forward_slashes() {
+        let root = Path::new(r"C:\work\project");
+        assert_eq!(
+            from_root(r"at C:\work\project\src\file.rs:3", root),
+            r"at src\file.rs:3"
+        );
+        assert_eq!(
+            from_root("at C:/work/project/src/file.rs:3", root),
+            "at src/file.rs:3"
+        );
+        assert_eq!(
+            from_root(r"at C:\work\project-other\file.rs:3", root),
+            r"at C:\work\project-other\file.rs:3"
+        );
+        assert_eq!(
+            from_root(r"at /tmp/a\b/file.rs:3", Path::new(r"/tmp/a\b")),
+            "at file.rs:3"
+        );
+    }
+
+    #[test]
     fn names_are_written_from_the_checkout_root() {
         let names = |out: &str, root: &str| failure_names(out, &[], Path::new(root), false);
         let here = names("Diff in /src/app/src/a.rs:3:\n-x\n+y\n", "/src/app");
@@ -559,6 +794,15 @@ mod tests {
         let mixed = names("--- FAIL: TestSame (0.00s)\n    --- FAIL: TestSame/sub (0.00s)\nFAIL\nFAIL\texample.com/a\t0.001s\n--- FAIL: TestSame (0.00s)\nFAIL\nFAIL\texample.com/b\t0.001s\nFAIL\n").unwrap();
         assert!(mixed.contains("example.com/a::TestSame/sub"));
         assert!(mixed.contains("example.com/b::TestSame"));
+
+        let details = "--- FAIL: TestSame (0.00s)\n    a_test.go:1: first cause\nFAIL\nFAIL\texample.com/a\t0.001s\n--- FAIL: TestSame (0.00s)\n    b_test.go:2: second cause\nFAIL\nFAIL\texample.com/b\t0.001s\n";
+        let evidence = failure_evidence(details, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.contains_key("example.com/a::TestSame"));
+        assert!(evidence.details.contains_key("example.com/b::TestSame"));
+        assert_ne!(
+            evidence.details["example.com/a::TestSame"],
+            evidence.details["example.com/b::TestSame"]
+        );
     }
 
     #[test]
@@ -572,11 +816,50 @@ mod tests {
             names("FAIL tests/a.test.js (5.123 s)\n  ● same test\n"),
             names("FAIL tests/a.test.js (12.345 s)\n  ● same test\n")
         );
+        let details = "FAIL tests/a.test.js\n  ● same test\n    first cause\nFAIL tests/b.test.js\n  ● same test\n    second cause\n";
+        let evidence = failure_evidence(details, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.contains_key("tests/a.test.js::same test"));
+        assert!(evidence.details.contains_key("tests/b.test.js::same test"));
+        assert_ne!(
+            evidence.details["tests/a.test.js::same test"],
+            evidence.details["tests/b.test.js::same test"]
+        );
     }
 
     #[test]
     fn affected_libtest_names_from_multiple_binaries_are_ambiguous() {
         let output = "test same ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
-        assert!(failure_names(output, &[], Path::new("/x"), true).is_none());
+        let evidence = failure_evidence(output, &[], Path::new("/x"), true).unwrap();
+        assert!(evidence.details.is_empty());
+    }
+
+    #[test]
+    fn workspace_libtest_evidence_includes_the_binary_identity() {
+        let output = |binary: &str, hash: &str| {
+            format!(
+                "Running unittests src/lib.rs (target/debug/deps/{binary}-{hash})\n\
+             test same ... FAILED\n---- same stdout ----\nassertion failed\n\
+             test result: FAILED. 1 passed; 1 failed; 0 ignored\n\
+             Running tests/other.rs (target/debug/deps/other-12345678)\n\
+             test result: ok. 1 passed; 0 failed; 0 ignored\n"
+            )
+        };
+        let evidence = |text: String| failure_evidence(&text, &[], Path::new("/x"), true).unwrap();
+        let a = evidence(output("first", "12345678"));
+        assert!(!a.details.is_empty());
+        assert_eq!(a.details, evidence(output("first", "abcdef12")).details);
+        assert_ne!(a.details, evidence(output("second", "abcdef12")).details);
+
+        let integration = "Running tests/other.rs (target/debug/deps/other-12345678)\ntest same ... FAILED\n---- same stdout ----\nassertion failed\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\nRunning unittests src/lib.rs (target/debug/deps/lib-12345678)\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
+        let integration = evidence(integration.to_string());
+        assert!(!integration.details.is_empty());
+        assert_ne!(a.details, integration.details);
+
+        let duplicate = format!(
+            "{}{}",
+            output("first", "12345678"),
+            output("second", "abcdef12")
+        );
+        assert!(evidence(duplicate).details.is_empty());
     }
 }
