@@ -38,6 +38,119 @@ class StatsTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
+    def test_change_evidence_ignores_host_git_configuration(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            tasks.git(root, "init", "-q", "-b", "main")
+            (root / "tracked").write_text("initial\n")
+            tasks.git(root, "add", "tracked")
+            tasks.git(root, "commit", "-q", "-m", "initial")
+            excludes = Path(d) / "excludes"
+            excludes.write_text("agent.txt\n")
+            config = Path(d) / "config"
+            config.write_text(f"[core]\n\texcludesFile = {excludes}\n")
+            xdg = Path(d) / "xdg"
+            (xdg / "git").mkdir(parents=True)
+            (xdg / "git" / "ignore").write_text("agent.txt\n")
+            empty_xdg = Path(d) / "empty-xdg"
+            empty_xdg.mkdir()
+            common = {"GIT_CONFIG_GLOBAL": os.devnull, "XDG_CONFIG_HOME": str(empty_xdg),
+                      "GIT_CONFIG_COUNT": "0"}
+            cases = [
+                {"GIT_CONFIG_GLOBAL": str(config)},
+                {"XDG_CONFIG_HOME": str(xdg)},
+                {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+                 "GIT_CONFIG_VALUE_0": str(excludes)},
+            ]
+            for hostile in cases:
+                with self.subTest(hostile=hostile), patch.dict(os.environ, common | hostile):
+                    before = runner.worktree_snapshot(root)
+                    (root / "agent.txt").write_text("new\n")
+                    after = runner.worktree_snapshot(root)
+                    self.assertEqual(runner.changed_paths(root, before, after), ["agent.txt"])
+                    (root / "agent.txt").unlink()
+
+    def test_change_evidence_compares_worktrees_without_touching_the_index(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tasks.git(root, "init", "-q", "-b", "main")
+            (root / ".gitignore").write_text("ignored\n")
+            (root / "tracked").write_text("initial\n")
+            (root / "deleted").write_text("initial\n")
+            (root / "staged-only").write_text("initial\n")
+            tasks.git(root, "add", ".gitignore", "tracked", "deleted", "staged-only")
+            tasks.git(root, "commit", "-q", "-m", "initial")
+            (root / "existing untracked").write_text("before\n")
+            (root / "tracked").write_text("staged before\n")
+            tasks.git(root, "add", "tracked")
+            index_before = tasks.git(root, "diff", "--cached")
+            before = runner.worktree_snapshot(root)
+
+            (root / "tracked").write_text("agent change\n")
+            (root / "deleted").unlink()
+            (root / "new file").write_text("new\n")
+            (root / "ignored").write_text("not evidence\n")
+            (root / "staged-only").write_text("staged\n")
+            tasks.git(root, "add", "staged-only")
+            (root / "staged-only").write_text("initial\n")
+            staged = tasks.git(root, "diff", "--cached")
+            after = runner.worktree_snapshot(root)
+            self.assertNotEqual(staged, index_before)
+            self.assertEqual(tasks.git(root, "diff", "--cached"), staged)
+            self.assertEqual(runner.changed_paths(root, before, after),
+                             ["deleted", "new file", "staged-only", "tracked"])
+
+            # Committed changes are just as visible, and a missing snapshot
+            # must not be reported as a clean worktree.
+            tasks.git(root, "add", "-A")
+            tasks.git(root, "commit", "-q", "-m", "agent change")
+            self.assertEqual(runner.changed_paths(root, before, runner.worktree_snapshot(root)),
+                             ["deleted", "existing untracked", "new file", "tracked"])
+            self.assertIsNone(runner.changed_paths(root, None, after))
+
+    def test_change_evidence_excludes_checker_changes(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+
+            def agent(_harness, _cmd, _env, workdir, *_args):
+                (workdir / "agent-only.txt").write_text("agent\n")
+                return {"lines": [], "session": None, "stopped": None, "exit_code": 0, "wall_s": 1}
+
+            def check(_task, workdir, *_args):
+                (workdir / "checker-only.txt").write_text("checker\n")
+                return {"passed": True, "exit_code": 0, "output": "ok"}
+
+            def sweep(path, session):
+                if session is not None:
+                    (path / "work" / "cleanup-written.txt").write_text("child\n")
+                return []
+
+            def agent_with_session(*args):
+                result = agent(*args)
+                result["session"] = 123
+                return result
+
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", side_effect=agent_with_session), \
+                    patch.object(runner, "sweep", side_effect=sweep), \
+                    patch.object(runner, "audit", return_value={}), \
+                    patch.object(runner.tasks_mod, "run_check", side_effect=check):
+                record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+            self.assertEqual(record["changed_paths"], ["agent-only.txt", "cleanup-written.txt"])
+
     def test_every_round_runs_every_arm_in_a_seeded_order(self):
         planned = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
         self.assertEqual(len(planned), 12)
