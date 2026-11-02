@@ -1671,8 +1671,11 @@ mod tests {
         // code with `jouet search` and `jouet read --symbol`: in the
         // benchmark's usage task agents spent 14 to 18 requests on grep and
         // sed and never used them; named here, they did, and the median run
-        // fell from 627k input tokens to 376k.
-        assert!(context.len() <= 1900, "{} bytes:\n{context}", context.len());
+        // fell from 627k input tokens to 376k. Then to 2000 for reading
+        // several definitions in one call: on zod, agents made five reads of
+        // one file, at ~35k tokens of context each, where a plain agent
+        // chained one sed.
+        assert!(context.len() <= 2000, "{} bytes:\n{context}", context.len());
         // Only deny rules: a warning costs the agent no call, and neither
         // does naming one that denies on content (`primer = false`).
         assert!(!context.contains("large-read"), "{context}");
