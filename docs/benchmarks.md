@@ -26,13 +26,14 @@ Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), 
 
 ### Tasks from real projects
 
-Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and the fix's parent commit (`[source]`) instead of a `repo/`. The prompt is the issue's own title and body and one line asking for a fix, a test and a commit. `hidden/` holds the fix PR's own tests, which `check.py` puts in place and runs, and `solve.py` applies the upstream fix (`fix.patch`). They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
+Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and a pinned commit before the fix (`[source]`) instead of a `repo/`. Prompts describe the original issue and ask for a fix, a test and a commit. The checker runs a hidden regression test and `solve.py` applies a reference fix. They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
 
 Projects beyond jdx's own:
 
 | task | project | issue | language and runner | needs on the host |
 |---|---|---|---|---|
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
+| `actual-running-balance` | Actual Budget, a local-first finance webapp | [actualbudget/actual#8475](https://github.com/actualbudget/actual/issues/8475) | TypeScript, Playwright and Chromium | the benchmark's pinned Node, a local clone and prepared Yarn and browser caches, as described below |
 | `cobra-completion-args` | Cobra, a Go CLI library | [spf13/cobra#2257](https://github.com/spf13/cobra/issues/2257) | Go, `go test` | the benchmark's Go tools, cached modules, and a local clone at `~/src/cobra-bench-source` |
 | `rubocop-redundant-self` | RuboCop, a Ruby static analyzer | [rubocop/rubocop#16149](https://github.com/rubocop/rubocop/issues/16149) | Ruby, RSpec and RuboCop's CLI | Ruby 4.0.9, a clone at `~/src/rubocop-bench-source`, and a prepared bundle as described below |
 | `requests-proxied-files` | Requests, an HTTP library | [psf/requests#7502](https://github.com/psf/requests/pull/7502) | Python, pytest and pytest-httpbin | Python 3.13 and a local Requests clone at `~/src/requests-bench-source` |
@@ -46,6 +47,17 @@ Projects beyond jdx's own:
 Each `task.toml` notes which jouet levels the task can exercise: what `jouet test` does with the project out of the box, and where TOML config or a Luau rule or routine could help. A JavaScript project's dependencies are installed by the task's `setup` commands, offline from your cache, after the work tree is committed and before the agent's clock starts. The agents are not network-sandboxed and can override offline defaults. A setup that leaves files git does not ignore is refused. Tools the default `bin/` lacks, such as `go`, `npm` or a pinned `pnpm`, can be exposed through `[tools]`, by path or by a bare name found on your `PATH`.
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
+
+The opt-in Actual Budget task checks a running balance after two edits in a local browser, and requires a committed regression test and release note. The reference fix is adapted from [actualbudget/actual#8490](https://github.com/actualbudget/actual/pull/8490). It retains repository history, uses port 3001 for its local server, and refuses to reuse a server already on that port. Before running, prepare the pinned dependencies and Chromium once from the jouet checkout:
+
+```sh
+git clone https://github.com/actualbudget/actual.git ~/src/actual-bench-source
+git -C ~/src/actual-bench-source checkout --detach 501bece3a1a556b9538359ca3284d065bac285eb
+MISE_ENV=bench mise x -- sh -c 'cd "$HOME/src/actual-bench-source" && YARN_CACHE_FOLDER="$HOME/.cache/jouet-bench/yarn-cache" node .yarn/releases/yarn-4.13.0.cjs install --immutable'
+MISE_ENV=bench mise x -- sh -c 'cd "$HOME/src/actual-bench-source" && PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/jouet-bench/playwright" node node_modules/@playwright/test/cli.js install --only-shell chromium'
+```
+
+Each trial installs its own `node_modules` from the prepared cache before timing. The agents are not network-sandboxed.
 
 The opt-in Django task's traceback ends in the SQL compiler, but the cause is in how the query records its `values()` selection, so the agent has to read across the query and the compiler. Its check runs the fix's own aggregation tests and `aggregation_regress`. Each run creates a virtual environment with asgiref, sqlparse and tblib (without tblib, Django's parallel runner cannot report a failure). pip installs them with `PIP_NO_INDEX`, so prepare the wheels once:
 
