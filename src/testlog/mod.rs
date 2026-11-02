@@ -50,7 +50,15 @@ pub(crate) struct Digest {
     /// Failures past the budget even by name.
     #[serde(skip_serializing_if = "is_zero")]
     pub(crate) failures_omitted: u64,
+    /// The tests that passed, by name, when there are at most
+    /// [`PASSES_NAMED`] and the runner names each: a small run says which
+    /// tests it ran, so the agent need not read the log to see its own.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) passed_names: Vec<String>,
 }
+
+/// The most passing tests a digest names.
+const PASSES_NAMED: usize = 8;
 
 fn is_zero(n: &u64) -> bool {
     *n == 0
@@ -78,6 +86,8 @@ struct Parsed {
     skipped: u64,
     warnings: u64,
     found: Vec<Found>,
+    /// The names of the passing tests, from runners that print each.
+    passed_names: Vec<String>,
 }
 
 impl Parsed {
@@ -132,6 +142,8 @@ regexes! {
     ENVIRONMENT = r"(?i)(dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|api rate limit exceeded)";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
+    LIBTEST_OK = r"^test (.+) \.\.\. ok$";
+    TAP_OK_NAME = r"^ok \d+ (.+?)(?: # .*)?$";
     LIBTEST_BLOCK = r"^---- (.+) stdout ----$";
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored";
@@ -258,6 +270,18 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         failures,
         more_failures,
         failures_omitted,
+        // Only when every pass is named, so a list is never a part of them.
+        passed_names: if parsed.passed as usize == parsed.passed_names.len()
+            && parsed.passed_names.len() <= PASSES_NAMED
+        {
+            parsed
+                .passed_names
+                .iter()
+                .map(|n| n.chars().take(80).collect())
+                .collect()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -302,7 +326,9 @@ fn until(lines: &[String], from: usize, end: &Regex) -> Vec<String> {
 
 fn libtest(lines: &[String], out: &mut Parsed) {
     for (i, line) in lines.iter().enumerate() {
-        if let Some(c) = LIBTEST_FAILED.captures(line) {
+        if let Some(c) = LIBTEST_OK.captures(line) {
+            out.passed_names.push(c[1].to_string());
+        } else if let Some(c) = LIBTEST_FAILED.captures(line) {
             out.push(i, &c[1], Vec::new());
         } else if let Some(c) = LIBTEST_BLOCK.captures(line) {
             out.push(i, &c[1], until(lines, i + 1, &LIBTEST_END));
@@ -606,6 +632,9 @@ fn tap(lines: &[String], out: &mut Parsed) {
             skipped += 1;
         } else if TAP_OK.is_match(line) {
             passed += 1;
+            if let Some(c) = TAP_OK_NAME.captures(line) {
+                out.passed_names.push(c[1].to_string());
+            }
         } else if let Some(c) = TAP_NOT_OK.captures(line) {
             failed += 1;
             let block = lines[i + 1..]

@@ -844,6 +844,10 @@ fn outcome(suite: &SuiteReport, streamed: bool) -> String {
     if !counts.is_empty() {
         let _ = write!(s, ": {counts}");
     }
+    // A person watching saw them go by.
+    if suite.exit_code == Some(0) && !streamed && !digest.passed_names.is_empty() {
+        let _ = write!(s, " ({})", digest.passed_names.join(", "));
+    }
     if streamed || suite.exit_code == Some(0) {
         let _ = writeln!(s, " (full log: {log})");
         return s;

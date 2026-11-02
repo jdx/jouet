@@ -50,7 +50,7 @@ causes an affected pytest run to stop before executing tests.
 An agent that runs a suite and cuts its output with `head`, `tail` or `grep` often cuts off the failure it needed, and runs the whole suite again with another filter. `jouet test` runs it once:
 
 - **The whole output goes to a log**, stdout and stderr together, under jouet's log directory (`$JOUET_LOG_DIR`, else `~/.local/state/jouet/logs`), kept for a week. Its path is printed on every run: read more from it with `grep` or `jouet read` rather than running the tests again.
-- **A pass is one line**, with the counts the runner printed.
+- **A pass is one line**, with the counts the runner printed, and, for a run of up to eight tests whose runner names each one (cargo test without `-q`, TAP and so bats), their names: `cmd: passed in 0.9s: 2 passed (edit::tests::editor_with_args, edit::tests::visual_fallback)`. An agent that added a test sees it ran without reading the log. Output streamed to a person, who saw the names go by, leaves them out.
 - **A failure shows each failing test** by name, with the lines that explain it: the assertion or panic, the diff, the compiler error with its code frame. A long one keeps its first and last lines and the error and diff lines between. Failures are shown in the order the output has them until `--budget` bytes (default 4000; `0` for no limit), then only their names, then a count, so nothing is left out without saying so.
 
 ```sh

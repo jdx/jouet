@@ -466,3 +466,33 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         None
     );
 }
+
+#[test]
+fn a_small_passing_run_names_its_tests() {
+    let libtest = "running 2 tests\ntest edit::tests::editor_with_args ... ok\ntest edit::tests::visual_fallback ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out\n";
+    assert_eq!(
+        digest(libtest, false, DEFAULT_BUDGET).passed_names,
+        [
+            "edit::tests::editor_with_args",
+            "edit::tests::visual_fallback"
+        ]
+    );
+    let tap =
+        "1..2\nok 1 edit command accepts an editor command\nok 2 falls back to VISUAL # 12ms\n";
+    assert_eq!(
+        digest(tap, false, DEFAULT_BUDGET).passed_names,
+        [
+            "edit command accepts an editor command",
+            "falls back to VISUAL"
+        ]
+    );
+    // Past eight, or with names missing (cargo test -q), none are named.
+    let many: String = (0..9).map(|i| format!("ok {} t{i}\n", i + 1)).collect();
+    assert!(
+        digest(&format!("1..9\n{many}"), false, DEFAULT_BUDGET)
+            .passed_names
+            .is_empty()
+    );
+    let quiet = "running 2 tests\n..\ntest result: ok. 2 passed; 0 failed; 0 ignored\n";
+    assert!(digest(quiet, false, DEFAULT_BUDGET).passed_names.is_empty());
+}
