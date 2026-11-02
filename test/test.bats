@@ -62,6 +62,13 @@ SH
 	assert_line -- 'not download'
 	assert_line -- '--collect-only'
 
+	# A filter can select nothing without proving no test depends on the change.
+	printf '#!/bin/sh\nexit 5\n' >.venv/bin/pytest
+	run --separate-stderr jouet test --affected --since main --dry-run --json
+	assert_success
+	run jq -r '.suites[0].reason' <<<"$output"
+	assert_output 'no tests selected for the changed files'
+
 	run --separate-stderr jouet test --dry-run --json
 	assert_success
 	run jq -r '.suites[0].command | join(" ")' <<<"$output"

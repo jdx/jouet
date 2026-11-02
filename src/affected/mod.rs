@@ -595,7 +595,7 @@ fn decide(
         .select(&suite.project, base, &sources, selection_extra)?;
     suite.note = selection.note;
     if selection.tests.is_empty() {
-        suite.decision = Decision::Nothing("no test depends on the changed files".into());
+        suite.decision = Decision::Nothing("no tests selected for the changed files".into());
         return Ok(suite);
     }
     suite.tests = selection.tests;
