@@ -120,7 +120,7 @@ impl Fake {
 
 fn run_json(id: u64, name: &str, status: &str, conclusion: Option<&str>) -> Value {
     json!({
-        "id": id, "name": name, "status": status, "conclusion": conclusion,
+        "id": id, "node_id": format!("check-{id}"), "name": name, "status": status, "conclusion": conclusion,
         "html_url": format!("https://github.com/jdx/demo/actions/runs/900/job/{id}"),
         "app": { "slug": "github-actions" },
     })
@@ -234,6 +234,32 @@ fn respond(
 /// names (its `$s`), and a PR for `wait pr`.
 fn graphql(world: &World, body: &[u8]) -> String {
     let request: Value = serde_json::from_slice(body).unwrap_or_default();
+    if let Some(ids) = request["variables"]["ids"].as_array() {
+        let nodes: Vec<Value> = ids
+            .iter()
+            .map(|id| {
+                let number = id
+                    .as_str()
+                    .and_then(|s| s.strip_prefix("check-"))
+                    .and_then(|s| s.parse::<u64>().ok());
+                let check = world
+                    .checks
+                    .values()
+                    .flatten()
+                    .find(|c| Some(c.id) == number);
+                check.map_or(Value::Null, |c| {
+                    json!({
+                        "id": id, "name": c.name, "checkSuite": {
+                            "app": { "slug": "github-actions" }, "branch": { "name": "feat" },
+                            "workflowRun": { "event": "pull_request", "runNumber": c.id,
+                                "runAttempt": 1, "workflow": { "id": "workflow-1" } }
+                        }
+                    })
+                })
+            })
+            .collect();
+        return json!({ "data": { "nodes": nodes } }).to_string();
+    }
     let sha = request["variables"]["s"].as_str().unwrap_or_default();
     let nodes: Vec<Value> = world
         .checks_on(sha)
@@ -432,6 +458,31 @@ fn handle(fake: &Fake) -> Arc<Mutex<World>> {
 }
 
 const CI: [&str; 6] = ["wait", "ci", "7", "--repo", "jdx/demo", "--interval"];
+
+#[test]
+fn ci_ignores_a_superseded_cancelled_workflow_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World::default();
+    world.checks.insert(
+        SHA_A,
+        vec![
+            check(2, "title", "completed", Some("success")),
+            check(1, "title", "completed", Some("cancelled")),
+        ],
+    );
+    let fake = serve(world);
+    let out = jouet(&fake, dir.path(), &[&CI[..], &["100ms", "--json"]].concat());
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let doc = json_doc(&out);
+    assert_eq!(doc["counts"]["pass"], 1);
+    assert_eq!(doc["counts"]["cancelled"], 0);
+}
 
 #[test]
 fn ci_passes_and_unchanged_polls_are_304s() {

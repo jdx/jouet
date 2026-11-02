@@ -303,7 +303,7 @@ fn keep_check_runs(v: Value) -> Value {
         .flatten()
         .map(|r| {
             let mut kept = json!({
-                "id": r["id"], "name": r["name"], "status": r["status"],
+                "id": r["id"], "node_id": r["node_id"], "name": r["name"], "status": r["status"],
                 "conclusion": r["conclusion"], "html_url": r["html_url"],
                 "details_url": r["details_url"], "app": { "slug": r["app"]["slug"] },
             });
@@ -428,22 +428,26 @@ fn fetch_checks(
     sha: &str,
     cache: &mut BTreeMap<String, Cached>,
 ) -> Result<Vec<Check>, Failure> {
-    let mut checks = Vec::new();
+    let mut runs = Vec::new();
     for page in 1..=MAX_PAGES {
-        // `filter=latest` is GitHub's default. Naming it keys this list apart
-        // from caches written before the Entire Gates summary was kept.
+        // This ordering keys the response apart from older cached copies that
+        // did not retain the node IDs needed to identify workflow runs.
         let path =
-            format!("{base}/commits/{sha}/check-runs?filter=latest&per_page=100&page={page}");
+            format!("{base}/commits/{sha}/check-runs?per_page=100&filter=latest&page={page}");
         let Some(v) = cached_get(client, cache, &path, keep_check_runs)? else {
             break;
         };
-        let runs = v["check_runs"].as_array().cloned().unwrap_or_default();
-        checks.extend(runs.iter().filter_map(Check::from_check_run));
+        let page_runs = v["check_runs"].as_array().cloned().unwrap_or_default();
+        let page_len = page_runs.len();
+        runs.extend(page_runs);
         let total = v["total_count"].as_u64().unwrap_or(0);
-        if runs.len() < 100 || checks.len() as u64 >= total {
+        if page_len < 100 || runs.len() as u64 >= total {
             break;
         }
     }
+    let identities = workflow_identities(client, sha, &runs, cache);
+    let runs = without_superseded(&runs, &identities);
+    let mut checks: Vec<_> = runs.into_iter().filter_map(Check::from_check_run).collect();
     let statuses = 'statuses: {
         let mut statuses = Vec::new();
         for page in 1..=MAX_PAGES {
@@ -461,6 +465,129 @@ fn fetch_checks(
     };
     checks.extend(statuses);
     Ok(checks)
+}
+
+/// Identify only duplicate Actions check names. Unknown identities are left
+/// alone: a check with the same name can belong to another workflow or app.
+fn workflow_identities(
+    client: &mut Client,
+    sha: &str,
+    runs: &[Value],
+    cache: &mut BTreeMap<String, Cached>,
+) -> BTreeMap<String, Value> {
+    const QUERY: &str = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on CheckRun { id name checkSuite { app { slug } branch { name } workflowRun { event runNumber runAttempt workflow { id } } } } } }";
+    let mut counts = BTreeMap::<&str, usize>::new();
+    for run in runs {
+        if run["app"]["slug"] == "github-actions"
+            && let Some(name) = run["name"].as_str()
+        {
+            *counts.entry(name).or_default() += 1;
+        }
+    }
+    let ids: Vec<&str> = runs
+        .iter()
+        .filter(|run| {
+            run["app"]["slug"] == "github-actions"
+                && run["name"]
+                    .as_str()
+                    .is_some_and(|name| counts.get(name).copied().unwrap_or(0) > 1)
+        })
+        .filter_map(|run| run["node_id"].as_str())
+        .collect();
+    let mut found = BTreeMap::new();
+    let mut missing = Vec::new();
+    for id in ids {
+        let key = format!("workflow:{sha}:{id}");
+        if let Some(cached) = cache.get(&key) {
+            found.insert(id.to_string(), cached.data.clone());
+        } else {
+            missing.push(id);
+        }
+    }
+    for batch in missing.chunks(100) {
+        let Ok(data) = client.graphql(QUERY, &json!({ "ids": batch })) else {
+            continue;
+        };
+        for node in data["nodes"].as_array().into_iter().flatten() {
+            let Some(id) = node["id"].as_str() else {
+                continue;
+            };
+            // Metadata may be incomplete while GitHub registers a run. Cache
+            // only complete identities for finished checks so a later poll can
+            // retry incomplete or still-changing data.
+            if workflow_identity(node, node).is_some()
+                && runs
+                    .iter()
+                    .any(|run| run["node_id"] == id && run["status"] == "completed")
+            {
+                let key = format!("workflow:{sha}:{id}");
+                cache.insert(
+                    key,
+                    Cached {
+                        etag: String::new(),
+                        data: node.clone(),
+                    },
+                );
+            }
+            found.insert(id.to_string(), node.clone());
+        }
+    }
+    found
+}
+
+type WorkflowKey = (String, String, String, String, String);
+
+fn workflow_identity(run: &Value, node: &Value) -> Option<(WorkflowKey, (u64, u64))> {
+    let name = run["name"].as_str()?;
+    if node["name"].as_str()? != name {
+        return None;
+    }
+    let suite = &node["checkSuite"];
+    let workflow = &suite["workflowRun"];
+    Some((
+        (
+            name.to_owned(),
+            suite["app"]["slug"].as_str()?.to_owned(),
+            suite["branch"]["name"].as_str()?.to_owned(),
+            workflow["event"].as_str()?.to_owned(),
+            workflow["workflow"]["id"].as_str()?.to_owned(),
+        ),
+        (
+            workflow["runNumber"].as_u64()?,
+            workflow["runAttempt"].as_u64()?,
+        ),
+    ))
+}
+
+fn without_superseded<'a>(
+    runs: &'a [Value],
+    identities: &BTreeMap<String, Value>,
+) -> Vec<&'a Value> {
+    let identity = |run: &Value| {
+        let id = run["node_id"].as_str()?;
+        workflow_identity(run, identities.get(id)?)
+    };
+    let mut latest = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    let mut ambiguous = BTreeSet::new();
+    for run in runs {
+        if let Some((key, order)) = identity(run) {
+            if !seen.insert((key.clone(), order)) {
+                ambiguous.insert(key.clone());
+            }
+            latest
+                .entry(key)
+                .and_modify(|n: &mut (u64, u64)| *n = (*n).max(order))
+                .or_insert(order);
+        }
+    }
+    runs.iter()
+        .filter(|run| {
+            identity(run).is_none_or(|(key, order)| {
+                ambiguous.contains(&key) || latest.get(&key).is_none_or(|newest| order >= *newest)
+            })
+        })
+        .collect()
 }
 
 /// Asks which checks on `sha` are required, for names not asked about
@@ -631,6 +758,51 @@ pub(crate) fn get_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn superseded_actions_checks_are_removed_only_with_unambiguous_workflow_identity() {
+        let run = |id: &str, conclusion: &str| {
+            json!({
+                "node_id": id, "name": "title", "status": "completed", "conclusion": conclusion,
+                "app": { "slug": "github-actions" }
+            })
+        };
+        let node = |id: &str, workflow: &str, number: u64| {
+            json!({
+                "id": id, "name": "title", "checkSuite": {
+                    "app": { "slug": "github-actions" }, "branch": { "name": "feature" },
+                    "workflowRun": { "event": "pull_request", "runNumber": number,
+                        "runAttempt": 1, "workflow": { "id": workflow } }
+                }
+            })
+        };
+        let runs = vec![
+            run("new", "success"),
+            run("old", "cancelled"),
+            run("other", "failure"),
+            run("unknown", "failure"),
+        ];
+        let mut identities = BTreeMap::from([
+            ("new".into(), node("new", "workflow-a", 2)),
+            ("old".into(), node("old", "workflow-a", 1)),
+            ("other".into(), node("other", "workflow-b", 1)),
+        ]);
+        let kept = without_superseded(&runs, &identities);
+        let ids: Vec<&str> = kept
+            .iter()
+            .map(|r| r["node_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["new", "other", "unknown"]);
+
+        // A later attempt of the same workflow run also supersedes it.
+        identities.get_mut("new").unwrap()["checkSuite"]["workflowRun"]["runNumber"] = json!(1);
+        identities.get_mut("new").unwrap()["checkSuite"]["workflowRun"]["runAttempt"] = json!(2);
+        assert_eq!(without_superseded(&runs, &identities).len(), 3);
+
+        // Duplicate jobs of the same name in one workflow run are ambiguous.
+        identities.insert("other".into(), node("other", "workflow-a", 1));
+        assert_eq!(without_superseded(&runs, &identities).len(), 4);
+    }
 
     #[test]
     fn a_conflict_counts_once_seen_again_ten_seconds_later() {
