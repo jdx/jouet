@@ -80,17 +80,21 @@ SH
 transcript() {
 	local id=$1
 	shift
-	local dir
-	dir="$HOME/.claude/projects/$(tr '/.' '--' <<<"$ROOT")"
+	local dir base
+	dir="$HOME/.claude/projects/$(printf '%s' "$ROOT" | LC_ALL=C tr -c '[:alnum:]' '-')"
+	base=$(date -u +'%Y-%m-%dT%H:%M')
 	mkdir -p "$dir"
 	local file="$dir/$id.jsonl" n=0
-	jq -cn --arg s "$id" --arg cwd "$ROOT" \
-		'{type: "user", timestamp: "2026-10-30T10:00:00.000Z", sessionId: $s, cwd: $cwd, message: {role: "user", content: "build it"}}' >"$file"
+	jq -cn --arg s "$id" --arg cwd "$ROOT" --arg ts "${base}:00.000Z" \
+		'{type: "user", timestamp: $ts, sessionId: $s, cwd: $cwd, message: {role: "user", content: "build it"}}' >"$file"
 	for command in "$@"; do
 		n=$((n + 1))
-		jq -cn --arg s "$id" --arg cwd "$ROOT" --arg c "$command" --arg id "t$n" --arg ts "2026-10-30T10:0$n:00.000Z" \
+		local start end
+		printf -v start '%s:%02d.000Z' "$base" "$((n * 3))"
+		printf -v end '%s:%02d.000Z' "$base" "$((n * 3 + 2))"
+		jq -cn --arg s "$id" --arg cwd "$ROOT" --arg c "$command" --arg id "t$n" --arg ts "$start" \
 			'{type: "assistant", timestamp: $ts, sessionId: $s, cwd: $cwd, message: {id: ("m" + $id), usage: {input_tokens: 5, output_tokens: 40}, content: [{type: "tool_use", id: $id, name: "Bash", input: {command: $c}}]}}' >>"$file"
-		jq -cn --arg s "$id" --arg cwd "$ROOT" --arg id "t$n" --arg ts "2026-10-30T10:0$n:02.000Z" \
+		jq -cn --arg s "$id" --arg cwd "$ROOT" --arg id "t$n" --arg ts "$end" \
 			'{type: "user", timestamp: $ts, sessionId: $s, cwd: $cwd, message: {role: "user", content: [{type: "tool_result", tool_use_id: $id, content: "test result: ok. 12 passed", is_error: false}]}}' >>"$file"
 	done
 }

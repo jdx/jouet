@@ -10,8 +10,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 const SHA_A: &str = "aaaaaaa1111111111111111111111111111111111";
 const SHA_B: &str = "bbbbbbb2222222222222222222222222222222222";
@@ -30,6 +28,8 @@ struct World {
     review: Option<&'static str>,
     /// Check runs by commit.
     checks: BTreeMap<&'static str, Vec<Run>>,
+    /// Complete the pending check after returning it once at the updated head.
+    fail_after_pending_check: bool,
     merged: bool,
     /// What a merge is answered with, when the head matches.
     merge_reply: (u16, &'static str),
@@ -61,6 +61,7 @@ impl Default for World {
                     ("unit", "completed", Some("success")),
                 ],
             )]),
+            fail_after_pending_check: false,
             merged: false,
             merge_reply: (200, ""),
             update_to: (SHA_B, "CLEAN"),
@@ -253,6 +254,18 @@ fn respond(world: &mut World, request: &Request) -> (u16, String) {
                             "app": { "slug": "other-ci" },
                         }))
                         .collect();
+                    if !sha.is_empty()
+                        && SHA_B.starts_with(sha)
+                        && std::mem::take(&mut world.fail_after_pending_check)
+                    {
+                        world.checks.insert(
+                            SHA_B,
+                            vec![
+                                ("lint", "completed", Some("success")),
+                                ("unit", "completed", Some("failure")),
+                            ],
+                        );
+                    }
                     ok(json!({ "total_count": runs.len(), "check_runs": runs }))
                 }
                 Some((_, "status")) => ok(json!({ "total_count": 0, "statuses": [] })),
@@ -408,6 +421,7 @@ fn failing_checks_after_an_update_stop_the_landing() {
     let dir = tempfile::tempdir().unwrap();
     let mut world = World {
         merge_state: "BEHIND",
+        fail_after_pending_check: true,
         ..World::default()
     };
     world.checks.insert(
@@ -417,25 +431,12 @@ fn failing_checks_after_an_update_stop_the_landing() {
             ("unit", "in_progress", None),
         ],
     );
-    let (fake, world) = github(world);
-    let handle = Arc::clone(&world);
-    let flip = thread::spawn(move || {
-        // Once the wait has seen `unit` running, it fails.
-        thread::sleep(Duration::from_millis(500));
-        handle.lock().unwrap().checks.insert(
-            SHA_B,
-            vec![
-                ("lint", "completed", Some("success")),
-                ("unit", "completed", Some("failure")),
-            ],
-        );
-    });
+    let (fake, _) = github(world);
     let out = land(
         &fake,
         dir.path(),
         &["--yes", "--update", "--interval", "100ms", "--json"],
     );
-    flip.join().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let doc = json(&out);
     assert_eq!(doc["result"], "ci_failed");

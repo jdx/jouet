@@ -46,6 +46,8 @@ struct World {
     mergeable: Option<bool>,
     mergeable_state: &'static str,
     checks: BTreeMap<&'static str, Vec<CheckRun>>,
+    /// Complete the check runs after the fake returns an unchanged check poll.
+    complete_after_304: bool,
     base_sha: &'static str,
     /// Files changed on the base between two SHAs, and in the PR.
     base_files: Vec<&'static str>,
@@ -66,6 +68,7 @@ impl Default for World {
             mergeable: Some(true),
             mergeable_state: "clean",
             checks: BTreeMap::new(),
+            complete_after_304: false,
             base_sha: "base000",
             base_files: Vec::new(),
             pr_files: vec!["src/a.rs"],
@@ -307,6 +310,18 @@ fn serve(world: World) -> Fake {
             } else {
                 text
             };
+            if status == 304 && target.contains("/check-runs") {
+                let mut world = w.lock().unwrap();
+                if std::mem::take(&mut world.complete_after_304) {
+                    world.checks.insert(
+                        SHA_A,
+                        vec![
+                            check(1, "lint", "completed", Some("success")),
+                            check(2, "unit", "completed", Some("skipped")),
+                        ],
+                    );
+                }
+            }
             l.lock()
                 .unwrap()
                 .requests
@@ -421,7 +436,10 @@ const CI: [&str; 6] = ["wait", "ci", "7", "--repo", "jdx/demo", "--interval"];
 #[test]
 fn ci_passes_and_unchanged_polls_are_304s() {
     let dir = tempfile::tempdir().unwrap();
-    let mut world = World::default();
+    let mut world = World {
+        complete_after_304: true,
+        ..World::default()
+    };
     world.checks.insert(
         SHA_A,
         vec![
@@ -430,21 +448,11 @@ fn ci_passes_and_unchanged_polls_are_304s() {
         ],
     );
     let fake = serve(world);
-    let child = spawn(&fake, dir.path(), &[&CI[..], &["100ms", "--json"]].concat());
-    // Unchanged for a few polls, then both pass.
-    let w = handle(&fake);
-    after(400, move || {
-        let mut w = w.lock().unwrap();
-        w.checks.insert(
-            SHA_A,
-            vec![
-                check(1, "lint", "completed", Some("success")),
-                check(2, "unit", "completed", Some("skipped")),
-            ],
-        );
-    })
-    .join()
-    .unwrap();
+    let child = spawn(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--timeout", "5s", "--json"]].concat(),
+    );
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),

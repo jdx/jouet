@@ -245,6 +245,7 @@ trail comment resolve $TESTS --trail 1 --repo $REPO"
 
 @test "a GitHub repository served through Entire is still GitHub's" {
 	git remote set-url origin entire://aws-us-east-2.entire.io/gh/jdx/mise
+	export JOUET_GITHUB_TOKEN=fixture-token
 
 	run --separate-stderr jouet pr status 1 --settle 0 --json
 
