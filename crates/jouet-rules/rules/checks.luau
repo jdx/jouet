@@ -495,9 +495,13 @@ end
 local function playwright_scope(args: { string }, at: number, workspace: string?): (Kind?, Scope)
 	local unknown = partial(nil)
 	local narrowed = false
+	local custom_config = false
 	for i = at + 1, #args do
 		local arg = args[i]
-		local name = string.match(arg, "^(%-%-[%w%-]+)=") or arg
+		local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
+		if name == "--config" or name == "-c" then
+			custom_config = true
+		end
 		-- UI modes can exit without running; this must take precedence over
 		-- any earlier selection flag, regardless of argument order.
 		if name == "--ui" or name == "--ui-host" or name == "--ui-port" or name == "--debug" or name == "--pass-with-no-tests" then
@@ -507,13 +511,15 @@ local function playwright_scope(args: { string }, at: number, workspace: string?
 			narrowed = true
 		end
 	end
-	-- A workspace is a filter. Mark it as an option so the verifier requires
-	-- an exact selection instead of treating added test names as a wider run.
-	if workspace then return "test", partial("--workspace=" .. workspace .. " playwright " .. table.concat(args, " ", at)) end
-	if narrowed then return "test", partial("playwright " .. table.concat(args, " ", at)) end
+	-- The namespace distinguishes these selections from test names for other
+	-- runners. A custom config may name a different suite, so it gets its own
+	-- conservative, exact selection rather than being covered by the default.
+	local suite = "@jouet:playwright" .. (if workspace then ":workspace=" .. workspace else "")
+	if custom_config then return "test", partial(suite .. ":config " .. table.concat(args, " ", at)) end
+	if narrowed then return "test", partial(suite .. " " .. table.concat(args, " ", at)) end
 	local selection = runner_scope(args, at + 1).selector
 	-- Even an unfiltered Playwright run need not cover a project's unit tests.
-	return "test", partial("playwright" .. (if selection then " " .. selection else ""))
+	return "test", partial(suite .. (if selection then " " .. selection else ""))
 end
 
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)

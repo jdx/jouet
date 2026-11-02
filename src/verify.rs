@@ -108,6 +108,25 @@ impl Run {
         {
             return false;
         }
+        // Playwright's unfiltered suite covers its own selected runs, even
+        // through different package-manager wrappers. Its namespace also
+        // prevents a test name in another runner from matching by accident.
+        const PLAYWRIGHT: &str = "@jouet:playwright";
+        fn playwright(s: &str) -> Option<&str> {
+            s.split_whitespace()
+                .next()
+                .filter(|first| *first == PLAYWRIGHT || first.starts_with("@jouet:playwright:"))
+        }
+        match (playwright(ran), playwright(wanted)) {
+            (Some(a), Some(b)) => {
+                return is_playwright(&self.command)
+                    && is_playwright(&failed.command)
+                    && a == b
+                    && (ran == wanted || (ran == a && !a.ends_with(":config")));
+            }
+            (Some(_), None) | (None, Some(_)) => return false,
+            (None, None) => {}
+        }
         if ran == wanted {
             return true;
         }
@@ -128,6 +147,47 @@ impl Run {
         };
         !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
     }
+}
+
+/// Match only the explicit Playwright invocations the checks rule recognizes.
+/// This keeps even a test literally named `@jouet:playwright` in another
+/// runner from being mistaken for a Playwright suite.
+fn is_playwright(command: &str) -> bool {
+    use jouet_rules::shell::{Command, parse};
+    parse(command).commands.iter().any(|command| {
+        let mut argv = command.argv().to_vec();
+        for _ in 0..4 {
+            let parsed = Command {
+                words: argv,
+                ..Command::default()
+            };
+            let words = parsed.argv();
+            let Some(program) = parsed.program() else {
+                return false;
+            };
+            let args: Vec<&str> = words.iter().skip(1).map(String::as_str).collect();
+            if program == "jouet" && args.contains(&"test") && args.contains(&"--cmd") {
+                let Some(separator) = args.iter().position(|word| *word == "--") else {
+                    return false;
+                };
+                argv = args[separator + 1..]
+                    .iter()
+                    .map(|word| (*word).to_owned())
+                    .collect();
+                continue;
+            }
+            return matches!(
+                (program, args.as_slice()),
+                ("playwright", ["test", ..])
+                    | ("npx" | "bunx", ["playwright", "test", ..])
+                    | ("npx" | "bunx", ["--no-install", "playwright", "test", ..])
+                    | ("pnpm" | "yarn", ["exec", "playwright", "test", ..])
+                    | ("npm", ["exec", "--", "playwright", "test", ..])
+                    | ("yarn", ["workspace", _, "exec", "playwright", "test", ..])
+            );
+        }
+        false
+    })
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -1580,6 +1640,53 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert!(!records[0].full);
         state.record(records, Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn playwright_coverage_stays_with_its_runner_workspace_and_config() {
+        let cwd = std::env::current_dir().unwrap();
+        let run = |command: &str, code| {
+            let mut records = crate::cmd::hook::checks(&cwd, command);
+            assert_eq!(records.len(), 1, "{command}");
+            records[0].exit_code = code;
+            records
+        };
+        let mut state = Checks::default();
+        state.record(run("cargo test playwright", 1), Some("t1"));
+        state.record(run("npx playwright test", 0), Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut state = Checks::default();
+        state.record(run("pytest @jouet:playwright", 1), Some("t1"));
+        state.record(run("npx playwright test", 0), Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut state = Checks::default();
+        state.record(
+            run("pnpm exec playwright test --grep balance", 1),
+            Some("t1"),
+        );
+        state.record(
+            run("jouet test --cmd -- npx playwright test", 0),
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut state = Checks::default();
+        state.record(
+            run("yarn workspace web exec playwright test", 1),
+            Some("t1"),
+        );
+        state.record(run("npx playwright test", 0), Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut state = Checks::default();
+        state.record(
+            run("npx playwright test --config=other.config.ts", 1),
+            Some("t1"),
+        );
+        state.record(run("npx playwright test", 0), Some("t1"));
         assert!(reason(&state, "t1").is_some());
     }
 
