@@ -155,7 +155,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                 out.push(priced(
                     CostKind::FailedRuns,
                     o.failed_runs as f64,
-                    "each is at least one more request; a check's answer, such as a failing test, is not counted",
+                    "jouet commands that failed by their own exit code (before jouet recorded it, calls that ran only jouet and failed), each at least one more request; a check's answer, such as a failing test, is not counted",
                 ));
             }
             if o.warnings > 0 {
@@ -207,14 +207,19 @@ fn edit_cost(
     harness: &str,
     priced: &dyn Fn(CostKind, f64, &str) -> Cost,
 ) -> Option<Cost> {
-    let (runs, failed) = measured
+    // Its own failure rate, from the runs that recorded their exit code,
+    // applied to every run.
+    let (runs, own_runs, failed) = measured
         .commands
         .iter()
         .filter(|c| c.harness == harness && Kind::of(&c.command) == Some(Kind::Edit))
-        .fold((0, 0), |(r, f), c| (r + c.runs, f + c.failed));
+        .fold((0, 0, 0), |(r, o, f), c| {
+            (r + c.runs.max(c.own_runs), o + c.own_runs, f + c.own_failed)
+        });
     if failed == 0 {
         return None;
     }
+    let own = ratio(failed, own_runs);
     let before = baseline.and_then(|b| b.kinds.iter().find(|k| k.kind == Kind::Edit));
     let Some(k) = before.filter(|k| k.runs >= MIN_BASELINE_RUNS) else {
         return Some(Cost {
@@ -225,21 +230,22 @@ fn edit_cost(
             basis: String::new(),
             refused: Some(format!(
                 "too few edits before setup to compare its {failed} failures in {} runs with",
-                count_text(runs)
+                count_text(own_runs)
             )),
         });
     };
     let rate = k.failure_rate();
-    let extra = failed as f64 - runs as f64 * rate;
+    let extra = runs as f64 * (own - rate);
     (extra > 0.0).then(|| {
         priced(
             CostKind::EditFailures,
             extra,
             &format!(
-                "jouet edit failed {:.1}% ({failed} of {}), edits before setup {:.1}%; each extra failure is one more request",
-                ratio(failed, runs) * 100.0,
-                count_text(runs),
-                rate * 100.0
+                "jouet edit failed {:.1}% of the {} runs that recorded their own exit code ({failed}), edits before setup {:.1}%, over its {} runs; each extra failure is one more request",
+                own * 100.0,
+                count_text(own_runs),
+                rate * 100.0,
+                count_text(runs)
             ),
         )
     })

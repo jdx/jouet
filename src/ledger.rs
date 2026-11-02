@@ -45,7 +45,9 @@ pub(crate) struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `test-run` (a
-    /// `jouet test` run, recorded by itself), `stop`, `override`,
+    /// `jouet test` run, recorded by itself), `jouet-run` (any jouet
+    /// command in an agent's session, with its own exit code), `stop`,
+    /// `override`,
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// or `deprecated` (a command used something on its way out).
@@ -152,6 +154,48 @@ fn deprecation_in(dir: &Path, session: Option<&str>, id: &str) -> bool {
         append(dir, &entry);
     }
     told
+}
+
+/// Records a jouet command's own exit code in an agent's session, for
+/// `jouet stats`: the hooks see only the exit code of the whole call, which
+/// may have run more than jouet. Only the command's name is kept, never its
+/// arguments; the harness is the session's, which the stats look up.
+pub(crate) fn record_run(args: &[String], code: i32) {
+    let Some(session) = crate::cmd::search::session_id() else {
+        return;
+    };
+    let settings = crate::settings::Settings::load();
+    let Some(dir) = dir().filter(|_| settings.hooks.ledger) else {
+        return;
+    };
+    append(&dir, &run_entry(&session, args, code));
+}
+
+/// `jouet edit replace` and its exit code, from `args` without the program.
+fn run_entry(session: &str, args: &[String], code: i32) -> Entry {
+    // Past the global flags, `--display MODE` with its value.
+    let mut rest = args.iter().map(String::as_str).peekable();
+    while let Some(flag) = rest.next_if(|w| w.starts_with('-')) {
+        if flag == "--display" {
+            rest.next();
+        }
+    }
+    let words: Vec<&str> = rest
+        .take_while(|w| {
+            w.starts_with(|c: char| c.is_ascii_lowercase())
+                && w.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+        })
+        .take(3)
+        .collect();
+    let mut entry = Entry::new("jouet", Some(session), "jouet-run");
+    entry.shape = Some(shape(
+        &std::iter::once("jouet")
+            .chain(words)
+            .collect::<Vec<_>>()
+            .join(" "),
+    ));
+    entry.exit_code = Some(code);
+    entry
 }
 
 /// `$XDG_STATE_HOME/jouet/ledger`, when there is a home directory.
@@ -839,6 +883,35 @@ pub(crate) fn redact_id(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_run_keeps_the_command_and_its_exit_code_never_its_arguments() {
+        let args = |line: &str| {
+            line.split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        let e = super::run_entry(
+            "s",
+            &args("--display plain edit replace src/main.rs --old a --new b"),
+            3,
+        );
+        assert_eq!(
+            (
+                e.event.as_str(),
+                e.harness.as_str(),
+                e.shape.as_deref(),
+                e.exit_code
+            ),
+            ("jouet-run", "jouet", Some("jouet edit replace"), Some(3))
+        );
+        let e = super::run_entry("s", &args("--json pr threads reply abc --body x"), 0);
+        // As the hooks shape it, so the stats match the two.
+        assert_eq!(
+            e.shape.as_deref(),
+            Some(super::shape("jouet pr threads reply").as_str())
+        );
+    }
+
     use super::*;
 
     #[test]

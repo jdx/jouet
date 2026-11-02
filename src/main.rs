@@ -99,6 +99,8 @@ fn main() -> ExitCode {
         Cmd::Completion(args) => cmd::completion::run(&args, &out),
         Cmd::Hook(_) => unreachable!("handled above"),
     };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    ledger::record_run(&args, i32::from(exit.code()));
     exit.into()
 }
 

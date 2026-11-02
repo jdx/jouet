@@ -301,6 +301,8 @@ fn a_failed_jouet_run_costs_unless_it_was_a_checks_answer() {
         post("jouet pr threads reply <arg> --body <arg>", 3),
         post("jouet test --affected", 4),
         post("cargo test", 101),
+        // It may have failed on cargo, not jouet.
+        post("cargo build && jouet commit <arg> --message <arg>", 101),
     ];
     let m = measure(&entries, &StatsFilter::default());
     assert_eq!(m.overhead[0].failed_runs, 3);
@@ -311,9 +313,10 @@ fn a_failed_jouet_run_costs_unless_it_was_a_checks_answer() {
             .map(|c| c.failed)
             .sum::<u64>()
     };
-    // The test failed, not the commit around it; the edit failed alone.
+    // Calls that failed: the test failed, not the commit around it, but
+    // the cargo build and the commit cannot be told apart.
     assert_eq!(failed("jouet test"), 2);
-    assert_eq!(failed("jouet commit"), 1);
+    assert_eq!(failed("jouet commit"), 2);
     assert_eq!(failed("jouet edit replace"), 1);
 }
 
@@ -409,8 +412,11 @@ fn jouet_edit_is_credited_only_where_it_fails_less_than_edits_did() {
             command: "jouet edit replace".into(),
             harness: "claude".into(),
             runs: 100,
-            failed,
-            duration_ms: 0,
+            // The calls' exit codes, which mix in other failures, are not used.
+            failed: 50,
+            own_runs: 100,
+            own_failed: failed,
+            ..CommandRuns::default()
         }],
         ..Measured::default()
     };
@@ -425,7 +431,7 @@ fn jouet_edit_is_credited_only_where_it_fails_less_than_edits_did() {
     assert_eq!(saved[0].input_tokens, Some(0));
     assert_eq!(
         saved[0].basis,
-        "1,000 edits before setup, 3.4% of which failed and were redone; jouet edit failed 9.0% (9 of 100), so nothing is credited"
+        "assuming each failed edit was redone: 1,000 edits before setup, 3.4% of which failed; jouet edit failed 9.0% of the 100 runs that recorded their own exit code (9), so nothing is credited"
     );
     let read = [AfterSetup {
         harness: "claude".into(),
@@ -451,4 +457,50 @@ fn jouet_edit_is_credited_only_where_it_fails_less_than_edits_did() {
     let edit = per.iter().find(|e| e.kind == Kind::Edit).unwrap();
     assert_eq!(edit.input_tokens, None);
     assert!(edit.refused.is_some());
+}
+
+#[test]
+fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
+    let run = |shape: &str, code| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        ..post(shape, code)
+    };
+    let entries = [
+        // The call failed on its tests; jouet edit and jouet commit did not.
+        post(
+            "jouet edit replace <arg> && jouet commit <arg> && cargo test",
+            101,
+        ),
+        run("jouet edit replace", 0),
+        run("jouet commit", 0),
+        // Here jouet failed on its own.
+        post("jouet edit replace <arg> && cargo fmt", 3),
+        run("jouet edit replace", 3),
+        post("jouet pr threads <arg> | jq <arg>", 5),
+        run("jouet pr threads", 5),
+        // A session the hooks never saw has no harness, so it is left out.
+        LedgerEntry {
+            session: Some("elsewhere".into()),
+            ..run("jouet commit", 2)
+        },
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let edit = m
+        .commands
+        .iter()
+        .find(|c| c.command == "jouet edit replace")
+        .unwrap();
+    assert_eq!(
+        (
+            edit.harness.as_str(),
+            edit.runs,
+            edit.failed,
+            edit.own_runs,
+            edit.own_failed
+        ),
+        ("claude", 2, 2, 2, 1)
+    );
+    assert_eq!(m.overhead.len(), 1);
+    assert_eq!(m.overhead[0].failed_runs, 1);
 }

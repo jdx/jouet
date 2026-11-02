@@ -454,7 +454,9 @@ fn measured_text(s: &mut String, m: &Measured) {
             "command".to_string(),
             "harness".into(),
             "runs".into(),
-            "failed".into(),
+            "calls failed".into(),
+            "own runs".into(),
+            "own failed".into(),
             "time".into(),
         ]];
         for c in &m.commands {
@@ -463,10 +465,16 @@ fn measured_text(s: &mut String, m: &Measured) {
                 c.harness.clone(),
                 c.runs.to_string(),
                 c.failed.to_string(),
+                c.own_runs.to_string(),
+                c.own_failed.to_string(),
                 duration(c.duration_ms),
             ]);
         }
-        table(s, &rows);
+        table(s, &rows, 2);
+        let _ = writeln!(
+            s,
+            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)"
+        );
     }
     if !m.rules.is_empty() {
         s.push('\n');
@@ -490,7 +498,7 @@ fn measured_text(s: &mut String, m: &Measured) {
                 r.then_nothing.to_string(),
             ]);
         }
-        table(s, &rows);
+        table(s, &rows, 1);
     }
     if !m.checks.is_empty() {
         let checks: Vec<String> = m
@@ -552,14 +560,15 @@ fn estimate_text(s: &mut String, e: &Estimate, measured: bool) {
     let _ = writeln!(s, "      basis: {}", e.basis);
 }
 
-fn table<const N: usize>(s: &mut String, rows: &[[String; N]]) {
+/// Columns before `left` are aligned left, the rest right.
+fn table<const N: usize>(s: &mut String, rows: &[[String; N]], left: usize) {
     let widths: Vec<usize> = (0..N)
         .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0))
         .collect();
     for row in rows {
         let _ = write!(s, "  {:<w$}", row[0], w = widths[0]);
         for (i, cell) in row.iter().enumerate().skip(1) {
-            if i == 1 && N == 5 {
+            if i < left {
                 let _ = write!(s, "  {cell:<w$}", w = widths[i]);
             } else {
                 let _ = write!(s, "  {cell:>w$}", w = widths[i]);

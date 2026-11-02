@@ -22,7 +22,7 @@ setup() {
 	assert_success
 	assert_equal "$stderr" ""
 	assert_line --index 0 'jouet stats: 14 ledger entries in 2 sessions, 2026-10-31T00:00:00Z to 2026-10-31T00:07:00Z'
-	assert_line --regexp '^  jouet wait ci +claude +1 +1 +4m$'
+	assert_line --regexp '^  jouet wait ci +claude +1 +1 +0 +0 +4m$'
 	assert_line --regexp '^  sleep-poll +1 +0 +0 +1 +0 +0$'
 	assert_line --regexp '^  python-edit +1 +0 +1 +0 +1 +0$'
 	assert_line '  checks recorded: test 1 (1 failed)'
@@ -48,6 +48,27 @@ setup() {
 	[[ "$(jq -r '[.costs[] | select(.harness == "claude") | .kind] | join(",")' <<<"$output")" == stop_blocks,denials,primer ]]
 	[[ "$(jq -r '.after_setup | map(.harness) | join(",")' <<<"$output")" == claude,codex ]]
 	[[ "$(jq 'has("net_input_tokens")' <<<"$output")" == false ]]
+}
+
+@test "a jouet command in a session records its own exit code, and the stats use it" {
+	# s1 is a fixture session the hooks saw, from Claude Code.
+	run --separate-stderr env CLAUDE_CODE_SESSION_ID=s1 jouet edit replace missing.txt --old a --new b
+	assert_failure
+	run --separate-stderr env CLAUDE_CODE_SESSION_ID=s1 jouet edit replace missing.txt --old a --new b --json
+	assert_failure
+
+	run --separate-stderr jq -c 'select(.event == "jouet-run") | [.harness, .shape, .exit_code != 0]' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_output '["jouet","jouet edit replace",true]
+["jouet","jouet edit replace",true]'
+
+	run --separate-stderr jouet stats --json --display plain
+	assert_success
+	[[ "$(jq -c '.measured.commands[] | select(.command == "jouet edit replace") | [.harness, .runs // 0, .own_runs, .own_failed]' <<<"$output")" == '["claude",0,2,2]' ]]
+	[[ "$(jq '[.measured.overhead[] | .failed_runs // 0] | add' <<<"$output")" == 0 ]]
+
+	# Outside a session, nothing is recorded.
+	run --separate-stderr jouet edit replace missing.txt --old a --new b
+	[[ "$(grep -c jouet-run "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl")" == 2 ]]
 }
 
 @test "saved baselines are reused until --rescan" {

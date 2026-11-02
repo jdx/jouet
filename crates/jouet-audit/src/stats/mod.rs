@@ -88,8 +88,11 @@ pub struct Overhead {
     /// Calls a rule warned about.
     #[serde(skip_serializing_if = "is_zero")]
     pub warnings: u64,
-    /// Command lines that ran jouet and failed, other than `jouet edit` (see
-    /// [`Kind::Edit`]) and a check's answer (see [`is_answer`]).
+    /// jouet commands that failed by their own exit code, other than `jouet
+    /// edit` (see [`Kind::Edit`]) and a check's answer (see [`is_answer`]).
+    /// Before jouet recorded its own exit codes, calls that ran only jouet (a
+    /// `cd` aside) and failed: a call that also ran something else could have
+    /// failed on that.
     #[serde(skip_serializing_if = "is_zero")]
     pub failed_runs: u64,
 }
@@ -118,16 +121,35 @@ fn is_answer(commands: &[String], code: i32) -> bool {
         })
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct CommandRuns {
     /// `jouet wait ci`, `jouet pr status`, ...
     pub command: String,
     pub harness: String,
     pub runs: u64,
+    /// Calls that ran it and failed. The ledger has the exit code of the
+    /// whole call, so this mixes in failures of whatever else the call ran,
+    /// except a check's answer (see [`is_answer`]).
     #[serde(skip_serializing_if = "is_zero")]
     pub failed: u64,
+    /// Runs that recorded their own exit code (`jouet-run` entries), from
+    /// this jouet on.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub own_runs: u64,
+    /// Of those, the ones that failed: its own failures.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub own_failed: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub duration_ms: u64,
+}
+
+/// The program each stage of a shape runs, a `cd` left out.
+fn programs(shape: &str) -> Vec<&str> {
+    shape
+        .split(['|', ';', '&'])
+        .filter_map(|stage| stage.split_whitespace().next())
+        .filter(|program| *program != "cd")
+        .collect()
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -183,7 +205,35 @@ pub fn jouet_commands(shape: &str) -> Vec<String> {
 
 /// Counts what the ledger recorded, in the entries `filter` keeps.
 pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
-    let kept: Vec<&LedgerEntry> = entries.iter().filter(|e| filter.keeps(e)).collect();
+    // A jouet command records its own run without knowing the harness: it
+    // is its session's, from the hooks' entries. One whose session the hooks
+    // never saw is left out.
+    let harness_of: HashMap<&str, &str> = entries
+        .iter()
+        .filter(|e| !matches!(e.harness.as_str(), "jouet" | "cli"))
+        .filter_map(|e| Some((e.session.as_deref()?, e.harness.as_str())))
+        .collect();
+    let resolved: Vec<LedgerEntry> = entries
+        .iter()
+        .filter_map(|e| {
+            if e.event != "jouet-run" {
+                return Some(e.clone());
+            }
+            let harness = harness_of.get(e.session.as_deref()?)?;
+            Some(LedgerEntry {
+                harness: (*harness).to_string(),
+                ..e.clone()
+            })
+        })
+        .collect();
+    let kept: Vec<&LedgerEntry> = resolved.iter().filter(|e| filter.keeps(e)).collect();
+    // Sessions whose jouet commands recorded their own exit codes: there,
+    // those decide what jouet failed, not the exit code of the whole call.
+    let own: HashSet<Option<&str>> = kept
+        .iter()
+        .filter(|e| e.event == "jouet-run")
+        .map(|e| e.session.as_deref())
+        .collect();
     let mut m = Measured {
         entries: kept.len() as u64,
         first_ts: kept.iter().map(|e| e.ts).min(),
@@ -236,13 +286,35 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 }
             }
         }
+        let ran = e.shape.as_deref().map(jouet_commands).unwrap_or_default();
+        let failed_run = |code: i32| {
+            code != 0
+                && ran.iter().any(|c| Kind::of(c) != Some(Kind::Edit))
+                && !is_answer(&ran, code)
+        };
+        if e.event == "jouet-run" {
+            let code = e.exit_code.unwrap_or(0);
+            added.failed_runs += u64::from(failed_run(code));
+            for command in &ran {
+                let c = command_runs(&mut commands, &e.harness, command);
+                c.own_runs += 1;
+                c.own_failed += u64::from(code != 0);
+            }
+            continue;
+        }
         if e.event != "post-tool-use" {
             continue;
         }
-        let ran = e.shape.as_deref().map(jouet_commands).unwrap_or_default();
-        if let Some(code) = e.exit_code.filter(|&x| x != 0)
-            && ran.iter().any(|c| Kind::of(c) != Some(Kind::Edit))
-            && !is_answer(&ran, code)
+        // Before jouet recorded its own exit codes, a failed call counts
+        // only when it ran nothing but jouet, so it cannot have failed on
+        // something else.
+        let only_jouet = e
+            .shape
+            .as_deref()
+            .is_some_and(|s| !ran.is_empty() && programs(s).iter().all(|p| *p == "jouet"));
+        if !own.contains(&e.session.as_deref())
+            && only_jouet
+            && failed_run(e.exit_code.unwrap_or(0))
         {
             added.failed_runs += 1;
         }
@@ -257,15 +329,7 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             if failed && (command == "jouet wait ci" || command == "jouet wait run") {
                 m.failure_excerpts += 1;
             }
-            let c = commands
-                .entry((e.harness.clone(), command.clone()))
-                .or_insert_with(|| CommandRuns {
-                    command,
-                    harness: e.harness.clone(),
-                    runs: 0,
-                    failed: 0,
-                    duration_ms: 0,
-                });
+            let c = command_runs(&mut commands, &e.harness, &command);
             c.runs += 1;
             c.failed += u64::from(failed);
             c.duration_ms += e.duration_ms.unwrap_or(0);
@@ -310,6 +374,20 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         })
         .collect();
     m
+}
+
+fn command_runs<'a>(
+    commands: &'a mut BTreeMap<(String, String), CommandRuns>,
+    harness: &str,
+    command: &str,
+) -> &'a mut CommandRuns {
+    commands
+        .entry((harness.to_string(), command.to_string()))
+        .or_insert_with(|| CommandRuns {
+            command: command.to_string(),
+            harness: harness.to_string(),
+            ..CommandRuns::default()
+        })
 }
 
 fn rule_counts<'a>(rules: &'a mut BTreeMap<String, RuleCounts>, rule: &str) -> &'a mut RuleCounts {
@@ -549,16 +627,17 @@ pub struct Estimate {
 /// own; when `jouet edit` failed as often or more, it saves nothing and
 /// [`costs`] charges the difference.
 pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
-    let mut runs: BTreeMap<(String, Kind), (u64, u64)> = BTreeMap::new();
+    let mut runs: BTreeMap<(String, Kind), (u64, u64, u64)> = BTreeMap::new();
     for c in &measured.commands {
         if let Some(kind) = Kind::of(&c.command) {
             let r = runs.entry((c.harness.clone(), kind)).or_default();
             r.0 += c.runs;
-            r.1 += c.failed;
+            r.1 += c.own_runs;
+            r.2 += c.own_failed;
         }
     }
     runs.into_iter()
-        .map(|((harness, kind), (runs, failed))| {
+        .map(|((harness, kind), (runs, own_runs, failed))| {
             let refuse = |reason: String| Estimate {
                 harness: harness.clone(),
                 kind,
@@ -590,18 +669,20 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
             }
             let k = found.expect("runs were counted from it");
             let per_request = k.tokens_per_request();
+            if kind == Kind::Edit && own_runs == 0 {
+                return refuse(
+                    "no jouet edit run recorded its own exit code (from this release on, each does), and the exit code of the whole call mixes in failures of whatever else it ran".to_string(),
+                );
+            }
             let (tokens, avoided, basis) = if kind == Kind::Edit {
+                // Its own rate, from the runs that recorded their exit code.
                 let before = k.failure_rate();
-                let after = ratio(failed, runs);
-                let jouet = if failed == 0 {
-                    "jouet edit failed none".to_string()
-                } else {
-                    format!(
-                        "jouet edit failed {:.1}% ({failed} of {})",
-                        after * 100.0,
-                        count_text(runs)
-                    )
-                };
+                let after = ratio(failed, own_runs);
+                let jouet = format!(
+                    "jouet edit failed {:.1}% of the {} runs that recorded their own exit code ({failed})",
+                    after * 100.0,
+                    count_text(own_runs)
+                );
                 let credit = if after < before {
                     format!("at {} tokens per request", tokens_text(per_request))
                 } else {
@@ -611,7 +692,7 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                     runs as f64 * (before - after).max(0.0) * per_request,
                     None,
                     format!(
-                        "{} before setup, {:.1}% of which failed and were redone; {jouet}, {credit}",
+                        "assuming each failed edit was redone: {} before setup, {:.1}% of which failed; {jouet}, {credit}",
                         kind.count(k.calls),
                         before * 100.0,
                     ),
@@ -654,8 +735,8 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
                 command: kind.commands()[0].to_string(),
                 harness: b.harness.clone(),
                 runs: 1,
-                failed: 0,
-                duration_ms: 0,
+                own_runs: 1,
+                ..CommandRuns::default()
             })
         })
         .collect();
