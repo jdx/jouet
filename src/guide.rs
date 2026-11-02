@@ -900,10 +900,12 @@ pub(crate) fn summary(
     if let ([commit, edit, reply], [_, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let test = if affected {
             format!(
-                "Test with `{selected}` (what your changes affect) or `{cmd}` (any other test or build)."
+                "Test with `{selected}` (what your changes affect) or `{cmd}` (any other test or build). Test representative boundary cases for behavior changes."
             )
         } else {
-            format!("Test with `{cmd}` (the tests or build for what you changed).")
+            format!(
+                "Test with `{cmd}` (the tests or build for what you changed). Test representative boundary cases for behavior changes."
+            )
         };
         let _ = writeln!(
             out,
