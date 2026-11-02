@@ -98,7 +98,7 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 
 A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.
 
-For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
+For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories, including the `jouet-init` cache when that arm is selected, must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
 
 ```sh
 MISE_ENV=bench mise run bench:agents --tasks-dir "$HOME/bench-tasks" --tasks example --out "$HOME/bench-results/example"
