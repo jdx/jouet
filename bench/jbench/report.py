@@ -107,24 +107,15 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
 
 
 def init_line(cell: dict[str, Any], init: dict[str, Any]) -> str:
-    """What the jouet-init skill cost, once, and how many runs its saving
-    takes to pay that back."""
-    used = (init.get("usage") or {}).get("input_tokens") or 0
+    """What the jouet-init skill changed. Its run is not a cost of the
+    task: a project commits the configuration once and keeps it, as it
+    keeps any other tooling config."""
+    del cell
     files = init.get("files") or []
-    named = ": " + ", ".join(files[:8]) if files else ""
-    text = (
-        f"jouet-init ran once for this task: {human(used)} input tokens in {init.get('wall_s') or 0:.0f}s, "
-        f"changing {len(files)} file(s){named}."
-    )
-    plain = ((cell["arms"].get("plain") or {}).get("metrics") or {}).get("input_tokens") or {}
-    ours = ((cell["arms"].get("jouet-init") or {}).get("metrics") or {}).get("input_tokens") or {}
-    if plain.get("median") is not None and ours.get("median") is not None:
-        saved = plain["median"] - ours["median"]
-        if saved > 0 and used:
-            text += f" At the median saving of {human(saved)} a run, it pays back after {used / saved:.1f} runs."
-        else:
-            text += " With no median saving per run, it does not pay back."
-    return text
+    if not files:
+        return "jouet-init changed no files for this task, so the `jouet-init` arm ran it as the `jouet` arm does."
+    named = ", ".join(files[:8]) + (f" and {len(files) - 8} more" if len(files) > 8 else "")
+    return f"jouet-init configured the project with {len(files)} file(s), committed before each run: {named}."
 
 
 def fmt(value: float | None, kind: str) -> str:

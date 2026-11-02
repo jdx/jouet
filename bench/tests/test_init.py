@@ -76,20 +76,13 @@ class InitTest(unittest.TestCase):
         self.assertTrue(arm.init)
         self.assertFalse(arms.ARMS["jouet"].init)
 
-    def test_the_report_says_what_init_cost_and_when_it_pays_back(self):
-        cell = {
-            "arms": {
-                "plain": {"metrics": {"input_tokens": {"median": 300_000}}},
-                "jouet-init": {"metrics": {"input_tokens": {"median": 200_000}}},
-            }
-        }
+    def test_the_report_says_what_init_configured_and_counts_none_of_its_cost(self):
         meta = {"usage": {"input_tokens": 450_000}, "wall_s": 120, "files": [".jouet/test.toml"]}
-        line = report.init_line(cell, meta)
-        self.assertIn("450.0k input tokens in 120s", line)
+        line = report.init_line({"arms": {}}, meta)
         self.assertIn(".jouet/test.toml", line)
-        self.assertIn("pays back after 4.5 runs", line)
-        cell["arms"]["jouet-init"]["metrics"]["input_tokens"]["median"] = 310_000
-        self.assertIn("does not pay back", report.init_line(cell, meta))
+        self.assertNotIn("450", line)
+        self.assertNotIn("pays back", line)
+        self.assertIn("changed no files", report.init_line({"arms": {}}, {"files": []}))
 
 
 if __name__ == "__main__":

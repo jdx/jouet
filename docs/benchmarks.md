@@ -86,7 +86,7 @@ The prompt is the same in both arms. `--jouet-env KEY=VALUE` sets a variable in 
 
 `--arms plain,jouet,jouet-init` adds a third arm: jouet as in the `jouet` arm, in the project as the [jouet-init skill](/project-setup) configured it, which is how a user who ran `jouet setup` and then `/jouet-init` works. The skill runs once per task, starting commit, jouet build, harness and model, in an isolated home like any run, with the prompt `Use the jouet-init skill to configure jouet for this project.`. What it changed, committed or not, is kept as a patch with what the run cost under `~/.cache/jouet-bench/init/`, and reused by every later `jouet-init` run. Each run applies the patch, commits it, so the agent starts from a clean tree, and runs `jouet trust --yes` in its fresh home, as the user does once after the skill. A PR task's fake GitHub then sees that commit as the branch head.
 
-The skill's cost is not added to the runs'. A project pays it once, so the report gives it a line of its own, with the files it changed and how many runs the median saving per run takes to pay it back. Without a `jouet` arm in the pilot, the report compares `jouet-init` with `plain`.
+The skill's run is not counted at all: a project commits the configuration once and keeps it, as it keeps its other tooling config, so it is part of the project, not of a task. The report says which files it configured. Without a `jouet` arm in the pilot, the report compares `jouet-init` with `plain`.
 
 ### Isolation
 
