@@ -21,6 +21,8 @@ struct Report {
     scaled_by: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     sequences: Option<Vec<Observation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequences_recording: Option<bool>,
 }
 
 pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
@@ -84,6 +86,9 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
         scale: costs.scale(),
         scaled_by: costs.scaled_by,
         sequences,
+        sequences_recording: args
+            .sequences
+            .then(|| crate::settings::Settings::load().cost.sequences),
     };
     out.result(&report, || text(&report, costs.is_empty()));
     Exit::Ok
@@ -131,6 +136,9 @@ fn text(report: &Report, empty: bool) -> String {
         );
     }
     if let Some(sequences) = &report.sequences {
+        if report.sequences_recording == Some(false) {
+            s.push_str("\nLocal sequence recording is off; enable [cost] sequences or JOUET_COST_SEQUENCES=1 to collect new observations.\n");
+        }
         s.push_str("\nSuccessive recorded checks in the same session and worktree (other work and cache changes may intervene):\n");
         if sequences.is_empty() {
             s.push_str("  not enough observations (at least 3 matching pairs are needed)\n");

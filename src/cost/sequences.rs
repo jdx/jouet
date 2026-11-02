@@ -56,7 +56,7 @@ fn path(cwd: &Path) -> Option<PathBuf> {
     Some(
         jouet_output::paths::state_dir()?
             .join("cost-sequences")
-            .join(format!("{repo}.jsonl")),
+            .join(format!("{repo}-{}.jsonl", super::host())),
     )
 }
 

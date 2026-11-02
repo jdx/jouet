@@ -452,6 +452,62 @@ fn a_panics_backtrace_folds_so_its_message_is_shown() {
 }
 
 #[test]
+fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
+    // bats with a filter that matched nothing: TAP's empty plan.
+    assert!(digest("1..0\n", false, DEFAULT_BUDGET).no_tests);
+    // cargo test with a name filter that matched nothing in any binary.
+    let none = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out\n";
+    assert!(digest(none, false, DEFAULT_BUDGET).no_tests);
+    // One binary ran a test: that is a run.
+    let one = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\n\nrunning 1 test\ntest a ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n";
+    assert!(!digest(one, false, DEFAULT_BUDGET).no_tests);
+    for said in [
+        "collected 0 items",
+        "========== no tests ran in 0.01s ==========",
+        "No tests found, exiting with code 1",
+        "testing: warning: no tests to run",
+    ] {
+        assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
+    }
+    // pytest with -k deselecting every test, and quiet output.
+    for said in [
+        "======= 5 deselected in 0.01s =======",
+        "5 deselected in 0.01s",
+        "no tests ran in 0.01s",
+        "collected 5 items / 5 deselected / 0 selected",
+    ] {
+        assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
+    }
+    // Some passed, some deselected: a run.
+    assert!(
+        !digest(
+            "== 2 passed, 3 deselected in 0.02s ==",
+            false,
+            DEFAULT_BUDGET
+        )
+        .no_tests
+    );
+    // Go package by package: empty only when every package ran none.
+    let go_empty = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.003s [no tests to run]\n";
+    assert!(digest(go_empty, false, DEFAULT_BUDGET).no_tests);
+    let go_one = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.120s\n";
+    assert!(!digest(go_one, false, DEFAULT_BUDGET).no_tests);
+    // An empty cargo suite, then Go tests that ran: Go's plain lines are
+    // not counted as passes, but they show a run.
+    let mixed = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\nok  \tgithub.com/a/b\t0.120s\n";
+    assert!(!digest(mixed, false, DEFAULT_BUDGET).no_tests);
+    // A build says nothing about tests.
+    assert!(
+        !digest(
+            "   Compiling a v0.1.0\n    Finished `dev` profile\n",
+            false,
+            DEFAULT_BUDGET
+        )
+        .no_tests
+    );
+}
+
+#[test]
 fn a_failure_that_blames_the_machine_is_told_apart() {
     let dbus = "1..2\nok 1 edit command accepts an editor command\nnot ok 2 edit command: create, edit, and remove keychain secrets\n# WARN fnox_core::keyring_store: Failed to initialize OS keyring store: Platform failure: DBus error: Using X11 for dbus-daemon autolaunch\n# (in test file test/edit.bats, line 120)\n";
     assert!(environment_cause(dbus, &[]).unwrap().contains("DBus error"));

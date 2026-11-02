@@ -13,13 +13,13 @@ class ResolveTest(unittest.TestCase):
     def test_project_tools_are_available_in_the_isolated_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ("parallel", "uv"):
+            for name in ("parallel", "uv", "uvx"):
                 executable = root / name
                 executable.write_text("#!/bin/sh\nexit 0\n")
                 executable.chmod(0o755)
             with patch.dict(os.environ, {"PATH": str(root)}):
                 env = arms.base_env(root / "run", None, "jdx/demo")
-            for name in ("parallel", "uv"):
+            for name in ("parallel", "uv", "uvx"):
                 self.assertEqual((root / "run/bin" / name).resolve(), (root / name).resolve())
             self.assertTrue(env["PATH"].startswith(str(root / "run/bin")))
 

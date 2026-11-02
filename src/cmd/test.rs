@@ -848,6 +848,11 @@ fn outcome(suite: &SuiteReport, streamed: bool) -> String {
     if suite.exit_code == Some(0) && !streamed && !digest.passed_names.is_empty() {
         let _ = write!(s, " ({})", digest.passed_names.join(", "));
     }
+    // A pass of nothing proves nothing: say so, so the agent does not read
+    // the log to find out, or take it for its test passing.
+    if digest.no_tests && suite.exit_code == Some(0) {
+        s.push_str(", but no test ran: a filter or path that matched nothing?");
+    }
     if streamed || suite.exit_code == Some(0) {
         let _ = writeln!(s, " (full log: {log})");
         return s;

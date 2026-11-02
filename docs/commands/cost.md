@@ -15,17 +15,19 @@ For example, run both checks through `jouet test --cmd -- cargo clippy` and
 For each pair seen at least three times, it reports the second check's median
 duration and the number of pairs. Pairs must be adjacent among recorded
 `jouet test` jobs in the same session and worktree, successful, non-overlapping,
-and no more than 30 minutes apart. A failed, unrecognized or unfinished job
-breaks the sequence. Ordinary shell commands and other work are not recorded
+and no more than 30 minutes apart. A failed or unrecognized job breaks the
+sequence. An unfinished job prevents later pairs in that session from being
+reported, because its end is unknown. Ordinary shell commands and other work are not recorded
 by this experiment and may intervene, and cache state is unknown. These are
 conditional observations, not measured savings or proof of cache reuse.
 
 Events are local and are not added to git notes or transferred by `cost push`.
-Commands use the same redaction as normal cost samples; session IDs and the
-worktree path are hashed. The files stay under the jouet state directory until
+Commands use the same redaction as normal cost samples; session IDs, machine
+identity and the worktree path are hashed. The files stay under the jouet state directory until
 you delete them; recording stops with a warning once a file reaches 16 MiB.
 Turn recording off with `JOUET_COST_SEQUENCES=0` or by
 removing the setting; `--sequences` can still read previously recorded data.
+The JSON output includes `sequences_recording` when `--sequences` is used.
 
 Agents don't know which runs are slow. In five of six Claude Code runs on the mise benchmark task, close to 90% or more of the wall time went to running commands, nearly all of it compiling. It built mise two or three times a run, for a unit test and again for an e2e test. `jouet cost` shows what each check costs here, and the session-start primer names the slowest, so the agent can finish its edits before starting a slow run and check them all in one run.
 
