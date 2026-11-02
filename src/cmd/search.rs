@@ -86,10 +86,11 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         report: &report,
         scope: scope.as_ref(),
     };
-    let bodies = if args.files_with_matches {
+    // Text only: JSON carries no code. `--again` shows without recording.
+    let bodies = if args.files_with_matches || out.json {
         String::new()
     } else {
-        small_definitions(&report)
+        small_definitions(&report, !args.again)
     };
     out.result(&doc, || {
         let mut text = search::render(&report, args.files_with_matches);
@@ -113,8 +114,8 @@ const BODY_LINES: u32 = 40;
 
 /// The code of the definitions a search's matches are in, when they are
 /// few and short: the agent would read them next, in a call of their own.
-/// Recorded as read, so a `jouet read` of one after collapses.
-fn small_definitions(report: &search::Report) -> String {
+/// Recorded as read when `record`, so a `jouet read` of one after collapses.
+fn small_definitions(report: &search::Report, record: bool) -> String {
     let mut defs: Vec<(&str, &search::Symbol)> = Vec::new();
     for file in &report.files {
         if file.more > 0 {
@@ -162,7 +163,7 @@ fn small_definitions(report: &search::Report) -> String {
             let _ = writeln!(text, "{}\t{line}", start + i);
         }
         let file = Path::new(path);
-        if let Some(stamp) = jouet_search::memory::Stamp::read(file) {
+        if record && let Some(stamp) = jouet_search::memory::Stamp::read(file) {
             memory.record(
                 &jouet_search::memory::key(file),
                 stamp,

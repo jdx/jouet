@@ -180,6 +180,13 @@ payload() {
 	JOUET_SESSION_ID=s1 run jouet search join_url src/lib.rs
 	JOUET_SESSION_ID=s1 run --separate-stderr jouet read src/lib.rs --symbol join_url
 	assert_output --partial 'already shown'
+	# --again shows it without recording it, and JSON carries no code.
+	JOUET_SESSION_ID=s2 run jouet search --again join_url src/lib.rs
+	JOUET_SESSION_ID=s2 run --separate-stderr jouet read src/lib.rs --symbol join_url
+	refute_output --partial 'already shown'
+	JOUET_SESSION_ID=s3 run --separate-stderr jouet --json search join_url src/lib.rs
+	JOUET_SESSION_ID=s3 run --separate-stderr jouet read src/lib.rs --symbol join_url
+	refute_output --partial 'already shown'
 	# More than a few definitions: only the matches.
 	run jouet search --again 'fn ' src/lib.rs
 	refute_output --regexp '^[0-9]+	'

@@ -31,9 +31,11 @@ PY
 @test "search --structural matches code, grouped by function, in that language only" {
 	run --separate-stderr jouet search --structural --lang rust '$X.unwrap()'
 	assert_success
-	assert_output "src/lib.rs
-  function load (1-6)
-    2: std::fs::read_to_string(path).unwrap()"
+	assert_line --index 0 "src/lib.rs"
+	assert_line --index 1 "  function load (1-6)"
+	assert_line --index 2 "    2: std::fs::read_to_string(path).unwrap()"
+	# The one short function it is in, as code.
+	assert_line --index 3 "src/lib.rs: function load (1-6)"
 
 	run --separate-stderr jouet search --structural --lang python 'print($$$ARGS)' --json
 	run jq -c '[.files_searched, .matches]' <<<"$output"
