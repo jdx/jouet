@@ -11,6 +11,7 @@ use usage_rs::spec::CommandMeta;
 /// line (a test checks), so a new command lands with one; `None` marks a
 /// command that is for people setting jouet up, not for agents.
 const WHEN: &[(&str, Option<&str>)] = &[
+    ("init", None),
     (
         "search",
         Some(

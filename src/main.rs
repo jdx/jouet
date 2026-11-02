@@ -58,6 +58,7 @@ fn main() -> ExitCode {
     );
     let out = cmd::Output::new(cli.json, cli.display.as_deref());
     let exit = match cli.cmd {
+        Cmd::Init(args) => cmd::init::run(&args, &out),
         Cmd::Audit(args) => cmd::audit::run(&args, &out),
         Cmd::Claim(args) => cmd::claim::run(args, &out),
         Cmd::Commit(args) => cmd::commit::run(&args, &out),

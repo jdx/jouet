@@ -13,6 +13,7 @@
 
 ## Subcommands
 
+- [`jouet init [--yes]`](/cli/init.md)
 - [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet claim [--for <DUR>] [--note <TEXT>] [PATHS]… [SUBCOMMAND]`](/cli/claim.md)
 - [`jouet claim ls [--all]`](/cli/claim/ls.md)
