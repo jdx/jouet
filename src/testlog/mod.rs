@@ -25,6 +25,9 @@ const FAILURE_MIDDLE: usize = 8;
 const LINE_MAX: usize = 400;
 /// Lines shown from the end of an output in which no failure was recognised.
 const OUTPUT_TAIL: usize = 20;
+/// The most lines marked as failures shown from above an unrecognised
+/// failure's end.
+const MARKED_MAX: usize = 10;
 /// Bytes past the budget that the names of failures not shown may take.
 const NAMES_SLACK: usize = 200;
 
@@ -198,6 +201,10 @@ regexes! {
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
+    // A line a runner marks as a failure: `FAIL name`, `FAILED: name`,
+    // `ERROR ...` or TAP's `not ok`. Upper case only, and not a word that
+    // merely starts with one (`FAIL_TO_PASS`).
+    FAILURE_MARK = r"^\s*(FAIL|FAILED|ERROR)(:|\s)|^\s*not ok\b";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -427,10 +434,26 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
     let mut found = merge(parsed.found);
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
+        let end = trim_excerpt(tail.clone(), OUTPUT_TAIL).lines;
+        // A runner jouet doesn't know often names its failures first and
+        // sums up last, so the end alone can leave out the one line that
+        // says what failed.
+        let marked: Vec<String> = tail
+            .into_iter()
+            .filter(|l| FAILURE_MARK.is_match(l) && !end.contains(l))
+            .take(MARKED_MAX)
+            .collect();
+        if !marked.is_empty() {
+            found.push(Found {
+                at: 0,
+                name: "no failure recognised; lines marked as failures".into(),
+                lines: marked,
+            });
+        }
         found.push(Found {
             at: 0,
             name: "no failure recognised; the end of the output".into(),
-            lines: trim_excerpt(tail, OUTPUT_TAIL).lines,
+            lines: end,
         });
     }
     let (failures, more_failures, failures_omitted) = fit(found, budget);
