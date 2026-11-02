@@ -34,6 +34,7 @@ Projects beyond jdx's own:
 |---|---|---|---|---|
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
 | `cobra-completion-args` | Cobra, a Go CLI library | [spf13/cobra#2257](https://github.com/spf13/cobra/issues/2257) | Go, `go test` | the benchmark's Go tools, cached modules, and a local clone at `~/src/cobra-bench-source` |
+| `rubocop-redundant-self` | RuboCop, a Ruby static analyzer | [rubocop/rubocop#16149](https://github.com/rubocop/rubocop/issues/16149) | Ruby, RSpec and RuboCop's CLI | Ruby 4.0.9, a clone at `~/src/rubocop-bench-source`, and a prepared bundle as described below |
 | `requests-proxied-files` | Requests, an HTTP library | [psf/requests#7502](https://github.com/psf/requests/pull/7502) | Python, pytest and pytest-httpbin | Python 3.13 and a local Requests clone at `~/src/requests-bench-source` |
 | `yq-signed-hex` | yq, a CLI | [mikefarah/yq#2748](https://github.com/mikefarah/yq/issues/2748) | Go, `go test` | the benchmark's pinned Go toolchain, and yq's modules in `~/go/pkg/mod` (`go mod download`) |
 | `zod-int-bounds` | zod, a library | [colinhacks/zod#6550](https://github.com/colinhacks/zod/issues/6550) | TypeScript, vitest in a pnpm monorepo | the benchmark's pinned pnpm and Node/npm, and one `pnpm install` in the clone to fill the store |
@@ -45,6 +46,17 @@ Each `task.toml` notes which jouet levels the task can exercise: what `jouet tes
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
 
 The opt-in Requests task installs hash-locked test dependencies, the project's pinned Ruff version, and the checkout into an isolated Python environment before each run. Its independent checker prepares multipart requests without network access, exercising temporary files, dynamically proxied streams and ordinary file values.
+
+The opt-in RuboCop task uses the parent of [the fix](https://github.com/rubocop/rubocop/pull/16151) and a checked-in Bundler lockfile. Prepare the clone and a gem bundle once; the harness copies that bundle into each run's ignored `vendor/` directory and checks it against the lockfile before starting the agent. Both arms have separate writable copies. The bundle contains native gems, so prepare it with the same Ruby and platform used for the trials:
+
+```sh
+git clone https://github.com/rubocop/rubocop.git ~/src/rubocop-bench-source
+git -C ~/src/rubocop-bench-source worktree add --detach /tmp/rubocop-bench-prep 11e303ca043bde4b5b0bef2fbc344823c204f8ff
+cp bench/tasks/rubocop-redundant-self/Gemfile.lock /tmp/rubocop-bench-prep/Gemfile.lock
+(cd /tmp/rubocop-bench-prep && BUNDLE_PATH="$HOME/src/rubocop-bench-source/vendor/bundle" BUNDLE_APP_CONFIG=/tmp/rubocop-bench-config mise x ruby@4.0.9 -- bundle install)
+```
+
+Run the harness with `MISE_ENV=bench` so both arms get its pinned Ruby and Bundler. The independent checker invokes RuboCop on splat assignment targets and on genuinely redundant receivers; it also requires a committed regression spec, changelog entry, and clean tracked worktree. The check does not replace the project's full suite.
 
 The opt-in `jactionlint-dependabot-groups` task reproduces [jdx/jactionlint#313](https://github.com/jdx/jactionlint/issues/313) from the parent of its fix. It needs a local clone at `~/src/jactionlint`, Go 1.27.1, Go 1.27.3 and the project's modules in `~/go/pkg/mod`. Run it with `MISE_ENV=bench MISE_GO_VERSION=1.27.1 mise run bench:agents --tasks jactionlint-dependabot-groups`: the project uses Go 1.27.1 for formatting and staticcheck, and Go 1.27.3 for builds and tests. Before each timed run, mise installs the project's tools in that run's isolated home. Its independent check exercises the public parser with both valid grouped updates and genuine duplicates.
 
@@ -67,7 +79,7 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
 
-A task may also specify `isolated_setup` as lists of command arguments. The harness runs each command directly in the run's environment before timing, with output in `environment.log`; failures or changes to tracked or nonignored checkout files make the setup fail. Ignored dependencies may be installed in the checkout. Only use commands appropriate for the task, since they run project tools and can access the network.
+A task may also specify `isolated_setup` as lists of command arguments. The harness runs each command directly in the run's environment before timing, with output in `environment.log`; failures or changes to tracked or nonignored checkout files make the setup fail. `{workdir}` names the run's checkout and `{taskdir}` the benchmark task's directory. Ignored dependencies may be installed in the checkout. Only use commands appropriate for the task, since they run project tools and can access the network.
 
 The isolated home's login profiles restore that `PATH` after system profiles run. On macOS, `path_helper` otherwise puts system tools ahead of the run's tools and can expose host-installed programs to the plain arm.
 

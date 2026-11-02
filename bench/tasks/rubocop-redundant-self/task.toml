@@ -1,0 +1,50 @@
+description = "Fix a RuboCop false positive on splat assignment (rubocop/rubocop#16149)"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1500
+check_timeout_s = 180
+isolated_setup = [
+  ["mkdir", "-p", "{workdir}/vendor"],
+  ["cp", "-R", "~/src/rubocop-bench-source/vendor/bundle", "{workdir}/vendor/bundle"],
+  ["cp", "{taskdir}/Gemfile.lock", "{workdir}/Gemfile.lock"],
+  ["bundle", "check"],
+]
+prompt = '''
+Style/RedundantSelf: False positive for splat assignment
+
+Create a file with the following content and run rubocop against it:
+
+```ruby
+# frozen_string_literal: true
+
+class Example
+  attr_accessor :special, :payload
+
+  def initialize(*payload)
+    self.special, *self.payload = payload
+  end
+end
+```
+
+Expected: no offenses detected. Actual: Style/RedundantSelf marks the `self`
+in `*self.payload` as redundant, and its autocorrection changes the assignment.
+
+Fix the bug, add tests, and commit the change.
+'''
+
+[source]
+git = "~/src/rubocop-bench-source"
+commit = "11e303ca043bde4b5b0bef2fbc344823c204f8ff"
+
+[tools]
+ruby = "ruby"
+bundle = "bundle"
+
+[env]
+BUNDLE_PATH = "{workdir}/vendor/bundle"
+BUNDLE_APP_CONFIG = "{workdir}/.bundle"
+BUNDLE_FROZEN = "true"
+BUNDLE_DISABLE_SHARED_GEMS = "true"

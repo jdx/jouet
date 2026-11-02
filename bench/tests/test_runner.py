@@ -531,6 +531,10 @@ class TasksTest(unittest.TestCase):
             self.assertEqual(result, {"setup_commands": "1"})
             self.assertEqual((home / "prepared").read_text(), "a; b")
 
+            task = dataclasses.replace(task, dir=root, isolated_setup=[[sys.executable, "-c", script, "{taskdir}"]])
+            tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
+            self.assertEqual((home / "prepared").read_text(), str(root.resolve()))
+
             task = dataclasses.replace(task, isolated_setup=[[sys.executable, "-c", "raise SystemExit(7)"]])
             with self.assertRaisesRegex(tasks.EnvironmentSetupError, "isolated setup failed"):
                 tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
