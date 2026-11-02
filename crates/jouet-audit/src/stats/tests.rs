@@ -491,6 +491,9 @@ fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
         run("jouet edit replace", 3),
         post("jouet pr threads <arg> | jq <arg>", 5),
         run("jouet pr threads", 5),
+        // Waiting is pr next's answer, not a failure.
+        post("jouet pr next <arg>", 20),
+        run("jouet pr next", 20),
         // A session the hooks never saw has no harness, so it is left out.
         LedgerEntry {
             session: Some("elsewhere".into()),

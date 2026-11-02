@@ -180,20 +180,23 @@ fn run_entry(session: &str, args: &[String], code: i32) -> Entry {
             rest.next();
         }
     }
-    let words: Vec<&str> = rest
-        .take_while(|w| {
-            w.starts_with(|c: char| c.is_ascii_lowercase())
-                && w.chars().all(|c| c.is_ascii_lowercase() || c == '-')
-        })
-        .take(3)
-        .collect();
+    // The command's path in jouet's own declaration, so no argument is ever
+    // kept; two levels at most, as a shape keeps.
+    let mut path: Vec<&str> = Vec::new();
+    for word in rest.take(2) {
+        path.push(word);
+        if !crate::spec::has_command(&path) {
+            path.pop();
+            break;
+        }
+    }
     let mut entry = Entry::new("jouet", Some(session), "jouet-run");
-    entry.shape = Some(shape(
-        &std::iter::once("jouet")
-            .chain(words)
+    entry.shape = Some(
+        std::iter::once("jouet")
+            .chain(path)
             .collect::<Vec<_>>()
             .join(" "),
-    ));
+    );
     entry.exit_code = Some(code);
     entry
 }
@@ -835,7 +838,7 @@ const SECOND: &[(&str, &str, &[&str])] = &[
             "ci", "cmd", "file", "http", "log", "pid", "port", "pr", "run",
         ],
     ),
-    ("jouet", "pr", &["status", "threads"]),
+    ("jouet", "pr", &["land", "next", "status", "threads"]),
     (
         "jouet",
         "rule",
@@ -904,12 +907,23 @@ mod tests {
             ),
             ("jouet-run", "jouet", Some("jouet edit replace"), Some(3))
         );
-        let e = super::run_entry("s", &args("--json pr threads reply abc --body x"), 0);
-        // As the hooks shape it, so the stats match the two.
-        assert_eq!(
-            e.shape.as_deref(),
-            Some(super::shape("jouet pr threads reply").as_str())
-        );
+        // The path from the declaration, two levels as the hooks shape it,
+        // so the stats match the two; never an argument.
+        for (line, shape) in [
+            ("--json pr threads reply abc --body x", "jouet pr threads"),
+            ("pr threads reply abc --body x", "jouet pr threads"),
+            ("pr next 12", "jouet pr next"),
+            ("pr land 12 --yes", "jouet pr land"),
+            ("run triage", "jouet run"),
+            ("not-a-command x", "jouet"),
+        ] {
+            let e = super::run_entry("s", &args(line), 0);
+            assert_eq!(e.shape.as_deref(), Some(shape), "{line}");
+            if line.starts_with("pr ") {
+                let hooks = super::shape(&format!("jouet {line}"));
+                assert!(hooks.starts_with(shape), "{hooks}");
+            }
+        }
     }
 
     use super::*;
