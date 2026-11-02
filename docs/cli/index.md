@@ -13,7 +13,6 @@
 
 ## Subcommands
 
-- [`jouet init [--yes]`](/cli/init.md)
 - [`jouet audit [FLAGS]`](/cli/audit.md)
 - [`jouet claim [--for <DUR>] [--note <TEXT>] [PATHS]… [SUBCOMMAND]`](/cli/claim.md)
 - [`jouet claim ls [--all]`](/cli/claim/ls.md)
@@ -122,6 +121,6 @@
 - [`jouet task apply [FLAGS] <ID>`](/cli/task/apply.md)
 - [`jouet share [FLAGS] [NAME]`](/cli/share.md)
 - [`jouet agent-help [--full] [COMMAND]…`](/cli/agent-help.md)
-- [`jouet skill [--format <FORMAT>] [--contribute]`](/cli/skill.md)
+- [`jouet skill [FLAGS]`](/cli/skill.md)
 - [`jouet setup [FLAGS] <HARNESS>`](/cli/setup.md)
 - [`jouet completion [--joue] <SHELL>`](/cli/completion.md)

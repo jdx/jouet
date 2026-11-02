@@ -219,9 +219,15 @@ impl Harness {
         }
     }
 
-    /// Where the harness looks for the jouet skill. Every harness but Claude
+    /// Where the harness looks for a named skill. Every harness but Claude
     /// Code reads the shared `.agents/skills`.
-    pub(crate) fn skill_path(self, scope: Scope, home: &Path, project: &Path) -> PathBuf {
+    pub(crate) fn skill_path(
+        self,
+        scope: Scope,
+        home: &Path,
+        project: &Path,
+        name: &str,
+    ) -> PathBuf {
         let dir = match (self, scope) {
             (Self::Claude, Scope::Global) => jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                 .unwrap_or_else(|| home.join(".claude"))
@@ -230,7 +236,7 @@ impl Harness {
             (_, Scope::Global) => home.join(".agents").join("skills"),
             (_, Scope::Local | Scope::Shared) => project.join(".agents").join("skills"),
         };
-        dir.join("jouet").join("SKILL.md")
+        dir.join(name).join("SKILL.md")
     }
 
     /// Whether the harness reads a hook's stdout as JSON even when the hook

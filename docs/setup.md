@@ -6,7 +6,9 @@ description: Install jouet's hooks into Claude Code, Codex, Cursor, Gemini CLI o
 
 `jouet setup` connects jouet to a coding agent's harness. It installs **hooks** that call back into `jouet hook`. They prime each session with a few lines about jouet, run jouet's [rules](/rules), which deny a handful of costly hand-rolled patterns and name the jouet command or git habit to use instead, and stop the agent from finishing while a test, lint or build run failed, or after it changed files with no test run passing since.
 
-The [skill](#the-skill-and-agent-help) is installed only with `--skill`, or when priming is turned off: the primer already tells the agent what the skill would, in every session.
+The **jouet-init** [onboarding skill](/project-setup) is always installed. After setup, start a new agent session in your project and run `/jouet-init` in Claude Code, `$jouet-init` in Codex, or ask the agent to use jouet-init. It inspects your project and helps configure and verify jouet for its workflows.
+
+The general [usage skill](#the-primer-the-skill-and-agent-help) is installed only with `--skill`, or when priming is turned off: the primer already tells the agent what that skill would, in every session.
 
 ```sh
 jouet setup claude              # Claude Code: ~/.claude/settings.json
@@ -40,7 +42,9 @@ prompts; without `--benchmark`, it keeps its existing output.
 
 ## What setup changes
 
-| Harness | Scope | Hooks | Skill |
+The table shows the optional usage skill. The onboarding skill is installed beside it at `skills/jouet-init/SKILL.md`, with the same scope and harness-specific home directory.
+
+| Harness | Scope | Hooks | Optional usage skill |
 |---|---|---|---|
 | Claude Code | `--global` (default) | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR` if set) | `~/.claude/skills/jouet/SKILL.md` |
 | Claude Code | `--project` | `.claude/settings.local.json` | `.claude/skills/jouet/SKILL.md` |
@@ -60,7 +64,7 @@ prompts; without `--benchmark`, it keeps its existing output.
 - **Merges, never clobbers.** jouet adds its own matcher group (in Cursor's and Copilot's files, its own handler) to each event and leaves every other hook, setting and key order as it was. A file that is not valid JSON, or whose `hooks` is not an object of arrays, is refused (exit 4) and left alone.
 - **Re-running is a no-op.** jouet recognises its entries by their command, which runs `jouet hook ...`, and only rewrites them when they differ from what this version installs. Entries an older version installed, such as the bare `jouet hook claude stop`, are replaced in place, not duplicated.
 - **`--uninstall` removes only jouet's entries**, then any group or event that removing them left empty. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`; Copilot's `jouet.json`, which is jouet's alone, is removed.
-- **The skill is jouet's only while it is unedited.** setup ends the `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps any other `skills/jouet/SKILL.md`, including one you have edited. Running setup without `--skill` removes the skill an earlier version installed, while it is unedited.
+- **A skill is jouet's only while it is unedited.** setup ends each `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps skills you wrote or edited. Running setup without `--skill` removes the general usage skill an earlier version installed, while it is unedited; onboarding stays installed. `--uninstall` removes both while unedited.
 - **Codex asks before running new hooks.** Codex skips new or changed hooks until they are trusted: after `jouet setup codex`, run `/hooks` in Codex and trust jouet's. Upgrading from a version that installed bare commands changes them, so they need trusting again. Cursor runs a project's hooks only in a trusted workspace, Gemini CLI runs hooks from settings files (yours too) only in a trusted folder, and Copilot reads a repository's hooks only once you trust the folder, and reads hooks only when it starts.
 
 ### When jouet is not on PATH
@@ -282,5 +286,11 @@ An organisation's [enforced rules](/plugins#enforced-rules-and-routines) in `/et
 The session-start primer is four lines, about 470 tokens: the command families by name, usage for `jouet test`, `jouet commit` (in the same call as the test run, which saves agents a request of their own for it), `jouet edit replace`, `jouet search` and `jouet read --symbol` (in place of `grep -rn` and `sed -n` ranges: agents never used them while the primer only named them, and spent most of an exploration-heavy task on greps), `jouet pr threads` and `jouet pr threads reply` with a note that these need no lookup, how the harness waits for a long build or test in one call (Claude Code: a Bash `timeout` of 600000, past which a call moves to the background; Codex: a large `yield_time_ms` or a loop on `write_stdin`, not a call per poll; in Claude Code's `bypassPermissions` mode the hook also sets that timeout itself on a test, build or lint call that has none and is not run in the background, through `updatedInput`, which needs an `allow` that would skip the user's prompt in any other mode, so it does this in no other mode), the rules that deny with the command each suggests, and the stop check. Where [`jouet cost`](/commands/cost) has timed checks of 20 seconds or more, a line after it names up to four of the slowest, so the agent can finish the edits a slow run checks before starting it. It leaves out what each command is for: that is one `jouet agent-help COMMAND` away, and every request in a session pays for the primer. Naming the deny rules up front spares the agent a denied call to learn them. It also says that Python scripts that rewrite files are denied, and that `jouet edit replace` takes several files and replacements in one call, because agents reached for a heredoc to batch replacements even with the `python-edit` rule named.
 
 `jouet skill` prints the skill `jouet setup --skill` installs, about 25 lines of when and why that end in "run `jouet agent-help`". setup leaves it out by default because the primer covers it: with both, every request carried the command list twice, and Codex read the skill file before starting. `--format agents-md` prints the same text as a snippet for an `AGENTS.md`, for harnesses without skills or hooks.
+
+`jouet skill --init` prints the separate project onboarding skill, which setup
+always installs. It is loaded when onboarding is needed, and keeps the project
+inspection and configuration workflow out of the session primer. For a harness
+without skills, `jouet skill --init --format agents-md` prints instructions you
+can give your agent for that setup session.
 
 `jouet agent-help` prints a guide for the whole tool in under 40 lines, one entry per command family with its subcommands by name, and `jouet agent-help COMMAND` one command's usage in about 1 kB: when to reach for it, the invocations agents use, each with what it does, the exit codes, and a last line saying what `--full` adds. `jouet agent-help COMMAND --full` prints the whole guide: that usage, then every subcommand with all its flags and details, and the output conventions. Agents used to read the whole guide, up to 7 kB, before a command's first use. With `--json`, `text` is the whole guide and `usage` the short one. Both are generated from the binary's own CLI definition, so they describe exactly the installed version. When [mbx](https://github.com/jdx/mr-boxington), rtk, beads (`bd`) or [fnox](https://fnox.jdx.dev) is on `PATH`, the guide says what each is for instead of jouet duplicating it.

@@ -149,13 +149,28 @@ jouet edit replace src/main.rs --old 'let x = 2;' --new 'let x = 3;'
 
 ## Tell your agent
 
-Agents use what their instructions mention. For Claude Code, Codex, Cursor, Gemini CLI or Copilot, let jouet install hooks that prime each session and steer the agent toward its commands:
+For Claude Code, Codex, Cursor, Gemini CLI or Copilot, install the hooks and project onboarding skill:
 
 ```sh
 jouet setup claude   # or: codex, cursor, gemini, copilot
 ```
 
 See [agent setup and hooks](/setup) for what that changes and how to turn each part off. For another harness, add the snippet `jouet skill --format agents-md` prints to its `AGENTS.md`; it points the agent at `jouet agent-help`, which always describes the installed version.
+
+## Initialize your project
+
+Start a new agent session in the project and invoke **jouet-init**:
+`/jouet-init` in Claude Code, `$jouet-init` in Codex, or ask:
+
+```text
+Use the jouet-init skill to configure jouet for this project.
+```
+
+The skill inspects your project instructions, build and test workflows, existing
+configuration and timing history. It helps the agent choose useful settings,
+avoid unnecessary expensive runs, and verify what it changes. If no extra
+configuration is needed, it says so. It leaves repository trust for you to
+review. [What onboarding does →](/project-setup)
 
 jouet notices when an agent runs it and switches to compact output by itself. See [display modes](/conventions#display-modes).
 

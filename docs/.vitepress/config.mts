@@ -67,6 +67,7 @@ export default defineConfig({
         text: "Start here",
         items: [
           { text: "Getting started", link: "/getting-started" },
+          { text: "Initialize a project", link: "/project-setup" },
           { text: "Why jouet", link: "/why" },
           { text: "Shared conventions", link: "/conventions" },
           { text: "Stability and deprecations", link: "/stability" },
@@ -100,7 +101,6 @@ export default defineConfig({
           { text: "jouet pr threads", link: "/commands/pr-threads" },
           { text: "jouet pr next", link: "/commands/pr-next" },
           { text: "jouet pr land", link: "/commands/pr-land" },
-          { text: "jouet init", link: "/commands/init" },
           { text: "jouet test", link: "/commands/test" },
           { text: "jouet task", link: "/commands/task" },
           { text: "jouet audit", link: "/commands/audit" },

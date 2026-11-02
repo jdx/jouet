@@ -32,6 +32,10 @@ async function copyCommand() {
         >More install options <span aria-hidden="true">→</span></a
       >
     </p>
+    <p class="onboarding-note">
+      Next: <a href="/getting-started#tell-your-agent">connect your agent</a>,
+      then ask it to use <a href="/project-setup">jouet-init</a> in your project.
+    </p>
     <p class="copy-status" role="status">{{ status }}</p>
     <p class="early-note">
       <strong>Early development.</strong> How much jouet helps depends on your
@@ -107,6 +111,12 @@ a:hover {
   font-size: 12px;
   min-height: 20px;
   text-align: left;
+}
+.onboarding-note {
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 12px;
 }
 .early-note {
   border-left: 2px solid var(--jouet-brass);
