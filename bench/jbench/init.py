@@ -6,8 +6,8 @@ model, in an isolated home like any run. What it changed in the work tree
 is kept as a patch, with what the run cost, under
 `~/.cache/jouet-bench/init/`. Every `jouet-init` run applies that patch and
 commits it before the agent starts, so its own work begins from a clean
-tree that already holds the configuration. The skill's cost is reported
-apart from the runs': a project pays it once.
+tree that already holds the configuration. The skill's run is not
+counted: a project commits the configuration once and keeps it.
 """
 
 from __future__ import annotations
