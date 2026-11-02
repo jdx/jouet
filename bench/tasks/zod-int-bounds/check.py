@@ -19,9 +19,11 @@ proc = subprocess.run(
 )
 expect(proc.returncode == 0, f"the hidden number tests fail:\n{(proc.stdout + proc.stderr)[-3000:]}")
 try:
+    # The task's outer check timeout is 300s. Leave room after the primary
+    # 240s check so this diagnostic cannot use up the task's whole budget.
     related = subprocess.run(
         ["node_modules/.bin/vitest", "run", f"{tests}/bigint.test.ts"],
-        capture_output=True, text=True, timeout=240,
+        capture_output=True, text=True, timeout=20,
     )
     print(f"related pre-existing bigint case: {'passed' if related.returncode == 0 else 'failed'}")
 except (OSError, subprocess.TimeoutExpired) as error:
