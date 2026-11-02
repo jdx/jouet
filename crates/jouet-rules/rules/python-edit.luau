@@ -129,7 +129,7 @@ local function replace_olds(code: string): { string }?
 	local from = 1
 	while true do
 		local s, e = string.find(code, "%.replace%(%s*", from)
-		if not s then
+		if not s or not e then
 			break
 		end
 		local text, after = literal(code, e + 1)

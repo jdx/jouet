@@ -543,7 +543,7 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		end
 		return "test", runner_scope(args, 2)
 	elseif program == "jouet" then
-		local kind, scope, given = jouet_test(args)
+		local kind: Kind?, scope: Scope, given: { string }? = jouet_test(args)
 		if given and #given > 0 then
 			-- `jouet test --cmd -- CMD` ran CMD: a test or a build, with its
 			-- scope. A command the rule does not know is recorded as nothing,
@@ -557,13 +557,15 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 				argv = argv,
 				program = if argv[1] then jouet.basename(argv[1]) else nil,
 				heredocs = {},
+				env = {},
+				matched = false,
 				via = via,
 				nested = command.nested,
 				status = command.status,
 				text = command.text,
 				line = command.line,
 			}
-			local inner_kind, inner_scope = classify(inner, dir)
+			local inner_kind: Kind?, inner_scope: Scope = classify(inner, dir)
 			return inner_kind, inner_scope
 		end
 		return kind, scope
@@ -600,12 +602,16 @@ local rule: JouetRule = {
 		for i, command in call.commands do
 			if command.program ~= "cd" or command.nested then
 				local dir = dirs[i]
-				local kind, scope = classify(command, dir)
 				-- After a `cd` it cannot follow, the run is in a work tree
 				-- the rule cannot name, so it is not recorded against this one.
-				if kind and dir ~= false then
+				if dir == false then
+					continue
+				end
+				local project_dir = if type(dir) == "string" then dir else nil
+				local kind, scope = classify(command, project_dir)
+				if kind then
 					-- Ignored when the command's own exit status is unknown.
-					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector, dir or nil)
+					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector, project_dir)
 				end
 			end
 		end
