@@ -220,6 +220,11 @@ pub(crate) struct Checks {
     /// second, so `cargo fmt` after the tests asks for no second run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub formatted: Vec<(String, String)>,
+    /// Every reason the stop hook has raised here, each with the run it is
+    /// about (its tree): a reason is raised once for that run, not again at
+    /// each stop after files change, until a new run gives it a new key.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub told: BTreeSet<String>,
     /// The tree when such a call started, until it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formatting: Option<String>,
@@ -320,6 +325,9 @@ pub(crate) struct Raised {
     /// How many reasons were left for a later stop, past [`MAX_RAISED`].
     #[serde(skip)]
     pub more: usize,
+    /// The keys of the reasons raised now, kept in [`Checks::told`].
+    #[serde(skip)]
+    pub told: Vec<String>,
     /// The unverifiable commands whose failure these reasons raise, which
     /// are then answered (see [`Checks::answered`]).
     #[serde(skip)]
@@ -329,6 +337,18 @@ pub(crate) struct Raised {
 /// The most reasons one stop raises; the rest wait for the next.
 const MAX_RAISED: usize = 5;
 
+/// What [`Checks::told`] keeps a reason by: what it is about and the run,
+/// by its command, exit code and tree, and not the message, which names
+/// the runs since; so only a newer run of it is a new key.
+fn told_key(about: &str, run: &Run) -> String {
+    format!(
+        "{about}\u{0}{}\u{0}{}\u{0}{}",
+        run.command,
+        run.exit_code,
+        run.tree.as_deref().unwrap_or("")
+    )
+}
+
 /// A command as a message shows it: cut to 80 characters.
 fn shown(command: &str) -> String {
     match command.char_indices().nth(80) {
@@ -337,15 +357,15 @@ fn shown(command: &str) -> String {
     }
 }
 
-/// Why the stop hook blocks, from the checks of one work tree.
+/// Why the stop hook blocks, from the checks of every work tree with
+/// something to raise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Block {
-    /// The root of that work tree.
-    pub root: String,
-    /// The reason, naming the tree when it is not the session's own.
+    /// The reasons, each tree's named when it is not the session's own.
     pub reason: String,
-    /// What to keep in that tree's checks once the stop is blocked.
-    pub raised: Raised,
+    /// What to keep in each tree's checks once the stop is blocked, by
+    /// root.
+    pub raised: Vec<(String, Raised)>,
 }
 
 /// The `jouet test --baseline` run that compares the failed full run's own
@@ -428,30 +448,46 @@ impl State {
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
         let others = self.trees.iter().filter(|(root, _)| root.as_str() != home);
-        own.into_iter().chain(others).find_map(|(root, checks)| {
-            let raised = checks.block(|| tree(root), hk_repo(root), affected(root))?;
-            // Those raised now: the ones before were raised at this tree.
-            let before = match &checks.raised {
-                Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
-                _ => 0,
-            };
-            let mut reason = raised.reasons[before.min(raised.reasons.len())..].join("\n\n");
-            if raised.more > 0 {
-                reason.push_str(&format!(
-                    "\n\n({} more after these, at the next stop.)",
-                    raised.more
-                ));
-            }
-            let reason = if root == home || root.is_empty() {
-                reason
-            } else {
-                format!("In {root}: {reason}")
-            };
-            Some(Block {
-                root: root.clone(),
-                reason,
-                raised,
+        // Every tree's at once: a tree left for a later stop would be raised
+        // at the end of a turn that never touched it.
+        let found: Vec<(String, String, Raised)> = own
+            .into_iter()
+            .chain(others)
+            .filter_map(|(root, checks)| {
+                let raised = checks.block(|| tree(root), hk_repo(root), affected(root))?;
+                // Those raised now: the ones before were raised at this tree.
+                let before = match &checks.raised {
+                    Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
+                    _ => 0,
+                };
+                let mut reason = raised.reasons[before.min(raised.reasons.len())..].join("\n\n");
+                if raised.more > 0 {
+                    reason.push_str(&format!(
+                        "\n\n({} more after these, at the next stop.)",
+                        raised.more
+                    ));
+                }
+                let reason = if root == home || root.is_empty() {
+                    reason
+                } else {
+                    format!("In {root}: {reason}")
+                };
+                Some((root.clone(), reason, raised))
             })
+            .collect();
+        if found.is_empty() {
+            return None;
+        }
+        Some(Block {
+            reason: found
+                .iter()
+                .map(|(_, r, _)| r.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            raised: found
+                .into_iter()
+                .map(|(root, _, raised)| (root, raised))
+                .collect(),
         })
     }
 
@@ -508,11 +544,16 @@ impl State {
     /// Keeps what a stop was blocked for, so the next stop at the same tree
     /// with no run since does not raise it again.
     pub(crate) fn raise(&mut self, block: &Block) {
-        let checks = self.trees.entry(block.root.clone()).or_default();
-        checks.raised = Some(block.raised.clone());
-        checks
-            .answered
-            .extend(block.raised.answering.iter().cloned());
+        for (root, raised) in &block.raised {
+            let checks = self.trees.entry(root.clone()).or_default();
+            // The keys go to `told`; the kept copy is what a file reads back.
+            checks.raised = Some(Raised {
+                told: Vec::new(),
+                ..raised.clone()
+            });
+            checks.answered.extend(raised.answering.iter().cloned());
+            checks.told.extend(raised.told.iter().cloned());
+        }
     }
 
     /// Marks `command`'s failures in the work tree at `root` as ones the
@@ -653,7 +694,7 @@ impl Checks {
     ) -> Option<Raised> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(&tree).clone();
-        let reasons = self.reasons(now, hk_repo, affected);
+        let reasons = self.keyed_reasons(now, hk_repo, affected);
         let tree = now();
         let mut raised = match &self.raised {
             Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
@@ -661,10 +702,18 @@ impl Checks {
         };
         // Two runs whose commands are cut to the same text read as one
         // reason, so they are raised, and counted, as one.
+        // A reason already told for the run it is about is not raised again:
+        // not at the next stop after files change, nor at one ending a turn
+        // that never touched them. A new run of it is a new key.
         let mut new: Vec<String> = Vec::new();
-        for reason in reasons {
+        let mut keys: Vec<String> = Vec::new();
+        for (reason, key) in reasons {
+            if self.told.contains(&key) {
+                continue;
+            }
             if !raised.contains(&reason) && !new.contains(&reason) {
                 new.push(reason);
+                keys.push(key);
             }
         }
         if new.is_empty() {
@@ -672,6 +721,7 @@ impl Checks {
         }
         let more = new.len().saturating_sub(MAX_RAISED);
         let new: Vec<String> = new.into_iter().take(MAX_RAISED).collect();
+        keys.truncate(MAX_RAISED);
         let answering = self
             .failures
             .iter()
@@ -686,6 +736,7 @@ impl Checks {
             tree,
             more,
             answering,
+            told: keys,
         })
     }
 
@@ -696,12 +747,27 @@ impl Checks {
     /// `tree` gives the work tree now; it is only asked for when one of the
     /// last two could apply. `affected` is whether `jouet test --affected`
     /// can select tests there, for the message.
+    #[cfg(test)]
     pub(crate) fn reasons(
         &self,
         tree: impl Fn() -> Option<String>,
         hk_repo: bool,
         affected: bool,
     ) -> Vec<String> {
+        self.keyed_reasons(tree, hk_repo, affected)
+            .into_iter()
+            .map(|(reason, _)| reason)
+            .collect()
+    }
+
+    /// [`Checks::reasons`], each with its key: the reason and the tree of
+    /// the run it is about.
+    fn keyed_reasons(
+        &self,
+        tree: impl Fn() -> Option<String>,
+        hk_repo: bool,
+        affected: bool,
+    ) -> Vec<(String, String)> {
         // While a test run is still going, its result decides; the agent
         // waiting for it is not finishing on a stale one.
         let testing = self.running.iter().any(Running::alive);
@@ -713,24 +779,30 @@ impl Checks {
         reasons
     }
 
-    fn hk_reason(&self, tree: &impl Fn() -> Option<String>, hk_repo: bool) -> Option<String> {
+    fn hk_reason(
+        &self,
+        tree: &impl Fn() -> Option<String>,
+        hk_repo: bool,
+    ) -> Option<(String, String)> {
         let hk = self.hk.as_ref().filter(|_| hk_repo)?;
         if !hk.passed() || hk.tree.is_none() {
             return None;
         }
         if !hk.covers_changes() {
-            return Some(format!(
+            let keyed = |reason| (reason, told_key("hk-partial", hk));
+            return Some(keyed(format!(
                 "The last hk check passed for only some files (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
                 shown(&hk.command)
-            ));
+            )));
         }
         if self.same_files(hk.tree.as_deref(), tree().as_deref()) {
             return None;
         }
-        Some(format!(
+        let keyed = |reason| (reason, told_key("hk-changed", hk));
+        Some(keyed(format!(
             "Files changed after the last hk check passed (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
             shown(&hk.command)
-        ))
+        )))
     }
 
     /// Files changed after the newest test run passed, and no test run has
@@ -741,7 +813,7 @@ impl Checks {
         &self,
         tree: &impl Fn() -> Option<String>,
         affected: bool,
-    ) -> Option<String> {
+    ) -> Option<(String, String)> {
         let last = self.runs.get(&Kind::Test)?;
         if !last.passed() || last.tree.is_none() {
             return None;
@@ -760,10 +832,12 @@ impl Checks {
         } else {
             "the tests for the code you changed"
         };
-        Some(format!(
+        let reason = format!(
             "Files changed after the last test run passed (`{}`). Run the tests your change affects ({run}) before you finish, or say why none are needed. [jouet: verify]",
             shown(&last.command)
-        ))
+        );
+        let key = told_key("untested", last);
+        Some((reason, key))
     }
 
     /// A reason for each failure nothing has cleared, by kind, and within a
@@ -773,7 +847,11 @@ impl Checks {
     /// would clear it ran at the tree now: the files are back to ones that
     /// passed, as after checking that a test fails without a fix and putting
     /// the fix back. `tree` is only asked for when there is a failure.
-    fn failure_reasons(&self, tree: &impl Fn() -> Option<String>, skip_tests: bool) -> Vec<String> {
+    fn failure_reasons(
+        &self,
+        tree: &impl Fn() -> Option<String>,
+        skip_tests: bool,
+    ) -> Vec<(String, String)> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(tree).clone();
         let passed_now = |kind: &Kind, failed: &Run| {
@@ -797,7 +875,11 @@ impl Checks {
                 full.chain(partial)
                     .filter(|failed| !passed_now(kind, failed))
                     .filter(|failed| !self.answered.contains(&same_run(&failed.command)))
-                    .map(|failed| self.failure_reason(*kind, failed))
+                    .map(|failed| {
+                        let reason = self.failure_reason(*kind, failed);
+                        let key = told_key(kind.name(), failed);
+                        (reason, key)
+                    })
                     .collect::<Vec<_>>()
             })
             .collect()
@@ -1698,7 +1780,7 @@ mod tests {
         state.record("/home", failures, Some("t1"));
         let tree = |_: &str| Some("t1".to_string());
         let block = state.block("/home", tree, |_| false, |_| true).unwrap();
-        assert_eq!(block.raised.reasons.len(), 5);
+        assert_eq!(block.raised[0].1.reasons.len(), 5);
         assert!(
             block
                 .reason
@@ -1706,7 +1788,7 @@ mod tests {
             "{}",
             block.reason
         );
-        state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
+        state.raise(&block);
         let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         assert_eq!(
             block.reason.matches("[jouet: verify]").count(),
@@ -1733,9 +1815,9 @@ mod tests {
         let tree = |_: &str| Some("t1".to_string());
         let block = state.block("/home", tree, |_| false, |_| true).unwrap();
         // Six cut to one text, and the other.
-        assert_eq!(block.raised.reasons.len(), 2, "{}", block.reason);
-        assert_eq!(block.raised.more, 0);
-        state.trees.get_mut("/home").unwrap().raised = Some(block.raised);
+        assert_eq!(block.raised[0].1.reasons.len(), 2, "{}", block.reason);
+        assert_eq!(block.raised[0].1.more, 0);
+        state.raise(&block);
         assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
     }
 
@@ -1760,7 +1842,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_whose_reason_was_raised_gives_way_to_the_next() {
+    fn every_tree_with_a_reason_is_raised_at_one_stop() {
         let mut state = State::default();
         let tree = |root: &str| Some(if root == "/other" { "o1" } else { "h1" }.to_string());
         state.record(
@@ -1773,17 +1855,73 @@ mod tests {
             [test("cargo test --workspace", 1, "full")],
             Some("o1"),
         );
+        // Both at once, the session's own first: one left for a later stop
+        // would end a turn that never touched it.
         let block = state.block("/home", tree, |_| false, |_| true).unwrap();
-        assert_eq!(block.root, "/home");
-        assert!(block.reason.contains("exited 101"), "{block:?}");
-        state.raise(&block);
-        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
-        assert_eq!(block.root, "/other");
-        assert!(block.reason.starts_with("In /other: "), "{block:?}");
+        assert_eq!(
+            block
+                .raised
+                .iter()
+                .map(|(root, _)| root.as_str())
+                .collect::<Vec<_>>(),
+            ["/home", "/other"]
+        );
+        assert!(
+            block.reason.starts_with("The last test run failed"),
+            "{block:?}"
+        );
+        assert!(block.reason.contains("\n\nIn /other: "), "{block:?}");
         // The raised reason is kept without the tree's name.
-        assert!(block.raised.reasons[0].starts_with("The last test run failed"));
+        assert!(block.raised[1].1.reasons[0].starts_with("The last test run failed"));
         state.raise(&block);
         assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
+    }
+
+    #[test]
+    fn a_reason_is_raised_once_for_its_run_not_at_each_tree_after() {
+        let mut state = State::default();
+        let at = std::cell::Cell::new("t1");
+        let tree = |_: &str| Some(at.get().to_string());
+        state.record(
+            "/home",
+            [test("cargo test -p a name", 101, "-p a name")],
+            Some("t1"),
+        );
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
+        assert!(block.reason.contains("exited 101"), "{}", block.reason);
+        state.raise(&block);
+        // Files change, and other runs pass: the failure was said once.
+        at.set("t2");
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
+        state.record("/home", [test("cargo test -p b", 0, "-p b")], Some("t2"));
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
+        // The same command failing again, at other files, is new.
+        at.set("t3");
+        state.record(
+            "/home",
+            [test("cargo test -p a name", 101, "-p a name")],
+            Some("t3"),
+        );
+        assert!(state.block("/home", tree, |_| false, |_| true).is_some());
+
+        // Files changed after a pass: said once for that pass.
+        let mut state = State::default();
+        at.set("p1");
+        state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("p1"));
+        at.set("p2");
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
+        assert!(
+            block.reason.starts_with("Files changed after"),
+            "{}",
+            block.reason
+        );
+        state.raise(&block);
+        at.set("p3");
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
+        // A newer pass, then changes again: said again.
+        state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("p3"));
+        at.set("p4");
+        assert!(state.block("/home", tree, |_| false, |_| true).is_some());
     }
 
     #[test]
