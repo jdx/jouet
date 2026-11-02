@@ -928,7 +928,7 @@ pub(crate) fn summary(
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while a test, lint or build run failed, or when no test passed since your last change. For failures you did not cause, use `jouet test --baseline`, not environment changes.\n",
+            "They also stop you finishing while a test, lint or build run failed, or when no test passed since your last change. For an unrelated failure, compare its command with `jouet test --baseline --cmd -- CMD`.\n",
         );
     }
     out
@@ -1152,6 +1152,10 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
+        assert!(
+            text.contains("compare its command with `jouet test --baseline --cmd -- CMD`"),
+            "{text}"
+        );
         assert!(text.contains("These need no lookup"), "{text}");
         // CI's coverage depends on the repository; the primer cannot assert it.
         assert!(!text.contains("CI runs the full suite"), "{text}");
@@ -1166,7 +1170,6 @@ mod tests {
         // repository whose suite could not pass in its sandbox, then changed
         // the environment, outside its checkout, to make it pass.
         assert!(text.contains("Test with `jouet test --affected`"), "{text}");
-        assert!(text.contains("use `jouet test --baseline`"), "{text}");
         assert!(
             text.contains(
                 "python-edit (use `jouet edit`), git-stash, print-secrets, secret-files (use `fnox exec`)."
