@@ -287,11 +287,15 @@ class TasksTest(unittest.TestCase):
             tasks.git(source, "update-index", "--add", "--cacheinfo", f"100644,{blob},crlf.txt")
             tasks.git(source, "commit", "-q", "-m", "source")
             revision = tasks.git(source, "rev-parse", "HEAD")
-            task = dataclasses.replace(tasks.load("smoke"), source={"git": str(source), "commit": revision})
+            task = dataclasses.replace(tasks.load("smoke"), source={"git": str(source), "commit": revision},
+                                       setup=["true"])
             workdir = root / "work"
             tasks.prepare(task, workdir)
             self.assertEqual((workdir / "hidden.txt").read_text(), "included in the commit\n")
             self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
+            modified = dataclasses.replace(task, setup=["sh -c 'printf altered > crlf.txt'"])
+            with self.assertRaisesRegex(RuntimeError, "crlf.txt"):
+                tasks.prepare(modified, root / "modified")
 
     def test_python_environment_is_isolated_and_available_to_the_run(self):
         import dataclasses
