@@ -31,6 +31,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
 
 
+def snapshot_git_env() -> dict[str, str]:
+    """Use benchmark Git identity without inherited command-scope overrides."""
+    env = {k: v for k, v in os.environ.items() if k not in {"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"}
+           and not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))}
+    return env | tasks_mod.GIT_ENV
+
+
 def worktree_snapshot(workdir: Path) -> tuple[str, str] | None:
     """Snapshot the index and unignored worktree without changing the real index.
 
@@ -40,7 +47,7 @@ def worktree_snapshot(workdir: Path) -> tuple[str, str] | None:
     try:
         with tempfile.TemporaryDirectory() as directory:
             index = Path(directory) / "index"
-            env = os.environ | tasks_mod.GIT_ENV
+            env = snapshot_git_env()
             git_index = subprocess.run(
                 ["git", "rev-parse", "--git-path", "index"], cwd=workdir, env=env,
                 capture_output=True, check=True, timeout=120,
@@ -55,7 +62,7 @@ def worktree_snapshot(workdir: Path) -> tuple[str, str] | None:
             trees = []
             for args in (["write-tree"], ["add", "-A"], ["write-tree"]):
                 result = subprocess.run(
-                    ["git", *args], cwd=workdir, env=env,
+                    ["git", "-c", f"core.excludesFile={os.devnull}", *args], cwd=workdir, env=env,
                     capture_output=True, check=True, timeout=120,
                 )
                 if args == ["write-tree"]:
@@ -74,7 +81,7 @@ def changed_paths(workdir: Path, before: tuple[str, str] | None, after: tuple[st
         for old, new in zip(before, after):
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--no-renames", "-z", old, new, "--"],
-                cwd=workdir, env=os.environ | tasks_mod.GIT_ENV,
+                cwd=workdir, env=snapshot_git_env(),
                 capture_output=True, check=True, timeout=120,
             )
             paths.update(os.fsdecode(path) for path in result.stdout.split(b"\0") if path)
@@ -444,7 +451,6 @@ def execute(
             # Before anything else can fail: a refresh the run made is the
             # user's only working login.
             notes = credentials.give_back(lent)
-        changes = changed_paths(workdir, before, worktree_snapshot(workdir))
         usage = harness.usage(agent["lines"], config_dir)
         return {
             "env": env,
@@ -454,7 +460,7 @@ def execute(
             "config_dir": config_dir,
             "credentials": notes,
             "environment": environment,
-            "changed_paths": changes,
+            "before_snapshot": before,
         }
 
     if fixture is not None:
@@ -468,6 +474,7 @@ def execute(
 
     env = ran["env"]
     left = sweep(run_dir, ran["agent"]["session"]) + sweep(tmp_dir, None)
+    changes = changed_paths(workdir, ran["before_snapshot"], worktree_snapshot(workdir))
     # The agent's environment without its credentials: the check builds and
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
@@ -499,7 +506,7 @@ def execute(
         "github": github,
         "setup": ran["setup"],
         "environment": ran["environment"],
-        "changed_paths": ran["changed_paths"],
+        "changed_paths": changes,
         "credentials": ran["credentials"],
         "left_running": left,
     }

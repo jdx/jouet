@@ -53,7 +53,13 @@ class PlanTest(unittest.TestCase):
             excludes.write_text("agent.txt\n")
             config = Path(d) / "config"
             config.write_text(f"[core]\n\texcludesFile = {excludes}\n")
-            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            xdg = Path(d) / "xdg"
+            (xdg / "git").mkdir(parents=True)
+            (xdg / "git" / "ignore").write_text("agent.txt\n")
+            hostile = {"GIT_CONFIG_GLOBAL": str(config), "XDG_CONFIG_HOME": str(xdg),
+                       "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+                       "GIT_CONFIG_VALUE_0": str(excludes)}
+            with patch.dict(os.environ, hostile):
                 before = runner.worktree_snapshot(root)
                 (root / "agent.txt").write_text("new\n")
                 after = runner.worktree_snapshot(root)
@@ -116,15 +122,25 @@ class PlanTest(unittest.TestCase):
                 (workdir / "checker-only.txt").write_text("checker\n")
                 return {"passed": True, "exit_code": 0, "output": "ok"}
 
+            def sweep(path, session):
+                if session is not None:
+                    (path / "work" / "cleanup-written.txt").write_text("child\n")
+                return []
+
+            def agent_with_session(*args):
+                result = agent(*args)
+                result["session"] = 123
+                return result
+
             with patch.object(runner.arms_mod, "build", return_value=env), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
-                    patch.object(runner, "run_agent", side_effect=agent), \
-                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner, "run_agent", side_effect=agent_with_session), \
+                    patch.object(runner, "sweep", side_effect=sweep), \
                     patch.object(runner, "audit", return_value={}), \
                     patch.object(runner.tasks_mod, "run_check", side_effect=check):
                 record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
-            self.assertEqual(record["changed_paths"], ["agent-only.txt"])
+            self.assertEqual(record["changed_paths"], ["agent-only.txt", "cleanup-written.txt"])
 
     def test_every_round_runs_every_arm_in_a_seeded_order(self):
         planned = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
