@@ -3,8 +3,8 @@
 `[cost] seed` in task.toml lists the commands to time. They run once through
 `jouet test --cmd`, in a work tree of their own rather than a run's, whose
 build they would warm. The note jouet keeps for them under
-`refs/notes/jouet-cost` is cached by the task's source and commands, and by
-the machine, since the timings are this machine's. Every run, in both arms,
+`refs/notes/jouet-cost` is cached by the source, setup, tools, jouet binary,
+commands and machine. Every run, in both arms,
 starts with that note on its HEAD, so the jouet arm's primer can name the
 slow checks, as it would in a repository whose CI keeps them.
 """
@@ -28,11 +28,33 @@ from . import tasks as tasks_mod
 NOTES_REF = "jouet-cost"
 
 
-def cache_path(task: tasks_mod.Task) -> Path:
-    data = [task.name, task.source, task.cost_seed, socket.gethostname()]
-    if requirements := tasks_mod.requirements_file(task):
-        data.append(tasks_mod.requirements_digest(task, requirements))
-    key = json.dumps(data)
+def cache_path(task: tasks_mod.Task, jouet_bin: Path) -> Path:
+    # Setup and the tools used by it can change what a check costs even when
+    # the source commit and check command stay the same.
+    requirements = tasks_mod.requirements_file(task)
+    requirements_hash = tasks_mod.requirements_digest(task, requirements) if requirements else None
+    programs = {"node", "python3"}
+    programs.update(shlex.split(command)[0] for command in (*task.setup, *task.cost_seed) if shlex.split(command))
+    programs.update(task.tools.values())
+    tools = {}
+    for program in sorted(programs):
+        found = str(Path(program).expanduser()) if "/" in program else shutil.which(program)
+        if found:
+            path = Path(found).resolve()
+            try:
+                stat = path.stat()
+                tools[program] = [str(path), stat.st_size, stat.st_mtime_ns]
+            except OSError:
+                tools[program] = None
+        else:
+            tools[program] = None
+    with jouet_bin.open("rb") as binary:
+        jouet_hash = hashlib.file_digest(binary, "sha256").hexdigest()
+    data = [task.name, task.source, task.cost_seed, task.setup, task.tools, task.env, task.path,
+            tools, jouet_hash, socket.gethostname()]
+    if requirements_hash:
+        data.append(requirements_hash)
+    key = json.dumps(data, sort_keys=True)
     digest = hashlib.sha256(key.encode()).hexdigest()[:16]
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     return root / "jouet-bench" / "cost-seeds" / f"{task.name}-{digest}.txt"
@@ -44,7 +66,7 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
     task seeds nothing, or when no command was timed."""
     if not task.cost_seed:
         return None
-    cache = cache_path(task)
+    cache = cache_path(task, jouet_bin)
     if cache.exists():
         return cache.read_text()
     log(f"timing {len(task.cost_seed)} commands for {task.name}'s cost note (once; cached at {cache})")

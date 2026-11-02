@@ -646,3 +646,32 @@ class CostSeedTest(unittest.TestCase):
             shas = tasks.prepare(task, run)
             costs.apply(run, note, shas["head_sha"])
             self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)
+
+    def test_cost_cache_changes_with_setup_tools_and_jouet(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tool = root / "pnpm"
+            tool.write_text("tool one")
+            tool.chmod(0o755)
+            binary = root / "jouet"
+            binary.write_text("jouet one")
+            task = dataclasses.replace(tasks.load("smoke"), cost_seed=["pnpm test"],
+                                       setup=["pnpm install"], tools={"pnpm": "pnpm"})
+            with patch.dict(os.environ, {"PATH": str(root), "XDG_CACHE_HOME": str(root / "cache")}):
+                original = costs.cache_path(task, binary)
+                self.assertEqual(costs.cache_path(task, binary), original)
+                self.assertNotEqual(costs.cache_path(dataclasses.replace(task, setup=["pnpm build"]), binary), original)
+                self.assertNotEqual(costs.cache_path(dataclasses.replace(task, env={"MODE": "offline"}), binary), original)
+                tool.write_text("a different tool version")
+                self.assertNotEqual(costs.cache_path(task, binary), original)
+                tool.write_text("tool one")
+                tool.chmod(0o755)
+                before_binary_change = costs.cache_path(task, binary)
+                binary.write_text("jouet two")
+                self.assertNotEqual(costs.cache_path(task, binary), before_binary_change)
