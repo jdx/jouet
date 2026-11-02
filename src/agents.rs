@@ -8,6 +8,7 @@
 //! agent: the hooks read the agent from the payload, and a jouet command run
 //! from a Bash call looks up the call the pre-tool-use hook noted for it.
 
+use jouet_rules::shell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -70,8 +71,42 @@ pub(crate) fn command_key(session: &str, subcommand: &str) -> Option<String> {
 struct Noted {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent: Option<String>,
-    command: String,
+    /// The jouet subcommands the call runs (see [`subcommands`]): never the
+    /// command itself, which may hold a credential.
+    subcommands: Vec<String>,
     at: i64,
+}
+
+/// The jouet subcommands a shell command runs: `read` for `jouet --json read
+/// x`, `run` for `joue`, after wrappers such as `env` and `timeout`.
+fn subcommands(command: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for command in shell::parse(command).all() {
+        let Some((program, args)) = command.argv().split_first() else {
+            continue;
+        };
+        let sub = match shell::basename(program) {
+            "joue" => Some("run"),
+            "jouet" => {
+                let mut args = args.iter();
+                let mut sub = None;
+                while let Some(arg) = args.next() {
+                    if arg == "--display" {
+                        args.next();
+                    } else if !arg.starts_with('-') {
+                        sub = Some(arg.as_str());
+                        break;
+                    }
+                }
+                sub
+            }
+            _ => None,
+        };
+        if let Some(sub) = sub.filter(|s| !found.iter().any(|f| f == s)) {
+            found.push(sub.to_string());
+        }
+    }
+    found
 }
 
 /// Notes a Bash call about to run jouet, with the agent making it, so the
@@ -81,9 +116,13 @@ pub(crate) fn note_call(payload: &Value) {
     let Some((path, command)) = call_path(payload) else {
         return;
     };
+    let subcommands = subcommands(command);
+    if subcommands.is_empty() {
+        return;
+    }
     let noted = Noted {
         agent: of_payload(payload).map(str::to_string),
-        command: command.to_string(),
+        subcommands,
         at: jouet_output::time::now(),
     };
     let Some(dir) = path.parent() else { return };
@@ -123,6 +162,19 @@ fn call_path(payload: &Value) -> Option<(PathBuf, &str)> {
     let call = safe(payload.get("tool_use_id")?.as_str()?)?;
     let dir = calls_dir()?.join(session);
     Some((dir.join(format!("{call}.json")), command))
+}
+
+/// Removes the notes of calls no longer running, in every session: a call
+/// moved to the background, or one whose post-tool-use hook never came.
+pub(crate) fn prune_calls() {
+    let Some(Ok(sessions)) = calls_dir().map(std::fs::read_dir) else {
+        return;
+    };
+    let now = jouet_output::time::now();
+    for session in sessions.flatten() {
+        let _ = caller_in(&session.path(), "", now);
+        let _ = std::fs::remove_dir(session.path());
+    }
 }
 
 /// `<state dir>/calls`.
@@ -171,11 +223,7 @@ fn caller_in(dir: &Path, subcommand: &str, now: i64) -> Caller {
             let _ = std::fs::remove_file(entry.path());
             continue;
         }
-        let runs = noted
-            .command
-            .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
-            .any(|word| word == subcommand);
-        if runs && !agents.contains(&noted.agent) {
+        if noted.subcommands.iter().any(|s| s == subcommand) && !agents.contains(&noted.agent) {
             agents.push(noted.agent);
         }
     }
@@ -194,7 +242,7 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         let noted = Noted {
             agent: agent.map(str::to_string),
-            command: command.into(),
+            subcommands: subcommands(command),
             at,
         };
         std::fs::write(
@@ -211,6 +259,20 @@ mod tests {
         let payload = serde_json::json!({"session_id": "s1", "agent_id": "a7f3"});
         assert_eq!(of_payload(&payload), Some("a7f3"));
         assert_eq!(of_payload(&serde_json::json!({"session_id": "s1"})), None);
+    }
+
+    #[test]
+    fn a_note_keeps_only_the_jouet_subcommands_a_call_runs() {
+        assert_eq!(
+            subcommands("GH_TOKEN=ghp_x jouet pr threads 212 && jouet --display agent read a.rs"),
+            ["pr", "read"]
+        );
+        assert_eq!(
+            subcommands("timeout 60 jouet --json test --affected | tail"),
+            ["test"]
+        );
+        assert_eq!(subcommands("joue pr-next"), ["run"]);
+        assert!(subcommands("echo jouet read && cargo test").is_empty());
     }
 
     #[test]

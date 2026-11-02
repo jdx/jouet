@@ -49,6 +49,7 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         }
         if event == "session-start" {
             verify::prune_sessions();
+            agents::prune_calls();
         }
         let settings = Settings::load();
         let hk: Vec<String> = args
