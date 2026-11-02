@@ -74,7 +74,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "ci",
         Some(
-            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR]` (or `ci explain --run ID`) says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR]` (or `--run ID` for a run without a PR) says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
         ),
     ),
     (
@@ -385,23 +385,19 @@ const USAGE: &[Usage] = &[
         command: "ci",
         lines: &[
             (
-                "jouet ci explain [<PR>]",
-                "whether each failed job is flaky, infrastructure or real, with the evidence",
+                "jouet ci explain [<PR> | <URL> | --run ID | --job ID]",
+                "whether each failed job is flaky, infrastructure or real, with the evidence; one target only, and a URL names an Actions run or job",
             ),
             (
-                "jouet ci explain --run ID",
-                "the same for one Actions run, named without a PR",
-            ),
-            (
-                "jouet ci explain [<PR>] --rerun",
-                "rerun only when every failure is a flake or infrastructure",
+                "jouet ci explain [<PR> | --run ID] --rerun [--force]",
+                "rerun only when every failure is a flake or infrastructure; --force for a cause fixed outside the repository",
             ),
             (
                 "jouet ci run [<WORKFLOW>] --check NAME",
                 "run the job behind a check here, with jactionlint",
             ),
         ],
-        more: "--job, --event, --secrets-from, --log-lines and how a failure is classified",
+        more: "--repo, --event, --secrets-from, --log-lines and how a failure is classified",
     },
     Usage {
         command: "pr",
@@ -415,7 +411,7 @@ const USAGE: &[Usage] = &[
                 "reply to a thread and resolve it",
             ),
             (
-                "jouet pr threads resolve <IDS>...",
+                "jouet pr threads resolve <IDS>... [#PR]",
                 "resolve threads without a reply",
             ),
             (
@@ -1243,6 +1239,41 @@ mod tests {
         assert_eq!(command(&["pr", "threads"]), full(&["pr", "threads"]));
     }
 
+    /// The commands a usage line joins with ` | ` or ` / `. Inside brackets
+    /// the same separators are choices within one command
+    /// (`[<PR> | --run ID]`), so they do not split it.
+    fn alternatives(line: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let (mut depth, mut start) = (0usize, 0);
+        let bytes = line.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'[' => depth += 1,
+                b']' => depth = depth.saturating_sub(1),
+                b'|' | b'/'
+                    if depth == 0
+                        && i > 0
+                        && bytes[i - 1] == b' '
+                        && bytes.get(i + 1) == Some(&b' ') =>
+                {
+                    out.push(&line[start..i - 1]);
+                    start = i + 2;
+                }
+                _ => {}
+            }
+        }
+        out.push(&line[start..]);
+        out
+    }
+
+    #[test]
+    fn alternatives_split_only_outside_brackets() {
+        assert_eq!(
+            alternatives("jouet a [<X> | --y ID] | jouet b / c"),
+            ["jouet a [<X> | --y ID]", "jouet b", "c"]
+        );
+    }
+
     /// Every flag a usage line names exists on the command it names, so a
     /// renamed flag fails here instead of misleading an agent.
     #[test]
@@ -1250,7 +1281,7 @@ mod tests {
         for usage in USAGE {
             for (line, _) in usage.lines {
                 let mut parent: Vec<&str> = Vec::new();
-                for segment in line.split(" | ").flat_map(|s| s.split(" / ")) {
+                for segment in alternatives(line) {
                     let words: Vec<&str> = segment.split_whitespace().collect();
                     let words = match words.first() {
                         // Routines' own arguments are theirs, not jouet's.
