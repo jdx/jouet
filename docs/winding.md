@@ -90,7 +90,7 @@ jouet wind noticed `cargo build && cargo test -p <arg>` run 3 times in 2 session
 
 The ledger never keeps the command itself, so [`jouet task propose`](/commands/task) reads the repository's session transcripts and drafts the task: its name, `run`, description, `depends` and `sources` where they can be inferred, and the evidence. It also suggests `mise.local.toml` (personal, not committed) or `mise.toml` (shared, committed), and says why.
 
-Which file is always the user's choice. A pending task's line at session start tells the agent to ask the user at a natural pause, giving jouet's suggestion. `jouet task apply ID` refuses until it is given `--file local` or `--file shared`, then writes the task through `mise tasks add`. jouet never edits a mise config file itself, and applying needs mise 2026.10.25 or later. `jouet unwind` later proposes removing a task jouet added that nobody runs. [`jouet task`](/commands/task) has the details: which commands count, how the file is suggested, and how a task is applied and removed.
+Which file is always the user's choice. A pending task's line at session start tells the agent to ask the user at a natural pause, giving jouet's suggestion. `jouet task apply ID` refuses until it is given `--file local` or `--file shared`, then writes the task through `mise tasks add`. jouet never edits a mise config file itself. `jouet unwind` later proposes removing a task jouet added that nobody runs. [`jouet task`](/commands/task) has the details: which commands count, how the file is suggested, and how a task is applied and removed.
 
 ## Reviewing whole sessions
 

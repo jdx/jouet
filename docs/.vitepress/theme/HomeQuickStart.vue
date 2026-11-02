@@ -27,7 +27,7 @@ async function copyCommand() {
       </button>
     </div>
     <p class="install-note">
-      <span>mise 2026.10.25+ · Linux · macOS (Apple Silicon) · Windows</span>
+      <span>Linux · macOS (Apple Silicon) · Windows</span>
       <a href="/getting-started"
         >More install options <span aria-hidden="true">→</span></a
       >
