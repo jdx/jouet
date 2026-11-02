@@ -559,6 +559,10 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		return "test", runner_scope(args, 3)
 	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "unittest" then
 		return "test", unittest_scope(args, 3)
+	elseif (program == "python" or program == "python3") and first == "-m" and args[2] == "tornado.test.runtests" then
+		-- Tornado has its own options and test selection. Keep its scope
+		-- unknown rather than treating a selected run as the full suite.
+		return "test", unknown
 	elseif program == "ruff" then
 		local kind: Kind? = if first == "check" then "lint" else nil
 		return kind, if #args == 1 or (#args == 2 and args[2] == ".") then FULL else unknown
