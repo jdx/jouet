@@ -722,15 +722,15 @@ class TasksTest(unittest.TestCase):
             subprocess.run(["git", "clone", "--quiet", "--depth=1", source.as_uri(), str(shallow)], check=True)
             task = dataclasses.replace(tasks.load("smoke"), remote=False,
                 source={"git": str(shallow), "commit": revision, "history": True})
-            with self.assertRaisesRegex(ValueError, "non-shallow"):
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "non-shallow"):
                 tasks.prepare(task, root / "shallow-work")
             task.source["git"] = str(source)
             task.source["commit"] = "main"
-            with self.assertRaisesRegex(ValueError, "full pinned commit"):
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "full pinned commit"):
                 tasks.prepare(task, root / "moving-ref-work")
             tasks.git(source, "config", "remote.origin.promisor", "true")
             task.source["commit"] = revision
-            with self.assertRaisesRegex(ValueError, "partial clone"):
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "partial clone"):
                 tasks.prepare(task, root / "partial-work")
 
     def test_history_source_refuses_network_remotes_and_submodules(self):
@@ -747,10 +747,10 @@ class TasksTest(unittest.TestCase):
             revision = tasks.git(source, "rev-parse", "HEAD")
             task = dataclasses.replace(tasks.load("smoke"), remote=True,
                 source={"git": str(source), "commit": revision, "history": True})
-            with self.assertRaisesRegex(ValueError, "remote = false"):
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "remote = false"):
                 tasks.prepare(task, root / "remote-work")
             task.remote = False
-            with self.assertRaisesRegex(ValueError, "does not fetch submodules"):
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "does not fetch submodules"):
                 tasks.prepare(task, root / "submodule-work")
 
     def test_external_tasks_require_an_explicit_outside_result_directory(self):
@@ -776,6 +776,25 @@ class TasksTest(unittest.TestCase):
                 self.assertEqual(agents.main(["run", "--tasks-dir", str(directory), "--out", str(directory / "results")]), 0)
                 run.assert_called_once()
                 self.assertEqual(tasks.all_names(), ["local-task"])
+
+    def test_check_tasks_reports_history_preparation_errors(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task = root / "task"
+            task.mkdir()
+            (task / "task.toml").write_text(
+                'description = "test"\nprompt = "test"\nchore = "bug-fix"\nremote = false\n'
+                '[source]\ngit = "/missing-source"\ncommit = "' + "a" * 40 + '"\nhistory = true\n'
+            )
+            (task / "check.py").touch()
+            (task / "solve.py").touch()
+            result = subprocess.run([sys.executable, str(runner.REPO_ROOT / "bench/agents.py"),
+                                     "check-tasks", "--tasks-dir", str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("preparation failed", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
 
     def test_python_environment_is_isolated_and_available_to_the_run(self):
         import dataclasses

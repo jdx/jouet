@@ -370,7 +370,7 @@ def checkout_roots(workdir: Path) -> list[Path]:
 def prepare(task: Task, workdir: Path) -> dict[str, str]:
     """Builds the task's work tree in `workdir`; returns its SHAs."""
     if task.source and task.source.get("history", False) and task.remote:
-        raise ValueError("history mode requires remote = false")
+        raise EnvironmentSetupError("history mode requires remote = false")
     if task.source:
         if task.source.get("history", False):
             copy_history(task.source, workdir)
@@ -386,7 +386,7 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     # them at the recorded revisions so an agent can run the project's tests.
     if task.source and (workdir / ".gitmodules").exists():
         if task.source.get("history", False):
-            raise ValueError("history mode does not fetch submodules; provide a task without them")
+            raise EnvironmentSetupError("history mode does not fetch submodules; provide a task without them")
         git(workdir, "submodule", "update", "--init", "--recursive")
     run_setup(task, workdir)
     base = git(workdir, "rev-parse", "HEAD")
@@ -476,25 +476,33 @@ def copy_history(source: dict[str, str | bool], workdir: Path) -> None:
     repo = Path(str(source["git"])).expanduser().resolve()
     commit = str(source["commit"])
     if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", commit):
-        raise ValueError("history mode needs a full pinned commit SHA")
-    if git(repo, "rev-parse", f"{commit}^{{commit}}") != commit:
-        raise ValueError("history mode source.commit must identify a commit")
-    if git(repo, "rev-parse", "--is-shallow-repository") == "true":
-        raise ValueError("history mode needs a complete, non-shallow source repository")
+        raise EnvironmentSetupError("history mode needs a full pinned commit SHA")
+    try:
+        resolved = git(repo, "rev-parse", f"{commit}^{{commit}}")
+        shallow = git(repo, "rev-parse", "--is-shallow-repository")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise EnvironmentSetupError("history mode cannot read the pinned source commit") from error
+    if resolved != commit:
+        raise EnvironmentSetupError("history mode source.commit must identify a commit")
+    if shallow == "true":
+        raise EnvironmentSetupError("history mode needs a complete, non-shallow source repository")
     partial = subprocess.run(
         ["git", "config", "--local", "--get-regexp", r"^remote\..*\.promisor$"],
         cwd=repo, env=git_env(), capture_output=True, text=True,
     )
     if partial.returncode not in (0, 1):
-        raise RuntimeError("could not inspect the source repository's partial-clone configuration")
+        raise EnvironmentSetupError("could not inspect the source repository's partial-clone configuration")
     if partial.returncode == 0 and any(line.split()[-1].lower() == "true" for line in partial.stdout.splitlines()):
-        raise ValueError("history mode needs a complete source, not a partial clone")
+        raise EnvironmentSetupError("history mode needs a complete source, not a partial clone")
     workdir.mkdir(parents=True)
     git(workdir, "init", "-q", "-b", "main")
-    git(workdir, "fetch", "-q", "--no-tags", str(repo), commit)
-    git(workdir, "checkout", "-q", "-B", "main", "FETCH_HEAD")
+    try:
+        git(workdir, "fetch", "-q", "--no-tags", str(repo), commit)
+        git(workdir, "checkout", "-q", "-B", "main", "FETCH_HEAD")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise EnvironmentSetupError("history mode could not copy the pinned source history") from error
     if git(workdir, "rev-parse", "HEAD") != commit:
-        raise RuntimeError("history mode did not check out the pinned commit")
+        raise EnvironmentSetupError("history mode did not check out the pinned commit")
 
 
 def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
