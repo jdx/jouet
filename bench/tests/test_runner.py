@@ -817,6 +817,8 @@ class ReportTest(unittest.TestCase):
         records = [
             {"task": "smoke", "harness": "codex", "arm": "plain", "round": 1,
              "success": True, "changed_paths": []},
+            {"task": "smoke", "harness": "codex", "arm": "plain", "round": 2,
+             "success": True},
             {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
              "success": True, "changed_paths": paths},
             {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 2,
@@ -827,6 +829,7 @@ class ReportTest(unittest.TestCase):
         summary = report.summarize(records, {})
         text = report.markdown(summary)
         self.assertIn("**plain changed paths (round 1):** none observed", text)
+        self.assertIn("**plain changed paths (round 2):** unavailable", text)
         self.assertIn('"file-0.txt"', text)
         self.assertIn('``["name`with\\nnewline"', text)
         self.assertIn("2 more (full list: runs.jsonl)", text)

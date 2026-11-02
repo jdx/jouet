@@ -68,8 +68,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 "rule_decisions": dict(sorted(decisions.items())),
                 "github_unanswered": sorted(unanswered),
                 "changes": [
-                    {"round": r.get("round"), "paths": r["changed_paths"]}
-                    for r in runs if "changed_paths" in r
+                    {"round": r.get("round"), "paths": r.get("changed_paths")}
+                    for r in runs
                 ],
             }
         if "plain" in by_arm and "jouet" in by_arm:
