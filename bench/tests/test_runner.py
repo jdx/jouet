@@ -99,11 +99,21 @@ class PlanTest(unittest.TestCase):
                 self.assertFalse(record["success"])
                 self.assertIsNone(record["check"]["exit_code"])
 
+                # Capacity can interrupt a session after it has spent tokens
+                # and run tools; the partial attempt is still not a task result.
+                agent["lines"] = [json.dumps({"type": "item.completed", "item": {
+                    "type": "command_execution", "command": "git status"}}), event]
+                with patch.object(HARNESSES["codex"], "_session_usage", return_value=({"input_tokens": 123}, None)):
+                    interrupted = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                check.assert_not_called()
+                self.assertIn("capacity", interrupted["error"])
+                self.assertEqual(interrupted["usage"]["input_tokens"], 123)
+
                 # A stopped run keeps its timeout classification even if
                 # the stream also reported capacity.
                 agent["stopped"] = "timeout"
                 check.return_value = {"passed": True, "exit_code": 0, "output": "ok"}
-                stopped = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                stopped = runner.execute(runner.Planned(3, "smoke", "codex", "plain"), opts, root, root)
                 check.assert_called_once()
                 self.assertNotIn("error", stopped)
                 self.assertEqual(stopped["stopped"], "timeout")
@@ -257,6 +267,9 @@ class HarnessOutputTest(unittest.TestCase):
         after_work = [json.dumps({"type": "item.completed", "item": {
             "type": "command_execution", "command": "git status"}}), *lines]
         u = HARNESSES["codex"].usage(after_work, Path("/nonexistent"))
+        self.assertTrue(u.extra["capacity_error"])
+        recovered = [*lines, json.dumps({"type": "turn.completed", "usage": {}})]
+        u = HARNESSES["codex"].usage(recovered, Path("/nonexistent"))
         self.assertFalse(u.extra["capacity_error"])
 
 
