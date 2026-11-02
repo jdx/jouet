@@ -242,6 +242,19 @@ mod tests {
         ));
         assert!(has("uv run pytest -q | head", Pattern::HeadOnTestOutput));
         assert!(has("uv run -- pytest | tail", Pattern::HeadOnTestOutput));
+        assert!(has(
+            "uv run --no-sync pytest | head",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(has(
+            "uv run --with coverage pytest | tail",
+            Pattern::HeadOnTestOutput
+        ));
+        assert!(has("uv run -m pytest | head", Pattern::HeadOnTestOutput));
+        assert!(!has(
+            "uv run --with pytest echo hello | head",
+            Pattern::HeadOnTestOutput
+        ));
         assert!(!has("uv run rg pytest | head", Pattern::HeadOnTestOutput));
         assert!(!has(
             "uv run echo 'pytest' | head",

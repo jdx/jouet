@@ -782,12 +782,87 @@ fn subcommands(
         "uv" if ident(i).as_deref() == Some("run") => {
             parts.push("run".into());
             i += 1;
-            if let Some(Tok::Word(w)) = items.get(i) {
-                if w.text == "--" && !w.quoted {
+            while let Some(Tok::Word(w)) = items.get(i) {
+                if w.quoted || w.dynamic || !w.text.starts_with('-') {
+                    break;
+                }
+                let option = w.text.split('=').next().unwrap_or("");
+                if option == "--" {
                     parts.push("--".into());
                     i += 1;
-                } else if w.text.starts_with('-') {
+                    break;
+                }
+                if matches!(option, "-m" | "--module") {
+                    parts.push(option.into());
+                    i += 1;
+                    break;
+                }
+                let value = matches!(
+                    option,
+                    "-w" | "--with"
+                        | "--with-editable"
+                        | "--with-requirements"
+                        | "-p"
+                        | "--python"
+                        | "--extra"
+                        | "--no-extra"
+                        | "--group"
+                        | "--no-group"
+                        | "--only-group"
+                        | "--package"
+                        | "--env-file"
+                        | "--directory"
+                        | "--project"
+                        | "--config-file"
+                        | "--cache-dir"
+                        | "--index"
+                        | "--default-index"
+                        | "-i"
+                        | "--index-url"
+                        | "--extra-index-url"
+                        | "-f"
+                        | "--find-links"
+                );
+                let switch = matches!(
+                    option,
+                    "-q" | "-v"
+                        | "-n"
+                        | "--quiet"
+                        | "--verbose"
+                        | "--no-cache"
+                        | "--no-sync"
+                        | "--locked"
+                        | "--frozen"
+                        | "--offline"
+                        | "--isolated"
+                        | "--active"
+                        | "--no-project"
+                        | "--no-dev"
+                        | "--only-dev"
+                        | "--all-extras"
+                        | "--all-groups"
+                        | "--all-packages"
+                        | "--no-default-groups"
+                        | "--no-editable"
+                        | "--no-env-file"
+                        | "--no-index"
+                        | "--no-config"
+                        | "--no-progress"
+                        | "--managed-python"
+                        | "--no-managed-python"
+                        | "--no-python-downloads"
+                );
+                if !value && !switch {
                     return i;
+                }
+                parts.push(flag(&w.text));
+                i += 1;
+                if value && !w.text.contains('=') {
+                    if items.get(i).is_none() {
+                        return i;
+                    }
+                    parts.push("<v>".into());
+                    i += 1;
                 }
             }
             let rest: Vec<&Tok> = items[i..].to_vec();
