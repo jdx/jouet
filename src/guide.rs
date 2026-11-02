@@ -907,7 +907,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} {wait}Commit only the paths you name with {commit}, in the same call as their test run (`jouet test ... && jouet commit ...`). Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read definitions with `jouet read PATH --symbol NAME --range A:B` (each repeats) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads and searches in one. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read definitions with `jouet read PATH --symbol NAME --range A:B` (each repeats) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads and searches in one. List a PR's open review threads with `jouet pr threads [PR]`; reply to and resolve one with {reply}. These need no lookup; for other commands, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1162,7 +1162,7 @@ mod tests {
         // Agents committed in a call of their own after the test run, and
         // guessed `pr threads list` before `pr threads`.
         assert!(
-            text.contains("in the same call as their test run"),
+            text.contains("don't rerun a passing test just to combine calls"),
             "{text}"
         );
         assert!(text.contains("`jouet pr threads [PR]`"), "{text}");
