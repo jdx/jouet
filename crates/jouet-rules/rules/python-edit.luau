@@ -59,14 +59,18 @@ end
 local STRUCTURED = { "json%.dump", "yaml%.dump", "yaml%.safe_dump", "toml%.dump", "tomlkit%.dump", "tomli_w%.dump" }
 
 -- Whether the code stops on a miss before it writes: an `assert` line, or a
--- `raise` or `sys.exit`, as `assert old in s` or `if old not in s: raise`.
+-- `raise` or `sys.exit`, as `assert old in s` or `if old not in s: raise`;
+-- or it finds its place by `.index(` (or `.rindex(`), which raises on a miss,
+-- and changes no text by `.replace(` or `re.sub`, which would not.
 local function checked(code: string): boolean
 	for line in string.gmatch(code, "[^\n]+") do
 		if string.match(line, "^%s*assert%s") or string.find(line, "raise%s") or string.find(line, "sys%.exit%(") then
 			return true
 		end
 	end
-	return false
+	return string.find(code, "%.r?index%(") ~= nil
+		and not string.find(code, "%.replace%(")
+		and not string.find(code, "re%.subn?%(")
 end
 
 local function structured(code: string): boolean
