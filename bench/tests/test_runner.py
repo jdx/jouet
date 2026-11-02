@@ -293,6 +293,14 @@ class TasksTest(unittest.TestCase):
             self.assertEqual((workdir / "hidden.txt").read_text(), "included in the commit\n")
             self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
 
+    def test_setup_that_dirties_the_tree_is_refused(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            task = dataclasses.replace(tasks.load("smoke"), setup=["touch made-by-setup.txt"])
+            with self.assertRaisesRegex(RuntimeError, r"\?\? made-by-setup\.txt"):
+                tasks.prepare(task, Path(d) / "work")
+
     def test_python_environment_is_isolated_and_available_to_the_run(self):
         import dataclasses
         import hashlib

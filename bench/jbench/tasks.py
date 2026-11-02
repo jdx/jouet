@@ -289,7 +289,10 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
 
 def run_setup(task: Task, workdir: Path) -> None:
     """Runs the task's `setup` commands, such as installing a project's
-    dependencies offline, and refuses one that leaves the tree dirty."""
+    dependencies offline, and refuses one that leaves the tree dirty. An exact
+    source tree can look modified before setup runs, from a blob its
+    attributes would normalize, so only what setup changed counts."""
+    before = set(git(workdir, "status", "--porcelain", "--ignored=no").splitlines())
     for command in task.setup:
         proc = subprocess.run(
             [expand(arg, workdir) for arg in shlex.split(command)],
@@ -301,7 +304,8 @@ def run_setup(task: Task, workdir: Path) -> None:
         if proc.returncode != 0:
             output = (proc.stdout + proc.stderr)[-3000:]
             raise RuntimeError(f"task {task.name}: setup `{command}` exited {proc.returncode}:\n{output}")
-    if dirty := git(workdir, "status", "--porcelain", "--ignored=no"):
+    after = git(workdir, "status", "--porcelain", "--ignored=no").splitlines()
+    if dirty := "\n".join(line for line in after if line not in before):
         raise RuntimeError(f"task {task.name}: setup left files git does not ignore:\n{dirty}")
 
 
