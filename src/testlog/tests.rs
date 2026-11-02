@@ -237,6 +237,30 @@ fn an_unrecognised_failure_shows_the_end_of_the_output() {
 }
 
 #[test]
+fn an_unrecognised_failure_also_shows_lines_marked_as_failures_above_the_end() {
+    let text = "FAIL swebench-pylint-4551: the check should pass when solved:\nFAIL_TO_PASS tests/a.py::t not run\n"
+        .to_string()
+        + &(1..=50).map(|i| format!("ok   step {i}\n")).collect::<String>();
+    let d = digest(&text, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        [
+            "no failure recognised; lines marked as failures",
+            "no failure recognised; the end of the output"
+        ]
+    );
+    assert_eq!(
+        d.failures[0].lines,
+        ["FAIL swebench-pylint-4551: the check should pass when solved:"]
+    );
+    // A machine the end blames is still blamed, whatever the marked lines say.
+    let text = "FAIL keyring: stores the token\n".to_string()
+        + &(1..=30).map(|i| format!("step {i}\n")).collect::<String>()
+        + "Error: DBus error: no bus\n";
+    assert!(environment_cause(&text, &[]).is_some());
+}
+
+#[test]
 fn rspec_keeps_named_failures_and_their_assertions() {
     let output = r#"
 ==> Summary (2 workers)

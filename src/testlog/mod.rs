@@ -25,6 +25,11 @@ const FAILURE_MIDDLE: usize = 8;
 const LINE_MAX: usize = 400;
 /// Lines shown from the end of an output in which no failure was recognised.
 const OUTPUT_TAIL: usize = 20;
+/// The most lines marked as failures shown from above an unrecognised
+/// failure's end.
+const MARKED_MAX: usize = 10;
+/// The name of an unrecognised failure's lines marked as failures.
+const MARKED: &str = "no failure recognised; lines marked as failures";
 /// Bytes past the budget that the names of failures not shown may take.
 const NAMES_SLACK: usize = 200;
 
@@ -198,6 +203,10 @@ regexes! {
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
+    // A line a runner marks as a failure: `FAIL name`, `FAILED: name`,
+    // `ERROR ...` or TAP's `not ok`. Upper case only, and not a word that
+    // merely starts with one (`FAIL_TO_PASS`).
+    FAILURE_MARK = r"^\s*(FAIL|FAILED|ERROR)(:|\s)|^\s*not ok\b";
     // A runner refusing its own arguments, before it runs anything; argparse
     // and pytest name the program, and a subcommand, first.
     USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
@@ -307,7 +316,9 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
     }
     let digest = digest_with(text, true, 0, formats);
     let mut first = None;
-    for failure in &digest.failures {
+    // The lines marked as failures above an unrecognised end only point at
+    // it; the end, which keeps the rest of the output, is what is judged.
+    for failure in digest.failures.iter().filter(|f| f.name != MARKED) {
         let line = failure.lines.iter().find(|l| blames_machine(l))?;
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
@@ -445,10 +456,26 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
     let mut found = merge(parsed.found);
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
+        let end = trim_excerpt(tail.clone(), OUTPUT_TAIL).lines;
+        // A runner jouet doesn't know often names its failures first and
+        // sums up last, so the end alone can leave out the one line that
+        // says what failed.
+        let marked: Vec<String> = tail
+            .into_iter()
+            .filter(|l| FAILURE_MARK.is_match(l) && !end.contains(l))
+            .take(MARKED_MAX)
+            .collect();
+        if !marked.is_empty() {
+            found.push(Found {
+                at: 0,
+                name: MARKED.into(),
+                lines: marked,
+            });
+        }
         found.push(Found {
             at: 0,
             name: "no failure recognised; the end of the output".into(),
-            lines: trim_excerpt(tail, OUTPUT_TAIL).lines,
+            lines: end,
         });
     }
     let (failures, more_failures, failures_omitted) = fit(found, budget);
