@@ -403,6 +403,15 @@ def zombie(pid: int) -> bool:
         return True
 
 
+def task_dir(name: str) -> str | None:
+    """The directory a task came from, for a record whose run failed before loading it."""
+    try:
+        found = tasks_mod.index().get(name)
+    except (OSError, ValueError):
+        return None
+    return str(found.parent) if found else None
+
+
 def execute(
     p: Planned,
     opts: dict[str, Any],
@@ -624,6 +633,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
+                if found := task_dir(p.task):
+                    record["task_dir"] = found
                 if opts.get("keep_work"):
                     record["workdir"] = str(work_root / p.directory / "work")
                     record["tmp_dir"] = str(tmp_root / p.directory)

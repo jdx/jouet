@@ -179,10 +179,13 @@ class PlanTest(unittest.TestCase):
             with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
                     patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
                     patch.object(runner.costs_mod, "seeds", return_value={}), \
-                    patch.object(runner, "execute", side_effect=execute):
+                    patch.object(runner, "execute", side_effect=execute), \
+                    patch.object(tasks, "index", return_value={"bad": root / "private" / "bad"}):
                 records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
         self.assertEqual([r["task"] for r in records], ["bad", "good"])
         self.assertIn("EnvironmentSetupError", records[0]["error"])
+        # An error record still says which task directory the task came from.
+        self.assertEqual(records[0]["task_dir"], str(root / "private"))
         self.assertTrue(records[1]["success"])
         self.assertTrue(any("environment setup already failed" in message for message in messages))
 
