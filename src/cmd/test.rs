@@ -228,6 +228,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<std::collections::BTreeSet<String>>, u64)> = Vec::new();
+    // What each failed suite blames on the machine; the run is the
+    // machine's only when every one of them does.
+    let mut environment: Vec<Option<String>> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
     // Marked for the stop gate while it runs; a run that dies early leaves a
@@ -254,6 +257,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
             let digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            if code != 0 {
+                environment.push(testlog::environment_cause(&output, &formats));
+            }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((job, baseline::failure_names(&output, &formats, &root), ran));
@@ -310,7 +316,17 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // hooks.
     if runs {
         crate::cost::record(&cwd, &timed);
-        super::hook::record_own_run(&cwd, &own_command(), i32::from(exit.code()));
+        let blamed = environment
+            .iter()
+            .all(Option::is_some)
+            .then(|| environment.iter().flatten().next().cloned())
+            .flatten();
+        super::hook::record_own_run(
+            &cwd,
+            &own_command(),
+            i32::from(exit.code()),
+            blamed.as_deref(),
+        );
         super::hook::mark_own_run(&cwd, &own_command(), false);
     }
     if out.json {
