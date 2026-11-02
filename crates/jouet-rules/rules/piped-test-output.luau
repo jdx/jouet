@@ -219,6 +219,26 @@ local function jouet_test(command: JouetCommand): boolean
 	return false
 end
 
+-- The script of a `jouet test --cmd -- sh -c SCRIPT`.
+local SHELLS = set({ "sh", "bash", "zsh", "dash", "ksh" })
+local function script_under(command: JouetCommand): string?
+	local argv = command.argv
+	local at = table.find(argv, "--")
+	if not at or not SHELLS[jouet.basename(argv[at + 1] or "")] then
+		return nil
+	end
+	for k = at + 2, #argv do
+		local arg = argv[k]
+		if string.sub(arg, 1, 1) ~= "-" then
+			return nil
+		end
+		if string.find(string.sub(arg, 2), "c", 1, true) and string.sub(arg, 1, 2) ~= "--" then
+			return argv[k + 1]
+		end
+	end
+	return nil
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		for i, command in call.commands do
@@ -227,8 +247,26 @@ local rule: JouetRule = {
 			end
 			-- `jouet test` already prints only what matters, keeps the whole
 			-- output in its log, and records its own result for the hooks,
-			-- piped or not: a cut drops nothing the agent needs.
+			-- piped or not: a cut drops nothing the agent needs. Inside it, a
+			-- shell script that cuts a run leaves it only the cut output to
+			-- read, and the exit code of the script's last command.
 			if jouet_test(command) then
+				local script = script_under(command)
+				if script then
+					local inner = jouet.parse(script)
+					for j, step in inner do
+						local cut = not step.nested and runs(step) and cutter(inner, j)
+						if cut then
+							local words = {}
+							for _, word in step.words do
+								table.insert(words, quote(word))
+							end
+							return jouet.warn(
+								`\`jouet test\` reads only what this script prints after {cut.program} cut it, and the exit code of its last command. Run \`jouet test --cmd -- {table.concat(words, " ")}\` on its own for each run instead, uncut: it keeps the whole output in a log and prints each failure, or one line of counts when the run passes.`
+							)
+						end
+					end
+				end
 				continue
 			end
 			if not runs(command) then

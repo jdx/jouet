@@ -38,6 +38,9 @@ fires = [
   "npx vitest run 2>&1 | head -50",
   "make 2>&1 | tail",
   "RUST_LOG=debug cargo test --manifest-path $DIR/Cargo.toml 2>&1 | tail",
+  # Inside `jouet test`, it sees only the cut output and the last exit code.
+  "jouet test --cmd -- sh -c 'cargo test --bin fnox editor 2>&1 | tail -15; mise run build 2>&1 | tail -3'",
+  "jouet test --cmd -- bash -lc 'go test ./... | grep -v ^ok'",
 ]
 quiet = [
   # Left to `scoped-lint`.
@@ -70,4 +73,6 @@ quiet = [
   "jouet --json test --affected | grep -c failed",
   "jouet test > t.log 2>&1; tail -5 t.log",
   "jouet pr status | head -3",
+  "jouet test --cmd -- sh -c 'cargo build && cargo test'",
+  "jouet test --cmd -- sh -c 'cargo test 2>&1 | tee t.log'",
 ]
