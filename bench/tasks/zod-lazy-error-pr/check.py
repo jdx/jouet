@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 import sys
@@ -9,11 +10,26 @@ from _check import dirty, expect, finish, github_state, new_commit  # noqa: E402
 expect(new_commit(), "nothing was committed")
 expect(not dirty(), f"changes were left uncommitted: {dirty()}")
 
+tests = "packages/zod/src/v4/classic/tests"
+# What CI failed, as the agent left it: the issue-schema tests must pass in
+# both vitest projects, none skipped or removed (9 tests, each run twice).
+report = Path("vitest-report.json")
+subprocess.run(
+    ["node_modules/.bin/vitest", "run", f"{tests}/issue-schema.test.ts", "--reporter=json",
+     f"--outputFile={report}"],
+    capture_output=True, text=True, timeout=240,
+)
+results = json.loads(report.read_text()) if report.exists() else {}
+report.unlink(missing_ok=True)
+passed = results.get("numPassedTests", 0)
+expect(results.get("numFailedTests", 1) == 0 and passed >= 18,
+       f"the issue-schema tests CI failed do not all pass in the work tree: {passed} passed, "
+       f"{results.get('numFailedTests')} failed")
+
 # The upstream tests, which the agent never saw, replace whatever is in the
 # work tree: the issue-schema tests CI failed (227d555), the review's
 # synchronously throwing check (3ccbab4), and the PR's own tests that the
 # error is still built on first read, so dropping the change does not pass.
-tests = "packages/zod/src/v4/classic/tests"
 for name in ("issue-schema.test.ts", "standard-schema.test.ts", "error.test.ts"):
     shutil.copyfile(Path(__file__).parent / "hidden" / name, f"{tests}/{name}")
 proc = subprocess.run(
