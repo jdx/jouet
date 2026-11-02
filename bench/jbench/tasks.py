@@ -306,41 +306,18 @@ def run_setup(task: Task, workdir: Path) -> None:
 
 
 def copy_source(source: dict[str, str], workdir: Path) -> None:
-    """Stages the tree of `source`'s commit in a new repository at `workdir`.
+    """Stages the exact commit tree in a new, independent repository.
 
-    Every tracked file is staged by name, with `-f`, because a project can
-    track files its own `.gitignore` matches, which `git add -A` would drop."""
+    Import the objects and check out the index directly: `git archive` can
+    omit export-ignored files, and re-adding an archive can normalize blobs
+    whose bytes do not match the project's current attributes.
+    """
     repo = Path(source["git"]).expanduser()
     commit = source["commit"]
     workdir.mkdir(parents=True)
-    archive = subprocess.run(["git", "-C", str(repo), "archive", commit], check=True, capture_output=True)
-    subprocess.run(["tar", "-x", "-C", str(workdir)], input=archive.stdout, check=True)
     git(workdir, "init", "-q", "-b", "main")
-    entries = subprocess.run(
-        ["git", "-C", str(repo), "ls-tree", "-r", "-z", commit], check=True, capture_output=True
-    ).stdout.split(b"\0")
-    files, links = [], []
-    for entry in filter(None, entries):
-        metadata, name = entry.split(b"\t", 1)
-        mode, kind, oid = metadata.split(b" ")
-        if kind == b"commit":
-            links.append(mode + b" " + oid + b"\t" + name + b"\0")
-        else:
-            files.append(name + b"\0")
-    env = {**os.environ, **GIT_ENV}
-    subprocess.run(
-        ["git", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        cwd=workdir,
-        env=env,
-        input=b"".join(files),
-        check=True,
-        capture_output=True,
-    )
-    if links:
-        subprocess.run(
-            ["git", "update-index", "-z", "--index-info"], cwd=workdir, env=env,
-            input=b"".join(links), check=True, capture_output=True,
-        )
+    git(workdir, "fetch", "-q", "--no-tags", "--depth=1", str(repo), commit)
+    git(workdir, "read-tree", "--reset", "-u", "FETCH_HEAD^{tree}")
     tree = git(workdir, "write-tree")
     want = git(repo, "rev-parse", f"{commit}^{{tree}}")
     if tree != want:
