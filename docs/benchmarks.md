@@ -75,6 +75,45 @@ The opt-in `jactionlint-dependabot-groups` task reproduces [jdx/jactionlint#313]
 
 The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://github.com/astral-sh/ruff/issues/29365) from the parent of its upstream fix. It needs a local Ruff Git repository at `~/src/ruff-bench-source` containing commit `83a3afc3156d73ae4296f3fa74ede28e4c72bfcd`, Rust 1.99.0, and the project's Cargo dependencies. Ruff's project instructions also require `uv` for its `prek` checks; verify it is available in both isolated arms, and report when a run cannot perform those checks. The independent check builds Ruff and exercises both conditional-iterable fixes and a named-expression case. It is excluded from the default suite because the project is large and each isolated run must build it.
 
+### Tasks from SWE-bench
+
+`bench/import_swebench.py` turns SWE-bench-format records into tasks of the same kind. It reads a JSONL file (a Hugging Face dataset's `to_json` export), a JSON list or a page of the dataset viewer's `/rows` API, with SWE-bench's fields (`instance_id`, `repo`, `base_commit`, `problem_statement`, `patch`, `test_patch`, `FAIL_TO_PASS`, `PASS_TO_PASS`). SWE-bench Verified, SWE-bench Multilingual and SWE-PolyBench use those names; Multi-SWE-bench's own (`org`, `number`, `base.sha`, `fix_patch`, `resolved_issues`, `f2p_tests`, `p2p_tests`) are mapped onto them. Each instance becomes an opt-in task named `swebench-<repo>-<number>`:
+
+- `[source]` is a clone under `~/src/swebench/<owner>__<repo>` at `base_commit`, cloned once if missing;
+- the prompt is `problem_statement` and the line the other real-project tasks end with;
+- `hidden/` holds the test files as `test_patch` leaves them, and `fix.patch` is `patch`;
+- `check.py` puts `hidden/` in place, runs the instance's test modules with the repository's runner, and passes when every `FAIL_TO_PASS` test passes and no `PASS_TO_PASS` test fails. A `PASS_TO_PASS` test the environment skips, or that the log does not name, is listed in the check's output but does not fail it. The logs are read as SWE-bench reads them: Django's runner, sympy's `bin/test` and pytest's `-rA` summary. `swebench.json` holds the instance's tests and the command;
+- `solve.py` applies `fix.patch` and commits it.
+
+```sh
+python3 bench/import_swebench.py import verified.jsonl --dataset "SWE-bench Verified" --ids django__django-11400,sympy__sympy-16597
+MISE_ENV=bench mise x -- python3 bench/import_swebench.py prime bench/tasks/swebench-*
+python3 bench/agents.py check-tasks --tasks swebench-django-11400
+```
+
+`prime` is the only step that uses the network. For each task it builds a Python environment under `~/src/swebench/envs/<instance_id>` with the benchmark's `uv`. It uses the instance's Python version, installs the repository at its base commit for its dependencies, adds the test extras, and makes the environment read-only. Packages are limited to those released within six months after the instance's `created_at`. The build tools are limited to those released before 2024, and atomicwrites, whose old releases were deleted from PyPI, is exempt. uv downloads the Python versions it lacks. A run links `python3` and `python` to that environment in both arms and puts the work tree first on `PYTHONPATH`, so the agent's edits are what is tested, with no install in the run.
+
+The repositories the importer knows (`spec_for`) are Django, sympy, Sphinx, pylint and pytest, all pure Python. Python versions follow SWE-bench's harness, except that Django 3.x runs on 3.8, not 3.6, because uv's Python builds start at 3.8. A repository it does not know needs `--test-cmd` (and `--python` for a Python project), and its check then requires only that the command exits 0. That is how SWE-bench Multilingual's or Multi-SWE-bench's other languages import; their toolchains are not primed. Repositories with compiled extensions, such as astropy, scikit-learn and matplotlib, do not work with `PYTHONPATH`, since the work tree has no built extensions.
+
+The first batch has ten SWE-bench Verified instances, chosen from the dataset's two longest difficulty labels (`1-4 hours`, `>4 hours`) for gold patches that span several files or need reading across modules:
+
+| task | instance | gold patch | why |
+|---|---|---|---|
+| `swebench-django-11400` | Ordering of `RelatedFieldListFilter` choices | 3 files | admin filters, model fields and reverse relations |
+| `swebench-django-11885` | Combine fast-delete queries | 2 files, 213 lines | the deletion collector and the admin's use of it |
+| `swebench-django-13344` | A coroutine reaches the first middleware's `process_response()` | 3 files | the session, cache and security middlewares |
+| `swebench-django-14631` | `BaseForm` should read values through `BoundField` | 2 files | forms and bound fields |
+| `swebench-django-15629` | `db_collation` does not reach foreign keys | 4 files | the schema editors and related fields |
+| `swebench-django-16263` | Strip unused annotations from count queries | 4 files | expressions, `Q`, the SQL query and `WHERE` |
+| `swebench-sympy-16597` | `a.is_even` does not imply `a.is_finite` | 6 files | assumptions, core, printing and tensors |
+| `swebench-sympy-14248` | `MatrixSymbol` differences print as sums | 3 files | the str, pretty and LaTeX printers |
+| `swebench-sphinx-9461` | `@classmethod` `@property` methods go undocumented | 3 files | the Python domain, autodoc and `util.inspect` |
+| `swebench-pytest-5787` | Exception serialization loses chained exceptions | 1 file, 260 lines | report serialization, read against `_pytest._code` |
+
+SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
+
+The models under test may have seen these issues and fixes in training. Both arms use the same model, so the paired comparison cancels most of that. A run's success rate on these tasks says less than its cost difference does.
+
 ### Arms
 
 - **plain:** the harness as installed, with no jouet on `PATH`.
@@ -98,7 +137,7 @@ Every run starts from nothing, in a temporary directory outside any checkout (so
 
 A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.
 
-For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
+For task definitions that should stay outside this checkout, `run` and `check-tasks` accept repeatable `--tasks-dir PATH` arguments alongside the bundled task directory. A run using an external task directory must specify `--out` outside the jouet checkout, and its task and cache directories, including the `jouet-init` cache when that arm is selected, must also be outside the checkout. The same applies to directories in `JOUET_BENCH_TASKS`. For example:
 
 ```sh
 MISE_ENV=bench mise run bench:agents --tasks-dir "$HOME/bench-tasks" --tasks example --out "$HOME/bench-results/example"

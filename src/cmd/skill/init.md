@@ -7,7 +7,9 @@ description: Configure jouet for a project's actual build, test and agent workfl
 
 Help this project's agents use fewer tokens and finish work faster. Find where
 jouet fits the existing workflow, configure what is useful, and explain any
-gaps. A project that needs no new configuration is a successful outcome.
+gaps. Record the checks you establish in `.jouet/project.toml` (below), so
+every later session starts knowing them; beyond that, a project that needs no
+other configuration is a successful outcome.
 
 ## Understand the project
 
@@ -35,6 +37,32 @@ focused checks help during iteration. Do not start a cold rebuild, full suite,
 network-dependent setup or paid agent benchmark just to collect timings. If a
 representative check is already appropriate to the user's task, run it through
 `jouet test` so its result and duration are recorded.
+
+## Record the checks
+
+Write the commands you established to `.jouet/project.toml`, to be committed
+with the project. The session-start primer shows them to every later session
+once a person trusts the repository's jouet files, so agents run the right
+check instead of looking for it:
+
+```toml
+[checks]
+full = "mise run test"                     # the whole suite
+lint = "jouet diag check --changed"
+before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
+
+[checks.focused]                           # by what each covers
+unit = "jouet test --affected"
+e2e = "jouet test --cmd -- mise run test:e2e FILE"
+```
+
+List only commands you confirmed from the project's tasks and instructions,
+and checked where you can (a dry-run selection, `--help`, or a run the task
+already called for). Write focused checks as `jouet test --affected` or
+`jouet test --cmd -- …`, so their results are recorded. Put what CI enforces but
+the focused checks leave out (a clippy or type check) in `before_push`. Keep it
+short: it is in every session's context. Update an existing file rather
+than replacing it.
 
 ## Adapt only what helps
 
@@ -65,7 +93,7 @@ selection before running checks appropriate to the changes. A dry run verifies
 selection, not that tests pass. Keep failures visible; distinguish a baseline
 failure from a new one. Do not claim savings from a timing estimate.
 
-Report what changed and why, the full and focused check commands, any known
+Report what changed and why, the checks recorded in `.jouet/project.toml`, any known
 slow checks, what was verified, and remaining ecosystem or trust requirements.
 Name the next useful action so the user can start normal work. Explain how
 future `jouet test` runs build timing history and how `jouet wind` can turn

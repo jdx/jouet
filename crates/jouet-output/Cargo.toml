@@ -1,6 +1,6 @@
 [package]
 name = "jouet-output"
-version = "0.0.1"
+version = "0.0.2"
 description = "The exit codes, display modes and output conventions jouet's commands share"
 keywords = ["agents", "cli"]
 categories = ["command-line-interface"]

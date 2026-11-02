@@ -1,6 +1,6 @@
 [package]
 name = "jouet-edit"
-version = "0.0.1"
+version = "0.0.2"
 description = "The exact, all-or-nothing edit engine behind jouet edit"
 keywords = ["agents", "edit", "patch"]
 categories = ["development-tools", "text-processing"]

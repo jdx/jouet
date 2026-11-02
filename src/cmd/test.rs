@@ -255,6 +255,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
+    // What each failed suite's runner said when it refused its arguments
+    // and ran no test.
+    let mut misused: Vec<Option<String>> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
     let sequences = crate::settings::Settings::load().cost.sequences;
@@ -312,6 +315,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             }
             if code != 0 {
                 environment.push(testlog::environment_cause(&output, &formats));
+                misused.push(testlog::usage_error(&output, &formats));
             }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
@@ -347,6 +351,18 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let blamed = (!environment.is_empty() && environment.iter().all(Option::is_some))
         .then(|| environment.iter().flatten().next().cloned())
         .flatten();
+    // Every failed suite only refused its arguments: no test ran, so none
+    // failed, and the run is not recorded as a failed test run.
+    let misuse = (!misused.is_empty() && misused.iter().all(Option::is_some))
+        .then(|| misused.iter().flatten().next().cloned())
+        .flatten();
+    if let Some(line) = &misuse
+        && !out.json
+    {
+        emit(&format!(
+            "usage: the runner refused its arguments and ran no test (`{line}`); not counted as a failed test run\n"
+        ));
+    }
     if let Some(line) = &blamed
         && !out.json
     {
@@ -415,14 +431,26 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     report.ok = exit == Exit::Ok;
     // Kept by the run itself, since a pipe hides its exit status from the
     // hooks.
-    if runs {
+    if runs && misuse.is_none() {
         crate::cost::record(&cwd, &timed);
+        // A `--cmd` run that may have tested something, which counts even
+        // when no rule knows its command: not one whose runner said it ran
+        // no test, nor one that only listed, explained or formatted.
+        let ran_tests = args.cmd
+            && !args.extra.iter().any(|w| NOT_A_TEST.contains(&w.as_str()))
+            && report
+                .suites
+                .iter()
+                .any(|suite| suite.digest.as_ref().is_some_and(|d| !d.no_tests));
         super::hook::record_own_run(
             &cwd,
             &own_command(),
             i32::from(exit.code()),
             blamed.as_deref(),
+            ran_tests,
         );
+    }
+    if runs {
         super::hook::mark_own_run(&cwd, &own_command(), false);
     }
     if out.json {
@@ -461,6 +489,24 @@ fn with_baseline() -> String {
     words.insert(at, "--baseline".into());
     format!("jouet {}", command_line(&words))
 }
+
+/// Options and subcommands that list, explain or format rather than test,
+/// as the `checks` rule reads them.
+const NOT_A_TEST: &[&str] = &[
+    "--help",
+    "-h",
+    "--version",
+    "-V",
+    "--list",
+    "--collect-only",
+    "--co",
+    "--listTests",
+    "--list-tests",
+    "fmt",
+    "format",
+    "--write",
+    "--fix",
+];
 
 fn own_command() -> String {
     let words: Vec<String> = std::env::args().skip(1).collect();

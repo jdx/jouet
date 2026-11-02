@@ -207,6 +207,9 @@ regexes! {
     // `ERROR ...` or TAP's `not ok`. Upper case only, and not a word that
     // merely starts with one (`FAIL_TO_PASS`).
     FAILURE_MARK = r"^\s*(FAIL|FAILED|ERROR)(:|\s)|^\s*not ok\b";
+    // A runner refusing its own arguments, before it runs anything; argparse
+    // and pytest name the program, and a subcommand, first.
+    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -419,6 +422,21 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
             }
         })
         .collect()
+}
+
+/// The line where a runner refused its own arguments, when the run ran no
+/// test: clap's `error: unexpected argument`, argparse's `error:
+/// unrecognized arguments`, Go's `flag provided but not defined`. Such a
+/// run never tested anything, so it is no failed test.
+pub(crate) fn usage_error(text: &str, formats: &[Format]) -> Option<String> {
+    let digest = digest_with(text, true, 0, formats);
+    if digest.passed + digest.failed > 0 {
+        return None;
+    }
+    clean(text)
+        .into_iter()
+        .find(|l| USAGE.is_match(l))
+        .map(|l| l.trim().chars().take(120).collect())
 }
 
 /// [`digest_with`] jouet's own formats alone.

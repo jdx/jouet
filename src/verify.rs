@@ -113,7 +113,9 @@ impl Run {
         }
         // Selections leave out the runner, which these two read words by.
         if same_runner(&self.command, &failed.command)
-            && (without_names(ran, wanted) || wider_filter(&failed.command, ran, wanted))
+            && (without_names(ran, wanted)
+                || wider_filter(&failed.command, ran, wanted)
+                || without_name_filter(ran, wanted))
         {
             return true;
         }
@@ -156,6 +158,37 @@ fn without_names(ran: &str, wanted: &str) -> bool {
         && wanted.starts_with(&ran)
         && !ran.last().is_some_and(option)
         && !wanted[ran.len()..].iter().any(option)
+}
+
+/// Options that only narrow a run to the tests whose names match: bats'
+/// `-f`, jest's and vitest's `-t`, go's `-run`. Not pytest's `-k`, whose
+/// `not x` runs more than `x` would.
+const NAME_FILTERS: &[&str] = &["-f", "--filter", "-t", "--testNamePattern", "-run"];
+
+/// Whether `wanted` is `ran` with a name filter after it (`bats t.bats -f
+/// name`): the whole of `ran` covers what the filter picked from it. The
+/// name may be several words, since the recorded command lost its quotes,
+/// but none may be another file or package (`./pkg`, or a word with the
+/// extension of a file `ran` named), which `ran` did not run.
+fn without_name_filter(ran: &str, wanted: &str) -> bool {
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let extensions: Vec<&str> = ran
+        .iter()
+        .filter_map(|w| Path::new(w).extension()?.to_str())
+        .collect();
+    let a_path = |w: &&str| {
+        w.starts_with("./")
+            || Path::new(w)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| extensions.contains(&e))
+    };
+    !ran.is_empty()
+        && wanted.len() > ran.len() + 1
+        && wanted.starts_with(&ran)
+        && NAME_FILTERS.contains(&wanted[ran.len()])
+        && !wanted[ran.len() + 1..].iter().any(a_path)
 }
 
 /// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
@@ -1616,6 +1649,37 @@ mod tests {
             "mise run test:e2e test_ab",
             "test:e2e test_a",
             "test:e2e test_ab"
+        ));
+    }
+
+    #[test]
+    fn a_run_without_a_name_filter_covers_the_filtered_one() {
+        assert!(without_name_filter(
+            "bats test/hook.bats",
+            "bats test/hook.bats -f jouet commit"
+        ));
+        assert!(without_name_filter(
+            "go test ./pkg",
+            "go test ./pkg -run TestA"
+        ));
+        assert!(without_name_filter(
+            "npx vitest run a.test.ts",
+            "npx vitest run a.test.ts -t adds"
+        ));
+        assert!(!without_name_filter(
+            "pytest t.py",
+            "pytest t.py -k not slow"
+        ));
+        assert!(!without_name_filter("bats a.bats", "bats b.bats -f x"));
+        assert!(!without_name_filter("bats a.bats", "bats a.bats -f"));
+        // A file or package after the name is one `ran` did not run.
+        assert!(!without_name_filter(
+            "bats a.bats",
+            "bats a.bats -f x b.bats"
+        ));
+        assert!(!without_name_filter(
+            "go test ./pkg",
+            "go test ./pkg -run TestA ./other"
         ));
     }
 

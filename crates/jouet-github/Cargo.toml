@@ -1,6 +1,6 @@
 [package]
 name = "jouet-github"
-version = "0.0.1"
+version = "0.0.2"
 description = "jouet's GitHub, GitLab and Forgejo clients and the pull request model behind its pr and wait commands"
 keywords = ["agents", "github", "gitlab", "forgejo"]
 categories = ["development-tools"]

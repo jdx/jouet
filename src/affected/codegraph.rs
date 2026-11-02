@@ -181,7 +181,11 @@ impl Adapter for Graph {
                     .map(|p| p.to_string_lossy().replace('\\', "/"))
                     .collect(),
             })
-            .filter(|t| project.inside(&t.path).is_some() && self.traces(&t.path))
+            .filter(|t| {
+                project.inside(&t.path).is_some()
+                    && self.traces(&t.path)
+                    && (self.runner != Runner::Go || t.path.ends_with("_test.go"))
+            })
             .collect();
         let mut argv: Vec<String> = match self.runner {
             Runner::Go => {

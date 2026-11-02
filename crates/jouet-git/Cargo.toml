@@ -1,6 +1,6 @@
 [package]
 name = "jouet-git"
-version = "0.0.1"
+version = "0.0.2"
 description = "The git recipes behind jouet commit, review-package, handoff and pickup"
 keywords = ["agents", "git", "commit", "review"]
 categories = ["development-tools"]

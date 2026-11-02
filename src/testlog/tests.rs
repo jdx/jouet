@@ -656,6 +656,39 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         ),
         None
     );
+    // A runner that refused its arguments ran no test.
+    assert!(
+        usage_error(
+            "error: unexpected argument 'guide' found\n\nUsage: cargo test [OPTIONS] [TESTNAME]\n",
+            &[]
+        )
+        .is_some()
+    );
+    assert!(usage_error("flag provided but not defined: -nope\n", &[]).is_some());
+    // argparse and pytest name the program first.
+    for line in [
+        "usage: pytest [options] [file_or_dir] [file_or_dir] [...]\npytest: error: unrecognized arguments: --nope\n",
+        "usage: agents.py run [-h] --tasks TASKS\nagents.py run: error: the following arguments are required: --tasks\n",
+        "usage: agents.py [-h]\nagents.py: error: argument --rounds: invalid int value: 'x'\n",
+    ] {
+        assert!(usage_error(line, &[]).is_some(), "{line}");
+    }
+    // A compiler's own argument warning is no refusal of the run.
+    assert_eq!(
+        usage_error(
+            "clang: error: argument unused during compilation: '-pthread'\n",
+            &[]
+        ),
+        None
+    );
+    // A run with tests is judged by them, whatever else it printed.
+    assert_eq!(
+        usage_error(
+            "running 1 test\ntest a ... FAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\nerror: unexpected argument\n",
+            &[]
+        ),
+        None
+    );
     // A missing command is most often a binary the change did not build.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# fnox: command not found\n", &[]),

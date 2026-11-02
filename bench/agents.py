@@ -28,7 +28,7 @@ if sys.version_info < (3, 11):
     sys.exit("bench/agents.py needs Python 3.11 or newer (for tomllib)")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jbench import arms, report, runner, tasks  # noqa: E402
+from jbench import arms, init, report, runner, tasks  # noqa: E402
 from jbench.fake_github import FakeGitHub  # noqa: E402
 from jbench.harness import HARNESSES  # noqa: E402
 
@@ -427,6 +427,10 @@ def main(argv: list[str]) -> int:
             cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").expanduser().resolve()
             if in_checkout(cache):
                 print("--tasks-dir requires XDG_CACHE_HOME outside the jouet checkout", file=sys.stderr)
+                return 2
+            init_selected = any(arms.ARMS.get(name) and arms.ARMS[name].init for name in args.arms)
+            if init_selected and in_checkout(init.CACHE.resolve()):
+                print("external tasks require the jouet-init cache outside the jouet checkout", file=sys.stderr)
                 return 2
     return {"run": cmd_run, "report": cmd_report, "check-tasks": cmd_check_tasks}[args.command](args)
 
