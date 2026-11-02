@@ -12,4 +12,5 @@ Counts what the hook ledger recorded (jouet command runs, rule decisions and wha
 - **`--harness <HARNESS>`** — Which harness: claude, codex or all (default all)
 - **`--session <ID>`** — Only one session's ledger entries
 - **`--summary`** — Print one line about what jouet saved, or nothing, for a stop hook. `[stats] summary` in the config file or JOUET_STATS_SUMMARY sets its style: quips (default), plain or off
+- **`--rescan`** — Read the history before setup again instead of reusing the baselines the last run saved
 - **`-h --help`** — Print help

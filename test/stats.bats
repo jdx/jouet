@@ -32,6 +32,21 @@ setup() {
 	[[ -f "$XDG_STATE_HOME/jouet/stats/baselines.json" ]]
 }
 
+@test "saved baselines are reused until --rescan" {
+	run --separate-stderr jouet stats --json --display plain
+	assert_success
+	[[ "$(jq '.scan.files' <<<"$output")" -gt 0 ]]
+
+	run --separate-stderr jouet stats --json --display plain
+	assert_success
+	[[ "$(jq '.scan.files' <<<"$output")" == 0 ]]
+	[[ "$(jq -r '.baselines | map(.harness) | join(",")' <<<"$output")" == claude,codex ]]
+
+	run --separate-stderr jouet stats --json --display plain --rescan
+	assert_success
+	[[ "$(jq '.scan.files' <<<"$output")" -gt 0 ]]
+}
+
 @test "--json keeps measured and estimated apart, empty fields left out" {
 	run --separate-stderr jouet stats --json --display plain
 

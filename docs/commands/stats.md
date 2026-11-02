@@ -29,7 +29,9 @@ A request re-reads the whole context, so a request avoided saves its whole input
 
 Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis, such as "6,450 CI waits before setup, averaging 1.7 requests each at 305k tokens per request". A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
 
-Process-wait estimates need at least 20 linked opportunities in that history. A previously cached baseline that only grouped calls by category cannot support one; run `jouet stats` to rebuild it from the available transcripts. Unlinked or blocking waits are not evidence of avoidable requests.
+The history before setup does not change, so `jouet stats` saves each harness's baseline and reuses it while that harness's first ledger entry and the jouet version stay the same, instead of reading the transcripts again. Reading them takes seconds on a large history. A harness with no ledger entries yet is always read, and `--rescan` reads them again.
+
+Process-wait estimates need at least 20 linked opportunities in that history. A previously cached baseline that only grouped calls by category cannot support one; run `jouet stats --rescan` to rebuild it from the available transcripts. Unlinked or blocking waits are not evidence of avoidable requests.
 
 ## Example
 
