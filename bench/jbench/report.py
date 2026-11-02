@@ -69,7 +69,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 "github_unanswered": sorted(unanswered),
                 "changes": [
                     {"round": r.get("round"), "paths": r["changed_paths"]}
-                    for r in finished if "changed_paths" in r
+                    for r in runs if "changed_paths" in r
                 ],
             }
         if "plain" in by_arm and "jouet" in by_arm:

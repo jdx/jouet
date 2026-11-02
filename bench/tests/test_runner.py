@@ -821,6 +821,8 @@ class ReportTest(unittest.TestCase):
              "success": True, "changed_paths": paths},
             {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 2,
              "success": False, "changed_paths": None},
+            {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 3,
+             "error": "model unavailable", "changed_paths": ["partial.txt"]},
         ]
         summary = report.summarize(records, {})
         text = report.markdown(summary)
@@ -829,6 +831,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn('``["name`with\\nnewline"', text)
         self.assertIn("2 more (full list: runs.jsonl)", text)
         self.assertIn("**jouet changed paths (round 2):** unavailable", text)
+        self.assertIn('**jouet changed paths (round 3):** `["partial.txt"]`', text)
         self.assertEqual(summary["cells"][0]["arms"]["jouet"]["changes"][0]["paths"], paths)
 
     def test_paired_outcomes_exclude_errors_and_unpaired_runs(self):
