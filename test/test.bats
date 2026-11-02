@@ -668,6 +668,7 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
 	assert_failure 1
 	assert_output --partial 'without naming a failing test, so the failures could not be compared'
+	assert_output --partial 'it is not known whether they are the same'
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
 
 	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command

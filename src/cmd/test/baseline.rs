@@ -359,7 +359,7 @@ pub(super) fn compare(
             known::Outcome::Failed { .. } if now.is_none() => {
                 return Err(NotCompared {
                     message: format!(
-                        "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it remains unresolved",
+                        "the command also failed at {}, but the current failure could not be named, so the failures cannot be compared; it is not known whether they are the same and the failure remains unresolved",
                         base.name
                     ),
                     unverifiable: true,
@@ -370,7 +370,7 @@ pub(super) fn compare(
                 let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
                 return Err(NotCompared {
                     message: format!(
-                        "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared{log}",
+                        "the run at {} failed (exit {exit}) without naming a failing test, so the failures could not be compared; it is not known whether they are the same{log}",
                         base.name
                     ),
                     unverifiable: true,
