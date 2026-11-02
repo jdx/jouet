@@ -469,6 +469,23 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
     ] {
         assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
     }
+    // pytest with -k deselecting every test, and quiet output.
+    for said in [
+        "======= 5 deselected in 0.01s =======",
+        "5 deselected in 0.01s",
+        "no tests ran in 0.01s",
+    ] {
+        assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
+    }
+    // Some passed, some deselected: a run.
+    assert!(
+        !digest(
+            "== 2 passed, 3 deselected in 0.02s ==",
+            false,
+            DEFAULT_BUDGET
+        )
+        .no_tests
+    );
     // Go package by package: empty only when every package ran none.
     let go_empty = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.003s [no tests to run]\n";
     assert!(digest(go_empty, false, DEFAULT_BUDGET).no_tests);
