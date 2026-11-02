@@ -104,7 +104,7 @@ class Task:
 
     def agent_env(self, env: dict[str, str], bin_dir: Path, workdir: Path) -> None:
         """Adds the task's tools, variables and PATH entries to a run's environment."""
-        from .arms import resolve
+        from .arms import resolve, wrapper
 
         for name, target in self.tools.items():
             link = bin_dir / name
@@ -114,9 +114,9 @@ class Task:
                 found = resolve(target)
                 if found is None:
                     raise RuntimeError(f"task {self.name} needs {target}, which is not on PATH")
-                link.symlink_to(found)
+                wrapper(link, found, {})
             else:
-                link.symlink_to(expand(target, workdir))
+                wrapper(link, Path(expand(target, workdir)), {})
         env.update({k: expand(v, workdir) for k, v in self.env.items()})
         if self.path:
             env["PATH"] = os.pathsep.join([env["PATH"], *(expand(p, workdir) for p in self.path)])
