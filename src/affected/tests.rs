@@ -148,6 +148,57 @@ fn go_selection_ignores_fixture_sources_but_keeps_actual_tests_in_testdata() {
 }
 
 #[test]
+fn go_selection_falls_back_when_an_unchanged_test_cannot_be_parsed() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.26\n",
+    );
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 1 }\n",
+    );
+    write(
+        &root.join("lib/lib_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = *new(Value()) }\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 2 }\n",
+    );
+
+    let plan = plan_in(root).unwrap();
+    let [suite] = plan.suites.as_slice() else {
+        panic!("one suite")
+    };
+    assert_eq!(
+        suite.command.as_deref(),
+        Some(["go".into(), "test".into(), "./...".into()].as_slice())
+    );
+    assert!(suite.note.as_deref().unwrap().contains("lib/lib_test.go"));
+    assert!(suite.note.as_deref().unwrap().contains("whole suite"));
+
+    write(
+        &root.join("lib/lib_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = Value() }\n",
+    );
+    let plan = plan_in(root).unwrap();
+    let [suite] = plan.suites.as_slice() else {
+        panic!("one suite")
+    };
+    assert_eq!(suite.note, None);
+    assert_eq!(
+        suite.command.as_deref(),
+        Some(["go".into(), "test".into(), "./lib".into()].as_slice())
+    );
+}
+
+#[test]
 fn a_changed_module_selects_the_tests_that_import_it_directly_or_not() {
     let dir = repo("pytest", "");
     let root = dir.path();
