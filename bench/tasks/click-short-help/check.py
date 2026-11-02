@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import expect, finish, new_commit  # noqa: E402
+from _check import dirty, expect, finish, new_commit  # noqa: E402
 
 # Test the public Command API without replacing the agent's tests.
 program = r'''
@@ -29,5 +29,6 @@ assert click.Command("example", help="Long text", short_help="Exact.").get_short
 run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
                      env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60)
 expect(run.returncode == 0, f"short-help cases failed:\n{run.stdout}\n{run.stderr}")
-print(f"committed: {new_commit()}")
+expect(new_commit(), "nothing was committed")
+expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
 finish()
