@@ -651,18 +651,47 @@ fn contains_word(text: &str, word: &str) -> bool {
 
 /// The project's mise task whose script runs `program`, a test task first:
 /// a program that is not on PATH, such as `bats` in fnox, the project
-/// installs and runs through its own task.
+/// installs and runs through its own task. A command of the script must be
+/// the program, past wrappers (`mise x -- bats`), not merely name it
+/// (`echo bats`); a file task's script is read, never run, and a global
+/// task is not the project's.
 fn task_running(dir: &Path, program: &str) -> Option<String> {
-    let runs = |t: &crate::wind::tasks::Existing| {
-        t.run.iter().any(|line| {
-            line.split_whitespace()
-                .any(|w| Path::new(w).file_name().is_some_and(|n| n == program))
-        })
+    let args = ["tasks", "ls", "--json"].map(String::from);
+    let serde_json::Value::Array(tasks) = crate::mise::json(dir, &args).ok()? else {
+        return None;
     };
-    let tasks = crate::mise::tasks(dir).ok()?;
-    let mut found: Vec<&crate::wind::tasks::Existing> = tasks.iter().filter(|t| runs(t)).collect();
-    found.sort_by_key(|t| (!t.name.starts_with("test"), t.name.len()));
-    found.first().map(|t| t.name.clone())
+    let runs = |script: &str| {
+        let parsed = jouet_rules::shell::parse(script);
+        let inner = parsed.inner_scripts();
+        parsed
+            .all()
+            .into_iter()
+            .chain(inner.iter().flat_map(|s| s.all()))
+            .any(|c| c.program() == Some(program))
+    };
+    let mut found: Vec<&str> = tasks
+        .iter()
+        .filter(|t| t.get("global").and_then(serde_json::Value::as_bool) != Some(true))
+        .filter(|t| {
+            let mut scripts: Vec<String> = match t.get("run") {
+                Some(serde_json::Value::Array(lines)) => lines
+                    .iter()
+                    .filter_map(|l| l.as_str().map(String::from))
+                    .collect(),
+                Some(serde_json::Value::String(line)) => vec![line.clone()],
+                _ => Vec::new(),
+            };
+            if let Some(file) = t.get("file").and_then(serde_json::Value::as_str)
+                && let Ok(text) = std::fs::read_to_string(file)
+            {
+                scripts.push(text);
+            }
+            scripts.iter().any(|s| runs(s))
+        })
+        .filter_map(|t| t.get("name").and_then(serde_json::Value::as_str))
+        .collect();
+    found.sort_by_key(|name| (!name.starts_with("test"), name.len()));
+    found.first().map(|name| (*name).to_string())
 }
 
 /// Copies what the child writes to its log onto stdout until it exits.

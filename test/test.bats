@@ -1345,4 +1345,14 @@ SH
 	assert_failure
 	assert_output --partial 'running frob: No such file or directory'
 	assert_output --regexp '.mise run test:frob. runs it in this project'
+	# A file task's script counts, and a script that only names the program
+	# does not run it.
+	mkdir -p mise-tasks/test
+	printf '#!/bin/sh\nzork --all\n' >mise-tasks/test/zork
+	chmod +x mise-tasks/test/zork
+	printf '[tasks.say]\nrun = "echo quux"\n' >>mise.toml
+	MISE_TRUSTED_CONFIG_PATHS="$PWD" run jouet test --cmd -- zork
+	assert_output --regexp '.mise run test:zork. runs it in this project'
+	MISE_TRUSTED_CONFIG_PATHS="$PWD" run jouet test --cmd -- quux
+	refute_output --partial 'mise run'
 }
