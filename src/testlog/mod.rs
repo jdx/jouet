@@ -653,9 +653,25 @@ fn jest(lines: &[String], out: &mut Parsed) {
 }
 
 fn vitest(lines: &[String], out: &mut Parsed) {
+    // Files that failed to load are listed one after another, and the error
+    // they share follows the last of them: the first gets it, so a digest
+    // shows it once, ahead of the other files' names.
+    let mut sharing: Option<usize> = None;
     for (i, line) in lines.iter().enumerate() {
         if let Some(c) = VITEST_HEAD.captures(line) {
-            out.push(i, &c[1], until(lines, i + 1, &VITEST_END));
+            let block = until(lines, i + 1, &VITEST_END);
+            let next = lines[i + 1..].iter().find(|l| !l.trim().is_empty());
+            if block.iter().all(|l| l.trim().is_empty())
+                && next.is_some_and(|l| VITEST_HEAD.is_match(l))
+            {
+                sharing.get_or_insert(out.found.len());
+                out.push(i, &c[1], Vec::new());
+            } else if let Some(first) = sharing.take() {
+                out.push(i, &c[1], Vec::new());
+                out.found[first].lines = block;
+            } else {
+                out.push(i, &c[1], block);
+            }
         } else if let Some(c) = VITEST_TESTS.captures(line) {
             out.count_words(&c[1]);
         }
