@@ -231,7 +231,7 @@ def isolated_setup(task: Task, env: dict[str, str], workdir: Path, log: Path) ->
         before = setup_checkout_state(workdir)
         with log.open("a") as output:
             for args in task.isolated_setup:
-                command = [expand(arg, workdir) for arg in args]
+                command = [expand(arg, workdir).replace("{taskdir}", str(task.dir.resolve())) for arg in args]
                 proc = subprocess.run(command, cwd=workdir, env=env, stdout=output, stderr=subprocess.STDOUT,
                                       timeout=600)
                 if proc.returncode:

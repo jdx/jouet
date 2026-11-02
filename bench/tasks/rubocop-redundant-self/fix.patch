@@ -1,0 +1,69 @@
+diff --git a/changelog/fix_false_positives_in_style_redundant_self_with_a_splat_in_multiple_assignment_20261024215147.md b/changelog/fix_false_positives_in_style_redundant_self_with_a_splat_in_multiple_assignment_20261024215147.md
+new file mode 100644
+index 000000000..48e28c22b
+--- /dev/null
++++ b/changelog/fix_false_positives_in_style_redundant_self_with_a_splat_in_multiple_assignment_20261024215147.md
+@@ -0,0 +1 @@
++* [#16149](https://github.com/rubocop/rubocop/issues/16149): Fix false positives in `Style/RedundantSelf` with a splat in multiple assignment. ([@koic][])
+diff --git a/lib/rubocop/cop/style/redundant_self.rb b/lib/rubocop/cop/style/redundant_self.rb
+index 50648f026..cecadb1ef 100644
+--- a/lib/rubocop/cop/style/redundant_self.rb
++++ b/lib/rubocop/cop/style/redundant_self.rb
+@@ -115,7 +115,7 @@ module RuboCop
+ 
+         def on_send(node)
+           return unless node.self_receiver? && regular_method_call?(node)
+-          return if node.parent&.mlhs_type?
++          return if multiple_assignment_target?(node)
+           return if allowed_send_node?(node)
+           return if it_method_in_block?(node)
+ 
+@@ -154,6 +154,14 @@ module RuboCop
+           end
+         end
+ 
++        def multiple_assignment_target?(node)
++          return false unless (parent = node.parent)
++
++          parent = parent.parent if parent.splat_type?
++
++          parent.mlhs_type?
++        end
++
+         def allowed_send_node?(node)
+           @allowed_send_nodes.include?(node) ||
+             @local_variables_scopes[node].include?(node.method_name) ||
+diff --git a/spec/rubocop/cop/style/redundant_self_spec.rb b/spec/rubocop/cop/style/redundant_self_spec.rb
+index 80405e0da..151f3c169 100644
+--- a/spec/rubocop/cop/style/redundant_self_spec.rb
++++ b/spec/rubocop/cop/style/redundant_self_spec.rb
+@@ -124,6 +124,29 @@ RSpec.describe RuboCop::Cop::Style::RedundantSelf, :config do
+     expect_no_offenses('a, self.b = c, d')
+   end
+ 
++  it 'accepts a self receiver on a splat lvalue of a parallel assignment' do
++    expect_no_offenses('self.a, *self.b = c')
++  end
++
++  it 'accepts a self receiver on a leading splat lvalue of a parallel assignment' do
++    expect_no_offenses('*self.a, self.b = c')
++  end
++
++  it 'accepts a self receiver on a splat lvalue of a nested parallel assignment' do
++    expect_no_offenses('a, (self.b, *self.c) = d')
++  end
++
++  it 'registers an offense for a self receiver in a splat on the right-hand side of a parallel assignment' do
++    expect_offense(<<~RUBY)
++      a, b = *self.c
++              ^^^^ Redundant `self` detected.
++    RUBY
++
++    expect_correction(<<~RUBY)
++      a, b = *c
++    RUBY
++  end
++
+   it 'accepts a self receiver on an lvalue of an or-assignment' do
+     expect_no_offenses('self.logger ||= Rails.logger')
+   end
