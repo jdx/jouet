@@ -491,19 +491,32 @@ class TasksTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "exited 1"):
                 tasks.prepare(failing, root / "failing")
 
-    def test_a_bare_tool_name_links_the_host_program(self):
+    def test_a_task_tool_runs_from_its_original_installation(self):
         import dataclasses
+        import os
+        import subprocess
+        from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as d:
-            bin_dir = Path(d) / "bin"
+            root = Path(d)
+            bin_dir = root / "bin"
             bin_dir.mkdir()
-            task = dataclasses.replace(tasks.load("smoke"), tools={"git": "git"})
-            env = {"PATH": str(bin_dir)}
-            task.agent_env(env, bin_dir, Path(d))
-            self.assertEqual((bin_dir / "git").resolve(), arms.resolve("git"))
+            source = root / "install"
+            source.mkdir()
+            (source / "marker").write_text("original installation\n")
+            tool = source / "tool"
+            tool.write_text('#!/bin/sh\ncat "$(dirname "$0")/marker"\nprintf "%s\\n" "$1"\n')
+            tool.chmod(0o755)
+            task = dataclasses.replace(tasks.load("smoke"), tools={"tool": "tool"})
+            env = {"PATH": os.pathsep.join((str(bin_dir), os.defpath))}
+            with patch.dict(os.environ, {"PATH": os.pathsep.join((str(source), os.defpath))}):
+                task.agent_env(env, bin_dir, root)
+            result = subprocess.run([str(bin_dir / "tool"), "an argument"], env=env,
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, "original installation\nan argument\n")
             missing = dataclasses.replace(task, tools={"nope": "no-such-program-here"})
             with self.assertRaisesRegex(RuntimeError, "no-such-program-here"):
-                missing.agent_env(env, bin_dir, Path(d))
+                missing.agent_env(env, bin_dir, root)
 
     def test_every_task_loads(self):
         names = tasks.all_names()
