@@ -83,7 +83,7 @@ decide what to adopt. A drafted rule only warns until it is promoted
 proposes retiring rules that aren't helping.
 
 [`jouet stats`](https://jouet.jdx.dev/commands/stats) estimates the tokens
-jouet saved, against your own history. Those are estimates, not benchmark
+jouet saved and the tokens it cost, and the net, against your own history. Those are estimates, not benchmark
 results; the [comparative benchmarks](https://jouet.jdx.dev/benchmarks) are
 still being built.
 

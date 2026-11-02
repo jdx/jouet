@@ -1,15 +1,18 @@
-//! What jouet saved: counted from the hook ledger, and estimated against the
-//! user's own history from before `jouet setup`.
+//! What jouet saved and what it cost: counted from the hook ledger, and
+//! estimated against the user's own history from before `jouet setup`.
 //!
 //! The two are kept apart. [`measure`] counts what the ledger recorded: jouet
 //! command runs, rule decisions and what the agent did after a denial,
 //! checks, and failure excerpts. [`baseline`] reads an audit of the history
-//! before the ledger began, and [`estimate`] prices each jouet run by it,
-//! showing its basis, or refusing when the history is too thin.
+//! before the ledger began, [`estimate`] prices each jouet run by it, and
+//! [`costs`] prices what jouet added the same way, each showing its basis or
+//! refusing when the history is too thin. [`net`] is the one less the other.
 
+mod costs;
 mod ledger;
 mod summary;
 
+pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};
 
@@ -66,6 +69,53 @@ pub struct Measured {
     /// failed step's excerpt instead of the whole log.
     #[serde(skip_serializing_if = "is_zero")]
     pub failure_excerpts: u64,
+    /// What jouet itself made the agent do again, per harness: the costs
+    /// [`costs`] prices.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub overhead: Vec<Overhead>,
+}
+
+/// One harness's requests jouet added, as the ledger recorded them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Overhead {
+    pub harness: String,
+    /// Sessions stopped from finishing after a failed check.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stop_blocks: u64,
+    /// Calls a rule denied.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub denials: u64,
+    /// Calls a rule warned about.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub warnings: u64,
+    /// Command lines that ran jouet and failed, other than `jouet edit` (see
+    /// [`Kind::Edit`]) and a check's answer (see [`is_answer`]).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub failed_runs: u64,
+}
+
+/// The commands whose exit code 1 (or `pr next`'s 10 and 20, or a timeout's
+/// 124) is the answer to what they checked, not a failure of jouet: a test
+/// that fails fails without jouet too.
+const ANSWERS: &[&str] = &[
+    "jouet test",
+    "jouet wait",
+    "jouet ci",
+    "jouet secrets",
+    "jouet pr status",
+    "jouet pr next",
+    "jouet http",
+];
+
+/// Whether a command line that ran `commands` and exited with `code` only
+/// reported a check's answer.
+fn is_answer(commands: &[String], code: i32) -> bool {
+    matches!(code, 1 | 10 | 20 | 124)
+        && commands.iter().any(|c| {
+            ANSWERS
+                .iter()
+                .any(|a| c == a || c.starts_with(&format!("{a} ")))
+        })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,6 +194,7 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut commands: BTreeMap<(String, String), CommandRuns> = BTreeMap::new();
     let mut rules: BTreeMap<String, RuleCounts> = BTreeMap::new();
     let mut checks: BTreeMap<String, CheckRuns> = BTreeMap::new();
+    let mut overhead: BTreeMap<String, Overhead> = BTreeMap::new();
     // The next pre-tool-use entry of each session, for "what came next".
     let mut by_session: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
     for (i, e) in kept.iter().enumerate() {
@@ -151,12 +202,27 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         if e.event == "pre-tool-use" {
             by_session.entry(e.session.as_deref()).or_default().push(i);
         }
+        let added = overhead
+            .entry(e.harness.clone())
+            .or_insert_with(|| Overhead {
+                harness: e.harness.clone(),
+                ..Overhead::default()
+            });
         for d in &e.decisions {
             match d.action.as_str() {
-                "deny" => rule_counts(&mut rules, &d.rule).denies += 1,
-                "warn" => rule_counts(&mut rules, &d.rule).warns += 1,
+                "deny" => {
+                    rule_counts(&mut rules, &d.rule).denies += 1;
+                    added.denials += 1;
+                }
+                "warn" => {
+                    rule_counts(&mut rules, &d.rule).warns += 1;
+                    added.warnings += 1;
+                }
                 "override" => rule_counts(&mut rules, &d.rule).overrides += 1,
-                "block" if d.rule == "verify" => m.verify_blocks += 1,
+                "block" if d.rule == "verify" => {
+                    m.verify_blocks += 1;
+                    added.stop_blocks += 1;
+                }
                 action => {
                     if let Some(kind) = action.strip_prefix("record:") {
                         let c = checks.entry(kind.to_string()).or_insert_with(|| CheckRuns {
@@ -173,8 +239,21 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         if e.event != "post-tool-use" {
             continue;
         }
-        for command in e.shape.as_deref().map(jouet_commands).unwrap_or_default() {
-            let failed = e.exit_code.is_some_and(|x| x != 0);
+        let ran = e.shape.as_deref().map(jouet_commands).unwrap_or_default();
+        if let Some(code) = e.exit_code.filter(|&x| x != 0)
+            && ran.iter().any(|c| Kind::of(c) != Some(Kind::Edit))
+            && !is_answer(&ran, code)
+        {
+            added.failed_runs += 1;
+        }
+        // A line that ran a check and exited with its answer failed on the
+        // check, not on the jouet commands around it: `jouet edit ... &&
+        // jouet test` exiting 1 is a failing test, not a failed edit.
+        let code = e.exit_code.unwrap_or(0);
+        let answered = code != 0 && is_answer(&ran, code);
+        for command in ran {
+            let failed =
+                code != 0 && (!answered || is_answer(std::slice::from_ref(&command), code));
             if failed && (command == "jouet wait ci" || command == "jouet wait run") {
                 m.failure_excerpts += 1;
             }
@@ -221,6 +300,15 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             .then(a.rule.cmp(&b.rule))
     });
     m.checks = checks.into_values().collect();
+    m.overhead = overhead
+        .into_values()
+        .filter(|o| {
+            *o != Overhead {
+                harness: o.harness.clone(),
+                ..Overhead::default()
+            }
+        })
+        .collect();
     m
 }
 
@@ -330,8 +418,19 @@ pub struct Baseline {
     pub sessions: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub requests_with_tokens: u64,
+    /// Their input tokens: with `requests_with_tokens`, the price of the
+    /// average request, which [`costs`] charges for each one jouet added.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub input_tokens: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kinds: Vec<KindBaseline>,
+}
+
+impl Baseline {
+    /// The average request's input tokens before setup.
+    pub fn tokens_per_request(&self) -> f64 {
+        ratio(self.input_tokens, self.requests_with_tokens)
+    }
 }
 
 /// How one kind of work went before setup.
@@ -379,6 +478,7 @@ pub fn baseline(report: &HarnessReport, until: Option<u64>) -> Baseline {
         until,
         sessions: report.totals.sessions,
         requests_with_tokens: report.totals.requests_with_tokens,
+        input_tokens: report.totals.input_tokens,
         kinds: Kind::ALL
             .into_iter()
             .filter_map(|kind| {
@@ -441,19 +541,24 @@ pub struct Estimate {
     pub refused: Option<String>,
 }
 
-/// Prices the measured jouet runs by each harness's own history. A run that
-/// replaces a run of requests saves the requests after the first, at that
-/// harness's average context. An edit saves the retry a failed edit cost,
-/// at the old failure rate.
+/// Prices the measured jouet runs by each harness's own history: what they
+/// would have cost at the rates from before setup, which is an assumption,
+/// not a measurement. A run that replaces a run of requests saves the
+/// requests after the first, at that harness's average context. An edit
+/// saves the retries by which the old failure rate exceeds `jouet edit`'s
+/// own; when `jouet edit` failed as often or more, it saves nothing and
+/// [`costs`] charges the difference.
 pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
-    let mut runs: BTreeMap<(String, Kind), u64> = BTreeMap::new();
+    let mut runs: BTreeMap<(String, Kind), (u64, u64)> = BTreeMap::new();
     for c in &measured.commands {
         if let Some(kind) = Kind::of(&c.command) {
-            *runs.entry((c.harness.clone(), kind)).or_default() += c.runs;
+            let r = runs.entry((c.harness.clone(), kind)).or_default();
+            r.0 += c.runs;
+            r.1 += c.failed;
         }
     }
     runs.into_iter()
-        .map(|((harness, kind), runs)| {
+        .map(|((harness, kind), (runs, failed))| {
             let refuse = |reason: String| Estimate {
                 harness: harness.clone(),
                 kind,
@@ -486,15 +591,29 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
             let k = found.expect("runs were counted from it");
             let per_request = k.tokens_per_request();
             let (tokens, avoided, basis) = if kind == Kind::Edit {
-                let rate = k.failure_rate();
+                let before = k.failure_rate();
+                let after = ratio(failed, runs);
+                let jouet = if failed == 0 {
+                    "jouet edit failed none".to_string()
+                } else {
+                    format!(
+                        "jouet edit failed {:.1}% ({failed} of {})",
+                        after * 100.0,
+                        count_text(runs)
+                    )
+                };
+                let credit = if after < before {
+                    format!("at {} tokens per request", tokens_text(per_request))
+                } else {
+                    "so nothing is credited".to_string()
+                };
                 (
-                    runs as f64 * rate * per_request,
+                    runs as f64 * (before - after).max(0.0) * per_request,
                     None,
                     format!(
-                        "{} before setup, {:.1}% of which failed and were redone, at {} tokens per request",
+                        "{} before setup, {:.1}% of which failed and were redone; {jouet}, {credit}",
                         kind.count(k.calls),
-                        rate * 100.0,
-                        tokens_text(per_request)
+                        before * 100.0,
                     ),
                 )
             } else {
@@ -540,13 +659,26 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
             })
         })
         .collect();
-    estimate(
+    let mut estimates = estimate(
         &Measured {
             commands,
             ..Measured::default()
         },
         baselines,
-    )
+    );
+    // An edit saves only what `jouet edit` fails less often, and nothing
+    // has measured that yet.
+    for e in estimates
+        .iter_mut()
+        .filter(|e| e.kind == Kind::Edit && e.refused.is_none())
+    {
+        e.input_tokens = None;
+        e.basis = String::new();
+        e.refused = Some(
+            "it depends on how often jouet edit fails, which no ledger has measured yet".into(),
+        );
+    }
+    estimates
 }
 
 /// `987` or `12,345`.

@@ -48,6 +48,9 @@ pub struct Filter {
     pub until_ms: Option<i64>,
     /// Only sessions that ran in this directory or below it.
     pub project: Option<PathBuf>,
+    /// Only this session's transcripts, its subagents' included: both
+    /// harnesses put the session ID in the file's path.
+    pub session: Option<String>,
     /// Also read what a session digest needs and an audit does not: the
     /// user's messages, each call's line and target, and the start of each
     /// failure's output.
@@ -70,10 +73,15 @@ impl Filter {
     /// Whether a file last written at `modified_ms` can hold anything recent
     /// enough.
     fn wants(&self, source: &Source) -> bool {
-        match (self.since_ms, source.modified_ms) {
+        let recent = match (self.since_ms, source.modified_ms) {
             (Some(since), Some(modified)) => modified >= since,
             _ => true,
-        }
+        };
+        recent
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|s| source.path.to_string_lossy().contains(s.as_str()))
     }
 }
 
@@ -127,7 +135,8 @@ pub struct ScanStats {
     pub files: u64,
     /// Their size on disk (compressed, for `.zst`).
     pub bytes: u64,
-    /// Files left unread because they were last written before `--since`.
+    /// Files left unread because they were last written before `--since`,
+    /// or belong to another session than [`Filter::session`].
     pub skipped_old: u64,
     /// Files read whose session ran outside `--project`.
     pub other_projects: u64,

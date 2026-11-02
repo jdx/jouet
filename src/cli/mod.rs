@@ -125,7 +125,7 @@ pub(crate) enum Cmd {
     Pickup(PickupArgs),
     /// Show which agent sessions are working where on this machine
     Sessions(SessionsArgs),
-    /// Show what jouet saved: measured from its ledger, estimated from your history
+    /// Show what jouet saved and cost: measured from its ledger, estimated from your history
     Stats(StatsArgs),
     /// Show what builds, tests and lints cost here, from timings kept in git notes
     Cost(CostArgs),

@@ -1,13 +1,15 @@
 ---
-description: See what jouet saved, measured from its hook ledger and estimated against your own history from before setup.
+description: See what jouet saved and what it cost, measured from its hook ledger and estimated against your own history from before setup.
 ---
 
 # jouet stats
 
-`jouet stats` reports what jouet saved. It keeps two kinds of figure apart:
+`jouet stats` reports what jouet saved and what it cost, and the difference. It keeps two kinds of figure apart:
 
 - **Measured** figures are counted from the ledger that `jouet setup`'s hooks write: jouet command runs, rule decisions and what the agent did after a denial, the test, lint and build runs the `checks` rule recorded, sessions stopped from finishing after a failed check, and failing CI logs returned as the failing step's excerpt.
-- **Estimated** figures price those runs by your own Claude Code and Codex history from before setup, read the way [`jouet audit`](/commands/audit) reads it.
+- **Estimated** figures price those runs, and what jouet added, by your own Claude Code and Codex history from before setup, read the way [`jouet audit`](/commands/audit) reads it.
+
+The savings are what the runs would have cost at your rates before setup. That is an assumption, not a measurement: nothing records what an agent would have done without jouet. The costs are closer to measured, since the ledger records each block, denial and failure, but pricing them is an estimate too.
 
 ```text
 jouet stats [--since TIME] [--harness claude|codex|all] [--session ID] [--summary] [--json]
@@ -29,13 +31,32 @@ A request re-reads the whole context, so a request avoided saves its whole input
 
 Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis, such as "6,450 CI waits before setup, averaging 1.7 requests each at 305k tokens per request". A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
 
+`jouet edit` is credited only for failing less often than edits did before setup: its runs times the difference in failure rate, at that history's tokens per request. When it failed as often or more, it is credited nothing, and the extra failures are a cost. Without a ledger nothing has measured how often it fails, so it is not estimated.
+
+## How the costs work
+
+Each cost is priced the way the savings are, at the harness's average request before setup (its input tokens over its requests with token counts, which needs at least 20), and shows its basis:
+
+| Cost | Counted from | Priced as |
+|---|---|---|
+| finishing blocked after a failed check | `verify` blocks in the ledger | one more request each |
+| calls a rule denied | denials in the ledger | one more request each, for the call again or another |
+| failed jouet runs | command lines that ran jouet and exited non-zero | one more request each |
+| `jouet edit` failures beyond the rate before setup | `jouet edit` runs and failures in the ledger, against edits before setup | one more request for each failure past the old rate |
+| requests carrying the session-start primer | every request in your history after setup, read each time | the [primer](/setup#the-session-start-primer)'s size, at four characters a token, on every request |
+| rule warnings | warnings in the ledger | not priced: a warning adds no request, but its text stays in the context |
+
+"One more request" is a floor: an agent may spend several recovering. A failed run whose exit code is a check's answer is not a cost, since it fails without jouet too: exit 1 (or 124, or `pr next`'s 10 and 20) from `jouet test`, `wait`, `ci`, `secrets`, `http`, `pr status` or `pr next`. When such a line also ran another jouet command, as in `jouet edit replace ... && jouet test`, the failure is the check's. `jouet edit`'s failures are counted against the old rate instead, in their own line. The primer's requests include subagents', which may not read it, so that line can count high; its notes, such as the slow checks, are left out of its size.
+
+The net is the savings less the costs, and may be negative. When a cost cannot be priced, for want of a history before setup or after it, there is no net rather than one that leaves the cost out. A saving that cannot be estimated counts as nothing.
+
 The history before setup does not change, so `jouet stats` saves each harness's baseline and reuses it while that harness's first ledger entry and the jouet version stay the same, instead of reading the transcripts again. Reading them takes seconds on a large history. A harness with no ledger entries yet is always read, and `--rescan` reads them again.
 
 Process-wait estimates need at least 20 linked opportunities in that history. A previously cached baseline that only grouped calls by category cannot support one; run `jouet stats --rescan` to rebuild it from the available transcripts. Unlinked or blocking waits are not evidence of avoidable requests.
 
 ## Example
 
-From the fixture ledger in jouet's tests, whose history before setup is far too thin to estimate from:
+From the fixture ledger in jouet's tests, whose history before setup is far too thin to estimate from, so there is no net:
 
 ```console
 $ jouet stats
@@ -57,13 +78,26 @@ measured, from the ledger:
   finishing blocked after a failed check: 1
   failing CI logs returned as the failing step's excerpt: 1
 
-estimated, against your own history before setup:
+estimated savings: what these runs would have cost at your rates before setup (assumed, not measured):
   Claude Code (1 session before 2026-10-31T00:00:00Z):
   - jouet wait ci/run/pr: 1 run, not estimated: only 1 CI wait before setup, and an estimate needs 20
   - jouet pr status: 1 run, not estimated: only 1 PR status check before setup, and an estimate needs 20
   Codex (3 sessions before 2026-10-31T00:06:40Z):
   - jouet pr threads: 1 run, not estimated: only 0 review-thread rounds before setup, and an estimate needs 20
   - jouet edit: 1 run, not estimated: only 1 edit before setup, and an estimate needs 20
+
+estimated costs, priced the same way:
+  Claude Code:
+  - finishing blocked after a failed check: 1, not estimated: only 8 requests with token counts before setup, and a price needs 20
+  - calls a rule denied: 2, not estimated: only 8 requests with token counts before setup, and a price needs 20
+  - requests carrying the session-start primer: 0, about 0 input tokens
+      basis: 0 requests in the history after setup, subagents' included, each reading the primer's ~500 tokens
+  Codex:
+  - rule warnings: 1, not estimated: a warning adds no request, but its text stays in the context that later requests read; not priced
+  - requests carrying the session-start primer: 0, about 0 input tokens
+      basis: 0 requests in the history after setup, subagents' included, each reading the primer's ~505 tokens
+
+estimated savings 0, costs 0: no net, since a cost above could not be priced.
 
 Measured figures come from the ledger; estimates price them by your own history and are not measurements.
 ```
@@ -78,11 +112,19 @@ Without a ledger, `jouet stats` says so and shows what one run of each command w
 jouet[savings]: 3 waits, zero 'is it done yet?'. about 2.4M tokens left unread (estimated).
 ```
 
-`[stats] summary` in `~/.config/jouet/config.toml`, or `JOUET_STATS_SUMMARY`, sets the style: `quips` (the default), `plain` for the same fact stated plainly, or `off` for no line. A value jouet cannot read counts as the default, as with every [setting](/setup#settings), so a typo never breaks a stop hook. The summary reads the baseline the last full `jouet stats` saved under `$XDG_STATE_HOME/jouet/stats`, so it stays fast; until then it leaves estimates out.
+It works out the same net as the report, reading only that session's transcripts after setup with `--session`, and never claims a saving the net does not support. When the net is below a saving it names, the line gives the net and says so ("estimated, net of jouet's costs"). When the costs are larger, the line is about them instead:
+
+```text
+jouet[cost]: jouet cost about 686k more input tokens than it saved (estimated). the helper needed help.
+```
+
+When the net is unknown, the line names no tokens.
+
+`[stats] summary` in `~/.config/jouet/config.toml`, or `JOUET_STATS_SUMMARY`, sets the style: `quips` (the default), `plain` for the same fact stated plainly, or `off` for no line. A value jouet cannot read counts as the default, as with every [setting](/setup#settings), so a typo never breaks a stop hook. The summary reads the baseline the last full `jouet stats` saved under `$XDG_STATE_HOME/jouet/stats`, so it stays fast; until then it leaves estimates out, and names no tokens.
 
 ## JSON
 
-`--json` prints one document: `ledger` (where it is, whether it is there), `measured`, `baselines` (one per harness, with its runs, requests and tokens per kind of work), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens` and `scan`. An estimate that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
+`--json` prints one document: `ledger` (where it is, whether it is there), `measured` (with `overhead`, the per-harness counts the costs come from), `baselines` (one per harness, with its runs, requests and tokens per kind of work, and `input_tokens` over all its requests), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens`, `after_setup` (each harness's `requests` after setup and its `primer_tokens`), `costs` (each with `kind`, `count`, `input_tokens` and `basis`), `estimated_cost_tokens`, `net_input_tokens` (savings less costs, negative when jouet cost more, absent when a cost could not be priced), `scan` (reading the history before setup) and `after_setup_scan`. An estimate or cost that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
 
 ## Exit codes
 

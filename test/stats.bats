@@ -32,6 +32,24 @@ setup() {
 	[[ -f "$XDG_STATE_HOME/jouet/stats/baselines.json" ]]
 }
 
+@test "costs are shown beside savings, and no net is claimed when one cannot be priced" {
+	run --separate-stderr jouet stats --display plain
+
+	assert_success
+	assert_line 'estimated savings: what these runs would have cost at your rates before setup (assumed, not measured):'
+	assert_line 'estimated costs, priced the same way:'
+	assert_line '  - calls a rule denied: 2, not estimated: only 8 requests with token counts before setup, and a price needs 20'
+	assert_line --regexp '^  - requests carrying the session-start primer: 0, about 0 input tokens$'
+	assert_line --partial '  - rule warnings: 1, not estimated: '
+	assert_line 'estimated savings 0, costs 0: no net, since a cost above could not be priced.'
+
+	run --separate-stderr jouet stats --json --display plain
+	assert_success
+	[[ "$(jq -r '[.costs[] | select(.harness == "claude") | .kind] | join(",")' <<<"$output")" == stop_blocks,denials,primer ]]
+	[[ "$(jq -r '.after_setup | map(.harness) | join(",")' <<<"$output")" == claude,codex ]]
+	[[ "$(jq 'has("net_input_tokens")' <<<"$output")" == false ]]
+}
+
 @test "saved baselines are reused until --rescan" {
 	run --separate-stderr jouet stats --json --display plain
 	assert_success

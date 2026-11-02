@@ -1,6 +1,7 @@
-//! The one line a session's stop hook can print about what jouet saved.
+//! The one line a session's stop hook can print about what jouet saved, or
+//! about what it cost when that was more.
 
-use super::{Estimate, Kind, Measured, tokens_text};
+use super::{Cost, Estimate, Kind, Measured, net, tokens_text};
 
 /// How the summary line is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,13 +37,20 @@ struct Candidate {
 
 /// One line about what jouet saved, or `None` when nothing is worth saying
 /// or the style is [`SummaryStyle::Off`]. Every line carries a number the
-/// ledger recorded; estimates say so. Which fact, and which telling of it,
-/// varies from call to call.
-pub fn summary(measured: &Measured, estimates: &[Estimate], style: SummaryStyle) -> Option<String> {
+/// ledger recorded; estimates say so. A line never claims more tokens than
+/// the [`net`] of `estimates` and `costs`: when that is not positive the
+/// line is about the cost instead, and when it is unknown no line names
+/// tokens. Which fact, and which telling of it, varies from call to call.
+pub fn summary(
+    measured: &Measured,
+    estimates: &[Estimate],
+    costs: &[Cost],
+    style: SummaryStyle,
+) -> Option<String> {
     let mut seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos() as usize);
-    summary_choosing(measured, estimates, style, |len| {
+    summary_choosing(measured, estimates, costs, style, |len| {
         seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
         (seed >> 33) % len.max(1)
     })
@@ -51,13 +59,20 @@ pub fn summary(measured: &Measured, estimates: &[Estimate], style: SummaryStyle)
 fn summary_choosing(
     measured: &Measured,
     estimates: &[Estimate],
+    costs: &[Cost],
     style: SummaryStyle,
     mut pick: impl FnMut(usize) -> usize,
 ) -> Option<String> {
     if style == SummaryStyle::Off {
         return None;
     }
-    let mut facts = facts(measured, estimates);
+    let net = net(estimates, costs);
+    let mut facts = match net {
+        Some(n) if n <= 0 && costs.iter().any(|c| c.input_tokens.unwrap_or(0) > 0) => {
+            vec![cost_fact(n.unsigned_abs())]
+        }
+        _ => facts(measured, estimates, net.and_then(|n| u64::try_from(n).ok())),
+    };
     if facts.is_empty() {
         return None;
     }
@@ -71,14 +86,35 @@ fn summary_choosing(
     })
 }
 
-fn facts(measured: &Measured, estimates: &[Estimate]) -> Vec<Candidate> {
+/// jouet cost `more` input tokens than it saved.
+fn cost_fact(more: u64) -> Candidate {
+    let tok = tokens_text(more as f64);
+    Candidate {
+        quips: vec![
+            format!(
+                "jouet[cost]: jouet cost about {tok} more input tokens than it saved (estimated). the helper needed help."
+            ),
+            format!(
+                "jouet[cost]: net of its savings, jouet added about {tok} input tokens (estimated). noted, not celebrated."
+            ),
+        ],
+        plain: format!(
+            "jouet[cost]: jouet's estimated costs exceeded its estimated savings by {tok} input tokens"
+        ),
+    }
+}
+
+/// The facts worth telling, with no token figure above `net`, and none at
+/// all when the net is unknown.
+fn facts(measured: &Measured, estimates: &[Estimate], net: Option<u64>) -> Vec<Candidate> {
     let mut facts = Vec::new();
     let waits: Vec<&Estimate> = estimates
         .iter()
         .filter(|e| matches!(e.kind, Kind::CiWait | Kind::ProcessWait) && e.refused.is_none())
         .collect();
     let n: u64 = waits.iter().map(|e| e.runs).sum();
-    let tokens: u64 = waits.iter().filter_map(|e| e.input_tokens).sum();
+    let saved: u64 = waits.iter().filter_map(|e| e.input_tokens).sum();
+    let tokens = saved.min(net.unwrap_or(0));
     let polls = waits
         .iter()
         .filter_map(|e| e.requests_avoided)
@@ -86,6 +122,12 @@ fn facts(measured: &Measured, estimates: &[Estimate]) -> Vec<Candidate> {
         .round() as u64;
     if n > 0 && tokens >= MIN_WAIT_TOKENS {
         let tok = tokens_text(tokens as f64);
+        // Past the net, the line gives the net instead and says so.
+        let est = if tokens < saved {
+            "estimated, net of jouet's costs"
+        } else {
+            "estimated"
+        };
         let waits = if n == 1 {
             "1 wait".to_string()
         } else {
@@ -93,11 +135,11 @@ fn facts(measured: &Measured, estimates: &[Estimate]) -> Vec<Candidate> {
         };
         facts.push(Candidate {
             quips: vec![
-                format!("jouet[savings]: {waits} instead of about {polls} polls. the context window was not re-read {polls} times (~{tok} tokens, estimated)."),
-                format!("jouet[savings]: {waits}, zero 'is it done yet?'. about {tok} tokens left unread (estimated)."),
-                format!("jouet[savings]: {polls} polls not made. CI did not notice; the context window did (~{tok} tokens, estimated)."),
+                format!("jouet[savings]: {waits} instead of about {polls} polls. the context window was spared a lot of re-reading (~{tok} tokens, {est})."),
+                format!("jouet[savings]: {waits}, zero 'is it done yet?'. about {tok} tokens left unread ({est})."),
+                format!("jouet[savings]: {polls} polls not made. CI did not notice; the context window did (~{tok} tokens, {est})."),
             ],
-            plain: format!("jouet[savings]: {waits} replaced about {polls} polls, an estimated {tok} input tokens"),
+            plain: format!("jouet[savings]: {waits} replaced about {polls} polls, {tok} input tokens ({est})"),
         });
     }
     let steered: u64 = measured.rules.iter().map(|r| r.then_jouet).sum();
@@ -151,7 +193,7 @@ fn facts(measured: &Measured, estimates: &[Estimate]) -> Vec<Candidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::RuleCounts;
+    use crate::stats::{CostKind, RuleCounts};
 
     fn wait(tokens: u64) -> Estimate {
         Estimate {
@@ -165,14 +207,30 @@ mod tests {
         }
     }
 
-    fn lines(measured: &Measured, estimates: &[Estimate], style: SummaryStyle) -> Vec<String> {
+    fn cost(tokens: Option<u64>) -> Cost {
+        Cost {
+            harness: "claude".into(),
+            kind: CostKind::StopBlocks,
+            count: 1,
+            input_tokens: tokens,
+            basis: String::new(),
+            refused: tokens.is_none().then(|| "no claude history".into()),
+        }
+    }
+
+    fn lines(
+        measured: &Measured,
+        estimates: &[Estimate],
+        costs: &[Cost],
+        style: SummaryStyle,
+    ) -> Vec<String> {
         let mut out = Vec::new();
         for fact in 0..4 {
             for variant in 0..3 {
                 let mut picks = [fact, variant].into_iter();
-                if let Some(line) =
-                    summary_choosing(measured, estimates, style, |_| picks.next().unwrap_or(0))
-                {
+                if let Some(line) = summary_choosing(measured, estimates, costs, style, |_| {
+                    picks.next().unwrap_or(0)
+                }) {
                     out.push(line);
                 }
             }
@@ -182,16 +240,8 @@ mod tests {
         out
     }
 
-    #[test]
-    fn nothing_worth_saying_says_nothing() {
-        let m = Measured::default();
-        assert!(lines(&m, &[wait(10)], SummaryStyle::Quips).is_empty());
-        assert!(lines(&m, &[wait(5_000_000)], SummaryStyle::Off).is_empty());
-    }
-
-    #[test]
-    fn every_line_carries_a_recorded_number_and_estimates_say_so() {
-        let m = Measured {
+    fn measured() -> Measured {
+        Measured {
             rules: vec![RuleCounts {
                 rule: "sleep-poll".into(),
                 denies: 2,
@@ -201,8 +251,20 @@ mod tests {
             failure_excerpts: 1,
             verify_blocks: 1,
             ..Measured::default()
-        };
-        let quips = lines(&m, &[wait(2_400_000)], SummaryStyle::Quips);
+        }
+    }
+
+    #[test]
+    fn nothing_worth_saying_says_nothing() {
+        let m = Measured::default();
+        assert!(lines(&m, &[wait(10)], &[], SummaryStyle::Quips).is_empty());
+        assert!(lines(&m, &[wait(5_000_000)], &[], SummaryStyle::Off).is_empty());
+    }
+
+    #[test]
+    fn every_line_carries_a_recorded_number_and_estimates_say_so() {
+        let m = measured();
+        let quips = lines(&m, &[wait(2_400_000)], &[], SummaryStyle::Quips);
         assert_eq!(quips.len(), 9, "{quips:#?}");
         for line in &quips {
             assert!(line.starts_with("jouet[savings]: "), "{line}");
@@ -214,15 +276,47 @@ mod tests {
                 assert!(line.contains("estimated"), "{line}");
             }
         }
-        let plain = lines(&m, &[wait(2_400_000)], SummaryStyle::Plain);
+        let plain = lines(&m, &[wait(2_400_000)], &[], SummaryStyle::Plain);
         assert_eq!(
             plain,
             [
                 "jouet[savings]: 1 failing CI log returned as the failing step's excerpt",
-                "jouet[savings]: 3 waits replaced about 24 polls, an estimated 2.4M input tokens",
+                "jouet[savings]: 3 waits replaced about 24 polls, 2.4M input tokens (estimated)",
                 "jouet[savings]: blocked finishing after a failed check once",
                 "jouet[savings]: rules steered 2 commands to jouet",
             ]
         );
+    }
+
+    #[test]
+    fn a_saving_is_never_claimed_past_the_net() {
+        let m = measured();
+        // Costs take 1.4M of the 2.4M the waits saved: the line gives 1.0M.
+        let plain = lines(
+            &m,
+            &[wait(2_400_000)],
+            &[cost(Some(1_400_000))],
+            SummaryStyle::Plain,
+        );
+        assert!(
+            plain.contains(
+                &"jouet[savings]: 3 waits replaced about 24 polls, 1.0M input tokens (estimated, net of jouet's costs)".to_string()
+            ),
+            "{plain:#?}"
+        );
+        // Costs past the savings: the only line is the cost.
+        for style in [SummaryStyle::Plain, SummaryStyle::Quips] {
+            let out = lines(&m, &[wait(2_400_000)], &[cost(Some(3_000_000))], style);
+            assert!(!out.is_empty());
+            for line in &out {
+                assert!(line.starts_with("jouet[cost]: "), "{line}");
+                assert!(line.contains("600k"), "{line}");
+            }
+        }
+        // A cost that could not be priced leaves the net unknown, and no
+        // line names tokens.
+        let out = lines(&m, &[wait(2_400_000)], &[cost(None)], SummaryStyle::Quips);
+        assert_eq!(out.len(), 6, "{out:#?}");
+        assert!(out.iter().all(|l| !l.contains("tokens")), "{out:#?}");
     }
 }
