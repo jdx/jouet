@@ -269,6 +269,30 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_source_keeps_export_ignored_and_unnormalized_blobs(self):
+        import dataclasses
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = root / "source"
+            source.mkdir()
+            tasks.git(source, "init", "-q", "-b", "main")
+            (source / ".gitattributes").write_text("hidden.txt export-ignore\ncrlf.txt text eol=crlf\n")
+            (source / "hidden.txt").write_text("included in the commit\n")
+            (source / "crlf.txt").write_bytes(b"line\r\n")
+            tasks.git(source, "add", ".gitattributes", "hidden.txt")
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=source,
+                                  input=b"line\r\n", capture_output=True, check=True).stdout.decode().strip()
+            tasks.git(source, "update-index", "--add", "--cacheinfo", f"100644,{blob},crlf.txt")
+            tasks.git(source, "commit", "-q", "-m", "source")
+            revision = tasks.git(source, "rev-parse", "HEAD")
+            task = dataclasses.replace(tasks.load("smoke"), source={"git": str(source), "commit": revision})
+            workdir = root / "work"
+            tasks.prepare(task, workdir)
+            self.assertEqual((workdir / "hidden.txt").read_text(), "included in the commit\n")
+            self.assertEqual(tasks.git(workdir, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
+
     def test_python_environment_is_isolated_and_available_to_the_run(self):
         import dataclasses
         import hashlib
