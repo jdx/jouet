@@ -97,6 +97,7 @@ class Task:
     env: dict[str, str] = field(default_factory=dict)
     path: list[str] = field(default_factory=list)
     setup: list[str] = field(default_factory=list)
+    isolated_setup: list[list[str]] = field(default_factory=list)
     # Commands timed once for the cost note runs start with (see costs.py).
     cost_seed: list[str] = field(default_factory=list)
     # A fully pinned pip requirements file, relative to the task directory.
@@ -142,6 +143,12 @@ def load(name: str) -> Task:
     for required in ("check.py", "solve.py") if "source" in raw else ("check.py", "solve.py", "repo"):
         if not (d / required).exists():
             raise ValueError(f"task {name} has no {required}")
+    isolated_setup = raw.get("isolated_setup", [])
+    if not isinstance(isolated_setup, list) or any(
+        not isinstance(command, list) or not command or any(not isinstance(arg, str) or not arg for arg in command)
+        for command in isolated_setup
+    ):
+        raise ValueError(f"task {name}: isolated_setup must be a list of nonempty argument lists")
     return Task(
         name=name,
         dir=d,
@@ -163,6 +170,7 @@ def load(name: str) -> Task:
         env=dict(raw.get("env", {})),
         path=list(raw.get("path", [])),
         setup=list(raw.get("setup", [])),
+        isolated_setup=isolated_setup,
         cost_seed=list(raw.get("cost", {}).get("seed", [])),
         python_requirements=raw.get("python_requirements"),
     )
@@ -184,11 +192,63 @@ def requirements_digest(task: Task, requirements: Path) -> str:
         raise EnvironmentSetupError(f"{task.name}: cannot read Python requirements {requirements}: {error}") from error
 
 
+def setup_checkout_state(workdir: Path) -> tuple[bytes, bytes, list[tuple[bytes, int, str]]]:
+    """Include untracked contents as well as the tracked diff and path list."""
+    excluded = {"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE",
+                "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+    env = {k: v for k, v in os.environ.items() if k not in excluded
+           and not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))} | GIT_ENV
+
+    def git_output(*args: str) -> bytes:
+        return subprocess.run(
+            ["git", "-c", f"core.excludesFile={os.devnull}", *args], cwd=workdir,
+            env=env, capture_output=True, check=True, timeout=30,
+        ).stdout
+
+    untracked = git_output("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
+    files = []
+    for name in untracked:
+        if not name:
+            continue
+        path = workdir / os.fsdecode(name)
+        digest = hashlib.sha256()
+        if path.is_symlink():
+            digest.update(os.fsencode(os.readlink(path)))
+        else:
+            with path.open("rb") as contents:
+                for chunk in iter(lambda: contents.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        files.append((name, path.lstat().st_mode, digest.hexdigest()))
+    return (git_output("status", "--porcelain", "--ignored=no", "-z"),
+            git_output("diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD"), files)
+
+
+def isolated_setup(task: Task, env: dict[str, str], workdir: Path, log: Path) -> None:
+    """Run a task's setup in its own environment, before the agent starts."""
+    if not task.isolated_setup:
+        return
+    try:
+        before = setup_checkout_state(workdir)
+        with log.open("a") as output:
+            for args in task.isolated_setup:
+                command = [expand(arg, workdir) for arg in args]
+                proc = subprocess.run(command, cwd=workdir, env=env, stdout=output, stderr=subprocess.STDOUT,
+                                      timeout=600)
+                if proc.returncode:
+                    raise EnvironmentSetupError(f"{task.name}: isolated setup failed (log: {log})")
+        after = setup_checkout_state(workdir)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise EnvironmentSetupError(f"{task.name}: isolated setup failed: {error} (log: {log})") from error
+    if after != before:
+        raise EnvironmentSetupError(f"{task.name}: isolated setup changed files in the checkout (log: {log})")
+
+
 def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Path, log: Path) -> dict[str, str] | None:
-    """Create an isolated Python environment before an agent or check starts."""
+    """Prepare the run's isolated environment before an agent or check starts."""
     requirements = requirements_file(task)
     if requirements is None:
-        return None
+        isolated_setup(task, env, workdir, log)
+        return {"setup_commands": str(len(task.isolated_setup))} if task.isolated_setup else None
     # Keep the environment out of the checkout even when .venv is not ignored.
     venv = Path(env["HOME"]) / ".venv"
     if venv.exists():
@@ -219,7 +279,11 @@ def setup_environment(task: Task, env: dict[str, str], workdir: Path, cache: Pat
         version = subprocess.run([str(venv_python), "--version"], env=env, capture_output=True, text=True, check=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
         raise EnvironmentSetupError(f"{task.name}: cannot read the Python version: {error}") from error
-    return {"python": version.stdout.strip(), "requirements_sha256": requirements_digest(task, requirements)}
+    isolated_setup(task, env, workdir, log)
+    result = {"python": version.stdout.strip(), "requirements_sha256": requirements_digest(task, requirements)}
+    if task.isolated_setup:
+        result["setup_commands"] = str(len(task.isolated_setup))
+    return result
 
 
 def expand(value: str, workdir: Path) -> str:

@@ -6,6 +6,13 @@ remote = false
 upstream = true
 timeout_s = 1200
 check_timeout_s = 600
+isolated_setup = [
+  ["mise", "install"],
+  ["mise", "exec", "--", "go", "version"],
+  ["mise", "exec", "--", "gofmt", "-h"],
+  ["mise", "exec", "--", "staticcheck", "-version"],
+  ["mise", "exec", "--", "govulncheck", "-version"],
+]
 prompt = """
 `dependabot-syntax` reports an update with `multi-ecosystem-group` as a
 duplicate of the regular update for the same ecosystem and directory. The
@@ -27,3 +34,4 @@ gofmt = "gofmt"
 [env]
 GOMODCACHE = "~/go/pkg/mod"
 GOTOOLCHAIN = "go1.27.3"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"

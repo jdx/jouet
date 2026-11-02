@@ -330,6 +330,60 @@ class SweepTest(unittest.TestCase):
 
 
 class TasksTest(unittest.TestCase):
+    def test_isolated_setup_rejects_shell_strings_and_empty_commands(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            directory = Path(d) / "bad"
+            (directory / "repo").mkdir(parents=True)
+            (directory / "check.py").touch()
+            (directory / "solve.py").touch()
+            base = 'description = "test"\nprompt = "test"\nchore = "bug-fix"\n'
+            with patch.object(tasks, "TASKS_DIR", Path(d)):
+                for value in ('["echo hello"]', '[[]]', '[["echo", ""]]'):
+                    (directory / "task.toml").write_text(base + f"isolated_setup = {value}\n")
+                    with self.subTest(value=value), self.assertRaisesRegex(ValueError, "argument lists"):
+                        tasks.load("bad")
+
+    def test_isolated_setup_uses_run_environment_and_refuses_checkout_changes(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            work = root / "work"
+            home = root / "home"
+            work.mkdir()
+            home.mkdir()
+            tasks.git(work, "init", "-q", "-b", "main")
+            (work / "tracked").write_text("base\n")
+            tasks.git(work, "add", "tracked")
+            tasks.git(work, "commit", "-q", "-m", "base")
+            env = {"HOME": str(home), "PATH": os.defpath}
+            script = "import os,pathlib,sys; pathlib.Path(os.environ['HOME'], 'prepared').write_text(sys.argv[1])"
+            task = dataclasses.replace(tasks.load("smoke"), isolated_setup=[[sys.executable, "-c", script, "a; b"]])
+            result = tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
+            self.assertEqual(result, {"setup_commands": "1"})
+            self.assertEqual((home / "prepared").read_text(), "a; b")
+
+            task = dataclasses.replace(task, isolated_setup=[[sys.executable, "-c", "raise SystemExit(7)"]])
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "isolated setup failed"):
+                tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
+
+            (work / "existing").write_text("before\n")
+            task = dataclasses.replace(task, isolated_setup=[[sys.executable, "-c", "open('existing', 'w').write('after')"]])
+            with self.assertRaisesRegex(tasks.EnvironmentSetupError, "changed files"):
+                tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
+
+            task = dataclasses.replace(task, isolated_setup=[[sys.executable, "-c", "open('new-file', 'w').close()"]])
+            excludes = root / "host-ignore"
+            excludes.write_text("new-file\n")
+            hostile = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+                       "GIT_CONFIG_VALUE_0": str(excludes)}
+            with patch.dict(os.environ, hostile), self.assertRaisesRegex(tasks.EnvironmentSetupError, "changed files"):
+                tasks.setup_environment(task, env, work, root / "cache", root / "setup.log")
+
     def test_zod_related_timeout_does_not_fail_the_requested_issue(self):
         import contextlib
         import io
