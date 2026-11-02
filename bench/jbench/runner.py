@@ -9,6 +9,7 @@ than on one. Each pair (task, harness, round) is what the report compares.
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -28,6 +29,56 @@ from .harness import HARNESSES, Harness
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
+
+
+def worktree_snapshot(workdir: Path) -> tuple[str, str] | None:
+    """Snapshot the index and unignored worktree without changing the real index.
+
+    This is taken outside the timed agent run. An isolated index includes
+    committed, staged and untracked work without disturbing the agent's index.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            index = Path(directory) / "index"
+            git_index = subprocess.run(
+                ["git", "rev-parse", "--git-path", "index"], cwd=workdir,
+                capture_output=True, check=True, timeout=120,
+            ).stdout.decode().strip()
+            original = workdir / git_index
+            env = os.environ | {"GIT_INDEX_FILE": str(index)}
+            if original.exists():
+                shutil.copyfile(original, index)
+            else:
+                subprocess.run(["git", "read-tree", "HEAD"], cwd=workdir, env=env,
+                               capture_output=True, check=True, timeout=120)
+            trees = []
+            for args in (["write-tree"], ["add", "-A"], ["write-tree"]):
+                result = subprocess.run(
+                    ["git", *args], cwd=workdir, env=env,
+                    capture_output=True, check=True, timeout=120,
+                )
+                if args == ["write-tree"]:
+                    trees.append(result.stdout.decode("ascii").strip())
+            return (trees[0], trees[1])
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return None
+
+
+def changed_paths(workdir: Path, before: tuple[str, str] | None, after: tuple[str, str] | None) -> list[str] | None:
+    """Names changed between snapshots, or None if evidence is unavailable."""
+    if before is None or after is None:
+        return None
+    try:
+        paths = set()
+        for old, new in zip(before, after):
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--no-renames", "-z", old, new, "--"],
+                cwd=workdir, capture_output=True, check=True, timeout=120,
+            )
+            paths.update(os.fsdecode(path) for path in result.stdout.split(b"\0") if path)
+        return sorted(paths)
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 @dataclass
@@ -378,6 +429,7 @@ def execute(
             # session without the primer rather than one with the skill.
             env.update(opts.get("jouet_env") or {})
         arms_mod.login_shell_path(env)
+        before = worktree_snapshot(workdir)
         cmd = harness.command(harness.binary, task.prompt, opts, workdir)
         timeout_s = min(task.timeout_s, opts["timeout_s"]) if opts.get("timeout_s") else task.timeout_s
         config_dir = Path(env[harness.config_dir_env])
@@ -390,6 +442,7 @@ def execute(
             # Before anything else can fail: a refresh the run made is the
             # user's only working login.
             notes = credentials.give_back(lent)
+        changes = changed_paths(workdir, before, worktree_snapshot(workdir))
         usage = harness.usage(agent["lines"], config_dir)
         return {
             "env": env,
@@ -399,6 +452,7 @@ def execute(
             "config_dir": config_dir,
             "credentials": notes,
             "environment": environment,
+            "changed_paths": changes,
         }
 
     if fixture is not None:
@@ -443,6 +497,7 @@ def execute(
         "github": github,
         "setup": ran["setup"],
         "environment": ran["environment"],
+        "changed_paths": ran["changed_paths"],
         "credentials": ran["credentials"],
         "left_running": left,
     }
