@@ -40,12 +40,13 @@ def worktree_snapshot(workdir: Path) -> tuple[str, str] | None:
     try:
         with tempfile.TemporaryDirectory() as directory:
             index = Path(directory) / "index"
+            env = os.environ | tasks_mod.GIT_ENV
             git_index = subprocess.run(
-                ["git", "rev-parse", "--git-path", "index"], cwd=workdir,
+                ["git", "rev-parse", "--git-path", "index"], cwd=workdir, env=env,
                 capture_output=True, check=True, timeout=120,
             ).stdout.decode().strip()
             original = workdir / git_index
-            env = os.environ | {"GIT_INDEX_FILE": str(index)}
+            env["GIT_INDEX_FILE"] = str(index)
             if original.exists():
                 shutil.copyfile(original, index)
             else:
@@ -73,7 +74,8 @@ def changed_paths(workdir: Path, before: tuple[str, str] | None, after: tuple[st
         for old, new in zip(before, after):
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--no-renames", "-z", old, new, "--"],
-                cwd=workdir, capture_output=True, check=True, timeout=120,
+                cwd=workdir, env=os.environ | tasks_mod.GIT_ENV,
+                capture_output=True, check=True, timeout=120,
             )
             paths.update(os.fsdecode(path) for path in result.stdout.split(b"\0") if path)
         return sorted(paths)

@@ -38,6 +38,27 @@ class StatsTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
+    def test_change_evidence_ignores_host_git_configuration(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            tasks.git(root, "init", "-q", "-b", "main")
+            (root / "tracked").write_text("initial\n")
+            tasks.git(root, "add", "tracked")
+            tasks.git(root, "commit", "-q", "-m", "initial")
+            excludes = Path(d) / "excludes"
+            excludes.write_text("agent.txt\n")
+            config = Path(d) / "config"
+            config.write_text(f"[core]\n\texcludesFile = {excludes}\n")
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+                before = runner.worktree_snapshot(root)
+                (root / "agent.txt").write_text("new\n")
+                after = runner.worktree_snapshot(root)
+                self.assertEqual(runner.changed_paths(root, before, after), ["agent.txt"])
+
     def test_change_evidence_compares_worktrees_without_touching_the_index(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
