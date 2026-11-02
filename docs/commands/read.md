@@ -36,7 +36,7 @@ src/lib.rs: method Client::download (6-9)
 - **Several at once:** `--symbol` and `--range` repeat and go together, so `jouet read src/cart.ts --symbol Cart --symbol checkout --range 1:20` reads all three in one call, each symbol then each range. An agent pays for each call with the whole context, so one call for three reads costs a third. A name that matches nothing is noted beside the rest, and the call fails (exit 3) only when nothing was found.
 - **With none of them,** a file of up to 300 lines is printed whole, and a longer one as its outline, with a line saying so.
 
-Code is printed with line numbers, at most `--max-lines` lines (400 by default; `0` is no limit), and an outline at most that many definitions. A cut ends with a marker, such as `... 16 more lines (--range 3:18, or raise --max-lines)`.
+Code is printed with line numbers, at most `--max-lines` lines across all selections in the call (400 by default; `0` is no limit), and an outline at most that many definitions. A cut ends with a marker, such as `... 16 more lines (--range 3:18, or raise --max-lines)`; a selection skipped after the limit is reached is noted with its full line count and range.
 
 Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line, as in [`jouet search`](/commands/search#sessions); `--again` prints them. The hooks remember what Claude Code's Read tool showed too. Each of Claude Code's subagents has a memory of its own, apart from the lead's and from each other's ([sessions](/commands/search#sessions)).
 
