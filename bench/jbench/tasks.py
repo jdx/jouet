@@ -34,8 +34,9 @@ A task on a real project also sets, in `task.toml`:
   base commit as `main`, which `main` tracks: an agent that commits on
   `main` still has a branch to measure its change from, as in a clone;
 - `check_timeout_s`, for a check that builds the project;
-- `[tools]`: programs linked into the agent's `bin/` (name = path, or a bare
-  program name, found on the host's `PATH` as the default tools are), and
+- `[tools]`: programs linked into the agent's `bin/` (name = path, which
+  replaces a default tool of that name, or a bare program name, found on the
+  host's `PATH` as the default tools are), and
   `[env]`: variables set for the agent, such as a toolchain's home. A leading
   `~/` is the user's home, and `{workdir}` is the work tree;
 - `path`: directories appended to the agent's `PATH`, after the tools;
@@ -118,15 +119,23 @@ class Task:
 
         for name, target in self.tools.items():
             link = bin_dir / name
-            if link.exists():
-                continue
             if "/" not in target:
+                if link.exists():
+                    continue
                 found = resolve(target)
                 if found is None:
                     raise RuntimeError(f"task {self.name} needs {target}, which is not on PATH")
                 wrapper(link, found, {})
             else:
-                wrapper(link, Path(expand(target, workdir)), {})
+                # A path replaces a default tool: an imported task's own
+                # Python stands in for the host's `python3`.
+                path = Path(expand(target, workdir))
+                if not path.is_absolute():
+                    path = workdir / path
+                if not path.exists():
+                    raise RuntimeError(f"task {self.name} needs {path}, which does not exist")
+                link.unlink(missing_ok=True)
+                wrapper(link, path, {})
         env.update({k: expand(v, workdir) for k, v in self.env.items()})
         if self.path:
             env["PATH"] = os.pathsep.join([env["PATH"], *(expand(p, workdir) for p in self.path)])
