@@ -5,7 +5,7 @@ rules, including the evidence and exact proposed files. It reads project files
 without running their commands. Run `jouet init --yes` after reviewing the
 preview to write the proposed files; existing files are never replaced.
 It also lists selected test, build, lint and check tasks found in mise and
-Makefiles, and conventional Cargo commands when there is a Cargo manifest.
+Makefiles, a root `runtests.sh` script, and conventional Cargo commands when there is a Cargo manifest.
 Inspect their definitions and project instructions before running them: their
 names do not establish coverage or safety.
 

@@ -45,6 +45,16 @@ setup() {
 	[[ ! -e .jouet ]]
 }
 
+@test "finds a test script without running it" {
+	printf '#!/bin/sh\ntouch ran\n' >runtests.sh
+	run --separate-stderr jouet init --json
+	assert_success
+	run jq -c '[.files, [.tasks[] | [.command, .evidence]], .proposals]' <<<"$output"
+	assert_output '[["runtests.sh"],[["sh runtests.sh","root runtests.sh"]],[]]'
+	[[ ! -e ran ]]
+	[[ ! -e .jouet ]]
+}
+
 @test "proposes an explicitly documented pytest marker as a partial-run option" {
 	printf '[project]\nname = "example"\n[tool.pytest.ini_options]\n' >pyproject.toml
 	cat >Makefile <<'MAKE'

@@ -92,6 +92,7 @@ fn inspect(root: &Path) -> Report {
         ".mise.toml",
         "Makefile",
         "justfile",
+        "runtests.sh",
         "AGENTS.md",
         ".github/workflows",
     ]
@@ -135,6 +136,12 @@ fn inspect(root: &Path) -> Report {
                 });
             }
         }
+    }
+    if root.join("runtests.sh").is_file() {
+        tasks.push(Task {
+            command: "sh runtests.sh".into(),
+            evidence: "root runtests.sh".into(),
+        });
     }
     if root.join("Cargo.toml").is_file() {
         for verb in ["test", "build"] {
