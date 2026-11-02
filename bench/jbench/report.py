@@ -68,10 +68,28 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 "github_unanswered": sorted(unanswered),
             }
         if "plain" in by_arm and "jouet" in by_arm:
+            paired_runs = {
+                arm: {r["round"]: r for r in by_arm[arm] if not r.get("error") and isinstance(r.get("success"), bool)}
+                for arm in ("plain", "jouet")
+            }
+            rounds = sorted(paired_runs["plain"].keys() & paired_runs["jouet"].keys())
+            outcomes = [(paired_runs["plain"][n]["success"], paired_runs["jouet"][n]["success"]) for n in rounds]
+            cell["paired_outcomes"] = {
+                "both_passed": outcomes.count((True, True)),
+                "plain_only": outcomes.count((True, False)),
+                "jouet_only": outcomes.count((False, True)),
+                "both_failed": outcomes.count((False, False)),
+            }
+            passed_rounds = [n for n in rounds if paired_runs["plain"][n]["success"] and paired_runs["jouet"][n]["success"]]
+            cell["paired_when_both_pass"] = {}
             for key, _, get, _ in METRICS:
                 plain = {r["round"]: get(r) for r in by_arm["plain"] if not r.get("error")}
                 jouet = {r["round"]: get(r) for r in by_arm["jouet"] if not r.get("error")}
                 cell["paired"][key] = stats.paired(plain, jouet)
+                cell["paired_when_both_pass"][key] = stats.paired(
+                    {n: get(paired_runs["plain"][n]) for n in passed_rounds},
+                    {n: get(paired_runs["jouet"][n]) for n in passed_rounds},
+                )
         cells.append(cell)
     return {"schema": 1, "meta": meta, "cells": cells}
 
@@ -154,6 +172,13 @@ def markdown(summary: dict[str, Any]) -> str:
 
     for cell in summary["cells"]:
         lines += ["", f"## {cell['task']} · {cell['harness']}", ""]
+        if outcomes := cell.get("paired_outcomes"):
+            lines += [
+                f"Paired outcomes: {outcomes['both_passed']} both passed; {outcomes['plain_only']} plain only; "
+                f"{outcomes['jouet_only']} jouet only; {outcomes['both_failed']} both failed. "
+                "Unpaired runs and harness errors are excluded.",
+                "",
+            ]
         lines += [
             "| metric | plain median [p25–p75] | jouet median [p25–p75] | paired Δ median [min, max] | jouet lower | p |",
             "|---|---|---|---|---|---|",
@@ -173,6 +198,21 @@ def markdown(summary: dict[str, Any]) -> str:
             else:
                 row += ["–", "–", "–"]
             lines.append("| " + " | ".join(row) + " |")
+        if cell.get("paired_outcomes"):
+            success_metrics = cell["paired_when_both_pass"]
+            parts = []
+            for key, label, kind in (
+                ("input_tokens", "input", "tokens"),
+                ("uncached_input_tokens", "uncached input", "tokens"),
+                ("output_tokens", "output", "tokens"),
+                ("wall_s", "wall", "seconds"),
+            ):
+                metric = success_metrics.get(key)
+                if metric:
+                    parts.append(f"{label} {signed(metric['median_diff'], kind)}")
+            count = cell["paired_outcomes"]["both_passed"]
+            detail = "; ".join(parts) if parts else "no comparable metrics"
+            lines += ["", f"Both-pass pairs ({count}): median jouet minus plain: {detail}."]
         notes = []
         for arm, a in sorted(cell["arms"].items()):
             if a["rule_decisions"]:

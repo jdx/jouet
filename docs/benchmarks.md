@@ -88,7 +88,7 @@ Every metric comes from one run's isolated files:
 - **Success:** the task's check, and the run finished within its timeout and budget.
 - **Rule decisions:** from the run's jouet ledger, per rule and action.
 
-Token and time metrics include failed runs; success rates are reported beside them. For each task, harness and arm, the report gives the median and quartiles of each metric. For each pair of arms, it gives the median difference (jouet minus plain), its range, how many rounds jouet used less, and an exact two-sided sign test. With five pairs, the smallest p-value that test can give is 0.0625, which is the honest answer for five pairs.
+The main token and time metrics include failed runs; success rates are reported beside them. The report also counts paired outcomes (both pass, only plain passes, only jouet passes, or both fail) and shows token and time differences for pairs where both passed. Harness errors and unpaired runs are excluded from those outcome counts. For each task, harness and arm, the report gives the median and quartiles of each metric. For each pair of arms, it gives the median difference (jouet minus plain), its range, how many rounds jouet used less, and an exact two-sided sign test. With five pairs, the smallest p-value that test can give is 0.0625, which is the honest answer for five pairs. Both-pass comparisons are conditional on success and do not measure the cost of failures.
 
 ## Running it
 

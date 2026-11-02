@@ -331,6 +331,28 @@ class ReportTest(unittest.TestCase):
         self.assertIn("> **Smoke test**", text)
         self.assertIn("| smoke | claude | 2/2 | 1/2 | -50 (-5%)", text)
         self.assertIn("`python-edit:deny` ×2", text)
+        self.assertIn("Paired outcomes: 1 both passed; 1 plain only; 0 jouet only; 0 both failed.", text)
+        self.assertIn("Both-pass pairs (1): median jouet minus plain: input -200", text)
+        cell = summary["cells"][0]
+        self.assertEqual(cell["paired"]["input_tokens"]["median_diff"], -50)
+        self.assertEqual(cell["paired_when_both_pass"]["input_tokens"]["median_diff"], -200)
+
+    def test_paired_outcomes_exclude_errors_and_unpaired_runs(self):
+        def record(arm, round_number, success, **extra):
+            return {"task": "t", "harness": "codex", "arm": arm, "round": round_number,
+                    "success": success, "usage": {"input_tokens": 100, "cached_input_tokens": 50}, **extra}
+
+        records = [
+            record("plain", 1, True), record("jouet", 1, False),
+            record("plain", 2, False), record("jouet", 2, True),
+            record("plain", 3, False), record("jouet", 3, False),
+            record("plain", 4, True), record("jouet", 4, False, error="auth"),
+            record("plain", 5, True),
+        ]
+        cell = report.summarize(records, {})["cells"][0]
+        self.assertEqual(cell["paired_outcomes"], {"both_passed": 0, "plain_only": 1, "jouet_only": 1, "both_failed": 1})
+        self.assertIsNone(cell["paired_when_both_pass"]["input_tokens"])
+        self.assertIn("Both-pass pairs (0): median jouet minus plain: no comparable metrics.", report.markdown({"meta": {}, "cells": [cell]}))
 
 
 if __name__ == "__main__":
