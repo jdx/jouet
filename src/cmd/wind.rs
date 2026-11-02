@@ -664,7 +664,20 @@ fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
         .iter()
         .map(wind::memories::Memory::display)
         .collect();
-    let recorded = match wind::review::record(paths, reply, crate::wind::now(), &targets) {
+    let project = match args.project.as_deref() {
+        None => None,
+        Some(path) => match jouet_output::paths::repo_key(std::path::Path::new(path)) {
+            Some(key) => Some(key),
+            None => return out.error(Exit::Usage, "--project must name a Git work tree"),
+        },
+    };
+    let recorded = match wind::review::record(
+        paths,
+        reply,
+        crate::wind::now(),
+        &targets,
+        project.as_deref(),
+    ) {
         Ok(recorded) => recorded,
         Err(e) => return out.error(Exit::Failed, &format!("writing the winding state: {e}")),
     };

@@ -18,6 +18,6 @@ The ledger holds only command shapes. `jouet wind digest` and `jouet wind review
 - [`jouet wind digest [FLAGS] [SESSION]`](/cli/wind/digest.md)
 - [`jouet wind dismiss <ID>`](/cli/wind/dismiss.md)
 - [`jouet wind memories [--record]`](/cli/wind/memories.md)
-- [`jouet wind propose [FILE]`](/cli/wind/propose.md)
+- [`jouet wind propose [--project <PROJECT>] [FILE]`](/cli/wind/propose.md)
 - [`jouet wind review [FLAGS] [SESSION]`](/cli/wind/review.md)
 - [`jouet wind show <ID>`](/cli/wind/show.md)

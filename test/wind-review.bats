@@ -123,7 +123,8 @@ TOML
 }
 
 @test "propose records a review's proposals, which the next session starts show" {
-	run --separate-stderr jouet wind propose <<JSON
+	git init -q .
+	run --separate-stderr jouet wind propose --project . <<JSON
 \`\`\`json
 {"session": "$CLAUDE_ID", "proposals": [
   {"kind": "agents_md", "title": "Say that tests run through mise", "why": "The user had to correct cargo test (L8-11).", "evidence": ["L8-11"], "scope": "project", "draft": "Run tests with \`mise run test\`, never cargo test directly."},
@@ -140,6 +141,12 @@ JSON
 	assert_line --index 0 'p1 (pending, agents_md, scope project): Say that tests run through mise'
 	assert_line --regexp 'Run tests with .mise run test., never cargo test directly'
 
+	mkdir other
+	git -C other init -q
+	cd other
+	run primer unrelated-session
+	refute_output --partial 'p1'
+	cd ..
 	run primer next-session
 	assert_line --partial 'jouet wind review proposed an AGENTS.md note (p1): Say that tests run through mise.'
 

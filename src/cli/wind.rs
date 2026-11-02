@@ -104,14 +104,18 @@ pub(crate) struct WindMemoriesArgs {
 /// Reads a review's JSON reply on stdin (or from FILE): `{"session": "...",
 /// "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`,
 /// as `jouet wind review` asks for. Each proposal is checked and recorded
-/// as pending: three per review and three a day at most, never one that
+/// as pending: three per review and three a day per project at most, never one that
 /// looks like it holds a secret, never one already proposed. Recording
 /// applies nothing: the next session starts show each proposal in one line,
-/// and the agent there asks the user before applying it.
+/// and the agent there asks the user before applying it. Project and local
+/// proposals need --project unless their queued session identifies the project.
 #[derive(Args)]
 pub(crate) struct WindProposeArgs {
     /// Read the reply from FILE instead of stdin
     pub(crate) file: Option<String>,
+    /// Bind project and local proposals to this work tree
+    #[usage(long)]
+    pub(crate) project: Option<String>,
 }
 
 /// Propose retiring rules that are noisy or often overridden, and unused tasks

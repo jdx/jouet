@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 /// Proposals recorded per review, and per day, at most.
 pub(crate) const MAX_PER_REVIEW: usize = 3;
 pub(crate) const MAX_PROPOSALS_PER_DAY: usize = 3;
+const MAX_ALL_PROPOSALS_PER_DAY: usize = 12;
 /// The stop hook digests a session again only after this many seconds:
 /// it fires at the end of every turn.
 const CHECK_INTERVAL: u64 = 10 * 60;
@@ -137,6 +138,10 @@ pub(crate) struct Proposal {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<String>,
     pub scope: String,
+    /// The originating work tree, hashed like ledger entries. Absent for
+    /// user/global proposals and legacy proposals with no known project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
     /// The memory a `memory_update` or `memory_delete` changes: its path.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub target: String,
@@ -361,7 +366,10 @@ pub(crate) fn lines_for_session(
             if lines.len() == room {
                 break;
             }
-            if p.status != Status::Pending {
+            if p.status != Status::Pending
+                || (matches!(p.scope.as_str(), "project" | "local")
+                    && (p.repo.is_none() || p.repo.as_deref() != repo))
+            {
                 continue;
             }
             mark_shown(&mut p.shown, &mut p.status, session);
@@ -538,9 +546,11 @@ pub(crate) fn record(
     reply: Reply,
     now: u64,
     targets: &[String],
+    project: Option<&str>,
 ) -> std::io::Result<Recorded> {
-    let (mut out, ideas) =
-        super::update(&paths.state, |state| record_in(state, reply, now, targets))?;
+    let (mut out, ideas) = super::update(&paths.state, |state| {
+        record_in(state, reply, now, targets, project)
+    })?;
     if let Some(gaps) = crate::share::gaps_path() {
         for (title, body) in ideas {
             out.ideas
@@ -555,18 +565,29 @@ fn record_in(
     reply: Reply,
     now: u64,
     targets: &[String],
+    project: Option<&str>,
 ) -> (Recorded, Vec<(String, String)>) {
     let r = &mut state.reviews;
     let today = jouet_output::time::date(now);
-    let mut budget = MAX_PROPOSALS_PER_DAY.saturating_sub(
-        r.proposals
-            .iter()
-            .filter(|p| jouet_output::time::date(p.created) == today)
-            .count(),
-    );
+    let inferred = r
+        .queue
+        .iter()
+        .filter(|q| {
+            !reply.session.is_empty()
+                && !reply.session.contains(',')
+                && (reply.session.starts_with(&q.session) || q.session.starts_with(&reply.session))
+        })
+        .filter_map(|q| q.repo.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let conflict = project.is_some_and(|chosen| {
+        !inferred.is_empty() && (inferred.len() != 1 || !inferred.contains(chosen))
+    });
+    let project =
+        project.or_else(|| (inferred.len() == 1).then(|| inferred.first().unwrap().as_str()));
     let mut out = Recorded::default();
     let mut ideas = Vec::new();
     let mut this_review = 0;
+    let mut deferred = conflict;
     for d in reply.proposals {
         if d.kind == Kind::Nothing {
             out.nothing = true;
@@ -585,11 +606,30 @@ fn record_in(
             ideas.push((d.title.trim().to_string(), body));
             continue;
         }
+        let scope = d.scope.as_deref().unwrap_or(d.kind.scopes()[0]);
+        let repo = if matches!(scope, "project" | "local") {
+            if conflict {
+                deferred = true;
+                out.skipped.push(skip(
+                    "--project does not match the queued session's project".into(),
+                ));
+                continue;
+            }
+            let Some(repo) = project else {
+                deferred = true;
+                out.skipped.push(skip("a project or local proposal needs --project or a queued session with a known project".into()));
+                continue;
+            };
+            Some(repo.to_string())
+        } else {
+            None
+        };
         let target = target_of(&d, targets)
             .filter(|_| matches!(d.kind, Kind::MemoryUpdate | Kind::MemoryDelete))
             .unwrap_or_default();
         let duplicate = r.proposals.iter().any(|p| {
             p.kind == d.kind
+                && p.repo == repo
                 && (p.title.trim().eq_ignore_ascii_case(d.title.trim())
                     || (!target.is_empty() && p.target == target))
         });
@@ -598,15 +638,32 @@ fn record_in(
             continue;
         }
         if this_review == MAX_PER_REVIEW {
+            deferred = true;
             out.skipped.push(skip(format!(
                 "a review records {MAX_PER_REVIEW} proposals at most"
             )));
             continue;
         }
-        if budget == 0 {
+        if r.proposals
+            .iter()
+            .filter(|p| jouet_output::time::date(p.created) == today && p.repo == repo)
+            .count()
+            >= MAX_PROPOSALS_PER_DAY
+        {
+            deferred = true;
             out.skipped.push(skip(format!(
                 "{MAX_PROPOSALS_PER_DAY} proposals a day at most; propose it again tomorrow"
             )));
+            continue;
+        }
+        if r.proposals
+            .iter()
+            .filter(|p| jouet_output::time::date(p.created) == today)
+            .count()
+            >= MAX_ALL_PROPOSALS_PER_DAY
+        {
+            deferred = true;
+            out.skipped.push(skip(format!("{MAX_ALL_PROPOSALS_PER_DAY} proposals a day across all projects at most; propose it again tomorrow")));
             continue;
         }
         let id = r.id('p');
@@ -619,6 +676,7 @@ fn record_in(
             why: d.why.trim().to_string(),
             evidence: d.evidence,
             scope: d.scope.unwrap_or_else(|| d.kind.scopes()[0].to_string()),
+            repo,
             target,
             draft: d.draft,
             status: Status::Pending,
@@ -626,16 +684,21 @@ fn record_in(
         });
         out.recorded.push(id);
         this_review += 1;
-        budget -= 1;
     }
     // A reviewed session is no longer waiting for its review.
-    if !reply.session.is_empty() {
-        for q in r.queue.iter_mut() {
-            let same =
-                reply.session.starts_with(&q.session) || q.session.starts_with(&reply.session);
-            if q.status == Status::Pending && same {
-                q.status = Status::Adopted;
-            }
+    if !reply.session.is_empty() && !reply.session.contains(',') && !deferred {
+        let matches: Vec<usize> = r
+            .queue
+            .iter()
+            .enumerate()
+            .filter_map(|(i, q)| {
+                let same =
+                    reply.session.starts_with(&q.session) || q.session.starts_with(&reply.session);
+                (q.status == Status::Pending && same).then_some(i)
+            })
+            .collect();
+        if let [i] = matches.as_slice() {
+            r.queue[*i].status = Status::Adopted;
         }
     }
     (out, ideas)
@@ -678,7 +741,7 @@ For each improvement, choose one kind:
 
 Propose at most three, each grounded in spans from the digest. Never put a secret, a token or a private value in a proposal.
 
-Record them by piping this JSON to `jouet wind propose`; if you cannot run commands, reply with only the JSON:
+Record them by piping this JSON to `jouet wind propose --project PATH`, where PATH is the session's available Git work tree. For sessions from different projects, review and record each project separately. If the work tree is unavailable, do not assign its project changes to another one. If you cannot run commands, reply with only the JSON:
 
 {"session": "SESSION_ID", "proposals": [
   {"kind": "task", "title": "Add a `release:check` task", "why": "The agent tried `cargo xtask release-check` twice before the user named the task (L8-18).", "evidence": ["L8-14", "L18"], "scope": "local", "draft": "[tasks.\"release:check\"]\nrun = \"...\""}
