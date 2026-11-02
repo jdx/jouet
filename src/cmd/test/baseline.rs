@@ -715,6 +715,11 @@ mod tests {
         assert!(!evidence("17").details.is_empty());
         assert_eq!(evidence("17").details, evidence("17").details);
         assert_ne!(evidence("17").details, evidence("18").details);
+
+        let timeout = "Running 1 test using 1 worker, shard 1 of 2\n  1) e2e/balance.spec.ts:5:3 › updates balance\n    Test timeout of 30000ms exceeded.\n  1 failed\n";
+        let evidence = failure_evidence(timeout, &[], Path::new("/work"), false).unwrap();
+        assert!(!evidence.names.is_empty());
+        assert!(evidence.details.is_empty());
     }
 
     #[test]

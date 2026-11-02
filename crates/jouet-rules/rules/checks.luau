@@ -528,6 +528,20 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
+	elseif program == "playwright" and first == "test" then
+		for _, arg in args do
+			local name = string.match(arg, "^(%-%-[%w%-]+)=") or arg
+			-- UI modes may exit without running anything. With this flag the
+			-- runner can also report success for zero tests without output.
+			if name == "--ui" or name == "--ui-host" or name == "--ui-port" or name == "--debug" or name == "--pass-with-no-tests" then
+				return nil, unknown
+			end
+			-- These options narrow tests or change what they verify.
+			if name == "--only-changed" or name == "--grep-invert" or name == "--test-list" or name == "--test-list-invert" or name == "--no-deps" or name == "--ignore-snapshots" or name == "--update-snapshots" or name == "-u" then
+				return "test", partial(table.concat(args, " "))
+			end
+		end
+		return "test", runner_scope(args, 2)
 	elseif program == "jouet" then
 		local kind, scope, given = jouet_test(args)
 		if given and #given > 0 then

@@ -518,7 +518,8 @@ tap_script() {
 }
 
 @test "--cmd names a Playwright list failure and shows its assertion" {
-	cat >run-playwright <<'SH'
+	mkdir bin
+	cat >bin/playwright <<'SH'
 #!/bin/sh
 cat <<'OUTPUT'
 Running 1 test using 1 worker
@@ -531,14 +532,21 @@ Running 1 test using 1 worker
   1 failed
     [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance
 OUTPUT
-exit 1
+exit "${PLAYWRIGHT_EXIT:-1}"
 SH
-	chmod +x run-playwright
-	run --separate-stderr jouet test --cmd -- ./run-playwright
+	chmod +x bin/playwright
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- playwright test
 	assert_failure 1
 	assert_output --partial 'FAIL [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance'
 	assert_output --partial 'Expected: "42.00"'
 	refute_output --partial 'no failure recognised'
+	PATH="$PWD/bin:$PATH" PLAYWRIGHT_EXIT=0 run --separate-stderr jouet test --cmd -- playwright test
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported failing tests'
+	printf '#!/bin/sh\nprintf "Error: No tests found.\\n"\n' >bin/playwright
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- playwright test
+	assert_failure 4
+	assert_output --partial 'no test ran'
 }
 
 @test "--cmd refuses a recognised test run that selected no tests" {

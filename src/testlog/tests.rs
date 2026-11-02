@@ -71,6 +71,17 @@ fn playwright_names_need_a_run_and_a_failure_detail() {
 }
 
 #[test]
+fn playwright_shards_name_bare_test_timeouts() {
+    let output = "Running 1 test using 1 worker, shard 1 of 2\n  1) e2e/a.spec.ts:5:1 › waits for data\n    Test timeout of 30000ms exceeded.\n  1 failed\n";
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["e2e/a.spec.ts:5:1 › waits for data"]);
+    assert!(d.failures[0].lines[0].contains("Test timeout of 30000ms exceeded"));
+    // A generic timeout does not prove the baseline failed for the same reason.
+    assert!(failure_details(output, &[]).is_empty());
+}
+
+#[test]
 fn cargo_test_failures_keep_the_panic_and_drop_libtest_noise() {
     let d = digest(&fixture("cargo-test"), true, DEFAULT_BUDGET);
     assert_eq!(counts(&d), [40, 3, 0]);
@@ -619,6 +630,7 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
         "collected 0 items",
         "========== no tests ran in 0.01s ==========",
         "No tests found, exiting with code 1",
+        "Error: No tests found.",
         "testing: warning: no tests to run",
     ] {
         assert!(digest(said, false, DEFAULT_BUDGET).no_tests, "{said}");
