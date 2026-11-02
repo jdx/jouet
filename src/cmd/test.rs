@@ -454,9 +454,15 @@ fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
         .stdout(file.try_clone().map_err(saving)?)
         .stderr(file);
     let started = Instant::now();
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("running {}: {e}", job.argv[0]))?;
+    let mut child = command.spawn().map_err(|e| {
+        let mut message = format!("running {}: {e}", job.argv[0]);
+        if e.kind() == std::io::ErrorKind::NotFound
+            && let Some(other) = versioned_on_path(&job.argv[0])
+        {
+            let _ = write!(message, "; `{other}` is on PATH");
+        }
+        message
+    })?;
     let status = if stream {
         follow(&mut child, log)
     } else {
@@ -465,6 +471,29 @@ fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
     .map_err(|e| format!("running {}: {e}", job.argv[0]))?;
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     Ok((status.code().unwrap_or(1), ms))
+}
+
+/// A program on PATH named `name` and a version, such as `python3` for
+/// `python` or `pip3` for `pip`, the one with the shortest name: an agent
+/// that guessed the unversioned name need not look for it.
+fn versioned_on_path(name: &str) -> Option<String> {
+    if name.contains(std::path::MAIN_SEPARATOR) {
+        return None;
+    }
+    let path = std::env::var_os("PATH")?;
+    let mut found: Vec<String> = std::env::split_paths(&path)
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|file| {
+            file.strip_prefix(name).is_some_and(|rest| {
+                rest.starts_with(|c: char| c.is_ascii_digit())
+                    && rest.chars().all(|c| c.is_ascii_digit() || c == '.')
+            })
+        })
+        .collect();
+    found.sort_by_key(|f| (f.len(), f.clone()));
+    found.into_iter().next()
 }
 
 /// Copies what the child writes to its log onto stdout until it exits.

@@ -866,3 +866,14 @@ SCRIPT
 	assert_failure 1
 	refute_output --partial 'baseline:'
 }
+
+@test "a program not on PATH names its versioned sibling" {
+	mkdir -p bin
+	printf '#!/bin/sh\nexit 0\n' >bin/frob3
+	printf '#!/bin/sh\nexit 0\n' >bin/frob3.12
+	chmod +x bin/frob3 bin/frob3.12
+	PATH="$PWD/bin:$PATH" run jouet test --cmd -- frob -V
+	assert_failure
+	assert_output --partial 'running frob: No such file or directory'
+	assert_output --regexp '.frob3. is on PATH'
+}
