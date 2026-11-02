@@ -470,6 +470,50 @@ local INSPECT = set({
 	"--list-tests",
 })
 
+-- Only wrappers that explicitly execute the Playwright binary. Package scripts
+-- named `playwright` can do anything, so `yarn run playwright` is not one.
+local function playwright_args(program: string, args: { string }): (number?, string?)
+	local at: number? = nil
+	local workspace: string? = nil
+	if program == "playwright" then
+		at = 1
+	elseif program == "npx" or program == "bunx" then
+		local i = if args[1] == "--no-install" then 2 else 1
+		if args[i] == "playwright" then at = i + 1 end
+	elseif (program == "pnpm" or program == "yarn") and args[1] == "exec" and args[2] == "playwright" then
+		at = 3
+	elseif program == "npm" and args[1] == "exec" and args[2] == "--" and args[3] == "playwright" then
+		at = 4
+	elseif program == "yarn" and args[1] == "workspace" and args[2] and args[3] == "exec" and args[4] == "playwright" then
+		at = 5
+		workspace = args[2]
+	end
+	if at and args[at] == "test" then return at, workspace end
+	return nil, nil
+end
+
+local function playwright_scope(args: { string }, at: number, workspace: string?): (Kind?, Scope)
+	local unknown = partial(nil)
+	local narrowed = false
+	for i = at + 1, #args do
+		local arg = args[i]
+		local name = string.match(arg, "^(%-%-[%w%-]+)=") or arg
+		-- UI modes can exit without running; this must take precedence over
+		-- any earlier selection flag, regardless of argument order.
+		if name == "--ui" or name == "--ui-host" or name == "--ui-port" or name == "--debug" or name == "--pass-with-no-tests" then
+			return nil, unknown
+		end
+		if name == "--only-changed" or name == "--grep-invert" or name == "--test-list" or name == "--test-list-invert" or name == "--no-deps" or name == "--ignore-snapshots" or name == "--update-snapshots" or name == "-u" then
+			narrowed = true
+		end
+	end
+	-- A workspace is a filter. Mark it as an option so the verifier requires
+	-- an exact selection instead of treating added test names as a wider run.
+	if workspace then return "test", partial("--workspace=" .. workspace .. " " .. table.concat(args, " ", at)) end
+	if narrowed then return "test", partial(table.concat(args, " ", at)) end
+	return "test", runner_scope(args, at + 1)
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -484,6 +528,10 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	end
 	local first: string? = args[1]
 	local unknown = partial(nil)
+	local playwright_at, workspace = playwright_args(program, args)
+	if playwright_at then
+		return playwright_scope(args, playwright_at, workspace)
+	end
 	if program == "cargo" or program == "mbx" or program == "cross" then
 		if first == "fmt" then
 			if not jouet.contains(args, "--check") then
@@ -528,20 +576,6 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
 		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
-	elseif program == "playwright" and first == "test" then
-		for _, arg in args do
-			local name = string.match(arg, "^(%-%-[%w%-]+)=") or arg
-			-- UI modes may exit without running anything. With this flag the
-			-- runner can also report success for zero tests without output.
-			if name == "--ui" or name == "--ui-host" or name == "--ui-port" or name == "--debug" or name == "--pass-with-no-tests" then
-				return nil, unknown
-			end
-			-- These options narrow tests or change what they verify.
-			if name == "--only-changed" or name == "--grep-invert" or name == "--test-list" or name == "--test-list-invert" or name == "--no-deps" or name == "--ignore-snapshots" or name == "--update-snapshots" or name == "-u" then
-				return "test", partial(table.concat(args, " "))
-			end
-		end
-		return "test", runner_scope(args, 2)
 	elseif program == "jouet" then
 		local kind: Kind?, scope: Scope, given: { string }? = jouet_test(args)
 		if given and #given > 0 then
