@@ -303,7 +303,8 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup claude --shared --json
 	assert_success
 	run jq -r '.files[] | select(.path | contains("jouet-init")) | .action' <<<"$output"
-	assert_output unchanged
+	# The shared copy and the link to it.
+	assert_output $'unchanged\nunchanged'
 	jouet setup claude --shared --uninstall >/dev/null
 	assert [ ! -e .claude/skills/jouet-init ]
 	assert [ -f .agents/skills/jouet-init/SKILL.md ]
@@ -316,6 +317,28 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	jouet setup claude --shared --uninstall >/dev/null
 	assert [ ! -e .claude/skills/jouet-init ]
 	assert [ ! -e .agents/skills/jouet-init ]
+}
+
+@test "a dry run shows the shared copy and the link, and other harnesses keep the copy Claude Code links to" {
+	init_repo
+	work=$(pwd -P)
+	run --separate-stderr jouet setup claude --shared --dry-run
+	assert_success
+	assert_line "would create $work/.agents/skills/jouet-init/SKILL.md"
+	assert_line "would link $work/.claude/skills/jouet-init"
+	assert [ ! -e .claude/skills/jouet-init ]
+	jouet setup claude --shared >/dev/null
+	jouet setup codex --shared >/dev/null
+	# Uninstalling Codex leaves the copy Claude Code still reads.
+	run --separate-stderr jouet setup codex --shared --uninstall
+	assert_success
+	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
+	# A dangling link from an older jouet is made whole again.
+	rm -r .agents/skills/jouet-init
+	jouet setup claude --shared >/dev/null
+	assert [ -L .claude/skills/jouet-init ]
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
 }
 
 @test "an earlier setup's own Claude Code skill directory becomes the link" {
@@ -389,7 +412,10 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup claude --project --uninstall
 	assert_success
 	assert_line "updated $work/.claude/settings.json"
-	assert_line "removed $work/.claude/skills/jouet/SKILL.md"
+	# The shared install's link, and the copy it names, which nothing else reads.
+	assert_line "removed $work/.claude/skills/jouet"
+	assert_line "removed $work/.agents/skills/jouet/SKILL.md"
+	assert [ ! -e .claude/skills/jouet ]
 	assert_content .claude/settings.json $'{}\n'
 
 	jouet setup claude --project >/dev/null
