@@ -152,6 +152,21 @@ fn matches_are_grouped_by_file_and_enclosing_symbol() {
 }
 
 #[test]
+fn max_count_shows_at_most_that_many_matches_from_each_file() {
+    let mut o = options("self");
+    o.max_count = Some(1);
+    let (report, text) = run(&o);
+    assert!(report.files.iter().all(|f| f.shown.len() <= 1), "{text}");
+    let lib = report
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("src/lib.rs"))
+        .unwrap();
+    assert_eq!(lib.shown.len() + lib.more, lib.matches, "{text}");
+    assert!(lib.more > 0, "{text}");
+}
+
+#[test]
 fn a_file_budget_says_how_many_matches_it_left_out() {
     let mut o = options("self");
     o.budget.per_file = 60;

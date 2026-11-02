@@ -62,6 +62,12 @@ pub(crate) struct SearchArgs {
     /// The most bytes to print in total (default 6000; 0 is no limit)
     #[usage(long, value_name = "BYTES")]
     pub(crate) budget: Option<usize>,
+    /// Show at most NUM matches from each file, as rg's -m
+    #[usage(short = 'm', long, value_name = "NUM")]
+    pub(crate) max_count: Option<usize>,
+    /// Accepted for rg's sake: line numbers are always shown
+    #[usage(short = 'n', long)]
+    pub(crate) line_number: bool,
     /// The most bytes to print from one file (default 1500; 0 is no limit)
     #[usage(long, value_name = "BYTES")]
     pub(crate) file_budget: Option<usize>,
