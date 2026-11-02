@@ -1610,7 +1610,14 @@ mod tests {
 
     #[test]
     fn the_primer_names_the_active_rules() {
-        let out = session_start(&engine(Vec::new()), true, true, Harness::Claude);
+        let dir = tempfile::tempdir().unwrap();
+        let engine = engine(Vec::new());
+        engine.set_probes(jouet_rules::Probes::new(
+            Some(dir.path().to_path_buf()),
+            None,
+            false,
+        ));
+        let out = session_start(&engine, true, true, Harness::Claude);
         // The slow checks are a session-start note, read from the notes of
         // the repository the session is in, never part of the primer.
         let context = out["hookSpecificOutput"]["additionalContext"]
@@ -1618,7 +1625,7 @@ mod tests {
             .unwrap();
         // How to wait for a long run in one call, for this harness.
         assert!(context.contains("a Bash `timeout` of 600000"), "{context}");
-        let codex = session_start(&engine(Vec::new()), true, true, Harness::Codex);
+        let codex = session_start(&engine, true, true, Harness::Codex);
         let codex = codex["hookSpecificOutput"]["additionalContext"].to_string();
         assert!(codex.contains("loop on write_stdin"), "{codex}");
         assert!(!codex.contains("Bash `timeout`"), "{codex}");
