@@ -87,7 +87,7 @@ For task definitions that should stay outside this checkout, `run` and `check-ta
 MISE_ENV=bench mise run bench:agents --tasks-dir "$HOME/bench-tasks" --tasks example --out "$HOME/bench-results/example"
 ```
 
-The selected task's own setup and check programs can still access the network. Results, agent transcripts, cost notes and any retained worktrees can contain task data; choose locations and task programs accordingly.
+These worktrees are not security sandboxes: agents and task programs can access host files and the network. Results, agent transcripts, cost notes and any retained worktrees can contain task data; choose locations and task programs accordingly.
 
 A task may set `python_requirements` to a hash-locked pip requirements file in its task directory. Before timing each agent, the harness creates a fresh virtual environment under that run's home, installs the pinned requirements with hash verification, and prepends its `bin` to the isolated `PATH` for both the agent and the checker. The environments are separate; only the pip download cache is shared across the suite. Setup failures are reported as harness errors, rather than task failures. Each run records the Python version and requirements-file digest, and keeps setup output in `environment.log`.
 
