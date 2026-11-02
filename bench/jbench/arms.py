@@ -15,7 +15,10 @@ says:
 - `plain`: the harness as installed, with no jouet on `PATH`;
 - `jouet`: `jouet` on `PATH` and `jouet setup <harness>` run in the
   isolated home, which installs the hooks and the session-start primer that
-  points the agent at `jouet agent-help`.
+  points the agent at `jouet agent-help`;
+- `jouet-init`: as `jouet`, in the project as the jouet-init skill left it
+  (see `init`), with its config trusted, as after a user's
+  `/jouet-init`.
 
 `gh` and `jouet` are wrapper scripts when a task has a fake GitHub, so the
 agent's own environment carries no hint of it.
@@ -43,11 +46,16 @@ class Arm:
     name: str
     jouet: bool
     description: str
+    # The project starts as the jouet-init skill left it (see `init`).
+    init: bool = False
 
 
 ARMS = {
     "plain": Arm("plain", False, "the harness as installed, without jouet"),
     "jouet": Arm("jouet", True, "jouet on PATH, with `jouet setup` hooks and primer"),
+    "jouet-init": Arm(
+        "jouet-init", True, "as `jouet`, in the project as the jouet-init skill configured it", init=True
+    ),
 }
 
 
