@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import expect, finish, new_commit  # noqa: E402
+from _check import dirty, expect, finish, new_commit  # noqa: E402
 
 build = subprocess.run(["cargo", "build", "--bin", "fnox"], capture_output=True, text=True)
 expect(build.returncode == 0, f"build fails:\n{build.stderr[-3000:]}")
@@ -33,4 +33,6 @@ if build.returncode == 0:
         expect(run.returncode == 0 and len(args) == 2 and args[0] == "--visual",
                f"empty EDITOR did not fall back to VISUAL: {run.stderr}")
 print(f"committed: {new_commit()}")
+expect(new_commit(), "nothing was committed")
+expect(not dirty(), "tracked changes remain uncommitted")
 finish()
