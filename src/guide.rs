@@ -911,7 +911,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Edit with your own edit tool or {edit}, which takes several files and repeated --old/--new pairs at once; never a Python script. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read definitions with `jouet read PATH --symbol NAME --range A:B` (each repeats) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads and searches in one. List a PR's open review threads with `jouet pr threads [PR]`; reply and resolve with {reply}, not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Put a step's edits in one {edit} (several files, repeated --old/--new pairs), chained with its test; never a Python script. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read definitions with `jouet read PATH --symbol NAME --range A:B` (each repeats) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads and searches in one. List a PR's open review threads with `jouet pr threads [PR]`; reply and resolve with {reply}, not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
