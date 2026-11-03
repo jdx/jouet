@@ -32,6 +32,27 @@ local JOUET_EDIT_VALUES = {
 	"--expect-hash",
 }
 
+-- Whether a sed option gives the script, so no argument is: `-e`, `-f`,
+-- `-e's/a/b/'`, `--expression=...`, or a cluster such as `-ne`. In a
+-- cluster, what follows `-i` is its backup suffix.
+local function sed_script_option(arg: string): boolean
+	if jouet.contains(SED_VALUES, arg) then
+		return true
+	end
+	if string.sub(arg, 1, 2) == "--" then
+		return string.sub(arg, 1, 13) == "--expression=" or string.sub(arg, 1, 7) == "--file="
+	end
+	for i = 2, #arg do
+		local c = string.sub(arg, i, i)
+		if c == "i" then
+			return false
+		elseif c == "e" or c == "f" then
+			return true
+		end
+	end
+	return false
+end
+
 -- The arguments that are not options or the values of `values`.
 local function positional(args: { string }, values: { string }): { string }
 	local out = {}
@@ -165,7 +186,7 @@ local function written(command: JouetCommand): { string }
 		local named = positional(args, SED_VALUES)
 		local scripted = false
 		for _, arg in jouet.options(args) do
-			scripted = scripted or jouet.contains(SED_VALUES, arg)
+			scripted = scripted or sed_script_option(arg)
 		end
 		-- Without `-e` or `-f`, the first argument is the script.
 		if not scripted then
@@ -197,21 +218,22 @@ local function holds_any(path: string, texts: { string }): boolean
 end
 
 -- Whether the file is a rule in deny mode that `session` did not write. A
--- script's mode and author are in the TOML file beside it.
+-- script's mode and author are in the TOML file beside it; only a
+-- deprecated whole-file Luau rule, with no TOML, says them itself.
 local function guarded(path: string, session: string?): boolean
-	local files = { path }
+	local file = path
 	if string.sub(path, -5) == ".luau" then
-		table.insert(files, string.sub(path, 1, -6) .. ".toml")
+		local toml = string.sub(path, 1, -6) .. ".toml"
+		if jouet.file.contains(toml, "") ~= nil then
+			file = toml
+		end
 	elseif string.sub(path, -5) ~= ".toml" then
 		return false
 	end
-	for _, file in files do
-		if holds_any(file, DENY) then
-			local own = session ~= nil and holds_any(file, forms("author", session))
-			return not own
-		end
+	if not holds_any(file, DENY) then
+		return false
 	end
-	return false
+	return not (session ~= nil and holds_any(file, forms("author", session)))
 end
 
 local rule: JouetRule = {

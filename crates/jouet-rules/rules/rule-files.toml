@@ -61,6 +61,11 @@ fires = [
   { command = "bash -c 'rm ~/.config/jouet/rules/no-tags.toml'", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "sudo rm /etc/jouet/rules/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "rm -rf ~/.config/jouet/rules", action = "deny" },
+  { command = "sed -i -e's/deny/warn/' ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -i --expression=s/deny/warn/ ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -nie s/deny/warn/p ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  # A deprecated whole-file Luau rule says its mode itself.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", files = { "/home/u/.config/jouet/rules/old.luau" = 'mode = "deny"' }, action = "deny" },
   { command = "rm ~/.config/jouet/rules/*", action = "deny" },
   { command = "rm -f ~/.config/jouet/rules/*.toml", action = "deny" },
   { command = "rm -rf ~/.config/jouet/rules/.", action = "deny" },
@@ -83,6 +88,8 @@ quiet = [
   { tool = "Write", path = "/home/u/.config/jouet/rules/no-tags.toml" },
   "cat <<'EOF' > ~/.config/jouet/rules/no-tags.toml\n[[rule]]\nname = \"no-tags\"\nEOF",
   "mv /tmp/no-tags.toml ~/.config/jouet/rules/",
+  # A script that mentions deny mode, beside a TOML in warn mode.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.luau", files = { "/home/u/.config/jouet/rules/no-tags.luau" = '-- mode = "deny" once promoted', "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "warn"' } },
   "mv -t ~/.config/jouet/rules/ /tmp/no-tags.toml",
   { command = "rm ~/.config/jouet/rules/*.md" },
   { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = 'deny'\nauthor='mine'" } },
