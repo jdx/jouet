@@ -602,6 +602,19 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
     let tree_text = tree.to_string_lossy();
     let resolved_root = root.canonicalize().ok();
     let at = |path: &str| -> Option<String> {
+        let as_path = Path::new(path);
+        if as_path.is_absolute()
+            && as_path
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            && let Some(root) = resolved_root.as_deref()
+        {
+            // Resolve `..` through existing symlinks before deciding whether
+            // the path belongs to the checkout.
+            let resolved = resolve_existing_ancestors(as_path)?;
+            let relative = resolved.strip_prefix(root).ok()?;
+            return Some(tree.join(relative).to_string_lossy().into_owned());
+        }
         if let Some(rest) = path.strip_prefix(root_text.as_ref())
             && (rest.is_empty() || rest.starts_with(['/', '\\']))
         {
@@ -634,6 +647,25 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         }
         None => word.to_string(),
     }
+}
+
+/// Resolve existing ancestors, then append and normalize a missing suffix.
+fn resolve_existing_ancestors(path: &Path) -> Option<PathBuf> {
+    let (ancestor, mut resolved) = path.ancestors().find_map(|ancestor| {
+        ancestor
+            .canonicalize()
+            .ok()
+            .map(|resolved| (ancestor, resolved))
+    })?;
+    for part in path.strip_prefix(ancestor).ok()?.components() {
+        match part {
+            std::path::Component::Normal(name) => resolved.push(name),
+            std::path::Component::ParentDir if !resolved.pop() => return None,
+            std::path::Component::ParentDir | std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(resolved)
 }
 
 /// Reject a relative path that climbs above the checkout before returning.
@@ -717,6 +749,14 @@ mod tests {
         assert_eq!(
             rebase(&outside.to_string_lossy(), &root, &tree),
             outside.to_string_lossy()
+        );
+        let outside_dir = tmp.path().join("outside/dir");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::os::unix::fs::symlink(&outside_dir, root.join("external-link")).unwrap();
+        let through_link = alias.join("external-link/../missing");
+        assert_eq!(
+            rebase(&through_link.to_string_lossy(), &root, &tree),
+            through_link.to_string_lossy()
         );
     }
 
