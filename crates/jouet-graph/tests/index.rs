@@ -176,6 +176,25 @@ fn extracts_generated_code_over_codegraphs_one_mib_cap() {
     assert_eq!((report.indexed, report.skipped), (1, 0));
     assert!(names(&graph, "gen/oas_json_gen.go").contains(&"Encode0".to_string()));
     assert!(graph.incomplete_files("go").unwrap().is_empty());
+
+    // A graph an older jouet built, under its 1 MiB cap, extracts the file
+    // on the next refresh, though the file did not change.
+    drop(graph);
+    let db = rusqlite::Connection::open(cache.path().join("graph.db")).unwrap();
+    db.execute_batch(
+        "DELETE FROM nodes WHERE file_path = 'gen/oas_json_gen.go';
+         UPDATE files SET error = 'larger than 1 MiB', node_count = 0 WHERE path = 'gen/oas_json_gen.go';",
+    )
+    .unwrap();
+    drop(db);
+    let mut graph = open(root, cache.path());
+    assert_eq!(
+        graph.incomplete_files("go").unwrap(),
+        ["gen/oas_json_gen.go"]
+    );
+    graph.refresh(None).unwrap();
+    assert!(graph.incomplete_files("go").unwrap().is_empty());
+    assert!(names(&graph, "gen/oas_json_gen.go").contains(&"Encode0".to_string()));
 }
 
 #[test]

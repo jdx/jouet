@@ -181,6 +181,15 @@ struct Candidate {
     source: Option<String>,
 }
 
+/// Whether a file must be read again: its metadata changed, or it was left
+/// without symbols as too large and now fits under [`MAX_FILE_SIZE`], which
+/// an older jouet set lower. Its unchanged content is extracted then too.
+fn stale(known: &store::FileRow, seen: &Seen) -> bool {
+    known.size != seen.size
+        || known.modified_ns != seen.modified_ns
+        || (known.too_large && seen.size <= MAX_FILE_SIZE)
+}
+
 fn read(seen: Seen) -> Option<Candidate> {
     let bytes = std::fs::read(&seen.abs).ok()?;
     let hash = hash(&bytes);
@@ -226,11 +235,7 @@ impl Graph {
             .collect();
         let changed: Vec<Seen> = seen
             .into_iter()
-            .filter(|s| {
-                known
-                    .get(&s.rel)
-                    .is_none_or(|k| k.size != s.size || k.modified_ns != s.modified_ns)
-            })
+            .filter(|s| known.get(&s.rel).is_none_or(|k| stale(k, s)))
             .collect();
         {
             let tx = self.conn.transaction()?;
@@ -245,6 +250,7 @@ impl Graph {
             .filter_map(|s| {
                 known
                     .get(&s.rel)
+                    .filter(|k| !k.too_large)
                     .map(|k| (s.rel.clone(), k.content_hash.clone()))
             })
             .collect();
@@ -317,10 +323,12 @@ impl Graph {
                 modified_ns: modified_ns(&meta),
             };
             if let Some(k) = &known {
-                if k.size == seen.size && k.modified_ns == seen.modified_ns {
+                if !stale(k, &seen) {
                     continue;
                 }
-                hashes.insert(seen.rel.clone(), k.content_hash.clone());
+                if !k.too_large {
+                    hashes.insert(seen.rel.clone(), k.content_hash.clone());
+                }
             }
             changed.push(seen);
         }

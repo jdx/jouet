@@ -672,6 +672,8 @@ fn prune_keeps_a_graph_whose_root_cannot_be_checked() {
     }
 }
 
+// The stand-in runners are shell scripts.
+#[cfg(unix)]
 #[test]
 fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
     let env = Env::new();
