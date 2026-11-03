@@ -65,6 +65,18 @@ RS
 	assert_failure 3
 }
 
+@test "search accepts rg's context flags and says it shows no context lines" {
+	run --separate-stderr jouet search -A0 'fn fetch' src/lib.rs
+	assert_success
+	assert_output --partial "16: fn fetch(url: &str) -> String {"
+	refute_output --partial 'context lines'
+
+	run --separate-stderr jouet search -C 3 --again 'fn fetch' src/lib.rs
+	assert_success
+	assert_output --partial 'context lines (-A, -B, -C) are not shown'
+	assert_output --partial 'jouet read PATH --range A:B'
+}
+
 @test "search says what a budget left out" {
 	run --separate-stderr jouet search --file-budget 40 -F 'url' src/lib.rs
 	assert_success

@@ -46,6 +46,9 @@ Examples:
 - **`--budget <BYTES>`** — The most bytes to print in total (default 6000; 0 is no limit)
 - **`-m --max-count <NUM>`** — Show at most NUM matches from each file, as rg's -m
 - **`-n --line-number`** — Accepted for rg's sake: line numbers are always shown
+- **`-A --after-context <NUM>`** — Accepted for rg's sake: matches are shown in the symbol they are in, without context lines (`jouet read` reads around one)
+- **`-B --before-context <NUM>`** — Accepted for rg's sake, as -A
+- **`-C --context <NUM>`** — Accepted for rg's sake, as -A
 - **`--file-budget <BYTES>`** — The most bytes to print from one file (default 1500; 0 is no limit)
 - **`--again`** — Show matches this session was already shown, too
 - **`--structural`** — Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any number. Needs --lang
