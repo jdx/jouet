@@ -241,7 +241,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
     // What each failed suite's output names, for --baseline.
-    let mut failed: Vec<(&Job, Option<baseline::Evidence>, u64)> = Vec::new();
+    let mut failed: Vec<(&Job, Option<baseline::Evidence>, u64, u64)> = Vec::new();
     // How long the slowest failed suite took, which decides whether a
     // `--cmd` run is cheap enough to run again at the merge base.
     let mut slowest_failure = 0;
@@ -328,6 +328,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                         args.affected && args.baseline,
                     ),
                     ran,
+                    digest.passed + digest.skipped,
                 ));
                 slowest_failure = slowest_failure.max(ms);
             }
@@ -372,7 +373,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     }
     let base = base.filter(|_| blamed.is_none() || args.baseline);
     if let (Some(base), Exit::Failed) = (base, exit) {
-        let unnamed = failed.iter().any(|(_, names, _)| names.is_none());
+        let unnamed = failed.iter().any(|(_, names, _, _)| names.is_none());
         // Set when only a kept comparison could be used, and none was.
         let mut slow = false;
         let found = match (unnamed, args.baseline, failed.len()) {
