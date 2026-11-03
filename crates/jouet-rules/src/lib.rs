@@ -1111,6 +1111,22 @@ impl Engine {
         } else {
             rule_problem(&d, event)
         };
+        // Its script, read (never run) before any check below, so that its
+        // revision is the same whether or not the rule loads.
+        let code = d.script.as_ref().map(|script| {
+            match source.scripts.iter().find(|(path, _)| *path == script.0) {
+                Some((_, code)) => Ok(code.clone()),
+                None => match dir {
+                    Some(dir) => std::fs::read_to_string(dir.join(&script.0))
+                        .map_err(|e| format!("reading its script {}: {e}", script.0)),
+                    None => Err(format!("its script {} is not built in", script.0)),
+                },
+            }
+        });
+        let revision = match &code {
+            Some(Ok(code)) => revision(&[table, code]),
+            _ => revision(&[table]),
+        };
         let mut rule = Rule {
             name: match &source.namespace {
                 Some(namespace) => format!("{namespace}/{}", d.name.0),
@@ -1135,7 +1151,7 @@ impl Engine {
             script: d.script.as_ref().map(|s| s.0.clone()),
             requires: d.requires,
             primer: d.primer.unwrap_or(true),
-            revision: revision(&[table]),
+            revision,
             body: Body::None,
         };
         let problem = problem.or_else(|| examples.as_ref().err().cloned());
@@ -1148,31 +1164,16 @@ impl Engine {
             return rule;
         }
         (rule.examples, rule.missing_examples) = examples.unwrap_or_default();
-        rule.body = match (d.script, d.message) {
-            (Some(script), _) => {
-                let code = match source.scripts.iter().find(|(path, _)| *path == script.0) {
-                    Some((_, code)) => Ok(code.clone()),
-                    None => match dir {
-                        Some(dir) => std::fs::read_to_string(dir.join(&script.0))
-                            .map_err(|e| format!("reading its script {}: {e}", script.0)),
-                        None => Err(format!("its script {} is not built in", script.0)),
-                    },
-                };
-                match code {
-                    Ok(code) => {
-                        rule.revision = revision(&[table, &code]);
-                        Body::Script {
-                            matchers: d.matchers,
-                            code,
-                            table: OnceCell::new(),
-                            suggest: d.suggest,
-                        }
-                    }
-                    Err(e) => {
-                        rule.state = State::Broken(e);
-                        return rule;
-                    }
-                }
+        rule.body = match (code, d.message) {
+            (Some(Ok(code)), _) => Body::Script {
+                matchers: d.matchers,
+                code,
+                table: OnceCell::new(),
+                suggest: d.suggest,
+            },
+            (Some(Err(e)), _) => {
+                rule.state = State::Broken(e);
+                return rule;
             }
             (None, message) => Body::Match {
                 matchers: d.matchers,

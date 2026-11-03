@@ -16,15 +16,25 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 /// The rules loaded here, with their revisions: the rules table counts
-/// each only from the revision loaded now.
+/// each only from the revision loaded now. Where two share a name, the one
+/// that decides is the first that is neither broken nor untrusted, as the
+/// engine has it; the others count only when no such rule exists.
 fn revisions() -> BTreeMap<String, String> {
+    use jouet_rules::State;
     let cwd = std::env::current_dir().unwrap_or_default();
-    crate::rules::load(&cwd)
+    let loaded = crate::rules::load(&cwd);
+    let (runs, rest): (Vec<_>, Vec<_>) = loaded
         .engine
         .rules()
         .iter()
-        .map(|r| (r.name.clone(), r.revision.clone()))
-        .collect()
+        .partition(|r| !matches!(r.state, State::Untrusted | State::Broken(_)));
+    let mut revisions = BTreeMap::new();
+    for rule in runs.into_iter().chain(rest) {
+        revisions
+            .entry(rule.name.clone())
+            .or_insert_with(|| rule.revision.clone());
+    }
+    revisions
 }
 
 pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {

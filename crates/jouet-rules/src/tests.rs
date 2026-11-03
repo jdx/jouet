@@ -1215,6 +1215,14 @@ fn a_rules_revision_follows_its_own_table_and_script() {
         revision(vec![source], "no-ls")
     };
     assert_ne!(script("return {}"), script("return { check = nil }"));
+    // Untrusted, it has the revision it will record once trusted.
+    let repo = |trusted: bool| {
+        let source = Source::toml("a", Origin::Repo(PathBuf::from("a.toml")), &scripted)
+            .with_script("s.luau", "return {}");
+        let source = if trusted { source } else { source.untrusted() };
+        revision(vec![source], "no-ls")
+    };
+    assert_eq!(repo(false), repo(true));
 }
 
 #[test]

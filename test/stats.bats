@@ -56,10 +56,16 @@ stamp_revisions() {
 	mv "$ledger.new" "$ledger"
 	jq -cn '{ts: 1793405230, harness: "claude", session: "s1", event: "pre-tool-use", tool: "Bash", shape: "git push",
 		decisions: [{rule: "push-untested", action: "warn", revision: "123456789abc"}]}' >>"$ledger"
+	# A rule of yours named like a built-in one loads broken; the built-in
+	# one still decides, and is counted.
+	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
+	printf '[[rule]]\nname = "sleep-poll"\nwhy = "a copy"\nmessage = "no"\n[rule.match]\ncommand = "sleep"\n' \
+		>"$XDG_CONFIG_HOME/jouet/rules/sleep-poll.toml"
 
 	run --separate-stderr jouet stats --display plain
 	assert_success
 	assert_line --regexp '^  python-edit +1 +0 +1 +0 +0 +0 +1 +0$'
+	assert_line --regexp '^  sleep-poll +1 +0 +1 +0 +0 +1 +0 +0$'
 	refute_line --partial 'push-untested '
 	assert_line '  rules are counted from the revision loaded now; left out: 1 decision of an older revision of a rule, or from before the ledger recorded revisions; and the rules not loaded here: push-untested'
 	# What the warning cost still counts.

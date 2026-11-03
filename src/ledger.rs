@@ -289,8 +289,9 @@ pub(crate) fn recent(dir: &Path, session: &str) -> Vec<Entry> {
 ///
 /// A heuristic. Same shape means the same program, subcommands and flags,
 /// whatever the values, so `git add -A` retried as `git add -A` counts while
-/// `git add src/` does not. Each earlier decision is counted once.
-pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> {
+/// `git add src/` does not. Each earlier decision is counted once, as an
+/// `override` of the revision that decided it.
+pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<Decision> {
     let since = now.saturating_sub(OVERRIDE_WINDOW.as_secs());
     let mut rules = Vec::new();
     for entry in recent.iter().rev() {
@@ -305,8 +306,13 @@ pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<String> 
             continue;
         }
         for d in &entry.decisions {
-            if (d.action == "deny" || d.action == "warn") && !rules.contains(&d.rule) {
-                rules.push(d.rule.clone());
+            if (d.action == "deny" || d.action == "warn")
+                && !rules.iter().any(|r: &Decision| r.rule == d.rule)
+            {
+                rules.push(Decision {
+                    action: "override".into(),
+                    ..d.clone()
+                });
             }
         }
     }
@@ -1084,13 +1090,22 @@ mod tests {
                 rule: "git-stash".into(),
                 action: "deny".into(),
                 scope: None,
-                revision: None,
+                revision: Some("0ld".into()),
             }],
             ..Entry::default()
         };
         let now = 10_000;
         let recent = [denied(now - 60, "git stash")];
-        assert_eq!(overrides(&recent, "git stash", now), ["git-stash"]);
+        // An override of the revision that denied, whatever is loaded now.
+        assert_eq!(
+            overrides(&recent, "git stash", now),
+            [Decision {
+                rule: "git-stash".into(),
+                action: "override".into(),
+                scope: None,
+                revision: Some("0ld".into()),
+            }]
+        );
         assert!(overrides(&recent, "git stash list", now).is_empty());
         let stale = [denied(now - 3600, "git stash")];
         assert!(overrides(&stale, "git stash", now).is_empty());
