@@ -5,9 +5,37 @@
 -- deny mode that another author wrote. A file it cannot read is a new one,
 -- which only adds decisions.
 
--- The ways a TOML or Luau file can write `key = "value"`.
+-- The ways a rule file can say a field's value: `key = "value"` in TOML or a
+-- Luau table, and `--- key: value` in a deprecated whole-file Luau rule's
+-- header, where the line ends with the value.
 local function forms(key: string, value: string): { string }
-	return { `{key} = "{value}"`, `{key}="{value}"`, `{key} = '{value}'`, `{key}='{value}'` }
+	return {
+		`{key} = "{value}"`,
+		`{key}="{value}"`,
+		`{key} = '{value}'`,
+		`{key}='{value}'`,
+		`--- {key}: {value}\n`,
+		`---{key}: {value}\n`,
+		`--- {key}:{value}\n`,
+	}
+end
+
+-- The path with `\` as `/`, runs of `/` as one, `.` parts and a trailing `/`
+-- dropped, so `rules//`, `rules/./` and `rules/.` all name `rules`. `..` is
+-- kept: it leaves the directory.
+local function tidy(path: string): string
+	local p = string.gsub(path, "\\", "/")
+	p = string.gsub(p, "/+", "/")
+	repeat
+		local before = p
+		p = string.gsub(p, "/%./", "/")
+	until p == before
+	p = string.gsub(p, "^%./", "")
+	p = string.gsub(p, "/%.$", "")
+	if #p > 1 then
+		p = string.gsub(p, "/$", "")
+	end
+	return p
 end
 
 local DENY = forms("mode", "deny")
@@ -248,7 +276,8 @@ local rule: JouetRule = {
 			end
 		end
 		local repo: string? = nil
-		for _, path in paths do
+		for _, written_path in paths do
+			local path = tidy(written_path)
 			local kind, dir = place(path)
 			if kind == "user" and (dir or broad(path)) then
 				return jouet.deny(
