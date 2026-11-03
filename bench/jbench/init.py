@@ -1,8 +1,10 @@
 """The `jouet-init` arm's starting point: the project as the jouet-init skill
 leaves it, as a user who ran `jouet setup` and then `/jouet-init` has it.
 
-The skill runs once per task, starting commit, jouet build, harness and
-model, in an isolated home like any run. What it changed in the work tree
+The skill runs once per cache identity, in an isolated home like any run.
+The identity covers the task definition and path, pinned requirements, starting
+commit, jouet build, harness executable, model, effort and initialization prompt.
+What it changed in the work tree
 is kept as a patch, with what the run cost, under
 `~/.cache/jouet-bench/init/`. Every `jouet-init` run applies that patch and
 commits it before the agent starts, so its own work begins from a clean
@@ -34,9 +36,31 @@ TIMEOUT_S = 1800
 def key(task: tasks_mod.Task, head_sha: str, jouet_bin: Path, harness: Harness, opts: dict[str, Any]) -> str:
     """A hash only: like a measured run's directory, the skill's paths carry
     no task name, which a project's tests could see."""
-    digest = hashlib.sha256(jouet_bin.read_bytes()).hexdigest()[:16]
-    model = opts.get(f"{harness.name}_model") or ""
-    raw = f"{task.name}\0{head_sha}\0{digest}\0{harness.name}\0{model}"
+    requirements = tasks_mod.requirements_file(task)
+    task_data = asdict(task)
+    task_data["dir"] = str(task.dir.resolve())
+    binary = opts.get("harness_bins", {}).get(harness.name)
+    harness_binary = None
+    if binary:
+        path = Path(binary).resolve()
+        try:
+            stat = path.stat()
+            harness_binary = [str(path), stat.st_size, stat.st_mtime_ns]
+        except OSError:
+            harness_binary = [str(path), None, None]
+    data = {
+        "schema": 2,
+        "task": task_data,
+        "requirements_sha256": tasks_mod.requirements_digest(task, requirements) if requirements else None,
+        "head_sha": head_sha,
+        "jouet_sha256": hashlib.sha256(jouet_bin.read_bytes()).hexdigest(),
+        "harness": harness.name,
+        "harness_binary": harness_binary,
+        "model": opts.get(f"{harness.name}_model"),
+        "effort": opts.get("effort"),
+        "prompt": PROMPT,
+    }
+    raw = json.dumps(data, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
