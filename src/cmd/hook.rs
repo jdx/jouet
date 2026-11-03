@@ -1436,6 +1436,7 @@ fn fix_after_edit(
 fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> State {
     let mut state = State::default();
     let cwd = session_dir(payload);
+    let mut failed = std::collections::BTreeMap::<String, Vec<String>>::new();
     for verify::Ran {
         command,
         exit_code,
@@ -1456,6 +1457,12 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         for record in evaluate(engine, &call).records {
             let at = run_dir(cwd.as_deref(), record.dir.as_deref());
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            if record.exit_code != 0 {
+                failed
+                    .entry(root.clone())
+                    .or_default()
+                    .push(record.command.clone());
+            }
             state.record(&root, [record], None);
             // Read again at every stop: dated now, a run in another work
             // tree would never be left behind (see `set_aside_settled`).
@@ -1463,6 +1470,10 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
                 state.ran_at(&root, when);
             }
         }
+    }
+    // Once per work tree: each reads its project file.
+    for (root, commands) in &failed {
+        mark_broken(&mut state, root, commands);
     }
     state
 }

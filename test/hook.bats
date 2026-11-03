@@ -753,6 +753,15 @@ claude_payload() {
 	run jq -r '[.decision // "none", .systemMessage // ""] | @tsv' <<<"$output"
 	assert_output --partial none
 	assert_output --partial "fails here before any change: golangci-lint is built with an older Go"
+	# Codex, whose runs are read again from its transcript at each stop.
+	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["/bin/zsh","-lc","jouet test --cmd -- mise run lint"],"exit_code":1}}}' >rollout.jsonl
+	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	assert_success
+	refute_output --partial '"decision":"block"'
+	# A check the file does not list still blocks.
+	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["/bin/zsh","-lc","mise run test"],"exit_code":1}}}' >rollout.jsonl
+	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	assert_output --partial '"decision":"block"'
 }
 
 @test "trust refuses a .jouet/project.toml that does not parse" {
