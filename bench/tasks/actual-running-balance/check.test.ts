@@ -33,6 +33,15 @@ test('running balances refresh after repeated edits', async ({ browser }) => {
       await expect(olderBalance).toHaveText(amount);
       await expect(newerBalance).toHaveText(expectedNewer);
     }
+    const notes = account.transactionTableRow.nth(0).getByTestId('notes');
+    await notes.click();
+    const notesInput = notes.getByRole('combobox');
+    await notesInput.selectText();
+    await notesInput.pressSequentially('newer edited');
+    await page.keyboard.press('Tab');
+    await expect(notes).toHaveText('newer edited');
+    await expect(olderBalance).toHaveText('6.50');
+    await expect(newerBalance).toHaveText('11.50');
   } finally {
     await page.close();
   }
