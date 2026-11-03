@@ -36,6 +36,7 @@ Projects beyond jdx's own:
 |---|---|---|---|---|
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
 | `actual-running-balance` | Actual Budget, a local-first finance webapp | [actualbudget/actual#8475](https://github.com/actualbudget/actual/issues/8475) | TypeScript, Playwright and Chromium | the benchmark's pinned Node, a local clone and prepared Yarn and browser caches, as described below |
+| `ghost-tier-refresh` | Ghost, a publishing webapp | [TryGhost/Ghost#32471](https://github.com/TryGhost/Ghost/pull/32471) | TypeScript, Vitest browser mode and Chromium | Node 24.22.2, pnpm 12.16.1, a local clone and prepared pnpm and browser caches, as described below |
 | `cobra-completion-args` | Cobra, a Go CLI library | [spf13/cobra#2257](https://github.com/spf13/cobra/issues/2257) | Go, `go test` | the benchmark's Go tools, cached modules, and a local clone at `~/src/cobra-bench-source` |
 | `rubocop-redundant-self` | RuboCop, a Ruby static analyzer | [rubocop/rubocop#16149](https://github.com/rubocop/rubocop/issues/16149) | Ruby, RSpec and RuboCop's CLI | Ruby 4.0.9, a clone at `~/src/rubocop-bench-source`, and a prepared bundle as described below |
 | `requests-proxied-files` | Requests, an HTTP library | [psf/requests#7502](https://github.com/psf/requests/pull/7502) | Python, pytest and pytest-httpbin | Python 3.13 and a local Requests clone at `~/src/requests-bench-source` |
@@ -49,6 +50,18 @@ Projects beyond jdx's own:
 Each `task.toml` notes which jouet levels the task can exercise: what `jouet test` does with the project out of the box, and where TOML config or a Luau rule or routine could help. A JavaScript project's dependencies are installed by the task's `setup` commands, offline from your cache, after the work tree is committed and before the agent's clock starts. The agents are not network-sandboxed and can override offline defaults. A setup that leaves files git does not ignore is refused. Tools the default `bin/` lacks, such as `go`, `npm` or a pinned `pnpm`, can be exposed through `[tools]`, by path or by a bare name found on your `PATH`.
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
+
+The opt-in Ghost task checks the automation editor after leaving and returning to it: a newly added paid tier must appear, the existing selection must stay selected, and saving both must send the right IDs. It requires a clean commit and a changed test-named file, but does not judge the content of the agent's own test. Its reference fix is adapted from [TryGhost/Ghost#32471](https://github.com/TryGhost/Ghost/pull/32471). Prepare the pinned tools, dependencies and Chromium once from the jouet checkout:
+
+```sh
+git clone https://github.com/TryGhost/Ghost.git ~/src/ghost-bench-source
+git -C ~/src/ghost-bench-source checkout --detach a79316157f8175f9794310f700169e5a2b6877f0
+MISE_ENV=bench mise install pnpm@12.16.1
+MISE_ENV=bench mise x pnpm@12.16.1 -- sh -c 'cd "$HOME/src/ghost-bench-source" && export CI=1 NX_DAEMON=false NX_NO_CLOUD=true PNPM_CONFIG_ENABLE_GLOBAL_VIRTUAL_STORE=false PNPM_CONFIG_STORE_DIR="$HOME/.cache/jouet-bench/ghost-pnpm-store" PNPM_CONFIG_CACHE_DIR="$HOME/.cache/jouet-bench/ghost-pnpm-cache" PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/jouet-bench/ghost-playwright" && pnpm install --filter "@tryghost/admin..." --frozen-lockfile && pnpm --filter @tryghost/admin exec playwright install --only-shell chromium'
+MISE_ENV=bench mise x pnpm@12.16.1 -- python3 bench/agents.py check-tasks --tasks ghost-tier-refresh
+```
+
+Use the same `MISE_ENV=bench mise x pnpm@12.16.1 --` prefix for the task's benchmark runs. Each trial installs its own dependencies offline from the prepared store and builds Ghost's local packages before timing. It fetches Ghost's pinned relative submodules during setup, so that step needs network access. Use a fresh clone for preparation: pnpm will refuse to switch stores in a checkout whose existing `node_modules` uses another store.
 
 The opt-in Actual Budget task checks a running balance after two edits in a local browser, and requires a committed regression test and release note. The reference fix is adapted from [actualbudget/actual#8490](https://github.com/actualbudget/actual/pull/8490). It retains repository history, uses port 3001 for its local server, and refuses to reuse a server already on that port. Before running, prepare the pinned dependencies and Chromium once from the jouet checkout:
 

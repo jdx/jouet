@@ -1,0 +1,38 @@
+description = "Refresh automation editor tiers after navigation (TryGhost/Ghost#32471)"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1800
+check_timeout_s = 300
+isolated_setup = [
+  ["node", "-e", "if (process.version !== 'v24.22.2' || require('node:child_process').execFileSync('pnpm', ['--version'], {encoding: 'utf8'}).trim() !== '12.16.1') throw new Error('Ghost task requires Node 24.22.2 and pnpm 12.16.1')"],
+  ["pnpm", "install", "--filter", "@tryghost/admin...", "--offline", "--frozen-lockfile"],
+  ["pnpm", "nx", "run-many", "-t", "build", "-p", "@tryghost/kg-unsplash-selector,@tryghost/koenig-lexical"],
+]
+prompt = '''
+In Ghost Admin, an existing paid-subscription automation can show a stale tier
+list. If a new paid tier is created while the editor is closed, returning to the
+editor without a page refresh can omit it from the tier picker. Fix this so the
+editor reflects current tiers, preserve normal selection behavior, add a
+regression test, and commit the change.
+'''
+
+[source]
+git = "~/src/ghost-bench-source"
+commit = "a79316157f8175f9794310f700169e5a2b6877f0"
+submodule_base_url = "https://github.com/TryGhost/Ghost.git"
+
+[tools]
+node = "node"
+pnpm = "pnpm"
+
+[env]
+CI = "1"
+NX_DAEMON = "false"
+NX_NO_CLOUD = "true"
+PNPM_CONFIG_ENABLE_GLOBAL_VIRTUAL_STORE = "false"
+PNPM_CONFIG_STORE_DIR = "~/.cache/jouet-bench/ghost-pnpm-store"
+PNPM_CONFIG_CACHE_DIR = "~/.cache/jouet-bench/ghost-pnpm-cache"
+PLAYWRIGHT_BROWSERS_PATH = "~/.cache/jouet-bench/ghost-playwright"
