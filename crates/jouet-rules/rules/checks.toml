@@ -82,6 +82,8 @@ fires = [
   { command = "hk check --all --step eslint", exit_code = 0, kind = "lint", scope = "partial --step eslint" },
   { command = "hk check --staged", exit_code = 0, kind = "lint", scope = "partial --staged" },
   { command = "git diff --name-only -z | hk run check --safe --files0-from -", exit_code = 0, kind = "lint", scope = "partial" },
+  { command = "hk run check --safe --format json --files0-from changed.lst", exit_code = 0, kind = "lint", scope = "partial files0-from changed.lst" },
+  { command = "hk check --files0-from=/tmp/list --step eslint", exit_code = 0, kind = "lint", scope = "partial files0-from /tmp/list --step eslint" },
   { command = "jouet diag check --changed", exit_code = 1, kind = "lint", scope = "partial changed files" },
   { command = "jouet --json diag check src/a.rs --max 5", exit_code = 1, kind = "lint", scope = "partial files src/a.rs" },
   { command = "bats test/edit.bats", exit_code = 0, kind = "test", scope = "partial" },

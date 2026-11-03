@@ -159,6 +159,33 @@ pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
     Ok(!status.is_empty())
 }
 
+/// Every file in the work tree at `dir` that differs from HEAD, staged or
+/// not, and every untracked file that is not ignored, relative to the work
+/// tree's root: what hk checks by default. Deleted files, which no check
+/// can read, are left out.
+pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, String> {
+    let status = git(
+        Some(dir),
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+            "--no-renames",
+            "--ignore-submodules=all",
+        ],
+        timeout,
+    )?;
+    Ok(status
+        .split('\0')
+        // `XY PATH`
+        .filter_map(|entry| {
+            let (xy, path) = (entry.get(..2)?, entry.get(3..)?);
+            (!xy.contains('D') && !path.is_empty()).then(|| path.to_string())
+        })
+        .collect())
+}
+
 /// The tree of commit `rev` in the repository containing `dir`, hashed as
 /// [`work_tree`] hashes a work tree.
 pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<String, String> {
