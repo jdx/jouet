@@ -133,7 +133,7 @@ struct FileRead {
     /// --outline of a short file: it is printed whole as well.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     short: bool,
-    /// Why --why could not say where the lines came from.
+    /// Unavailable optional information or lines left out of the result.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     notes: Vec<String>,
 }
@@ -177,10 +177,10 @@ const CALLERS_SHOWN: usize = 5;
 
 /// The callers the code graph has for the definition named on `line` of
 /// `file`, and how many there are; nothing without a graph.
-fn graph_callers(file: &Path, line: u32) -> (Vec<String>, usize) {
+fn graph_callers(file: &Path, line: u32) -> Result<(Vec<String>, usize), String> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let Ok(Some(mut graph)) = jouet_graph::Graph::open_existing(&cwd) else {
-        return (Vec::new(), 0);
+        return Ok((Vec::new(), 0));
     };
     let abs = cwd.join(file);
     if graph
@@ -190,12 +190,12 @@ fn graph_callers(file: &Path, line: u32) -> (Vec<String>, usize) {
         )
         .is_err()
     {
-        return (Vec::new(), 0);
+        return Ok((Vec::new(), 0));
     }
     let Ok(Some(symbol)) = graph.enclosing(&abs, line) else {
-        return (Vec::new(), 0);
+        return Ok((Vec::new(), 0));
     };
-    let callers = graph.callers(&symbol.id, 1).unwrap_or_default();
+    let callers = graph.callers(&symbol.id, 1).map_err(|e| e.to_string())?;
     let shown = callers
         .iter()
         .take(CALLERS_SHOWN)
@@ -208,7 +208,7 @@ fn graph_callers(file: &Path, line: u32) -> (Vec<String>, usize) {
             )
         })
         .collect();
-    (shown, callers.len())
+    Ok((shown, callers.len()))
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -340,8 +340,15 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
                     ) else {
                         continue;
                     };
-                    (read_section.callers, read_section.caller_count) =
-                        graph_callers(file, l.def.line);
+                    match graph_callers(file, l.def.line) {
+                        Ok((callers, count)) => {
+                            read_section.callers = callers;
+                            read_section.caller_count = count;
+                        }
+                        Err(error) => read
+                            .notes
+                            .push(format!("callers of {} unavailable: {error}", l.def.name)),
+                    }
                     read.sections.push(read_section);
                 }
             }
