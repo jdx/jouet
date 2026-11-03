@@ -36,6 +36,8 @@ callers of method ToolVersion::install_path (src/toolset/tool_version.rs:544): 4
 
 Every answer is budgeted, 6,000 bytes by default, and paged rather than cut: a long answer ends with a line such as `... 43 more impact on 5 more pages (jouet graph impact struct:7af2… --page 2)`. A dense answer stays in the agent's context for the rest of the session, so it pays to ask for the next page only when it is needed. `--json` prints the same page as one document, with `total`, `page` and `pages`.
 
+`callers`, `callees` and `impact` fail when a traversal exceeds 2,000 symbols, rather than returning an incomplete result as if it were complete. Narrow the query or reduce `--depth`. `impact` also fails if the starting symbol contains more than 2,000 symbols; query a smaller symbol.
+
 ## Linking
 
 A call, import or base class is linked to its definition in this order: a name the file imports, a member of the type a `self`/`this` or a type qualifier names, the same file, the files the file imports, the same directory (a Go or Java package), and finally the only definition of that name in the project. Imports are resolved the way each language does: JS/TS specifiers with extensions and `index` files, Python modules from any package root, Go import paths through `go.mod`, Rust `use` paths through the crate's module files, Java imports by package directory, Ruby `require` and C `#include` relative to the file, then by path.
