@@ -162,13 +162,13 @@ impl Probes {
         }
     }
 
-    /// Whether the file at `path`, from the work tree when relative, holds
-    /// `text`.
+    /// Whether the file at `path`, from the call's directory when relative
+    /// or under `~` or `$HOME`, holds `text`.
     fn contains(&self, path: &str, text: &str) -> Answer {
         let base = self.dir.clone().or_else(|| std::env::current_dir().ok());
         let path = match base {
-            Some(base) if !Path::new(path).is_absolute() => base.join(path),
-            _ => PathBuf::from(path),
+            Some(base) => crate::resolve_dir(&base, path),
+            None => PathBuf::from(path),
         };
         let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         if meta.len() > FILE_MAX {
@@ -536,6 +536,11 @@ pub(crate) fn install(
     file_table.set(
         "contains",
         lua.create_function(move |lua, (path, text): (String, String)| {
+            // An example gives the file's text.
+            let stubbed = s.cache.borrow().get(&format!("file:{path}")).cloned();
+            if let Some(Ok(Some(serde_json::Value::String(held)))) = stubbed {
+                return answer(lua, Ok(Some(held.contains(&text).into())));
+            }
             let key = format!("contains:{path}\0{text}");
             let found = cached(&s, &key, |p, _| p.contains(&path, &text))?;
             answer(lua, found)

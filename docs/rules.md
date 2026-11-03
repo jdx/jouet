@@ -66,7 +66,7 @@ The built-in rules, grouped by what they are about:
 | Tests and lints | `scoped-lint`, `affected-tests`, `piped-test-output`, and `checks`, which denies nothing and records test, lint and build runs for the [stop check](/setup#finishing-on-a-failing-check) |
 | Servers and background work | `job-start`, `job-ready`, `job-logs`, `job-stop`, `pitchfork-start`, `pitchfork-stop`, `pitchfork-logs` |
 | What goes into the context | `reread`, `large-read`, `unbudgeted-search`, `unbounded-query`, `curl-json` |
-| Sessions and trust | `claimed-path`, `trust` |
+| Sessions and trust | `claimed-path`, `trust`, `rule-files` |
 
 [Steering rules](/setup#steering-rules) in the setup guide describes what they deny and what they suggest instead. Their source, in [`crates/jouet-rules/rules`](https://github.com/jdx/jouet/tree/main/crates/jouet-rules/rules), is a good place to copy from when you write your own.
 
@@ -109,6 +109,7 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 4. Run `jouet rule test NAME` until every example passes, and `jouet rule test NAME --replay` to see what the rule would have done to the calls jouet's hooks have already seen.
 5. Make sure a denied call has a way through. The `message` should name something that does what the agent was trying to do, and works in every case the rule fires on. Where a case is left that it cannot handle, such as a run whose cause was fixed outside the repository, the command it names needs an explicit way past the check (`jouet ci explain --rerun --force`), or the rule should only warn. A deny that leaves a correct agent no path is a bug in the rule.
 6. `jouet rule promote NAME` switches it from warn to deny once it passes its examples. `--reason` records why, and `jouet rule log` shows every change made to your rules. Only rules in `~/.config/jouet/rules` can be promoted: built-in rules are part of jouet, and a repository's change through a reviewed PR.
+7. Once it denies, it is yours: the built-in `rule-files` rule stops an agent from changing, moving or deleting it, unless the agent is the session its `author` names. A rule in warn mode stays open to edit.
 
 Writing the examples first follows [ast-grep](https://ast-grep.github.io/guide/test-rule.html)'s valid and invalid rule tests. They say what the rule is for more exactly than its `why` does, and jouet holds every rule to them before it can block anything.
 
@@ -165,6 +166,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `min_code_lines` | Like `min_read_lines`, counting only source files `jouet read --outline` can outline, so a long log, a command's saved output or a document read whole does not count. |
 | `min_tracked_files` | The work tree tracks at least this many files (`git ls-files`), so a search of all of it can print a lot. jouet's hook counts them only for the Grep tool and commands that run grep or rg. Outside a repository the count is unknown, and the key holds. |
 | `prints` | Whether the command's standard output reaches the transcript: it is not redirected to a file (`>`, `>>`, `&>`), piped into another command, or captured with `$(...)`. `>&2` still reaches it. |
+| `stdout_to` | The file its standard output is redirected to (`>`, `>>`, `&>`), as written, matches one of these wildcard patterns: `stdout_to = "*jouet/rules/*"`. |
 | `fnox` | Whether the call runs in a project that uses [fnox](https://fnox.jdx.dev): a `fnox.toml`, `.fnox.toml` or `.config/fnox.toml` in the working directory or above it. |
 | `secret_vars` | The command expands, outside single quotes, a variable the project's fnox config defines as a secret: `$NAME` or `${NAME}`. |
 | `secret_args` | One of its arguments is the name of a secret the project's fnox config defines, as in `printenv NAME`. |
@@ -233,8 +235,9 @@ fires = [
 | `claims` | The claims `jouet.claims.held()` finds, each with its `pattern` and `session`, and optionally `worktree` (`/elsewhere` if omitted), `branch` and `note`: `claims = [{ pattern = "src/cmd/", session = "theirs" }]`. |
 | `stack` | Where `jouet.stack.layer()` places the current branch: `stack = { branch = "feat/cache", parent = "feat/parser", parent_merged = true }`, with `trunk` (`main` if omitted). |
 | `secrets` | What `jouet.secrets.scan()` finds, for any scope: `secrets = [{ rule = "github-pat", path = "src/config.rs", line = 3 }]`, with a `commit` for an outgoing scan. |
+| `files` | The text `jouet.file.contains()` reads, by the path the script passes it: `files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }`. |
 
-Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason, unless the example answers it with `git`, `claims`, `stack` or `secrets`.
+Examples run without [probes](#probes), so they give the same answer on any machine: each probe returns `nil` and a reason, unless the example answers it with `git`, `claims`, `stack`, `secrets` or `files`.
 
 Every rule needs at least one example of each kind:
 
@@ -270,7 +273,7 @@ Adding `unless_flags = ["-i", "--interactive"]` to the matcher fixes it. A file 
 
 ```output
 $ jouet rule test ./no-rm-rf.toml
-jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`, `unless_with`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `unless_paths`, `fnox`, `secret_files`, `secret_vars`, `secret_args`, `prints`, `exit_code`
+jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`, `unless_with`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `unless_paths`, `fnox`, `secret_files`, `secret_vars`, `secret_args`, `prints`, `stdout_to`, `exit_code`
 ```
 
 `jouet rule test --all` runs every rule's examples: built in, the system's, yours, the plugins', and this repository's, trusted or not.
@@ -340,7 +343,7 @@ The script returns a table with a `check` function, which gets the tool call and
 
 A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
 
-These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `committed-secrets`, `job-start`, `piped-test-output`, `pitchfork-start`, `pitchfork-stop`, `python-edit`, `rebase-merged-base`, `reset-to-remote`, `scoped-lint`, `sed-line-edit` and `unbounded-query`. Some of what they do:
+These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `committed-secrets`, `job-start`, `piped-test-output`, `pitchfork-start`, `pitchfork-stop`, `python-edit`, `rebase-merged-base`, `reset-to-remote`, `rule-files`, `scoped-lint`, `sed-line-edit` and `unbounded-query`. Some of what they do:
 
 - `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them.
 - `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
@@ -348,6 +351,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 - `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop.
 - `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged.
 - `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
+- `rule-files` matches a write to a file in a jouet rules directory, then works out which files the call writes and asks `jouet.file.contains()` whether each holds a rule in deny mode, and who wrote it.
 - `committed-secrets` matches a commit or a push, then asks `jouet.secrets.scan()` what gitleaks' rules find in the lines it would add.
 
 ### The call
@@ -465,7 +469,7 @@ A script can also ask about jouet's state and the work tree. The probes only rea
 | `jouet.pitchfork.daemons()` | The daemons the project's pitchfork config declares, from `pitchfork.toml`, `pitchfork.local.toml` and their `.config/` forms from the filesystem root down to the call's directory, a nearer file winning: each one's `name`, its `run` command as one line, the `ports` it is said to listen on (`port`, `expected_port`, `ready_port`, and `--port N` or `-p N` in `run`), and its `file`. Read from the files, without running pitchfork; `nil` when none declares any |
 | `jouet.secrets.scan(scope?, paths?)` | What [gitleaks' rules](/commands/secrets), with the repository's `.gitleaks.toml` and `.gitleaksignore`, find in the lines a commit or push would add: `"staged"` (the default), `"tracked"` (what `git commit -a` takes) or `"outgoing"` (each commit not on any remote), and the `paths`, which a `git add` in the same call is about to stage. Each finding has its `rule`, `path`, `line`, `commit` for an outgoing scan, `redacted` match and `fingerprint`; never the secret. `nil` and the reason for a diff over 1 MiB, or a scan that runs out of budget |
 | `jouet.repo()` | The work tree's `root`, whether it is a linked worktree, and its GitHub `owner`, `name` and `repo` |
-| `jouet.file.contains(path, text)` | Whether the file at `path` (from the work tree's root when relative) holds `text` exactly: only `true` or `false`, never the file; `nil` and a reason when it cannot be read or is over 4 MiB |
+| `jouet.file.contains(path, text)` | Whether the file at `path` (from the call's directory when relative, or under `~` or `$HOME`) holds `text` exactly: only `true` or `false`, never the file; `nil` and a reason when it cannot be read or is over 4 MiB |
 | `jouet.env(name)` | An environment variable on a short allowlist: `AI_AGENT`, `CARGO_TARGET_DIR`, `CI`, `CLAUDECODE`, `CODEX_SANDBOX`, `GITHUB_ACTIONS`, `GITHUB_BASE_REF`, `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, `GITHUB_REPOSITORY`, `LANG`, `MISE_ENV`, `NODE_ENV`, `SHELL`, `TERM`, `USER`, `VIRTUAL_ENV` and `JOUET_*`. A name with `TOKEN`, `SECRET`, `PASSWORD` or `KEY` in it is never on it, and any name not on it is an error |
 
 ```lua

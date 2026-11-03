@@ -307,6 +307,10 @@
           "description": "Whether the command's standard output reaches the transcript: it is\nnot redirected to a file, piped into another command, or captured\nwith `$(...)`.",
           "type": "boolean"
         },
+        "stdout_to": {
+          "description": "The file the command's standard output is redirected to (`> out`,\n`>> notes`, `&> all`), as written, matches one of these. `*` and `?`\nare wildcards.",
+          "$ref": "#/$defs/OneOrMany_string"
+        },
         "exit_code": {
           "description": "For a `post-tool-use` rule: the call exited with one of these codes,\nsuch as `8` for `gh pr checks` with checks still pending. With\n`command`, it is that command's exit status, where the call's says\nwhat it was: in `npm test && gh pr checks` exiting 1, either may have\nfailed, so neither matches. Set it in an example with `exit_code`.",
           "$ref": "#/$defs/OneOrMany_int32",
@@ -482,6 +486,13 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/ExampleSecret"
+          }
+        },
+        "files": {
+          "description": "The text of files `jouet.file.contains` reads, by the path the\nscript passes it; omitted, it has no answer for any file.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
           }
         },
         "fired": {

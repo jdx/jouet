@@ -1,0 +1,124 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "rule-files"
+why = "jouet reads its rules from disk on every tool call, so an agent that rewrites, moves or deletes a rule that denies it something switches that restriction off; loosening a rule is the user's decision."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-11-03"
+suggest = "jouet rule new <NAME> --why <TEXT>"
+# It denies on what the file holds, not on how the call looks, so naming it
+# at session start would save no call.
+primer = false
+# The matcher finds a write to a file in a jouet rules directory; the
+# script works out which files the call writes and reads each one to see
+# whether it holds a rule in deny mode.
+script = "rule-files.luau"
+
+[[rule.match]]
+tool = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
+paths = ["**/jouet/**/rules/**", "**/.jouet/**/rules/**"]
+
+[[rule.match]]
+command = ["rm", "unlink", "shred", "mv", "cp", "install", "tee", "truncate"]
+args = ["*jouet/*rules", "*jouet/*rules/", "*jouet/*rules/*"]
+
+# `--target-directory=DIR` is an option, so `args` does not see DIR.
+[[rule.match]]
+command = ["mv", "cp", "install"]
+text = "jouet/[./]*rules"
+
+[[rule.match]]
+command = "sed"
+flags = ["-i", "--in-place"]
+args = ["*jouet/*rules/*"]
+
+[[rule.match]]
+command = "jouet edit"
+args = ["*jouet/*rules/*"]
+
+[[rule.match]]
+command = "*"
+stdout_to = ["*jouet/*rules/*"]
+
+[rule.examples]
+fires = [
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Write", path = "/home/u/.config/jouet/rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode='deny'" }, action = "deny" },
+  { tool = "MultiEdit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = \"deny\"\nauthor = \"theirs\"" }, action = "deny" },
+  # A script's mode is in the TOML beside it.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.luau", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = "/home/u/.config/jouet//rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Write", path = "/home/u/.config/jouet/./rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = ".jouet/./rules/no-curl.toml", action = "warn" },
+  { command = "cp -t ~/.config/jouet/./rules /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = "/etc/jouet/rules/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "rm ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "mv ~/.config/jouet/rules/no-tags.toml /tmp/", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "cp /tmp/loose.toml ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "cp /tmp/loose.toml ~/.config/jouet/rules/", files = { "~/.config/jouet/rules/loose.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -i 's/deny/warn/' ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -i '' -e 's/deny/warn/' $HOME/.config/jouet/rules/no-tags.toml", harness = "codex", files = { "$HOME/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "echo '' > ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "cat <<'EOF' > ~/.config/jouet/rules/no-tags.toml\n[[rule]]\nname = \"no-tags\"\nEOF", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "jouet edit replace ~/.config/jouet/rules/no-tags.toml --old deny --new warn", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "bash -c 'rm ~/.config/jouet/rules/no-tags.toml'", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sudo rm /etc/jouet/rules/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules", action = "deny" },
+  { command = "sed -i -e's/deny/warn/' ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -i --expression=s/deny/warn/ ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "sed -nie s/deny/warn/p ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  # A deprecated whole-file Luau rule says its mode itself.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", files = { "/home/u/.config/jouet/rules/old.luau" = 'mode = "deny"' }, action = "deny" },
+  { command = "rm ~/.config/jouet/rules/*", action = "deny" },
+  { command = "rm -f ~/.config/jouet/rules/*.toml", action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules/.", action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules/./", action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules//", action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules/../", action = "deny" },
+  { command = "rm ~/.config/jouet//rules//no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", files = { "/home/u/.config/jouet/rules/old.luau" = "--!strict\n--- name: old\n--- mode: deny\n--- author: user\n" }, action = "deny" },
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", session = "mine2", files = { "/home/u/.config/jouet/rules/old.luau" = "--- mode: deny\n--- author: mine\n" }, action = "deny" },
+  { command = "cp -t ~/.config/jouet/rules/ /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "mv --target-directory=/etc/jouet/rules /tmp/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "cp -rt ~/.config/jouet/rules /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  # A repository's rules change through a reviewed PR, and stop running
+  # until the user trusts them again.
+  { tool = "Edit", path = ".jouet/rules/no-curl.toml", action = "warn" },
+  { command = "rm .jouet/rules/no-curl.toml", action = "warn" },
+]
+quiet = [
+  # A rule in warn mode, such as a draft `jouet rule new` wrote, is for the
+  # agent to fill in.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "warn"' } },
+  { command = "sed -i 's/TODO/git tag/' ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "warn"' } },
+  # A rule this session wrote.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = \"deny\"\nauthor = \"mine\"" } },
+  # A new rule only adds decisions.
+  { tool = "Write", path = "/home/u/.config/jouet/rules/no-tags.toml" },
+  "cat <<'EOF' > ~/.config/jouet/rules/no-tags.toml\n[[rule]]\nname = \"no-tags\"\nEOF",
+  "mv /tmp/no-tags.toml ~/.config/jouet/rules/",
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", session = "mine", files = { "/home/u/.config/jouet/rules/old.luau" = "--- mode: deny\n--- author: mine\n" } },
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/old.luau", files = { "/home/u/.config/jouet/rules/old.luau" = "--- mode: warn\n" } },
+  # A script that mentions deny mode, beside a TOML in warn mode.
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.luau", files = { "/home/u/.config/jouet/rules/no-tags.luau" = '-- mode = "deny" once promoted', "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "warn"' } },
+  "mv -t ~/.config/jouet/rules/ /tmp/no-tags.toml",
+  { command = "rm ~/.config/jouet/rules/*.md" },
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = 'deny'\nauthor='mine'" } },
+  # Reading a rule, or copying it elsewhere.
+  { tool = "Read", path = "/home/u/.config/jouet/rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
+  { command = "cat ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
+  { command = "sed -n 1,20p ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
+  { command = "cp ~/.config/jouet/rules/no-tags.toml /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
+  { command = "grep -l deny ~/.config/jouet/rules/*.toml > /tmp/denying", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
+  # jouet's own commands for rules.
+  "jouet rule new no-tags --why 'tags are made by the release workflow'",
+  "jouet rule test no-tags",
+  "jouet rule promote no-tags",
+  # jouet's built-in rules are source code in its repository.
+  { tool = "Edit", path = "crates/jouet-rules/rules/trust.toml", files = { "crates/jouet-rules/rules/trust.toml" = 'mode = "deny"' } },
+  # Not a rule file, or the rules path only in the text being replaced.
+  { command = "rm ~/.config/jouet/rules/README.md" },
+  { command = "jouet edit replace docs/rules.md --old '~/.config/jouet/rules/a.toml' --new '~/.config/jouet/rules/b.toml'", files = { "~/.config/jouet/rules/a.toml" = 'mode = "deny"' } },
+  "echo hi > notes.md",
+]

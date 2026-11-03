@@ -659,6 +659,7 @@ return {
             git_ahead: None,
             stack: None,
             secrets: None,
+            files: None,
             fired: None,
         }
     );
