@@ -104,6 +104,41 @@ The ledger is deliberately myopic: it holds command shapes, for privacy and so i
 
 Session review reads the whole transcript instead, through a [digest](#the-digest), and only now and then. jouet calls no model and holds no API keys, so an agent does the review, and jouet records what it proposes.
 
+### Scheduled Codex reviews
+
+An agent-interface schedule can review sessions independently of the stop hook.
+This is opt-in: choose the project roots, cadence and maximum reviews per run
+with your agent, then create the schedule in that interface. jouet does not
+create a schedule itself. The scheduler reads local Codex session metadata to
+find sessions; reviews read the selected transcripts and may send their digests
+to the agent's model provider. Only sessions whose original worktree is under
+an opted-in root and whose recorded turns stay in that worktree are eligible.
+Sessions that span worktrees or cannot be inspected are reported, not reviewed.
+
+Give the scheduled agent these instructions, substituting the agreed roots and
+limit. Use JSON output to pass paths as arguments, not by shell interpolation:
+
+1. Run `jouet wind plan --root PATH --limit N --json` (repeat `--root` for
+   each opted-in root). Report unavailable, mixed-project and inspection-limited
+   counts rather than treating them as completed reviews.
+2. For each candidate, up to the agreed limit, run `jouet wind claim SNAPSHOT`
+   with the same roots. Claims expire after one hour. If claiming fails, skip
+   that candidate and plan again on the next run.
+3. Run `jouet wind review TRANSCRIPT --project PROJECT --lease LEASE` using
+   the returned claim's exact values. Review its digest and record the JSON
+   response with `jouet wind propose --lease LEASE`, as the prompt directs.
+   Record an explicit `nothing` if no change is warranted. If the review cannot
+   finish, use `jouet wind release LEASE` so it can be retried.
+4. Summarize proposals for the user. Do not apply project or memory changes or
+   submit upstream reports without the user's approval. Never publish private
+   repository information; inspect any proposed report before sharing it.
+
+The receipt records a version of an append-only transcript using its path,
+length and modification time; an append makes it eligible again. The plan limits
+full-transcript inspection to 32 MiB per session and 256 MiB per invocation,
+but enumerates local session metadata on each run. Proposals and receipts stay
+in local state; incomplete, changed or deferred reviews are not marked done.
+
 ### Suggesting a review
 
 With `[wind] review` on (it is off by default), the stop hook digests the session it ends, at most every ten minutes per session, from the transcript path the harness passes it. A session is queued for review when it has `review_corrections` or more user corrections (two by default; an interruption and the prompt after it count once), six or more failed attempts of retried commands, or ten minutes polling CI or a process (as `jouet audit` counts it: a long build is work, not waste). At most one in every `review_every` sessions (five by default) is queued. The next session start in the same repository shows one line:

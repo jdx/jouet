@@ -64,6 +64,65 @@ pub fn recent(claude: Option<&ClaudeCode>, codex: Option<&Codex>, since_ms: i64)
     out
 }
 
+/// Codex sessions for scheduled review, including a count of paths that could
+/// not be enumerated or parsed. Unlike the interactive listing, a scheduler
+/// must not silently mistake an incomplete scan for an empty backlog.
+pub fn codex_for_review(codex: &Codex) -> (Vec<Session>, usize) {
+    fn collect(dir: &Path, paths: &mut Vec<PathBuf>, unavailable: &mut usize) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => {
+                *unavailable += 1;
+                return;
+            }
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                *unavailable += 1;
+                continue;
+            };
+            let Ok(kind) = entry.file_type() else {
+                *unavailable += 1;
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() && entry.file_name() == "subagents" {
+                continue;
+            } else if kind.is_dir() {
+                collect(&path, paths, unavailable);
+            } else if kind.is_file()
+                && path.file_name().is_some_and(|n| {
+                    let name = n.to_string_lossy();
+                    name.starts_with("rollout-") && name.ends_with(".jsonl")
+                })
+            {
+                paths.push(path);
+            }
+        }
+    }
+    let mut paths = Vec::new();
+    let mut unavailable = 0;
+    collect(&codex.root.join("sessions"), &mut paths, &mut unavailable);
+    let mut sessions = Vec::new();
+    for path in paths {
+        let found = Source::from_path(path)
+            .ok()
+            .and_then(|source| read_codex(&source));
+        if let Some(session) = found {
+            sessions.push(session);
+        } else {
+            unavailable += 1;
+        }
+    }
+    sessions.sort_by(|a, b| {
+        a.modified_ms
+            .cmp(&b.modified_ms)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    (sessions, unavailable)
+}
+
 /// `projects/<project>/<session>.jsonl`, leaving out subagents' transcripts,
 /// which live a level below and belong to their session.
 fn claude_transcripts(root: &Path) -> Vec<PathBuf> {

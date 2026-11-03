@@ -16,4 +16,5 @@ Reads a Claude Code or Codex transcript and reduces it to a few thousand tokens:
 - **`--harness <HARNESS>`** — Which transcripts to read: claude, codex or all (default all)
 - **`--project <PATH>`** — Only sessions that ran in PATH or a directory below it
 - **`--budget <N>`** — Tokens per session's digest, about (default 4000)
+- **`--lease <LEASE>`** — Use the recording instructions for a claimed scheduled review
 - **`-h --help`** — Print help

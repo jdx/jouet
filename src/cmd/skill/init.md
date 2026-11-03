@@ -106,3 +106,16 @@ slow checks, what was verified, and remaining ecosystem or trust requirements.
 Name the next useful action so the user can start normal work. Explain how
 future `jouet test` runs build timing history and how `jouet wind` can turn
 recurring waste into proposals, without enabling optional automation unasked.
+
+Offer an optional paired benchmark on a representative task, explaining that it
+uses agent time and may incur model charges. Compare correctness, elapsed time,
+and cached and uncached tokens on the same task; do not claim a win from one
+run. If it underperforms, offer to prepare an upstream issue or discussion for
+the user to review, removing private project details before anything is shared.
+
+Also offer scheduled Codex session review for explicitly selected local project
+roots. Explain that the scheduler reads session transcripts and may send digests
+to the agent's model provider, and that proposals are reviewable before project
+changes or upstream reports. Agree on roots, cadence and a per-run review limit
+before creating any schedule; do not install one automatically. Follow the
+scheduled review instructions in the winding documentation for this version.

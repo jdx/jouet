@@ -3,7 +3,8 @@
 
 use super::Output;
 use crate::cli::{
-    UnwindArgs, WindArgs, WindCmd, WindDigestArgs, WindMemoriesArgs, WindProposeArgs,
+    UnwindArgs, WindArgs, WindClaimArgs, WindCmd, WindDigestArgs, WindMemoriesArgs, WindPlanArgs,
+    WindProposeArgs, WindReleaseArgs,
 };
 use crate::settings::Settings;
 use crate::wind::{self, Paths, Status, stats, unwind as retire};
@@ -18,6 +19,117 @@ fn paths(out: &Output) -> Result<Paths, Exit> {
             "there is no home directory to keep the ledger and rules in",
         )
     })
+}
+
+fn discover(
+    paths: &Paths,
+    root_args: &[String],
+    idle_arg: Option<&str>,
+    limit: usize,
+) -> Result<wind::scheduled::Plan, (Exit, String)> {
+    use std::path::PathBuf;
+    if root_args.is_empty() {
+        return Err((Exit::Usage, "give at least one opted-in --root PATH".into()));
+    }
+    let mut roots = Vec::<PathBuf>::new();
+    for root in root_args {
+        match std::fs::canonicalize(root) {
+            Ok(path) if path.is_dir() => roots.push(path),
+            Ok(_) => return Err((Exit::Usage, format!("--root is not a directory: {root}"))),
+            Err(e) => return Err((Exit::NotFound, format!("reading --root {root}: {e}"))),
+        }
+    }
+    let idle = match jouet_output::time::parse_duration(idle_arg.unwrap_or("15m")) {
+        Ok(duration) => i64::try_from(duration.as_millis()).unwrap_or(i64::MAX),
+        Err(e) => return Err((Exit::Usage, format!("--idle: {e}"))),
+    };
+    let Some(codex) = jouet_audit::Codex::from_env() else {
+        return Err((Exit::NotFound, "no Codex session directory found".into()));
+    };
+    let (sessions, discovery_unavailable) = jouet_audit::sessions::codex_for_review(&codex);
+    let scheduled = wind::scheduled::Scheduled::load(paths)
+        .map_err(|e| (Exit::Failed, format!("reading scheduled review state: {e}")))?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+        .unwrap_or(0);
+    let mut report = wind::scheduled::plan(
+        sessions,
+        &roots,
+        now_ms,
+        idle,
+        limit,
+        super::sessions::current_session().as_deref(),
+        &scheduled,
+    );
+    report.unavailable += discovery_unavailable;
+    Ok(report)
+}
+
+fn plan(paths: &Paths, args: &WindPlanArgs, out: &Output) -> Exit {
+    let limit = args.limit.unwrap_or(10);
+    if !(1..=100).contains(&limit) {
+        return out.error(Exit::Usage, "--limit must be between 1 and 100");
+    }
+    let report = match discover(paths, &args.root, args.idle.as_deref(), limit) {
+        Ok(report) => report,
+        Err((exit, message)) => return out.error(exit, &message),
+    };
+    out.result(&report, || {
+        let mut text = String::new();
+        for item in &report.candidates {
+            let _ = writeln!(text, "{}  {}  {}\n  transcript: {}\n  snapshot: {}", item.session, item.project.display(), item.modified_ms, item.transcript.display(), item.snapshot);
+        }
+        let _ = writeln!(text, "{} eligible; {} left out; {} idle too recently or current; {} unavailable; {} span projects; {} exceeded inspection limits; {} already reviewed; {} claimed. Read-only plan: no sessions were reviewed or marked.", report.eligible, report.left_out, report.idle_or_current, report.unavailable, report.mixed_project, report.inspection_limited, report.reviewed, report.claimed);
+        text
+    });
+    Exit::Ok
+}
+
+fn claim(paths: &Paths, args: &WindClaimArgs, out: &Output) -> Exit {
+    let report = match discover(paths, &args.root, args.idle.as_deref(), usize::MAX) {
+        Ok(report) => report,
+        Err((exit, message)) => return out.error(exit, &message),
+    };
+    let Some(candidate) = report
+        .candidates
+        .iter()
+        .find(|c| c.snapshot == args.snapshot)
+    else {
+        return out.error(
+            Exit::Precondition,
+            "snapshot is no longer eligible; run `jouet wind plan` again",
+        );
+    };
+    match wind::scheduled::claim(paths, candidate, wind::now()) {
+        Ok(claim) => {
+            out.result(&claim, || {
+                format!(
+                    "claimed session {} in {} until {}; lease {}\n",
+                    claim.session,
+                    claim.project.display(),
+                    claim.expires,
+                    claim.lease
+                )
+            });
+            Exit::Ok
+        }
+        Err(message) => out.error(Exit::Precondition, &message),
+    }
+}
+
+fn release(paths: &Paths, args: &WindReleaseArgs, out: &Output) -> Exit {
+    match wind::scheduled::release(paths, &args.lease) {
+        Ok(true) => {
+            out.result(&serde_json::json!({ "released": true }), || {
+                "released scheduled review lease\n".into()
+            });
+            Exit::Ok
+        }
+        Ok(false) => out.error(Exit::NotFound, "no scheduled review has that lease"),
+        Err(message) => out.error(Exit::Failed, &message),
+    }
 }
 
 pub(crate) fn run(args: &WindArgs, out: &Output) -> Exit {
@@ -41,6 +153,9 @@ pub(crate) fn run(args: &WindArgs, out: &Output) -> Exit {
         Some(WindCmd::Adopt(note)) => adopt(&paths, &note.id, out),
         Some(WindCmd::Digest(args)) => sessions(args, false, out),
         Some(WindCmd::Review(args)) => sessions(args, true, out),
+        Some(WindCmd::Plan(args)) => plan(&paths, args, out),
+        Some(WindCmd::Claim(args)) => claim(&paths, args, out),
+        Some(WindCmd::Release(args)) => release(&paths, args, out),
         Some(WindCmd::Propose(args)) => propose(&paths, args, out),
         Some(WindCmd::Memories(args)) => memories(&paths, args, out),
     }
@@ -349,6 +464,32 @@ const BUDGET: usize = 4000;
 /// `jouet wind digest` and, with `prompt`, `jouet wind review`.
 fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
     use wind::session::{self, Redactor, Select};
+    let claim = if let Some(lease) = args.lease.as_deref() {
+        if !prompt {
+            return out.error(Exit::Usage, "--lease is only for `jouet wind review`");
+        }
+        let paths = match paths(out) {
+            Ok(paths) => paths,
+            Err(exit) => return exit,
+        };
+        match wind::scheduled::active_claim(&paths, lease) {
+            Ok(claim) => Some(claim),
+            Err(message) => return out.error(Exit::Precondition, &message),
+        }
+    } else {
+        None
+    };
+    if let Some(claim) = &claim
+        && (args.session.as_deref() != claim.transcript.to_str()
+            || args.project.as_deref() != claim.project.to_str()
+            || args.last
+            || args.since.is_some())
+    {
+        return out.error(
+            Exit::Usage,
+            "with --lease, name its transcript and pass its exact --project",
+        );
+    }
     let since = match args.since.as_deref() {
         None => None,
         Some(s) => match super::audit::parse_since(s, jouet_output::time::now()) {
@@ -385,9 +526,17 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
     if let Some(problem) = &redactor.problem {
         eprintln!("jouet: not using gitleaks' rules: {problem}");
     }
+    // The claimed transcript was already checked against the canonical work
+    // tree. Its recorded cwd can use a symlink, so the digest's lexical
+    // project filter would otherwise reject that same valid session.
+    let digest_project = if claim.is_some() {
+        None
+    } else {
+        project.as_deref()
+    };
     let digests: Vec<_> = found
         .iter()
-        .filter_map(|f| session::digest(f, project.as_deref(), &redactor))
+        .filter_map(|f| session::digest(f, digest_project, &redactor))
         .collect();
     if digests.is_empty() {
         return out.error(Exit::NotFound, "no session there to digest");
@@ -403,7 +552,17 @@ fn sessions(args: &WindDigestArgs, prompt: bool, out: &Output) -> Exit {
         Vec::new()
     };
     let report = DigestReport {
-        prompt: prompt.then(|| wind::review::prompt(Settings::load().share.contribute)),
+        prompt: prompt.then(|| {
+            let text = wind::review::prompt(Settings::load().share.contribute);
+            if let Some(lease) = &args.lease {
+                text.replace(
+                    "`jouet wind propose --project PATH`, where PATH is the session's available Git work tree",
+                    &format!("`jouet wind propose --lease {lease}`; if recording is incomplete, release the lease for retry"),
+                )
+            } else {
+                text
+            }
+        }),
         redaction: redactor.describe(),
         digests: &digests,
         across: &across,
@@ -622,6 +781,14 @@ fn review_memories(
 }
 
 /// `jouet wind propose`: records a review's reply.
+#[derive(Serialize)]
+struct Proposed {
+    #[serde(flatten)]
+    recorded: wind::review::Recorded,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scheduled_reviewed: Option<bool>,
+}
+
 fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
     use std::io::Read as _;
     let settings = Settings::load();
@@ -671,17 +838,29 @@ fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
             None => return out.error(Exit::Usage, "--project must name a Git work tree"),
         },
     };
-    let recorded = match wind::review::record(
-        paths,
-        reply,
-        crate::wind::now(),
-        &targets,
-        project.as_deref(),
-    ) {
-        Ok(recorded) => recorded,
-        Err(e) => return out.error(Exit::Failed, &format!("writing the winding state: {e}")),
+    let (recorded, scheduled_reviewed) = if let Some(lease) = args.lease.as_deref() {
+        match wind::scheduled::finish(paths, lease, reply, &targets, project.as_deref()) {
+            Ok((recorded, done)) => (recorded, Some(done)),
+            Err(message) => return out.error(Exit::Precondition, &message),
+        }
+    } else {
+        match wind::review::record(
+            paths,
+            reply,
+            crate::wind::now(),
+            &targets,
+            project.as_deref(),
+        ) {
+            Ok(recorded) => (recorded, None),
+            Err(e) => return out.error(Exit::Failed, &format!("writing the winding state: {e}")),
+        }
     };
-    out.result(&recorded, || {
+    let result = Proposed {
+        recorded,
+        scheduled_reviewed,
+    };
+    out.result(&result, || {
+        let recorded = &result.recorded;
         let mut text = String::new();
         for id in &recorded.recorded {
             let _ = writeln!(text, "recorded {id}; the next session starts show it");
@@ -701,6 +880,11 @@ fn propose(paths: &Paths, args: &WindProposeArgs, out: &Output) -> Exit {
             } else {
                 "nothing to record: the reply has no proposals\n"
             });
+        }
+        if result.scheduled_reviewed == Some(true) {
+            text.push_str("scheduled review recorded for this transcript snapshot\n");
+        } else if result.scheduled_reviewed == Some(false) {
+            text.push_str("scheduled review is not complete; correct or defer the skipped proposals, or release its lease\n");
         }
         text
     });
