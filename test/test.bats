@@ -846,6 +846,28 @@ SH
 	assert_output --partial 'trust it before retrying'
 }
 
+@test "a baseline missing a project-local runner suggests the opt-in setup" {
+	printf 'node_modules/\n' >.gitignore
+	printf 'base\n' >tracked
+	git add .gitignore tracked
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >>tracked
+	mkdir -p node_modules/.bin
+	printf '#!/bin/sh\necho "the current check failed"\nexit 1\n' >node_modules/.bin/vitest
+	chmod +x node_modules/.bin/vitest
+
+	run --separate-stderr jouet test --baseline --cmd -- ./node_modules/.bin/vitest
+	assert_failure 1
+	assert_output --partial 'baseline checkout has no project-local node_modules executable'
+	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'trust it before retrying'
+
+	run --separate-stderr jouet test --baseline --cmd -- "$PWD/node_modules/.bin/vitest"
+	assert_failure 1
+	assert_output --partial 'baseline checkout has no project-local node_modules executable'
+}
+
 @test "--baseline keeps an unnamed failure unresolved when the merge base passes" {
 	cat >check-command <<'SH'
 #!/bin/sh

@@ -205,7 +205,7 @@ When the run fails, jouet runs each failed suite again in a temporary worktree o
 - Matching names with missing, ambiguous or different details remain unresolved (exit `1`).
 - A failure the merge base does not have still fails the run (exit `1`), and is listed as new.
 - When the run at the merge base fails without naming any failing test, as when a tool it needs is missing from that checkout, nothing is compared and the run still fails.
-- When pnpm reports that `node_modules` is missing in the merge-base checkout, jouet points to the optional baseline setup below; it does not install dependencies automatically.
+- When pnpm reports missing `node_modules`, or a project-local executable in it cannot be found in the merge-base checkout, jouet points to the optional baseline setup below; it does not install dependencies automatically.
 - When a multi-test merge-base run reports only failures, with no passes or skips, the result is not compared: a setup problem may have prevented the tests from running. This also applies to a kept baseline.
 - When a single failing command's failure names are missing or cannot be matched safely, explicit `--baseline` runs the command at the merge base. If both fail, jouet reports that it cannot compare the failures and retains the nonzero result; the stop gate asks for an explanation once. If the merge base passes, the failure remains unresolved. When multiple failing commands include unnamed failures, jouet does not run the comparison.
 - When the merge base ran fewer than half as many tests, a failure it does not list may never have run there, so it is listed as not compared rather than new.

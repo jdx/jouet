@@ -414,7 +414,23 @@ pub(super) fn compare(
                 };
                 // After this run's own logs, so pruning never takes one of them.
                 let log = log_path(failed.len() + i + 1);
-                let (code, _) = execute(&at_base, &log, false)?;
+                let (code, _) = execute(&at_base, &log, false).map_err(|error| {
+                    let program = Path::new(&at_base.argv[0]);
+                    let program = if program.is_absolute() {
+                        program.to_path_buf()
+                    } else {
+                        at_base.dir.join(program)
+                    };
+                    if setup.is_empty()
+                        && program.starts_with(&tree)
+                        && program.components().any(|part| part.as_os_str() == "node_modules")
+                        && !program.exists()
+                    {
+                        format!("{error}; the baseline checkout has no project-local node_modules executable: review [baseline].setup in .jouet/test.toml and trust it before retrying")
+                    } else {
+                        error
+                    }
+                })?;
                 let output = std::fs::read(&log).unwrap_or_default();
                 let output = String::from_utf8_lossy(&output);
                 if code == 0
@@ -582,11 +598,54 @@ fn from_root(name: &str, checkout: &Path) -> String {
 /// value after `=`) pointed at the same path in `tree`, so the run at the
 /// merge base does not read the checkout.
 fn rebase(word: &str, root: &Path, tree: &Path) -> String {
-    let root = root.to_string_lossy();
-    let tree = tree.to_string_lossy();
+    let root_text = root.to_string_lossy();
+    let tree_text = tree.to_string_lossy();
+    let resolved_root = root.canonicalize().ok();
     let at = |path: &str| -> Option<String> {
-        let rest = path.strip_prefix(root.as_ref())?;
-        (rest.is_empty() || rest.starts_with(['/', '\\'])).then(|| format!("{tree}{rest}"))
+        let as_path = Path::new(path);
+        if as_path.is_absolute()
+            && as_path
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            && let Some(root) = resolved_root.as_deref()
+        {
+            // Resolve `..` through existing symlinks before deciding whether
+            // the path belongs to the checkout.
+            let prefix = as_path.ancestors().find(|ancestor| {
+                ancestor.components().next_back() == Some(std::path::Component::ParentDir)
+            })?;
+            let suffix = as_path.strip_prefix(prefix).ok()?;
+            let resolved = resolve_existing_ancestors(prefix)?;
+            let relative = resolved.strip_prefix(root).ok()?;
+            return Some(
+                tree.join(relative)
+                    .join(suffix)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        if let Some(rest) = path.strip_prefix(root_text.as_ref())
+            && (rest.is_empty() || rest.starts_with(['/', '\\']))
+        {
+            let relative = Path::new(rest.trim_start_matches(['/', '\\']));
+            return inside_checkout(relative).then(|| format!("{tree_text}{rest}"));
+        }
+        // A checkout can have more than one absolute spelling, such as
+        // /var and /private/var on macOS. Resolve an ancestor, not the whole
+        // path: the file may be missing at the base or be a symlink itself.
+        let path = Path::new(path);
+        if !path.is_absolute() {
+            return None;
+        }
+        let root = resolved_root.as_deref()?;
+        for ancestor in path.ancestors() {
+            if ancestor.canonicalize().ok().as_deref() == Some(root) {
+                let rest = path.strip_prefix(ancestor).ok()?;
+                return inside_checkout(rest)
+                    .then(|| tree.join(rest).to_string_lossy().into_owned());
+            }
+        }
+        None
     };
     if let Some(path) = at(word) {
         return path;
@@ -597,6 +656,48 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         }
         None => word.to_string(),
     }
+}
+
+/// Resolve existing ancestors and a missing suffix, without following the
+/// final component: the baseline must use its own file or executable shim.
+fn resolve_existing_ancestors(path: &Path) -> Option<PathBuf> {
+    let leaf = path.file_name();
+    let parent = if leaf.is_some() { path.parent()? } else { path };
+    let (ancestor, mut resolved) = parent.ancestors().find_map(|ancestor| {
+        ancestor
+            .canonicalize()
+            .ok()
+            .map(|resolved| (ancestor, resolved))
+    })?;
+    for part in parent.strip_prefix(ancestor).ok()?.components() {
+        match part {
+            std::path::Component::Normal(name) => resolved.push(name),
+            std::path::Component::ParentDir if !resolved.pop() => return None,
+            std::path::Component::ParentDir | std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    if let Some(leaf) = leaf {
+        resolved.push(leaf);
+    }
+    Some(resolved)
+}
+
+/// Reject a relative path that climbs above the checkout before returning.
+fn inside_checkout(path: &Path) -> bool {
+    let mut depth = 0_usize;
+    for part in path.components() {
+        match part {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::ParentDir => match depth.checked_sub(1) {
+                Some(next) => depth = next,
+                None => return false,
+            },
+            std::path::Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<(), String> {
@@ -630,11 +731,65 @@ mod tests {
                 "--manifest-path=/tmp/base/tree/Cargo.toml",
             ),
             ("/src/apple/x", "/src/apple/x"),
+            ("/src/app/../other/check", "/src/app/../other/check"),
+            ("/src/app/dir/../file", "/tmp/base/tree/dir/../file"),
             ("cargo", "cargo"),
             ("--jobs=4", "--jobs=4"),
         ] {
             assert_eq!(rebase(word, root, tree), want, "{word}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rebases_an_alias_of_the_checkout_even_when_the_file_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("checkout");
+        let alias = tmp.path().join("alias");
+        let tree = tmp.path().join("baseline");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let root = root.canonicalize().unwrap();
+        let path = alias.join("node_modules/.bin/vitest");
+        let want = tree.join("node_modules/.bin/vitest");
+        assert_eq!(
+            rebase(&path.to_string_lossy(), &root, &tree),
+            want.to_string_lossy()
+        );
+        assert_eq!(
+            rebase(&format!("--runner={}", path.display()), &root, &tree),
+            format!("--runner={}", want.display())
+        );
+        let outside = alias.join("../other/check");
+        assert_eq!(
+            rebase(&outside.to_string_lossy(), &root, &tree),
+            outside.to_string_lossy()
+        );
+        let outside_dir = tmp.path().join("outside/dir");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::os::unix::fs::symlink(&outside_dir, root.join("external-link")).unwrap();
+        let through_link = alias.join("external-link/../missing");
+        assert_eq!(
+            rebase(&through_link.to_string_lossy(), &root, &tree),
+            through_link.to_string_lossy()
+        );
+        std::fs::create_dir(root.join("subdir")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/.bin")).unwrap();
+        let external_runner = outside_dir.join("runner");
+        std::fs::write(&external_runner, "").unwrap();
+        std::os::unix::fs::symlink(&external_runner, root.join("node_modules/.bin/vitest"))
+            .unwrap();
+        let shim = alias.join("subdir/../node_modules/.bin/vitest");
+        assert_eq!(
+            rebase(&shim.to_string_lossy(), &root, &tree),
+            tree.join("node_modules/.bin/vitest").to_string_lossy()
+        );
+        std::os::unix::fs::symlink(&outside_dir, root.join("external-modules")).unwrap();
+        let linked_dir = alias.join("subdir/../external-modules/runner");
+        assert_eq!(
+            rebase(&linked_dir.to_string_lossy(), &root, &tree),
+            tree.join("external-modules/runner").to_string_lossy()
+        );
     }
 
     #[test]
