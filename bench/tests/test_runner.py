@@ -906,22 +906,24 @@ class TasksTest(unittest.TestCase):
             root.mkdir()
             source = root / "apps/admin/src/automations"
             source.mkdir(parents=True)
-            (source / "code.ts").write_text("before\\n")
-            (source / "old.test.ts").write_text("old test\\n")
+            (source / "code.ts").write_text("before\n")
+            (source / "old.test.ts").write_text("old test\n")
             tasks.git(root, "init", "-q", "-b", "main")
             tasks.git(root, "add", "apps")
             tasks.git(root, "commit", "-q", "-m", "base")
             base = tasks.git(root, "rev-parse", "HEAD")
-            (source / "code.ts").write_text("fixed\\n")
+            (source / "code.ts").write_text("fixed\n")
             tasks.git(root, "rm", "-q", "apps/admin/src/automations/old.test.ts")
             tasks.git(root, "add", "apps/admin/src/automations/code.ts")
             tasks.git(root, "commit", "-q", "-m", "delete test")
             bin_dir = Path(d) / "bin"
             bin_dir.mkdir()
             pnpm = bin_dir / "pnpm"
-            pnpm.write_text("#!/bin/sh\\nexit 0\\n")
+            marker = Path(d) / "pnpm-ran"
+            pnpm.write_text('#!/bin/sh\nprintf "called" > "$PNPM_STUB_MARKER"\n')
             pnpm.chmod(0o755)
-            env = tasks.git_env() | {"BENCH_BASE_SHA": base, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+            env = tasks.git_env() | {"BENCH_BASE_SHA": base, "PNPM_STUB_MARKER": str(marker),
+                                     "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
             def check():
                 return subprocess.run([sys.executable, str(checker)], cwd=root, env=env,
@@ -930,7 +932,8 @@ class TasksTest(unittest.TestCase):
             deleted = check()
             self.assertNotEqual(deleted.returncode, 0)
             self.assertIn("no committed regression test", deleted.stderr)
-            (source / "new.test.ts").write_text("new test\\n")
+            self.assertEqual(marker.read_text(), "called")
+            (source / "new.test.ts").write_text("new test\n")
             tasks.git(root, "add", "apps/admin/src/automations/new.test.ts")
             tasks.git(root, "commit", "-q", "-m", "add test")
             added = check()
