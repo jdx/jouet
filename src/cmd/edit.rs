@@ -495,10 +495,17 @@ fn callers(report: &Report) -> Vec<Callers> {
     let mut graph = jouet_graph::Graph::open_existing(&cwd).ok().flatten();
     let mut out = Vec::new();
     for (path, change) in changed {
-        let callers = graph
-            .as_mut()
-            .and_then(|g| graph_callers(g, &cwd.join(path), change, &touched));
-        if let Some(mut references) = callers {
+        let callers = graph.as_mut().map_or(Ok(None), |g| {
+            graph_callers(g, &cwd.join(path), change, &touched)
+        });
+        if let Err(error) = callers {
+            out.push(Callers {
+                symbol: change.name.clone(),
+                references: Vec::new(),
+                more: 0,
+                error: Some(error),
+            });
+        } else if let Ok(Some(mut references)) = callers {
             if references.is_empty() {
                 continue;
             }
@@ -511,6 +518,7 @@ fn callers(report: &Report) -> Vec<Callers> {
                 symbol: change.name.clone(),
                 references,
                 more,
+                error: None,
             });
         }
     }
@@ -647,21 +655,26 @@ fn graph_callers(
     path: &Path,
     change: &edit::SignatureChange,
     touched: &[PathBuf],
-) -> Option<Vec<Reference>> {
+) -> Result<Option<Vec<Reference>>, String> {
     // The edit is not written yet, so this is the definition as it was.
-    graph
+    if graph
         .reindex_paths(&[path.to_path_buf()], Some(CALLER_BUDGET))
-        .ok()?;
-    let symbol = graph.enclosing(path, change.line as u32).ok()??;
+        .is_err()
+    {
+        return Ok(None);
+    }
+    let Ok(Some(symbol)) = graph.enclosing(path, change.line as u32) else {
+        return Ok(None);
+    };
     if symbol.name != change.name {
-        return None;
+        return Ok(None);
     }
     let root = graph.root().to_path_buf();
     let mut seen = std::collections::BTreeSet::new();
-    Some(
+    Ok(Some(
         graph
             .callers(&symbol.id, 1)
-            .ok()?
+            .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|r| !touched.contains(&root.join(&r.symbol.path)))
             .map(|r| {
@@ -673,7 +686,7 @@ fn graph_callers(
             .filter(|key| seen.insert(key.clone()))
             .map(|(path, line)| Reference { path, line })
             .collect(),
-    )
+    ))
 }
 
 /// How long finding a changed definition's callers may spend bringing the
@@ -1090,6 +1103,14 @@ fn render(report: &Report) -> String {
         );
     }
     for c in &report.callers {
+        if let Some(error) = &c.error {
+            let _ = writeln!(
+                s,
+                "warning: the signature of {} changed; callers unavailable: {error}",
+                c.symbol
+            );
+            continue;
+        }
         let total = c.references.len() + c.more;
         let found = if total == 1 { "caller" } else { "callers" };
         let _ = writeln!(
