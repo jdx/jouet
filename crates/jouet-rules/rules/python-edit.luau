@@ -184,8 +184,9 @@ end
 -- The old text of every `.replace(old, new)` in the code, each a plain
 -- literal or a variable, by the literal last assigned it before the call
 -- (`marker = '...'`); nil when one is not (a concatenation, an f-string, a loop variable),
--- since then what it matches cannot be told.
-local function replace_olds(code: string): { { text: string, at: number } }?
+-- since then what it matches cannot be told. Each keeps its new text too
+-- when that is a literal, since a later replacement can match what it inserts.
+local function replace_olds(code: string): { { text: string, new: string? } }?
 	local olds = {}
 	local python = blanked(code)
 	local from = 1
@@ -211,30 +212,12 @@ local function replace_olds(code: string): { { text: string, at: number } }?
 		if not after or not string.match(code, "^%s*,", after) then
 			return nil
 		end
-		table.insert(olds, { text = text, at = s })
+		local start = string.match(code, "^%s*,%s*()", after)
+		local new = if start then literal(code, start) else nil
+		table.insert(olds, { text = text, new = new })
 		from = after
 	end
 	return olds
-end
-
--- Every literal in the code and where it starts, for text a script writes
--- itself: what one replacement inserts can be what a later one replaces.
-local function literals(code: string): { { text: string, at: number } }
-	local out = {}
-	local from = 1
-	while true do
-		local at = string.find(code, "['\"]", from)
-		if not at then
-			return out
-		end
-		local text, after = literal(code, at)
-		if text and after then
-			table.insert(out, { text = text, at = at })
-			from = after
-		else
-			from = at + 1
-		end
-	end
 end
 
 -- The paths a target names: a literal as it is, or each literal the code
@@ -279,8 +262,7 @@ local function olds_found(code: string, targets: { string }, dir: string | false
 			table.insert(paths, path)
 		end
 	end
-	local written = literals(code)
-	for _, replacement in olds do
+	for i, replacement in olds do
 		local old = replacement.text
 		local found = false
 		for _, path in paths do
@@ -294,8 +276,10 @@ local function olds_found(code: string, targets: { string }, dir: string | false
 			end
 		end
 		if not found then
-			for _, earlier in written do
-				if earlier.at < replacement.at and earlier.text ~= old and string.find(earlier.text, old, 1, true) then
+			-- Text an earlier replacement inserts, as `a` to `a\nb` then `b`.
+			for j = 1, i - 1 do
+				local new = olds[j].new
+				if new and string.find(new, old, 1, true) then
 					found = true
 					break
 				end

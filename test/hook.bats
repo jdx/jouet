@@ -568,6 +568,23 @@ E"
 	assert_success
 	assert_output ""
 
+	# A replacement of the exact text an earlier one inserted is found; an
+	# old text that is only part of the path is not.
+	run --separate-stderr edit "python3 - <<'E'
+p='src/a.rs'; s=open(p).read()
+s=s.replace('old();', 'mid();')
+s=s.replace('mid();', 'new();')
+open(p,'w').write(s)
+E"
+	assert_success
+	assert_output ""
+	run --separate-stderr edit "python3 - <<'E'
+p='src/a.rs'; s=open(p).read()
+s=s.replace('a.rs', 'b.rs')
+open(p,'w').write(s)
+E"
+	assert_output --partial 'is not in src/a.rs, so'
+
 	# Text in neither file is still named, with both files.
 	run --separate-stderr edit "python3 - <<'E'
 p='src/a.rs'; s=open(p).read()
