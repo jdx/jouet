@@ -611,9 +611,18 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         {
             // Resolve `..` through existing symlinks before deciding whether
             // the path belongs to the checkout.
-            let resolved = resolve_existing_ancestors(as_path)?;
+            let prefix = as_path.ancestors().find(|ancestor| {
+                ancestor.components().next_back() == Some(std::path::Component::ParentDir)
+            })?;
+            let suffix = as_path.strip_prefix(prefix).ok()?;
+            let resolved = resolve_existing_ancestors(prefix)?;
             let relative = resolved.strip_prefix(root).ok()?;
-            return Some(tree.join(relative).to_string_lossy().into_owned());
+            return Some(
+                tree.join(relative)
+                    .join(suffix)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
         }
         if let Some(rest) = path.strip_prefix(root_text.as_ref())
             && (rest.is_empty() || rest.starts_with(['/', '\\']))
@@ -649,21 +658,27 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
     }
 }
 
-/// Resolve existing ancestors, then append and normalize a missing suffix.
+/// Resolve existing ancestors and a missing suffix, without following the
+/// final component: the baseline must use its own file or executable shim.
 fn resolve_existing_ancestors(path: &Path) -> Option<PathBuf> {
-    let (ancestor, mut resolved) = path.ancestors().find_map(|ancestor| {
+    let leaf = path.file_name();
+    let parent = if leaf.is_some() { path.parent()? } else { path };
+    let (ancestor, mut resolved) = parent.ancestors().find_map(|ancestor| {
         ancestor
             .canonicalize()
             .ok()
             .map(|resolved| (ancestor, resolved))
     })?;
-    for part in path.strip_prefix(ancestor).ok()?.components() {
+    for part in parent.strip_prefix(ancestor).ok()?.components() {
         match part {
             std::path::Component::Normal(name) => resolved.push(name),
             std::path::Component::ParentDir if !resolved.pop() => return None,
             std::path::Component::ParentDir | std::path::Component::CurDir => {}
             _ => return None,
         }
+    }
+    if let Some(leaf) = leaf {
+        resolved.push(leaf);
     }
     Some(resolved)
 }
@@ -757,6 +772,23 @@ mod tests {
         assert_eq!(
             rebase(&through_link.to_string_lossy(), &root, &tree),
             through_link.to_string_lossy()
+        );
+        std::fs::create_dir(root.join("subdir")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/.bin")).unwrap();
+        let external_runner = outside_dir.join("runner");
+        std::fs::write(&external_runner, "").unwrap();
+        std::os::unix::fs::symlink(&external_runner, root.join("node_modules/.bin/vitest"))
+            .unwrap();
+        let shim = alias.join("subdir/../node_modules/.bin/vitest");
+        assert_eq!(
+            rebase(&shim.to_string_lossy(), &root, &tree),
+            tree.join("node_modules/.bin/vitest").to_string_lossy()
+        );
+        std::os::unix::fs::symlink(&outside_dir, root.join("external-modules")).unwrap();
+        let linked_dir = alias.join("subdir/../external-modules/runner");
+        assert_eq!(
+            rebase(&linked_dir.to_string_lossy(), &root, &tree),
+            tree.join("external-modules/runner").to_string_lossy()
         );
     }
 
