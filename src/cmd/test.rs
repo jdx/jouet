@@ -756,7 +756,9 @@ fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<S
 
 /// The passing tests whose name, or its last part (`a::tests::b`'s `b`,
 /// vitest's `file > suite > test` test), a line of `added` holds, up to
-/// eight.
+/// eight. A last part that is an identifier must be defined or called
+/// there (`fn b(`, `def b(`): a comment that says `names` does not change
+/// a test called `names`.
 fn changed_tests(passed: &[String], added: &str) -> Vec<String> {
     if added.is_empty() {
         return Vec::new();
@@ -780,7 +782,23 @@ fn changed_tests(passed: &[String], added: &str) -> Vec<String> {
             }
             .trim();
             let named = |n: &str| n.chars().count() >= 4 && contains_word(added, n);
-            named(name.trim()) || named(last)
+            let identifier = last.chars().all(|c| c.is_alphanumeric() || c == '_');
+            let defined = |n: &str| {
+                n.chars().count() >= 4
+                    && added.match_indices(n).any(|(at, _)| {
+                        !added[..at]
+                            .chars()
+                            .next_back()
+                            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                            && added[at + n.len()..].trim_start().starts_with(['(', '<'])
+                    })
+            };
+            named(name.trim())
+                || if identifier && last != name.trim() {
+                    defined(last)
+                } else {
+                    named(last)
+                }
         })
         .take(9)
         .cloned()
@@ -1436,6 +1454,12 @@ mod tests {
         assert!(changed_tests(&bats, "run jouet --json search x\n").is_empty());
         let dotted = ["tests.test_a.T.test_json".to_string()];
         assert_eq!(changed_tests(&dotted, "    def test_json(self):\n"), dotted);
+        // The last part of a path is the test only where it is defined.
+        let rust = ["wind::rulefile::tests::names".to_string()];
+        assert!(changed_tests(&rust, "    // A Go panic is named by its names.\n").is_empty());
+        assert_eq!(changed_tests(&rust, "    fn names() {\n"), rust);
+        assert!(changed_tests(&rust, "    fn surnames() {\n").is_empty());
+        assert_eq!(changed_tests(&rust, "// names\nfn names<T>() {\n"), rust);
     }
 
     #[test]
