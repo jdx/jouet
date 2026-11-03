@@ -256,7 +256,8 @@ class Codex(Harness):
             result=messages[-1] if messages else None,
             session_id=thread,
             model=model,
-            extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity},
+            extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity,
+                   **({"usage_observed": bool(done or live)} if ephemeral else {})},
         )
 
 

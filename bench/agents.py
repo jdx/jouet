@@ -338,7 +338,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             os.close(lock)
     write_summary(out, records, meta)
     print(f"results: {out}")
-    return 4 if any(r.get("error_kind") == "codex_hook_preflight" for r in records) else 0
+    return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable")
+                    for r in records) else 0
 
 
 def write_summary(out: Path, records: list[dict], meta: dict) -> None:

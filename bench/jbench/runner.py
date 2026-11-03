@@ -517,8 +517,11 @@ def execute(
     capacity = (usage.is_error and not ran["agent"]["stopped"]
                 and usage.extra.get("capacity_error", False))
     missing_hook = harness.name == "codex" and arm.jouet and not arms_mod.codex_started(env)
+    missing_usage = harness.name == "codex" and usage.extra.get("usage_observed") is False
     if missing_hook:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: jouet's Codex session-start hook was not observed."}
+    elif missing_usage:
+        check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex reported no token usage."}
     elif capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
     else:
@@ -554,6 +557,9 @@ def execute(
     if missing_hook:
         record["error"] = "Codex did not record the jouet session-start hook"
         record["error_kind"] = "codex_hook_preflight"
+    elif missing_usage:
+        record["error"] = "Codex token usage is unavailable"
+        record["error_kind"] = "codex_usage_unavailable"
     elif capacity:
         record["error"] = "Codex model at capacity before the run completed"
     if opts.get("keep_work"):
@@ -685,6 +691,9 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 log(f"    credentials: {note}")
             if record.get("error_kind") == "codex_hook_preflight":
                 log("stopping: Codex hooks could not be verified")
+                break
+            if record.get("error_kind") == "codex_usage_unavailable":
+                log("stopping: Codex usage could not be measured")
                 break
             if auth_failed(record):
                 # Every later run of this harness would fail the same way,

@@ -183,6 +183,26 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(execute.call_count, 1)
                 self.assertTrue(any("hooks could not be verified" in message for message in messages))
 
+    def test_missing_codex_usage_stops_the_suite(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain"),
+                   runner.Planned(1, "second", "codex", "jouet")]
+        record = {"id": planned[0].id, "task": "first", "success": False,
+                  "error_kind": "codex_usage_unavailable", "usage": {}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", return_value=record) as execute:
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(execute.call_count, 1)
+            self.assertTrue(any("usage could not be measured" in message for message in messages))
+
     def test_failed_environment_skips_only_that_task(self):
         import os
         from unittest.mock import patch

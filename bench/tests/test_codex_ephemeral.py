@@ -64,6 +64,7 @@ send({"method": "turn/completed", "params": {"threadId": "thread-1", "turn": {"s
             interrupted = harness.usage(lines[:3], Path(directory))
             self.assertEqual((interrupted.input_tokens, interrupted.output_tokens), (100, 10))
             self.assertTrue(interrupted.is_error)
+            self.assertFalse(harness.usage(lines[:1], Path(directory)).extra["usage_observed"])
             for key in ("TEST_NON_EPHEMERAL", "TEST_BAD_USAGE"):
                 with self.subTest(key=key):
                     bad = subprocess.run([sys.executable, str(WORKER), "--codex", str(binary),
