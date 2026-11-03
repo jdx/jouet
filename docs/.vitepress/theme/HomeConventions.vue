@@ -29,11 +29,11 @@ const rules = [
     <div class="jouet-container">
       <HomeHeading
         id="jouet-conventions"
-        eyebrow="Built for an agent's shell"
-        title="Learn the rules once"
+        eyebrow="Conventions"
+        title="Shared by every command"
       >
-        Every jouet command follows the same conventions, so an agent that knows
-        one command knows how the others behave.
+        Every jouet command handles prompts, exit codes, JSON and long output
+        the same way.
       </HomeHeading>
       <ul>
         <li v-for="rule in rules" :key="rule.title">

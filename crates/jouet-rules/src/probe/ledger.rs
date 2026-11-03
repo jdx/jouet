@@ -1,5 +1,6 @@
 //! `jouet.ci.last_run()`: the last test, lint or build run the hooks
-//! recorded in the ledger (`<state dir>/ledger/ledger.jsonl`).
+//! recorded in the ledger (`<state dir>/ledger/ledger.jsonl`), and
+//! `jouet.session.fired()`: how often a rule already spoke up in a session.
 //!
 //! The ledger is written by `jouet hook`; without one there is no last run.
 //! Each post-tool-use entry carries a `record:<kind>` decision for a run a
@@ -75,6 +76,42 @@ pub(crate) fn last_run(
         return Some(run);
     }
     None
+}
+
+/// How many earlier tool calls in `session` the rule `rule` denied or warned
+/// about, in the end of the ledger. The hook writes a session's id with
+/// only its letters, digits, `-` and `_` (the binary's `ledger::redact_id`),
+/// so `session` is compared the same way.
+pub(crate) fn fired(dir: &Path, rule: &str, session: &str) -> Option<u64> {
+    let session: String = session
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .take(128)
+        .collect();
+    let mut file = std::fs::File::open(dir.join("ledger.jsonl")).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text.lines();
+    if start > 0 {
+        // The read started mid-line.
+        lines.next();
+    }
+    let count = lines
+        .filter(|line| line.contains(session.as_str()) && line.contains(rule))
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["event"] == "pre-tool-use" && entry["session"] == session.as_str())
+        .filter(|entry| {
+            entry["decisions"].as_array().is_some_and(|ds| {
+                ds.iter()
+                    .any(|d| d["rule"] == rule && (d["action"] == "deny" || d["action"] == "warn"))
+            })
+        })
+        .count();
+    Some(count as u64)
 }
 
 /// The rule, kind and scope of the entry's first `record:<kind>` decision

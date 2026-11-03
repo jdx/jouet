@@ -110,6 +110,8 @@ pub struct Case {
     pub secrets: Option<serde_json::Value>,
     /// The text of each file `jouet.file.contains()` reads, by its path.
     pub files: Option<std::collections::BTreeMap<String, String>>,
+    /// What `jouet.session.fired()` answers, for any rule and session.
+    pub fired: Option<u32>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -295,6 +297,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         stack: None,
         secrets: None,
         files: None,
+        fired: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -488,6 +491,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
                 .collect()
         }),
         files: t.files.clone(),
+        fired: t.fired,
         expect: if fires {
             Expect::Fires {
                 action,
@@ -584,6 +588,9 @@ impl Engine {
             }
             for (path, text) in case.files.iter().flatten() {
                 self.stub(&format!("file:{path}"), text.clone().into());
+            }
+            if let Some(fired) = case.fired {
+                self.stub("fired:*", fired.into());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {

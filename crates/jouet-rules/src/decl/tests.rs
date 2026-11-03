@@ -141,6 +141,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "command",
             "exit_code",
             "files",
+            "fired",
             "fnox",
             "git",
             "harness",

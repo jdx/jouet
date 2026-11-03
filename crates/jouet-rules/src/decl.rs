@@ -436,6 +436,10 @@ pub(crate) struct CaseTable {
     /// The text of files `jouet.file.contains` reads, by the path the
     /// script passes it; omitted, it has no answer for any file.
     pub files: Option<BTreeMap<String, String>>,
+    /// How many earlier calls in the session `jouet.session.fired()` says
+    /// the rule denied or warned about, for any rule; omitted, it has no
+    /// answer.
+    pub fired: Option<u32>,
 }
 
 /// A secret `jouet.secrets.scan()` finds in an example's diff.

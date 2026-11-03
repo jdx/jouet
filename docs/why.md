@@ -34,11 +34,11 @@ A skill tells an agent how to do something, and the agent still carries out each
 
 The agent calls the routine once, and the loops and conditions run as code. A routine declares the capabilities it needs, is tested against recorded responses, and only previews its writes until it is given `--yes`. It does the same thing every session, and you can add one to jouet without writing a Rust command.
 
-## The chores agents script by hand
+## Scripts agents write by hand
 
-jouet started from a survey of about 2,600 Claude Code and Codex sessions, which ran roughly 266,000 shell commands between them. Four chores stood out:
+jouet started from a survey of about 2,600 Claude Code and Codex sessions, which ran roughly 266,000 shell commands between them. Four tasks stood out:
 
-| Chore | What agents write | What goes wrong |
+| Task | What agents write | What goes wrong |
 |---|---|---|
 | Waiting on CI | `sleep` and `until` loops around `gh pr checks` and `gh run view`: thousands of them | `gh run view --log-failed` refuses while the run is still in progress, and a conflicted PR never gets CI, so the loop waits forever |
 | PR review threads | Raw `reviewThreads` GraphQL queries, then one call per reply and resolve | New comments filtered by `commit_id` instead of time, and "Fixed in abc123" replies naming a commit that was never pushed |
@@ -166,7 +166,7 @@ FAIL release  step "Require auto-merge on the release PR"  required
 
 The `until` loop above would still be polling: a failed check never makes `gh pr checks` succeed.
 
-## What jouet does instead
+## Commands that replace them
 
 | Command | Replaces |
 |---|---|

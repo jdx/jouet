@@ -19,15 +19,15 @@
 jouet (pronounced "zhweh", French for "toy") is a command-line toolkit for
 coding agents such as Claude Code and Codex. It does two things:
 
-- **It remembers what sessions cost.** Hooks time every build, test and lint,
-  and the agent hears at session start which ones are slow, so it can finish
+- **It records what sessions cost.** Hooks time every build, test and lint,
+  and at session start the agent is told which ones are slow, so it can finish
   its edits and build once instead of after every change. Across sessions,
-  jouet notices commands that keep failing and corrections that keep coming
+  jouet looks for commands that keep failing and corrections that keep coming
   back, and drafts a rule, a mise task or a routine for each.
-- **It has a command for each chore agents script by hand.** Exact edits
-  across files, budgeted searches and reads, waits for CI that take one call,
-  only the tests a change affects. When an agent hand-rolls one anyway, a hook
-  names the command.
+- **It replaces scripts agents write by hand.** Exact edits across files,
+  searches and reads within a budget, CI waits in one call, and running only
+  the tests a change affects. When an agent writes the script anyway, a hook
+  points it to the command.
 
 > [!CAUTION]
 > **jouet is in early development.** How much it helps depends on your
@@ -86,11 +86,11 @@ once it is ready.
 [`jouet audit`](https://jouet.jdx.dev/commands/audit) reads your Claude Code
 and Codex transcripts and shows where the tokens and time went, and
 [`jouet stats`](https://jouet.jdx.dev/commands/stats) estimates the tokens
-jouet saved and the tokens it cost, and the net, against your own history. Those are estimates, not benchmark
-results; the [comparative benchmarks](https://jouet.jdx.dev/benchmarks) are
+jouet saved and the tokens it cost, and the net, against your own history.
+Those are estimates, not benchmark results; the [comparative benchmarks](https://jouet.jdx.dev/benchmarks) are
 still being built.
 
-## An example
+## Example: editing a file
 
 An agent shouldn't need a Python program to change one string:
 

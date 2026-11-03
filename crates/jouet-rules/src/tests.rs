@@ -660,6 +660,7 @@ return {
             stack: None,
             secrets: None,
             files: None,
+            fired: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine

@@ -124,6 +124,9 @@ export type JouetExample = string | {
 	-- The text of each file `jouet.file.contains()` reads, by the path the
 	-- script passes it; without it, it has no answer.
 	files: { [string]: string }?,
+	-- What `jouet.session.fired()` answers, for any rule and session; without
+	-- it, it has no answer.
+	fired: number?,
 }
 
 export type JouetRule = {
@@ -405,6 +408,12 @@ declare jouet: {
 		-- `dir` (as `jouet.record`'s), the runs of the work tree there. nil
 		-- when there is no ledger or no such run.
 		last_run: (kind: string?, scope: string?, dir: string?) -> (JouetLastRun?, string?),
+	},
+	session: {
+		-- How many earlier tool calls in `session` (a call's `session`) the
+		-- rule named `rule` denied or warned about, from the end of the
+		-- hooks' ledger. nil when there is no ledger.
+		fired: (rule: string, session: string) -> (number?, string?),
 	},
 	cargo: {
 		-- The Cargo workspace around `dir` (relative to the call's directory;

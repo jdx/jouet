@@ -786,7 +786,7 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_output --regexp 'cmd: passed in [0-9.]+s: 2 passed \(full log: '
 }
 
-@test "the hooks steer a cut test run to --cmd, and record a --cmd build as a build" {
+@test "the hooks steer a cut test run to --cmd, denying once warned, and record a --cmd build as a build" {
 	payload() {
 		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
 	}
@@ -796,17 +796,24 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_output --partial "Run \`jouet test --cmd -- cargo test -q -p app\` instead of cutting its output with grep."
 	assert_output --partial '[jouet rule: piped-test-output]'
 
-	# Assignments stay in front, and what the shell would expand stays bare.
+	# Warned once in this session, the next cut run is denied. Assignments
+	# stay in front, and what the shell would expand stays bare.
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "RUST_LOG=debug cargo test --manifest-path \$DIR/Cargo.toml 'a b' | tail")"
+	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
+	assert_line --index 0 deny
+	assert_output --partial "already warned about cutting a run's output. Run \`RUST_LOG=debug jouet test --cmd -- cargo test --manifest-path \$DIR/Cargo.toml \"a b\"\` instead"
+
+	# Another session is only warned.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.session_id = "s2"')"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
-	assert_output --partial "Run \`RUST_LOG=debug jouet test --cmd -- cargo test --manifest-path \$DIR/Cargo.toml \"a b\"\` instead"
+	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
 	assert_output ""
 
 	# The whole suite, cut: plain `jouet test` runs it.
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'python3 -m unittest discover -v 2>&1 | tail -5')"
-	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	run jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$output"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 
 	ran 'jouet test --cmd -- cargo build' 1

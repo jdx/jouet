@@ -1,6 +1,6 @@
 //! Probes: read-only views of jouet's state that rules can ask for.
 //! `jouet.pr.status()` and `jouet.pr.next()` (GitHub), `jouet.ci.last_run()`
-//! (the hooks' ledger), `jouet.git.state()`, `jouet.git.tree()` and
+//! and `jouet.session.fired()` (the hooks' ledger), `jouet.git.state()`, `jouet.git.tree()` and
 //! `jouet.repo()` (plain `git`), `jouet.cargo.workspace()` (`Cargo.toml`
 //! files), `jouet.test.adapters()` (the test runners `jouet test --affected`
 //! can select for, as the binary detects them), `jouet.pitchfork.daemons()`
@@ -195,6 +195,10 @@ impl Probes {
         };
         ledger::last_run(self.ledger.as_deref()?, kind, scope, repo.as_deref())
     }
+
+    fn fired(&self, rule: &str, session: &str) -> Option<serde_json::Value> {
+        ledger::fired(self.ledger.as_deref()?, rule, session).map(Into::into)
+    }
 }
 
 /// Runs `f` on a thread of its own and waits at most `timeout` for it. A
@@ -317,6 +321,23 @@ pub(crate) fn install(
         )?,
     )?;
     jouet.set("ci", ci)?;
+
+    let session_table = lua.create_table()?;
+    let s = shared.clone();
+    session_table.set(
+        "fired",
+        lua.create_function(move |lua, (rule, session): (String, String)| {
+            // An example answers for any rule and session.
+            let stubbed = s.cache.borrow().get("fired:*").cloned();
+            if let Some(answer_) = stubbed {
+                return answer(lua, answer_);
+            }
+            let key = format!("fired:{rule}:{session}");
+            let found = cached(&s, &key, |p, _| Ok(p.fired(&rule, &session)))?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("session", session_table)?;
 
     let s = shared.clone();
     git_table.set(

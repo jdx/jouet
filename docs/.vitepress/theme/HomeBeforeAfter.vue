@@ -156,15 +156,15 @@ function select(index: number, focus = false) {
     <div class="jouet-container">
       <HomeHeading
         id="jouet-before-after"
-        eyebrow="Before and after"
-        title="The chore, minus the script"
+        eyebrow="Examples"
+        title="Before and after"
       >
-        jouet also has commands for the chores agents keep scripting by hand: a
+        jouet also has commands for work agents usually script by hand: a
         <a href="/commands/graph">code graph</a>,
         <a href="/commands/search">searches and reads</a> that stay within a
         budget, <a href="/commands/test">only the tests a change affects</a>,
-        edits that check before they write, and waits that poll for you. A few
-        of them, next to the script they replace:
+        edits that check before they write, and waits that poll for you. Three
+        of them, next to the scripts they replace:
       </HomeHeading>
 
       <div class="tabs" role="tablist" aria-label="Examples">
