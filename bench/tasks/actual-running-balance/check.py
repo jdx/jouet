@@ -3,6 +3,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+# Check before Playwright creates reports or other untracked artifacts.
+if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], text=True):
+    sys.exit('working tree changes are not committed')
+
 spec = Path('packages/desktop-client/e2e/jouet-running-balance.test.ts')
 created = False
 try:
@@ -35,5 +39,3 @@ script = Path(__file__).with_name('check-note.mjs').read_text()
 result = subprocess.run(['node', '--input-type=module', '-e', script, '--', *notes], check=False)
 if result.returncode:
     sys.exit('no valid committed release note crediting the supplied contributor')
-if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True):
-    sys.exit('tracked changes are not committed')
