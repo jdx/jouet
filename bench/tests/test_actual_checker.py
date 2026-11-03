@@ -39,7 +39,7 @@ class ActualCheckerTest(unittest.TestCase):
             bin_dir = root / "bin"
             bin_dir.mkdir()
             node = bin_dir / "node"
-            node.write_text("#!/bin/sh\nexit 0\n")
+            node.write_text("#!/bin/sh\nmkdir -p blob-report\ntouch blob-report/report.zip\nexit 0\n")
             node.chmod(0o755)
             env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_BASE_SHA": base})
 
@@ -53,3 +53,4 @@ class ActualCheckerTest(unittest.TestCase):
             git("commit", "-qm", "include source")
             result = check()
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((work / "blob-report/report.zip").exists())
