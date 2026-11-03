@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jbench import credentials, runner
 
@@ -51,6 +52,17 @@ class CredentialsTest(unittest.TestCase):
         before = self.source.stat().st_mtime_ns
         self.assertEqual(credentials.give_back(lent), [])
         self.assertEqual(self.source.stat().st_mtime_ns, before)
+
+    def test_persistent_home_removes_a_returned_copy_but_keeps_it_on_failure(self):
+        lent = credentials.lend([self.source], self.run)
+        self.refresh_in_run('{"token": "new"}')
+        with patch("jbench.credentials.give_back", side_effect=OSError("unavailable")):
+            with self.assertRaises(OSError):
+                credentials.give_back_and_remove(lent)
+        self.assertTrue(lent[0].copy.exists())
+        credentials.give_back_and_remove(lent)
+        self.assertEqual(self.source.read_text(), '{"token": "new"}')
+        self.assertFalse(lent[0].copy.exists())
 
     def test_a_deleted_or_emptied_copy_is_not_written_back(self):
         lent = credentials.lend([self.source], self.run)

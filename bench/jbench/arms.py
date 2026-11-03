@@ -35,10 +35,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import codex_hooks
 from .harness import Harness
 
 # Tools linked into every run's bin/ when the machine has them.
 TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch", "mise", "parallel", "uv", "uvx")
+CODEX_ISOLATION_ENV = {"CODEX_HOME", "HOME", "PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"}
 
 
 @dataclass(frozen=True)
@@ -221,3 +223,44 @@ def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path) -> dict[st
         raise RuntimeError(f"jouet setup {harness.name} failed: {proc.stderr.strip() or proc.stdout.strip()}")
     report = json.loads(proc.stdout)
     return {"files": [{"path": f["path"], "action": f["action"]} for f in report.get("files", [])]}
+
+
+def reviewed_codex(harness: Harness, env: dict[str, str], workdir: Path,
+                   opts: dict[str, Any]) -> None:
+    """Use the reviewed benchmark home only after Codex confirms its hooks."""
+    if harness.name != "codex":
+        return
+    home = opts.get("codex_reviewed_home")
+    if not home:
+        raise codex_hooks.HookPreflightError("Codex jouet runs require a reviewed benchmark home")
+    config = Path(home).resolve()
+    if (config == (Path.home() / ".codex").resolve()
+            or config.name != ".codex"
+            or not (config.parent / ".jouet-bench-codex-home").is_file()):
+        raise codex_hooks.HookPreflightError("Use a dedicated home created by prepare-codex")
+    if (config / "auth.json").is_symlink():
+        raise codex_hooks.HookPreflightError("The benchmark credential must not be a symlink")
+    if (config / "auth.json").exists():
+        raise codex_hooks.HookPreflightError("Sign out of the dedicated Codex home before running a trial")
+    expected = Path(env["CODEX_HOME"]) / "hooks.json"
+    try:
+        if json.loads((config / "hooks.json").read_text()) != json.loads(expected.read_text()):
+            raise codex_hooks.HookPreflightError("Reviewed hooks differ from this jouet build")
+    except (OSError, ValueError) as error:
+        raise codex_hooks.HookPreflightError("Cannot compare reviewed hooks with this jouet build") from error
+    env["CODEX_HOME"] = str(config)
+    result = codex_hooks.list_hooks(str(opts["harness_bins"]["codex"]), env, workdir)
+    codex_hooks.require_reviewed(result, config / "hooks.json")
+
+
+def codex_started(env: dict[str, str]) -> bool:
+    """A reviewed hook may still fail to run; require its per-run ledger event."""
+    root = Path(env["XDG_STATE_HOME"]) / "jouet" / "ledger"
+    for path in root.rglob("*.jsonl"):
+        try:
+            for line in path.read_text().splitlines():
+                if json.loads(line).get("event") == "session-start":
+                    return True
+        except (OSError, ValueError, AttributeError):
+            return False
+    return False

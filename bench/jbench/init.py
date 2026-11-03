@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import arms as arms_mod
+from . import codex_hooks
 from . import credentials
 from . import tasks as tasks_mod
 from .harness import Harness
@@ -90,9 +91,16 @@ def prepared(
         "jdx/demo",
         Path(opts["tmp_root"]) / f"init-{name}",
     )
+    codex_home = env.get("CODEX_HOME")
+    if harness.name == "codex" and arms_mod.CODEX_ISOLATION_ENV.intersection(task.env):
+        raise codex_hooks.HookPreflightError("A task changed a Codex isolation path")
     task.agent_env(env, run_dir / "bin", workdir)
+    if harness.name == "codex" and (env.get("CODEX_HOME") != codex_home or
+                                    arms_mod.CODEX_ISOLATION_ENV.intersection(opts.get("jouet_env") or {})):
+        raise codex_hooks.HookPreflightError("A task or override changed CODEX_HOME")
     tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", run_dir / "environment.log")
     arms_mod.setup_jouet(harness, env, workdir)
+    arms_mod.reviewed_codex(harness, env, workdir, opts)
     arms_mod.login_shell_path(env)
     config_dir = Path(env[harness.config_dir_env])
     lent = credentials.lend(arms_mod.credential_files(harness), config_dir)
@@ -108,8 +116,13 @@ def prepared(
             run_dir / "agent.jsonl",
         )
     finally:
-        credentials.give_back(lent)
+        if harness.name == "codex":
+            credentials.give_back_and_remove(lent)
+        else:
+            credentials.give_back(lent)
     usage = harness.usage(agent["lines"], config_dir)
+    if harness.name == "codex" and not arms_mod.codex_started(env):
+        raise codex_hooks.HookPreflightError(f"Codex did not record the jouet session-start hook; see {run_dir / 'agent.jsonl'}")
     # A run that failed configured nothing to keep: say so, and cache none.
     if agent["exit_code"] != 0 or agent["stopped"] or usage.is_error:
         raise RuntimeError(

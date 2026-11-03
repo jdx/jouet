@@ -79,6 +79,20 @@ def give_back(lent: list[Lent]) -> list[str]:
     return notes
 
 
+def give_back_and_remove(lent: list[Lent]) -> list[str]:
+    """Return refreshes before removing copies from a persistent benchmark home.
+
+    If returning a refresh fails, leave the copy in place for recovery.
+    """
+    for item in lent:
+        if item.copy.resolve() == item.source.resolve():
+            raise ValueError("refusing to remove the original credential")
+    notes = give_back(lent)
+    for item in lent:
+        item.copy.unlink(missing_ok=True)
+    return notes
+
+
 def _replace(path: Path, data: bytes) -> None:
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import arms as arms_mod
+from . import codex_hooks
 from . import costs as costs_mod
 from . import credentials
 from . import init as init_mod
@@ -453,9 +454,17 @@ def execute(
             "jdx/demo",
             tmp_dir,
         )
+        codex_home = env.get("CODEX_HOME")
+        if harness.name == "codex" and arms_mod.CODEX_ISOLATION_ENV.intersection(task.env):
+            raise codex_hooks.HookPreflightError("A task changed a Codex isolation path")
         task.agent_env(env, run_dir / "bin", workdir)
+        if harness.name == "codex" and (env.get("CODEX_HOME") != codex_home or
+                                        arms_mod.CODEX_ISOLATION_ENV.intersection(opts.get("jouet_env") or {})):
+            raise codex_hooks.HookPreflightError("A task or override changed CODEX_HOME")
         environment = tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", keep / "environment.log")
         setup = arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
+        if arm.jouet:
+            arms_mod.reviewed_codex(harness, env, workdir, opts)
         if arm.init:
             init_mod.trust(env, workdir)
         if arm.jouet:
@@ -475,7 +484,8 @@ def execute(
         finally:
             # Before anything else can fail: a refresh the run made is the
             # user's only working login.
-            notes = credentials.give_back(lent)
+            notes = (credentials.give_back_and_remove(lent) if harness.name == "codex" and arm.jouet
+                     else credentials.give_back(lent))
         usage = harness.usage(agent["lines"], config_dir)
         return {
             "env": env,
@@ -506,12 +516,16 @@ def execute(
     usage = ran["usage"]
     capacity = (usage.is_error and not ran["agent"]["stopped"]
                 and usage.extra.get("capacity_error", False))
-    if capacity:
+    missing_hook = harness.name == "codex" and arm.jouet and not arms_mod.codex_started(env)
+    if missing_hook:
+        check = {"passed": False, "exit_code": None, "output": "Check skipped: jouet's Codex session-start hook was not observed."}
+    elif capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
     else:
         check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
-    audit_report = audit(opts["jouet_bin"], harness, env)
+    # Ephemeral Codex sessions have no transcript for jouet audit to inspect.
+    audit_report = None if harness.name == "codex" else audit(opts["jouet_bin"], harness, env)
     (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
     agent = ran["agent"]
     record = {
@@ -537,14 +551,18 @@ def execute(
         "credentials": ran["credentials"],
         "left_running": left,
     }
-    if capacity:
+    if missing_hook:
+        record["error"] = "Codex did not record the jouet session-start hook"
+        record["error_kind"] = "codex_hook_preflight"
+    elif capacity:
         record["error"] = "Codex model at capacity before the run completed"
     if opts.get("keep_work"):
         record["workdir"] = str(workdir)
         record["tmp_dir"] = str(tmp_dir)
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
-    copy_transcripts(ran["config_dir"], keep / "transcripts")
+    if harness.name != "codex":
+        copy_transcripts(ran["config_dir"], keep / "transcripts")
     if not opts.get("keep_work"):
         remove(run_dir)
         remove(tmp_dir)
@@ -642,6 +660,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
+                if isinstance(e, codex_hooks.HookPreflightError):
+                    record["error_kind"] = "codex_hook_preflight"
                 if found := task_dir(p.task):
                     record["task_dir"] = found
                 if opts.get("keep_work"):
@@ -663,6 +683,9 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             )
             for note in record.get("credentials") or []:
                 log(f"    credentials: {note}")
+            if record.get("error_kind") == "codex_hook_preflight":
+                log("stopping: Codex hooks could not be verified")
+                break
             if auth_failed(record):
                 # Every later run of this harness would fail the same way,
                 # and record a failure that says nothing about jouet.

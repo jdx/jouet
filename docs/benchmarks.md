@@ -133,6 +133,19 @@ The models under test may have seen these issues and fixes in training. Both arm
 - **plain:** the harness as installed, with no jouet on `PATH`.
 - **jouet:** `jouet` on `PATH`, and `jouet setup claude` or `jouet setup codex` run in the run's home, which installs the hooks and the session-start primer that points the agent at `jouet agent-help`.
 
+Codex trials use a dedicated configuration whose hooks a person has reviewed. Create a new home and review the hooks before running a Codex jouet arm:
+
+```sh
+python3 bench/agents.py prepare-codex --home "$HOME/.cache/jouet-bench/reviewed-codex"
+HOME="$HOME/.cache/jouet-bench/reviewed-codex" CODEX_HOME="$HOME/.cache/jouet-bench/reviewed-codex/.codex" codex
+# In Codex, open /hooks and review and trust the jouet hooks. Then exit.
+python3 bench/agents.py run --harness codex --codex-reviewed-home "$HOME/.cache/jouet-bench/reviewed-codex/.codex"
+```
+
+If the review session signed into the dedicated home, sign out of that home before starting a trial. The harness lends credentials for each run and returns any refresh before removing its copy. It refuses concurrent use of the dedicated home and checks that Codex reports the exact hooks for this jouet build as enabled and trusted. A changed hook needs a new review. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
+
+Codex runs use ephemeral sessions. The harness records live cumulative token counts and the agent's event stream, but `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs.
+
 The prompt is the same in both arms. `--jouet-env KEY=VALUE` sets a variable in the jouet arm's agent environment after `jouet setup`. For example, `--jouet-env JOUET_HOOKS_PRIME=0` measures sessions without the primer, and without the skill that setup would install in its place. Adding an arm for rtk, or for jouet with only some rules, means adding an entry to `ARMS` in `bench/jbench/arms.py` with its setup step.
 
 ### The jouet-init arm
@@ -146,7 +159,7 @@ The skill's run is not counted: a project commits the configuration once and kee
 Every run starts from nothing, in a temporary directory outside any checkout (so no parent `CLAUDE.md` or `AGENTS.md` leaks in):
 
 - a fresh copy of the task's repository;
-- its own `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, XDG directories and `TMPDIR`;
+- its own `HOME`, XDG directories and `TMPDIR`, plus a fresh `CLAUDE_CONFIG_DIR` or, for a plain Codex run, `CODEX_HOME`. Codex jouet runs share the reviewed `CODEX_HOME` and use ephemeral sessions;
 - a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, `uv` and `uvx`, when installed on the host, are available to both arms for projects whose checks use them.
 
 A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.
