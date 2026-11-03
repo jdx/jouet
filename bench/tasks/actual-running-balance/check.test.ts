@@ -13,19 +13,25 @@ test('running balances refresh after repeated edits', async ({ browser }) => {
       name: 'Balance check', offBudget: false, balance: 0,
     });
     await account.waitFor();
-    await account.createSingleTransaction({ payee: '', notes: 'check', credit: '17.00' });
+    await account.createSingleTransaction({ payee: '', notes: 'older', credit: '17.00' });
+    await account.createSingleTransaction({ payee: '', notes: 'newer', credit: '5.00' });
     await account.accountMenuButton.click();
     await page.getByRole('button', { name: 'Show running balance' }).click();
-    const transaction = account.getNthTransaction(0);
-    const balance = account.transactionTableRow.nth(0).getByTestId('balance');
-    await expect(balance).toHaveText('17.00');
-    for (const amount of ['42.00', '6.50']) {
-      await transaction.credit.click();
-      const input = transaction.credit.getByRole('textbox');
+    const older = account.transactionTableRow.filter({ hasText: 'older' });
+    const newer = account.transactionTableRow.filter({ hasText: 'newer' });
+    const credit = older.getByTestId('credit');
+    const olderBalance = older.getByTestId('balance');
+    const newerBalance = newer.getByTestId('balance');
+    await expect(olderBalance).toHaveText('17.00');
+    await expect(newerBalance).toHaveText('22.00');
+    for (const [amount, expectedNewer] of [['42.00', '47.00'], ['6.50', '11.50']]) {
+      await credit.click();
+      const input = credit.getByRole('textbox');
       await input.selectText();
       await input.pressSequentially(amount);
       await page.keyboard.press('Tab');
-      await expect(balance).toHaveText(amount);
+      await expect(olderBalance).toHaveText(amount);
+      await expect(newerBalance).toHaveText(expectedNewer);
     }
   } finally {
     await page.close();
