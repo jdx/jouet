@@ -83,20 +83,39 @@ pub(crate) struct Digest {
 /// Whether the output says a run selected no test: TAP's empty plan,
 /// libtest running none in every binary, or a supported runner saying so.
 fn no_tests(lines: &[String]) -> bool {
+    // `go test -json` wraps the same package output lines in output events.
+    // Only unwrap Go-shaped events; unrelated JSON is not runner output.
+    let go_output: Vec<String> = lines
+        .iter()
+        .filter(|line| line.starts_with('{'))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event.get("Action").and_then(|v| v.as_str()) == Some("output")
+                && event.get("Package").and_then(|v| v.as_str()).is_some()
+        })
+        .filter_map(|event| {
+            event
+                .get("Output")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .collect();
+    let output = || {
+        lines
+            .iter()
+            .map(String::as_str)
+            .chain(go_output.iter().flat_map(|line| line.lines()))
+    };
     // A Go package that ran a test shows it only in its plain `ok` line,
     // which the counts do not see: that is a run.
     let go = |empty: bool| {
-        lines
-            .iter()
-            .any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
+        output().any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
     };
     if go(false) {
         return false;
     }
-    let said = go(true)
-        || lines
-            .iter()
-            .any(|l| NO_TESTS.is_match(l) || GO_PACKAGE_NO_TESTS.is_match(l));
+    let said =
+        go(true) || output().any(|l| NO_TESTS.is_match(l) || GO_PACKAGE_NO_TESTS.is_match(l));
     let mut libtest = lines
         .iter()
         .filter_map(|l| LIBTEST_RUNNING.captures(l))
