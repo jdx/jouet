@@ -8,7 +8,7 @@ author = "builtin"
 created = "2026-10-30"
 needs = ["pr", "threads"]
 suggest = "jouet pr threads"
-message = "It lists review threads; `jouet pr threads reply ID --body TEXT --resolve` replies and resolves, and `jouet pr threads resolve ID...` resolves without a reply. Raw reviewThreads GraphQL is long and easy to get wrong (`jouet agent-help pr`)."
+message = "It lists review threads; `jouet pr threads reply ID PR --body TEXT --resolve` replies and resolves, and `jouet pr threads resolve ID... PR` resolves without a reply. ID is any comment's numeric ID in the thread, such as the one you would reply to with `gh api .../comments/ID/replies`, so there is no thread ID to look up first. Raw reviewThreads GraphQL is long and easy to get wrong (`jouet agent-help pr`)."
 
 [[rule.match]]
 command = "gh api graphql"
@@ -23,6 +23,8 @@ fires = [
   "gh api graphql -f query='{ repository(owner:\"a\",name:\"b\") { pullRequest(number:1) { reviewThreads(first:100) { nodes { id } } } } }'",
   "gh api graphql -F query=@- <<'EOF'\n{ reviewThreads(first: 50) { nodes { isResolved } } }\nEOF",
   "curl -s https://api.github.com/graphql -d '{\"query\":\"{ reviewThreads }\"}'",
+  # A REST reply, then the GraphQL lookup from comment to thread to resolve it.
+  "gh api repos/o/r/pulls/7/comments/101/replies -f body=Fixed && gh api graphql -f query='{ repository(owner:\"o\",name:\"r\") { pullRequest(number:7) { reviewThreads(first:50) { nodes { id comments(first:1) { nodes { databaseId } } } } } } }'",
 ]
 quiet = [
   "rg reviewThreads src/",
