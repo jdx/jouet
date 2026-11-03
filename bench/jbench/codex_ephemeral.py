@@ -83,6 +83,7 @@ def run(binary: str, cwd: str, model: str, effort: str | None, prompt: str) -> i
                         "cached_input_tokens": usage["cachedInputTokens"],
                         "output_tokens": usage["outputTokens"],
                         "cache_write_input_tokens": usage.get("cacheWriteInputTokens", 0),
+                        "reasoning_output_tokens": usage.get("reasoningOutputTokens"),
                     }})
                     return 0
                 elif request_id is not None and method:

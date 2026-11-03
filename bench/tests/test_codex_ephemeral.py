@@ -40,7 +40,7 @@ assert turn["method"] == "turn/start" and turn["params"]["input"][0]["text"] == 
 send({"id": 3, "result": {}})
 send({"method": "thread/tokenUsage/updated", "params": {"threadId": "thread-1", "tokenUsage": {
     "total": {"inputTokens": None if os.getenv("TEST_BAD_USAGE") else 100,
-              "cachedInputTokens": 80, "outputTokens": 10}}}})
+              "cachedInputTokens": 80, "outputTokens": 10, "reasoningOutputTokens": 5}}}})
 send({"method": "item/completed", "params": {"threadId": "thread-1", "item": {
     "type": "agentMessage", "text": "done"}}})
 send({"method": "turn/completed", "params": {"threadId": "thread-1", "turn": {"status": "completed"}}})
@@ -61,8 +61,10 @@ send({"method": "turn/completed", "params": {"threadId": "thread-1", "turn": {"s
             self.assertEqual(harness.tokens_so_far(lines[:1], Path(directory)), 0)
             self.assertEqual(harness.tokens_so_far(lines[:3], Path(directory)), 110)
             self.assertEqual(harness.usage(lines, Path(directory)).cached_input_tokens, 80)
+            self.assertEqual(harness.usage(lines, Path(directory)).extra["reasoning_tokens"], 5)
             interrupted = harness.usage(lines[:3], Path(directory))
             self.assertEqual((interrupted.input_tokens, interrupted.output_tokens), (100, 10))
+            self.assertEqual(interrupted.extra["reasoning_tokens"], 5)
             self.assertTrue(interrupted.is_error)
             self.assertFalse(harness.usage(lines[:1], Path(directory)).extra["usage_observed"])
             for key in ("TEST_NON_EPHEMERAL", "TEST_BAD_USAGE"):
