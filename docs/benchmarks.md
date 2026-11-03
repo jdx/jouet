@@ -144,7 +144,7 @@ python3 bench/agents.py run --harness codex --codex-reviewed-home "$HOME/.cache/
 
 The review command uses an ephemeral credential store; it does not need `codex logout`. The harness uses the dedicated file credential store, lends credentials for each run, and returns any refresh before removing its copy. It refuses concurrent use of the dedicated home and checks that Codex reports the exact hooks for this jouet build as enabled and trusted. A changed hook needs a new review. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
 
-Codex runs use ephemeral sessions. The harness records live cumulative token counts and the agent's event stream, but `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs.
+Codex runs use ephemeral sessions. The harness records live cumulative token counts and selected agent events, but not every tool call or output. `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs.
 
 The prompt is the same in both arms. `--jouet-env KEY=VALUE` sets a variable in the jouet arm's agent environment after `jouet setup`. For example, `--jouet-env JOUET_HOOKS_PRIME=0` measures sessions without the primer, and without the skill that setup would install in its place. Adding an arm for rtk, or for jouet with only some rules, means adding an entry to `ARMS` in `bench/jbench/arms.py` with its setup step.
 
@@ -264,7 +264,7 @@ Results go to `bench/results/<timestamp>/`, which git ignores:
 - `meta.json`: versions, models, seed, budget, benchmark checkout commit and the SHA-256 of the jouet binary snapshot used by the suite. The commit is the benchmark checkout's HEAD; it does not capture uncommitted changes or establish which source built an externally supplied `--jouet` binary. Older records do not have the binary hash;
 - `runs.jsonl`: one record per run, with the directory its task came from (`task_dir`);
 - `summary.json` and `summary.md`: the comparison;
-- `runs/<task>.<harness>.<arm>.r<round>/`: the agent's event stream, its transcripts, `jouet audit`'s report, the check's output and, for PR tasks, every request the fake GitHub saw and its final state.
+- `runs/<task>.<harness>.<arm>.r<round>/`: agent events, transcripts and `jouet audit` output where available, the check's output and, for PR tasks, every request the fake GitHub saw and its final state. Ephemeral Codex runs have only selected events and no transcript or audit report.
 
 Each run's `changed_paths` lists paths whose contents or Git index entries changed between setup and the checker, including committed, staged and untracked changes. The summary shows up to ten paths per run and points to `runs.jsonl` when more were recorded; `summary.json` retains the full list. Staging an existing file can list it even when its contents did not change. This is evidence for a scope review, not a pass/fail judgment or a substitute for reviewing the diff. Ignored files and changes inside submodules are not included. `null` means the snapshots could not be compared; it does not mean nothing changed. The snapshots use a temporary Git index and do not change the agent's index.
 
