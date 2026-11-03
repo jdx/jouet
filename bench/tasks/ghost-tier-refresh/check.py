@@ -24,6 +24,6 @@ base = os.environ['BENCH_BASE_SHA']
 head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
 if head == base:
     sys.exit('no committed change')
-changed = subprocess.check_output(['git', 'diff', '--name-only', base, head], text=True).splitlines()
+changed = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=AM', base, head], text=True).splitlines()
 if not any('test' in path.lower() or 'spec' in path.lower() for path in changed):
     sys.exit('no committed regression test')
