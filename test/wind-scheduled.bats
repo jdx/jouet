@@ -44,7 +44,7 @@ JSON
 	assert_equal "$(jq '.reviewed' <<<"$output")" 1
 	assert_equal "$(jq '.eligible' <<<"$output")" 0
 
-	printf '%s\n' '{"type":"turn_context","payload":{}}' >>"$TRANSCRIPT"
+	jq -nc --arg cwd "$PWD" '{type:"turn_context",payload:{cwd:$cwd}}' >>"$TRANSCRIPT"
 	run --separate-stderr jouet wind plan --root "$PWD" --idle 0s --json
 	assert_equal "$(jq '.eligible' <<<"$output")" 1
 }

@@ -38,6 +38,14 @@ network-dependent setup or paid agent benchmark just to collect timings. If a
 representative check is already appropriate to the user's task, run it through
 `jouet test` so its result and duration are recorded.
 
+If observed baseline comparisons cannot run because their isolated checkout
+lacks dependencies, explain the optional `[baseline] setup` in
+`.jouet/test.toml` and its cost. Propose only a dependency setup command verified
+from this project; it may execute project scripts and access the network. Let
+the user review the command and the repository's jouet files before the person
+decides whether to run `jouet trust`. Do not treat an uncomparable baseline as a
+pass or configure setup merely because a project has a lockfile.
+
 ## Record the checks
 
 Write the commands you established to `.jouet/project.toml`, to be committed

@@ -307,11 +307,13 @@ fn one_project(path: &Path, expected: &Path) -> std::io::Result<bool> {
         }
         let value: serde_json::Value =
             serde_json::from_str(&line).map_err(std::io::Error::other)?;
-        if value["type"] == "turn_context"
-            && let Some(cwd) = value["payload"]["cwd"].as_str()
-            && jouet_output::paths::work_tree(Path::new(cwd)).as_deref() != Some(expected)
-        {
-            return Ok(false);
+        if value["type"] == "turn_context" {
+            let cwd = value["payload"]["cwd"]
+                .as_str()
+                .ok_or_else(|| std::io::Error::other("turn context has no cwd"))?;
+            if jouet_output::paths::work_tree(Path::new(cwd)).as_deref() != Some(expected) {
+                return Ok(false);
+            }
         }
     }
     Ok(true)
@@ -582,6 +584,8 @@ mod tests {
         std::fs::write(&transcript, "\n  \n{\"type\":\"event_msg\"}\n").unwrap();
         assert!(one_project(&transcript, dir.path()).unwrap());
         std::fs::write(&transcript, "{\"type\":\"turn_context\"\n").unwrap();
+        assert!(one_project(&transcript, dir.path()).is_err());
+        std::fs::write(&transcript, "{\"type\":\"turn_context\",\"payload\":{}}\n").unwrap();
         assert!(one_project(&transcript, dir.path()).is_err());
     }
 
