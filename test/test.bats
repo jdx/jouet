@@ -21,6 +21,104 @@ setup() {
 	init_repo
 }
 
+@test "baseline uses a local submodule for the pinned commit without changing its remote" {
+	local source="$BATS_TEST_TMPDIR/source repo #1"
+	local parent_origin="$BATS_TEST_TMPDIR/parent-origin"
+	git remote add origin "$parent_origin"
+	git init -q "$source"
+	printf 'old\n' >"$source/value"
+	git -C "$source" add value
+	git -C "$source" commit -qm old
+	local old_oid
+	old_oid="$(git -C "$source" rev-parse HEAD)"
+	git -c protocol.file.allow=always submodule add -q -- "$source" 'deps/local #1'
+	printf '%s\n' "$source" >source-url
+	printf 'old\n' >expected
+	cat >check-submodule <<'SH'
+#!/bin/sh
+echo '1..1'
+remote="$(git -C 'deps/local #1' remote get-url origin)"
+expected_remote="$(cat source-url)"
+if test "$(cat 'deps/local #1/value')" = "$(cat expected)" &&
+   test ! -f "$(git -C 'deps/local #1' rev-parse --path-format=absolute --git-path objects/info/alternates)" &&
+   { test "$remote" = "$expected_remote" || test "$remote" = "file://$expected_remote"; }; then
+  echo 'not ok 1 expected failure'
+  echo '# same failure details'
+else
+  echo 'not ok 1 wrong submodule'
+  echo '# missing commit or wrong remote'
+fi
+exit 1
+SH
+	chmod +x check-submodule
+	git add .gitmodules 'deps/local #1' source-url expected check-submodule
+	git commit -qm base
+	git checkout -qb work
+
+	printf 'new\n' >"$source/value"
+	git -C "$source" add value
+	git -C "$source" commit -qm new
+	git -C 'deps/local #1' fetch -q origin
+	git -C 'deps/local #1' checkout -q FETCH_HEAD
+	printf 'new\n' >expected
+	git add 'deps/local #1' expected
+	git commit -qm change
+	mv "$source" "${source}.unavailable"
+
+	# The base's older gitlink is present locally, but its remote is gone.
+	GIT_ALLOW_PROTOCOL="file" run --separate-stderr jouet test --baseline --cmd -- ./check-submodule
+	assert_success
+	assert_output --partial 'baseline: the failure also fails'
+	assert_equal "$(git -C 'deps/local #1' remote get-url origin)" "$source"
+	assert_equal "$(cat 'deps/local #1/value')" new
+
+	# A local update can create the checkout and still fail. Simulate that
+	# after Git succeeds: the fallback must see the original remote, not the
+	# temporary file URL.
+	local real_git
+	real_git="$(command -v git)"
+	mkdir -p "$BATS_TEST_TMPDIR/git-wrapper"
+	cat >"$BATS_TEST_TMPDIR/git-wrapper/git" <<'SH'
+#!/bin/sh
+case "$*" in
+  *submodule.*.url=file://*)
+    printf 'hit\n' >>"$GIT_WRAPPER_LOG"
+    if [ "${GIT_WRAPPER_FAIL_BEFORE:-}" != 1 ]; then "$REAL_GIT" "$@"; fi
+    exit 1
+    ;;
+  *) exec "$REAL_GIT" "$@" ;;
+esac
+SH
+	chmod +x "$BATS_TEST_TMPDIR/git-wrapper/git"
+	REAL_GIT="$real_git" GIT_WRAPPER_LOG="$BATS_TEST_TMPDIR/wrapper-hit" PATH="$BATS_TEST_TMPDIR/git-wrapper:$PATH" \
+		XDG_STATE_HOME="$BATS_TEST_TMPDIR/partial-state" GIT_ALLOW_PROTOCOL="file" \
+		run --separate-stderr jouet test --baseline --cmd -- ./check-submodule
+	assert [ -s "$BATS_TEST_TMPDIR/wrapper-hit" ]
+	assert_success
+	assert_output --partial 'baseline: the failure also fails'
+	assert_equal "$(git -C 'deps/local #1' remote get-url origin)" "$source"
+
+	# A shallow local checkout lacks the old gitlink. Restore its remote and
+	# require the normal fallback to fetch the pinned commit.
+	mv "${source}.unavailable" "$source"
+	REAL_GIT="$real_git" GIT_WRAPPER_LOG="$BATS_TEST_TMPDIR/wrapper-hit" GIT_WRAPPER_FAIL_BEFORE=1 \
+		PATH="$BATS_TEST_TMPDIR/git-wrapper:$PATH" XDG_STATE_HOME="$BATS_TEST_TMPDIR/before-state" \
+		GIT_ALLOW_PROTOCOL="file" run --separate-stderr jouet test --baseline --cmd -- ./check-submodule
+	assert_success
+	assert_output --partial 'baseline: the failure also fails'
+	assert_equal "$(git remote get-url origin)" "$parent_origin"
+
+	mv 'deps/local #1' "$BATS_TEST_TMPDIR/saved-submodule"
+	git clone -q --depth 1 "file://$source" 'deps/local #1'
+	run git -C 'deps/local #1' cat-file -e "${old_oid}^{commit}"
+	assert_failure
+	XDG_STATE_HOME="$BATS_TEST_TMPDIR/fallback-state" GIT_ALLOW_PROTOCOL="file" \
+		run --separate-stderr jouet test --baseline --cmd -- ./check-submodule
+	assert_success
+	assert_output --partial 'baseline: the failure also fails'
+	assert_equal "$(git -C 'deps/local #1' remote get-url origin)" "file://$source"
+}
+
 @test "trusted project pytest options apply to affected runs only" {
 	cp -R "$FIXTURES/pytest/." .
 	mkdir -p .jouet .venv/bin

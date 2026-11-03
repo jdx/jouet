@@ -22,8 +22,17 @@ needed to establish those facts.
 Run `jouet agent-help` and consult `jouet agent-help COMMAND --full` for the
 commands and configuration you need. Use the installed version's help rather
 than guessing flags, supported adapters or configuration keys. Hook installation
-belongs to `jouet setup HARNESS`; if the user only asked for a configuration
-review, report missing hooks without installing them.
+belongs to `jouet setup HARNESS`. Check the current harness's global setup with
+`jouet setup HARNESS --global --dry-run` before adding project hooks. Inspect
+the harness's hook file in that preview separately from skill files: an
+unchanged hook file means the expected entries are installed, even if a skill
+would change. A changed hook file needs inspection; no preview proves the
+harness has trusted or enabled the hooks. If hooks are already installed
+globally, do not add another project installation or copy the skill into the
+repository unless the user asks to share setup with the project. A shared
+installation changes tracked files and project-local hooks may need separate
+review and trust in the agent interface. If the user only asked for a
+configuration review, report missing hooks without installing them.
 
 ## Make costs visible
 

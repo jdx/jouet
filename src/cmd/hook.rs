@@ -919,6 +919,18 @@ fn record(payload: &Value, call: &Call, records: &[Record]) -> Option<Ran> {
     let repo = (!trees[0].1.is_empty())
         .then(|| jouet_output::paths::repo_key(Path::new(&trees[0].1)))
         .flatten();
+    // An hk check of a file list that names every changed file checked
+    // what hk without files would have.
+    let records: Vec<Record> = records
+        .iter()
+        .cloned()
+        .map(|mut record| {
+            if let Some(at) = run_dir(cwd.as_deref(), record.dir.as_deref()) {
+                verify::widen_hk_files(&mut record, &at, TREE_TIMEOUT);
+            }
+            record
+        })
+        .collect();
     // A failure whose output blames the machine (no D-Bus, a missing
     // system library, no network) is marked so: it does not hold up
     // finishing. Claude Code puts a failed call's output in `error`.

@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// How many unresolved failures of a kind are kept; older ones are dropped.
 const MAX_FAILURES: usize = 16;
@@ -605,6 +606,100 @@ impl Run {
     fn covers_changes(&self) -> bool {
         self.full || self.selector.as_deref() == Some("changed files")
     }
+}
+
+/// Past this size a `--files0-from` list is not read.
+const MAX_FILE_LIST: u64 = 1 << 20;
+
+/// Records an hk check of an explicit file list (`files a b`, or
+/// `files0-from LIST`) that ran in `dir` as a check of the changed files
+/// when the list names every file changed in the work tree, which is what
+/// hk without files would have checked. A list it cannot read, or a work
+/// tree it cannot read, leaves the run partial.
+pub(crate) fn widen_hk_files(record: &mut Record, dir: &Path, timeout: Duration) {
+    // With `--cd`, hk reads the list from another directory.
+    let moved = record
+        .command
+        .split_whitespace()
+        .any(|w| w == "--cd" || w.starts_with("--cd="));
+    if record.kind != Kind::Lint || !through_hk(&record.command) || moved {
+        return;
+    }
+    let Some(selector) = record.selector.as_deref() else {
+        return;
+    };
+    if listed_cover_changes(selector, dir, timeout) == Some(true) {
+        record.selector = Some("changed files".into());
+    }
+}
+
+/// Whether the files `selector` lists from `dir` include every file changed
+/// in the work tree there; None when it lists nothing readable.
+fn listed_cover_changes(selector: &str, dir: &Path, timeout: Duration) -> Option<bool> {
+    let dir = dir.canonicalize().ok()?;
+    let root = PathBuf::from(root_of(&dir));
+    if root.as_os_str().is_empty() {
+        return None;
+    }
+    let listed: BTreeSet<String> = listed_files(selector, &dir)?
+        .iter()
+        .filter_map(|file| relative_to(&root, &dir.join(file)))
+        .collect();
+    let changed = jouet_rules::tree::changed_paths(&root, timeout).ok()?;
+    Some(changed.iter().all(|path| listed.contains(path)))
+}
+
+/// The files an hk selector names, as given: `files a b` with nothing that
+/// narrows it, or the NUL-separated list in `files0-from LIST`, which
+/// counts itself so that a list kept in the work tree is not a file left
+/// unchecked.
+fn listed_files(selector: &str, dir: &Path) -> Option<Vec<String>> {
+    if let Some(files) = selector.strip_prefix("files ") {
+        let files: Vec<String> = files.split_whitespace().map(str::to_string).collect();
+        let narrowed = files
+            .iter()
+            .any(|f| f.starts_with('-') || f == "files0-from");
+        return (!narrowed).then_some(files);
+    }
+    let list = selector.strip_prefix("files0-from ")?;
+    if list.contains(" -") {
+        return None;
+    }
+    let path = dir.join(list);
+    if std::fs::metadata(&path).ok()?.len() > MAX_FILE_LIST {
+        return None;
+    }
+    let text = std::fs::read_to_string(&path).ok()?;
+    let mut files: Vec<String> = text
+        .split('\0')
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .collect();
+    files.push(list.to_string());
+    Some(files)
+}
+
+/// `path` relative to `root`, `/`-separated, with `.` and `..` resolved by
+/// name; None outside it.
+fn relative_to(root: &Path, path: &Path) -> Option<String> {
+    use std::path::Component;
+    let mut clean = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                clean.pop();
+            }
+            other => clean.push(other),
+        }
+    }
+    let parts: Option<Vec<&str>> = clean
+        .strip_prefix(root)
+        .ok()?
+        .components()
+        .map(|c| c.as_os_str().to_str())
+        .collect();
+    Some(parts?.join("/"))
 }
 
 impl State {
@@ -2644,5 +2739,159 @@ mod tests {
             ]
         );
         assert!(codex_commands(&dir.path().join("missing")).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hk_file_list_tests {
+    use super::*;
+
+    /// A repository with `a.rs`, `b.rs` and `gone.rs` committed, then
+    /// `a.rs` changed, `gone.rs` deleted, `new.rs` added and an untracked
+    /// repository put in `nested`.
+    fn repo() -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir(repo.path().join("src")).unwrap();
+        std::fs::write(repo.path().join("src/a.rs"), "a\n").unwrap();
+        std::fs::write(repo.path().join("src/b.rs"), "b\n").unwrap();
+        std::fs::write(repo.path().join("gone.rs"), "g\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+        std::fs::write(repo.path().join("src/a.rs"), "a2\n").unwrap();
+        std::fs::write(repo.path().join("new.rs"), "n\n").unwrap();
+        std::fs::remove_file(repo.path().join("gone.rs")).unwrap();
+        let nested = repo.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        git(&["init", "-q", "nested"]);
+        std::fs::write(nested.join("x.rs"), "x\n").unwrap();
+        repo
+    }
+
+    /// The selector `command`, which selected `selector`, is recorded with
+    /// after running in `dir`.
+    fn widened(command: &str, selector: &str, dir: &Path) -> Option<String> {
+        let mut record = Record {
+            rule: "checks".into(),
+            kind: Kind::Lint,
+            command: command.into(),
+            exit_code: 0,
+            full: false,
+            dir: None,
+            selector: Some(selector.into()),
+        };
+        widen_hk_files(&mut record, dir, Duration::from_secs(10));
+        record.selector
+    }
+
+    #[test]
+    fn a_file_list_naming_every_change_covers_the_changes() {
+        let repo = repo();
+        let changed = Some("changed files".to_string());
+        assert_eq!(
+            widened(
+                "hk check src/a.rs new.rs",
+                "files src/a.rs new.rs",
+                repo.path()
+            ),
+            changed
+        );
+        // From a subdirectory, by paths relative to it.
+        let sub = repo.path().join("src");
+        assert_eq!(
+            widened(
+                "hk check a.rs ../new.rs b.rs",
+                "files a.rs ../new.rs b.rs",
+                &sub
+            ),
+            changed
+        );
+        // A NUL-separated list outside the work tree.
+        let scratch = tempfile::tempdir().unwrap();
+        let list = scratch.path().join("files");
+        std::fs::write(&list, "src/a.rs\0new.rs\0").unwrap();
+        let selector = format!("files0-from {}", list.display());
+        let command = format!("hk run check --files0-from {}", list.display());
+        assert_eq!(widened(&command, &selector, repo.path()), changed);
+        // One inside it counts itself.
+        std::fs::write(repo.path().join("list"), "src/a.rs\0new.rs\0").unwrap();
+        assert_eq!(
+            widened(
+                "hk run check --files0-from list",
+                "files0-from list",
+                repo.path()
+            ),
+            changed
+        );
+        // `jouet diag check` runs hk too.
+        std::fs::remove_file(repo.path().join("list")).unwrap();
+        assert_eq!(
+            widened(
+                "jouet diag check src/a.rs new.rs",
+                "files src/a.rs new.rs",
+                repo.path()
+            ),
+            changed
+        );
+    }
+
+    #[test]
+    fn a_file_list_missing_a_change_stays_partial() {
+        let repo = repo();
+        let selector = "files src/a.rs".to_string();
+        assert_eq!(
+            widened("hk check src/a.rs", &selector, repo.path()),
+            Some(selector)
+        );
+        std::fs::write(repo.path().join("list"), "src/a.rs\0list\0").unwrap();
+        let selector = "files0-from list".to_string();
+        assert_eq!(
+            widened("hk check --files0-from list", &selector, repo.path()),
+            Some(selector)
+        );
+        // Every change, but narrowed to one step.
+        let selector = "files src/a.rs new.rs --step fmt".to_string();
+        assert_eq!(
+            widened(
+                "hk check src/a.rs new.rs --step fmt",
+                &selector,
+                repo.path()
+            ),
+            Some(selector)
+        );
+        // From another directory.
+        let selector = "files src/a.rs new.rs".to_string();
+        assert_eq!(
+            widened("hk check --cd src src/a.rs new.rs", &selector, repo.path()),
+            Some(selector)
+        );
+    }
+
+    #[test]
+    fn an_unreadable_file_list_stays_partial() {
+        let repo = repo();
+        let selector = "files0-from missing".to_string();
+        assert_eq!(
+            widened("hk check --files0-from missing", &selector, repo.path()),
+            Some(selector)
+        );
+        // Outside a repository there are no changes to compare.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let selector = "files a.rs".to_string();
+        assert_eq!(
+            widened("hk check a.rs", &selector, elsewhere.path()),
+            Some(selector)
+        );
     }
 }

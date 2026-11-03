@@ -309,14 +309,16 @@ local HK_INSPECT = set({ "--help", "-h", "--plan", "-P", "--why", "-W" })
 
 -- The scope of `hk check` or `hk run check`, from its arguments after the
 -- hook. Without files or options that narrow it, hk checks the changed
--- files, or with `--all` everything. A file list read from stdin is a
--- selection the rule cannot name, so it clears only a run of the same
--- command.
+-- files, or with `--all` everything. A file list read from a file is
+-- recorded as `files0-from FILE`, which the hook reads to tell whether it
+-- named every changed file; one read from stdin is a selection the rule
+-- cannot name, so it clears only a run of the same command.
 local function hk_scope(args: { string }, from: number): (Kind?, Scope)
 	local files: { string } = {}
 	local narrow: { string } = {}
 	local all = false
 	local stdin = false
+	local list: string? = nil
 	local i = from
 	while i <= #args do
 		local arg = args[i]
@@ -328,7 +330,12 @@ local function hk_scope(args: { string }, from: number): (Kind?, Scope)
 		elseif name == "--all" or name == "-a" then
 			all = true
 		elseif name == "--files0-from" then
-			stdin = true
+			local value = if takes then args[i] else string.sub(arg, #name + 2)
+			if value == nil or value == "" or value == "-" or string.sub(value, 1, 5) == "/dev/" then
+				stdin = true
+			else
+				list = value
+			end
 		elseif HK_NARROW[name] then
 			table.insert(narrow, if takes then `{arg} {args[i] or ""}` else arg)
 		elseif string.sub(arg, 1, 1) ~= "-" then
@@ -344,6 +351,9 @@ local function hk_scope(args: { string }, from: number): (Kind?, Scope)
 	local selected: { string } = {}
 	if #files > 0 then
 		table.insert(selected, "files " .. table.concat(files, " "))
+	end
+	if list then
+		table.insert(selected, "files0-from " .. list)
 	end
 	for _, n in narrow do
 		table.insert(selected, n)

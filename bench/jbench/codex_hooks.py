@@ -85,11 +85,11 @@ def copy_trust(reviewed: Path, run: Path) -> None:
     source = str(reviewed / "hooks.json") + ":"
     try:
         reviewed_config = reviewed / "config.toml"
-        reviewed_text = reviewed_config.read_text() if reviewed_config.exists() else ""
+        reviewed_text = reviewed_config.read_text(encoding="utf-8") if reviewed_config.exists() else ""
         state = tomllib.loads(reviewed_text).get("hooks", {}).get("state", {})
         config = run / "config.toml"
-        existing = tomllib.loads(config.read_text()) if config.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        existing = tomllib.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise HookPreflightError("Cannot read the reviewed Codex trust") from error
     if "hooks" in existing:
         raise HookPreflightError("The run's Codex configuration already has hook settings")
@@ -98,9 +98,9 @@ def copy_trust(reviewed: Path, run: Path) -> None:
     if not entries:
         raise HookPreflightError("Codex hooks in the benchmark home have not been reviewed")
     target = str(run / "hooks.json")
-    with config.open("a") as file:
+    with config.open("a", encoding="utf-8") as file:
         for suffix, digest in sorted(entries):
-            file.write(f"\n[hooks.state.{json.dumps(f'{target}:{suffix}')}]\ntrusted_hash = {json.dumps(digest)}\n")
+            file.write(f"\n[hooks.state.{json.dumps(f'{target}:{suffix}', ensure_ascii=False)}]\ntrusted_hash = {json.dumps(digest)}\n")
 
 
 def require_reviewed(result: dict[str, Any], hook_file: Path) -> None:

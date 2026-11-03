@@ -159,6 +159,40 @@ pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
     Ok(!status.is_empty())
 }
 
+/// Every file in the work tree at `dir` that differs from HEAD, staged or
+/// not, and every untracked file that is not ignored, relative to the work
+/// tree's root: what hk checks by default. Deleted files, which no check
+/// can read, are left out.
+pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, String> {
+    let started = Instant::now();
+    let top = git(Some(dir), &["rev-parse", "--show-toplevel"], timeout)?;
+    let top = Path::new(top.trim_end_matches('\n'));
+    let status = git(
+        Some(top),
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+            "--no-renames",
+            "--ignore-submodules=all",
+        ],
+        timeout.saturating_sub(started.elapsed()),
+    )?;
+    Ok(status
+        .split('\0')
+        // `XY PATH`
+        // A nested repository is listed as its directory, which no check
+        // reads, and a deleted file is gone; a path still on disk counts
+        // whatever its status says.
+        .filter_map(|entry| {
+            let path = entry.get(3..)?;
+            let meta = std::fs::symlink_metadata(top.join(path)).ok()?;
+            (!meta.is_dir()).then(|| path.to_string())
+        })
+        .collect())
+}
+
 /// The tree of commit `rev` in the repository containing `dir`, hashed as
 /// [`work_tree`] hashes a work tree.
 pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<String, String> {

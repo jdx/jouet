@@ -341,10 +341,15 @@ impl Checkout<'_> {
                 ],
             )
             .map_err(|e| format!("checking out the merge base {}: {e}", self.base.merge_base))?;
-            if tree.join(".gitmodules").is_file() {
-                let _ = git(&tree, &["submodule", "update", "--init", "--quiet"]);
-            }
+            // Keep the worktree registered for cleanup even if local setup fails.
             self.tmp = Some((tmp, tree));
+            let tree = &self.tmp.as_ref().expect("just checked out").1;
+            if tree.join(".gitmodules").is_file() {
+                #[cfg(unix)]
+                local_submodules(self.root, tree)?;
+                // Also initializes anything that had no usable local source.
+                let _ = git(tree, &["submodule", "update", "--init", "--quiet"]);
+            }
         }
         Ok(&self.tmp.as_ref().expect("checked out above").1)
     }
@@ -421,6 +426,165 @@ fn targeted(
         .iter()
         .all(|name| base.names.contains(name) && now.details.get(name) == base.details.get(name));
     Ok(same.then(|| now.names.clone()))
+}
+
+/// Populate exact pinned commits from already initialized local submodules.
+#[cfg(unix)]
+fn local_submodules(root: &Path, tree: &Path) -> Result<(), String> {
+    use std::path::Component;
+
+    let Some(entries) = git_stdout(
+        tree,
+        &[
+            "config",
+            "--null",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ],
+    ) else {
+        return Ok(());
+    };
+    let Ok(root) = root.canonicalize() else {
+        return Ok(());
+    };
+    for entry in entries
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let Ok(entry) = std::str::from_utf8(entry) else {
+            continue;
+        };
+        let Some((key, path)) = entry.split_once('\n') else {
+            continue;
+        };
+        let Some(name) = key
+            .strip_prefix("submodule.")
+            .and_then(|key| key.strip_suffix(".path"))
+        else {
+            continue;
+        };
+        let relative = Path::new(path);
+        if relative
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            continue;
+        }
+        let Ok(source) = root.join(relative).canonicalize() else {
+            continue;
+        };
+        if !source.starts_with(&root) {
+            continue;
+        }
+        let Some(top) = git_stdout(&source, &["rev-parse", "--show-toplevel"])
+            .and_then(|output| String::from_utf8(output).ok())
+            .and_then(|output| Path::new(output.trim_end()).canonicalize().ok())
+        else {
+            continue;
+        };
+        if top != source {
+            continue;
+        }
+        let Some(index) = git_stdout(
+            tree,
+            &[
+                "--literal-pathspecs",
+                "ls-files",
+                "--stage",
+                "-z",
+                "--",
+                path,
+            ],
+        )
+        .and_then(|output| String::from_utf8(output).ok()) else {
+            continue;
+        };
+        let Some((header, indexed_path)) = index.trim_end_matches('\0').split_once('\t') else {
+            continue;
+        };
+        let mut fields = header.split_whitespace();
+        let (Some("160000"), Some(oid), Some("0"), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if indexed_path != path
+            || !matches!(oid.len(), 40 | 64)
+            || !oid.bytes().all(|b| b.is_ascii_hexdigit())
+            || git(&source, &["cat-file", "-e", &format!("{oid}^{{commit}}")]).is_err()
+        {
+            continue;
+        }
+        let Some(source) = source.to_str() else {
+            continue;
+        };
+        let mut url = String::from("file://");
+        for byte in source.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+                url.push(char::from(byte));
+            } else {
+                use std::fmt::Write;
+                let _ = write!(url, "%{byte:02X}");
+            }
+        }
+        // Let Git resolve relative URLs as it normally does. The per-command
+        // override never replaces that configured URL in the parent repository.
+        if git(tree, &["submodule", "init", "--", path]).is_err() {
+            continue;
+        }
+        let config = format!("submodule.{name}.url");
+        let Some(original) = git_stdout(tree, &["config", "--null", "--get", &config])
+            .and_then(|output| String::from_utf8(output).ok())
+        else {
+            continue;
+        };
+        let original = original.trim_end_matches('\0');
+        let override_url = format!("{config}={url}");
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(tree)
+            .args([
+                "-c",
+                &override_url,
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "--quiet",
+                "--",
+                path,
+            ])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .stdin(Stdio::null())
+            .output();
+        let checkout = tree.join(relative);
+        // A failed checkout can still have created a clone. Restore its remote
+        // before the normal fallback, too.
+        if checkout.join(".git").exists()
+            && git_stdout(&checkout, &["remote", "get-url", "origin"]).is_some()
+        {
+            git(&checkout, &["remote", "set-url", "origin", original])
+                .map_err(|_| format!("restoring the original remote for submodule {path}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn git_stdout(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(output.stdout)
 }
 
 /// Sorts each failed job's failures into those the merge base has too and
