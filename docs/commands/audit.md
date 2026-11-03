@@ -30,7 +30,7 @@ The categories are CI polling, process polling, PR threads, PR status, other Git
 
 The process-polling category includes blocking waits and other checks. Its attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.
 
-Recorded shell-call time sums the durations the transcript attributes to shell calls, not necessarily the full lifetime of their processes. If a command yields a background session, later waits are counted as process polling rather than shell time; unobserved or missing durations are not counted. Tool times can overlap, so their sum is not the task's elapsed wall time. In JSON, these totals are `command_ms` and `tool_ms` respectively.
+Recorded shell-call time sums the durations the transcript attributes to shell calls, not necessarily the full lifetime of their processes. If a command yields a background session, later native wait calls are counted as process polling, not shell time. A shell-based process poll, such as `sleep 10`, counts in both the process-polling category and shell-call time. Unobserved or missing durations are not counted. Tool times can overlap, so their sum is not the task's elapsed wall time. In JSON, these totals are `command_ms` and `tool_ms` respectively.
 
 The savings are estimates and are labelled as such:
 
