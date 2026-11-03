@@ -163,6 +163,12 @@ def cmd_prepare_codex(args: argparse.Namespace) -> int:
     if result.returncode or not (config / "hooks.json").is_file():
         print("jouet setup did not create the Codex hooks", file=sys.stderr)
         return 1
+    try:
+        with (config / "config.toml").open("x") as file:
+            file.write('cli_auth_credentials_store = "file"\n')
+    except OSError as error:
+        print(f"cannot configure the dedicated credential store: {error}", file=sys.stderr)
+        return 1
     (home / ".jouet-bench-codex-home").write_text("jouet benchmark Codex home\n")
     print(f"Prepared Codex hooks in {config}. Review them in Codex with /hooks before running trials.")
     print(f"Use --codex-reviewed-home {config} when running the benchmark.")

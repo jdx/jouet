@@ -16,7 +16,8 @@ def emit(event: dict[str, Any]) -> None:
 def run(binary: str, cwd: str, model: str, effort: str | None, prompt: str) -> int:
     """Run the app server in this process group so the runner can stop it."""
     emit({"type": "jouet.ephemeral", "model": model})
-    with subprocess.Popen([binary, "app-server", "--listen", "stdio://"],
+    with subprocess.Popen([binary, "app-server", "--listen", "stdio://",
+                           "-c", 'cli_auth_credentials_store="file"'],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as proc:
         assert proc.stdin is not None and proc.stdout is not None
 

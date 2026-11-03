@@ -92,6 +92,7 @@ class CodexHooksTest(unittest.TestCase):
             first = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertTrue((home / ".codex/hooks.json").is_file())
+            self.assertEqual((home / ".codex/config.toml").read_text(), 'cli_auth_credentials_store = "file"\n')
             self.assertTrue((home / ".jouet-bench-codex-home").is_file())
             self.assertFalse((home / ".codex/auth.json").exists())
             second = subprocess.run(command, capture_output=True, text=True)

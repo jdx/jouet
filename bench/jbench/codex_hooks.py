@@ -18,7 +18,8 @@ class HookPreflightError(RuntimeError):
 def list_hooks(binary: str, env: dict[str, str], cwd: Path, timeout: float = 15) -> dict[str, Any]:
     """Query the experimental app-server hooks/list API; fail closed on errors."""
     messages: queue.Queue[str | None] = queue.Queue()
-    with subprocess.Popen([binary, "app-server", "--listen", "stdio://"], cwd=cwd, env=env,
+    with subprocess.Popen([binary, "app-server", "--listen", "stdio://",
+                           "-c", 'cli_auth_credentials_store="file"'], cwd=cwd, env=env,
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           text=True) as proc:
         assert proc.stdin is not None and proc.stdout is not None

@@ -137,12 +137,12 @@ Codex trials use a dedicated configuration whose hooks a person has reviewed. Cr
 
 ```sh
 python3 bench/agents.py prepare-codex --home "$HOME/.cache/jouet-bench/reviewed-codex"
-HOME="$HOME/.cache/jouet-bench/reviewed-codex" CODEX_HOME="$HOME/.cache/jouet-bench/reviewed-codex/.codex" codex
+HOME="$HOME/.cache/jouet-bench/reviewed-codex" CODEX_HOME="$HOME/.cache/jouet-bench/reviewed-codex/.codex" codex -c 'cli_auth_credentials_store="ephemeral"'
 # In Codex, open /hooks and review and trust the jouet hooks. Then exit.
 python3 bench/agents.py run --harness codex --codex-reviewed-home "$HOME/.cache/jouet-bench/reviewed-codex/.codex"
 ```
 
-If the review session signed into the dedicated home, sign out of that home before starting a trial. The harness lends credentials for each run and returns any refresh before removing its copy. It refuses concurrent use of the dedicated home and checks that Codex reports the exact hooks for this jouet build as enabled and trusted. A changed hook needs a new review. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
+The review command uses an ephemeral credential store; it does not need `codex logout`. The harness uses the dedicated file credential store, lends credentials for each run, and returns any refresh before removing its copy. It refuses concurrent use of the dedicated home and checks that Codex reports the exact hooks for this jouet build as enabled and trusted. A changed hook needs a new review. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
 
 Codex runs use ephemeral sessions. The harness records live cumulative token counts and the agent's event stream, but `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs.
 
