@@ -20,7 +20,17 @@ static PYTEST_SELF_ADDRESS: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\s*self = <[^<>]+ object at )0x[0-9a-fA-F]+(>)$")
         .expect("pytest self address pattern")
 });
-const DETAILS_VERSION: u32 = 2;
+/// What changes between two runs of the same Go panic: goroutine numbers,
+/// a frame's argument words, and its program counter offset.
+static GO_GOROUTINE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\bgoroutine \d+\b").expect("goroutine pattern"));
+static GO_FRAME_ARGS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\s*\S+\()(?:[{}\s,?.]|0x[0-9a-fA-F]+)*(\))$").expect("frame pattern")
+});
+static GO_FRAME_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\s+\S+\.go:\d+) \+0x[0-9a-fA-F]+$").expect("frame offset pattern")
+});
+const DETAILS_VERSION: u32 = 3;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -208,6 +218,9 @@ pub(super) fn failure_evidence(
                     .map(|line| {
                         let line = from_root(line, root);
                         let line = RUST_THREAD_ID.replace(&line, "$1$2");
+                        let line = GO_GOROUTINE.replace_all(&line, "goroutine N");
+                        let line = GO_FRAME_ARGS.replace(&line, "$1...$2");
+                        let line = GO_FRAME_OFFSET.replace(&line, "$1");
                         PYTEST_SELF_ADDRESS
                             .replace(&line, "${1}<address>${2}")
                             .into_owned()
@@ -914,6 +927,28 @@ mod tests {
         assert_eq!(
             RUST_THREAD_ID.replace(&line(123), "$1$2"),
             RUST_THREAD_ID.replace(&line(456), "$1$2")
+        );
+    }
+
+    #[test]
+    fn go_panic_stacks_compare_without_goroutines_or_addresses() {
+        let output = |goroutine: u32, address: &str, message: &str| {
+            format!(
+                "--- FAIL: TestX (0.00s)\npanic: {message} [recovered]\n\tpanic: {message}\n\ngoroutine {goroutine} [running]:\ntesting.tRunner.func1.2({{{address}, 0x6c8b10}})\n\t/usr/lib/go/src/testing/testing.go:1734 +0x{goroutine}c\nexample.com/p.TestX({address}?)\n\t/w/p/p_test.go:9 +0x25\ncreated by testing.(*T).Run in goroutine 1\n\t/usr/lib/go/src/testing/testing.go:1851 +0x413\nFAIL\texample.com/p\t0.004s\nFAIL\n"
+            )
+        };
+        let details = |text: String| {
+            let evidence = failure_evidence(&text, &[], Path::new("/w"), false).unwrap();
+            assert!(!evidence.details.is_empty(), "{text}");
+            evidence.details
+        };
+        assert_eq!(
+            details(output(7, "0x5e0f40", "boom")),
+            details(output(4021, "0xc000102380", "boom"))
+        );
+        assert_ne!(
+            details(output(7, "0x5e0f40", "boom")),
+            details(output(7, "0x5e0f40", "bang"))
         );
     }
 

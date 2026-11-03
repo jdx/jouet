@@ -723,10 +723,26 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         // Go with no network: offline, or a name that does not resolve.
         "mise go@1.27.3 go: github.com/go-delve/delve/cmd/dlv@latest: module lookup disabled by GOPROXY=off",
         "Get \"https://proxy.golang.org/x\": dial tcp: lookup proxy.golang.org on 127.0.0.53:53: no such host",
+        // A Go tool built for another Go than the one installed.
+        "panic: file requires newer Go version go1.27 (application built with go1.26) [recovered, repanicked]",
+        "a.go:3:2: could not import authz (unsupported version: export data version 5 is greater than maximum supported version 4) (typecheck)",
+        "go: go.mod requires go >= 1.27.1 (running go 1.26.2; GOTOOLCHAIN=local)",
+        "a.go:61:2: could not import errors (/home/u/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/errors/wrap.go:8:2: could not import internal/reflectlite) (typecheck)",
     ] {
         let text = format!("1..1\nnot ok 1 a\n# {line}\n");
         assert!(environment_cause(&text, &[]).is_some(), "{line}");
     }
+    // golangci-lint, as `mise run lint` shows it: a panic in its loader, and
+    // a typecheck issue, each failing the task with no test named.
+    let panic = "[lint:go] panic: file requires newer Go version go1.27 (application built with go1.26) [recovered, repanicked]\n[lint:go] \n[lint:go] goroutine 3023 [running]:\n[lint:go] go/types.(*Checker).handleBailout(0xc9ebefad840, 0xc9ebf3c8420)\n[lint:go] \tgo/types/check.go:404 +0x13a\n[lint:go] ERROR task failed\n[lint] ERROR task failed\n";
+    assert!(environment_cause(panic, &[]).is_some());
+    let typecheck = "[lint:go] api/a.go:3:2: could not import authz (unsupported version: export data version 5 is greater than maximum supported version 4) (typecheck)\n[lint:go] import authz \"example.com/authz\"\n[lint:go]        ^\n[lint:go] 1 issues:\n[lint:go] * typecheck: 1\n[lint:go] ERROR task failed\n[lint] ERROR task failed\n";
+    assert!(environment_cause(typecheck, &[]).is_some());
+    // A newer Go version a test names is the test's own.
+    assert_eq!(
+        environment_cause("1..1\nnot ok 1 a\n# expected: requires go >= 1.27.1\n", &[]),
+        None
+    );
     // A database that answers and refuses the login, or has no such
     // database, is the change's.
     for line in [
