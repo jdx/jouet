@@ -21,6 +21,7 @@ setup() {
 	assert_equal "$stderr" ""
 	assert_line --index 0 --regexp '^jouet audit: 4 sessions \(read 5 files, [0-9]+ KB, in [0-9.]+s\)$'
 	assert_line 'Claude Code: 1 session (2 transcripts with subagents), 8 requests, 10 tool calls (1 failed)'
+	assert_output --partial 'recorded shell-call time'
 	assert_line --regexp '^  CI polling +24\.3% +41k +2 +2 +34s +41 B$'
 	assert_line --partial '- CI polling (24.3%): jouet wait ci'
 	assert_line '    estimate: 21k tokens (12.4%), counting requests that polled CI right after a request that did; a wait would have made each run of polls one call'

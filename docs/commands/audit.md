@@ -30,6 +30,8 @@ The categories are CI polling, process polling, PR threads, PR status, other Git
 
 The process-polling category includes blocking waits and other checks. Its attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.
 
+Recorded shell-call time sums the durations the transcript attributes to shell calls, not necessarily the full lifetime of their processes. If a command yields a background session, later waits are counted as process polling rather than shell time; unobserved or missing durations are not counted. Tool times can overlap, so their sum is not the task's elapsed wall time. In JSON, these totals are `command_ms` and `tool_ms` respectively.
+
 The savings are estimates and are labelled as such:
 
 - **Process waits:** consecutive short, quiet checks of the same linked job, where the previous check reported it was still running. A longer wait might have avoided later checks. Blocking waits, output, user-facing messages and unlinked calls are not counted as savings. The report also counts linked checks and sequences as observations, and shows cached input separately when available.
@@ -56,7 +58,7 @@ $ jouet audit --harness codex --top 5
 jouet audit: 947 sessions (read 989 files, 663.0 MB, in 0.4s)
 
 Codex: 947 sessions (965 transcripts with subagents), 216,659 requests, 221,424 tool calls (5,085 failed)
-  input 27.50B tokens, output 47.9M; 121,175 commands ran 119h; tools returned 820.7 MB
+  input 27.50B tokens, output 47.9M; 121,175 commands; recorded shell-call time 119h; tools returned 820.7 MB
 
   share of input tokens:
   category            share  tokens  requests   calls  time    output

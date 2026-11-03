@@ -289,7 +289,7 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
     }
     let _ = writeln!(
         s,
-        "{} ran {}; tools returned {}",
+        "{}; recorded shell-call time {}; tools returned {}",
         plural(t.commands, "command"),
         duration(t.command_ms),
         bytes(t.output_bytes)
