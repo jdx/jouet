@@ -1195,6 +1195,38 @@ fn a_script_that_does_not_load_fails_open_and_lists_as_broken() {
 }
 
 #[test]
+fn a_rules_revision_follows_its_own_table_and_script() {
+    let revision =
+        |sources: Vec<Source>, name: &str| engine(sources).rule(name).unwrap().revision.clone();
+    let alone = revision(vec![toml_user("a", DENY_LS)], "no-ls");
+    assert_eq!(alone.len(), 12);
+    // Another rule in the same file, or the file's name, leaves it be.
+    let other = DENY_LS
+        .replace("no-ls", "no-dir")
+        .replace("\"ls\"", "\"dir\"");
+    let both = format!("{DENY_LS}\n{other}");
+    assert_eq!(revision(vec![toml_user("b", &both)], "no-ls"), alone);
+    // Its own table changing changes it.
+    let reworded = DENY_LS.replace("use eza", "use eza instead");
+    assert_ne!(revision(vec![toml_user("a", &reworded)], "no-ls"), alone);
+    // So does its script.
+    let scripted = DENY_LS.replace("message = \"use eza\"", "script = \"s.luau\"");
+    let script = |code: &str| {
+        let source = Source::toml("a", Origin::Builtin, &scripted).with_script("s.luau", code);
+        revision(vec![source], "no-ls")
+    };
+    assert_ne!(script("return {}"), script("return { check = nil }"));
+    // Untrusted, it has the revision it will record once trusted.
+    let repo = |trusted: bool| {
+        let source = Source::toml("a", Origin::Repo(PathBuf::from("a.toml")), &scripted)
+            .with_script("s.luau", "return {}");
+        let source = if trusted { source } else { source.untrusted() };
+        revision(vec![source], "no-ls")
+    };
+    assert_eq!(repo(false), repo(true));
+}
+
+#[test]
 fn an_untrusted_toml_rule_is_listed_and_never_runs() {
     let source = Source::toml(
         "team",

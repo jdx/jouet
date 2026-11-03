@@ -6,7 +6,7 @@ description: See what jouet saved and what it cost, measured from its hook ledge
 
 `jouet stats` reports what jouet saved and what it cost, and the difference. It keeps two kinds of figure apart:
 
-- **Measured** figures are counted from the ledger that `jouet setup`'s hooks write: jouet command runs, rule decisions, the sessions each rule fired in and how many of them it fired in more than once, what the agent did after a denial, the test, lint and build runs the `checks` rule recorded, sessions stopped from finishing after a failed check, and failing CI logs returned as the failing step's excerpt.
+- **Measured** figures are counted from the ledger that `jouet setup`'s hooks write: jouet command runs, rule decisions from each rule's current revision, the sessions each rule fired in and how many of them it fired in more than once, what the agent did after a denial, the test, lint and build runs the `checks` rule recorded, sessions stopped from finishing after a failed check, and failing CI logs returned as the failing step's excerpt.
 - **Estimated** figures price those runs, and what jouet added, by your own Claude Code and Codex history from before setup, read the way [`jouet audit`](/commands/audit) reads it.
 
 The savings are what the runs would have cost at your rates before setup. That is an assumption, not a measurement: nothing records what an agent would have done without jouet. The costs are closer to measured, since the ledger records each block, denial and failure, but pricing them is an estimate too.
@@ -19,7 +19,9 @@ The flags are listed in the [CLI reference](/cli/stats). `--since` limits the le
 
 ## Whether a rule changed what the agent did
 
-A warning lets the call run and shows the agent a message, so the ledger cannot say directly whether the agent took the advice. What it can say is whether the same rule fired again later in the session. In the rules table, `sessions` counts the sessions a rule denied or warned in, and `again` those in which it did so more than once. A warning that fires again in most of its sessions is not changing what agents do there: its message may need rewording, or the rule may suit `deny` better, or none at all. The count is per session, so one agent repeating a command many times counts once.
+A warning lets the call run and shows the agent a message, so the ledger cannot say directly whether the agent took the advice. What it can say is whether the same rule fired again later in the session. In the rules table, `sessions` counts the sessions a rule denied or warned in, and `again` those in which it did so more than once.
+
+The table counts each rule only from its current revision: the ledger records with each decision a hash of the rule's `[[rule]]` table and script (see [the ledger](/setup#the-ledger)), and `jouet stats` compares it with the rules loaded in the directory it runs in. A rule that has changed since is counted afresh, so the table does not mix what an old version did with what the current one does. Decisions of an older revision, and those from before the ledger recorded revisions, are left out with a count, and rules the ledger names that are not loaded there (removed ones, or another repository's) are left out by name. What their denials and warnings cost is still counted. In `--json`, these are `older_decisions` and `rules_not_loaded`. A warning that fires again in most of its sessions is not changing what agents do there: its message may need rewording, or the rule may suit `deny` better, or none at all. The count is per session, so one agent repeating a command many times counts once.
 
 `overridden` counts the same command run again soon after a deny or warning, and `then jouet`, `then other` and `then nothing` say what the agent ran next after a denial.
 
@@ -68,7 +70,7 @@ Process-wait estimates need at least 20 linked opportunities in that history. A 
 
 ## Example
 
-From the fixture ledger in jouet's tests, whose history before setup is far too thin to estimate from, so there is no net:
+From the fixture ledger in jouet's tests, its decisions stamped with the current rules' revisions as the tests do, whose history before setup is far too thin to estimate from, so there is no net:
 
 ```console
 $ jouet stats

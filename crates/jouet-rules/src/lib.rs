@@ -362,6 +362,10 @@ pub struct Rule {
     requires: Option<decl::Requires>,
     /// Whether the session-start primer names it, when it denies.
     pub primer: bool,
+    /// A short hash of its declaration and its script, so the ledger can
+    /// tell its decisions from an older revision's across builds. Empty for
+    /// a rule that could not be read.
+    pub revision: String,
     body: Body,
 }
 
@@ -518,6 +522,9 @@ pub struct Decision {
     /// The command a matcher rule suggests running instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggest: Option<String>,
+    /// The revision of the rule that decided (see [`Rule::revision`]).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub revision: String,
 }
 
 #[derive(
@@ -818,6 +825,20 @@ pub struct Engine {
     rules: Vec<Rule>,
 }
 
+/// A short hash of `parts`, as a rule's revision.
+fn revision(parts: &[&str]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update(part.as_bytes());
+        hash.update([0]);
+    }
+    hash.finalize()[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// The built-in rules' sources.
 pub fn builtin() -> Vec<Source> {
     BUILTIN
@@ -1022,6 +1043,7 @@ impl Engine {
             script: None,
             requires: None,
             primer: true,
+            revision: String::new(),
             body: Body::None,
         };
         let decls = match decl::parse(&source.code) {
@@ -1040,13 +1062,24 @@ impl Engine {
             .path()
             .and_then(Path::parent)
             .map(Path::to_path_buf);
+        // Each `[[rule]]` table as text of its own, in order, for its
+        // revision: another rule in the same file changing leaves it be.
+        let tables: Vec<String> = toml::from_str::<toml::Table>(&source.code)
+            .ok()
+            .and_then(|t| t.get("rule")?.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|v| toml::to_string(v).unwrap_or_default())
+            .collect();
         decls
             .into_iter()
-            .map(|(line, d)| {
+            .enumerate()
+            .map(|(i, (line, d))| {
                 if let (Some(dir), Some(script)) = (&dir, &d.script) {
                     scripts.push(dir.join(&script.0));
                 }
-                let mut rule = self.toml_rule(&source, line, d, dir.as_deref(), disabled);
+                let table = tables.get(i).map_or("", String::as_str);
+                let mut rule = self.toml_rule(&source, line, d, table, dir.as_deref(), disabled);
                 if let State::Broken(e) = &mut rule.state {
                     *e = format!("{file}:{line}: {e}");
                 }
@@ -1060,6 +1093,7 @@ impl Engine {
         source: &Source,
         line: usize,
         d: decl::RuleDecl,
+        table: &str,
         dir: Option<&Path>,
         disabled: &[String],
     ) -> Rule {
@@ -1076,6 +1110,22 @@ impl Engine {
             Some("`why` says what the rule is for, in one line".into())
         } else {
             rule_problem(&d, event)
+        };
+        // Its script, read (never run) before any check below, so that its
+        // revision is the same whether or not the rule loads.
+        let code = d.script.as_ref().map(|script| {
+            match source.scripts.iter().find(|(path, _)| *path == script.0) {
+                Some((_, code)) => Ok(code.clone()),
+                None => match dir {
+                    Some(dir) => std::fs::read_to_string(dir.join(&script.0))
+                        .map_err(|e| format!("reading its script {}: {e}", script.0)),
+                    None => Err(format!("its script {} is not built in", script.0)),
+                },
+            }
+        });
+        let revision = match &code {
+            Some(Ok(code)) => revision(&[table, code]),
+            _ => revision(&[table]),
         };
         let mut rule = Rule {
             name: match &source.namespace {
@@ -1101,6 +1151,7 @@ impl Engine {
             script: d.script.as_ref().map(|s| s.0.clone()),
             requires: d.requires,
             primer: d.primer.unwrap_or(true),
+            revision,
             body: Body::None,
         };
         let problem = problem.or_else(|| examples.as_ref().err().cloned());
@@ -1113,28 +1164,16 @@ impl Engine {
             return rule;
         }
         (rule.examples, rule.missing_examples) = examples.unwrap_or_default();
-        rule.body = match (d.script, d.message) {
-            (Some(script), _) => {
-                let code = match source.scripts.iter().find(|(path, _)| *path == script.0) {
-                    Some((_, code)) => Ok(code.clone()),
-                    None => match dir {
-                        Some(dir) => std::fs::read_to_string(dir.join(&script.0))
-                            .map_err(|e| format!("reading its script {}: {e}", script.0)),
-                        None => Err(format!("its script {} is not built in", script.0)),
-                    },
-                };
-                match code {
-                    Ok(code) => Body::Script {
-                        matchers: d.matchers,
-                        code,
-                        table: OnceCell::new(),
-                        suggest: d.suggest,
-                    },
-                    Err(e) => {
-                        rule.state = State::Broken(e);
-                        return rule;
-                    }
-                }
+        rule.body = match (code, d.message) {
+            (Some(Ok(code)), _) => Body::Script {
+                matchers: d.matchers,
+                code,
+                table: OnceCell::new(),
+                suggest: d.suggest,
+            },
+            (Some(Err(e)), _) => {
+                rule.state = State::Broken(e);
+                return rule;
             }
             (None, message) => Body::Match {
                 matchers: d.matchers,
@@ -1191,6 +1230,7 @@ impl Engine {
             script: None,
             requires: None,
             primer: true,
+            revision: revision(&[&source.code]),
             body: Body::None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {
@@ -1468,6 +1508,7 @@ impl Engine {
                     action,
                     message,
                     suggest,
+                    revision: rule.revision.clone(),
                 })
             }
             Some(Err(type_name)) => {

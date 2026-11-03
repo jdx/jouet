@@ -253,6 +253,10 @@ fn priced(harness: &str, kinds: Vec<KindBaseline>) -> Baseline {
 }
 
 fn warned(session: &str, rule: &str) -> LedgerEntry {
+    warned_by(session, rule, None)
+}
+
+fn warned_by(session: &str, rule: &str, revision: Option<&str>) -> LedgerEntry {
     LedgerEntry {
         harness: "claude".into(),
         session: Some(session.into()),
@@ -261,6 +265,7 @@ fn warned(session: &str, rule: &str) -> LedgerEntry {
         decisions: vec![LedgerDecision {
             rule: rule.into(),
             action: "warn".into(),
+            revision: revision.map(str::to_string),
         }],
         ..LedgerEntry::default()
     }
@@ -286,6 +291,34 @@ fn counts_the_sessions_a_rule_fired_in_more_than_once() {
         counts,
         [("piped-test-output", 4, 2, 1), ("large-read", 2, 2, 0)]
     );
+}
+
+#[test]
+fn with_the_rules_loaded_now_only_their_current_revision_counts() {
+    let entries = [
+        // Before the ledger recorded revisions, then an older revision.
+        warned_by("a", "large-read", None),
+        warned_by("a", "large-read", Some("old")),
+        warned_by("a", "large-read", Some("new")),
+        warned_by("b", "large-read", Some("new")),
+        // A rule that is no longer loaded.
+        warned_by("a", "push-untested", Some("x")),
+    ];
+    let filter = StatsFilter {
+        revisions: Some([("large-read".to_string(), "new".to_string())].into()),
+        ..StatsFilter::default()
+    };
+    let m = measure(&entries, &filter);
+    let counts: Vec<(&str, u64, u64, u64)> = m
+        .rules
+        .iter()
+        .map(|r| (r.rule.as_str(), r.warns, r.sessions, r.sessions_again))
+        .collect();
+    assert_eq!(counts, [("large-read", 2, 2, 0)]);
+    assert_eq!(m.older_decisions, 2);
+    assert_eq!(m.rules_not_loaded, ["push-untested"]);
+    // What the warnings cost counts whatever the revision.
+    assert_eq!(m.overhead[0].warnings, 5);
 }
 
 fn post(shape: &str, exit_code: i32) -> LedgerEntry {

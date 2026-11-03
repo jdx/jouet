@@ -72,6 +72,10 @@ struct ListedRule<'a> {
     /// Why its examples fall short, so that it only warns.
     #[serde(skip_serializing_if = "Option::is_none")]
     missing_examples: Option<&'a str>,
+    /// A hash of its declaration and script, as the ledger records it with
+    /// each decision.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    revision: &'a str,
 }
 
 #[derive(Serialize)]
@@ -118,6 +122,7 @@ fn list(cwd: &Path, out: &Output) -> Exit {
                 format: rule.format,
                 script: rule.script.as_deref(),
                 missing_examples: rule.missing_examples.as_deref(),
+                revision: &rule.revision,
             }
         })
         .collect();

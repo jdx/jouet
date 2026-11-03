@@ -432,6 +432,11 @@ stop_reason() {
 	assert_line --index 1 '["override","git stash",["git-stash:override"]]'
 	assert_line --index 2 '["pre-tool-use","git stash",[]]'
 	assert_line --index 3 '["post-tool-use","cargo test -p <arg>",["checks:record:test"]]'
+	# The deny and its override name the revision of the rule that decided.
+	run jq -r '.decisions[0].revision // "-"' "$ledger"
+	assert_line --index 0 --regexp '^[0-9a-f]{12}$'
+	assert_line --index 1 "${lines[0]}"
+	assert_line --index 3 '-'
 	run jq -c '[.exit_code, .duration_ms, .session]' <<<"$(tail -1 "$ledger")"
 	assert_output '[101,1200,"s1"]'
 	run grep -c 'secret' "$ledger"

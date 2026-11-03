@@ -310,6 +310,7 @@ fn handle(
                     rule: "verify".into(),
                     action: "block".into(),
                     scope: None,
+                    revision: None,
                 });
             }
             log.append(entry);
@@ -516,15 +517,11 @@ impl Log<'_> {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
-            for rule in ledger::overrides(&ledger::recent(dir, session), &shape, now) {
+            for decision in ledger::overrides(&ledger::recent(dir, session), &shape, now) {
                 let mut entry = self.entry("override");
                 entry.tool = Some(call.tool.clone());
                 entry.shape = Some(shape.clone());
-                entry.decisions.push(ledger::Decision {
-                    rule,
-                    action: "override".into(),
-                    scope: None,
-                });
+                entry.decisions.push(decision);
                 ledger::append(dir, &entry);
             }
         }
@@ -543,6 +540,7 @@ impl Log<'_> {
                     "warn".into()
                 },
                 scope: None,
+                revision: Some(d.revision.clone()).filter(|r| !r.is_empty()),
             })
             .collect();
         ledger::append(dir, &entry);
@@ -574,6 +572,7 @@ impl Log<'_> {
                 rule: d.rule.clone(),
                 action: "warn".into(),
                 scope: None,
+                revision: Some(d.revision.clone()).filter(|r| !r.is_empty()),
             }));
         self.append(entry);
     }
@@ -1252,6 +1251,7 @@ fn decision(r: &Record) -> ledger::Decision {
         rule: r.rule.clone(),
         action: format!("record:{}", r.kind.name()),
         scope: Some(if r.full { "full" } else { "partial" }.into()),
+        revision: None,
     }
 }
 
