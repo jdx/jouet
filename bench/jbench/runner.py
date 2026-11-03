@@ -28,7 +28,7 @@ from . import credentials
 from . import init as init_mod
 from . import tasks as tasks_mod
 from .fake_github import FakeGitHub
-from .harness import HARNESSES, Harness
+from .harness import HARNESSES, Harness, codex_shell_metrics
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
@@ -556,6 +556,9 @@ def execute(
         "wall_s": agent["wall_s"],
         "usage": asdict(usage),
         "audit": summarize_audit(audit_report),
+        "shell": (codex_shell_metrics(agent["lines"])
+                  if harness.name == "codex" and not agent["stopped"] and agent["exit_code"] == 0
+                  else None),
         "ledger": ledger(env) if arm.jouet else None,
         "github": github,
         "setup": ran["setup"],

@@ -21,6 +21,16 @@ def sample_wheel(root):
 
 
 class StatsTest(unittest.TestCase):
+    def test_shell_metrics_are_separate_from_tool_counts(self):
+        def record(arm, shell):
+            return {"task": "example", "harness": "codex", "arm": arm, "round": 1,
+                    "success": True, "shell": shell}
+        cell = report.summarize([record("plain", {"completed": 5, "failed": 1}),
+                                 record("jouet", {"completed": 3, "failed": 0})], {})["cells"][0]
+        self.assertEqual(cell["paired_when_both_pass"]["shell_commands"]["median_diff"], -2)
+        self.assertEqual(cell["paired_when_both_pass"]["shell_failures"]["median_diff"], -1)
+        self.assertIsNone(cell["paired_when_both_pass"]["calls"])
+
     def test_quantiles(self):
         self.assertEqual(stats.median([3, 1, 2]), 2)
         self.assertEqual(stats.median([1, 2, 3, 4]), 2.5)
@@ -1392,6 +1402,40 @@ class ReportTest(unittest.TestCase):
         self.assertIn("Initialized versus ordinary jouet", text)
         self.assertIn("| input tokens (all context read) | 100 | 310 | +20 |", text)
         self.assertNotIn("12.5s, 200 input tokens", text)
+
+    def test_report_backfills_only_complete_local_codex_streams(self):
+        import argparse
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        import agents
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out = root / "results"
+            run = out / "runs" / "one"
+            run.mkdir(parents=True)
+            events = [{"type": "jouet.ephemeral"}, {"type": "thread.started"},
+                      {"type": "item.started", "item": {"type": "commandExecution", "id": "c"}},
+                      {"type": "item.completed", "item": {"type": "commandExecution", "id": "c", "exitCode": 1}},
+                      {"type": "turn.completed"}]
+            (run / "agent.jsonl").write_text("\n".join(json.dumps(event) for event in events))
+            outside = root / "external"
+            outside.mkdir()
+            (outside / "agent.jsonl").write_text((run / "agent.jsonl").read_text())
+            (out / "runs" / "linked").symlink_to(outside, target_is_directory=True)
+            records = [{"id": ident, "harness": "codex", "stopped": False, "exit_code": 0}
+                       for ident in ("one", "missing", "../external", "linked")]
+            records.append({"id": "one", "harness": "codex", "stopped": True, "exit_code": 0})
+            (out / "meta.json").write_text("{}")
+            (out / "runs.jsonl").write_text("\n".join(json.dumps(record) for record in records))
+            (out / "summary.md").write_text("")
+            with patch.object(agents, "write_summary") as write, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(agents.cmd_report(argparse.Namespace(dir=out)), 0)
+            actual = write.call_args.args[1]
+            self.assertEqual(actual[0]["shell"], {"completed": 1, "failed": 1})
+            self.assertTrue(all("shell" not in record for record in actual[1:]))
 
     def test_markdown(self):
         def record(arm, r, tokens, success=True):

@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from jbench import arms, init, report, runner, tasks  # noqa: E402
 from jbench.fake_github import FakeGitHub  # noqa: E402
-from jbench.harness import HARNESSES  # noqa: E402
+from jbench.harness import HARNESSES, codex_shell_metrics  # noqa: E402
 
 DEFAULTS = {
     "claude_model": "claude-sonnet-5-5",
@@ -357,6 +357,23 @@ def write_summary(out: Path, records: list[dict], meta: dict) -> None:
 def cmd_report(args: argparse.Namespace) -> int:
     meta = json.loads((args.dir / "meta.json").read_text())
     records = [json.loads(line) for line in (args.dir / "runs.jsonl").read_text().splitlines() if line.strip()]
+    runs = (args.dir / "runs").resolve()
+    for record in records:
+        if not runs.is_relative_to(args.dir.resolve()):
+            break
+        ident = record.get("id")
+        if (record.get("harness") != "codex" or record.get("shell") is not None
+                or record.get("stopped") or record.get("exit_code") != 0
+                or not isinstance(ident, str) or not ident or Path(ident).name != ident
+                or ident in (".", "..")):
+            continue
+        path = (runs / ident / "agent.jsonl").resolve()
+        if not path.is_relative_to(runs):
+            continue
+        try:
+            record["shell"] = codex_shell_metrics(path.read_text().splitlines())
+        except (OSError, UnicodeError):
+            pass
     write_summary(args.dir, records, meta)
     sys.stdout.write((args.dir / "summary.md").read_text())
     return 0

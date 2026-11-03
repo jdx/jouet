@@ -78,6 +78,46 @@ def _json_lines(lines: list[str]) -> list[dict[str, Any]]:
     return out
 
 
+def codex_shell_metrics(lines: list[str]) -> dict[str, int | None] | None:
+    """Count complete, linked command events in a complete ephemeral turn."""
+    try:
+        events = [json.loads(line) for line in lines if line.strip()]
+    except (TypeError, ValueError):
+        return None
+    if (len(events) < 3 or not all(isinstance(event, dict) for event in events)
+            or events[0].get("type") != "jouet.ephemeral"
+            or events[1].get("type") != "thread.started"
+            or events[-1].get("type") != "turn.completed"):
+        return None
+    started: set[str] = set()
+    completed: dict[str, int | None] = {}
+    for event in events[2:-1]:
+        if event.get("type") in ("error", "turn.failed", "turn.completed", "thread.started"):
+            return None
+        if event.get("type") not in ("item.started", "item.completed"):
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "commandExecution":
+            continue
+        ident = item.get("id")
+        if not isinstance(ident, str) or not ident:
+            return None
+        if event["type"] == "item.started":
+            if ident in started:
+                return None
+            started.add(ident)
+        else:
+            if ident not in started or ident in completed:
+                return None
+            code = item.get("exitCode")
+            completed[ident] = code if type(code) is int else None
+    if started != completed.keys():
+        return None
+    failures = (sum(code != 0 for code in completed.values())
+                if all(code is not None for code in completed.values()) else None)
+    return {"completed": len(completed), "failed": failures}
+
+
 class Claude(Harness):
     name = "claude"
     binary = "claude"
