@@ -126,7 +126,7 @@ The first batch has ten SWE-bench Verified instances, chosen from the dataset's 
 
 SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
 
-The models under test may have seen these issues and fixes in training. Both arms use the same model, so the paired comparison cancels most of that. A run's success rate on these tasks says less than its cost difference does.
+The models under test may have seen these issues and fixes in training. Both arms use the same model, but jouet may change how an agent uses what it remembers, so pairing does not eliminate this confounder. Success and cost differences on these tasks may not generalize to unfamiliar work.
 
 ### Arms
 
