@@ -109,13 +109,15 @@ jouet looks for adapters in the current directory, then each directory above it 
 - **Limits:** a test that reads a file at run time without importing it, such as a fixture loaded with `fs.readFileSync`, is not in the module graph. A deleted file runs the whole suite, because the graph cannot follow a file that is gone.
 - **Runner:** `node_modules/.bin/vitest` in the project or a directory above it. Yarn Plug'n'Play installs, which have no `node_modules`, are not supported yet.
 
+For a project with a non-default Vitest configuration, run from that package and pass it to the runner, for example `jouet test --affected -- --config vitest.acceptance.config.ts`. jouet uses the same configuration when listing and running the affected tests. A change to that configuration runs its whole suite. This limits the run to that configuration; other suites are not verified.
+
 ### jest
 
 - **Found by** a `jest.config.*` file, a `jest` key in `package.json`, or `jest` in its dependencies.
 - **Selects with** `jest --listTests --findRelatedTests <changed files>`, and runs `jest --findRelatedTests <changed files>`: jest's dependency graph (its haste map).
 - **Traces** the same files as vitest.
 - **The whole suite for** `package.json`, `jest.config.*`, `jest.preset.*`, `tsconfig*.json`, `jsconfig.*`, Babel, SWC and PostCSS configuration, `.env*` files, setup files and `__mocks__/`.
-- **Limits** and **runner:** as for vitest, with `node_modules/.bin/jest`.
+- **Limits** and **runner:** as for vitest, with `node_modules/.bin/jest`. An explicit `--config` or `-c` also applies to both selection and execution, and a change to that config runs its whole suite.
 
 ### pytest
 

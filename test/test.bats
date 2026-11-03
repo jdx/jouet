@@ -190,6 +190,61 @@ py_project() {
 	fi
 }
 
+@test "affected JavaScript selection uses the requested runner config" {
+	for runner in vitest jest; do
+		mkdir "$runner"
+		(
+			cd "$runner"
+			init_repo
+			js_project "$runner"
+			if [[ $runner == vitest ]]; then
+				printf "export default { test: { include: ['never/**/*.test.js'] } }\n" >vitest.config.js
+				printf "export default { test: { include: ['test/**/*.test.js'] } }\n" >alternate.config.js
+			else
+				printf "module.exports = { testMatch: ['**/never/**/*.test.js'] };\n" >jest.config.cjs
+				printf "module.exports = { testMatch: ['**/test/**/*.test.js'] };\n" >alternate.config.cjs
+			fi
+			if [[ $runner == vitest ]]; then
+				git add vitest.config.js alternate.config.js
+			else
+				git add jest.config.cjs alternate.config.cjs
+			fi
+			git commit -qm configs
+			git branch -f main HEAD
+			printf '\n// changed\n' >>src/fmt.js
+			if [[ $runner == vitest ]]; then
+				config=alternate.config.js
+			else
+				config=alternate.config.cjs
+			fi
+			for config_form in separate equals short; do
+				case $config_form in
+				separate) config_args=(--config "$config") ;;
+				equals) config_args=("--config=$config") ;;
+				short) config_args=(-c "$config") ;;
+				esac
+				run --separate-stderr jouet test --affected --since main --dry-run --json -- "${config_args[@]}"
+				assert_success
+				run jq -r '.suites[0].tests[].path' <<<"$output"
+				assert_output 'test/fmt.test.js'
+			done
+			run --separate-stderr jouet test --baseline --affected --since main --dry-run --json -- --config "$config"
+			assert_success
+			run jq -e '.suites[0] | ((.tests | map(.path) | index("test/fmt.test.js")) != null) and ((.command | index("--config")) != null) and ((.command | index("test/fmt.test.js")) != null)' <<<"$output"
+			assert_success
+			run --separate-stderr jouet test --affected --since main --json -- --config "$config"
+			assert_success
+			run jq -r '.ok, .suites[0].tests[].path' <<<"$output"
+			assert_output $'true\ntest/fmt.test.js'
+			printf '\n// config change\n' >>"$config"
+			run --separate-stderr jouet test --affected --since main --dry-run --json -- --config "$config"
+			assert_success
+			run jq -r '.suites[0] | [.decision, .reason] | join(" ")' <<<"$output"
+			assert_output "full the selected test configuration changed ($config)"
+		)
+	done
+}
+
 @test "--dry-run explains a vitest selection, test by test, and runs nothing" {
 	js_project vitest
 	printf 'export const sum = (a, b) => b + a\n' >src/sum.js

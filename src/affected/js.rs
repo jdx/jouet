@@ -123,6 +123,7 @@ impl Js {
         project: &Project,
         base: &Base,
         sources: &[Change],
+        extra: &[String],
     ) -> Result<Vec<String>, Error> {
         let bin = self.bin(project)?;
         let mut command = Command::new(&bin);
@@ -133,9 +134,11 @@ impl Js {
                 // `--json` takes an optional file; given as `--json=FILE` so
                 // the list is not mixed with vitest's other output.
                 command.args(["list", "--changed", &base.merge_base, "--filesOnly"]);
+                command.args(config_args(extra));
                 command.arg(format!("--json={}", json.path().display()));
             }
             Runner::Jest => {
+                command.args(config_args(extra));
                 command.args(["--listTests", "--findRelatedTests"]);
                 command.args(sources.iter().map(|s| project.root.join(&s.path)));
             }
@@ -283,7 +286,7 @@ impl Adapter for Js {
         sources: &[Change],
         extra: &[String],
     ) -> Result<Selection, Error> {
-        let tests = self.list(project, base, sources)?;
+        let tests = self.list(project, base, sources, extra)?;
         let mut argv = vec![self.bin(project)?];
         match self.runner {
             Runner::Vitest => {
@@ -330,6 +333,55 @@ impl Adapter for Js {
             note,
         })
     }
+}
+
+/// Config changes which tests the runner can see, so discovery must use the
+/// same config as the eventual run. Other runner arguments may be specific to
+/// execution and need not be accepted by its list command.
+fn config_args(extra: &[String]) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut iter = extra.iter();
+    while let Some(arg) = iter.next() {
+        if matches!(arg.as_str(), "--config" | "-c") {
+            args.push(arg.as_str());
+            if let Some(value) = iter.next() {
+                args.push(value.as_str());
+            }
+        } else if arg.starts_with("--config=") || arg.starts_with("-c=") {
+            args.push(arg.as_str());
+        }
+    }
+    args
+}
+
+/// An explicitly selected config can have any name, including one that the
+/// normal filename-based classification would otherwise treat as source.
+pub(crate) fn config_changed(project: &Project, extra: &[String], path: &str) -> bool {
+    let args = config_args(extra);
+    if args.is_empty() {
+        return false;
+    }
+    let Ok(changed) = project.root.join(path).canonicalize() else {
+        return false;
+    };
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let value = if matches!(*arg, "--config" | "-c") {
+            iter.next().copied()
+        } else {
+            arg.split_once('=').map(|(_, value)| value)
+        };
+        if value.is_some_and(|value| {
+            project
+                .dir
+                .join(value)
+                .canonicalize()
+                .is_ok_and(|config| config == changed)
+        }) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The project's JavaScript and TypeScript files and their relative
