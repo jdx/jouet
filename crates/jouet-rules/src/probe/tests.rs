@@ -357,6 +357,45 @@ fn without_probes_set_up_every_probe_says_why() {
 }
 
 #[test]
+fn fired_counts_a_rules_earlier_warnings_and_denials_in_one_session() {
+    let ledger = tempfile::tempdir().unwrap();
+    let lines = [
+        json!({"ts": 1, "harness": "claude", "session": "s-1", "event": "pre-tool-use",
+               "decisions": [{"rule": "piped-test-output", "action": "warn"}]}),
+        json!({"ts": 2, "harness": "claude", "session": "s-1", "event": "pre-tool-use",
+               "decisions": [{"rule": "scoped-lint", "action": "warn"}, {"rule": "piped-test-output", "action": "deny"}]}),
+        // Another session's, a recorded run, and an override do not count.
+        json!({"ts": 3, "harness": "claude", "session": "s-2", "event": "pre-tool-use",
+               "decisions": [{"rule": "piped-test-output", "action": "warn"}]}),
+        json!({"ts": 4, "harness": "claude", "session": "s-1", "event": "post-tool-use",
+               "decisions": [{"rule": "piped-test-output", "action": "record:test"}]}),
+        json!({"ts": 5, "harness": "claude", "session": "s-1", "event": "override",
+               "decisions": [{"rule": "piped-test-output", "action": "override"}]}),
+    ];
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    std::fs::write(ledger.path().join("ledger.jsonl"), text).unwrap();
+    let expr = r#"(function()
+        local mine = jouet.session.fired("piped-test-output", "s-1")
+        -- The hook writes ids with only letters, digits, `-` and `_`.
+        local spelled = jouet.session.fired("piped-test-output", "s-1/")
+        local other = jouet.session.fired("scoped-lint", "s-2")
+        return `{mine} {spelled} {other}`
+    end)()"#;
+    let e = engine(expr, Budget::default());
+    e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
+    assert_eq!(said(&e), "2 2 0");
+
+    // No ledger at all: nothing to report, and no error.
+    let none = tempfile::tempdir().unwrap();
+    let e = engine(
+        r#"(function() local n, err = jouet.session.fired("x", "s-1"); return `{n} {err}` end)()"#,
+        Budget::default(),
+    );
+    e.set_probes(Probes::new(None, Some(none.path().join("missing")), false));
+    assert_eq!(said(&e), "nil nil");
+}
+
+#[test]
 fn last_run_filters_by_scope_and_reports_the_tree() {
     let ledger = tempfile::tempdir().unwrap();
     let lines = [

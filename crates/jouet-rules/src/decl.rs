@@ -425,6 +425,10 @@ pub(crate) struct CaseTable {
     /// What `jouet.secrets.scan()` finds, for any scope; omitted, it has no
     /// answer.
     pub secrets: Option<Vec<SecretCase>>,
+    /// How many earlier calls in the session `jouet.session.fired()` says
+    /// the rule denied or warned about, for any rule; omitted, it has no
+    /// answer.
+    pub fired: Option<u32>,
 }
 
 /// A secret `jouet.secrets.scan()` finds in an example's diff.

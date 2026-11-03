@@ -483,6 +483,12 @@
           "items": {
             "$ref": "#/$defs/ExampleSecret"
           }
+        },
+        "fired": {
+          "description": "How many earlier calls in the session `jouet.session.fired()` says\nthe rule denied or warned about, for any rule; omitted, it has no\nanswer.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "additionalProperties": false
