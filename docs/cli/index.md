@@ -113,7 +113,7 @@
 - [`jouet wind adopt <ID>`](/cli/wind/adopt.md)
 - [`jouet wind digest [FLAGS] [SESSION]`](/cli/wind/digest.md)
 - [`jouet wind review [FLAGS] [SESSION]`](/cli/wind/review.md)
-- [`jouet wind propose [FILE]`](/cli/wind/propose.md)
+- [`jouet wind propose [--project <PROJECT>] [FILE]`](/cli/wind/propose.md)
 - [`jouet wind memories [--record]`](/cli/wind/memories.md)
 - [`jouet unwind [--apply]`](/cli/unwind.md)
 - [`jouet task <SUBCOMMAND>`](/cli/task.md)
