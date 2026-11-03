@@ -148,6 +148,89 @@ fn go_selection_ignores_fixture_sources_but_keeps_actual_tests_in_testdata() {
 }
 
 #[test]
+fn go_selection_includes_tests_in_the_changed_files_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(&root.join(".gitignore"), "lib/local_test.go\n");
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.22\n",
+    );
+    write(&root.join("lib/type.go"), "package lib\ntype T struct{}\n");
+    write(
+        &root.join("lib/method.go"),
+        "package lib\nfunc (T) Work() int { return 7 }\n",
+    );
+    write(
+        &root.join("lib/method_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestDirect(t *testing.T) { if (T{}).Work() != 7 { t.Fatal(\"bad\") } }\n",
+    );
+    write(
+        &root.join("client/client_test.go"),
+        "package client\nimport (\"testing\"; \"example.test/project/lib\")\nfunc TestClient(t *testing.T) { if (lib.T{}).Work() == 0 { t.Fatal(\"bad\") } }\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    // Go runs local ignored tests too, though the graph deliberately does not index them.
+    write(
+        &root.join("lib/local_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestLocal(t *testing.T) { _ = T{} }\n",
+    );
+    write(
+        &root.join("lib/method.go"),
+        "package lib\nfunc (T) Work() int { return 8 }\n",
+    );
+
+    let plan = plan_in(root).unwrap();
+    let [suite] = plan.suites.as_slice() else {
+        panic!("one suite")
+    };
+    let paths: Vec<_> = suite.tests.iter().map(|test| test.path.as_str()).collect();
+    assert!(paths.contains(&"lib/method_test.go"), "{paths:?}");
+    assert!(paths.contains(&"lib/local_test.go"), "{paths:?}");
+    assert!(suite.command.as_ref().unwrap().contains(&"./lib".into()));
+}
+
+#[test]
+fn go_selection_finds_a_packages_only_test_even_when_git_ignores_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.22\n",
+    );
+    write(&root.join(".gitignore"), "lib/local_test.go\n");
+    write(
+        &root.join("lib/value.go"),
+        "package lib\nfunc Value() int { return 7 }\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    write(
+        &root.join("lib/local_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestLocal(t *testing.T) { if Value() != 7 { t.Fatal(\"bad\") } }\n",
+    );
+    write(
+        &root.join("lib/value.go"),
+        "package lib\nfunc Value() int { return 8 }\n",
+    );
+    let plan = plan_in(root).unwrap();
+    let [suite] = plan.suites.as_slice() else {
+        panic!("one suite")
+    };
+    assert_eq!(suite.decision, Decision::Affected);
+    assert_eq!(suite.tests[0].path, "lib/local_test.go");
+    assert_eq!(
+        suite.command.as_deref(),
+        Some(["go".into(), "test".into(), "./lib".into()].as_slice())
+    );
+}
+
+#[test]
 fn go_selection_falls_back_when_an_unchanged_test_cannot_be_parsed() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
