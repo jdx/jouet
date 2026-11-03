@@ -49,6 +49,11 @@ use usage_rs::Args;
 /// minute; a slower one uses what is kept for it, or names the --baseline
 /// command that compares it. `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.
 ///
+/// A failing run whose every failing test is defined in a package the change
+/// does not reach (by the code graph: --affected selects nothing there, and
+/// no changed file is in it) says so on an `unrelated:` line, is not run at
+/// the merge base, and does not hold up finishing; it still exits 1.
+///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
 /// no runner is found or installed.
 #[derive(Args)]

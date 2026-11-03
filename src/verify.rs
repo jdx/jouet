@@ -65,6 +65,11 @@ pub(crate) struct Run {
     /// a failure does not hold up finishing; the stop says it in a note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    /// For a failed run whose every failing test is one the change does not
+    /// reach (`jouet test --affected` selects none of them): those tests.
+    /// Like a machine failure, it is a note at the stop, not a block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unrelated: Option<String>,
 }
 
 impl Run {
@@ -76,6 +81,7 @@ impl Run {
             selector: record.selector,
             tree: tree.map(str::to_string),
             environment: None,
+            unrelated: None,
         }
     }
 
@@ -784,8 +790,26 @@ impl State {
         }
     }
 
-    /// One line for each failure the stop let through as the machine's, in
-    /// any work tree, for the person to see, each once: those already said
+    /// Marks the newest failure of `command` in the work tree at `root` as
+    /// one in tests the change does not reach, which `tests` names.
+    pub(crate) fn mark_unrelated(&mut self, root: &str, command: &str, tests: &str) {
+        let Some(checks) = self.trees.get_mut(root) else {
+            return;
+        };
+        for failures in checks.failures.values_mut() {
+            if let Some(failed) = failures.iter_mut().rev().find(|f| f.command == command) {
+                failed.unrelated = Some(tests.to_string());
+            }
+        }
+        for run in checks.runs.values_mut() {
+            if run.command == command && !run.passed() {
+                run.unrelated = Some(tests.to_string());
+            }
+        }
+    }
+
+    /// One line for each failure the stop let through as the machine's, or
+    /// as in tests the change does not reach, in any work tree, for the person to see, each once: those already said
     /// are kept in [`Checks::noted`] by [`State::noted`].
     pub(crate) fn environment_notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
@@ -794,26 +818,33 @@ impl State {
                 if checks.noted.contains(&noted_key(failed)) {
                     continue;
                 }
-                if let Some(cause) = &failed.environment {
-                    let at = if root.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" in {root}")
-                    };
-                    let note = format!(
-                        "jouet did not hold up finishing for `{}`{at}: its failures blame the machine, not the change ({cause}).",
-                        shown(&failed.command)
-                    );
-                    if !notes.contains(&note) {
-                        notes.push(note);
+                let why = match (&failed.environment, &failed.unrelated) {
+                    (Some(cause), _) => {
+                        format!("its failures blame the machine, not the change ({cause})")
                     }
+                    (None, Some(tests)) => {
+                        format!("its failing tests are ones the change does not reach ({tests})")
+                    }
+                    (None, None) => continue,
+                };
+                let at = if root.is_empty() {
+                    String::new()
+                } else {
+                    format!(" in {root}")
+                };
+                let note = format!(
+                    "jouet did not hold up finishing for `{}`{at}: {why}.",
+                    shown(&failed.command)
+                );
+                if !notes.contains(&note) {
+                    notes.push(note);
                 }
             }
         }
         notes
     }
 
-    /// Keeps the environment failures [`State::environment_notes`] gave as
+    /// Keeps the failures [`State::environment_notes`] gave as
     /// said, so a later stop does not say them again.
     pub(crate) fn noted(&mut self) {
         for checks in self.trees.values_mut() {
@@ -821,7 +852,7 @@ impl State {
                 .failures
                 .values()
                 .flatten()
-                .filter(|f| f.environment.is_some())
+                .filter(|f| f.environment.is_some() || f.unrelated.is_some())
                 .map(noted_key)
                 .collect();
             checks.noted.extend(keys);
@@ -1181,8 +1212,9 @@ impl Checks {
                 full.chain(partial)
                     .filter(|failed| !passed_now(kind, failed))
                     .filter(|failed| !self.answered.contains(&same_run(&failed.command)))
-                    // The machine's, not the change's: a note, not a block.
-                    .filter(|failed| failed.environment.is_none())
+                    // The machine's, or in tests the change does not reach,
+                    // not the change's: a note, not a block.
+                    .filter(|failed| failed.environment.is_none() && failed.unrelated.is_none())
                     .map(|failed| {
                         let reason = self.failure_reason(*kind, failed);
                         let key = told_key(kind.name(), failed);
@@ -1701,6 +1733,29 @@ mod tests {
                 .block("/home", |_| Some("t1".into()), |_| false, |_| true)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_failure_in_tests_the_change_does_not_reach_holds_nothing_up() {
+        let mut state = State::default();
+        state.record("/home", [test("go test ./...", 1, "")], Some("t1"));
+        state.mark_unrelated(
+            "/home",
+            "go test ./...",
+            "TestBroken in other/other_test.go",
+        );
+        assert_eq!(
+            state.block("/home", |_| Some("t1".into()), |_| false, |_| true),
+            None
+        );
+        let notes = state.environment_notes();
+        assert_eq!(notes.len(), 1);
+        assert!(
+            notes[0].contains("failing tests are ones the change does not reach (TestBroken in other/other_test.go)"),
+            "{notes:?}"
+        );
+        state.noted();
+        assert!(state.environment_notes().is_empty());
     }
 
     #[test]

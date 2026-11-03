@@ -671,3 +671,71 @@ fn prune_keeps_a_graph_whose_root_cannot_be_checked() {
         assert_eq!(pruned["kept"], 2);
     }
 }
+
+#[test]
+fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
+    let env = Env::new();
+    let root = env.root();
+    std::fs::remove_dir(root.join(".git")).unwrap();
+    env.write("go.mod", "module example.com/shop\n\ngo 1.22\n");
+    env.write(
+        "price/price.go",
+        "package price\n\nfunc Total(n int) int { return n * 2 }\n",
+    );
+    env.write(
+        "cart/cart.go",
+        "package cart\n\nimport \"example.com/shop/price\"\n\nfunc Sum(n int) int { return price.Total(n) }\n",
+    );
+    env.write(
+        "cart/cart_test.go",
+        "package cart\n\nimport \"testing\"\n\nfunc TestSum(t *testing.T) { Sum(1) }\n",
+    );
+    env.write(
+        "other/other_test.go",
+        "package other\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { t.Fatal(\"boom\") }\n",
+    );
+    // `go test ./...` as the output of a run where one test fails, so the
+    // test does not need Go.
+    let fake = |test: &str, package: &str| {
+        format!(
+            "#!/bin/sh\nprintf -- '--- FAIL: {test} (0.00s)\\n    x_test.go:5: boom\\nFAIL\\nFAIL\\texample.com/shop/{package}\\t0.004s\\nFAIL\\n'\nexit 1\n"
+        )
+    };
+    env.write("run-tests", &fake("TestBroken", "other"));
+    env.write("run-cart", &fake("TestSum", "cart"));
+    for script in ["run-tests", "run-cart"] {
+        let path = root.join(script);
+        let mut mode = std::fs::metadata(&path).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
+        std::fs::set_permissions(&path, mode).unwrap();
+    }
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    std::fs::write(
+        root.join("price/price.go"),
+        "package price\n\nfunc Total(n int) int { return n * 3 }\n",
+    )
+    .unwrap();
+
+    let out = env.run(&["test", "--cmd", "--", "./run-tests"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("unrelated: the failing tests are in packages this change does not reach (TestBroken in other/other_test.go)"),
+        "{text}"
+    );
+    assert!(!text.contains("baseline:"), "{text}");
+
+    // A test in a package the change reaches is the change's to fix (with
+    // no comparison with main, where the stand-in fails too).
+    let out = env
+        .command(&["test", "--cmd", "--", "./run-cart"])
+        .env("JOUET_TEST_BASELINE", "off")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(!text.contains("unrelated:"), "{text}");
+}

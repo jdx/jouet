@@ -13,6 +13,8 @@ Every run's output, stdout and stderr together, goes to a log under jouet's log 
 
 With --baseline, a failing run is run again in a temporary worktree of the merge base with the upstream or default branch (or --since REF). If every test that failed also fails there, the failures were there before the change, from the environment or an earlier commit, and the run passes, naming them; any new failure still fails it. It needs the output to name its failures, and costs one more run of the failed suites. What the merge base did is kept, so a later failure of the same command compares with it without running it again. With --affected, it replays the selected commands at the merge base without selecting tests again; a missing or uncomparable test does not count as an existing failure. Without --baseline, a failing full suite is compared on its own, and so is a failing --cmd run that took under a minute; a slower one uses what is kept for it, or names the --baseline command that compares it. `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.
 
+A failing run whose every failing test is defined in a package the change does not reach (by the code graph: --affected selects nothing there, and no changed file is in it) says so on an `unrelated:` line, is not run at the merge base, and does not hold up finishing; it still exits 1.
+
 Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when no runner is found or installed.
 
 ## Arguments
