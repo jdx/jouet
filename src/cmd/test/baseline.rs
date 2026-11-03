@@ -605,7 +605,8 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         if let Some(rest) = path.strip_prefix(root_text.as_ref())
             && (rest.is_empty() || rest.starts_with(['/', '\\']))
         {
-            return Some(format!("{tree_text}{rest}"));
+            let relative = Path::new(rest.trim_start_matches(['/', '\\']));
+            return inside_checkout(relative).then(|| format!("{tree_text}{rest}"));
         }
         // A checkout can have more than one absolute spelling, such as
         // /var and /private/var on macOS. Resolve an ancestor, not the whole
@@ -618,7 +619,8 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         for ancestor in path.ancestors() {
             if ancestor.canonicalize().ok().as_deref() == Some(root) {
                 let rest = path.strip_prefix(ancestor).ok()?;
-                return Some(tree.join(rest).to_string_lossy().into_owned());
+                return inside_checkout(rest)
+                    .then(|| tree.join(rest).to_string_lossy().into_owned());
             }
         }
         None
@@ -632,6 +634,23 @@ fn rebase(word: &str, root: &Path, tree: &Path) -> String {
         }
         None => word.to_string(),
     }
+}
+
+/// Reject a relative path that climbs above the checkout before returning.
+fn inside_checkout(path: &Path) -> bool {
+    let mut depth = 0_usize;
+    for part in path.components() {
+        match part {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::ParentDir => match depth.checked_sub(1) {
+                Some(next) => depth = next,
+                None => return false,
+            },
+            std::path::Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<(), String> {
@@ -665,6 +684,8 @@ mod tests {
                 "--manifest-path=/tmp/base/tree/Cargo.toml",
             ),
             ("/src/apple/x", "/src/apple/x"),
+            ("/src/app/../other/check", "/src/app/../other/check"),
+            ("/src/app/dir/../file", "/tmp/base/tree/dir/../file"),
             ("cargo", "cargo"),
             ("--jobs=4", "--jobs=4"),
         ] {
@@ -691,6 +712,11 @@ mod tests {
         assert_eq!(
             rebase(&format!("--runner={}", path.display()), &root, &tree),
             format!("--runner={}", want.display())
+        );
+        let outside = alias.join("../other/check");
+        assert_eq!(
+            rebase(&outside.to_string_lossy(), &root, &tree),
+            outside.to_string_lossy()
         );
     }
 
