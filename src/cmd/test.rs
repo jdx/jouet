@@ -709,7 +709,10 @@ fn touched_files(dir: &Path) -> Option<Touched> {
         .split('\0')
         .chain(untracked.split('\0'))
         .filter(|f| !f.is_empty())
-        .map(|f| root.join(f))
+        .map(|f| {
+            let path = root.join(f);
+            path.canonicalize().unwrap_or(path)
+        })
         .collect();
     files.sort();
     files.dedup();
@@ -719,7 +722,7 @@ fn touched_files(dir: &Path) -> Option<Touched> {
 /// The warnings (`headline (path:line:col)`) whose file is one the change
 /// touches. A warning's path is absolute, or relative to where the compiler
 /// ran: the run's directory, or for cargo the workspace's, so the
-/// repository's root too.
+/// repository's root when the run's directory has no such file.
 fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<String> {
     warnings
         .iter()
@@ -738,10 +741,14 @@ fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<S
                 }
             }
             let path = Path::new(path);
-            [cwd.join(path), touched.root.join(path)]
-                .into_iter()
-                .map(|p| p.canonicalize().unwrap_or(p))
-                .any(|p| touched.files.contains(&p))
+            // The run's own file when there is one, so `src/lib.rs` in a
+            // crate is not the root's; the root's only when it is not.
+            let own = cwd.join(path);
+            let path = own
+                .canonicalize()
+                .or_else(|_| touched.root.join(path).canonicalize())
+                .unwrap_or(own);
+            touched.files.contains(&path)
         })
         .cloned()
         .collect()
@@ -1479,6 +1486,16 @@ mod tests {
             let warning = ["unused: `w` (src/lib.rs:1:1)".to_string()];
             assert_eq!(
                 changed_warnings(&warning, &real.join("link"), &linked),
+                warning
+            );
+            // From a crate with its own unchanged src/lib.rs, a warning there
+            // is not the root's changed one; from one without, it is.
+            std::fs::create_dir_all(real.join("crates/a/src")).unwrap();
+            std::fs::write(real.join("crates/a/src/lib.rs"), "").unwrap();
+            std::fs::create_dir_all(real.join("crates/b")).unwrap();
+            assert!(changed_warnings(&warning, &real.join("crates/a"), &linked).is_empty());
+            assert_eq!(
+                changed_warnings(&warning, &real.join("crates/b"), &linked),
                 warning
             );
         }
