@@ -596,7 +596,7 @@ mod tests {
             plan(
                 vec![session.clone()],
                 std::slice::from_ref(&root),
-                i64::try_from(now + 1).unwrap() * 1000,
+                i64::try_from(now + 60).unwrap() * 1000,
                 0,
                 (10, None),
                 None,
@@ -840,7 +840,7 @@ mod tests {
             plan(
                 vec![session.clone()],
                 std::slice::from_ref(&root),
-                i64::try_from(now + 1).unwrap() * 1000,
+                i64::try_from(now + 60).unwrap() * 1000,
                 0,
                 (10, None),
                 None,
@@ -859,7 +859,7 @@ mod tests {
         let after_move = plan(
             vec![archived],
             std::slice::from_ref(&root),
-            i64::try_from(now + 1).unwrap() * 1000,
+            i64::try_from(now + 60).unwrap() * 1000,
             0,
             (10, None),
             None,
@@ -901,7 +901,7 @@ mod tests {
         let after_move = plan(
             vec![archived],
             std::slice::from_ref(&root),
-            i64::try_from(now + 1).unwrap() * 1000,
+            i64::try_from(now + 60).unwrap() * 1000,
             0,
             (10, None),
             None,
@@ -947,7 +947,7 @@ mod tests {
             plan(
                 vec![session.clone()],
                 std::slice::from_ref(&root),
-                i64::try_from(now + 1).unwrap() * 1000,
+                i64::try_from(now + 60).unwrap() * 1000,
                 0,
                 (10, None),
                 None,
