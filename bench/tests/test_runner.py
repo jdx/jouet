@@ -896,6 +896,49 @@ class TasksTest(unittest.TestCase):
                 run.assert_called_once()
                 self.assertEqual(run.call_args.args[0].tasks_dir, [directory])
 
+    def test_ghost_checker_does_not_count_a_deleted_test(self):
+        import os
+        import subprocess
+
+        checker = tasks.TASKS_DIR / "ghost-tier-refresh" / "check.py"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            source = root / "apps/admin/src/automations"
+            source.mkdir(parents=True)
+            (source / "code.ts").write_text("before\n")
+            (source / "old.test.ts").write_text("old test\n")
+            tasks.git(root, "init", "-q", "-b", "main")
+            tasks.git(root, "add", "apps")
+            tasks.git(root, "commit", "-q", "-m", "base")
+            base = tasks.git(root, "rev-parse", "HEAD")
+            (source / "code.ts").write_text("fixed\n")
+            tasks.git(root, "rm", "-q", "apps/admin/src/automations/old.test.ts")
+            tasks.git(root, "add", "apps/admin/src/automations/code.ts")
+            tasks.git(root, "commit", "-q", "-m", "delete test")
+            bin_dir = Path(d) / "bin"
+            bin_dir.mkdir()
+            pnpm = bin_dir / "pnpm"
+            marker = Path(d) / "pnpm-ran"
+            pnpm.write_text('#!/bin/sh\nprintf "called" > "$PNPM_STUB_MARKER"\n')
+            pnpm.chmod(0o755)
+            env = tasks.git_env() | {"BENCH_BASE_SHA": base, "PNPM_STUB_MARKER": str(marker),
+                                     "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+            def check():
+                return subprocess.run([sys.executable, str(checker)], cwd=root, env=env,
+                                      capture_output=True, text=True)
+
+            deleted = check()
+            self.assertNotEqual(deleted.returncode, 0)
+            self.assertIn("no committed regression test", deleted.stderr)
+            self.assertEqual(marker.read_text(), "called")
+            (source / "new.test.ts").write_text("new test\n")
+            tasks.git(root, "add", "apps/admin/src/automations/new.test.ts")
+            tasks.git(root, "commit", "-q", "-m", "add test")
+            added = check()
+            self.assertEqual(added.returncode, 0, added.stderr)
+
     def test_checkout_roots_include_the_current_worktree(self):
         self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
 
