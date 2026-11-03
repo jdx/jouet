@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _check import commit, expect, finish, new_commit  # noqa: E402
 
-PASS, FAIL, SKIP = "pass", "fail", "skip"
+PASS, FAIL, SKIP, XFAIL = "pass", "fail", "skip", "xfail"
 
 
 def load(task_dir: Path) -> dict:
@@ -33,31 +33,43 @@ def parse_django(log: str) -> dict[str, str]:
     them. A test that prints puts its status on a line of its own."""
     statuses = {}
     pending = None
+    header = None
     for line in log.splitlines():
+        if re.match(r"^test\S+ \([^)]+\)$", line):
+            header = line
+            pending = None
+            continue
         m = re.match(r"^(.+?) \.\.\. (.*)$", line)
+        if m and re.fullmatch(r"test\S+ \([^)]+\)", m.group(1)):
+            header = None
         word = (m.group(2) if m else line).strip()
-        name = m.group(1) if m else pending
+        name = m.group(1) if m else pending or header
         status = django_status(word)
         if m and status is None:
             pending = name
             continue
         if name is not None and status is not None:
             record(statuses, name, status)
+            if header is not None:
+                record(statuses, header, status)
             pending = None
+            header = None
     return statuses
 
 
 def record(statuses: dict[str, str], name: str, status: str) -> None:
     """Two tests can share a name, as sympy's do across files: the name gets
     the worse result, so a failure or a skip of either is not a pass."""
-    rank = {FAIL: 0, SKIP: 1, PASS: 2}
+    rank = {FAIL: 0, SKIP: 1, XFAIL: 1, PASS: 2}
     previous = statuses.get(name)
     statuses[name] = status if previous is None or rank[status] < rank[previous] else previous
 
 
 def django_status(word: str) -> str | None:
-    if word in ("ok", "OK", "expected failure"):
+    if word in ("ok", "OK"):
         return PASS
+    if word == "expected failure":
+        return XFAIL
     if word in ("FAIL", "ERROR", "unexpected success"):
         return FAIL
     if word.startswith("skipped"):
@@ -70,7 +82,7 @@ def parse_sympy(log: str) -> dict[str, str]:
     expected failure), `X` (an unexpected pass) or `s`."""
     statuses = {}
     for m in re.finditer(r"^(test_\w+) (ok|F|E|f|X|s|Skipped)\b", log, re.M):
-        record(statuses, m.group(1), {"ok": PASS, "f": PASS, "s": SKIP, "Skipped": SKIP}.get(m.group(2), FAIL))
+        record(statuses, m.group(1), {"ok": PASS, "f": XFAIL, "s": SKIP, "Skipped": SKIP}.get(m.group(2), FAIL))
     return statuses
 
 
@@ -81,7 +93,8 @@ def parse_pytest(log: str) -> dict[str, str]:
     for m in re.finditer(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED) (\S+)", log, re.M):
         if m.group(1) == "SKIPPED":
             continue  # `SKIPPED [1] path:line: reason` names no test.
-        record(statuses, m.group(2), PASS if m.group(1) in ("PASSED", "XFAIL") else FAIL)
+        status = {"PASSED": PASS, "XFAIL": XFAIL}.get(m.group(1), FAIL)
+        record(statuses, m.group(2), status)
     return statuses
 
 
@@ -90,23 +103,23 @@ PARSERS = {"django": parse_django, "sympy": parse_sympy, "pytest": parse_pytest}
 
 def verdict(spec: dict, statuses: dict[str, str]) -> list[str]:
     """What failed: every FAIL_TO_PASS test must pass; a PASS_TO_PASS test
-    must not fail. One the environment skips or the log does not name is
-    reported, but does not fail the check."""
+    must not fail. A skipped, expected-failing or missing PASS_TO_PASS test
+    is reported as unverified, but does not fail the check."""
     problems = []
     for name in spec["fail_to_pass"]:
         status = statuses.get(name)
         if status != PASS:
             problems.append(f"FAIL_TO_PASS {name}: {status or 'not run'}")
-    absent = []
+    unverified = []
     for name in spec["pass_to_pass"]:
         status = statuses.get(name)
         if status == FAIL:
             problems.append(f"PASS_TO_PASS {name}: fail")
-        elif status is None:
-            absent.append(name)
-    if absent:
-        print(f"{len(absent)} PASS_TO_PASS tests were not run or not named in the log: {absent[:5]}"
-              + (f" ... {len(absent) - 5} more" if len(absent) > 5 else ""))
+        elif status != PASS:
+            unverified.append(f"{name} ({status or 'not run or not named'})")
+    if unverified:
+        print(f"{len(unverified)} PASS_TO_PASS tests were not verified: {unverified[:5]}"
+              + (f" ... {len(unverified) - 5} more" if len(unverified) > 5 else ""))
     return problems
 
 
@@ -145,13 +158,16 @@ def check(task_dir: Path) -> None:
         return
     log = proc.stdout + proc.stderr
     save_log(spec, log)
+    expect(proc.returncode == 0, f"the tests exited {proc.returncode}:\n{log[-3000:]}")
     parser = PARSERS.get(spec["log_format"])
-    if parser is None:
-        expect(proc.returncode == 0, f"the tests exited {proc.returncode}:\n{log[-3000:]}")
-    else:
+    if parser is not None:
         statuses = parser(log)
+        failed = [name for name, status in statuses.items() if status == FAIL]
+        if proc.returncode == 0 and failed:
+            expect(False, "the tests exited 0 but reported failures: " + ", ".join(failed))
         problems = verdict(spec, statuses)
-        print(f"{sum(s == PASS for s in statuses.values())} of {len(statuses)} tests in the log passed")
+        print(f"{sum(s == PASS for s in statuses.values())} of {len(statuses)} named results passed "
+              "(a test can have multiple names)")
         expect(not problems, "the instance's tests fail:\n" + "\n".join(problems) + f"\n{log[-2500:]}")
     # Not a condition of the check: the prompt asks for a commit.
     print(f"committed: {new_commit()}")

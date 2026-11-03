@@ -109,7 +109,7 @@ The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://g
 - `[source]` is a clone under `~/src/swebench/<owner>__<repo>` at `base_commit`, cloned once if missing;
 - the prompt is `problem_statement` and the line the other real-project tasks end with;
 - `hidden/` holds the test files as `test_patch` leaves them, and `fix.patch` is `patch`;
-- `check.py` puts `hidden/` in place, runs the instance's test modules with the repository's runner, and passes when every `FAIL_TO_PASS` test passes and no `PASS_TO_PASS` test fails. A `PASS_TO_PASS` test the environment skips, or that the log does not name, is listed in the check's output but does not fail it. The logs are read as SWE-bench reads them: Django's runner, sympy's `bin/test` and pytest's `-rA` summary. `swebench.json` holds the instance's tests and the command;
+- `check.py` puts `hidden/` in place, runs the instance's test modules with the repository's runner, and passes when the test command exits zero, every `FAIL_TO_PASS` test passes and no `PASS_TO_PASS` test fails. An expected failure does not count as a passing `FAIL_TO_PASS` test. A `PASS_TO_PASS` test that is skipped, expected-failing or not named in the log is reported as unverified but does not fail the check. The logs are read from Django's runner, sympy's `bin/test` and pytest's `-rA` summary. Django tests with docstrings are recorded under both their test ID and description, so the reported number of named results is not a test count. `swebench.json` holds the instance's tests and the command;
 - `solve.py` applies `fix.patch` and commits it.
 
 ```sh
