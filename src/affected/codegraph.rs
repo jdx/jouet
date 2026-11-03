@@ -235,7 +235,8 @@ impl Adapter for Graph {
                             ),
                         )
                     })?;
-                    if !name.ends_with("_test.go") {
+                    if !name.ends_with("_test.go") || name.starts_with('.') || name.starts_with('_')
+                    {
                         continue;
                     }
                     let metadata = std::fs::metadata(entry.path()).map_err(|e| {

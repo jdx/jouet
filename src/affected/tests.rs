@@ -201,7 +201,10 @@ fn go_selection_finds_a_packages_only_test_even_when_git_ignores_it() {
         &root.join("go.mod"),
         "module example.test/project\n\ngo 1.22\n",
     );
-    write(&root.join(".gitignore"), "lib/local_test.go\n");
+    write(
+        &root.join(".gitignore"),
+        "lib/local_test.go\nlib/_ignored_test.go\nlib/.hidden_test.go\n",
+    );
     write(
         &root.join("lib/value.go"),
         "package lib\nfunc Value() int { return 7 }\n",
@@ -214,6 +217,8 @@ fn go_selection_finds_a_packages_only_test_even_when_git_ignores_it() {
         &root.join("lib/local_test.go"),
         "package lib\nimport \"testing\"\nfunc TestLocal(t *testing.T) { if Value() != 7 { t.Fatal(\"bad\") } }\n",
     );
+    write(&root.join("lib/_ignored_test.go"), "package lib\n");
+    write(&root.join("lib/.hidden_test.go"), "package lib\n");
     write(
         &root.join("lib/value.go"),
         "package lib\nfunc Value() int { return 8 }\n",
@@ -223,6 +228,7 @@ fn go_selection_finds_a_packages_only_test_even_when_git_ignores_it() {
         panic!("one suite")
     };
     assert_eq!(suite.decision, Decision::Affected);
+    assert_eq!(suite.tests.len(), 1);
     assert_eq!(suite.tests[0].path, "lib/local_test.go");
     assert_eq!(
         suite.command.as_deref(),
