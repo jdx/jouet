@@ -64,6 +64,18 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(self.source.read_text(), '{"token": "new"}')
         self.assertFalse(lent[0].copy.exists())
 
+    def test_exclusive_lending_does_not_overwrite_a_file_or_follow_a_link(self):
+        destination = self.run / self.source.name
+        destination.write_text("existing")
+        with self.assertRaises(FileExistsError):
+            credentials.lend([self.source], self.run, exclusive=True)
+        self.assertEqual(destination.read_text(), "existing")
+        destination.unlink()
+        destination.symlink_to(self.source)
+        with self.assertRaises(FileExistsError):
+            credentials.lend([self.source], self.run, exclusive=True)
+        self.assertEqual(self.source.read_text(), '{"token": "old"}')
+
     def test_a_deleted_or_emptied_copy_is_not_written_back(self):
         lent = credentials.lend([self.source], self.run)
         (self.run / ".credentials.json").write_text("")

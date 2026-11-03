@@ -36,7 +36,7 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def lend(sources: list[Path], config_dir: Path) -> list[Lent]:
+def lend(sources: list[Path], config_dir: Path, *, exclusive: bool = False) -> list[Lent]:
     """Copies each existing source into `config_dir`, readable by the user only."""
     lent = []
     for source in sources:
@@ -45,7 +45,9 @@ def lend(sources: list[Path], config_dir: Path) -> list[Lent]:
         real = source.resolve()
         data = real.read_bytes()
         copy = config_dir / source.name
-        fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        flags = os.O_WRONLY | os.O_CREAT
+        flags |= os.O_EXCL | os.O_NOFOLLOW if exclusive else os.O_TRUNC
+        fd = os.open(copy, flags, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         lent.append(Lent(source=real, copy=copy, digest=_digest(data)))

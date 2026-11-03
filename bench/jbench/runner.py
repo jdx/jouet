@@ -476,7 +476,11 @@ def execute(
         cmd = harness.command(harness.binary, task.prompt, opts, workdir)
         timeout_s = min(task.timeout_s, opts["timeout_s"]) if opts.get("timeout_s") else task.timeout_s
         config_dir = Path(env[harness.config_dir_env])
-        lent = credentials.lend(arms_mod.credential_files(harness), config_dir)
+        try:
+            lent = credentials.lend(arms_mod.credential_files(harness), config_dir,
+                                    exclusive=harness.name == "codex" and arm.jouet)
+        except FileExistsError as error:
+            raise codex_hooks.HookPreflightError("Dedicated Codex credentials appeared during setup") from error
         try:
             agent = run_agent(
                 harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"), keep / "agent.jsonl"

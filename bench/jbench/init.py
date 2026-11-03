@@ -103,7 +103,10 @@ def prepared(
     arms_mod.reviewed_codex(harness, env, workdir, opts)
     arms_mod.login_shell_path(env)
     config_dir = Path(env[harness.config_dir_env])
-    lent = credentials.lend(arms_mod.credential_files(harness), config_dir)
+    try:
+        lent = credentials.lend(arms_mod.credential_files(harness), config_dir, exclusive=harness.name == "codex")
+    except FileExistsError as error:
+        raise codex_hooks.HookPreflightError("Dedicated Codex credentials appeared during setup") from error
     try:
         agent = run_agent(
             harness,
