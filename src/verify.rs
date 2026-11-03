@@ -2691,8 +2691,9 @@ mod tests {
 mod hk_file_list_tests {
     use super::*;
 
-    /// A repository with `a.rs` and `b.rs` committed, then `a.rs` changed
-    /// and `new.rs` added.
+    /// A repository with `a.rs`, `b.rs` and `gone.rs` committed, then
+    /// `a.rs` changed, `gone.rs` deleted, `new.rs` added and an untracked
+    /// repository put in `nested`.
     fn repo() -> tempfile::TempDir {
         let repo = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
@@ -2710,10 +2711,16 @@ mod hk_file_list_tests {
         std::fs::create_dir(repo.path().join("src")).unwrap();
         std::fs::write(repo.path().join("src/a.rs"), "a\n").unwrap();
         std::fs::write(repo.path().join("src/b.rs"), "b\n").unwrap();
+        std::fs::write(repo.path().join("gone.rs"), "g\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "-qm", "init"]);
         std::fs::write(repo.path().join("src/a.rs"), "a2\n").unwrap();
         std::fs::write(repo.path().join("new.rs"), "n\n").unwrap();
+        std::fs::remove_file(repo.path().join("gone.rs")).unwrap();
+        let nested = repo.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        git(&["init", "-q", "nested"]);
+        std::fs::write(nested.join("x.rs"), "x\n").unwrap();
         repo
     }
 

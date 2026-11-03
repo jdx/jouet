@@ -164,8 +164,11 @@ pub fn uncommitted(dir: &Path, timeout: Duration) -> Result<bool, String> {
 /// tree's root: what hk checks by default. Deleted files, which no check
 /// can read, are left out.
 pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, String> {
+    let started = Instant::now();
+    let top = git(Some(dir), &["rev-parse", "--show-toplevel"], timeout)?;
+    let top = Path::new(top.trim_end_matches('\n'));
     let status = git(
-        Some(dir),
+        Some(top),
         &[
             "status",
             "--porcelain",
@@ -174,14 +177,18 @@ pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, Strin
             "--no-renames",
             "--ignore-submodules=all",
         ],
-        timeout,
+        timeout.saturating_sub(started.elapsed()),
     )?;
     Ok(status
         .split('\0')
         // `XY PATH`
+        // A nested repository is listed as its directory, which no check
+        // reads, and a deleted file is gone; a path still on disk counts
+        // whatever its status says.
         .filter_map(|entry| {
-            let (xy, path) = (entry.get(..2)?, entry.get(3..)?);
-            (!xy.contains('D') && !path.is_empty()).then(|| path.to_string())
+            let path = entry.get(3..)?;
+            let meta = std::fs::symlink_metadata(top.join(path)).ok()?;
+            (!meta.is_dir()).then(|| path.to_string())
         })
         .collect())
 }
