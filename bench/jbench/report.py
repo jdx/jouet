@@ -130,23 +130,9 @@ def init_line(cell: dict[str, Any], init: dict[str, Any]) -> str:
     del cell
     files = init.get("files") or []
     if not files:
-        line = "jouet-init changed no files for this task, so the `jouet-init` arm ran it as the `jouet` arm does."
-    else:
-        named = ", ".join(files[:8]) + (f" and {len(files) - 8} more" if len(files) > 8 else "")
-        line = f"jouet-init configured the project with {len(files)} file(s), committed before each run: {named}."
-    usage = init.get("usage") or {}
-    costs = []
-    if init.get("wall_s") is not None:
-        costs.append(f"{init['wall_s']:.1f}s")
-    if usage.get("input_tokens") is not None:
-        costs.append(f"{usage['input_tokens']:,} input tokens")
-        if usage.get("cached_input_tokens") is not None:
-            costs.append(f"{usage['input_tokens'] - usage['cached_input_tokens']:,} uncached input tokens")
-    if usage.get("output_tokens") is not None:
-        costs.append(f"{usage['output_tokens']:,} output tokens")
-    if costs:
-        line += " Initialization (separate from task runs): " + ", ".join(costs) + "."
-    return line
+        return "jouet-init changed no files for this task, so the `jouet-init` arm ran it as the `jouet` arm does."
+    named = ", ".join(files[:8]) + (f" and {len(files) - 8} more" if len(files) > 8 else "")
+    return f"jouet-init configured the project with {len(files)} file(s), committed before each run: {named}."
 
 
 def fmt(value: float | None, kind: str) -> str:

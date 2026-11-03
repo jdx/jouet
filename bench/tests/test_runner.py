@@ -1152,7 +1152,7 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def test_initialized_comparison_includes_only_both_passed_pairs_and_setup_cost(self):
+    def test_initialized_comparison_includes_only_both_passed_pairs(self):
         def record(arm, number, success, tokens, **extra):
             return {"task": "web", "harness": "codex", "arm": arm, "round": number,
                     "success": success, "wall_s": 10 if arm == "jouet" else 15,
@@ -1171,7 +1171,7 @@ class ReportTest(unittest.TestCase):
         text = report.markdown({"meta": {}, "cells": [cell]})
         self.assertIn("Initialized versus ordinary jouet", text)
         self.assertIn("| input tokens (all context read) | 100 | 310 | +20 |", text)
-        self.assertIn("12.5s, 200 input tokens, 50 uncached input tokens, 20 output tokens", text)
+        self.assertNotIn("12.5s, 200 input tokens", text)
 
     def test_markdown(self):
         def record(arm, r, tokens, success=True):
