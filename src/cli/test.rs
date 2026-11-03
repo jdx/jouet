@@ -47,7 +47,11 @@ use usage_rs::Args;
 /// test does not count as an existing failure. Without --baseline, a failing full suite is
 /// compared on its own, and so is a failing --cmd run that took under a
 /// minute; a slower one uses what is kept for it, or names the --baseline
-/// command that compares it. `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.
+/// command that compares it. When every failure is a Go test that `go test`
+/// named with its package, those tests alone run at the merge base first
+/// (`go test -run '^(TestA|TestB)$' PKG...`), however slow the run was;
+/// only when that does not show each one failing the same way does the
+/// comparison go on as above. `[test] baseline = "off"` (JOUET_TEST_BASELINE=off) turns that off.
 ///
 /// A failing run whose every failing test is defined in a package the change
 /// does not reach (by the code graph: --affected selects nothing there, and

@@ -1612,6 +1612,39 @@ SCRIPT
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
 }
 
+@test "failing Go tests are run alone at the merge base, not the whole command" {
+	cat >go.mod <<-'EOF'
+		module example.com/shop
+
+		go 1.22
+	EOF
+	# What `go test` prints for one failing test, from the check and from the
+	# merge base's run of that test alone.
+	cat >fail.txt <<-'EOF'
+		--- FAIL: TestBroken (0.00s)
+		    other_test.go:5: boom
+		FAIL
+		FAIL	example.com/shop/other	0.004s
+		FAIL
+	EOF
+	printf '#!/bin/sh\necho run >>"%s/checks"\ncat "%s/fail.txt"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >check.sh
+	mkdir -p bin
+	printf '#!/bin/sh\necho "$*" >>"%s/go"\ncat "%s/fail.txt"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >bin/go
+	chmod +x check.sh bin/go
+	git add go.mod fail.txt check.sh
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+	# Slow enough that the whole check is not run again at the merge base.
+	PATH="$PWD/bin:$PATH" JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- ./check.sh
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/checks")" 1
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/go")" 'test -run ^(TestBroken)$ example.com/shop/other'
+}
+
 @test "a large passing run names the tests the change adds, and only those" {
 	git commit -q --allow-empty -m base
 	cat >run-tests <<'SH'
