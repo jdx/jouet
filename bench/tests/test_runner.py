@@ -959,6 +959,21 @@ class TasksTest(unittest.TestCase):
             self.assertEqual(tasks.git(workdir, "symbolic-ref", "refs/remotes/origin/HEAD"), "refs/remotes/origin/main")
             self.assertTrue((Path(d) / "run" / "origin.git").is_dir())
 
+    def test_an_upstream_url_is_origins_url_and_resolves_to_the_local_repository(self):
+        import dataclasses
+
+        url = "https://git.example.invalid/owner/repo.git"
+        with tempfile.TemporaryDirectory() as d:
+            task = dataclasses.replace(tasks.load("smoke"), remote=False, upstream=True, upstream_url=url)
+            workdir = Path(d) / "run" / "work"
+            workdir.parent.mkdir()
+            shas = tasks.prepare(task, workdir)
+            self.assertEqual(tasks.git(workdir, "config", "--get", "remote.origin.url"), url)
+            self.assertEqual(tasks.git(workdir, "rev-parse", "origin/main"), shas["base_sha"])
+            # A push goes to the local repository, not the host.
+            tasks.git(workdir, "push", "-q", "origin", "HEAD:refs/heads/check")
+            self.assertEqual(tasks.git(Path(d) / "run" / "origin.git", "rev-parse", "check"), shas["head_sha"])
+
 
     def test_setup_runs_in_the_work_tree_and_must_leave_it_clean(self):
         import dataclasses

@@ -201,12 +201,12 @@ regexes! {
     PLAYWRIGHT_ERROR = r"^\s*(?:(?:\w*Error|AssertionError):|Test timeout of \d+ms exceeded\b)";
     PLAYWRIGHT_TIMEOUT = r"^\s*(?:\w*Error:\s*)?Test timeout of \d+ms exceeded\b";
     // A line that blames the machine, not the code: no D-Bus or keyring, a
-    // system library missing, no network, an API's rate limit, or no
+    // system library missing, no network (Go's own words for it too), an API's rate limit, or no
     // database or service running on this machine (a refused connection to
     // localhost, a database client that cannot connect). Not a missing
     // command or file, which is most often the change's own (a binary it did
     // not build).
-    ENVIRONMENT = r"(?i)(could not connect to server: (connection refused|no such file or directory)|connection to server (at .*|on socket .*) failed: (connection refused|no such file or directory)|can't connect to (local )?mysql server|dial tcp (127\.0\.0\.1|\[::1\]|localhost):\d+: connect: connection refused|econnrefused (127\.0\.0\.1|::1|localhost):\d+|dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|api rate limit exceeded)";
+    ENVIRONMENT = r"(?i)(could not connect to server: (connection refused|no such file or directory)|connection to server (at .*|on socket .*) failed: (connection refused|no such file or directory)|can't connect to (local )?mysql server|dial tcp (127\.0\.0\.1|\[::1\]|localhost):\d+: connect: connection refused|econnrefused (127\.0\.0\.1|::1|localhost):\d+|dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|dial tcp: lookup [^ ]+( on [^ ]+)?: no such host|module lookup disabled by goproxy=off|api rate limit exceeded)";
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
