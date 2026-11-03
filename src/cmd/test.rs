@@ -307,9 +307,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 && digest.warning_names.is_empty()
                 && !digest.warnings_all.is_empty()
             {
-                let dir = job.dir.clone();
                 digest.warnings_changed =
-                    Some(changed_warnings(&digest.warnings_all, &dir, touched));
+                    Some(changed_warnings(&digest.warnings_all, &job.dir, touched));
             }
             let empty_test = args.cmd
                 && code == 0
