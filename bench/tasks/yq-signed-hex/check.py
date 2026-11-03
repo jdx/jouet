@@ -19,6 +19,6 @@ output = proc.stdout
 if len(output) > 8000:
     output = f"... {len(output) - 8000} earlier characters omitted\n" + output[-8000:]
 expect(proc.returncode == 0, f"the issue or existing tests fail:\n{output}")
-# Not a condition of the check: the prompt asks for a commit.
 print(f"committed: {new_commit()}")
+expect(new_commit(), "nothing was committed")
 finish()
