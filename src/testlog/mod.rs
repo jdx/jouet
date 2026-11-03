@@ -822,6 +822,9 @@ fn go(lines: &[String], out: &mut Parsed) {
             // then the panic: that is its output.
             if let Some(test) = out.found.last_mut()
                 && test.lines.is_empty()
+                // Another runner's failure found later in the output is not
+                // this test.
+                && test.at < i
                 && lines[test.at..i]
                     .iter()
                     .all(|l| GO_RESULT.is_match(l) || l.trim().is_empty())

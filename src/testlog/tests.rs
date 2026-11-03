@@ -749,6 +749,10 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     let remote = "panic: Can't connect to MySQL server on 'db.example.com' (111)\n\ngoroutine 1 [running]:\nmain.main()\n\t/w/main.go:9 +0x25\nexit status 2\n";
     assert_eq!(environment_cause(remote, &[]), None);
     assert!(environment_cause(&remote.replace("db.example.com", "127.0.0.1"), &[]).is_some());
+    // A Go panic before another runner's failure with no block of its own
+    // is not that failure's output, and reading it does not panic.
+    let mixed = "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n\t/w/main.go:9 +0x25\nexit status 2\ntest later ... FAILED\n";
+    assert_eq!(environment_cause(mixed, &[]), None);
     // A newer Go version a test names is the test's own.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# expected: requires go >= 1.27.1\n", &[]),
