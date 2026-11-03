@@ -49,9 +49,17 @@ before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
 [checks.focused]
 unit = "jouet test --affected"
 bats = "jouet test --cmd -- mise run test:bats -- test/NAME.bats"
+
+[checks.ci]
+e2e = "mise run test:e2e"
+
+[checks.broken]
+"mise run lint" = "golangci-lint is built with Go 1.26; go.mod needs 1.27"
 ```
 
-Once the repository's jouet files are trusted, the session-start primer names them in one line: `jouet: this project's checks (.jouet/project.toml): bats …; unit …; full suite …; before pushing …`. Every later session then starts knowing how this project runs its focused tests and what CI enforces, instead of looking for it. In the benchmark, agents that did not know a project's focused bats command spent several requests finding a way to run it. The keys are `full`, `lint`, `before_push` (a list) and `focused` (a table, by what each check covers). An unknown key makes the file unreadable, so a typo is not silently dropped.
+Once the repository's jouet files are trusted, the session-start primer names them in one line: `jouet: this project's checks (.jouet/project.toml): bats …; unit …; full suite …; before pushing …`. Every later session then starts knowing how this project runs its focused tests and what CI enforces, instead of looking for it. In the benchmark, agents that did not know a project's focused bats command spent several requests finding a way to run it. The keys are `full`, `lint`, `before_push` (a list), `focused` (a table, by what each check covers), `ci` and `broken`.
+
+The skill runs each check once before it records it. A check that is slow, or needs services or tools only CI has, goes in `ci`: the primer tells agents to push and [`jouet wait ci`](/commands/wait) instead of running it. A check that already fails before any change, for a reason outside the code, goes in `broken` with that reason. The primer tells agents it is not theirs to fix, and a failed run of it does not hold up finishing, as a failure that [blames the machine](/setup#what-clears-a-failure) does not. Remove the entry once the environment is fixed. An unknown key makes the file unreadable, so a typo is not silently dropped.
 
 ## Trust and existing files
 
