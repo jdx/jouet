@@ -42,7 +42,7 @@ jouet edit replace app.py --old 'reverse=True)' --new ')' --old 'math.floor' --n
 
 `--old` and `--new` may start with `-`, as a Markdown list item does.
 
-Arguments are literal: `\n` is not expanded to a newline. For multiline text, pass actual newlines or provide a patch or search/replace spec on stdin, for example with a quoted heredoc.
+Arguments are literal: `\n` is not expanded to a newline. For multiline text, pass actual newlines or use `jouet edit` with a patch or search/replace spec on stdin, for example with a quoted heredoc.
 
 ## Editing several files with a spec
 

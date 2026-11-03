@@ -137,7 +137,8 @@ pub(crate) enum EditCmd {
 /// that lands whole or not at all.
 ///
 /// Arguments are literal: `\n` is not expanded into a newline. For multiline
-/// edits, pass actual newlines or use a patch or search/replace spec on stdin.
+/// edits, pass actual newlines, or use `jouet edit` with a patch or
+/// search/replace spec on stdin.
 ///
 /// Examples:
 ///   jouet edit replace src/lib.rs --old 'let x = 1;' --new 'let x = 2;'
