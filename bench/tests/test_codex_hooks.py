@@ -1,6 +1,7 @@
 import json
 import contextlib
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -86,19 +87,42 @@ class CodexHooksTest(unittest.TestCase):
     def test_codex_tool_identity_detects_replaced_wrappers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "codex").symlink_to("/bin/true")
+            (root / "codex").symlink_to(sys.executable)
             (root / "jouet").write_text("original wrapper")
             original = arms.codex_tools(root, True)
             (root / "jouet").write_text("different wrapper")
             self.assertNotEqual(arms.codex_tools(root, True), original)
             (root / "jouet").unlink()
-            (root / "jouet").symlink_to("/bin/true")
+            (root / "jouet").symlink_to(sys.executable)
             with self.assertRaises(HookPreflightError):
                 arms.codex_tools(root, True)
             (root / "codex").unlink()
             (root / "codex").write_text("replacement")
             with self.assertRaises(HookPreflightError):
                 arms.codex_tools(root, False)
+
+    def test_path_rejects_shadowed_tools_and_jouet_in_the_plain_arm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            other = root / "other"
+            bin_dir.mkdir()
+            other.mkdir()
+            (bin_dir / "codex").symlink_to(sys.executable)
+            (bin_dir / "jouet").symlink_to(sys.executable)
+            env = {"PATH": str(bin_dir)}
+            arms.verify_codex_path(bin_dir, env, True)
+            with self.assertRaisesRegex(HookPreflightError, "plain"):
+                arms.verify_codex_path(bin_dir, env, False)
+            (bin_dir / "jouet").unlink()
+            (other / "codex").symlink_to(sys.executable)
+            (other / "jouet").symlink_to(sys.executable)
+            env["PATH"] = os.pathsep.join((str(other), str(bin_dir)))
+            with self.assertRaisesRegex(HookPreflightError, "codex"):
+                arms.verify_codex_path(bin_dir, env, False)
+            env["PATH"] = os.pathsep.join((str(bin_dir), str(other)))
+            with self.assertRaisesRegex(HookPreflightError, "plain"):
+                arms.verify_codex_path(bin_dir, env, False)
 
     def test_preparation_creates_a_dedicated_home_without_overwriting_one(self):
         root = Path(__file__).resolve().parents[2]

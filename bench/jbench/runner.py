@@ -465,6 +465,10 @@ def execute(
                                         arms_mod.CODEX_ISOLATION_ENV.intersection(opts.get("jouet_env") or {})):
             raise codex_hooks.HookPreflightError("A task or override changed CODEX_HOME")
         environment = tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", keep / "environment.log")
+        if codex_tools is not None:
+            if arms_mod.codex_tools(run_dir / "bin", arm.jouet) != codex_tools:
+                raise codex_hooks.HookPreflightError("Setup replaced a Codex benchmark tool")
+            arms_mod.verify_codex_path(run_dir / "bin", env, arm.jouet)
         setup = arms_mod.setup_jouet(harness, env, workdir) if arm.jouet else None
         if arm.jouet:
             arms_mod.reviewed_codex(harness, env, workdir, opts)

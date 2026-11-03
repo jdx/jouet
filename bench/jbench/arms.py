@@ -266,6 +266,16 @@ def codex_tools(bin_dir: Path, jouet: bool) -> tuple[str, bytes | None]:
         raise codex_hooks.HookPreflightError("Cannot identify the Codex benchmark tools") from error
 
 
+def verify_codex_path(bin_dir: Path, env: dict[str, str], jouet: bool) -> None:
+    """Ensure setup did not put a different tool ahead of the benchmark wrappers."""
+    for name in ("codex", "jouet") if jouet else ("codex",):
+        found = shutil.which(name, path=env.get("PATH", ""))
+        if not found or Path(found).parent.resolve() != bin_dir.resolve():
+            raise codex_hooks.HookPreflightError(f"PATH does not select the benchmark {name}")
+    if not jouet and shutil.which("jouet", path=env.get("PATH", "")):
+        raise codex_hooks.HookPreflightError("The plain Codex arm has jouet on PATH")
+
+
 def codex_started(env: dict[str, str]) -> bool:
     """A reviewed hook may still fail to run; require its per-run ledger event."""
     root = Path(env["XDG_STATE_HOME"]) / "jouet" / "ledger"
