@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from jbench import arms, report, runner, stats, tasks
+from jbench import arms, init, report, runner, stats, tasks
 from jbench.harness import HARNESSES
 
 
@@ -18,6 +18,67 @@ def sample_wheel(root):
         archive.writestr("bench_sample-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         archive.writestr("bench_sample-1.0.dist-info/RECORD", "")
     return wheel
+
+
+class InitCacheTest(unittest.TestCase):
+    def test_prepared_reuses_only_the_matching_setup(self):
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "jouet"
+            binary.write_text("binary")
+            task = tasks.Task(name="example", dir=root, description="", prompt="", chore="",
+                              rules=[], timeout_s=1)
+            harness = HARNESSES["codex"]
+            opts = {"jouet_bin": binary, "codex_model": "model", "effort": "medium"}
+            cache = root / "cache"
+            entry = cache / init.key(task, "base", binary, harness, opts)
+            entry.mkdir(parents=True)
+            (entry / "init.patch").write_text("saved patch")
+            (entry / "meta.json").write_text("{}")
+            with patch.object(init, "CACHE", cache), patch.object(init.tasks_mod, "prepare",
+                                                                  side_effect=RuntimeError("cache miss")):
+                cached = init.prepared(task, harness, {"head_sha": "base"}, opts, root, None)
+                self.assertTrue(cached["cached"])
+                self.assertEqual(cached["patch"].read_text(), "saved patch")
+                with self.assertRaisesRegex(RuntimeError, "cache miss"):
+                    init.prepared(replace(task, env={"MODE": "new"}), harness,
+                                  {"head_sha": "base"}, opts, root, None)
+
+    def test_cache_identity_changes_with_init_inputs(self):
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "jouet"
+            binary.write_text("binary")
+            requirements = root / "requirements.txt"
+            requirements.write_text("fixture==1\n")
+            task = tasks.Task(name="example", dir=root, description="", prompt="", chore="",
+                              rules=[], timeout_s=1, python_requirements="requirements.txt")
+            harness = HARNESSES["codex"]
+            opts = {"codex_model": "model", "effort": "medium"}
+            original = init.key(task, "base", binary, harness, opts)
+            self.assertEqual(original, init.key(task, "base", binary, harness, opts))
+            with patch.object(init, "PROMPT", init.PROMPT + " different"):
+                self.assertNotEqual(original, init.key(task, "base", binary, harness, opts))
+            self.assertNotEqual(original, init.key(task, "base", binary, harness, opts | {"effort": "high"}))
+            for changed in (replace(task, env={"MODE": "other"}), replace(task, path=["/other"]),
+                            replace(task, setup=["prepare"]), replace(task, tools={"python3": "/other"}),
+                            replace(task, isolated_setup=[["prepare"]])):
+                with self.subTest(changed=changed):
+                    self.assertNotEqual(original, init.key(changed, "base", binary, harness, opts))
+            requirements.write_text("fixture==2\n")
+            self.assertNotEqual(original, init.key(task, "base", binary, harness, opts))
+            harness_binary = root / "codex"
+            harness_binary.write_text("first")
+            with_binary = opts | {"harness_bins": {"codex": harness_binary}}
+            before_update = init.key(task, "base", binary, harness, with_binary)
+            harness_binary.write_text("updated binary")
+            self.assertNotEqual(before_update, init.key(task, "base", binary, harness, with_binary))
 
 
 class StatsTest(unittest.TestCase):
