@@ -307,7 +307,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 && digest.warning_names.is_empty()
                 && !digest.warnings_all.is_empty()
             {
-                let dir = job.dir.canonicalize().unwrap_or_else(|_| job.dir.clone());
+                let dir = job.dir.clone();
                 digest.warnings_changed =
                     Some(changed_warnings(&digest.warnings_all, &dir, touched));
             }
@@ -697,7 +697,10 @@ fn touched_files(dir: &Path) -> Option<Touched> {
             .filter(|o| o.status.success())?;
         Some(String::from_utf8_lossy(&out.stdout).into_owned())
     };
+    // Canonical, as the run's directory and each warning's path are, since
+    // git's form can differ (`C:/a` for `\\?\C:\a`, `/tmp` for `/private/tmp`).
     let root = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim_end());
+    let root = root.canonicalize().unwrap_or(root);
     let changed = git(
         &root,
         &["diff", "HEAD", "--name-only", "--no-ext-diff", "-z"],
@@ -737,8 +740,9 @@ fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<S
             }
             let path = Path::new(path);
             [cwd.join(path), touched.root.join(path)]
-                .iter()
-                .any(|p| touched.files.contains(p))
+                .into_iter()
+                .map(|p| p.canonicalize().unwrap_or(p))
+                .any(|p| touched.files.contains(&p))
         })
         .cloned()
         .collect()
@@ -1461,5 +1465,23 @@ mod tests {
             changed_warnings(&absolute, Path::new("/elsewhere"), &spaced),
             absolute
         );
+        // Through a symlink to the run's directory, as `/tmp` on macOS.
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let real = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(real.join("src")).unwrap();
+            std::fs::write(real.join("src/lib.rs"), "").unwrap();
+            std::os::unix::fs::symlink(&real, real.join("link")).unwrap();
+            let linked = Touched {
+                root: real.clone(),
+                files: vec![real.join("src/lib.rs")],
+            };
+            let warning = ["unused: `w` (src/lib.rs:1:1)".to_string()];
+            assert_eq!(
+                changed_warnings(&warning, &real.join("link"), &linked),
+                warning
+            );
+        }
     }
 }
