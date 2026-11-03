@@ -201,7 +201,7 @@ FAIL test_env (test_a.T.test_env)
 baseline: the failure also fails at main (302afa77cd40) with matching failure details; counted as passing: test_env (test_a.T.test_env)
 ```
 
-When the run fails, jouet runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch, and compares the names and captured failure details. `--since REF` names another branch or commit. An upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead. Any path into the checkout in the command is pointed at the worktree, and the worktree is removed afterwards.
+When the run fails, jouet runs each failed suite again in a temporary worktree of the merge base with the upstream or default branch, and compares the names and captured failure details. `--since REF` names another branch or commit. An upstream of the branch's own name, as `git push -u` sets, holds the change itself, so the default branch is used instead. Any path into the checkout in the command is pointed at the worktree, and the worktree is removed afterwards. On Unix, jouet first initializes submodules from the current checkout when it has the exact pinned commits, copying Git objects into the temporary worktree and preserving the configured remotes. For other submodules it uses Git's normal initialization and URLs.
 
 - If every failure also fails at the merge base with matching, unambiguous details, the run passes (exit `0`) and names them. The stop gate counts the coverage actually run; an affected run remains partial.
 - Matching names with missing, ambiguous or different details remain unresolved (exit `1`).
