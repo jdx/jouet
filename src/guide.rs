@@ -122,7 +122,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "test",
         Some(
-            "running tests or a build: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, cargo by crate, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, when a full run is needed (a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`). `jouet test --cmd -- CMD` runs any other test, e2e or build command; add `--baseline` to compare a failing command with the merge base. Each prints one line when it passes, or each failure with its error within --budget bytes, and saves the whole output to a log it names: read that instead of piping the run through head, tail or grep, or running it again",
+            "running tests or a build: `jouet test --affected` runs only the tests your changes affect (vitest, jest, pytest, unittest, cargo by crate, and the code graph for Go, Ruby and Java) and lists why each was picked; `jouet test` runs the full suite, when a full run is needed (a mise, npm, just or make `test` task, cargo, go, vitest, jest, pytest or `python -m unittest`). `jouet test --cmd -- CMD` runs any other test, e2e or build command. Failed full suites and short `--cmd` runs may already be compared with the merge base: read the result before using `--baseline`, and don't retry an uncomparable baseline until its setup changes. Each prints one line when it passes, or each failure with its error within --budget bytes, and saves the whole output to a log it names: read that instead of piping the run through head, tail or grep, or running it again",
         ),
     ),
     (
@@ -932,7 +932,7 @@ pub(crate) fn summary(
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while a test, lint or build run failed, or when no test passed since your last change. For an unrelated failure, compare its command with `jouet test --baseline --cmd -- CMD`.\n",
+            "Failed checks or untested edits block finishing. For unrelated failures, read baseline results first; if none, use `jouet test --baseline --cmd -- CMD`. Uncomparable remains unresolved; don't retry unchanged.\n",
         );
     }
     out
@@ -1156,10 +1156,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
-        assert!(
-            text.contains("compare its command with `jouet test --baseline --cmd -- CMD`"),
-            "{text}"
-        );
+        assert!(text.contains("read baseline results first"), "{text}");
         assert!(text.contains("These need no lookup"), "{text}");
         // CI's coverage depends on the repository; the primer cannot assert it.
         assert!(!text.contains("CI runs the full suite"), "{text}");
