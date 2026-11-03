@@ -410,7 +410,16 @@ pub(crate) fn plan(
                 .map(|c| FileEffect {
                     path: c.path.clone(),
                     status: c.status,
-                    effect: effect(adapters[i].as_ref(), &others, &project, &mut packages, c),
+                    effect: if matches!(adapters[i].name(), "vitest" | "jest")
+                        && js::config_changed(&project, extra, &c.path)
+                    {
+                        Effect::Full(format!(
+                            "the selected test configuration changed ({})",
+                            c.path
+                        ))
+                    } else {
+                        effect(adapters[i].as_ref(), &others, &project, &mut packages, c)
+                    },
                 })
                 .collect()
         })
