@@ -19,6 +19,8 @@ METRICS: list[tuple[str, str, Callable[[dict[str, Any]], float | None], str]] = 
     ("requests", "model requests", lambda r: _a(r, "requests"), "count"),
     ("calls", "tool calls", lambda r: _a(r, "calls"), "count"),
     ("failed_calls", "failed tool calls", lambda r: _a(r, "failed_calls"), "count"),
+    ("shell_commands", "completed shell commands", lambda r: _shell(r, "completed"), "count"),
+    ("shell_failures", "failed shell commands", lambda r: _shell(r, "failed"), "count"),
     ("tool_output_bytes", "tool output (bytes)", lambda r: _a(r, "tool_output_bytes"), "bytes"),
     ("wall_s", "wall time (s)", lambda r: r.get("wall_s"), "seconds"),
 ]
@@ -31,6 +33,10 @@ def _u(r: dict[str, Any], key: str) -> float | None:
 def _a(r: dict[str, Any], key: str) -> float | None:
     a = r.get("audit")
     return a.get(key) if a else None
+
+
+def _shell(r: dict[str, Any], key: str) -> float | None:
+    return (r.get("shell") or {}).get(key)
 
 
 def _uncached(r: dict[str, Any]) -> float | None:

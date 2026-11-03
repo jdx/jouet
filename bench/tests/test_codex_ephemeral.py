@@ -10,13 +10,43 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from jbench.harness import Codex
+from jbench.harness import Codex, codex_shell_metrics
 
 
 WORKER = Path(__file__).resolve().parents[1] / "jbench/codex_ephemeral.py"
 
 
 class CodexEphemeralTest(unittest.TestCase):
+    def test_shell_metrics_require_linked_completed_events(self):
+        def event(kind, ident, code=None):
+            item = {"type": "commandExecution", "id": ident}
+            if code is not None:
+                item["exitCode"] = code
+            return {"type": kind, "item": item}
+
+        prefix = [{"type": "jouet.ephemeral"}, {"type": "thread.started"}]
+        suffix = [{"type": "turn.completed"}]
+        events = prefix + [event("item.started", "1"), event("item.completed", "1", 0),
+                           {"type": "item.completed", "item": {"type": "fileChange"}},
+                           event("item.started", "2"), event("item.completed", "2", 1)] + suffix
+        encode = lambda rows: [json.dumps(row) for row in rows]
+        self.assertEqual(codex_shell_metrics(encode(events)), {"completed": 2, "failed": 1})
+        unknown = prefix + [event("item.started", "1"), event("item.completed", "1")] + suffix
+        self.assertEqual(codex_shell_metrics(encode(unknown)), {"completed": 1, "failed": None})
+        incomplete = [
+            events[1:], events[:-1], prefix + [event("item.started", "1")] + suffix,
+            prefix + [event("item.completed", "1", 0)] + suffix,
+            prefix + [event("item.started", "1"), event("item.started", "1"),
+                      event("item.completed", "1", 0)] + suffix,
+            prefix + [event("item.started", "1"), event("item.completed", "1", 0),
+                      event("item.completed", "1", 0)] + suffix,
+            prefix + [{"type": "error"}] + suffix,
+        ]
+        for rows in incomplete:
+            with self.subTest(rows=rows):
+                self.assertIsNone(codex_shell_metrics(encode(rows)))
+        self.assertIsNone(codex_shell_metrics(encode(events[:-1]) + ["{", json.dumps(suffix[0])]))
+
     def test_command_preserves_a_prompt_that_starts_with_a_dash(self):
         cmd = Codex().command("codex", "--task", {"codex_model": "test"}, Path("/tmp"))
         self.assertEqual(cmd[-2:], ["--", "--task"])
