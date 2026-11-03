@@ -252,6 +252,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     } else {
         added_lines(&cwd)
     };
+    // And the files it touches, for naming its warnings.
+    let touched = if args.dry_run {
+        Vec::new()
+    } else {
+        touched_files(&cwd)
+    };
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
@@ -296,6 +302,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
                 digest.passed_changed = changed_tests(&digest.passed_all, &added);
+            }
+            if digest.warning_names.is_empty() && !digest.warnings_all.is_empty() {
+                digest.warnings_changed = Some(changed_warnings(&digest.warnings_all, &touched));
             }
             let empty_test = args.cmd
                 && code == 0
@@ -661,6 +670,50 @@ fn added_lines(dir: &Path) -> String {
         }
     }
     added
+}
+
+/// The files the work tree changes since HEAD, and its untracked ones, from
+/// the repository's root.
+fn touched_files(dir: &Path) -> Vec<String> {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    };
+    let mut files: Vec<String> = git(&["diff", "HEAD", "--name-only", "--no-ext-diff"])
+        .lines()
+        .chain(git(&["ls-files", "--others", "--exclude-standard", "--full-name"]).lines())
+        .map(str::to_string)
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// The warnings (`headline (path:line:col)`) whose file is one the change
+/// touches, up to [`WARNINGS_NAMED`]. A warning's path is from where the
+/// compiler ran, a touched one from the repository's root, so either may
+/// end with the other.
+fn changed_warnings(warnings: &[String], touched: &[String]) -> Vec<String> {
+    warnings
+        .iter()
+        .filter(|w| {
+            let Some(at) = w.rsplit_once(" (").map(|(_, at)| at.trim_end_matches(')')) else {
+                return false;
+            };
+            let path = at.split(':').next().unwrap_or(at);
+            touched
+                .iter()
+                .any(|t| Path::new(t).ends_with(path) || Path::new(path).ends_with(t))
+        })
+        .take(testlog::WARNINGS_NAMED)
+        .cloned()
+        .collect()
 }
 
 /// The passing tests whose name, or its last part (`a::tests::b`'s `b`,
@@ -1249,6 +1302,18 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
             for warning in &digest.warning_names {
                 let _ = writeln!(s, "  warning: {warning}");
             }
+            // Too many to name: those in the files the change touches.
+            match &digest.warnings_changed {
+                Some(changed) if changed.is_empty() => {
+                    s.push_str("  none of the warnings is in a file this change touches\n");
+                }
+                Some(changed) => {
+                    for warning in changed {
+                        let _ = writeln!(s, "  warning in a changed file: {warning}");
+                    }
+                }
+                None => {}
+            }
         }
         return s;
     }
@@ -1326,5 +1391,24 @@ mod tests {
         assert!(changed_tests(&bats, "run jouet --json search x\n").is_empty());
         let dotted = ["tests.test_a.T.test_json".to_string()];
         assert_eq!(changed_tests(&dotted, "    def test_json(self):\n"), dotted);
+    }
+
+    #[test]
+    fn warnings_in_the_changed_files_are_named() {
+        let warnings: Vec<String> = [
+            "unused import: `std::fs` (src/cmd/edit.rs:3:5)",
+            "unused variable: `x` (crates/a/src/lib.rs:10:9)",
+            "field `y` is never read (src/old.rs:7:5)",
+        ]
+        .map(String::from)
+        .into();
+        // A path from the crate's own directory matches one from the root.
+        let touched = ["src/cmd/edit.rs", "crates/a/src/lib.rs"].map(String::from);
+        assert_eq!(changed_warnings(&warnings, &touched), &warnings[..2]);
+        let touched = ["README.md".to_string()];
+        assert!(changed_warnings(&warnings, &touched).is_empty());
+        let in_crate = ["unused variable: `x` (src/lib.rs:10:9)".to_string()];
+        let touched = ["crates/a/src/lib.rs".to_string()];
+        assert_eq!(changed_warnings(&in_crate, &touched), in_crate);
     }
 }
