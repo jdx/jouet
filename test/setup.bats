@@ -14,6 +14,7 @@ setup() {
 	assert_success
 	assert_output --partial 'Start a new agent session in the project'
 	assert_output --partial 'Help me compare this project with and without jouet.'
+	assert_output --partial 'Remove private project details and secrets from the draft'
 	assert_output --partial 'approve it before posting anything'
 	refute [ -s "$HOME/.codex/auth.json" ]
 }
@@ -24,6 +25,7 @@ setup() {
 	run jq -r '.benchmark_prompt' <<<"$output"
 	assert_success
 	assert_output --partial 'Help me compare this project with and without jouet.'
+	assert_output --partial 'Remove private project details and secrets from the draft'
 	run --separate-stderr jouet setup codex --json
 	assert_success
 	run jq 'has("benchmark_prompt")' <<<"$output"
