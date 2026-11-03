@@ -228,6 +228,10 @@ py_project() {
 				run jq -r '.suites[0].tests[].path' <<<"$output"
 				assert_output 'test/fmt.test.js'
 			done
+			run --separate-stderr jouet test --baseline --affected --since main --dry-run --json -- --config "$config"
+			assert_success
+			run jq -e '.suites[0] | ((.tests | map(.path) | index("test/fmt.test.js")) != null) and ((.command | index("--config")) != null) and ((.command | index("test/fmt.test.js")) != null)' <<<"$output"
+			assert_success
 			run --separate-stderr jouet test --affected --since main --json -- --config "$config"
 			assert_success
 			run jq -r '.ok, .suites[0].tests[].path' <<<"$output"
