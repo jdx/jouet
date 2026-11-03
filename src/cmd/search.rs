@@ -98,6 +98,10 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         if let Some(scope) = &scope {
             text.push_str(&super::scope::render(scope));
         }
+        let context = [args.after_context, args.before_context, args.context];
+        if context.into_iter().flatten().any(|n| n > 0) {
+            text.push_str("context lines (-A, -B, -C) are not shown: `jouet read PATH --range A:B` reads around a match\n");
+        }
         text
     });
     if report.matches == 0 {

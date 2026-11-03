@@ -70,6 +70,17 @@ pub(crate) struct SearchArgs {
     /// Accepted for rg's sake: line numbers are always shown
     #[usage(short = 'n', long)]
     pub(crate) line_number: bool,
+    /// Accepted for rg's sake: matches are shown in the symbol they are
+    /// in, without context lines (`jouet read` reads around one)
+    // Agents type rg's `-A0` from habit; an unknown flag costs a request.
+    #[usage(short = 'A', long = "after-context", value_name = "NUM")]
+    pub(crate) after_context: Option<usize>,
+    /// Accepted for rg's sake, as -A
+    #[usage(short = 'B', long = "before-context", value_name = "NUM")]
+    pub(crate) before_context: Option<usize>,
+    /// Accepted for rg's sake, as -A
+    #[usage(short = 'C', long = "context", value_name = "NUM")]
+    pub(crate) context: Option<usize>,
     /// The most bytes to print from one file (default 1500; 0 is no limit)
     #[usage(long, value_name = "BYTES")]
     pub(crate) file_budget: Option<usize>,
