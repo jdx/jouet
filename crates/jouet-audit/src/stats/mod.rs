@@ -19,7 +19,7 @@ pub use summary::{SummaryStyle, summary};
 use crate::analyze::HarnessReport;
 use crate::category::Category;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The fewest runs of a kind of work, before setup, to estimate from.
 pub const MIN_BASELINE_RUNS: u64 = 20;
@@ -31,9 +31,22 @@ pub struct StatsFilter {
     pub since: Option<u64>,
     pub harness: Option<String>,
     pub session: Option<String>,
+    /// The rules loaded now, by name, with their revisions. When set, the
+    /// rules table counts each rule only from decisions of that revision,
+    /// and leaves out rules that are not loaded.
+    pub revisions: Option<BTreeMap<String, String>>,
 }
 
 impl StatsFilter {
+    /// Whether the rules table counts a rule's decision: without
+    /// `revisions`, every one; with them, one of the revision loaded now.
+    fn current(&self, d: &LedgerDecision) -> bool {
+        self.revisions.as_ref().is_none_or(|r| {
+            r.get(&d.rule)
+                .is_some_and(|rev| d.revision.as_ref() == Some(rev))
+        })
+    }
+
     fn keeps(&self, e: &LedgerEntry) -> bool {
         self.since.is_none_or(|s| e.ts >= s)
             && self.harness.as_ref().is_none_or(|h| *h == e.harness)
@@ -59,6 +72,13 @@ pub struct Measured {
     /// Rule decisions, most first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<RuleCounts>,
+    /// Decisions of a loaded rule left out of `rules` as an older
+    /// revision's, or from before the ledger recorded revisions.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub older_decisions: u64,
+    /// Rules the ledger names that are not loaded now, left out of `rules`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rules_not_loaded: Vec<String>,
     /// Test, lint and build runs the `checks` rule recorded.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<CheckRuns>,
@@ -254,6 +274,7 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut overhead: BTreeMap<String, Overhead> = BTreeMap::new();
     // How often each rule denied or warned in each session.
     let mut fired: HashMap<(&str, &str), u64> = HashMap::new();
+    let mut not_loaded: BTreeSet<String> = BTreeSet::new();
     // The next pre-tool-use entry of each session, for "what came next".
     let mut by_session: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
     for (i, e) in kept.iter().enumerate() {
@@ -268,19 +289,37 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 ..Overhead::default()
             });
         for d in &e.decisions {
-            if let ("deny" | "warn", Some(session)) = (d.action.as_str(), e.session.as_deref()) {
+            // What a rule decided goes in the rules table only from its
+            // current revision; what it cost counts whatever the revision.
+            let ruled = matches!(d.action.as_str(), "deny" | "warn" | "override");
+            let counted = !ruled || filter.current(d);
+            if !counted {
+                match &filter.revisions {
+                    Some(r) if r.contains_key(&d.rule) => m.older_decisions += 1,
+                    _ => {
+                        not_loaded.insert(d.rule.clone());
+                    }
+                }
+            }
+            if let ("deny" | "warn", Some(session), true) =
+                (d.action.as_str(), e.session.as_deref(), counted)
+            {
                 *fired.entry((d.rule.as_str(), session)).or_default() += 1;
             }
             match d.action.as_str() {
                 "deny" => {
-                    rule_counts(&mut rules, &d.rule).denies += 1;
+                    if counted {
+                        rule_counts(&mut rules, &d.rule).denies += 1;
+                    }
                     added.denials += 1;
                 }
                 "warn" => {
-                    rule_counts(&mut rules, &d.rule).warns += 1;
+                    if counted {
+                        rule_counts(&mut rules, &d.rule).warns += 1;
+                    }
                     added.warnings += 1;
                 }
-                "override" => rule_counts(&mut rules, &d.rule).overrides += 1,
+                "override" if counted => rule_counts(&mut rules, &d.rule).overrides += 1,
                 "block" if d.rule == "verify" => {
                     m.verify_blocks += 1;
                     added.stop_blocks += 1;
@@ -351,7 +390,11 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     for indexes in by_session.values() {
         for (n, &i) in indexes.iter().enumerate() {
             let next = indexes.get(n + 1).map(|&j| kept[j]);
-            for d in kept[i].decisions.iter().filter(|d| d.action == "deny") {
+            for d in kept[i]
+                .decisions
+                .iter()
+                .filter(|d| d.action == "deny" && filter.current(d))
+            {
                 let r = rule_counts(&mut rules, &d.rule);
                 match next.and_then(|e| e.shape.as_deref()) {
                     None if next.is_none() => r.then_nothing += 1,
@@ -367,6 +410,7 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         r.sessions_again += u64::from(n > 1);
     }
     m.sessions = sessions.len() as u64;
+    m.rules_not_loaded = not_loaded.into_iter().collect();
     m.commands = commands.into_values().collect();
     m.commands.sort_by(|a, b| {
         b.runs

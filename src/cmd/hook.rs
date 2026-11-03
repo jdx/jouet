@@ -193,7 +193,7 @@ fn handle(
                 .and_then(|cwd| fnox::context(cwd.as_ref()));
             let (mut output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
-                log.pre_tool_use(&call, outcome);
+                log.pre_tool_use(&engine, &call, outcome);
             }
             if harness == Harness::Claude && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
                 output = with_long_timeout(&engine, payload, &call, output);
@@ -310,6 +310,7 @@ fn handle(
                     rule: "verify".into(),
                     action: "block".into(),
                     scope: None,
+                    revision: None,
                 });
             }
             log.append(entry);
@@ -481,6 +482,16 @@ fn with_notes(mut primer: Value, notes: &[String]) -> Value {
     primer
 }
 
+/// The revision of the loaded rule `name`, for the ledger.
+fn revision(engine: &Engine, name: &str) -> Option<String> {
+    engine
+        .rules()
+        .iter()
+        .find(|r| r.name == name)
+        .map(|r| r.revision.clone())
+        .filter(|r| !r.is_empty())
+}
+
 /// Where this hook's ledger entries go, and whose they are.
 struct Log<'a> {
     dir: Option<PathBuf>,
@@ -505,7 +516,7 @@ impl Log<'_> {
 
     /// The call's shape and decisions, after any overrides it is: a retry
     /// of a command of the same shape that a rule denied or warned about.
-    fn pre_tool_use(&self, call: &Call, outcome: &Outcome) {
+    fn pre_tool_use(&self, engine: &Engine, call: &Call, outcome: &Outcome) {
         let (Some(dir), Some(command)) = (&self.dir, &call.command) else {
             return;
         };
@@ -521,6 +532,7 @@ impl Log<'_> {
                 entry.tool = Some(call.tool.clone());
                 entry.shape = Some(shape.clone());
                 entry.decisions.push(ledger::Decision {
+                    revision: revision(engine, &rule),
                     rule,
                     action: "override".into(),
                     scope: None,
@@ -543,6 +555,7 @@ impl Log<'_> {
                     "warn".into()
                 },
                 scope: None,
+                revision: revision(engine, &d.rule),
             })
             .collect();
         ledger::append(dir, &entry);
@@ -1252,6 +1265,7 @@ fn decision(r: &Record) -> ledger::Decision {
         rule: r.rule.clone(),
         action: format!("record:{}", r.kind.name()),
         scope: Some(if r.full { "full" } else { "partial" }.into()),
+        revision: None,
     }
 }
 
