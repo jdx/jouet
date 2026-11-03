@@ -80,25 +80,27 @@ pub(crate) struct Digest {
     pub(crate) no_tests: bool,
 }
 
+#[derive(serde::Deserialize)]
+struct GoOutput<'a> {
+    #[serde(rename = "Action", borrow)]
+    action: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "Package", borrow)]
+    package: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "Output", borrow)]
+    output: Option<std::borrow::Cow<'a, str>>,
+}
+
 /// Whether the output says a run selected no test: TAP's empty plan,
 /// libtest running none in every binary, or a supported runner saying so.
 fn no_tests(lines: &[String]) -> bool {
     // `go test -json` wraps the same package output lines in output events.
     // Only unwrap Go-shaped events; unrelated JSON is not runner output.
-    let go_output: Vec<String> = lines
+    let go_output: Vec<_> = lines
         .iter()
-        .filter(|line| line.starts_with('{'))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|event| {
-            event.get("Action").and_then(|v| v.as_str()) == Some("output")
-                && event.get("Package").and_then(|v| v.as_str()).is_some()
-        })
-        .filter_map(|event| {
-            event
-                .get("Output")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
+        .filter(|line| line.starts_with('{') && line.contains("\"Output\""))
+        .filter_map(|line| serde_json::from_str::<GoOutput<'_>>(line).ok())
+        .filter(|event| event.action.as_deref() == Some("output") && event.package.is_some())
+        .filter_map(|event| event.output)
         .collect();
     let output = || {
         lines

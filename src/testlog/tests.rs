@@ -667,6 +667,8 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
     assert!(!digest(&go_no_files_and_test, false, DEFAULT_BUDGET).no_tests);
     let go_json_empty = r#"{"Action":"output","Package":"example.com/a","Output":"?   \texample.com/a\t[no test files]\n"}"#;
     assert!(digest(go_json_empty, false, DEFAULT_BUDGET).no_tests);
+    let go_json_escaped = r#"{"Action":"\u006futput","Package":"example.com/\u0061","Output":"?   \texample.com/a\t[no test files]\n"}"#;
+    assert!(digest(go_json_escaped, false, DEFAULT_BUDGET).no_tests);
     let go_json_filtered = r#"{"Action":"output","Package":"example.com/a","Output":"ok  \texample.com/a\t0.004s [no tests to run]\n"}"#;
     assert!(digest(go_json_filtered, false, DEFAULT_BUDGET).no_tests);
     let go_json_test = format!(
