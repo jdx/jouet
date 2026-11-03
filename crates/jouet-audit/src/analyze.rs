@@ -699,7 +699,7 @@ pub struct Totals {
     /// Shell commands.
     #[serde(skip_serializing_if = "is_zero")]
     pub commands: u64,
-    /// Time shell commands ran.
+    /// Sum of recorded shell-call durations, not full background process time.
     #[serde(skip_serializing_if = "is_zero")]
     pub command_ms: u64,
     /// Time every tool call took, shell commands included.
