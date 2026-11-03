@@ -207,7 +207,7 @@ When a run fails because the harness cannot log in at all, the suite stops inste
 ### Running the agents
 
 - **Claude Code:** `claude -p --output-format stream-json --verbose --model M --effort E --permission-mode bypassPermissions --strict-mcp-config --settings '{"syncClaudeAiSkills": false}' --max-budget-usd N`. The stream carries each response's usage, and its last event has the totals, turn count and cost. Skill syncing is off because a claude.ai login otherwise downloads the account's skills in the background, and their listing, about 3.8k tokens, joins every request after it lands. It landed in longer runs and not in shorter ones, so it counted against whichever arm made more requests. Runs before this change include it.
-- **Codex:** `codex exec --json --model M -c model_reasoning_effort=E --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust`. Codex skips hooks nobody has trusted, and the throwaway `CODEX_HOME` has trusted none. Its usage arrives only at the end of the turn, so the per-run token cap is enforced from the session file Codex writes as it goes.
+- **Codex:** one ephemeral thread through `codex app-server`, with approvals off and full sandbox access, and the model and effort set per thread. Codex runs only hooks it trusts, so a jouet run carries the reviewed trust (see above). Usage arrives as live app-server events, which enforce the per-run token cap.
 
 ### A fake GitHub
 
