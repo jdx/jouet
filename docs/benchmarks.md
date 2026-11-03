@@ -28,6 +28,8 @@ Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), 
 
 Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and a pinned commit before the fix (`[source]`) instead of a `repo/`. Prompts describe the original issue and ask for a fix, a test and a commit. The checker runs a hidden regression test and `solve.py` applies a reference fix. They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
 
+Success means the agent exited normally and the task's checker passed; it does not by itself establish that every part of the prompt was fulfilled. Some real-project checkers report whether a fix was committed without making the commit a condition of success, and not all check that the agent added a test. Inspect the task's checker and run evidence when assessing accuracy.
+
 Projects beyond jdx's own:
 
 | task | project | issue | language and runner | needs on the host |
@@ -124,7 +126,7 @@ The first batch has ten SWE-bench Verified instances, chosen from the dataset's 
 
 SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
 
-The models under test may have seen these issues and fixes in training. Both arms use the same model, so the paired comparison cancels most of that. A run's success rate on these tasks says less than its cost difference does.
+The models under test may have seen these issues and fixes in training. Both arms use the same model, but jouet may change how an agent uses what it remembers, so pairing does not eliminate this confounder. Success and cost differences on these tasks may not generalize to unfamiliar work.
 
 ### Arms
 
