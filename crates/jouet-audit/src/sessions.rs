@@ -94,7 +94,8 @@ pub fn codex_for_review(codex: &Codex) -> (Vec<Session>, usize) {
             } else if kind.is_file()
                 && path.file_name().is_some_and(|n| {
                     let name = n.to_string_lossy();
-                    name.starts_with("rollout-") && name.ends_with(".jsonl")
+                    name.starts_with("rollout-")
+                        && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
                 })
             {
                 paths.push(path);
@@ -104,6 +105,11 @@ pub fn codex_for_review(codex: &Codex) -> (Vec<Session>, usize) {
     let mut paths = Vec::new();
     let mut unavailable = 0;
     collect(&codex.root.join("sessions"), &mut paths, &mut unavailable);
+    collect(
+        &codex.root.join("archived_sessions"),
+        &mut paths,
+        &mut unavailable,
+    );
     let mut sessions = Vec::new();
     for path in paths {
         let found = Source::from_path(path)
@@ -175,9 +181,13 @@ fn read_codex(source: &Source) -> Option<Session> {
     let meta = first_line(&source.path, MAX_META, |line| {
         line.get("type").and_then(Value::as_str) == Some("session_meta")
     })?;
-    let turn = last_line(&source.path, b"\"turn_context\"", |line| {
-        line.get("type").and_then(Value::as_str) == Some("turn_context")
-    });
+    let turn = if source.path.extension().is_some_and(|e| e == "zst") {
+        None
+    } else {
+        last_line(&source.path, b"\"turn_context\"", |line| {
+            line.get("type").and_then(Value::as_str) == Some("turn_context")
+        })
+    };
     let cwd = turn
         .as_ref()
         .and_then(|t| text(t, &["payload", "cwd"]))
@@ -224,7 +234,7 @@ fn last_line(path: &Path, needle: &[u8], wanted: impl Fn(&Value) -> bool) -> Opt
 /// The first whole line within the first `limit` bytes that parses to
 /// what `wanted` accepts.
 fn first_line(path: &Path, limit: u64, wanted: impl Fn(&Value) -> bool) -> Option<Value> {
-    let mut reader = BufReader::new(File::open(path).ok()?.take(limit));
+    let mut reader = BufReader::new(crate::read::open(path).ok()?.take(limit));
     let mut line = Vec::new();
     loop {
         line.clear();

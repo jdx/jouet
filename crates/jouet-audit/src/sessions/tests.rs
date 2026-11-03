@@ -37,15 +37,35 @@ fn scheduled_discovery_reports_unreadable_metadata_and_ignores_subagents() {
         "not json\n",
     );
     write(
+        &codex.root.join("archived_sessions/rollout-plain.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"plain\",\"cwd\":\"/repo\"}}\n",
+    );
+    let compressed = codex
+        .root
+        .join("archived_sessions/rollout-zipped.jsonl.zst");
+    let bytes = zstd::stream::encode_all(
+        &b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"zipped\",\"cwd\":\"/repo\"}}\n"[..],
+        0,
+    )
+    .unwrap();
+    std::fs::write(compressed, bytes).unwrap();
+    std::fs::write(
+        codex
+            .root
+            .join("archived_sessions/rollout-broken.jsonl.zst"),
+        b"not zstd",
+    )
+    .unwrap();
+    write(
         &codex
             .root
             .join("sessions/day/subagents/rollout-child.jsonl"),
         "not json\n",
     );
     let (sessions, unavailable) = codex_for_review(&codex);
-    assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].id, "good");
-    assert_eq!(unavailable, 1);
+    let ids: std::collections::BTreeSet<_> = sessions.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["good", "plain", "zipped"].into_iter().collect());
+    assert_eq!(unavailable, 2);
 }
 
 #[test]

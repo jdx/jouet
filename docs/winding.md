@@ -109,8 +109,8 @@ Session review reads the whole transcript instead, through a [digest](#the-diges
 An agent-interface schedule can review sessions independently of the stop hook.
 This is opt-in: choose the project roots, cadence and maximum reviews per run
 with your agent, then create the schedule in that interface. jouet does not
-create a schedule itself. The scheduler reads local Codex session metadata to
-find sessions; reviews read the selected transcripts and may send their digests
+create a schedule itself. The scheduler reads local Codex session metadata,
+including plain and compressed archives, to find sessions; reviews read the selected transcripts and may send their digests
 to the agent's model provider. Only sessions whose original worktree is under
 an opted-in root and whose recorded turns stay in that worktree are eligible.
 Sessions that span worktrees or cannot be inspected are reported, not reviewed.
@@ -135,8 +135,10 @@ limit. Use JSON output to pass paths as arguments, not by shell interpolation:
    submit upstream reports without the user's approval. Never publish private
    repository information; inspect any proposed report before sharing it.
 
-The receipt records a version of an append-only transcript using its path,
-length and modification time; an append makes it eligible again. The plan limits
+The receipt records a version of an append-only transcript by session, project,
+length and modification time; an append makes it eligible again. Moving a plain
+transcript preserves its receipt when its metadata is unchanged; recompressing
+it may make it eligible for another review. The plan limits decoded
 full-transcript inspection to 32 MiB per session and 256 MiB per invocation,
 but enumerates local session metadata on each run. Proposals and receipts stay
 in local state; incomplete, changed or deferred reviews are not marked done.

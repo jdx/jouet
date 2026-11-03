@@ -717,7 +717,7 @@ pub(crate) fn prompt(contribute: bool) -> String {
 
 const PROMPT: &str = r#"You are reviewing a coding-agent session to find changes to its environment that would have made it go better: fewer corrections from the user, fewer failed retries, less waiting, less exploring the same ground. You are not reviewing the code it wrote.
 
-Below is a digest of the session from `jouet wind digest`: the user's corrections, failures, long calls, where tokens went, files read repeatedly, commands typed out again, and a timeline of phases, one per prompt. Each item has a span (L120-188) into the transcript named in its header, a JSONL file; when an item is unclear, read those lines (`sed -n '120,188p' FILE | cut -c1-600`), and only those.
+Below is a digest of the session from `jouet wind digest`: the user's corrections, failures, long calls, where tokens went, files read repeatedly, commands typed out again, and a timeline of phases, one per prompt. Each item has a span (L120-188) into the transcript named in its header. When an item is unclear, read only those lines; a `.zst` transcript needs local decompression first. If you cannot inspect an unclear item, do not infer its missing context.
 
 Look for causes, not symptoms:
 - A correction the user had to make: what did the agent not know, or not follow? Would a note or a rule have prevented it?
