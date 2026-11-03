@@ -21,9 +21,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-/// codegraph's `MAX_SOURCE_FILE_SIZE_BYTES`: larger files are recorded but
-/// not extracted (they are almost always generated or vendored).
-pub(crate) const MAX_FILE_SIZE: u64 = 1024 * 1024;
+/// Larger files are recorded but not extracted. codegraph, which this is
+/// derived from, stops at 1 MiB, since such files are almost always
+/// generated or vendored; but generated code such as an OpenAPI client is
+/// part of the graph `jouet test --affected` follows, and a Go file left out
+/// of it means the whole suite. Extracting one takes about 0.9 s per MB,
+/// paid again only when it changes.
+pub(crate) const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024;
 
 /// Directories never indexed, even when nothing ignores them (codegraph's
 /// `SUBPROJECT_SCAN_SKIP`, less the names that are often real source).
@@ -63,7 +67,7 @@ pub struct Refresh {
     pub touched: usize,
     /// Files that disappeared, and their symbols with them.
     pub removed: usize,
-    /// Files recorded without symbols: larger than 1 MiB, or not UTF-8.
+    /// Files recorded without symbols: larger than 4 MiB, or not UTF-8.
     pub skipped: usize,
     /// Stale files left for the next refresh because the budget ran out.
     pub deferred: usize,
@@ -190,7 +194,7 @@ fn extract_one(c: &Candidate) -> Option<(&'static str, Result<Extraction, String
     let Some(source) = &c.source else {
         let lang = extract::language_for_path(&c.seen.rel)?;
         let why = if c.seen.size > MAX_FILE_SIZE {
-            "larger than 1 MiB"
+            "larger than 4 MiB"
         } else {
             "not UTF-8"
         };
