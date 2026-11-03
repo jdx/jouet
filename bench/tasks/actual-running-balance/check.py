@@ -35,5 +35,5 @@ script = Path(__file__).with_name('check-note.mjs').read_text()
 result = subprocess.run(['node', '--input-type=module', '-e', script, '--', *notes], check=False)
 if result.returncode:
     sys.exit('no valid committed release note crediting the supplied contributor')
-if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True):
-    sys.exit('tracked changes are not committed')
+if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], text=True):
+    sys.exit('working tree changes are not committed')
