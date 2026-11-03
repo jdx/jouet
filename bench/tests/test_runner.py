@@ -1167,6 +1167,22 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_primary_comparison_prefers_initialized_jouet(self):
+        def record(arm, tokens, success=True):
+            return {"task": "web", "harness": "codex", "arm": arm, "round": 1,
+                    "success": success, "wall_s": 10, "usage": {"input_tokens": tokens, "cached_input_tokens": 0}}
+
+        records = [record("plain", 100), record("jouet", 80), record("jouet-init", 60)]
+        cell = report.summarize(records, {})["cells"][0]
+        self.assertEqual(cell["treatment"], "jouet-init")
+        self.assertEqual(cell["paired_when_both_pass"]["input_tokens"]["median_diff"], -40)
+        self.assertEqual(cell["init_comparison"]["paired_when_both_pass"]["input_tokens"]["median_diff"], -20)
+        self.assertIn("| web (jouet-init) | codex | 1/1 | 1/1 | 1 | -40", report.markdown({"meta": {}, "cells": [cell]}))
+
+        cell = report.summarize(records[:2], {})["cells"][0]
+        self.assertEqual(cell["treatment"], "jouet")
+        self.assertEqual(cell["paired_when_both_pass"]["input_tokens"]["median_diff"], -20)
+
     def test_initialized_comparison_includes_only_both_passed_pairs(self):
         def record(arm, number, success, tokens, **extra):
             return {"task": "web", "harness": "codex", "arm": arm, "round": number,
