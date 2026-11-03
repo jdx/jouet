@@ -78,6 +78,23 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
         init_runs = [r["init"] for r in by_arm.get("jouet-init", []) if r.get("init")]
         if init_runs:
             cell["init"] = init_runs[0]
+        if "jouet" in by_arm and "jouet-init" in by_arm:
+            pairs = {
+                arm: {r["round"]: r for r in by_arm[arm]
+                      if not r.get("error") and isinstance(r.get("success"), bool)}
+                for arm in ("jouet", "jouet-init")
+            }
+            rounds = sorted(pairs["jouet"].keys() & pairs["jouet-init"].keys())
+            passed = [n for n in rounds if pairs["jouet"][n]["success"] and pairs["jouet-init"][n]["success"]]
+            cell["init_comparison"] = {
+                "pairs": len(rounds),
+                "both_passed": len(passed),
+                "paired_when_both_pass": {
+                    key: stats.paired({n: get(pairs["jouet"][n]) for n in passed},
+                                      {n: get(pairs["jouet-init"][n]) for n in passed})
+                    for key, _, get, _ in METRICS
+                },
+            }
         if "plain" in by_arm and treat:
             paired_runs = {
                 arm: {r["round"]: r for r in by_arm[arm] if not r.get("error") and isinstance(r.get("success"), bool)}
@@ -246,6 +263,19 @@ def markdown(summary: dict[str, Any]) -> str:
             lines += ["", f"Both-pass pairs ({count}): median jouet minus plain: {detail}."]
         if init := cell.get("init"):
             lines += ["", init_line(cell, init)]
+        if comparison := cell.get("init_comparison"):
+            lines += ["", "### Initialized versus ordinary jouet", "",
+                      f"Paired rounds: {comparison['pairs']}; passed in both arms: {comparison['both_passed']}. "
+                      "Medians include finished failures; deltas are initialized minus ordinary and include only both-pass pairs.", "",
+                      "| metric | ordinary jouet median | initialized jouet median | both-pass paired Δ |",
+                      "|---|---|---|---|"]
+            for key, label, _, kind in METRICS:
+                ordinary = cell["arms"]["jouet"]["metrics"].get(key)
+                initialized = cell["arms"]["jouet-init"]["metrics"].get(key)
+                delta = comparison["paired_when_both_pass"].get(key)
+                lines.append(f"| {label} | {fmt(ordinary['median'] if ordinary else None, kind)} | "
+                             f"{fmt(initialized['median'] if initialized else None, kind)} | "
+                             f"{signed(delta['median_diff'] if delta else None, kind)} |")
         notes = []
         for arm, a in sorted(cell["arms"].items()):
             for change in a.get("changes", []):

@@ -959,6 +959,21 @@ class TasksTest(unittest.TestCase):
             self.assertEqual(tasks.git(workdir, "symbolic-ref", "refs/remotes/origin/HEAD"), "refs/remotes/origin/main")
             self.assertTrue((Path(d) / "run" / "origin.git").is_dir())
 
+    def test_an_upstream_url_is_origins_url_and_resolves_to_the_local_repository(self):
+        import dataclasses
+
+        url = "https://git.example.invalid/owner/repo.git"
+        with tempfile.TemporaryDirectory() as d:
+            task = dataclasses.replace(tasks.load("smoke"), remote=False, upstream=True, upstream_url=url)
+            workdir = Path(d) / "run" / "work"
+            workdir.parent.mkdir()
+            shas = tasks.prepare(task, workdir)
+            self.assertEqual(tasks.git(workdir, "config", "--get", "remote.origin.url"), url)
+            self.assertEqual(tasks.git(workdir, "rev-parse", "origin/main"), shas["base_sha"])
+            # A push goes to the local repository, not the host.
+            tasks.git(workdir, "push", "-q", "origin", "HEAD:refs/heads/check")
+            self.assertEqual(tasks.git(Path(d) / "run" / "origin.git", "rev-parse", "check"), shas["head_sha"])
+
 
     def test_setup_runs_in_the_work_tree_and_must_leave_it_clean(self):
         import dataclasses
@@ -1152,6 +1167,27 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_initialized_comparison_includes_only_both_passed_pairs(self):
+        def record(arm, number, success, tokens, **extra):
+            return {"task": "web", "harness": "codex", "arm": arm, "round": number,
+                    "success": success, "wall_s": 10 if arm == "jouet" else 15,
+                    "usage": {"input_tokens": tokens, "cached_input_tokens": tokens // 2,
+                              "output_tokens": 10}, **extra}
+
+        init = {"files": [".jouet/project.toml"], "wall_s": 12.5,
+                "usage": {"input_tokens": 200, "cached_input_tokens": 150, "output_tokens": 20}}
+        records = [record("jouet", 1, True, 100), record("jouet-init", 1, True, 120, init=init),
+                   record("jouet", 2, True, 100), record("jouet-init", 2, False, 500),
+                   record("jouet", 3, True, 100), record("jouet-init", 3, True, 300, error="auth")]
+        cell = report.summarize(records, {})["cells"][0]
+        comparison = cell["init_comparison"]
+        self.assertEqual((comparison["pairs"], comparison["both_passed"]), (2, 1))
+        self.assertEqual(comparison["paired_when_both_pass"]["input_tokens"]["median_diff"], 20)
+        text = report.markdown({"meta": {}, "cells": [cell]})
+        self.assertIn("Initialized versus ordinary jouet", text)
+        self.assertIn("| input tokens (all context read) | 100 | 310 | +20 |", text)
+        self.assertNotIn("12.5s, 200 input tokens", text)
+
     def test_markdown(self):
         def record(arm, r, tokens, success=True):
             return {

@@ -33,10 +33,54 @@ pub(crate) enum WindCmd {
     Digest(WindDigestArgs),
     /// Print a prompt and session digests for an agent to review
     Review(WindDigestArgs),
+    /// List bounded review candidates across selected local project roots
+    Plan(WindPlanArgs),
+    /// Claim one planned snapshot for review
+    Claim(WindClaimArgs),
+    /// Release a scheduled-review lease without marking it reviewed
+    Release(WindReleaseArgs),
     /// Record what a review proposed, to show at the next session start
     Propose(WindProposeArgs),
     /// Check your agents' memories for workarounds whose bug looks fixed
     Memories(WindMemoriesArgs),
+}
+
+/// Find idle Codex sessions in opted-in project roots for scheduled review
+///
+/// This is a read-only plan: it does not run a model, record a review, or
+/// mark sessions reviewed. Roots are explicit; repeat --root for more than
+/// one. Older sessions come first, with projects interleaved.
+#[derive(Args)]
+pub(crate) struct WindPlanArgs {
+    /// Directory containing projects to consider; repeatable
+    #[usage(long, var, value_name = "PATH")]
+    pub(crate) root: Vec<String>,
+    /// Maximum candidates to return (default 10, maximum 100)
+    #[usage(long)]
+    pub(crate) limit: Option<usize>,
+    /// How long a transcript must be idle (default 15m)
+    #[usage(long)]
+    pub(crate) idle: Option<String>,
+}
+
+/// Claim a planned snapshot for one hour, so another review does not start it
+#[derive(Args)]
+pub(crate) struct WindClaimArgs {
+    /// Snapshot ID from `jouet wind plan`
+    pub(crate) snapshot: String,
+    /// Directory containing opted-in projects; repeat as in the plan
+    #[usage(long, var, value_name = "PATH")]
+    pub(crate) root: Vec<String>,
+    /// The same idle threshold used by the plan (default 15m)
+    #[usage(long)]
+    pub(crate) idle: Option<String>,
+}
+
+/// Release a review lease after an interruption or failure
+#[derive(Args)]
+pub(crate) struct WindReleaseArgs {
+    /// Lease ID returned by `jouet wind claim`
+    pub(crate) lease: String,
 }
 
 /// Show or drop a winding note
@@ -77,6 +121,9 @@ pub(crate) struct WindDigestArgs {
     /// Tokens per session's digest, about (default 4000)
     #[usage(long, value_name = "N")]
     pub(crate) budget: Option<usize>,
+    /// Use the recording instructions for a claimed scheduled review
+    #[usage(long)]
+    pub(crate) lease: Option<String>,
 }
 
 /// Check your agents' memories for workarounds whose bug looks fixed
@@ -104,14 +151,21 @@ pub(crate) struct WindMemoriesArgs {
 /// Reads a review's JSON reply on stdin (or from FILE): `{"session": "...",
 /// "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`,
 /// as `jouet wind review` asks for. Each proposal is checked and recorded
-/// as pending: three per review and three a day at most, never one that
+/// as pending: three per review and three a day per project at most, never one that
 /// looks like it holds a secret, never one already proposed. Recording
 /// applies nothing: the next session starts show each proposal in one line,
-/// and the agent there asks the user before applying it.
+/// and the agent there asks the user before applying it. Project and local
+/// proposals need --project unless their queued session identifies the project.
 #[derive(Args)]
 pub(crate) struct WindProposeArgs {
     /// Read the reply from FILE instead of stdin
     pub(crate) file: Option<String>,
+    /// Bind project and local proposals to this work tree
+    #[usage(long)]
+    pub(crate) project: Option<String>,
+    /// Finish a claimed scheduled review only after its reply is recorded
+    #[usage(long)]
+    pub(crate) lease: Option<String>,
 }
 
 /// Propose retiring rules that are noisy or often overridden, and unused tasks

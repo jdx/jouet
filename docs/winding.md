@@ -43,7 +43,7 @@ When more than two are pending, the ledger's rule notes come first, then mise ta
 - **Warn first.** A rule jouet drafts starts in warn mode, and so does a rule a review proposes. Promotion to deny takes `jouet rule promote` or, when you turn `auto_promote` on, a clean record.
 - **Your rules only.** Winding writes, promotes and retires rules in `~/.config/jouet/rules` and nothing else. Built-in rules are never proposed for retirement, and none of yours can replace or overrule one (see [the floor](/rules#where-rules-come-from)). A repository's rules run only once trusted, and change through a reviewed PR.
 - **Your choice for the project.** jouet applies nothing itself. Anything for the project (`mise.toml`, AGENTS.md, a repository rule) or a change to a memory needs your yes. `jouet task apply` refuses until it is told which file.
-- **Few lines.** At most two lines per session start. At most two new rule drafts, two new mise task notes and two new memory notes a day, and three proposals per review and three a day.
+- **Few lines.** At most two lines per session start. At most two new rule drafts, two new mise task notes and two new memory notes a day. Reviews record at most three proposals each, three a day per project (or for user-wide proposals), and twelve a day across all projects.
 - **The sandbox.** Every rule fails open and runs within its budget, whoever wrote it.
 - **Plain files.** The notes, proposals and their states are in `$XDG_STATE_HOME/jouet/wind.json`, and the rule log is in `$XDG_STATE_HOME/jouet/rule-log.jsonl`. `jouet rule log` lists every change (created, promoted, retired), when, by whom and why.
 
@@ -104,6 +104,43 @@ The ledger is deliberately myopic: it holds command shapes, for privacy and so i
 
 Session review reads the whole transcript instead, through a [digest](#the-digest), and only now and then. jouet calls no model and holds no API keys, so an agent does the review, and jouet records what it proposes.
 
+### Scheduled Codex reviews
+
+An agent-interface schedule can review sessions independently of the stop hook.
+This is opt-in: choose the project roots, cadence and maximum reviews per run
+with your agent, then create the schedule in that interface. jouet does not
+create a schedule itself. The scheduler reads local Codex session metadata to
+find sessions; reviews read the selected transcripts and may send their digests
+to the agent's model provider. Only sessions whose original worktree is under
+an opted-in root and whose recorded turns stay in that worktree are eligible.
+Sessions that span worktrees or cannot be inspected are reported, not reviewed.
+Blank lines are ignored; malformed records are left unavailable because they
+may conceal a change of project.
+
+Give the scheduled agent these instructions, substituting the agreed roots and
+limit. Use JSON output to pass paths as arguments, not by shell interpolation:
+
+1. Run `jouet wind plan --root PATH --limit N --json` (repeat `--root` for
+   each opted-in root). Report unavailable, mixed-project and inspection-limited
+   counts rather than treating them as completed reviews.
+2. For each candidate, up to the agreed limit, run `jouet wind claim SNAPSHOT`
+   with the same roots. Claims expire after one hour. If claiming fails, skip
+   that candidate and plan again on the next run.
+3. Run `jouet wind review TRANSCRIPT --project PROJECT --lease LEASE` using
+   the returned claim's exact values. Review its digest and record the JSON
+   response with `jouet wind propose --lease LEASE`, as the prompt directs.
+   Record an explicit `nothing` if no change is warranted. If the review cannot
+   finish, use `jouet wind release LEASE` so it can be retried.
+4. Summarize proposals for the user. Do not apply project or memory changes or
+   submit upstream reports without the user's approval. Never publish private
+   repository information; inspect any proposed report before sharing it.
+
+The receipt records a version of an append-only transcript using its path,
+length and modification time; an append makes it eligible again. The plan limits
+full-transcript inspection to 32 MiB per session and 256 MiB per invocation,
+but enumerates local session metadata on each run. Proposals and receipts stay
+in local state; incomplete, changed or deferred reviews are not marked done.
+
 ### Suggesting a review
 
 With `[wind] review` on (it is off by default), the stop hook digests the session it ends, at most every ten minutes per session, from the transcript path the harness passes it. A session is queued for review when it has `review_corrections` or more user corrections (two by default; an interruption and the prompt after it count once), six or more failed attempts of retried commands, or ten minutes polling CI or a process (as `jouet audit` counts it: a long build is work, not waste). At most one in every `review_every` sessions (five by default) is queued. The next session start in the same repository shows one line:
@@ -117,8 +154,8 @@ jouet wind: session d1d1d1d1 (2h ago, this repository) had 3 user corrections, 2
 `jouet wind review` prints a prompt and the digests of the sessions it picks, for a fresh subagent or a headless run:
 
 ```sh
-claude -p "$(jouet wind review --since 1d)" | jouet wind propose
-codex exec "$(jouet wind review --last --harness codex)" | jouet wind propose
+claude -p "$(jouet wind review --since 1d --project .)" | jouet wind propose --project .
+codex exec "$(jouet wind review --last --harness codex --project .)" | jouet wind propose --project .
 ```
 
 `jouet wind review` and `jouet wind digest` choose sessions the same way. `SESSION` is a session ID, a prefix of one, or a transcript's path. `--last` takes the most recently written session (inside a session, that is the session itself), and `--since TIME` every session written since then (`1d`, `12h`, a date or RFC 3339), the eight most recent, with what they share listed first. `--project PATH` keeps sessions that ran in `PATH` or below it, `--harness` picks `claude`, `codex` or `all` (the default), and `--budget N` sets the tokens per digest (4000 by default).
@@ -131,7 +168,7 @@ The prompt asks the reviewer for causes, not symptoms, and for at most three pro
 ]}
 ```
 
-`jouet wind propose` reads that reply on stdin (or from a file), [checks each proposal](#checks-on-proposals) and records it as pending. Recording a reply also clears that session's suggested review. Recording applies nothing: each next session start shows a pending proposal in one line, like a ledger note, and the agent there asks the user before applying it, then runs `jouet wind adopt ID`. `jouet wind show ID` prints the proposal and its draft, and `jouet wind dismiss ID` drops it.
+`jouet wind propose --project PATH` reads that reply on stdin (or from a file), [checks each proposal](#checks-on-proposals) and records it as pending. `PATH` identifies the session's Git work tree; project and local proposals can omit it when a queued review already identifies the project. Review sessions from different projects separately. Project proposals are shown only in their own work tree; user and global proposals are shown across projects. Older project proposals that lack an origin are not shown at session start, but remain available through `jouet wind` and `jouet wind show ID`. Recording a reply clears the suggested review unless a project or daily limit left proposals deferred. Recording applies nothing: each next session start shows a pending proposal in one line, like a ledger note, and the agent there asks the user before applying it, then runs `jouet wind adopt ID`. `jouet wind show ID` prints the proposal and its draft, and `jouet wind dismiss ID` drops it.
 
 The review runs in a separate agent rather than in the session itself. The stop hook could ask the agent to review its own session before it finishes, but the stop hook fires at the end of every turn, and a review there would spend the session's own context, its largest, at the moment the user is waiting for the answer, by the agent least able to see its own mistakes. A fresh subagent or a headless run starts from the digest alone, a few thousand tokens, and can run when nobody is waiting, or on a schedule.
 
@@ -160,7 +197,7 @@ A `rule`, `routine`, `memory`, `memory_update` or `memory_delete` proposal takes
 - for `memory_update` or `memory_delete`, with a `target` that is not one of the memories the review listed;
 - that looks like it holds a secret.
 
-It skips one with the same kind and title as an earlier proposal (or, for a memory, the same target), and records at most three per review and three a day. What it records is applied only as the [guardrails](#guardrails) allow.
+It skips one with the same kind and title as an earlier proposal in the same project (or, for a memory, the same target). It records at most three per review, three per project per day and twelve in total per day. What it records is applied only as the [guardrails](#guardrails) allow.
 
 ### The digest
 

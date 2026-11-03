@@ -321,6 +321,15 @@ Digest whole sessions: corrections, failures, waits, re\-reads
 \fBwind review\fR
 Digest whole sessions: corrections, failures, waits, re\-reads
 .TP
+\fBwind plan\fR
+Find idle Codex sessions in opted\-in project roots for scheduled review
+.TP
+\fBwind claim\fR
+Claim one planned snapshot for review
+.TP
+\fBwind release\fR
+Release a scheduled\-review lease without marking it reviewed
+.TP
 \fBwind propose\fR
 Record what a review proposed, to show at the next session start
 .TP
@@ -2800,6 +2809,9 @@ Only sessions that ran in PATH or a directory below it
 \fB\-\-budget\fR \fI<N>\fR
 Tokens per session's digest, about (default 4000)
 .TP
+\fB\-\-lease\fR \fI<LEASE>\fR
+Use the recording instructions for a claimed scheduled review
+.TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
@@ -2832,6 +2844,9 @@ Only sessions that ran in PATH or a directory below it
 \fB\-\-budget\fR \fI<N>\fR
 Tokens per session's digest, about (default 4000)
 .TP
+\fB\-\-lease\fR \fI<LEASE>\fR
+Use the recording instructions for a claimed scheduled review
+.TP
 \fB\-h, \-\-help\fR
 Print help
 \fBArguments:\fR
@@ -2839,15 +2854,78 @@ Print help
 .TP
 \fB<SESSION>\fR
 A session ID, a prefix of one, or a transcript's path
+.SH "JOUET WIND PLAN"
+Find idle Codex sessions in opted\-in project roots for scheduled review
+
+This is a read\-only plan: it does not run a model, record a review, or mark sessions reviewed. Roots are explicit; repeat \-\-root for more than one. Older sessions come first, with projects interleaved.
+.PP
+\fBUsage:\fR jouet wind plan [OPTIONS]
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-root\fR \fI<PATH>\fR
+Directory containing projects to consider; repeatable
+.TP
+\fB\-\-limit\fR \fI<LIMIT>\fR
+Maximum candidates to return (default 10, maximum 100)
+.TP
+\fB\-\-idle\fR \fI<IDLE>\fR
+How long a transcript must be idle (default 15m)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+.SH "JOUET WIND CLAIM"
+Claim one planned snapshot for review
+.PP
+\fBUsage:\fR jouet wind claim [OPTIONS] <SNAPSHOT>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-\-root\fR \fI<PATH>\fR
+Directory containing opted\-in projects; repeat as in the plan
+.TP
+\fB\-\-idle\fR \fI<IDLE>\fR
+The same idle threshold used by the plan (default 15m)
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<SNAPSHOT>\fR
+Snapshot ID from `jouet wind plan`
+.SH "JOUET WIND RELEASE"
+Release a scheduled\-review lease without marking it reviewed
+.PP
+\fBUsage:\fR jouet wind release [OPTIONS] <LEASE>
+.PP
+\fBOptions:\fR
+.PP
+.TP
+\fB\-h, \-\-help\fR
+Print help
+\fBArguments:\fR
+.PP
+.TP
+\fB<LEASE>\fR
+Lease ID returned by `jouet wind claim`
 .SH "JOUET WIND PROPOSE"
 Record what a review proposed, to show at the next session start
 
-Reads a review's JSON reply on stdin (or from FILE): `{"session": "...", "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`, as `jouet wind review` asks for. Each proposal is checked and recorded as pending: three per review and three a day at most, never one that looks like it holds a secret, never one already proposed. Recording applies nothing: the next session starts show each proposal in one line, and the agent there asks the user before applying it.
+Reads a review's JSON reply on stdin (or from FILE): `{"session": "...", "proposals": [{"kind", "title", "why", "evidence", "scope", "draft"}]}`, as `jouet wind review` asks for. Each proposal is checked and recorded as pending: three per review and three a day per project at most, never one that looks like it holds a secret, never one already proposed. Recording applies nothing: the next session starts show each proposal in one line, and the agent there asks the user before applying it. Project and local proposals need \-\-project unless their queued session identifies the project.
 .PP
 \fBUsage:\fR jouet wind propose [OPTIONS] [<FILE>]
 .PP
 \fBOptions:\fR
 .PP
+.TP
+\fB\-\-project\fR \fI<PROJECT>\fR
+Bind project and local proposals to this work tree
+.TP
+\fB\-\-lease\fR \fI<LEASE>\fR
+Finish a claimed scheduled review only after its reply is recorded
 .TP
 \fB\-h, \-\-help\fR
 Print help

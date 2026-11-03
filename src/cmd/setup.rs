@@ -20,6 +20,8 @@ enum Action {
     Unchanged,
     /// A skill file setup did not write, or one edited since: left alone.
     Keep,
+    /// A link to make, Claude Code's skill directory naming the shared one.
+    Link,
 }
 
 #[derive(Debug, Serialize)]
@@ -170,35 +172,134 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     // else's is left alone without a word.
     let hooks = crate::settings::Settings::load().hooks;
     let want_skill = !args.uninstall && (args.skill || !(hooks.enabled && hooks.prime));
-    let ours = matches!(read(&skill), Ok(Some(text)) if stamped_by_jouet(&text));
-    if want_skill || args.uninstall || ours {
-        let skill_text = want_skill.then(|| stamp(&skill::render(format)));
-        match plan_skill(&skill, skill_text) {
-            Ok((change, note)) => {
-                files.push(change);
-                notes.extend(note);
+    // Every harness reads the same skill text, so in a shared install Claude
+    // Code's `.claude/skills/NAME` is a link to the `.agents/skills/NAME` the
+    // others read, and the repository keeps one copy. A --project install is
+    // yours alone and stays where git can ignore it.
+    let share = harness == Harness::Claude && scope == Scope::Shared;
+    // Whether a harness other than Claude Code, or Claude Code, still has
+    // jouet's hooks in this project, and so reads a shared skill.
+    let project_hooks = |harnesses: &[Harness]| {
+        harnesses.iter().any(|h| {
+            [Scope::Shared, Scope::Local].into_iter().any(|s| {
+                let path = h.config_path(s, &home, &project);
+                path != config && read_hooks(&path).is_ok_and(|(_, doc)| has_jouet(&doc))
+            })
+        })
+    };
+    let others_read_it = project_hooks(&[
+        Harness::Codex,
+        Harness::Cursor,
+        Harness::Gemini,
+        Harness::Copilot,
+    ]);
+    let claude_reads_it = project_hooks(&[Harness::Claude]);
+    // What installing `text` at `path`, or removing it (`None`), changes.
+    let plan_at = |path: &Path,
+                   text: Option<String>|
+     -> Result<Vec<(FileChange, Option<String>)>, String> {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        let shared = shared_skill(&project, path);
+        match text {
+            Some(text) if share && linkable(path) => {
+                let file = plan_skill(&shared, Some(text))?;
+                let already = std::fs::read_link(dir).is_ok_and(|t| t == link_target(path));
+                let link = FileChange {
+                    path: dir.display().to_string(),
+                    action: if already {
+                        Action::Unchanged
+                    } else {
+                        Action::Link
+                    },
+                    diff: String::new(),
+                    contents: None,
+                };
+                Ok(vec![file, (link, None)])
             }
-            Err(message) => return out.error(Exit::Precondition, &message),
+            // A shared install's link, which setup made: anyone else's link
+            // reaches plan_skill, which keeps a skill jouet did not write.
+            None if harness == Harness::Claude
+                && scope != Scope::Global
+                && std::fs::read_link(dir).is_ok_and(|t| t == link_target(path)) =>
+            {
+                // The link goes, and the shared file it names unless another
+                // harness here still has jouet's hooks and reads it.
+                let mut changes = vec![(
+                    FileChange {
+                        path: dir.display().to_string(),
+                        action: Action::Remove,
+                        diff: String::new(),
+                        contents: None,
+                    },
+                    None,
+                )];
+                if !others_read_it && harness == Harness::Claude {
+                    changes.push(plan_skill(&shared, None)?);
+                }
+                Ok(changes)
+            }
+            // Claude Code's copy, through a link on `.claude/skills` as a
+            // whole, that another harness here still reads.
+            None if harness == Harness::Claude
+                && scope != Scope::Global
+                && others_read_it
+                && dir.parent().is_some_and(is_link)
+                && claude_links_to(&project, &shared) =>
+            {
+                let change = FileChange {
+                    path: path.display().to_string(),
+                    action: Action::Keep,
+                    diff: String::new(),
+                    contents: None,
+                };
+                let note = format!(
+                    "kept {}: another harness here still has jouet's hooks and reads it",
+                    path.display()
+                );
+                Ok(vec![(change, Some(note))])
+            }
+            // Another harness's copy that Claude Code's link still names.
+            None if harness != Harness::Claude
+                && claude_reads_it
+                && claude_links_to(&project, path) =>
+            {
+                let change = FileChange {
+                    path: path.display().to_string(),
+                    action: Action::Keep,
+                    diff: String::new(),
+                    contents: None,
+                };
+                let note = format!(
+                    "kept {}: Claude Code's skill links to it, and Claude Code still has jouet's hooks here",
+                    path.display()
+                );
+                Ok(vec![(change, Some(note))])
+            }
+            text => Ok(vec![plan_skill(path, text)?]),
         }
-    }
-
-    let init_text = (!args.uninstall).then(|| stamp(&skill::init(format)));
-    match plan_skill(&init_skill, init_text) {
-        Ok((change, note)) => {
+    };
+    let mut plan = |path: &Path, text: Option<String>| -> Result<(), String> {
+        for (change, note) in plan_at(path, text)? {
             files.push(change);
             notes.extend(note);
         }
-        Err(message) => return out.error(Exit::Precondition, &message),
+        Ok(())
+    };
+    let ours = matches!(read(&skill), Ok(Some(text)) if stamped_by_jouet(&text));
+    if want_skill || args.uninstall || ours {
+        let skill_text = want_skill.then(|| stamp(&skill::render(format)));
+        if let Err(message) = plan(&skill, skill_text) {
+            return out.error(Exit::Precondition, &message);
+        }
     }
-
+    let init_text = (!args.uninstall).then(|| stamp(&skill::init(format)));
+    if let Err(message) = plan(&init_skill, init_text) {
+        return out.error(Exit::Precondition, &message);
+    }
     if args.uninstall {
         for other in other_skills {
-            match plan_skill(&other, None) {
-                Ok((change, note)) => {
-                    files.push(change);
-                    notes.extend(note);
-                }
-                Err(message) => return out.error(Exit::Precondition, &message),
+            if let Err(message) = plan(&other, None) {
+                return out.error(Exit::Precondition, &message);
             }
         }
     }
@@ -210,9 +311,12 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
             }
         }
     }
-    let changed = files
-        .iter()
-        .any(|f| matches!(f.action, Action::Create | Action::Update | Action::Remove));
+    let changed = files.iter().any(|f| {
+        matches!(
+            f.action,
+            Action::Create | Action::Update | Action::Remove | Action::Link
+        )
+    });
     if !args.uninstall {
         let written: Vec<&Path> = std::iter::once(config.as_path())
             .chain(want_skill.then_some(skill.as_path()))
@@ -591,6 +695,104 @@ fn plan_skill(path: &Path, after: Option<String>) -> Result<(FileChange, Option<
     }
 }
 
+/// The shared copy of the skill Claude Code keeps at `skill`
+/// (`.claude/skills/NAME/SKILL.md`): `.agents/skills/NAME/SKILL.md`.
+fn shared_skill(project: &Path, skill: &Path) -> PathBuf {
+    let name = skill.parent().and_then(Path::file_name).unwrap_or_default();
+    project
+        .join(".agents")
+        .join("skills")
+        .join(name)
+        .join("SKILL.md")
+}
+
+/// What Claude Code's skill directory for `skill` links to, relative to it.
+fn link_target(skill: &Path) -> PathBuf {
+    let name = skill.parent().and_then(Path::file_name).unwrap_or_default();
+    Path::new("..")
+        .join("..")
+        .join(".agents")
+        .join("skills")
+        .join(name)
+}
+
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Whether Claude Code's skill directory for `skill` can be the link: it is
+/// not there, or it is a link (jouet's, or one left dangling), or it is a
+/// directory an earlier setup made, holding only its own unedited skill.
+/// Not when `.claude/skills` is itself a link, as in a repository that
+/// shares the whole directory already: the file reaches `.agents` through it.
+fn linkable(skill: &Path) -> bool {
+    let Some(dir) = skill.parent() else {
+        return false;
+    };
+    if dir.parent().is_some_and(is_link) {
+        return false;
+    }
+    match std::fs::symlink_metadata(dir) {
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        // jouet's own link, or one whose target is gone; never a link of
+        // someone's to a skill of their own.
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::read_link(dir).is_ok_and(|t| t == link_target(skill)) || !dir.exists()
+        }
+        Ok(meta) if meta.is_dir() => {
+            std::fs::read_dir(dir).is_ok_and(|entries| entries.count() == 1)
+                && matches!(read(skill), Ok(Some(text)) if stamped_by_jouet(&text))
+        }
+        Ok(_) => false,
+    }
+}
+
+/// Whether Claude Code's skill directory in `project` for the skill at the
+/// shared `path` is that directory through a link: its own, or one on
+/// `.claude/skills` as a whole.
+fn claude_links_to(project: &Path, path: &Path) -> bool {
+    let Some(name) = path.parent().and_then(Path::file_name) else {
+        return false;
+    };
+    let dir = project.join(".claude").join("skills").join(name);
+    let resolved = |p: &Path| std::fs::canonicalize(p).ok();
+    resolved(&dir).is_some() && resolved(&dir) == path.parent().and_then(resolved)
+}
+
+/// Makes Claude Code's skill directory `dir` the link to the shared copy,
+/// which setup has just written, replacing what [`linkable`] allowed there.
+/// Where links cannot be made (Windows without the right), the directory
+/// gets a copy of the shared file instead.
+fn make_link(dir: &Path) -> std::io::Result<()> {
+    let skill = dir.join("SKILL.md");
+    let target = link_target(&skill);
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::remove_file(dir).or_else(|_| std::fs::remove_dir(dir))?;
+        }
+        Ok(_) => {
+            std::fs::remove_file(&skill)?;
+            std::fs::remove_dir(dir)?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&target, dir);
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(&target, dir);
+    if linked.is_err() {
+        std::fs::create_dir_all(dir)?;
+        // A relative link resolves from the directory it is in.
+        let base = dir.parent().unwrap_or(Path::new("."));
+        std::fs::copy(base.join(&target).join("SKILL.md"), &skill)?;
+    }
+    Ok(())
+}
+
 fn read(path: &Path) -> Result<Option<String>, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
@@ -614,6 +816,13 @@ fn apply(file: &FileChange) -> std::io::Result<()> {
                 tmp.as_file().set_permissions(meta.permissions())?;
             }
             tmp.persist(&target).map_err(|e| e.error)?;
+        }
+        (Action::Link, _) => make_link(path)?,
+        // A skill directory's link: removed itself, not what it names.
+        (Action::Remove, _)
+            if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) =>
+        {
+            std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))?;
         }
         (Action::Remove, _) => {
             std::fs::remove_file(path)?;
@@ -662,6 +871,8 @@ fn text(report: &Report) -> String {
             (Action::Remove, true) => "would remove",
             (Action::Unchanged, _) => "unchanged",
             (Action::Keep, _) => "kept",
+            (Action::Link, false) => "linked",
+            (Action::Link, true) => "would link",
         };
         let _ = writeln!(out, "{verb} {}", file.path);
         if report.dry_run {

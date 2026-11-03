@@ -173,6 +173,9 @@ pub enum SymbolError {
 pub struct Callers {
     pub symbol: String,
     pub references: Vec<Reference>,
+    /// Why the graph could not list callers; an empty list is not evidence of none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// References left out of the list.
     #[serde(skip_serializing_if = "is_zero")]
     pub more: usize,

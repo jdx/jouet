@@ -38,6 +38,14 @@ network-dependent setup or paid agent benchmark just to collect timings. If a
 representative check is already appropriate to the user's task, run it through
 `jouet test` so its result and duration are recorded.
 
+If observed baseline comparisons cannot run because their isolated checkout
+lacks dependencies, explain the optional `[baseline] setup` in
+`.jouet/test.toml` and its cost. Propose only a dependency setup command verified
+from this project; it may execute project scripts and access the network. Let
+the user review the command and the repository's jouet files before the person
+decides whether to run `jouet trust`. Do not treat an uncomparable baseline as a
+pass or configure setup merely because a project has a lockfile.
+
 ## Record the checks
 
 Write the commands you established to `.jouet/project.toml`, to be committed
@@ -106,3 +114,16 @@ slow checks, what was verified, and remaining ecosystem or trust requirements.
 Name the next useful action so the user can start normal work. Explain how
 future `jouet test` runs build timing history and how `jouet wind` can turn
 recurring waste into proposals, without enabling optional automation unasked.
+
+Offer an optional paired benchmark on a representative task, explaining that it
+uses agent time and may incur model charges. Compare correctness, elapsed time,
+and cached and uncached tokens on the same task; do not claim a win from one
+run. If it underperforms, offer to prepare an upstream issue or discussion for
+the user to review, removing private project details before anything is shared.
+
+Also offer scheduled Codex session review for explicitly selected local project
+roots. Explain that the scheduler reads session transcripts and may send digests
+to the agent's model provider, and that proposals are reviewable before project
+changes or upstream reports. Agree on roots, cadence and a per-run review limit
+before creating any schedule; do not install one automatically. Follow the
+scheduled review instructions in the winding documentation for this version.

@@ -3,7 +3,8 @@
 //!
 //! Derived from codegraph's queries (`src/graph/traversal.ts`,
 //! `src/context/`, `src/search/query-utils.ts`). Every query returns all it
-//! found, ranked, up to a hard cap; the command line budgets what it prints.
+//! found, ranked, up to a hard cap; traversal refuses to return an incomplete
+//! result. The command line budgets what it prints.
 
 use crate::{Error, Graph, SYMBOL_COLUMNS, Symbol};
 use regex::Regex;
@@ -389,7 +390,7 @@ impl Graph {
         let mut queue: VecDeque<(i64, u32)> = start.iter().map(|&n| (n, 0)).collect();
         let mut out = Vec::new();
         while let Some((nid, d)) = queue.pop_front() {
-            if d >= depth || out.len() >= MAX_RESULTS {
+            if d >= depth {
                 continue;
             }
             let rows = stmt.query_map([nid], |r| {
@@ -404,6 +405,11 @@ impl Graph {
                 let (next, via, line, symbol) = row?;
                 if !seen.insert(next) {
                     continue;
+                }
+                if out.len() == MAX_RESULTS {
+                    return Err(Error(format!(
+                        "graph traversal exceeds {MAX_RESULTS} symbols; narrow the query or depth"
+                    )));
                 }
                 out.push(Reach {
                     symbol,
@@ -442,12 +448,17 @@ impl Graph {
             .conn
             .prepare_cached("SELECT target FROM edges WHERE source = ?1 AND kind = 'contains'")?;
         let mut i = 0;
-        while i < start.len() && start.len() < MAX_RESULTS {
+        while i < start.len() {
             let children: Vec<i64> = stmt
                 .query_map([start[i]], |r| r.get(0))?
                 .collect::<Result<_, _>>()?;
             for c in children {
                 if !start.contains(&c) {
+                    if start.len() == MAX_RESULTS {
+                        return Err(Error(format!(
+                            "graph impact contains more than {MAX_RESULTS} symbols; query a smaller symbol"
+                        )));
+                    }
                     start.push(c);
                 }
             }

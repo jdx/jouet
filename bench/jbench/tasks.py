@@ -32,7 +32,11 @@ A task on a real project also sets, in `task.toml`:
 - `remote = false`, for a repository with no forge remote, and
   `upstream = true` to give it a local bare `origin` instead, holding the
   base commit as `main`, which `main` tracks: an agent that commits on
-  `main` still has a branch to measure its change from, as in a clone;
+  `main` still has a branch to measure its change from, as in a clone.
+  `upstream_url` makes that `origin`'s URL, as a clone's would be, for a
+  project whose code or tests parse it; git's `insteadOf` still sends every
+  fetch and push to the local repository. Use a host that cannot resolve,
+  such as `https://git.example.invalid/owner/repo.git`;
 - `check_timeout_s`, for a check that builds the project;
 - `[tools]`: programs linked into the agent's `bin/` (name = path, which
   replaces a default tool of that name, or a bare program name, found on the
@@ -102,6 +106,7 @@ class Task:
     opt_in: bool = False
     remote: bool = True
     upstream: bool = False
+    upstream_url: str | None = None
     check_timeout_s: int = 120
     tools: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
@@ -219,6 +224,7 @@ def load(name: str) -> Task:
         opt_in=bool(raw.get("opt_in", False)),
         remote=bool(raw.get("remote", True)),
         upstream=bool(raw.get("upstream", False)),
+        upstream_url=raw.get("upstream_url"),
         check_timeout_s=int(raw.get("check_timeout_s", 120)),
         tools=dict(raw.get("tools", {})),
         env=dict(raw.get("env", {})),
@@ -420,7 +426,10 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     elif task.upstream:
         origin = workdir.parent / "origin.git"
         git(workdir.parent, "init", "-q", "--bare", "-b", "main", str(origin))
-        git(workdir, "remote", "add", "origin", str(origin))
+        git(workdir, "remote", "add", "origin", task.upstream_url or str(origin))
+        if task.upstream_url:
+            # The URL a clone would have, resolved to the local repository.
+            git(workdir, "config", f"url.{origin}.insteadOf", task.upstream_url)
         git(workdir, "push", "-q", "origin", f"{base}:refs/heads/main")
         git(workdir, "fetch", "-q", "origin")
         git(workdir, "branch", "-q", "--set-upstream-to=origin/main", "main")

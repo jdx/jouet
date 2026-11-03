@@ -301,7 +301,7 @@ fake_hk_stop() {
 	assert_success
 	assert_output --partial "hk's stop hook in"
 	run jq -c '[.hooks.Stop[].hooks[] | {command, timeout}]' .claude/settings.json
-	assert_output '[{"command":"sh -c '"'"'command -v jouet >/dev/null 2>&1 || exec hk agent stop-hook --target claude-code --timeout 570; exec jouet hook claude stop --hk \"hk agent stop-hook --target claude-code --timeout 570\"'"'"'","timeout":600}]'
+	assert_output '[{"command":"sh -c '"'"'jouet --version >/dev/null 2>&1 || exec hk agent stop-hook --target claude-code --timeout 570; exec jouet hook claude stop --hk \"hk agent stop-hook --target claude-code --timeout 570\"'"'"'","timeout":600}]'
 
 	run --separate-stderr jouet setup claude --project --shared --uninstall
 	assert_success

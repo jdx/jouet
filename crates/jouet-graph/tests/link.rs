@@ -79,6 +79,45 @@ fn python_calls_resolve_through_imports_and_relink_when_the_target_moves() {
 }
 
 #[test]
+fn traversal_reports_when_a_fanout_exceeds_the_result_limit() {
+    use std::fmt::Write as _;
+    let mut source = "def target():\n    pass\n".to_string();
+    for i in 0..jouet_graph::MAX_RESULTS {
+        writeln!(source, "def caller_{i}():\n    target()\n").unwrap();
+    }
+    let mut repo = Repo::new(&[("calls.py", &source)]);
+    let id = repo.id("target");
+    assert_eq!(
+        repo.graph.callers(&id, 1).unwrap().len(),
+        jouet_graph::MAX_RESULTS
+    );
+    source.push_str("def extra_caller():\n    target()\n");
+    repo.edit("calls.py", &source);
+    let error = repo.graph.callers(&repo.id("target"), 1).unwrap_err();
+    assert!(
+        error.to_string().contains("graph traversal exceeds"),
+        "{error}"
+    );
+}
+
+#[test]
+fn impact_reports_when_contained_symbols_exceed_the_result_limit() {
+    use std::fmt::Write as _;
+    let mut source = "class Large:\n".to_string();
+    for i in 0..jouet_graph::MAX_RESULTS {
+        writeln!(source, "    def method_{i}(self):\n        pass\n").unwrap();
+    }
+    let repo = Repo::new(&[("large.py", &source)]);
+    let error = repo.graph.impact(&repo.id("Large"), 3).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("graph impact contains more than"),
+        "{error}"
+    );
+}
+
+#[test]
 fn an_unresolved_call_links_once_a_file_defines_it() {
     let mut repo = Repo::new(&[("a.go", "package a\n\nfunc Run() {\n\tLater()\n}\n")]);
     assert!(repo.graph.find("Later").unwrap().is_empty());
