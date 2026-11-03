@@ -164,6 +164,7 @@ The built-in rules:
 | `pitchfork-stop` | `kill $(lsof ...)`, `lsof ... \| xargs kill`, `pkill`/`killall`, `fuser -k` or `kill-port` aimed at a declared daemon's port or command line | `pitchfork stop ID` or `pitchfork restart ID` |
 | `pitchfork-logs` | warns on `pitchfork logs --follow` | `pitchfork logs ID -n 50` |
 | `trust` | `jouet trust` and `jouet plugin add`, with or without `--yes`: a repository's rules put text in front of the agent and its routines run commands, so the agent must not be the one to trust them | asking the user to run it in their own terminal |
+| `rule-files` | changing, moving or deleting a rule in deny mode in `~/.config/jouet/rules` or the system directory, whether with Edit, Write, MultiEdit or NotebookEdit, `jouet edit`, `sed -i`, `rm`, `mv`, `cp`, `tee`, `truncate` or a `>` redirect, or moving or deleting the whole directory; a rule in warn mode, a new file, and a rule whose `author` is the session itself are left alone. Warns (does not deny) on the same changes to a repository's `.jouet/rules`, which turn off all of its rules until the user trusts them again | `jouet rule new NAME --why TEXT` for a new rule, or asking the user |
 
 One more built-in rule, `checks`, neither denies nor warns: it records test, lint and build runs for the [stop check](#what-counts-as-a-check).
 

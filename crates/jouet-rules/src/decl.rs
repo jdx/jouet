@@ -251,6 +251,12 @@ pub(crate) struct Matcher {
     /// not redirected to a file, piped into another command, or captured
     /// with `$(...)`.
     pub prints: Option<bool>,
+    /// The file the command's standard output is redirected to (`> out`,
+    /// `>> notes`, `&> all`), as written, matches one of these. `*` and `?`
+    /// are wildcards.
+    #[serde(default, deserialize_with = "one_or_many")]
+    #[schemars(with = "OneOrMany<String>")]
+    pub stdout_to: Vec<Glob>,
 }
 
 impl Matcher {
@@ -284,6 +290,7 @@ impl Matcher {
             secret_vars,
             secret_args,
             prints,
+            stdout_to,
         } = self;
         !command.is_empty()
             || !via.is_empty()
@@ -301,6 +308,7 @@ impl Matcher {
             || secret_vars.is_some()
             || secret_args.is_some()
             || prints.is_some()
+            || !stdout_to.is_empty()
     }
 
     /// What is wrong with it, beyond what its types check.
@@ -413,6 +421,9 @@ pub(crate) struct CaseTable {
     /// What `jouet.secrets.scan()` finds, for any scope; omitted, it has no
     /// answer.
     pub secrets: Option<Vec<SecretCase>>,
+    /// The text of files `jouet.file.contains` reads, by the path the
+    /// script passes it; omitted, it has no answer for any file.
+    pub files: Option<BTreeMap<String, String>>,
 }
 
 /// A secret `jouet.secrets.scan()` finds in an example's diff.
@@ -505,7 +516,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `code_lines`, `tracked_files`, `fnox`, `git`, `session`, `claims` or `stack`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `code_lines`, `tracked_files`, `fnox`, `git`, `session`, `claims`, `stack`, `secrets` or `files`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

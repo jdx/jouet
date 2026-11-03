@@ -306,6 +306,10 @@
         "prints": {
           "description": "Whether the command's standard output reaches the transcript: it is\nnot redirected to a file, piped into another command, or captured\nwith `$(...)`.",
           "type": "boolean"
+        },
+        "stdout_to": {
+          "description": "The file the command's standard output is redirected to (`> out`,\n`>> notes`, `&> all`), as written, matches one of these. `*` and `?`\nare wildcards.",
+          "$ref": "#/$defs/OneOrMany_string"
         }
       },
       "additionalProperties": false
@@ -462,6 +466,13 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/ExampleSecret"
+          }
+        },
+        "files": {
+          "description": "The text of files `jouet.file.contains` reads, by the path the\nscript passes it; omitted, it has no answer for any file.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
           }
         }
       },

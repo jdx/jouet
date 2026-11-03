@@ -122,6 +122,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("curl-json", include_str!("../rules/curl-json.toml")),
     ("trust", include_str!("../rules/trust.toml")),
+    ("rule-files", include_str!("../rules/rule-files.toml")),
 ];
 
 /// The scripts built-in rules name.
@@ -155,6 +156,7 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/pitchfork-stop.luau"),
     ),
     ("job-start.luau", include_str!("../rules/job-start.luau")),
+    ("rule-files.luau", include_str!("../rules/rule-files.luau")),
     (
         "unbounded-query.luau",
         include_str!("../rules/unbounded-query.luau"),

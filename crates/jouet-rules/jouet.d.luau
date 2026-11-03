@@ -121,6 +121,9 @@ export type JouetExample = string | {
 	-- What `jouet.secrets.scan()` finds, for any scope; without it, it has
 	-- no answer.
 	secrets: { { rule: string, path: string, line: number, commit: string? } }?,
+	-- The text of each file `jouet.file.contains()` reads, by the path the
+	-- script passes it; without it, it has no answer.
+	files: { [string]: string }?,
 }
 
 export type JouetRule = {
@@ -438,8 +441,8 @@ declare jouet: {
 		scan: (scope: string?, paths: { string }?) -> ({ JouetSecretFinding }?, string?),
 	},
 	file: {
-		-- Whether `path` (from the work tree's root when relative) holds
-		-- `text` exactly; nil and a reason when it cannot be read or is over
+		-- Whether `path` (from the call's directory when relative, or under
+		-- `~` or `$HOME`) holds `text` exactly; nil and a reason when it cannot be read or is over
 		-- 4 MiB. It answers only true or false: the file is never shown.
 		contains: (path: string, text: string) -> (boolean?, string?),
 	},

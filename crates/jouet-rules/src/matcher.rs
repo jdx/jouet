@@ -261,6 +261,14 @@ fn command(m: &Matcher, c: &shell::Command, call: &Call) -> bool {
     if m.prints.is_some_and(|want| prints != want) {
         return false;
     }
+    if !m.stdout_to.is_empty()
+        && !c
+            .stdout_to
+            .as_ref()
+            .is_some_and(|to| m.stdout_to.iter().any(|g| glob::matches(&g.0, to)))
+    {
+        return false;
+    }
     m.text.iter().all(|pattern| {
         args.iter()
             .chain(&c.heredocs)

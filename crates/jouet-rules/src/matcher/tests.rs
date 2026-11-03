@@ -324,6 +324,17 @@ fn prints_is_output_that_reaches_the_transcript() {
 }
 
 #[test]
+fn stdout_to_is_the_file_output_is_redirected_to() {
+    let m = "command = \"*\"\nstdout_to = \"*jouet/rules/*\"";
+    assert!(fires(m, "echo x > ~/.config/jouet/rules/a.toml"));
+    assert!(fires(m, "cat >> .jouet/rules/a.toml <<'EOF'\nx\nEOF"));
+    assert!(fires(m, "make &> ~/.config/jouet/rules/log"));
+    assert!(!fires(m, "cat ~/.config/jouet/rules/a.toml"));
+    assert!(!fires(m, "cat ~/.config/jouet/rules/a.toml > /tmp/a"));
+    assert!(!fires(m, "echo x 2> ~/.config/jouet/rules/a.toml"));
+}
+
+#[test]
 fn unless_paths_excludes_a_file_tools_path() {
     let m: Matcher =
         toml::from_str("tool = \"Read\"\npaths = \".env*\"\nunless_paths = \"*.example\"").unwrap();

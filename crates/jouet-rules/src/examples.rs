@@ -108,6 +108,8 @@ pub struct Case {
     pub stack: Option<serde_json::Value>,
     /// What `jouet.secrets.scan()` answers, for any scope.
     pub secrets: Option<serde_json::Value>,
+    /// The text of each file `jouet.file.contains()` reads, by its path.
+    pub files: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -292,6 +294,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         git_ahead: None,
         stack: None,
         secrets: None,
+        files: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -484,6 +487,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
                 })
                 .collect()
         }),
+        files: t.files.clone(),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -577,6 +581,9 @@ impl Engine {
             }
             if let Some(secrets) = &case.secrets {
                 self.stub("secrets:*", secrets.clone());
+            }
+            for (path, text) in case.files.iter().flatten() {
+                self.stub(&format!("file:{path}"), text.clone().into());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
