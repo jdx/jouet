@@ -21,9 +21,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-/// codegraph's `MAX_SOURCE_FILE_SIZE_BYTES`: larger files are recorded but
-/// not extracted (they are almost always generated or vendored).
-pub(crate) const MAX_FILE_SIZE: u64 = 1024 * 1024;
+/// Larger files are recorded but not extracted. codegraph, which this is
+/// derived from, stops at 1 MiB, since such files are almost always
+/// generated or vendored; but generated code such as an OpenAPI client is
+/// part of the graph `jouet test --affected` follows, and a Go file left out
+/// of it means the whole suite. Extracting one takes about 0.9 s per MB,
+/// paid again only when it changes.
+pub(crate) const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024;
 
 /// Directories never indexed, even when nothing ignores them (codegraph's
 /// `SUBPROJECT_SCAN_SKIP`, less the names that are often real source).
@@ -63,7 +67,7 @@ pub struct Refresh {
     pub touched: usize,
     /// Files that disappeared, and their symbols with them.
     pub removed: usize,
-    /// Files recorded without symbols: larger than 1 MiB, or not UTF-8.
+    /// Files recorded without symbols: larger than 4 MiB, or not UTF-8.
     pub skipped: usize,
     /// Stale files left for the next refresh because the budget ran out.
     pub deferred: usize,
@@ -177,6 +181,15 @@ struct Candidate {
     source: Option<String>,
 }
 
+/// Whether a file must be read again: its metadata changed, or it was left
+/// without symbols as too large and now fits under [`MAX_FILE_SIZE`], which
+/// an older jouet set lower. Its unchanged content is extracted then too.
+fn stale(known: &store::FileRow, seen: &Seen) -> bool {
+    known.size != seen.size
+        || known.modified_ns != seen.modified_ns
+        || (known.too_large && seen.size <= MAX_FILE_SIZE)
+}
+
 fn read(seen: Seen) -> Option<Candidate> {
     let bytes = std::fs::read(&seen.abs).ok()?;
     let hash = hash(&bytes);
@@ -190,7 +203,7 @@ fn extract_one(c: &Candidate) -> Option<(&'static str, Result<Extraction, String
     let Some(source) = &c.source else {
         let lang = extract::language_for_path(&c.seen.rel)?;
         let why = if c.seen.size > MAX_FILE_SIZE {
-            "larger than 1 MiB"
+            "larger than 4 MiB"
         } else {
             "not UTF-8"
         };
@@ -222,11 +235,7 @@ impl Graph {
             .collect();
         let changed: Vec<Seen> = seen
             .into_iter()
-            .filter(|s| {
-                known
-                    .get(&s.rel)
-                    .is_none_or(|k| k.size != s.size || k.modified_ns != s.modified_ns)
-            })
+            .filter(|s| known.get(&s.rel).is_none_or(|k| stale(k, s)))
             .collect();
         {
             let tx = self.conn.transaction()?;
@@ -241,6 +250,7 @@ impl Graph {
             .filter_map(|s| {
                 known
                     .get(&s.rel)
+                    .filter(|k| !k.too_large)
                     .map(|k| (s.rel.clone(), k.content_hash.clone()))
             })
             .collect();
@@ -313,10 +323,12 @@ impl Graph {
                 modified_ns: modified_ns(&meta),
             };
             if let Some(k) = &known {
-                if k.size == seen.size && k.modified_ns == seen.modified_ns {
+                if !stale(k, &seen) {
                     continue;
                 }
-                hashes.insert(seen.rel.clone(), k.content_hash.clone());
+                if !k.too_large {
+                    hashes.insert(seen.rel.clone(), k.content_hash.clone());
+                }
             }
             changed.push(seen);
         }

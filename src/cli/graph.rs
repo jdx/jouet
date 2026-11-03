@@ -50,7 +50,7 @@ pub(crate) struct GraphPruneArgs {}
 ///
 /// Lists the work tree's source files (honouring .gitignore), and extracts
 /// only the files whose content changed since the last index. Files larger
-/// than 1 MiB or not UTF-8 are recorded without symbols. A worktree with no
+/// than 4 MiB or not UTF-8 are recorded without symbols. A worktree with no
 /// graph yet starts from a copy of the graph of a sibling worktree of the
 /// same repository, the one whose HEAD is nearest, so only the files that
 /// differ are extracted.

@@ -1096,13 +1096,15 @@ pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Opt
 }
 
 /// Records a `jouet test` run as the checks see it; `environment` is what
-/// its output blames on the machine, when every failure does, and
-/// `ran_tests` that it was a `--cmd` run that may have tested something.
+/// its output blames on the machine, when every failure does, `unrelated`
+/// the failing tests when the change reaches none of them, and `ran_tests`
+/// that it was a `--cmd` run that may have tested something.
 pub(crate) fn record_own_run(
     cwd: &Path,
     command: &str,
     exit_code: i32,
     environment: Option<&str>,
+    unrelated: Option<&str>,
     ran_tests: bool,
 ) {
     let settings = Settings::load();
@@ -1151,6 +1153,11 @@ pub(crate) fn record_own_run(
             if let Some(cause) = environment {
                 for record in &records {
                     state.mark_environment(&root, &record.command, cause);
+                }
+            }
+            if let Some(tests) = unrelated {
+                for record in &records {
+                    state.mark_unrelated(&root, &record.command, tests);
                 }
             }
             let failed: Vec<String> = records

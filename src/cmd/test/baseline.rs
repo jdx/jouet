@@ -173,6 +173,9 @@ pub(super) fn failure_names(
 pub(super) struct Evidence {
     names: BTreeSet<String>,
     details: BTreeMap<String, String>,
+    /// For failures that are all Go tests: each name's packages, from `go
+    /// test`'s output, so the merge base can run just those tests.
+    go: Option<BTreeMap<String, BTreeSet<String>>>,
 }
 
 pub(super) fn failure_evidence(
@@ -246,7 +249,9 @@ pub(super) fn failure_evidence(
             }
         }
     }
-    Some(Evidence { names, details })
+    let go = testlog::go_failure_packages(output)
+        .filter(|go| !go.is_empty() && names.iter().all(|name| go.contains_key(name)));
+    Some(Evidence { names, details, go })
 }
 
 /// The merge base of HEAD with `since` (the upstream or default branch when
@@ -357,6 +362,79 @@ impl Drop for Checkout<'_> {
             let _ = git(self.root, &["worktree", "remove", "--force", &tree]);
         }
     }
+}
+
+/// Runs only the failing Go tests of `now` at the merge base, and returns
+/// their names when every one fails there with the same details: seconds,
+/// where the command that found them may take minutes.
+fn targeted(
+    job: &Job,
+    now: &Evidence,
+    root: &Path,
+    checkout: &mut Checkout<'_>,
+    formats: &[Format],
+    log: PathBuf,
+) -> Result<Option<BTreeSet<String>>, NotCompared> {
+    let Some(go) = &now.go else {
+        return Ok(None);
+    };
+    if now.names.iter().any(|name| !now.details.contains_key(name)) {
+        return Ok(None);
+    }
+    // A subtest runs with its test.
+    let tests: BTreeSet<&str> = now
+        .names
+        .iter()
+        .map(|name| name.split('/').next().unwrap_or(name))
+        .collect();
+    let packages: BTreeSet<&str> = go
+        .values()
+        .flatten()
+        .filter_map(|qualified| qualified.rsplit_once("::").map(|(package, _)| package))
+        .collect();
+    if packages.is_empty() {
+        return Ok(None);
+    }
+    let tree = checkout.tree()?.to_path_buf();
+    let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
+    let mut argv = vec![
+        "go".to_string(),
+        "test".into(),
+        "-run".into(),
+        format!("^({})$", tests.into_iter().collect::<Vec<_>>().join("|")),
+    ];
+    argv.extend(packages.into_iter().map(str::to_string));
+    let at_base = Job {
+        argv,
+        env: job.env.clone(),
+        dir: tree.join(dir),
+        exit: Box::new(|_| Exit::Ok),
+    };
+    let Ok((code, _)) = execute(&at_base, &log, false) else {
+        return Ok(None);
+    };
+    if code == 0 {
+        return Ok(None);
+    }
+    let output = std::fs::read(&log).unwrap_or_default();
+    let output = String::from_utf8_lossy(&output);
+    let Some(base) = failure_evidence(&output, formats, &tree, false) else {
+        return Ok(None);
+    };
+    // One pattern runs in every package, so a test of the same name may
+    // fail in another: each must fail in its own package there.
+    let Some(base_go) = &base.go else {
+        return Ok(None);
+    };
+    let same = now.names.iter().all(|name| {
+        base.names.contains(name)
+            && now.details.get(name) == base.details.get(name)
+            && go
+                .get(name)
+                .zip(base_go.get(name))
+                .is_some_and(|(here, there)| here.is_subset(there))
+    });
+    Ok(same.then(|| now.names.clone()))
 }
 
 /// Populate exact pinned commits from already initialized local submodules.
@@ -559,6 +637,26 @@ pub(super) fn compare(
         } else {
             None
         };
+        // Failures that are all Go tests: just those run at the merge base
+        // first. One that fails there the same way was there before; any
+        // other answer goes on to the whole command, the only run that may
+        // call a failure new.
+        if kept.is_none()
+            && setup.is_empty()
+            && mode != Mode::Fresh
+            && let Some(now) = now
+            && let Some(found) = targeted(
+                job,
+                now,
+                root,
+                &mut checkout,
+                formats,
+                log_path(failed.len() * 2 + 2 + i),
+            )?
+        {
+            pre_existing.extend(found);
+            continue;
+        }
         let outcome = match (kept, mode) {
             (_, Mode::Fresh)
             | (Some(known::Outcome::Unnamed { .. }), Mode::Retry)

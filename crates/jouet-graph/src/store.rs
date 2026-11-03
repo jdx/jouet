@@ -260,12 +260,17 @@ pub(crate) struct FileRow {
     pub(crate) content_hash: String,
     pub(crate) size: u64,
     pub(crate) modified_ns: i64,
+    /// Recorded without symbols for its size, under the cap of the jouet
+    /// that indexed it, which may have been lower.
+    pub(crate) too_large: bool,
 }
 
 pub(crate) fn file_rows(
     conn: &Connection,
 ) -> Result<std::collections::HashMap<String, FileRow>, Error> {
-    let mut stmt = conn.prepare("SELECT path, content_hash, size, modified_ns FROM files")?;
+    let mut stmt = conn.prepare(
+        "SELECT path, content_hash, size, modified_ns, error LIKE 'larger than %' FROM files",
+    )?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
@@ -273,6 +278,7 @@ pub(crate) fn file_rows(
                 content_hash: r.get(1)?,
                 size: r.get::<_, i64>(2)? as u64,
                 modified_ns: r.get(3)?,
+                too_large: r.get::<_, Option<bool>>(4)?.unwrap_or(false),
             },
         ))
     })?;
@@ -282,13 +288,14 @@ pub(crate) fn file_rows(
 pub(crate) fn file_row(conn: &Connection, path: &str) -> Result<Option<FileRow>, Error> {
     Ok(conn
         .query_row(
-            "SELECT content_hash, size, modified_ns FROM files WHERE path = ?1",
+            "SELECT content_hash, size, modified_ns, error LIKE 'larger than %' FROM files WHERE path = ?1",
             [path],
             |r| {
                 Ok(FileRow {
                     content_hash: r.get(0)?,
                     size: r.get::<_, i64>(1)? as u64,
                     modified_ns: r.get(2)?,
+                    too_large: r.get::<_, Option<bool>>(3)?.unwrap_or(false),
                 })
             },
         )

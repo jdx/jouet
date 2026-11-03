@@ -85,7 +85,7 @@ Every git worktree has its own graph. A worktree with none yet starts from a cop
 
 Each graph records the root it was built for, and `jouet graph prune` deletes the graphs whose root no longer exists, which short-lived agent worktrees would otherwise leave behind. Any query does the same at most once a day. A graph whose root exists, or cannot be checked (a permission error, say), is kept.
 
-Files larger than 1 MiB, or not UTF-8, are recorded without symbols. Directories such as `node_modules`, `vendor` and `target` are skipped even when nothing ignores them. A file with syntax errors is still indexed, as tree-sitter recovered it, and `status` counts such files.
+Files larger than 4 MiB, or not UTF-8, are recorded without symbols. Directories such as `node_modules`, `vendor` and `target` are skipped even when nothing ignores them. A file with syntax errors is still indexed, as tree-sitter recovered it, and `status` counts such files.
 
 ## Credit
 

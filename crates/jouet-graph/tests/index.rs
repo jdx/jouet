@@ -146,13 +146,55 @@ fn records_files_it_cannot_extract_without_retrying_them() {
     let dir = repo();
     let cache = tempfile::tempdir().unwrap();
     let root = dir.path();
-    std::fs::write(root.join("big.js"), vec![b'x'; 1024 * 1024 + 1]).unwrap();
+    std::fs::write(root.join("big.js"), vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
     std::fs::write(root.join("latin1.c"), b"int caf\xe9;\n").unwrap();
     let mut graph = open(root, cache.path());
     let report = graph.refresh(None).unwrap();
     assert_eq!((report.indexed, report.skipped), (2, 2));
     assert_eq!(graph.status().unwrap().files_without_symbols, 2);
     assert_eq!(graph.refresh(None).unwrap().indexed, 0);
+}
+
+#[test]
+fn extracts_generated_code_over_codegraphs_one_mib_cap() {
+    // Generated clients pass 1 MiB, and `jouet test --affected` runs the
+    // whole Go suite when one is left out of the graph.
+    let dir = repo();
+    let cache = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut source = String::from("package gen\n\n");
+    let mut i = 0;
+    while source.len() <= 3 * 1024 * 1024 / 2 {
+        source.push_str(&format!(
+            "func Encode{i}(b []byte) []byte {{ return append(b, {i}) }}\n"
+        ));
+        i += 1;
+    }
+    write(root, "gen/oas_json_gen.go", &source);
+    let mut graph = open(root, cache.path());
+    let report = graph.refresh(None).unwrap();
+    assert_eq!((report.indexed, report.skipped), (1, 0));
+    assert!(names(&graph, "gen/oas_json_gen.go").contains(&"Encode0".to_string()));
+    assert!(graph.incomplete_files("go").unwrap().is_empty());
+
+    // A graph an older jouet built, under its 1 MiB cap, extracts the file
+    // on the next refresh, though the file did not change.
+    drop(graph);
+    let db = rusqlite::Connection::open(cache.path().join("graph.db")).unwrap();
+    db.execute_batch(
+        "DELETE FROM nodes WHERE file_path = 'gen/oas_json_gen.go';
+         UPDATE files SET error = 'larger than 1 MiB', node_count = 0 WHERE path = 'gen/oas_json_gen.go';",
+    )
+    .unwrap();
+    drop(db);
+    let mut graph = open(root, cache.path());
+    assert_eq!(
+        graph.incomplete_files("go").unwrap(),
+        ["gen/oas_json_gen.go"]
+    );
+    graph.refresh(None).unwrap();
+    assert!(graph.incomplete_files("go").unwrap().is_empty());
+    assert!(names(&graph, "gen/oas_json_gen.go").contains(&"Encode0".to_string()));
 }
 
 #[test]
