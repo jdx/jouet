@@ -477,24 +477,28 @@ pub(super) fn compare(
                 }
                 known::Outcome::Failed {
                     names,
-                    ran,
+                    ran: base_ran,
                     non_failed,
                     details,
                     details_version: _,
                 } => {
                     // A broken checkout can make every test fail in setup.
                     // Matching names in that run do not establish that the
-                    // current failures existed.
-                    if ran > 1 && non_failed == Some(0) {
+                    // current failures existed. When every test the current
+                    // run shows failed too, as when only failures are
+                    // printed, the two runs look alike, and the details
+                    // compared below tell a setup failure apart.
+                    let current_failed = now.as_ref().map_or(0, |e| e.names.len() as u64);
+                    if base_ran > 1 && non_failed == Some(0) && current_failed < *ran {
                         return Err(NotCompared::from(format!(
-                            "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                            "all {base_ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
                             base.name
                         )));
                     }
                     (
                         names.into_iter().collect(),
                         details.unwrap_or_default(),
-                        ran,
+                        base_ran,
                     )
                 }
                 known::Outcome::Unnamed { exit, log } => {
