@@ -184,7 +184,7 @@ impl Adapter for Graph {
                 note: None,
             });
         }
-        let tests: Vec<Test> = affected
+        let mut tests: Vec<Test> = affected
             .tests
             .into_iter()
             .map(|t| Test {
@@ -201,6 +201,62 @@ impl Adapter for Graph {
                     && (self.runner != Runner::Go || t.path.ends_with("_test.go"))
             })
             .collect();
+        let mut same_package = false;
+        if self.runner == Runner::Go {
+            // A Go package's tests can exercise a method defined in another
+            // file without a graph edge to that file (for example through an
+            // interface). Run the changed package's tests even in that case.
+            let changed_dirs: BTreeSet<_> = sources
+                .iter()
+                .filter_map(|source| Path::new(&source.path).parent())
+                .collect();
+            let mut selected: BTreeSet<String> =
+                tests.iter().map(|test| test.path.clone()).collect();
+            for dir in changed_dirs {
+                let entries = std::fs::read_dir(project.root.join(dir)).map_err(|e| {
+                    Error::new(
+                        Exit::Failed,
+                        format!("reading Go package {}: {e}", dir.display()),
+                    )
+                })?;
+                for entry in entries {
+                    let entry = entry.map_err(|e| {
+                        Error::new(
+                            Exit::Failed,
+                            format!("reading Go package {}: {e}", dir.display()),
+                        )
+                    })?;
+                    let name = entry.file_name().into_string().map_err(|_| {
+                        Error::new(
+                            Exit::Failed,
+                            format!(
+                                "a file in Go package {} has a non-UTF-8 name",
+                                dir.display()
+                            ),
+                        )
+                    })?;
+                    if !name.ends_with("_test.go") || name.starts_with('.') || name.starts_with('_')
+                    {
+                        continue;
+                    }
+                    let metadata = std::fs::metadata(entry.path()).map_err(|e| {
+                        Error::new(Exit::Failed, format!("reading Go test {name}: {e}"))
+                    })?;
+                    let path = dir.join(name).to_string_lossy().replace('\\', "/");
+                    if metadata.is_file()
+                        && project.inside(&path).is_some()
+                        && selected.insert(path.clone())
+                    {
+                        same_package = true;
+                        tests.push(Test {
+                            path,
+                            via: Vec::new(),
+                        });
+                    }
+                }
+            }
+            tests.sort_by(|a, b| a.path.cmp(&b.path));
+        }
         let mut argv: Vec<String> = match self.runner {
             Runner::Go => {
                 // `go test` runs packages: the selected tests' directories.
@@ -261,7 +317,7 @@ impl Adapter for Graph {
             tests,
             command: argv,
             full_reason: None,
-            note: None,
+            note: same_package.then(|| "Go also runs tests in changed packages".into()),
         })
     }
 }
