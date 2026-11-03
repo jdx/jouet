@@ -708,7 +708,13 @@ fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
     // `go test` failed a TestBroken in cart, a package the change reaches,
     // and only other defines one: not that test, whatever the graph knows.
     env.write("run-cart-broken", &fake("TestBroken", "cart"));
-    for script in ["run-tests", "run-cart", "run-cart-broken"] {
+    // Go's failure lines with no package line after them: which TestBroken
+    // failed is not known.
+    env.write(
+        "run-no-package",
+        "#!/bin/sh\nprintf -- '--- FAIL: TestBroken (0.00s)\\n    x_test.go:5: boom\\nFAIL\\n'\nexit 1\n",
+    );
+    for script in ["run-tests", "run-cart", "run-cart-broken", "run-no-package"] {
         let path = root.join(script);
         let mut mode = std::fs::metadata(&path).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
@@ -735,7 +741,7 @@ fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
 
     // A test in a package the change reaches is the change's to fix (with
     // no comparison with main, where the stand-in fails too).
-    for script in ["./run-cart", "./run-cart-broken"] {
+    for script in ["./run-cart", "./run-cart-broken", "./run-no-package"] {
         let out = env
             .command(&["test", "--cmd", "--", script])
             .env("JOUET_TEST_BASELINE", "off")

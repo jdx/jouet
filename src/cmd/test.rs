@@ -516,7 +516,9 @@ fn failing_tests(
     root: &Path,
 ) -> Option<Vec<crate::affected::Failing>> {
     let names = baseline::failure_names(output, formats, root, false)?;
-    let go = testlog::go_failure_packages(output).filter(|go| !go.is_empty());
+    // `None` is Go output whose failures it could not tie to a package;
+    // empty, output that is not Go's.
+    let go = Some(testlog::go_failure_packages(output)?).filter(|go| !go.is_empty());
     names
         .into_iter()
         .map(|name| {
