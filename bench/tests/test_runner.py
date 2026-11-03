@@ -915,12 +915,19 @@ class TasksTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}):
             root = Path(d)
             sub = root / "sub"
+            nested = root / "nested"
             source = root / "source"
             sub.mkdir()
+            nested.mkdir()
             source.mkdir()
+            tasks.git(nested, "init", "-q", "-b", "main")
+            (nested / "nested.txt").write_text("nested\n")
+            tasks.git(nested, "add", "nested.txt")
+            tasks.git(nested, "commit", "-q", "-m", "nested")
             tasks.git(sub, "init", "-q", "-b", "main")
             (sub / "fixture.txt").write_text("from submodule\n")
             tasks.git(sub, "add", "fixture.txt")
+            tasks.git(sub, "submodule", "add", "-q", "../nested", "vendor/nested")
             tasks.git(sub, "commit", "-q", "-m", "submodule")
             tasks.git(source, "init", "-q", "-b", "main")
             tasks.git(source, "submodule", "add", "-q", "../sub", "vendor/sub")
@@ -932,7 +939,19 @@ class TasksTest(unittest.TestCase):
             tasks.prepare(task, work)
             self.assertEqual((work / "vendor/sub/fixture.txt").read_text(), "from submodule\n")
             self.assertEqual(tasks.git(work, "rev-parse", "HEAD^{tree}"), tasks.git(source, "rev-parse", "HEAD^{tree}"))
-            self.assertEqual(tasks.git(work / "vendor/sub", "remote"), "")
+            self.assertEqual((work / "vendor/sub/vendor/nested/nested.txt").read_text(), "nested\n")
+            for repo in (work, work / "vendor/sub", work / "vendor/sub/vendor/nested"):
+                config = Path(tasks.git(repo, "rev-parse", "--git-path", "config"))
+                self.assertNotIn(str(root / "source"), (repo / config).read_text())
+                self.assertNotIn(str(root / "sub"), (repo / config).read_text())
+                self.assertNotIn(str(root / "nested"), (repo / config).read_text())
+                if repo != work:
+                    self.assertEqual(tasks.git(repo, "remote"), "")
+                    fetch_head = Path(tasks.git(repo, "rev-parse", "--git-path", "FETCH_HEAD"))
+                    self.assertFalse((repo / fetch_head).exists())
+                    reflog = Path(tasks.git(repo, "rev-parse", "--git-path", "logs/HEAD"))
+                    if (repo / reflog).exists():
+                        self.assertNotIn(str(root), (repo / reflog).read_text())
             self.assertEqual(tasks.git(work, "remote", "get-url", "origin"), str(root / "origin.git"))
 
     def test_source_preserves_and_initializes_submodules(self):
