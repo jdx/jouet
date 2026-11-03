@@ -206,6 +206,11 @@ def load(name: str) -> Task:
             raise ValueError(f"task {name}: source needs nonempty git and commit strings")
         if not isinstance(source.get("history", False), bool):
             raise ValueError(f"task {name}: source.history must be a boolean")
+        if "submodule_base_url" in source and (not isinstance(source["submodule_base_url"], str)
+                                                or not source["submodule_base_url"]):
+            raise ValueError(f"task {name}: source.submodule_base_url must be a nonempty string")
+        if source.get("history") and "submodule_base_url" in source:
+            raise ValueError(f"task {name}: history mode does not fetch submodules")
         if source.get("history") and raw.get("remote", True):
             raise ValueError(f"task {name}: source.history requires remote = false")
     return Task(
@@ -382,6 +387,28 @@ def checkout_roots(workdir: Path) -> list[Path]:
     return roots
 
 
+def clean_submodule_sources(workdir: Path) -> None:
+    """Remove resolved source locations from fresh submodule Git metadata."""
+    output = git(workdir, "submodule", "foreach", "--quiet", "--recursive",
+                 'printf "%s\\0" "$toplevel/$sm_path"')
+    submodules = [Path(path) for path in output.split("\0") if path]
+    for repo in [workdir, *submodules]:
+        result = subprocess.run(
+            ["git", "config", "--local", "--null", "--name-only", "--get-regexp", r"^submodule\..*\.url$"],
+            cwd=repo, env=git_env(), capture_output=True, text=True,
+        )
+        if result.returncode not in (0, 1):
+            raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        for key in result.stdout.split("\0"):
+            if key:
+                git(repo, "config", "--local", "--unset-all", key)
+        if repo != workdir:
+            git(repo, "remote", "remove", "origin")
+            git(repo, "reflog", "expire", "--expire=all", "--all")
+            fetch_head = Path(git(repo, "rev-parse", "--git-path", "FETCH_HEAD"))
+            (repo / fetch_head).unlink(missing_ok=True)
+
+
 def prepare(task: Task, workdir: Path) -> dict[str, str]:
     """Builds the task's work tree in `workdir`; returns its SHAs."""
     if task.source and task.source.get("history", False) and task.remote:
@@ -402,7 +429,18 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     if task.source and (workdir / ".gitmodules").exists():
         if task.source.get("history", False):
             raise EnvironmentSetupError("history mode does not fetch submodules; provide a task without them")
-        git(workdir, "submodule", "update", "--init", "--recursive")
+        base = task.source.get("submodule_base_url")
+        if base:
+            # Only setup uses this URL. The task's origin is installed below,
+            # after relative .gitmodules URLs have been resolved.
+            git(workdir, "remote", "add", "origin", str(base))
+        try:
+            git(workdir, "submodule", "update", "--init", "--recursive")
+            if base:
+                clean_submodule_sources(workdir)
+        finally:
+            if base:
+                git(workdir, "remote", "remove", "origin")
     run_setup(task, workdir)
     base = git(workdir, "rev-parse", "HEAD")
     if task.branch:
