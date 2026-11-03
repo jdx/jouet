@@ -80,20 +80,44 @@ pub(crate) struct Digest {
     pub(crate) no_tests: bool,
 }
 
+#[derive(serde::Deserialize)]
+struct GoOutput<'a> {
+    #[serde(rename = "Action", borrow)]
+    action: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "Package", borrow)]
+    package: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "Output", borrow)]
+    output: Option<std::borrow::Cow<'a, str>>,
+}
+
 /// Whether the output says a run selected no test: TAP's empty plan,
 /// libtest running none in every binary, or a supported runner saying so.
 fn no_tests(lines: &[String]) -> bool {
+    // `go test -json` wraps the same package output lines in output events.
+    // Only unwrap Go-shaped events; unrelated JSON is not runner output.
+    let go_output: Vec<_> = lines
+        .iter()
+        .filter(|line| line.starts_with('{') && line.contains("\"Output\""))
+        .filter_map(|line| serde_json::from_str::<GoOutput<'_>>(line).ok())
+        .filter(|event| event.action.as_deref() == Some("output") && event.package.is_some())
+        .filter_map(|event| event.output)
+        .collect();
+    let output = || {
+        lines
+            .iter()
+            .map(String::as_str)
+            .chain(go_output.iter().flat_map(|line| line.lines()))
+    };
     // A Go package that ran a test shows it only in its plain `ok` line,
     // which the counts do not see: that is a run.
     let go = |empty: bool| {
-        lines
-            .iter()
-            .any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
+        output().any(|l| GO_PACKAGE_OK.is_match(l) && l.contains("[no tests to run]") == empty)
     };
     if go(false) {
         return false;
     }
-    let said = go(true) || lines.iter().any(|l| NO_TESTS.is_match(l));
+    let said =
+        go(true) || output().any(|l| NO_TESTS.is_match(l) || GO_PACKAGE_NO_TESTS.is_match(l));
     let mut libtest = lines
         .iter()
         .filter_map(|l| LIBTEST_RUNNING.captures(l))
@@ -231,6 +255,7 @@ regexes! {
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
+    GO_PACKAGE_NO_TESTS = r"^\?\s+\S+\s+\[no test files\]\s*$";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.

@@ -591,6 +591,42 @@ SH
 	assert_success
 }
 
+@test "--cmd refuses Go runs when every package has no test files" {
+	mkdir bin
+	cat >bin/go <<'SH'
+#!/bin/sh
+printf '?   \texample.com/a\t[no test files]\n'
+if [ "${WITH_TESTS:-0}" = 1 ]; then
+  printf 'ok  \texample.com/b\t0.123s\n'
+else
+  printf '?   \texample.com/b\t[no test files]\n'
+fi
+SH
+	chmod +x bin/go
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- go test ./...
+	assert_failure 4
+	assert_output --partial 'no test ran'
+	PATH="$PWD/bin:$PATH" WITH_TESTS=1 run --separate-stderr jouet test --cmd -- go test ./...
+	assert_success
+}
+
+@test "--cmd refuses Go JSON runs when no test ran" {
+	mkdir bin
+	cat >bin/go <<'SH'
+#!/bin/sh
+printf '%s\n' '{"Action":"output","Package":"example.com/a","Output":"?   \texample.com/a\t[no test files]\n"}'
+if [ "${WITH_TESTS:-0}" = 1 ]; then
+  printf '%s\n' '{"Action":"output","Package":"example.com/b","Output":"ok  \texample.com/b\t0.120s\n"}'
+fi
+SH
+	chmod +x bin/go
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- go test -json ./...
+	assert_failure 4
+	assert_output --partial 'no test ran'
+	PATH="$PWD/bin:$PATH" WITH_TESTS=1 run --separate-stderr jouet test --cmd -- go test -json ./...
+	assert_success
+}
+
 @test "--cmd reports RSpec failures and rejects contradictory success" {
 	mkdir bin
 	cat >bin/rspec <<'SH'

@@ -658,6 +658,26 @@ fn a_run_that_selected_no_test_is_told_apart_from_a_pass() {
     assert!(digest(go_empty, false, DEFAULT_BUDGET).no_tests);
     let go_one = "ok  \tgithub.com/a/b\t0.004s [no tests to run]\nok  \tgithub.com/a/c\t0.120s\n";
     assert!(!digest(go_one, false, DEFAULT_BUDGET).no_tests);
+    let go_no_files =
+        "?   \tgithub.com/a/b\t[no test files]\n?   \tgithub.com/a/c\t[no test files]\n";
+    assert!(digest(go_no_files, false, DEFAULT_BUDGET).no_tests);
+    let go_no_files_and_empty = format!("{go_no_files}{go_empty}");
+    assert!(digest(&go_no_files_and_empty, false, DEFAULT_BUDGET).no_tests);
+    let go_no_files_and_test = format!("{go_no_files}ok  \tgithub.com/a/d\t0.120s\n");
+    assert!(!digest(&go_no_files_and_test, false, DEFAULT_BUDGET).no_tests);
+    let go_json_empty = r#"{"Action":"output","Package":"example.com/a","Output":"?   \texample.com/a\t[no test files]\n"}"#;
+    assert!(digest(go_json_empty, false, DEFAULT_BUDGET).no_tests);
+    let go_json_escaped = r#"{"Action":"\u006futput","Package":"example.com/\u0061","Output":"?   \texample.com/a\t[no test files]\n"}"#;
+    assert!(digest(go_json_escaped, false, DEFAULT_BUDGET).no_tests);
+    let go_json_filtered = r#"{"Action":"output","Package":"example.com/a","Output":"ok  \texample.com/a\t0.004s [no tests to run]\n"}"#;
+    assert!(digest(go_json_filtered, false, DEFAULT_BUDGET).no_tests);
+    let go_json_test = format!(
+        "{go_json_empty}\n{}",
+        r#"{"Action":"output","Package":"example.com/b","Output":"ok  \texample.com/b\t0.120s\n"}"#
+    );
+    assert!(!digest(&go_json_test, false, DEFAULT_BUDGET).no_tests);
+    let unrelated_json = r#"{"Output":"?   \texample.com/a\t[no test files]\n"}"#;
+    assert!(!digest(unrelated_json, false, DEFAULT_BUDGET).no_tests);
     // An empty cargo suite, then Go tests that ran: Go's plain lines are
     // not counted as passes, but they show a run.
     let mixed = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\nok  \tgithub.com/a/b\t0.120s\n";
