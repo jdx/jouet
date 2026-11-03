@@ -1,15 +1,19 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "piped-test-output"
-why = "Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget."
-mode = "warn"
+why = "Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget. It warns the first time in a session and denies after that, since a warning alone was followed once and then forgotten."
+mode = "deny"
+# The primer already asks for `jouet test --cmd` for any test or build, and
+# the rule warns before it ever denies, so naming it there saves no call.
+primer = false
 scope = "builtin"
 author = "builtin"
 created = "2026-10-31"
 needs = ["test"]
 # The matcher finds a test or build runner in a call that also runs a
 # program that cuts output; the script checks that it cuts that run's own
-# output, through a pipe or a file the call writes and reads back.
+# output, through a pipe or a file the call writes and reads back, and
+# denies only once the session was warned (`jouet.session.fired()`).
 script = "piped-test-output.luau"
 
 [rule.match]
@@ -42,6 +46,13 @@ fires = [
   "jouet test --cmd -- sh -c 'cargo test --bin fnox editor 2>&1 | tail -15; mise run build 2>&1 | tail -3'",
   "jouet test --cmd -- bash -lc 'go test ./... | grep -v ^ok'",
   "jouet test --cmd -- sh -c 'RUST_LOG=debug cargo test 2>&1 | tail'",
+  # Warned once already in this session: denied.
+  { command = "cargo build -q 2>&1 | tail -5", session = "s1", fired = 0, action = "warn" },
+  { command = "cargo build -q 2>&1 | tail -5", session = "s1", fired = 1, action = "deny" },
+  { command = "jouet test --cmd -- sh -c 'cargo test | tail'", session = "s1", fired = 2, action = "deny" },
+  # No session to count in (or no ledger): it only warns.
+  { command = "cargo build -q 2>&1 | tail -5", fired = 3, action = "warn" },
+  { command = "cargo test | tail", session = "s1", action = "warn" },
 ]
 quiet = [
   # Left to `scoped-lint`.
@@ -76,4 +87,6 @@ quiet = [
   "jouet pr status | head -3",
   "jouet test --cmd -- sh -c 'cargo build && cargo test'",
   "jouet test --cmd -- sh -c 'cargo test 2>&1 | tee t.log'",
+  # Warned before, but this run is not cut.
+  { command = "jouet test --cmd -- cargo build -q", session = "s1", fired = 4 },
 ]

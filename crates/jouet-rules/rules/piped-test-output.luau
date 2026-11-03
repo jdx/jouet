@@ -239,6 +239,19 @@ local function script_under(command: JouetCommand): string?
 	return nil
 end
 
+-- The rule warns the first time in a session, and denies after that: a
+-- warning alone was followed once and then forgotten, and the cut run was
+-- often run again to see what the cut dropped.
+local function speak(call: JouetCall, message: string): JouetDecision
+	if call.session then
+		local fired = jouet.session.fired("piped-test-output", call.session)
+		if fired and fired > 0 then
+			return jouet.deny(`This session was already warned about cutting a run's output. {message}`)
+		end
+	end
+	return jouet.warn(message)
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		for i, command in call.commands do
@@ -267,7 +280,8 @@ local rule: JouetRule = {
 							for _, word in step.words do
 								table.insert(words, quote(word))
 							end
-							return jouet.warn(
+							return speak(
+								call,
 								`\`jouet test\` reads only what this script prints after {cut.program} cut it, and the exit code of its last command. Run \`{table.concat(env)}jouet test --cmd -- {table.concat(words, " ")}\` on its own for each run instead, uncut: it keeps the whole output in a log and prints each failure, or one line of counts when the run passes.`
 							)
 						end
@@ -294,7 +308,8 @@ local rule: JouetRule = {
 					end
 					run = `jouet test --cmd -- {table.concat(words, " ")}`
 				end
-				return jouet.warn(
+				return speak(
+					call,
 					`Run \`{table.concat(env)}{run}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
 				)
 			end

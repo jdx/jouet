@@ -138,6 +138,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "code_lines",
             "command",
             "exit_code",
+            "fired",
             "fnox",
             "git",
             "harness",

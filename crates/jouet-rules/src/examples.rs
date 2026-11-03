@@ -108,6 +108,8 @@ pub struct Case {
     pub stack: Option<serde_json::Value>,
     /// What `jouet.secrets.scan()` answers, for any scope.
     pub secrets: Option<serde_json::Value>,
+    /// What `jouet.session.fired()` answers, for any rule and session.
+    pub fired: Option<u32>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -292,6 +294,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         git_ahead: None,
         stack: None,
         secrets: None,
+        fired: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -484,6 +487,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
                 })
                 .collect()
         }),
+        fired: t.fired,
         expect: if fires {
             Expect::Fires {
                 action,
@@ -577,6 +581,9 @@ impl Engine {
             }
             if let Some(secrets) = &case.secrets {
                 self.stub("secrets:*", secrets.clone());
+            }
+            if let Some(fired) = case.fired {
+                self.stub("fired:*", fired.into());
             }
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
