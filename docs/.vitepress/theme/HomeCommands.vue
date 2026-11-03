@@ -65,11 +65,11 @@ const groups = [
     <div class="jouet-container">
       <HomeHeading
         id="jouet-all-commands"
-        eyebrow="Commands"
-        title="One command per chore"
+        eyebrow="Reference"
+        title="Commands"
       >
-        Each replaces a script or a loop agents write over and over. The hooks
-        name the command when an agent hand-rolls one anyway.
+        Each replaces a script or loop that agents commonly write. When an agent
+        writes one anyway, a hook points it to the command.
       </HomeHeading>
       <div class="groups">
         <section v-for="group in groups" :key="group.title" class="group">
