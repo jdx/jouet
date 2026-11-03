@@ -6,7 +6,7 @@ description: See what jouet saved and what it cost, measured from its hook ledge
 
 `jouet stats` reports what jouet saved and what it cost, and the difference. It keeps two kinds of figure apart:
 
-- **Measured** figures are counted from the ledger that `jouet setup`'s hooks write: jouet command runs, rule decisions and what the agent did after a denial, the test, lint and build runs the `checks` rule recorded, sessions stopped from finishing after a failed check, and failing CI logs returned as the failing step's excerpt.
+- **Measured** figures are counted from the ledger that `jouet setup`'s hooks write: jouet command runs, rule decisions, the sessions each rule fired in and how many of them it fired in more than once, what the agent did after a denial, the test, lint and build runs the `checks` rule recorded, sessions stopped from finishing after a failed check, and failing CI logs returned as the failing step's excerpt.
 - **Estimated** figures price those runs, and what jouet added, by your own Claude Code and Codex history from before setup, read the way [`jouet audit`](/commands/audit) reads it.
 
 The savings are what the runs would have cost at your rates before setup. That is an assumption, not a measurement: nothing records what an agent would have done without jouet. The costs are closer to measured, since the ledger records each block, denial and failure, but pricing them is an estimate too.
@@ -16,6 +16,12 @@ jouet stats [--since TIME] [--harness claude|codex|all] [--session ID] [--summar
 ```
 
 The flags are listed in the [CLI reference](/cli/stats). `--since` limits the ledger entries counted; the history before setup is the same whatever it says. The ledger keeps 30 days of [rotated files](/setup#the-ledger), so measured figures reach back about that far.
+
+## Whether a rule changed what the agent did
+
+A warning lets the call run and shows the agent a message, so the ledger cannot say directly whether the agent took the advice. What it can say is whether the same rule fired again later in the session. In the rules table, `sessions` counts the sessions a rule denied or warned in, and `again` those in which it did so more than once. A warning that fires again in most of its sessions is not changing what agents do there: its message may need rewording, or the rule may suit `deny` better, or none at all. The count is per session, so one agent repeating a command many times counts once.
+
+`overridden` counts the same command run again soon after a deny or warning, and `then jouet`, `then other` and `then nothing` say what the agent ran next after a denial.
 
 ## How the estimates work
 
@@ -76,10 +82,11 @@ measured, from the ledger:
   jouet pr threads  codex       1             0         0           0    0s
   (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)
 
-  rule            deny  warn  overridden  then jouet  then other  then nothing
-  python-edit        1     0           1           0           1             0
-  review-threads     0     1           0           0           0             0
-  sleep-poll         1     0           0           1           0             0
+  rule            deny  warn  sessions  again  overridden  then jouet  then other  then nothing
+  python-edit        1     0         1      0           1           0           1             0
+  review-threads     0     1         1      0           0           0           0             0
+  sleep-poll         1     0         1      0           0           1           0             0
+  (sessions: the sessions it denied or warned in; again: those in which it did so more than once)
 
   checks recorded: test 1 (1 failed)
   finishing blocked after a failed check: 1
