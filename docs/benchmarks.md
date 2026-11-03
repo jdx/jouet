@@ -28,6 +28,8 @@ Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), 
 
 Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and a pinned commit before the fix (`[source]`) instead of a `repo/`. Prompts describe the original issue and ask for a fix, a test and a commit. The checker runs a hidden regression test and `solve.py` applies a reference fix. They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
 
+Success means the agent exited normally and the task's checker passed; it does not by itself establish that every part of the prompt was fulfilled. Some real-project checkers report whether a fix was committed without making the commit a condition of success, and not all check that the agent added a test. Inspect the task's checker and run evidence when assessing accuracy.
+
 Projects beyond jdx's own:
 
 | task | project | issue | language and runner | needs on the host |
