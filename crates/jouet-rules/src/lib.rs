@@ -360,6 +360,10 @@ pub struct Rule {
     requires: Option<decl::Requires>,
     /// Whether the session-start primer names it, when it denies.
     pub primer: bool,
+    /// A short hash of its declaration and its script, so the ledger can
+    /// tell its decisions from an older revision's across builds. Empty for
+    /// a rule that could not be read.
+    pub revision: String,
     body: Body,
 }
 
@@ -816,6 +820,20 @@ pub struct Engine {
     rules: Vec<Rule>,
 }
 
+/// A short hash of `parts`, as a rule's revision.
+fn revision(parts: &[&str]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update(part.as_bytes());
+        hash.update([0]);
+    }
+    hash.finalize()[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// The built-in rules' sources.
 pub fn builtin() -> Vec<Source> {
     BUILTIN
@@ -1020,6 +1038,7 @@ impl Engine {
             script: None,
             requires: None,
             primer: true,
+            revision: String::new(),
             body: Body::None,
         };
         let decls = match decl::parse(&source.code) {
@@ -1038,13 +1057,24 @@ impl Engine {
             .path()
             .and_then(Path::parent)
             .map(Path::to_path_buf);
+        // Each `[[rule]]` table as text of its own, in order, for its
+        // revision: another rule in the same file changing leaves it be.
+        let tables: Vec<String> = toml::from_str::<toml::Table>(&source.code)
+            .ok()
+            .and_then(|t| t.get("rule")?.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|v| toml::to_string(v).unwrap_or_default())
+            .collect();
         decls
             .into_iter()
-            .map(|(line, d)| {
+            .enumerate()
+            .map(|(i, (line, d))| {
                 if let (Some(dir), Some(script)) = (&dir, &d.script) {
                     scripts.push(dir.join(&script.0));
                 }
-                let mut rule = self.toml_rule(&source, line, d, dir.as_deref(), disabled);
+                let table = tables.get(i).map_or("", String::as_str);
+                let mut rule = self.toml_rule(&source, line, d, table, dir.as_deref(), disabled);
                 if let State::Broken(e) = &mut rule.state {
                     *e = format!("{file}:{line}: {e}");
                 }
@@ -1058,6 +1088,7 @@ impl Engine {
         source: &Source,
         line: usize,
         d: decl::RuleDecl,
+        table: &str,
         dir: Option<&Path>,
         disabled: &[String],
     ) -> Rule {
@@ -1099,6 +1130,7 @@ impl Engine {
             script: d.script.as_ref().map(|s| s.0.clone()),
             requires: d.requires,
             primer: d.primer.unwrap_or(true),
+            revision: revision(&[table]),
             body: Body::None,
         };
         let problem = problem.or_else(|| examples.as_ref().err().cloned());
@@ -1122,12 +1154,15 @@ impl Engine {
                     },
                 };
                 match code {
-                    Ok(code) => Body::Script {
-                        matchers: d.matchers,
-                        code,
-                        table: OnceCell::new(),
-                        suggest: d.suggest,
-                    },
+                    Ok(code) => {
+                        rule.revision = revision(&[table, &code]);
+                        Body::Script {
+                            matchers: d.matchers,
+                            code,
+                            table: OnceCell::new(),
+                            suggest: d.suggest,
+                        }
+                    }
                     Err(e) => {
                         rule.state = State::Broken(e);
                         return rule;
@@ -1189,6 +1224,7 @@ impl Engine {
             script: None,
             requires: None,
             primer: true,
+            revision: revision(&[&source.code]),
             body: Body::None,
         };
         if let Err(e) = apply_header(&mut rule, &header) {

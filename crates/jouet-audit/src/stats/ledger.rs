@@ -36,6 +36,9 @@ pub struct LedgerDecision {
     pub rule: String,
     /// `deny`, `warn`, `record:<kind>`, `override` or `block`.
     pub action: String,
+    /// For a `deny`, `warn` or `override`: the revision of the rule that
+    /// decided. Older lines lack it.
+    pub revision: Option<String>,
 }
 
 /// Every entry of a ledger directory, oldest first.

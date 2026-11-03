@@ -100,6 +100,7 @@ pub(crate) mod tests {
                     rule: (*rule).into(),
                     action: (*action).into(),
                     scope: None,
+                    revision: None,
                 })
                 .collect(),
             ..Entry::default()

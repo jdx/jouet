@@ -14,6 +14,21 @@ setup() {
 	export XDG_STATE_HOME="$HOME/state"
 	export XDG_CONFIG_HOME="$HOME/.config"
 	unset CLAUDE_CONFIG_DIR CODEX_HOME JOUET_STATS_SUMMARY
+	stamp_revisions
+}
+
+# The fixture ledger's rule decisions, as from the revisions loaded now:
+# `jouet stats` counts a rule only from its current revision. A line that is
+# not JSON stays as it is.
+stamp_revisions() {
+	local revisions
+	revisions=$(jouet rule list --json | jq -c 'reduce .rules[] as $r ({}; .[$r.name] = $r.revision)')
+	for file in "$XDG_STATE_HOME"/jouet/ledger/*.jsonl; do
+		jq -Rr --argjson rev "$revisions" '. as $line
+			| (fromjson? | if has("decisions") then .decisions |= map(if .action | test("^(deny|warn|override)$") then .revision = $rev[.rule] else . end) else . end
+				| tojson) // $line' "$file" >"$file.new"
+		mv "$file.new" "$file"
+	done
 }
 
 @test "measured figures come from the ledger, and thin history is not estimated" {
@@ -30,6 +45,28 @@ setup() {
 	assert_line '  - jouet wait ci/run/pr: 1 run, not estimated: only 1 CI wait before setup, and an estimate needs 20'
 	refute_output --partial 'estimated total'
 	[[ -f "$XDG_STATE_HOME/jouet/stats/baselines.json" ]]
+}
+
+@test "rules are counted from the revision loaded now" {
+	# One of python-edit's decisions from an older revision, and one from a
+	# rule that is no longer loaded.
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	jq -Rr '. as $line | (fromjson? | if .decisions[0]?.action == "override" then .decisions[0].revision = "0ld" else . end | tojson) // $line' \
+		"$ledger" >"$ledger.new"
+	mv "$ledger.new" "$ledger"
+	jq -cn '{ts: 1793405230, harness: "claude", session: "s1", event: "pre-tool-use", tool: "Bash", shape: "git push",
+		decisions: [{rule: "push-untested", action: "warn", revision: "123456789abc"}]}' >>"$ledger"
+
+	run --separate-stderr jouet stats --display plain
+	assert_success
+	assert_line --regexp '^  python-edit +1 +0 +1 +0 +0 +0 +1 +0$'
+	refute_line --partial 'push-untested '
+	assert_line '  rules are counted from the revision loaded now; left out: 1 decision of an older revision of a rule, or from before the ledger recorded revisions; and the rules not loaded here: push-untested'
+	# What the warning cost still counts.
+	assert_line --partial '  - rule warnings: 1, not estimated: '
+
+	run --separate-stderr jouet stats --json --display plain
+	[[ "$(jq -c '.measured | [.older_decisions, .rules_not_loaded]' <<<"$output")" == '[1,["push-untested"]]' ]]
 }
 
 @test "costs are shown beside savings, and no net is claimed when one cannot be priced" {

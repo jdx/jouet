@@ -32,6 +32,11 @@ pub(crate) struct Decision {
     /// a value. Older lines lack it, and read as partial.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    /// For a `deny`, `warn` or `override`: the revision of the rule that
+    /// decided, a hash of its declaration (see `jouet_rules::Rule`). Older
+    /// lines lack it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +131,7 @@ pub(crate) fn record_fix(
         rule: "fix-after".into(),
         action: "fix".into(),
         scope: Some(scope.into()),
+        revision: None,
     });
     append(&dir, &entry);
 }
@@ -1036,6 +1042,7 @@ mod tests {
             rule: "git-add-all".into(),
             action: "deny".into(),
             scope: None,
+            revision: None,
         }];
         append(dir.path(), &entry);
         append(dir.path(), &Entry::new("claude", Some("other"), "stop"));
@@ -1077,6 +1084,7 @@ mod tests {
                 rule: "git-stash".into(),
                 action: "deny".into(),
                 scope: None,
+                revision: None,
             }],
             ..Entry::default()
         };

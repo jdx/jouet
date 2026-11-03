@@ -15,6 +15,18 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+/// The rules loaded here, with their revisions: the rules table counts
+/// each only from the revision loaded now.
+fn revisions() -> BTreeMap<String, String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    crate::rules::load(&cwd)
+        .engine
+        .rules()
+        .iter()
+        .map(|r| (r.name.clone(), r.revision.clone()))
+        .collect()
+}
+
 pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     let since = match args.since.as_deref().map(|s| parse_since(s, time::now())) {
         None => None,
@@ -35,6 +47,7 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         since,
         harness: harness.clone(),
         session: args.session.clone(),
+        revisions: Some(revisions()),
     };
     let dir = crate::ledger::dir();
     let ledger = match dir.as_deref().map(Ledger::read).transpose() {
@@ -525,6 +538,34 @@ fn measured_text(s: &mut String, m: &Measured) {
         let _ = writeln!(
             s,
             "  (sessions: the sessions it denied or warned in; again: those in which it did so more than once)"
+        );
+    }
+    if m.older_decisions > 0 || !m.rules_not_loaded.is_empty() {
+        if m.rules.is_empty() {
+            s.push('\n');
+        }
+        let mut left = Vec::new();
+        if m.older_decisions > 0 {
+            left.push(format!(
+                "{} {} of an older revision of a rule, or from before the ledger recorded revisions",
+                m.older_decisions,
+                if m.older_decisions == 1 {
+                    "decision"
+                } else {
+                    "decisions"
+                }
+            ));
+        }
+        if !m.rules_not_loaded.is_empty() {
+            left.push(format!(
+                "the rules not loaded here: {}",
+                m.rules_not_loaded.join(", ")
+            ));
+        }
+        let _ = writeln!(
+            s,
+            "  rules are counted from the revision loaded now; left out: {}",
+            left.join("; and ")
         );
     }
     if !m.checks.is_empty() {

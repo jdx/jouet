@@ -118,6 +118,7 @@ fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
             rule: rule.clone(),
             action: "deny".into(),
             scope: None,
+            revision: None,
         }],
         ..pre(session, "git stash")
     };
@@ -127,6 +128,7 @@ fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
             rule: rule.clone(),
             action: "override".into(),
             scope: None,
+            revision: None,
         }],
         ..pre(session, "git stash")
     };

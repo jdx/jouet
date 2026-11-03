@@ -412,6 +412,7 @@ pub(crate) mod tests {
                 rule: "r".into(),
                 action: "warn".into(),
                 scope: None,
+                revision: None,
             }];
             d.observe(&pre, &never);
             d.observe(&ran(i as u64, s, "nope x", 127), &never);
