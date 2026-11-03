@@ -85,11 +85,11 @@ def copy_trust(reviewed: Path, run: Path) -> None:
     source = str(reviewed / "hooks.json") + ":"
     try:
         reviewed_config = reviewed / "config.toml"
-        reviewed_text = reviewed_config.read_text() if reviewed_config.exists() else ""
+        reviewed_text = reviewed_config.read_text(encoding="utf-8") if reviewed_config.exists() else ""
         state = tomllib.loads(reviewed_text).get("hooks", {}).get("state", {})
         config = run / "config.toml"
-        existing = tomllib.loads(config.read_text()) if config.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        existing = tomllib.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise HookPreflightError("Cannot read the reviewed Codex trust") from error
     if "hooks" in existing:
         raise HookPreflightError("The run's Codex configuration already has hook settings")

@@ -93,11 +93,11 @@ class CodexHooksTest(unittest.TestCase):
     def test_copied_trust_keeps_a_non_ascii_run_path_valid(self):
         # json.dumps escapes U+1F600 as a surrogate pair, which TOML rejects.
         with tempfile.TemporaryDirectory() as directory:
-            reviewed, run = Path(directory) / "reviewed", Path(directory) / "run 😀"
+            reviewed, run = Path(directory) / "reviewed 😀", Path(directory) / "run 😀"
             reviewed.mkdir()
             run.mkdir()
-            key = json.dumps(f"{reviewed / 'hooks.json'}:stop:0:0")
-            (reviewed / "config.toml").write_text(f"[hooks.state.{key}]\ntrusted_hash = \"sha256:aa\"\n")
+            key = json.dumps(f"{reviewed / 'hooks.json'}:stop:0:0", ensure_ascii=False)
+            (reviewed / "config.toml").write_text(f"[hooks.state.{key}]\ntrusted_hash = \"sha256:aa\"\n", encoding="utf-8")
             copy_trust(reviewed, run)
             copied = tomllib.loads((run / "config.toml").read_text(encoding="utf-8"))
             self.assertEqual(copied["hooks"]["state"], {f"{run / 'hooks.json'}:stop:0:0": {"trusted_hash": "sha256:aa"}})
