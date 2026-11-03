@@ -1,0 +1,34 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "ci-pending"
+why = "`gh pr checks` exiting 8 means checks are still running, and checking again spends a model turn each time; `jouet wait ci` blocks until they settle."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-11-03"
+on = "post-tool-use"
+needs = ["wait", "ci"]
+message = "Checks are still pending (`gh pr checks` exited 8). Run `jouet wait ci` next rather than checking again: it blocks until they settle, in one call, and prints the failing jobs' logs (`jouet agent-help wait`)."
+
+[rule.match]
+command = "gh pr checks"
+unless_flags = ["--help", "-h", "--watch"]
+exit_code = 8
+
+[rule.examples]
+fires = [
+  { command = "gh pr checks", exit_code = 8 },
+  { command = "gh pr checks 123 --required", exit_code = 8 },
+  { command = "cd ~/src/app && gh pr checks 12", exit_code = 8 },
+  { command = "gh pr checks 123 --repo jdx/jouet", exit_code = 8, harness = "claude" },
+]
+quiet = [
+  { command = "gh pr checks", exit_code = 0 },
+  { command = "gh pr checks", exit_code = 1 },
+  { command = "gh pr checks --watch", exit_code = 8 },
+  # The pipe's exit code is grep's, not gh's.
+  { command = "gh pr checks | grep -c pending", exit_code = 8 },
+  { command = "gh pr checks || true", exit_code = 0 },
+  { command = "gh run view 42", exit_code = 8 },
+  { command = "jouet wait ci", exit_code = 1 },
+]

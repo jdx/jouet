@@ -46,7 +46,7 @@
           "type": "string"
         },
         "on": {
-          "description": "When the rule runs. Only a `script` rule can run after a tool\n(`post-tool-use`), to record a test, lint or build run.",
+          "description": "When the rule runs: before a tool (`pre-tool-use`, the default), or\nafter it (`post-tool-use`), where a rule only warns, as context for\nthe agent's next step, and a script can record a test, lint or build\nrun.",
           "$ref": "#/$defs/Event"
         },
         "needs": {
@@ -175,7 +175,7 @@
       ]
     },
     "Matcher": {
-      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `min_code_lines`,\n`min_tracked_files`, `fnox` and `secret_files` is about a command, and\nneeds `command`.",
+      "description": "Which calls a rule matches. Every key given must hold; a list in a key\nmatches if any of its items does (`text` excepted: every pattern must\nmatch). Every key but `tool`, `paths`, `unless_paths`, `input`,\n`unless_input`, `seen`, `min_read_lines`, `min_code_lines`,\n`min_tracked_files`, `fnox`, `secret_files` and `exit_code` is about a\ncommand, and needs `command`.",
       "type": "object",
       "properties": {
         "tool": {
@@ -306,6 +306,11 @@
         "prints": {
           "description": "Whether the command's standard output reaches the transcript: it is\nnot redirected to a file, piped into another command, or captured\nwith `$(...)`.",
           "type": "boolean"
+        },
+        "exit_code": {
+          "description": "For a `post-tool-use` rule: the call exited with one of these codes,\nsuch as `8` for `gh pr checks` with checks still pending. With\n`command`, it is that command's exit status, where the call's says\nwhat it was: in `npm test && gh pr checks` exiting 1, either may have\nfailed, so neither matches. Set it in an example with `exit_code`.",
+          "$ref": "#/$defs/OneOrMany_int32",
+          "default": []
         }
       },
       "additionalProperties": false
@@ -334,6 +339,21 @@
           "items": {
             "type": "string",
             "pattern": "^(-[^-]|--[^=]+)$"
+          }
+        }
+      ]
+    },
+    "OneOrMany_int32": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "int32"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       ]

@@ -1033,8 +1033,8 @@ fn rule_keys_that_do_not_fit_together_are_refused() {
     assert!(broken("match = { command = \"ls\" }\n").contains("`message`"));
     assert!(broken("message = \"m\"\nscript = \"r.luau\"\n").contains("leave out `message`"));
     assert!(
-        broken("on = \"post-tool-use\"\nmessage = \"m\"\nmatch = { command = \"ls\" }\n")
-            .contains("needs a `script`")
+        broken("message = \"m\"\nmatch = { command = \"ls\", exit_code = 1 }\n")
+            .contains("give the rule `on = \"post-tool-use\"`")
     );
     assert!(
         broken("scope = \"repo\"\nmessage = \"m\"\nmatch = { command = \"ls\" }\n")
@@ -1654,4 +1654,43 @@ fn a_daemon_the_project_declares_goes_to_pitchfork_and_anything_else_to_jouet_jo
     let outcome = engine.evaluate(&bash("pkill -f vite"));
     assert!(outcome.deny.is_none());
     assert_eq!(outcome.warnings[0].rule, "job-stop");
+}
+
+#[test]
+fn a_post_tool_use_matcher_only_warns_on_the_exit_status_it_names() {
+    let rule = r#"[[rule]]
+name = "after-ls"
+why = "a test rule"
+mode = "deny"
+on = "post-tool-use"
+message = "ls failed"
+[rule.match]
+command = "ls"
+exit_code = [1, 2]
+[rule.examples]
+fires = [{ command = "ls x", exit_code = 2 }]
+quiet = [{ command = "ls x", exit_code = 0 }]
+"#;
+    let engine = engine(vec![toml_user("after-ls", rule)]);
+    let after = |command: &str, exit_code: i32| {
+        let call = Call {
+            event: Some(Event::PostToolUse),
+            exit_code: Some(exit_code),
+            ..bash(command)
+        };
+        engine.evaluate(&call)
+    };
+    let outcome = after("ls x", 2);
+    assert!(outcome.deny.is_none(), "{outcome:?}");
+    assert_eq!(outcome.warnings.len(), 1, "{outcome:?}");
+    assert_eq!(outcome.warnings[0].message.as_deref(), Some("ls failed"));
+    assert!(after("ls x", 0).warnings.is_empty());
+    assert!(after("ls x", 3).warnings.is_empty());
+    // In `make && ls`, either may have failed.
+    assert!(after("make && ls x", 1).warnings.is_empty());
+    assert_eq!(after("cd d && ls x", 1).warnings.len(), 1);
+    // Before a tool, it does not run.
+    assert!(engine.evaluate(&bash("ls x")).warnings.is_empty());
+    let examples = engine.examples(engine.rule("after-ls").unwrap()).unwrap();
+    assert!(examples.iter().all(|e| e.ok), "{examples:?}");
 }

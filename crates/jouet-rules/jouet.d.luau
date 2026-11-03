@@ -125,6 +125,8 @@ export type JouetExample = string | {
 
 export type JouetRule = {
 	-- Returns a decision, or nil to say nothing. The first rule to deny wins.
+	-- After a tool (`on = "post-tool-use"`), a deny is a warning: the
+	-- command already ran.
 	check: (call: JouetCall) -> JouetDecision?,
 	-- The rest is for a deprecated whole-file Luau rule; a script's rule
 	-- says these in its TOML.
