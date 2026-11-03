@@ -4,7 +4,7 @@ use jouet_audit::sessions::Session;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{BufRead as _, BufReader, Read as _};
+use std::io::{BufRead as _, Read as _};
 use std::path::{Path, PathBuf};
 
 const MAX_TRANSCRIPT_BYTES: u64 = 32 * 1024 * 1024;
@@ -166,33 +166,28 @@ pub(crate) fn plan(
             idle_or_current += 1;
             continue;
         }
-        let identity = format!(
-            "{}\0{}\0{}\0{}",
-            session.harness,
-            session.id,
-            project.display(),
-            session.transcript.display(),
-        );
-        let key: String = Sha256::digest(identity.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let identity = format!("{}\0{}\0{}", session.harness, session.id, project.display());
+        let key = digest(&identity);
+        let legacy_key = digest(&format!("{identity}\0{}", session.transcript.display()));
+        let legacy_snapshot = snapshot(&legacy_key, metadata.len(), modified.as_nanos());
         let snapshot = snapshot(&key, metadata.len(), modified.as_nanos());
         // Inspect a claim's requested snapshot without spending its budget on
         // unrelated sessions that may have appeared since the plan.
         if selection.1.is_some_and(|wanted| wanted != snapshot) {
             continue;
         }
-        if state.receipts.get(&key) == Some(&snapshot) {
+        // Older receipts included the transcript path in the key. Honour them
+        // while that path remains, while new keys survive a plain-file move.
+        if state.receipts.get(&key) == Some(&snapshot)
+            || state.receipts.get(&legacy_key) == Some(&legacy_snapshot)
+        {
             reviewed += 1;
             continue;
         }
         let now = u64::try_from(now_ms.max(0) / 1000).unwrap_or(0);
-        if state
-            .claims
-            .get(&key)
-            .is_some_and(|claim| claim.expires > now)
-        {
+        if state.claims.values().any(|claim| {
+            claim.session == session.id && claim.project == project && claim.expires > now
+        }) {
             claimed += 1;
             continue;
         }
@@ -229,17 +224,22 @@ pub(crate) fn plan(
         for queue in &mut queues {
             if let Some(candidate) = queue.pop_front() {
                 added = true;
-                if candidate.bytes > MAX_TRANSCRIPT_BYTES
-                    || inspected_bytes.saturating_add(candidate.bytes) > MAX_INSPECTION_BYTES
+                if candidate.bytes > MAX_TRANSCRIPT_BYTES || inspected_bytes >= MAX_INSPECTION_BYTES
                 {
                     inspection_limited += 1;
                     continue;
                 }
-                inspected_bytes += candidate.bytes;
-                match one_project(&candidate.transcript, &candidate.project) {
-                    Ok(true) => {}
-                    Ok(false) => {
+                let limit = MAX_TRANSCRIPT_BYTES.min(MAX_INSPECTION_BYTES - inspected_bytes);
+                let (result, bytes) = one_project(&candidate.transcript, &candidate.project, limit);
+                inspected_bytes = inspected_bytes.saturating_add(bytes);
+                match result {
+                    Ok(Some(true)) => {}
+                    Ok(Some(false)) => {
                         mixed_project += 1;
+                        continue;
+                    }
+                    Ok(None) => {
+                        inspection_limited += 1;
                         continue;
                     }
                     Err(_) => {
@@ -278,9 +278,8 @@ pub(crate) fn plan(
 /// Codex's initial project, which is also what `wind review` reads. Its
 /// session listing uses the latest cwd instead, so it cannot identify this.
 fn origin(path: &Path) -> std::io::Result<(String, String)> {
-    let file = std::fs::File::open(path)?;
     let mut first = String::new();
-    BufReader::new(file)
+    jouet_audit::open(path)?
         .take(MAX_META_BYTES)
         .read_line(&mut first)?;
     let value: serde_json::Value = serde_json::from_str(&first).map_err(std::io::Error::other)?;
@@ -298,29 +297,49 @@ fn origin(path: &Path) -> std::io::Result<(String, String)> {
     Ok((id.to_owned(), cwd.to_owned()))
 }
 
-fn one_project(path: &Path, expected: &Path) -> std::io::Result<bool> {
-    let file = std::fs::File::open(path)?;
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: serde_json::Value =
-            serde_json::from_str(&line).map_err(std::io::Error::other)?;
-        if value["type"] == "turn_context" {
-            let cwd = value["payload"]["cwd"]
-                .as_str()
-                .ok_or_else(|| std::io::Error::other("turn context has no cwd"))?;
-            if jouet_output::paths::work_tree(Path::new(cwd)).as_deref() != Some(expected) {
-                return Ok(false);
+/// Reads at most one byte past the remaining decoded-byte budget, including
+/// for compressed archives. An over-limit file is never treated as reviewed.
+fn one_project(path: &Path, expected: &Path, limit: u64) -> (std::io::Result<Option<bool>>, u64) {
+    let mut input = match jouet_audit::open(path) {
+        Ok(input) => input.take(limit.saturating_add(1)),
+        Err(e) => return (Err(e), 0),
+    };
+    let mut content = Vec::new();
+    let read = input.read_to_end(&mut content);
+    let bytes = content.len() as u64;
+    if let Err(e) = read {
+        return (Err(e), bytes);
+    }
+    if bytes > limit {
+        return (Ok(None), bytes);
+    }
+    let result = (|| {
+        for line in content.split(|&byte| byte == b'\n') {
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            let value: serde_json::Value =
+                serde_json::from_slice(line).map_err(std::io::Error::other)?;
+            if value["type"] == "turn_context" {
+                let cwd = value["payload"]["cwd"]
+                    .as_str()
+                    .ok_or_else(|| std::io::Error::other("turn context has no cwd"))?;
+                if jouet_output::paths::work_tree(Path::new(cwd)).as_deref() != Some(expected) {
+                    return Ok(Some(false));
+                }
             }
         }
-    }
-    Ok(true)
+        Ok(Some(true))
+    })();
+    (result, bytes)
 }
 
 fn snapshot(key: &str, len: u64, modified_ns: u128) -> String {
-    Sha256::digest(format!("{key}\0{len}\0{modified_ns}").as_bytes())
+    digest(&format!("{key}\0{len}\0{modified_ns}"))
+}
+
+fn digest(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
@@ -337,11 +356,11 @@ pub(crate) fn claim(
         if scheduled.receipts.get(&candidate.key) == Some(&candidate.snapshot) {
             return Err("this snapshot is already reviewed".into());
         }
-        if scheduled
-            .claims
-            .get(&candidate.key)
-            .is_some_and(|claim| claim.expires > now)
-        {
+        if scheduled.claims.values().any(|claim| {
+            claim.session == candidate.session
+                && claim.project == candidate.project
+                && claim.expires > now
+        }) {
             return Err("this session is already claimed".into());
         }
         if !unchanged(candidate) {
@@ -497,6 +516,110 @@ mod tests {
     }
 
     #[test]
+    fn compressed_archives_are_inspected_and_count_decoded_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let project = root.join("project");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let transcript = root.join("rollout-test.jsonl.zst");
+        let meta =
+            serde_json::json!({"type":"session_meta","payload":{"id":"archived","cwd":project}});
+        let turn = serde_json::json!({"type":"turn_context","payload":{"cwd":project}});
+        let contents = format!("{meta}\n{turn}\n");
+        std::fs::write(
+            &transcript,
+            zstd::stream::encode_all(contents.as_bytes(), 0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(origin(&transcript).unwrap().0, "archived");
+        let (result, bytes) = one_project(&transcript, &project, 10);
+        assert_eq!(result.unwrap(), None);
+        assert_eq!(bytes, 11);
+        let (result, bytes) = one_project(&transcript, &project, 4096);
+        assert_eq!(result.unwrap(), Some(true));
+        assert_eq!(bytes, contents.len() as u64);
+        let session = Session {
+            harness: "codex",
+            id: "archived".into(),
+            cwd: None,
+            branch: None,
+            modified_ms: 0,
+            transcript,
+        };
+        let now = i64::try_from(super::super::now() + 1).unwrap() * 1000;
+        let found = plan(
+            vec![session],
+            &[root],
+            now,
+            0,
+            (1, None),
+            None,
+            &Scheduled::default(),
+        );
+        assert_eq!(found.eligible, 1);
+        assert_eq!(found.candidates[0].session, "archived");
+    }
+
+    #[test]
+    fn legacy_path_keyed_receipts_and_claims_remain_effective() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let project = root.join("project");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let transcript = root.join("session.jsonl");
+        write_session(&transcript, &project, "legacy");
+        let session = Session {
+            harness: "codex",
+            id: "legacy".into(),
+            cwd: None,
+            branch: None,
+            modified_ms: 0,
+            transcript: transcript.clone(),
+        };
+        let now = super::super::now();
+        let identity = format!(
+            "codex\0legacy\0{}\0{}",
+            project.display(),
+            transcript.display()
+        );
+        let key = digest(&identity);
+        let metadata = std::fs::metadata(&transcript).unwrap();
+        let modified = metadata
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        let old_snapshot = snapshot(&key, metadata.len(), modified.as_nanos());
+        let mut state = Scheduled::default();
+        state.receipts.insert(key.clone(), old_snapshot.clone());
+        let make_plan = |state: &Scheduled| {
+            plan(
+                vec![session.clone()],
+                std::slice::from_ref(&root),
+                i64::try_from(now + 1).unwrap() * 1000,
+                0,
+                (10, None),
+                None,
+                state,
+            )
+        };
+        assert_eq!(make_plan(&state).reviewed, 1);
+        state.receipts.clear();
+        state.claims.insert(
+            key,
+            Claim {
+                session: "legacy".into(),
+                project,
+                transcript,
+                snapshot: old_snapshot,
+                lease: "old-lease".into(),
+                expires: now + 3600,
+            },
+        );
+        assert_eq!(make_plan(&state).claimed, 1);
+    }
+
+    #[test]
     fn plan_interleaves_allowed_projects_and_changes_snapshot_after_append() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
@@ -582,11 +705,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let transcript = dir.path().join("session.jsonl");
         std::fs::write(&transcript, "\n  \n{\"type\":\"event_msg\"}\n").unwrap();
-        assert!(one_project(&transcript, dir.path()).unwrap());
+        assert_eq!(
+            one_project(&transcript, dir.path(), 1024).0.unwrap(),
+            Some(true)
+        );
         std::fs::write(&transcript, "{\"type\":\"turn_context\"\n").unwrap();
-        assert!(one_project(&transcript, dir.path()).is_err());
+        assert!(one_project(&transcript, dir.path(), 1024).0.is_err());
         std::fs::write(&transcript, "{\"type\":\"turn_context\",\"payload\":{}}\n").unwrap();
-        assert!(one_project(&transcript, dir.path()).is_err());
+        assert!(one_project(&transcript, dir.path(), 1024).0.is_err());
     }
 
     #[test]
@@ -726,6 +852,21 @@ mod tests {
         let first_claim = claim(&paths, candidate, now).unwrap();
         assert!(claim(&paths, candidate, now).is_err());
         assert_eq!(make_plan().claimed, 1);
+        let moved = root.join("archived-active.jsonl");
+        std::fs::rename(&transcript, &moved).unwrap();
+        let mut archived = session.clone();
+        archived.transcript = moved.clone();
+        let after_move = plan(
+            vec![archived],
+            std::slice::from_ref(&root),
+            i64::try_from(now + 1).unwrap() * 1000,
+            0,
+            (10, None),
+            None,
+            &Scheduled::load(&paths).unwrap(),
+        );
+        assert_eq!(after_move.claimed, 1);
+        std::fs::rename(&moved, &transcript).unwrap();
         let reply = |id: &str| {
             serde_json::from_value::<super::super::review::Reply>(
                 serde_json::json!({"session": id, "proposals": [{"kind":"nothing"}]}),
@@ -753,6 +894,21 @@ mod tests {
                 .1
         );
         assert_eq!(make_plan().reviewed, 1);
+        let moved = root.join("archived.jsonl");
+        std::fs::rename(&transcript, &moved).unwrap();
+        let mut archived = session.clone();
+        archived.transcript = moved.clone();
+        let after_move = plan(
+            vec![archived],
+            std::slice::from_ref(&root),
+            i64::try_from(now + 1).unwrap() * 1000,
+            0,
+            (10, None),
+            None,
+            &Scheduled::load(&paths).unwrap(),
+        );
+        assert_eq!(after_move.reviewed, 1);
+        std::fs::rename(&moved, &transcript).unwrap();
         writeln!(
             std::fs::OpenOptions::new()
                 .append(true)

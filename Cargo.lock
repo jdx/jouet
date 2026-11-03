@@ -686,6 +686,7 @@ dependencies = [
  "ureq",
  "usage-config",
  "usage-rs",
+ "zstd",
 ]
 
 [[package]]
