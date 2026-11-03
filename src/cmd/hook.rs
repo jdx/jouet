@@ -227,12 +227,23 @@ fn handle(
             if harness == Harness::Claude {
                 agents::end_call(payload);
             }
-            let (records, ran) = if hooks.verify {
-                record(payload, &call)
+            let outcome = (hooks.verify || hooks.steer)
+                .then(|| load(payload))
+                .flatten()
+                .map(|engine| post_tool_use(&engine, payload, &call))
+                .unwrap_or_default();
+            let records = if hooks.verify {
+                outcome.records
             } else {
-                (Vec::new(), None)
+                Vec::new()
             };
-            log.post_tool_use(payload, &call, &records, ran);
+            let warnings = if hooks.steer {
+                outcome.warnings
+            } else {
+                Vec::new()
+            };
+            let ran = record(payload, &call, &records);
+            log.post_tool_use(payload, &call, &records, &warnings, ran);
             if hooks.verify {
                 note_formatting(payload, &call, false);
             }
@@ -247,19 +258,16 @@ fn handle(
             {
                 wind::tasks::record_use(&paths, Path::new(cwd), command, crate::wind::now());
             }
-            // A warning the pre-tool-use hook held for this call.
-            if !harness::defers_warnings(harness) {
-                return None;
-            }
-            let path = pending_path(payload)?;
-            let context = std::fs::read_to_string(&path).ok()?;
-            let _ = std::fs::remove_file(&path);
-            Some(json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": context,
-                }
-            }))
+            // A warning the pre-tool-use hook held for this call goes first.
+            let held = harness::defers_warnings(harness)
+                .then(|| pending_path(payload))
+                .flatten()
+                .and_then(|path| {
+                    let context = std::fs::read_to_string(&path).ok();
+                    let _ = std::fs::remove_file(&path);
+                    context
+                });
+            after_tool(event, held, &warnings)
         }
         // Every harness sends its file edits here, Codex its patches too.
         // The graph is re-indexed after the format, so it sees the file as
@@ -540,7 +548,14 @@ impl Log<'_> {
         ledger::append(dir, &entry);
     }
 
-    fn post_tool_use(&self, payload: &Value, call: &Call, records: &[Record], ran: Option<Ran>) {
+    fn post_tool_use(
+        &self,
+        payload: &Value,
+        call: &Call,
+        records: &[Record],
+        warnings: &[jouet_rules::Decision],
+        ran: Option<Ran>,
+    ) {
         let mut entry = self.entry("post-tool-use");
         // A run after a `cd` belongs to the repository it went to.
         let (tree, repo) = ran.map_or((None, None), |r| (r.tree, r.repo));
@@ -553,6 +568,13 @@ impl Log<'_> {
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
         entry.tree = tree;
         entry.decisions = records.iter().map(decision).collect();
+        entry
+            .decisions
+            .extend(warnings.iter().map(|d| ledger::Decision {
+                rule: d.rule.clone(),
+                action: "warn".into(),
+                scope: None,
+            }));
         self.append(entry);
     }
 }
@@ -787,14 +809,16 @@ fn pre_tool_use(engine: &Engine, call: &Call) -> (Option<Value>, Option<Outcome>
     (respond(&outcome), Some(outcome))
 }
 
+/// A decision's message, with the rule that made it.
+fn tag(d: &jouet_rules::Decision) -> String {
+    format!(
+        "{} [jouet rule: {}]",
+        d.message.as_deref().unwrap_or("jouet denied this command"),
+        d.rule
+    )
+}
+
 fn respond(outcome: &Outcome) -> Option<Value> {
-    let tag = |d: &jouet_rules::Decision| {
-        format!(
-            "{} [jouet rule: {}]",
-            d.message.as_deref().unwrap_or("jouet denied this command"),
-            d.rule
-        )
-    };
     if let Some(deny) = &outcome.deny {
         return Some(json!({
             "hookSpecificOutput": {
@@ -823,39 +847,63 @@ struct Ran {
     repo: Option<String>,
 }
 
-/// Runs the post-tool-use rules on a finished Bash command and keeps what
-/// they record in the session's state file, each with the tree it ran
-/// against; returns them and where the first ran.
-fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
-    // A background command has not finished when this hook runs.
+/// Runs the post-tool-use rules on a finished Bash command: what they
+/// record and what they warn about. A command whose exit code is unknown, or
+/// that runs in the background and so has not finished, gets nothing.
+fn post_tool_use(engine: &Engine, payload: &Value, call: &Call) -> Outcome {
     let background = payload
         .get("tool_input")
         .and_then(|i| i.get("run_in_background"))
         .and_then(Value::as_bool)
         == Some(true);
     if call.tool != "Bash" || call.exit_code.is_none() || background {
-        return (Vec::new(), None);
+        return Outcome::default();
     }
-    let Some(path) = session_state_path(payload) else {
-        return (Vec::new(), None);
-    };
-    let Some(engine) = load(payload) else {
-        return (Vec::new(), None);
-    };
     let call = Call {
         event: Some(Event::PostToolUse),
         ..call.clone()
     };
-    let records = evaluate(&engine, &call).records;
-    if records.is_empty() {
-        return (records, None);
+    evaluate(engine, &call)
+}
+
+/// What the agent is told after a tool: a warning held from before it ran,
+/// then the post-tool-use rules' warnings, each tagged with its rule.
+fn after_tool(
+    event: &str,
+    held: Option<String>,
+    warnings: &[jouet_rules::Decision],
+) -> Option<Value> {
+    let context: Vec<String> = held.into_iter().chain(warnings.iter().map(tag)).collect();
+    if context.is_empty() {
+        return None;
     }
+    // Claude Code checks that the answer names the event it asked about.
+    let name = if event == "post-tool-use-failure" {
+        "PostToolUseFailure"
+    } else {
+        "PostToolUse"
+    };
+    Some(json!({
+        "hookSpecificOutput": {
+            "hookEventName": name,
+            "additionalContext": context.join("\n"),
+        }
+    }))
+}
+
+/// Keeps the runs the post-tool-use rules recorded in the session's state
+/// file, each with the tree it ran against; returns where the first ran.
+fn record(payload: &Value, call: &Call, records: &[Record]) -> Option<Ran> {
+    if records.is_empty() {
+        return None;
+    }
+    let path = session_state_path(payload)?;
     // The command has finished, so the tree now is the one it ran against,
     // unless the command itself changed tracked files. Each run counts for
     // the work tree it ran in, after any `cd` before it.
     let cwd = session_dir(payload);
     let mut dirs: Vec<Option<&str>> = Vec::new();
-    for record in &records {
+    for record in records {
         if !dirs.contains(&record.dir.as_deref()) {
             dirs.push(record.dir.as_deref());
         }
@@ -910,7 +958,7 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
         }
     });
     let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
-    (records, Some(Ran { tree, repo }))
+    Some(Ran { tree, repo })
 }
 
 /// Keeps the tree before and after a call that only formats or commits
@@ -1562,6 +1610,45 @@ mod tests {
             out["hookSpecificOutput"]
                 .get("permissionDecision")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_post_tool_use_warning_reaches_the_agent_after_the_call() {
+        let engine = engine(Vec::new());
+        let payload = json!({
+            "hook_event_name": "PostToolUseFailure",
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr checks 12"},
+            "error": "Exit code 8\nSome checks are still pending",
+        });
+        let call = Call::from_hook(&payload, "claude");
+        let outcome = post_tool_use(&engine, &payload, &call);
+        let out = after_tool("post-tool-use-failure", None, &outcome.warnings).unwrap();
+        let output = &out["hookSpecificOutput"];
+        assert_eq!(output["hookEventName"], "PostToolUseFailure");
+        let context = output["additionalContext"].as_str().unwrap();
+        assert!(context.contains("`jouet wait ci`"), "{context}");
+        assert!(context.ends_with("[jouet rule: ci-pending]"), "{context}");
+        // A warning held from before the call comes first.
+        let out = after_tool("post-tool-use", Some("held".into()), &outcome.warnings).unwrap();
+        let context = out["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.starts_with("held\n"), "{context}");
+        assert_eq!(after_tool("post-tool-use", None, &[]), None);
+        // A command in the background has not finished.
+        let background = json!({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr checks 12", "run_in_background": true},
+            "exit_code": 8,
+        });
+        let call = Call::from_hook(&background, "claude");
+        assert!(
+            post_tool_use(&engine, &background, &call)
+                .warnings
+                .is_empty()
         );
     }
 

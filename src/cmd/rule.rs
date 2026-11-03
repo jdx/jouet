@@ -193,8 +193,14 @@ fn list_text(report: &List) -> String {
         .rules
         .iter()
         .map(|r| {
-            // A post-tool-use rule records runs; its mode never applies.
+            // After a tool, nothing is denied: a matcher warns, and a script
+            // records runs (and may warn).
             let mode = match (r.event, r.mode) {
+                ("post-tool-use", _)
+                    if r.script.is_none() && r.format == jouet_rules::Format::Toml =>
+                {
+                    "warn"
+                }
                 ("post-tool-use", _) => "record",
                 (_, jouet_rules::Mode::Warn) => "warn",
                 (_, jouet_rules::Mode::Deny) => "deny",

@@ -72,8 +72,10 @@ pub(crate) struct RuleDecl {
     pub author: Option<String>,
     /// When, as a date.
     pub created: Option<String>,
-    /// When the rule runs. Only a `script` rule can run after a tool
-    /// (`post-tool-use`), to record a test, lint or build run.
+    /// When the rule runs: before a tool (`pre-tool-use`, the default), or
+    /// after it (`post-tool-use`), where a rule only warns, as context for
+    /// the agent's next step, and a script can record a test, lint or build
+    /// run.
     pub on: Option<Event>,
     /// The jouet command the rule's advice names, such as `["wait", "ci"]`:
     /// the rule stays off until the installed jouet has it.
@@ -123,8 +125,8 @@ pub(crate) struct Requires {
 /// matches if any of its items does (`text` excepted: every pattern must
 /// match). Every key but `tool`, `paths`, `unless_paths`, `input`,
 /// `unless_input`, `seen`, `min_read_lines`, `min_code_lines`,
-/// `min_tracked_files`, `fnox` and `secret_files` is about a command, and
-/// needs `command`.
+/// `min_tracked_files`, `fnox`, `secret_files` and `exit_code` is about a
+/// command, and needs `command`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Matcher {
@@ -251,6 +253,14 @@ pub(crate) struct Matcher {
     /// not redirected to a file, piped into another command, or captured
     /// with `$(...)`.
     pub prints: Option<bool>,
+    /// For a `post-tool-use` rule: the call exited with one of these codes,
+    /// such as `8` for `gh pr checks` with checks still pending. With
+    /// `command`, it is that command's exit status, where the call's says
+    /// what it was: in `npm test && gh pr checks` exiting 1, either may have
+    /// failed, so neither matches. Set it in an example with `exit_code`.
+    #[serde(default, deserialize_with = "one_or_many")]
+    #[schemars(with = "OneOrMany<i32>")]
+    pub exit_code: Vec<i32>,
 }
 
 impl Matcher {
@@ -268,6 +278,7 @@ impl Matcher {
             unless_paths: _,
             fnox: _,
             secret_files: _,
+            exit_code: _,
             command,
             via,
             flags,
@@ -316,10 +327,11 @@ impl Matcher {
             || !self.unless_paths.is_empty()
             || self.fnox.is_some()
             || self.secret_files.is_some()
+            || !self.exit_code.is_empty()
             || self.with.is_some()
             || self.unless_with.is_some();
         if nested && not_command {
-            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `fnox`, `secret_files`, `with` or `unless_with`".into());
+            return Some("`with` and `unless_with` match another command: give them command keys, not `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `fnox`, `secret_files`, `exit_code`, `with` or `unless_with`".into());
         }
         if self.command.is_empty() && self.about_a_command() {
             return Some("it says how a command looks, but not which: add `command`".into());
@@ -560,6 +572,9 @@ where
             f.write_str("a value or a list of values")
         }
         fn visit_str<E: de::Error>(self, v: &str) -> Result<Vec<T>, E> {
+            T::deserialize(v.into_deserializer()).map(|t| vec![t])
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Vec<T>, E> {
             T::deserialize(v.into_deserializer()).map(|t| vec![t])
         }
         fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Vec<T>, A::Error> {
