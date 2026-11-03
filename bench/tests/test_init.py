@@ -76,11 +76,11 @@ class InitTest(unittest.TestCase):
         self.assertTrue(arm.init)
         self.assertFalse(arms.ARMS["jouet"].init)
 
-    def test_the_report_says_what_init_configured_and_counts_none_of_its_cost(self):
+    def test_the_report_says_what_init_configured_and_shows_its_separate_cost(self):
         meta = {"usage": {"input_tokens": 450_000}, "wall_s": 120, "files": [".jouet/test.toml"]}
         line = report.init_line({"arms": {}}, meta)
         self.assertIn(".jouet/test.toml", line)
-        self.assertNotIn("450", line)
+        self.assertIn("120.0s, 450,000 input tokens", line)
         self.assertNotIn("pays back", line)
         self.assertIn("changed no files", report.init_line({"arms": {}}, {"files": []}))
 
