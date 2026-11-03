@@ -206,6 +206,11 @@ def load(name: str) -> Task:
             raise ValueError(f"task {name}: source needs nonempty git and commit strings")
         if not isinstance(source.get("history", False), bool):
             raise ValueError(f"task {name}: source.history must be a boolean")
+        if "submodule_base_url" in source and (not isinstance(source["submodule_base_url"], str)
+                                                or not source["submodule_base_url"]):
+            raise ValueError(f"task {name}: source.submodule_base_url must be a nonempty string")
+        if source.get("history") and "submodule_base_url" in source:
+            raise ValueError(f"task {name}: history mode does not fetch submodules")
         if source.get("history") and raw.get("remote", True):
             raise ValueError(f"task {name}: source.history requires remote = false")
     return Task(
@@ -402,7 +407,19 @@ def prepare(task: Task, workdir: Path) -> dict[str, str]:
     if task.source and (workdir / ".gitmodules").exists():
         if task.source.get("history", False):
             raise EnvironmentSetupError("history mode does not fetch submodules; provide a task without them")
-        git(workdir, "submodule", "update", "--init", "--recursive")
+        base = task.source.get("submodule_base_url")
+        if base:
+            # Only setup uses this URL. The task's origin is installed below,
+            # after relative .gitmodules URLs have been resolved.
+            git(workdir, "remote", "add", "origin", str(base))
+        try:
+            git(workdir, "submodule", "update", "--init", "--recursive")
+            if base:
+                # Do not leave the source remotes available in the trial.
+                git(workdir, "submodule", "foreach", "--quiet", "--recursive", "git remote remove origin")
+        finally:
+            if base:
+                git(workdir, "remote", "remove", "origin")
     run_setup(task, workdir)
     base = git(workdir, "rev-parse", "HEAD")
     if task.branch:
