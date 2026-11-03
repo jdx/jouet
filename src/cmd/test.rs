@@ -266,7 +266,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut misused: Vec<Option<String>> = Vec::new();
     // The tests each failed suite names, for telling whether the change
     // reaches them; `None` for a suite whose failures are not all named.
-    let mut failing: Vec<Option<std::collections::BTreeSet<String>>> = Vec::new();
+    let mut failing: Vec<Option<Vec<crate::affected::Failing>>> = Vec::new();
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
     let sequences = crate::settings::Settings::load().cost.sequences;
@@ -333,7 +333,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 environment.push(testlog::environment_cause(&output, &formats));
                 misused.push(testlog::usage_error(&output, &formats));
                 if !args.affected {
-                    failing.push(baseline::failure_names(&output, &formats, &root, false));
+                    failing.push(failing_tests(&output, &formats, &root));
                 }
             }
             if base.is_some() && code != 0 {
@@ -398,11 +398,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         && !args.affected
         && !args.baseline
         && !failing.is_empty())
-    .then(|| failing.iter().cloned().collect::<Option<Vec<_>>>())
+    .then(|| failing.into_iter().collect::<Option<Vec<_>>>())
     .flatten()
     .and_then(|sets| {
-        let names: Vec<String> = sets.into_iter().flatten().collect();
-        crate::affected::unaffected(&cwd, &names)
+        let tests: Vec<crate::affected::Failing> = sets.into_iter().flatten().collect();
+        crate::affected::unaffected(&cwd, &tests)
     })
     .map(|found| unrelated_cause(&found));
     if let Some(cause) = &unrelated
@@ -507,6 +507,35 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
 /// Whether a failing run is compared with the merge base without
 /// --baseline: not an affected run, whose tests depend on the changes, nor
 /// a dry run, and not with `[test] baseline = "off"`.
+/// The tests a failed suite's output names, a Go test with the packages it
+/// failed in; `None` when it does not name every failure, or names a Go
+/// failure without its package.
+fn failing_tests(
+    output: &str,
+    formats: &[testlog::Format],
+    root: &Path,
+) -> Option<Vec<crate::affected::Failing>> {
+    let names = baseline::failure_names(output, formats, root, false)?;
+    let go = testlog::go_failure_packages(output).filter(|go| !go.is_empty());
+    names
+        .into_iter()
+        .map(|name| {
+            let go_packages = match &go {
+                Some(go) => Some(
+                    go.get(&name)?
+                        .iter()
+                        .filter_map(|qualified| {
+                            qualified.rsplit_once("::").map(|(p, _)| p.to_string())
+                        })
+                        .collect(),
+                ),
+                None => None,
+            };
+            Some(crate::affected::Failing { name, go_packages })
+        })
+        .collect()
+}
+
 /// The failing tests a change does not reach, each with its file: the
 /// first few, and how many more.
 fn unrelated_cause(found: &[(String, String)]) -> String {

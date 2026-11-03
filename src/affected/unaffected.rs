@@ -3,18 +3,26 @@
 //! the merge base to prove it, which costs a second run of the whole suite.
 
 use super::{Decision, plan};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
-/// For failing tests `names`, each test with the file that defines it,
+/// A failing test, by the name its runner gave it.
+pub(crate) struct Failing {
+    pub name: String,
+    /// The import paths of the packages `go test` failed it in, for a Go
+    /// failure: only a definition in one of them is this test.
+    pub go_packages: Option<BTreeSet<String>>,
+}
+
+/// For failing tests `failing`, each test with the file that defines it,
 /// when every one is defined only in test files of packages the change
 /// does not reach: none of them is selected by `jouet test --affected`, nor
 /// in a changed file's directory. `None` when any is in doubt: a name the
 /// code graph does not define as a test, a suite that runs whole for this
-/// change, or a test in a project whose adapter selects by something other
-/// than files.
-pub(crate) fn unaffected(cwd: &Path, names: &[String]) -> Option<Vec<(String, String)>> {
-    if names.is_empty() {
+/// change, a name defined more often than the graph lists at once, or a
+/// test in a project whose adapter selects by something other than files.
+pub(crate) fn unaffected(cwd: &Path, failing: &[Failing]) -> Option<Vec<(String, String)>> {
+    if failing.is_empty() {
         return None;
     }
     let plan = plan(cwd, None, None, &[]).ok()?;
@@ -40,41 +48,72 @@ pub(crate) fn unaffected(cwd: &Path, names: &[String]) -> Option<Vec<(String, St
         .map(parent)
         .collect();
     let graph = jouet_graph::Graph::open(&first.project.root).ok()?;
+    let mut modules: HashMap<&Path, Option<String>> = HashMap::new();
     let mut found = Vec::new();
-    for name in names {
-        let leaf = leaf(name)?;
-        let defined: Vec<String> = graph
+    for test in failing {
+        let leaf = leaf(&test.name)?;
+        let symbols = graph
             .symbols(&jouet_graph::SymbolQuery {
                 text: Some(leaf.to_string()),
                 ..Default::default()
             })
-            .ok()?
-            .into_iter()
-            .filter(|symbol| {
-                symbol.name == leaf
-                    && matches!(symbol.kind.as_str(), "function" | "method")
-                    && jouet_graph::is_test_path(&symbol.path)
-            })
-            .map(|symbol| symbol.path)
-            .collect();
-        let [path, ..] = defined.as_slice() else {
+            .ok()?;
+        // A full page may leave out the definition that is this test.
+        if symbols.len() >= jouet_graph::MAX_RESULTS {
             return None;
-        };
-        for path in &defined {
+        }
+        let mut defined = Vec::new();
+        for symbol in symbols {
+            if symbol.name != leaf
+                || !matches!(symbol.kind.as_str(), "function" | "method")
+                || !jouet_graph::is_test_path(&symbol.path)
+            {
+                continue;
+            }
             // Only a graph suite's selection is by files; a test another
             // adapter owns, a cargo crate's say, is not judged here.
             let owner = plan
                 .suites
                 .iter()
-                .filter(|suite| suite.project.inside(path).is_some())
+                .filter(|suite| suite.project.inside(&symbol.path).is_some())
                 .max_by_key(|suite| suite.project.rel.len())?;
-            if owner.adapter.name() != "graph" || reached.contains(parent(path)) {
+            if owner.adapter.name() != "graph" {
                 return None;
             }
+            if let Some(packages) = &test.go_packages {
+                let module = modules
+                    .entry(owner.project.dir.as_path())
+                    .or_insert_with(|| go_module(&owner.project.dir))
+                    .as_deref()?;
+                let dir = parent(owner.project.inside(&symbol.path)?);
+                let package = if dir.is_empty() {
+                    module.to_string()
+                } else {
+                    format!("{module}/{dir}")
+                };
+                if !packages.contains(&package) {
+                    continue;
+                }
+            }
+            defined.push(symbol.path);
         }
-        found.push((name.clone(), path.clone()));
+        let [path, ..] = defined.as_slice() else {
+            return None;
+        };
+        if defined.iter().any(|path| reached.contains(parent(path))) {
+            return None;
+        }
+        found.push((test.name.clone(), path.clone()));
     }
     Some(found)
+}
+
+/// The module path a `go.mod` in `dir` declares.
+fn go_module(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("go.mod")).ok()?;
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("module "))
+        .map(|module| module.trim().trim_matches('"').to_string())
 }
 
 /// The function a failure names: the last part of `module::test` or

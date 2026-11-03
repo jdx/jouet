@@ -999,8 +999,19 @@ impl Checks {
             self.raised = None;
             self.last_run = Some(jouet_output::time::now());
             let kind = record.kind;
-            let run = Run::new(record, tree);
+            let mut run = Run::new(record, tree);
             let failures = self.failures.entry(kind).or_default();
+            // `jouet test` records its own run, and the harness's hook the same
+            // call after it: the same failure at the same tree keeps what
+            // `jouet test` found about its tests.
+            if !run.passed()
+                && run.tree.is_some()
+                && let Some(earlier) = failures.iter().rev().find(|f| {
+                    f.command == run.command && f.tree == run.tree && f.exit_code == run.exit_code
+                })
+            {
+                run.unrelated = earlier.unrelated.clone();
+            }
             if run.passed() && run.full {
                 failures.clear();
                 self.full_passes.insert(kind, run.clone());
@@ -1851,6 +1862,19 @@ mod tests {
         );
         state.noted();
         assert!(state.environment_notes().is_empty());
+        // The harness's hook records the same call after `jouet test` did.
+        state.record("/home", [test("go test ./...", 1, "")], Some("t1"));
+        assert_eq!(
+            state.block("/home", |_| Some("t1".into()), |_| false, |_| true),
+            None
+        );
+        // At another tree, it is a new failure.
+        state.record("/home", [test("go test ./...", 1, "")], Some("t2"));
+        assert!(
+            state
+                .block("/home", |_| Some("t2".into()), |_| false, |_| true)
+                .is_some()
+        );
     }
 
     #[test]

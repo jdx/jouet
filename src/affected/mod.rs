@@ -32,7 +32,7 @@ use classify::Packages;
 use jouet_output::exit::Exit;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-pub(crate) use unaffected::unaffected;
+pub(crate) use unaffected::{Failing, unaffected};
 
 /// The language a package is written in, by its manifest: which packages a
 /// suite's adapter can see into.

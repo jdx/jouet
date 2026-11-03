@@ -705,7 +705,10 @@ fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
     };
     env.write("run-tests", &fake("TestBroken", "other"));
     env.write("run-cart", &fake("TestSum", "cart"));
-    for script in ["run-tests", "run-cart"] {
+    // `go test` failed a TestBroken in cart, a package the change reaches,
+    // and only other defines one: not that test, whatever the graph knows.
+    env.write("run-cart-broken", &fake("TestBroken", "cart"));
+    for script in ["run-tests", "run-cart", "run-cart-broken"] {
         let path = root.join(script);
         let mut mode = std::fs::metadata(&path).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
@@ -732,12 +735,14 @@ fn a_failure_in_a_package_the_change_does_not_reach_is_unrelated() {
 
     // A test in a package the change reaches is the change's to fix (with
     // no comparison with main, where the stand-in fails too).
-    let out = env
-        .command(&["test", "--cmd", "--", "./run-cart"])
-        .env("JOUET_TEST_BASELINE", "off")
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(1), "{text}");
-    assert!(!text.contains("unrelated:"), "{text}");
+    for script in ["./run-cart", "./run-cart-broken"] {
+        let out = env
+            .command(&["test", "--cmd", "--", script])
+            .env("JOUET_TEST_BASELINE", "off")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(out.status.code(), Some(1), "{script}: {text}");
+        assert!(!text.contains("unrelated:"), "{script}: {text}");
+    }
 }

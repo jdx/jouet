@@ -1741,6 +1741,13 @@ SCRIPT
 	assert_output --partial 'baseline: the failure also fails at main'
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/checks")" 1
 	assert_equal "$(cat "$BATS_TEST_TMPDIR/go")" 'test -run ^(TestBroken)$ example.com/shop/other'
+	# One pattern runs in every package: a TestBroken failing in another
+	# package at the merge base is not this one.
+	sed s/shop.other/shop.elsewhere/ fail.txt >elsewhere.txt
+	printf '#!/bin/sh\ncat "%s/elsewhere.txt"\nexit 1\n' "$PWD" >bin/go
+	PATH="$PWD/bin:$PATH" JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- ./check.sh
+	assert_failure 1
+	refute_output --partial 'also fails at main'
 }
 
 @test "a large passing run names the tests the change adds, and only those" {

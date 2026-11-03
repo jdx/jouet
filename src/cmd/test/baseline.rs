@@ -421,10 +421,19 @@ fn targeted(
     let Some(base) = failure_evidence(&output, formats, &tree, false) else {
         return Ok(None);
     };
-    let same = now
-        .names
-        .iter()
-        .all(|name| base.names.contains(name) && now.details.get(name) == base.details.get(name));
+    // One pattern runs in every package, so a test of the same name may
+    // fail in another: each must fail in its own package there.
+    let Some(base_go) = &base.go else {
+        return Ok(None);
+    };
+    let same = now.names.iter().all(|name| {
+        base.names.contains(name)
+            && now.details.get(name) == base.details.get(name)
+            && go
+                .get(name)
+                .zip(base_go.get(name))
+                .is_some_and(|(here, there)| here.is_subset(there))
+    });
     Ok(same.then(|| now.names.clone()))
 }
 
