@@ -23,6 +23,32 @@ fn now_ms() -> i64 {
 }
 
 #[test]
+fn scheduled_discovery_reports_unreadable_metadata_and_ignores_subagents() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex = Codex {
+        root: dir.path().to_path_buf(),
+    };
+    write(
+        &codex.root.join("sessions/day/rollout-good.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"good\",\"cwd\":\"/repo\"}}\n",
+    );
+    write(
+        &codex.root.join("sessions/day/rollout-bad.jsonl"),
+        "not json\n",
+    );
+    write(
+        &codex
+            .root
+            .join("sessions/day/subagents/rollout-child.jsonl"),
+        "not json\n",
+    );
+    let (sessions, unavailable) = codex_for_review(&codex);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "good");
+    assert_eq!(unavailable, 1);
+}
+
+#[test]
 fn reads_where_each_session_last_worked() {
     let dir = tempfile::tempdir().unwrap();
     let claude = ClaudeCode {

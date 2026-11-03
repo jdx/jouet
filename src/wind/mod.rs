@@ -16,6 +16,7 @@ pub(crate) mod reader;
 pub(crate) mod replay;
 pub(crate) mod review;
 pub(crate) mod rulefile;
+pub(crate) mod scheduled;
 pub(crate) mod session;
 pub(crate) mod stats;
 pub(crate) mod tasks;
