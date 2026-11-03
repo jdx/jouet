@@ -160,8 +160,12 @@ class LogTest(unittest.TestCase):
         ])
         self.assertEqual(_swebench.parse_django(log), {
             "test_a (m.tests.T)": "pass", "test_b (m.tests.T)": "fail", "A docstring's first line.": "fail",
-            "test_d (m.tests.T.test_d)": "skip", "test_e (m.tests.T)": "pass",
+            "test_c (m.tests.T)": "fail", "test_d (m.tests.T.test_d)": "skip", "test_e (m.tests.T)": "pass",
         })
+
+    def test_django_does_not_credit_an_interrupted_test_to_the_next_one(self):
+        log = "test_interrupted (m.tests.T)\ntest_next (m.tests.T) ... ok\n"
+        self.assertEqual(_swebench.parse_django(log), {"test_next (m.tests.T)": "pass"})
 
     def test_duplicate_names_keep_a_failure(self):
         log = "a/tests/test_x.py[1]\ntest_same F\nb/tests/test_y.py[1]\ntest_same ok\n"
@@ -171,7 +175,7 @@ class LogTest(unittest.TestCase):
 
     def test_sympy(self):
         log = "sympy/core/tests/test_x.py[4] \ntest_a ok\ntest_b F\ntest_c E\ntest_d f\n"
-        self.assertEqual(_swebench.parse_sympy(log), {"test_a": "pass", "test_b": "fail", "test_c": "fail", "test_d": "pass"})
+        self.assertEqual(_swebench.parse_sympy(log), {"test_a": "pass", "test_b": "fail", "test_c": "fail", "test_d": "xfail"})
 
     def test_pytest(self):
         log = "\n".join([
@@ -182,14 +186,23 @@ class LogTest(unittest.TestCase):
             "PASSED tests/a.py::test_w[a: int]",
         ])
         self.assertEqual(_swebench.parse_pytest(log), {
-            "tests/a.py::test_x[1]": "pass", "tests/a.py::test_y": "fail", "tests/a.py::test_z": "pass",
+            "tests/a.py::test_x[1]": "pass", "tests/a.py::test_y": "fail", "tests/a.py::test_z": "xfail",
             "tests/a.py::test_w[a:": "pass",
         })
 
     def test_verdict(self):
-        spec = {"fail_to_pass": ["a", "b"], "pass_to_pass": ["c", "d", "e"]}
-        problems = _swebench.verdict(spec, {"a": "pass", "b": "skip", "c": "fail", "d": "skip"})
+        import contextlib
+        import io
+
+        spec = {"fail_to_pass": ["a", "b"], "pass_to_pass": ["c", "d", "e", "f"]}
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            problems = _swebench.verdict(spec, {"a": "pass", "b": "skip", "c": "fail",
+                                               "d": "skip", "f": "xfail"})
         self.assertEqual(problems, ["FAIL_TO_PASS b: skip", "PASS_TO_PASS c: fail"])
+        self.assertIn("d (skip)", output.getvalue())
+        self.assertIn("e (not run or not named)", output.getvalue())
+        self.assertIn("f (xfail)", output.getvalue())
 
 
 class ImportTest(unittest.TestCase):
@@ -263,6 +276,75 @@ class ImportTest(unittest.TestCase):
         self.assertIn("committed: True", solved.stdout)
         # The gold patch's deletion is committed with the rest.
         self.assertNotIn("legacy.py", git(work, "ls-tree", "--name-only", "HEAD"))
+
+    def test_check_rejects_a_runner_error_after_the_target_passes(self):
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        for log_format, name, passing in (
+            ("django", "test_expected (case.Test)", "test_expected (case.Test) ... ok"),
+            ("sympy", "test_expected", "test_expected ok"),
+            ("pytest", "tests/test_case.py::test_expected", "PASSED tests/test_case.py::test_expected"),
+        ):
+            with self.subTest(log_format=log_format):
+                meta["log_format"] = log_format
+                meta["fail_to_pass"] = [name]
+                meta["pass_to_pass"] = []
+                meta["test_command"] = ["{python}", "-c",
+                                        f"import sys; print({passing!r}); print('runner crashed'); sys.exit(2)"]
+                meta_path.write_text(json.dumps(meta))
+                proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                      env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                      capture_output=True, text=True)
+                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("runner crashed", proc.stdout)
+
+    def test_check_rejects_an_expected_failure_as_a_fixed_test(self):
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        for log_format, name, xfail in (
+            ("django", "test_expected (case.Test)", "test_expected (case.Test) ... expected failure"),
+            ("sympy", "test_expected", "test_expected f"),
+            ("pytest", "tests/test_case.py::test_expected", "XFAIL tests/test_case.py::test_expected - known bug"),
+        ):
+            with self.subTest(log_format=log_format):
+                meta["log_format"] = log_format
+                meta["fail_to_pass"] = [name]
+                meta["pass_to_pass"] = []
+                meta["test_command"] = ["{python}", "-c", f"print({xfail!r})"]
+                meta_path.write_text(json.dumps(meta))
+                proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                      env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                      capture_output=True, text=True)
+                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("FAIL_TO_PASS", proc.stdout)
+
+    def test_check_rejects_a_failure_despite_a_zero_exit(self):
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        for log_format, name, log in (
+            ("django", "test_expected (case.Test)",
+             "test_expected (case.Test) ... ok\ntest_other (case.Test) ... FAIL"),
+            ("sympy", "test_expected", "test_expected ok\ntest_other F"),
+            ("pytest", "tests/test_case.py::test_expected",
+             "PASSED tests/test_case.py::test_expected\nFAILED tests/test_case.py::test_other - no"),
+        ):
+            with self.subTest(log_format=log_format):
+                meta["log_format"] = log_format
+                meta["fail_to_pass"] = [name]
+                meta["pass_to_pass"] = []
+                meta["test_command"] = ["{python}", "-c", f"print({log!r})"]
+                meta_path.write_text(json.dumps(meta))
+                proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                      env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                      capture_output=True, text=True)
+                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("test_other", proc.stdout)
 
     def test_a_timeout_keeps_what_the_tests_printed(self):
         meta_path = self.task / "swebench.json"

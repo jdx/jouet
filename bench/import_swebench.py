@@ -14,8 +14,8 @@ SWE-PolyBench do; Multi-SWE-bench's own field names are mapped onto them.
 `import` clones each repository once under `--clones` (if missing) and
 writes one task per instance: the prompt is the problem statement, `hidden/`
 holds the test files as `test_patch` leaves them, `check.py` runs the
-instance's tests and requires every FAIL_TO_PASS test to pass and no
-PASS_TO_PASS test to fail, and `solve.py` applies the gold patch.
+instance's tests and requires the test command to succeed, every FAIL_TO_PASS
+test to pass and no PASS_TO_PASS test to fail. `solve.py` applies the gold patch.
 
 `prime` makes each task runnable offline: it builds a Python environment for
 the instance under `--envs`, with the repository's own dependencies as of
