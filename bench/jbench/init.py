@@ -92,9 +92,12 @@ def prepared(
         Path(opts["tmp_root"]) / f"init-{name}",
     )
     codex_home = env.get("CODEX_HOME")
+    codex_tools = arms_mod.codex_tools(run_dir / "bin", True) if harness.name == "codex" else None
     if harness.name == "codex" and arms_mod.CODEX_ISOLATION_ENV.intersection(task.env):
         raise codex_hooks.HookPreflightError("A task changed a Codex isolation path")
     task.agent_env(env, run_dir / "bin", workdir)
+    if codex_tools is not None and arms_mod.codex_tools(run_dir / "bin", True) != codex_tools:
+        raise codex_hooks.HookPreflightError("A task replaced a Codex benchmark tool")
     if harness.name == "codex" and (env.get("CODEX_HOME") != codex_home or
                                     arms_mod.CODEX_ISOLATION_ENV.intersection(opts.get("jouet_env") or {})):
         raise codex_hooks.HookPreflightError("A task or override changed CODEX_HOME")

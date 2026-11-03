@@ -142,6 +142,7 @@ class PlanTest(unittest.TestCase):
                 return result
 
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", side_effect=agent_with_session), \
@@ -251,6 +252,23 @@ class PlanTest(unittest.TestCase):
                 runner.run_suite([], {"jouet_bin": binary}, root, lambda _: None, on_snapshot=on_snapshot)
             self.assertEqual(seen, [b"original"])
 
+    def test_a_task_cannot_replace_a_codex_benchmark_tool(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", side_effect=[("old", None), ("new", None)]), \
+                    patch.object(runner, "run_agent") as agent:
+                with self.assertRaisesRegex(runner.codex_hooks.HookPreflightError, "replaced"):
+                    runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                agent.assert_not_called()
+
     def test_agent_exit_is_part_of_success(self):
         from unittest.mock import patch
 
@@ -263,6 +281,7 @@ class PlanTest(unittest.TestCase):
             opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
                     "codex_model": "test", "tmp_root": str(root), "keep_work": True}
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", return_value=agent), \
@@ -293,6 +312,7 @@ class PlanTest(unittest.TestCase):
             opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
                     "codex_model": "test", "tmp_root": str(root), "keep_work": True}
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", return_value=agent), \

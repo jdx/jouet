@@ -83,6 +83,23 @@ class CodexHooksTest(unittest.TestCase):
             ledger.write_text('{"event":"session-start"}\n')
             self.assertTrue(arms.codex_started(env))
 
+    def test_codex_tool_identity_detects_replaced_wrappers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "codex").symlink_to("/bin/true")
+            (root / "jouet").write_text("original wrapper")
+            original = arms.codex_tools(root, True)
+            (root / "jouet").write_text("different wrapper")
+            self.assertNotEqual(arms.codex_tools(root, True), original)
+            (root / "jouet").unlink()
+            (root / "jouet").symlink_to("/bin/true")
+            with self.assertRaises(HookPreflightError):
+                arms.codex_tools(root, True)
+            (root / "codex").unlink()
+            (root / "codex").write_text("replacement")
+            with self.assertRaises(HookPreflightError):
+                arms.codex_tools(root, False)
+
     def test_preparation_creates_a_dedicated_home_without_overwriting_one(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as directory:

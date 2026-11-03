@@ -253,6 +253,19 @@ def reviewed_codex(harness: Harness, env: dict[str, str], workdir: Path,
     codex_hooks.require_reviewed(result, config / "hooks.json")
 
 
+def codex_tools(bin_dir: Path, jouet: bool) -> tuple[str, bytes | None]:
+    """Identify the harness and jouet wrappers before a task adds its tools."""
+    try:
+        codex = bin_dir / "codex"
+        link = os.readlink(codex)
+        wrapper_path = bin_dir / "jouet"
+        if jouet and (wrapper_path.is_symlink() or not wrapper_path.is_file()):
+            raise codex_hooks.HookPreflightError("The jouet benchmark wrapper was replaced")
+        return link, wrapper_path.read_bytes() if jouet else None
+    except OSError as error:
+        raise codex_hooks.HookPreflightError("Cannot identify the Codex benchmark tools") from error
+
+
 def codex_started(env: dict[str, str]) -> bool:
     """A reviewed hook may still fail to run; require its per-run ledger event."""
     root = Path(env["XDG_STATE_HOME"]) / "jouet" / "ledger"
