@@ -939,7 +939,8 @@ mod tests {
         };
         let details = |text: String| {
             let evidence = failure_evidence(&text, &[], Path::new("/w"), false).unwrap();
-            assert!(!evidence.details.is_empty(), "{text}");
+            // The test that panicked has the panic as its details.
+            assert!(evidence.details.contains_key("TestX"), "{text}");
             evidence.details
         };
         assert_eq!(

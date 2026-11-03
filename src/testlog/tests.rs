@@ -738,6 +738,17 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
     assert!(environment_cause(panic, &[]).is_some());
     let typecheck = "[lint:go] api/a.go:3:2: could not import authz (unsupported version: export data version 5 is greater than maximum supported version 4) (typecheck)\n[lint:go] import authz \"example.com/authz\"\n[lint:go]        ^\n[lint:go] 1 issues:\n[lint:go] * typecheck: 1\n[lint:go] ERROR task failed\n[lint] ERROR task failed\n";
     assert!(environment_cause(typecheck, &[]).is_some());
+    // A test named after a machine error still fails on its assertion; only
+    // a Go panic is named by its message.
+    let named = "1..1\nnot ok 1 reports DBus error when no bus\n# expected: 1\n# actual: 2\n";
+    assert_eq!(environment_cause(named, &[]), None);
+    // A Go assertion keeps its source location before the text it quotes.
+    let go = "--- FAIL: TestVersion (0.00s)\n    version_test.go:10: expected: go: go.mod requires go >= 1.27.1 (running go 1.26.2; GOTOOLCHAIN=local)\nFAIL\nFAIL\texample.com/p\t0.004s\n";
+    assert_eq!(environment_cause(go, &[]), None);
+    // A MySQL server elsewhere may be the change's own dependency.
+    let remote = "panic: Can't connect to MySQL server on 'db.example.com' (111)\n\ngoroutine 1 [running]:\nmain.main()\n\t/w/main.go:9 +0x25\nexit status 2\n";
+    assert_eq!(environment_cause(remote, &[]), None);
+    assert!(environment_cause(&remote.replace("db.example.com", "127.0.0.1"), &[]).is_some());
     // A newer Go version a test names is the test's own.
     assert_eq!(
         environment_cause("1..1\nnot ok 1 a\n# expected: requires go >= 1.27.1\n", &[]),

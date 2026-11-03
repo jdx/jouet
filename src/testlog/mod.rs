@@ -239,7 +239,7 @@ regexes! {
     // localhost, a database client that cannot connect). Not a missing
     // command or file, which is most often the change's own (a binary it did
     // not build).
-    ENVIRONMENT = r"(?i)(could not connect to server: (connection refused|no such file or directory)|connection to server (at .*|on socket .*) failed: (connection refused|no such file or directory)|can't connect to (local )?mysql server|dial tcp (127\.0\.0\.1|\[::1\]|localhost):\d+: connect: connection refused|econnrefused (127\.0\.0\.1|::1|localhost):\d+|dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|dial tcp: lookup [^ ]+( on [^ ]+)?: no such host|module lookup disabled by goproxy=off|api rate limit exceeded|requires newer go version go[\d.]+ \(application built with go[\d.]+\)|export data version \d+ is greater than maximum supported version|go\.mod requires go >= [\d.]+ \(running go [\d.]+|could not import \S+ \(\S*/golang\.org/toolchain@\S*/src/)";
+    ENVIRONMENT = r"(?i)(could not connect to server: (connection refused|no such file or directory)|connection to server (at .*|on socket .*) failed: (connection refused|no such file or directory)|can't connect to (local mysql server|mysql server on '?(localhost|127\.0\.0\.1|::1)\b)|dial tcp (127\.0\.0\.1|\[::1\]|localhost):\d+: connect: connection refused|econnrefused (127\.0\.0\.1|::1|localhost):\d+|dbus error|failed to connect to (the )?(session |system )?bus|org\.freedesktop\.(dbus|secret)|secret service|error while loading shared libraries|cannot open shared object file|could not find system library|was not found in the pkg-config search path|unable to find library -l|could not resolve host|temporary failure in name resolution|network is unreachable|dial tcp: lookup [^ ]+( on [^ ]+)?: no such host|module lookup disabled by goproxy=off|api rate limit exceeded|requires newer go version go[\d.]+ \(application built with go[\d.]+\)|export data version \d+ is greater than maximum supported version|go\.mod requires go >= [\d.]+ \(running go [\d.]+|could not import \S+ \(\S*/golang\.org/toolchain@\S*/src/)";
     // A line of an assertion: what was expected, what came instead, or a
     // side of a diff.
     ASSERTION = r"(?i)^\s*(expected|actual|received|left|right|assert\w*)\b|^\s*[-+] ";
@@ -351,7 +351,7 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
         .found
         .iter()
         .filter(|f| f.lines.iter().any(|l| !l.trim().is_empty()))
-        .all(|f| blames_machine(&f.name) || f.lines.iter().any(|l| blames_machine(l)))
+        .all(|f| panic_blames_machine(&f.name) || f.lines.iter().any(|l| blames_machine(l)))
     {
         return None;
     }
@@ -360,10 +360,10 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
     // The lines marked as failures above an unrecognised end only point at
     // it; the end, which keeps the rest of the output, is what is judged.
     for failure in digest.failures.iter().filter(|f| f.name != MARKED) {
-        // A Go panic is named by its message.
         let line = std::iter::once(&failure.name)
-            .chain(&failure.lines)
-            .find(|l| blames_machine(l))?;
+            .filter(|name| panic_blames_machine(name))
+            .chain(failure.lines.iter().filter(|l| blames_machine(l)))
+            .next()?;
         first.get_or_insert_with(|| line.trim().chars().take(120).collect::<String>());
     }
     first
@@ -373,7 +373,16 @@ pub(crate) fn environment_cause(text: &str, formats: &[Format]) -> Option<String
 /// network, and is not an assertion quoting one (`expected: DBus error`,
 /// a diff's side), which the change's own test can fail on.
 fn blames_machine(line: &str) -> bool {
-    ENVIRONMENT.is_match(line) && !ASSERTION.is_match(line)
+    // `go test` writes the source location before a `t.Errorf` line.
+    let bare = GO_FILE.replace(line.trim_start(), "");
+    ENVIRONMENT.is_match(line) && !ASSERTION.is_match(&bare)
+}
+
+/// Whether a failure's name blames the machine: only a Go panic is named
+/// by its message; any other name describes a test, which can be about a
+/// missing bus and still fail on its own assertion.
+fn panic_blames_machine(name: &str) -> bool {
+    GO_PANIC.is_match(name) && blames_machine(name)
 }
 
 /// What every runner jouet knows, and each of `formats`, finds in `lines`,
@@ -809,6 +818,18 @@ fn go(lines: &[String], out: &mut Parsed) {
         } else if GO_PANIC.is_match(line) {
             let block = until(lines, i + 1, &GO_END);
             let n = block.len();
+            // A test that panicked prints `--- FAIL` with nothing under it,
+            // then the panic: that is its output.
+            if let Some(test) = out.found.last_mut()
+                && test.lines.is_empty()
+                && lines[test.at..i]
+                    .iter()
+                    .all(|l| GO_RESULT.is_match(l) || l.trim().is_empty())
+            {
+                test.lines = std::iter::once(line.clone())
+                    .chain(block.iter().cloned())
+                    .collect();
+            }
             out.push(i, line.clone(), block);
             i += n;
         }
