@@ -723,10 +723,41 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         // Go with no network: offline, or a name that does not resolve.
         "mise go@1.27.3 go: github.com/go-delve/delve/cmd/dlv@latest: module lookup disabled by GOPROXY=off",
         "Get \"https://proxy.golang.org/x\": dial tcp: lookup proxy.golang.org on 127.0.0.53:53: no such host",
+        // A Go tool built for another Go than the one installed.
+        "panic: file requires newer Go version go1.27 (application built with go1.26) [recovered, repanicked]",
+        "a.go:3:2: could not import authz (unsupported version: export data version 5 is greater than maximum supported version 4) (typecheck)",
+        "go: go.mod requires go >= 1.27.1 (running go 1.26.2; GOTOOLCHAIN=local)",
+        "a.go:61:2: could not import errors (/home/u/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/errors/wrap.go:8:2: could not import internal/reflectlite) (typecheck)",
     ] {
         let text = format!("1..1\nnot ok 1 a\n# {line}\n");
         assert!(environment_cause(&text, &[]).is_some(), "{line}");
     }
+    // golangci-lint, as `mise run lint` shows it: a panic in its loader, and
+    // a typecheck issue, each failing the task with no test named.
+    let panic = "[lint:go] panic: file requires newer Go version go1.27 (application built with go1.26) [recovered, repanicked]\n[lint:go] \n[lint:go] goroutine 3023 [running]:\n[lint:go] go/types.(*Checker).handleBailout(0xc9ebefad840, 0xc9ebf3c8420)\n[lint:go] \tgo/types/check.go:404 +0x13a\n[lint:go] ERROR task failed\n[lint] ERROR task failed\n";
+    assert!(environment_cause(panic, &[]).is_some());
+    let typecheck = "[lint:go] api/a.go:3:2: could not import authz (unsupported version: export data version 5 is greater than maximum supported version 4) (typecheck)\n[lint:go] import authz \"example.com/authz\"\n[lint:go]        ^\n[lint:go] 1 issues:\n[lint:go] * typecheck: 1\n[lint:go] ERROR task failed\n[lint] ERROR task failed\n";
+    assert!(environment_cause(typecheck, &[]).is_some());
+    // A test named after a machine error still fails on its assertion; only
+    // a Go panic is named by its message.
+    let named = "1..1\nnot ok 1 reports DBus error when no bus\n# expected: 1\n# actual: 2\n";
+    assert_eq!(environment_cause(named, &[]), None);
+    // A Go assertion keeps its source location before the text it quotes.
+    let go = "--- FAIL: TestVersion (0.00s)\n    version_test.go:10: expected: go: go.mod requires go >= 1.27.1 (running go 1.26.2; GOTOOLCHAIN=local)\nFAIL\nFAIL\texample.com/p\t0.004s\n";
+    assert_eq!(environment_cause(go, &[]), None);
+    // A MySQL server elsewhere may be the change's own dependency.
+    let remote = "panic: Can't connect to MySQL server on 'db.example.com' (111)\n\ngoroutine 1 [running]:\nmain.main()\n\t/w/main.go:9 +0x25\nexit status 2\n";
+    assert_eq!(environment_cause(remote, &[]), None);
+    assert!(environment_cause(&remote.replace("db.example.com", "127.0.0.1"), &[]).is_some());
+    // A Go panic before another runner's failure with no block of its own
+    // is not that failure's output, and reading it does not panic.
+    let mixed = "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n\t/w/main.go:9 +0x25\nexit status 2\ntest later ... FAILED\n";
+    assert_eq!(environment_cause(mixed, &[]), None);
+    // A newer Go version a test names is the test's own.
+    assert_eq!(
+        environment_cause("1..1\nnot ok 1 a\n# expected: requires go >= 1.27.1\n", &[]),
+        None
+    );
     // A database that answers and refuses the login, or has no such
     // database, is the change's.
     for line in [

@@ -1,0 +1,45 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "ci-failed"
+why = "After a failed check, agents read the job's log in pieces or push a guess; `jouet ci explain` says whether each failed job is flaky, infrastructure or real, with the lines that show it."
+mode = "warn"
+scope = "builtin"
+author = "builtin"
+created = "2026-11-03"
+on = "post-tool-use"
+needs = ["ci", "explain"]
+message = "If a check failed (gh exits 1 for a failed check, and for an error such as no PR on the branch), run `jouet ci explain` (with the PR, or `--run ID`) before reading the logs or pushing a fix: it says whether each failed job is flaky, infrastructure or real, with the log lines that show it, and `--rerun` reruns only a flake (`jouet agent-help ci`)."
+
+# `gh pr checks` exits 1 when a check failed. `gh run view` and `gh run
+# watch` exit 1 for a failed run only with `--exit-status`; without it, 1 is
+# an error of gh's own.
+[[rule.match]]
+command = "gh pr checks"
+unless_flags = ["--help", "-h"]
+exit_code = 1
+
+[[rule.match]]
+command = ["gh run view", "gh run watch"]
+flags = "--exit-status"
+unless_flags = ["--help", "-h", "--log", "--log-failed"]
+exit_code = 1
+
+[rule.examples]
+fires = [
+  { command = "gh pr checks", exit_code = 1 },
+  { command = "gh pr checks 123 --watch --fail-fast", exit_code = 1 },
+  { command = "gh run watch 41193844808 --exit-status", exit_code = 1 },
+  { command = "gh run view 41193844808 --exit-status", exit_code = 1 },
+  { command = "cd ~/src/app && gh pr checks 12", exit_code = 1 },
+]
+quiet = [
+  { command = "gh pr checks", exit_code = 0 },
+  { command = "gh pr checks", exit_code = 8 },
+  { command = "gh run view 41193844808", exit_code = 1 },
+  { command = "gh run view 41193844808 --log-failed --exit-status", exit_code = 1 },
+  # Either command may have failed.
+  { command = "npm test && gh pr checks", exit_code = 1 },
+  { command = "gh pr checks | grep fail", exit_code = 1 },
+  { command = "jouet ci explain 12", exit_code = 1 },
+  { command = "gh pr checks --help", exit_code = 1 },
+]

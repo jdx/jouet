@@ -105,6 +105,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "background",
             "command",
             "exact_flags",
+            "exit_code",
             "flags",
             "fnox",
             "input",

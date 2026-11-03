@@ -47,8 +47,20 @@ fn matches_at(m: &Matcher, i: usize, call: &Call, commands: &[shell::Command]) -
             .any(|(j, other)| j != i && command(with, other, call))
     };
     command(m, &commands[i], call)
+        && (m.exit_code.is_empty() || status(call, i).is_some_and(|s| m.exit_code.contains(&s)))
         && m.with.as_deref().is_none_or(other)
         && !m.unless_with.as_deref().is_some_and(other)
+}
+
+/// The exit status the call's command at `i` is known to have had, as
+/// [`shell::statuses`] reads it from the call's exit code. The top-level
+/// commands come first in a call's commands; a nested one has none.
+fn status(call: &Call, i: usize) -> Option<i32> {
+    let top = shell::parse(call.command.as_deref()?).commands;
+    shell::statuses(&top, call.exit_code?)
+        .get(i)
+        .copied()
+        .flatten()
 }
 
 /// Whether the call meets everything the matcher asks besides its `command`.
@@ -81,6 +93,15 @@ fn conditions(m: &Matcher, call: &Call) -> bool {
     if m.command.is_empty()
         && let Some(want) = m.secret_files
         && call.path.as_deref().is_some_and(|p| secret_file(call, p)) != want
+    {
+        return false;
+    }
+    // With a `command`, the exit code is that command's, in `matches_at`.
+    if m.command.is_empty()
+        && !m.exit_code.is_empty()
+        && !call
+            .exit_code
+            .is_some_and(|code| m.exit_code.contains(&code))
     {
         return false;
     }

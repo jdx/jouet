@@ -62,6 +62,12 @@ before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
 [checks.focused]                           # by what each covers
 unit = "jouet test --affected"
 e2e = "jouet test --cmd -- mise run test:e2e NAME"
+
+[checks.ci]                                # left to CI, by what each covers
+e2e = "mise run test:e2e"
+
+[checks.broken]                            # fails here before any change
+"mise run lint" = "golangci-lint 2.11.2 is built with Go 1.26; go.mod needs 1.27"
 ```
 
 These are an example; write this project's own commands, not these.
@@ -73,6 +79,23 @@ already called for). Write focused checks as `jouet test --affected` or
 the test, file or step to run, write `NAME` in its place, whatever the project
 calls it. Set `lint` only to a command that works in this project: the example
 needs an `hk.pkl`; otherwise use the project's own lint command.
+
+Run each check you record once, at the current commit, before recording it:
+the focused checks, `lint` and `before_push`, and `full` when its recorded
+time is short or the user agrees. A check that cannot run because mise or
+jouet refuses an untrusted config is recorded as unverified in your report;
+ask the person to review and trust it, then run it. Record what you saw:
+
+- A check that fails at this commit for reasons outside the code (a tool
+  built for another language version, a missing system tool, a service that
+  is not running) goes in `[checks.broken]`, keyed by its command, with the
+  cause in a few words. Not in `full` or `lint`: agents then do not spend
+  their task repairing the machine, and the stop gate does not hold them on
+  it. Report each one, so a person can fix the environment and remove it.
+- A check that is slow, or needs what a workstation lacks (services,
+  credentials, tools only CI installs), goes in `[checks.ci]`. Agents push
+  and wait for CI rather than run it.
+- Everything else that passed goes where the example shows.
 
 Put in `before_push` what a CI workflow runs and the focused checks leave out (a
 clippy or type check). Read the workflow files; a check that only a document or

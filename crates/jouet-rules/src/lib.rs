@@ -58,6 +58,8 @@ const PRELUDE: &str = include_str!("prelude.luau");
 const BUILTIN: &[(&str, &str)] = &[
     ("sleep-poll", include_str!("../rules/sleep-poll.toml")),
     ("ci-rerun", include_str!("../rules/ci-rerun.toml")),
+    ("ci-pending", include_str!("../rules/ci-pending.toml")),
+    ("ci-failed", include_str!("../rules/ci-failed.toml")),
     (
         "review-threads",
         include_str!("../rules/review-threads.toml"),
@@ -1445,6 +1447,8 @@ impl Engine {
             None => None,
             Some(Ok((action, message))) => {
                 let action = match action.as_str() {
+                    // After a tool, there is nothing left to deny.
+                    "deny" if rule.event == Event::PostToolUse => Action::Warn,
                     // A warn-mode rule only warns, and the floor: a rule of
                     // yours or a repository's cannot lock you out of jouet.
                     "deny"
@@ -1577,7 +1581,13 @@ fn rule_problem(d: &decl::RuleDecl, event: Event) -> Option<String> {
         }
     }
     for (i, m) in matchers.iter().enumerate() {
-        if let Some(problem) = m.problem(false) {
+        let problem = m.problem(false).or_else(|| {
+            (event == Event::PreToolUse && !m.exit_code.is_empty()).then(|| {
+                "`exit_code` is known only after a tool ran: give the rule `on = \"post-tool-use\"`"
+                    .to_string()
+            })
+        });
+        if let Some(problem) = problem {
             let at = if matchers.len() == 1 {
                 "`match`".to_string()
             } else {
@@ -1597,10 +1607,6 @@ fn rule_problem(d: &decl::RuleDecl, event: Event) -> Option<String> {
         None if message.is_none_or(|m| m.trim().is_empty()) => {
             Some("give it a `message`: what the agent is told when it matches".into())
         }
-        None if event == Event::PostToolUse => Some(
-            "a matcher denies or warns before a tool runs; a `post-tool-use` rule needs a `script`"
-                .into(),
-        ),
         None => None,
     }
 }

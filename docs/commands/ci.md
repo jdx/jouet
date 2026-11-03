@@ -207,7 +207,7 @@ A failed checks gate repeats the jobs explained above. A branch that is not up t
 
 `--rerun` reruns the failed jobs, and the jobs that follow them, through GitHub's rerun-failed-jobs API, or that one job with `--job`, but only when every failed job is flaky or infrastructure. If any failed job is real or unknown, it reruns nothing and exits `4`, naming the jobs. Without `--rerun`, the report gives the command to run when a rerun is allowed.
 
-The built-in rule [`ci-rerun`](/setup#steering-rules) denies `gh run rerun` (bare, `--failed` or `--job`) and `gh api` calls to the rerun endpoints, and points the agent here first.
+The built-in rule [`ci-rerun`](/setup#steering-rules) denies `gh run rerun` (bare, `--failed` or `--job`) and `gh api` calls to the rerun endpoints, and points the agent here first. After `gh pr checks` reports a failed check, `ci-failed` points it here too.
 
 ## History, its budget and the cache
 

@@ -11,6 +11,12 @@
 //! [checks.focused]
 //! unit = "jouet test --affected"
 //! bats = "jouet test --cmd -- mise run test:bats -- test/NAME.bats"
+//!
+//! [checks.ci]
+//! e2e = "mise run test:e2e"
+//!
+//! [checks.broken]
+//! "mise run lint" = "golangci-lint is built with Go 1.26; go.mod needs 1.27"
 //! ```
 //!
 //! It is text the agent reads, so it counts only once the repository's jouet
@@ -37,6 +43,35 @@ pub(crate) struct Checks {
     pub(crate) lint: Option<String>,
     /// What to run before pushing that the focused checks leave out.
     pub(crate) before_push: Vec<String>,
+    /// Checks to leave to CI: slow, or needing what a workstation lacks
+    /// (services, credentials, tools CI installs).
+    pub(crate) ci: BTreeMap<String, String>,
+    /// Commands that fail here before any change, each with why. A failed
+    /// run of one does not hold up finishing.
+    pub(crate) broken: BTreeMap<String, String>,
+}
+
+impl Checks {
+    /// Why `command` fails here before any change, when it is a broken
+    /// check: as written, or run through `jouet test --cmd --`.
+    pub(crate) fn broken(&self, command: &str) -> Option<&str> {
+        let ran = through_jouet_test(command);
+        self.broken
+            .iter()
+            .find(|(check, _)| through_jouet_test(check) == ran)
+            .map(|(_, why)| why.as_str())
+    }
+}
+
+/// The command `jouet test --cmd -- CMD` runs, or `command` itself.
+fn through_jouet_test(command: &str) -> &str {
+    let command = command.trim();
+    if command.starts_with("jouet test ")
+        && let Some(at) = command.find(" -- ")
+    {
+        return command[at + 4..].trim();
+    }
+    command
 }
 
 /// The longest line the primer gives the project's checks, in characters.
@@ -57,15 +92,7 @@ pub(crate) fn parse(text: &str) -> Result<Project, String> {
 /// its `.jouet/project.toml` is trusted and names any.
 pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
     let root = crate::verify::root_of(cwd);
-    let root = Path::new(&root);
-    let project = read(root)?;
-    let mut errors = Vec::new();
-    let trusted = sources::sets(root, None, &mut sources::digests(), &mut errors)
-        .iter()
-        .any(|set| set.kind == Kind::Repo && set.status.runs());
-    if !trusted {
-        return None;
-    }
+    let project = trusted(Path::new(&root))?;
     match project {
         Ok(project) => line(&project.checks),
         // Said, so a typo does not look like no file at all.
@@ -73,6 +100,17 @@ pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
             "jouet: .jouet/project.toml does not parse, so its checks are not shown: {error}"
         )),
     }
+}
+
+/// The project file at `root` once the repository's jouet files are
+/// trusted: it is text an agent acts on.
+pub(crate) fn trusted(root: &Path) -> Option<Result<Project, String>> {
+    let project = read(root)?;
+    let mut errors = Vec::new();
+    sources::sets(root, None, &mut sources::digests(), &mut errors)
+        .iter()
+        .any(|set| set.kind == Kind::Repo && set.status.runs())
+        .then_some(project)
 }
 
 fn line(checks: &Checks) -> Option<String> {
@@ -93,6 +131,28 @@ fn line(checks: &Checks) -> Option<String> {
             .map(|c| format!("`{c}`"))
             .collect();
         parts.push(format!("before pushing {}", each.join(" and ")));
+    }
+    if !checks.ci.is_empty() {
+        let each: Vec<String> = checks
+            .ci
+            .iter()
+            .map(|(kind, command)| format!("{kind} `{command}`"))
+            .collect();
+        parts.push(format!(
+            "left to CI, so push and `jouet wait ci` rather than run them here: {}",
+            each.join(", ")
+        ));
+    }
+    if !checks.broken.is_empty() {
+        let each: Vec<String> = checks
+            .broken
+            .iter()
+            .map(|(command, why)| format!("`{command}` ({why})"))
+            .collect();
+        parts.push(format!(
+            "failing here before any change, so not yours to fix unless asked: {}",
+            each.join(", ")
+        ));
     }
     if parts.is_empty() {
         return None;
@@ -124,6 +184,28 @@ mod tests {
             "jouet: this project's checks (.jouet/project.toml): bats `jouet test --cmd -- mise run test:bats -- test/NAME.bats`; unit `jouet test --affected`; full suite `mise run test`; before pushing `cargo clippy -- -D warnings`."
         );
         assert_eq!(line(&Checks::default()), None);
+    }
+
+    #[test]
+    fn ci_and_broken_checks_say_to_leave_them() {
+        let project: Project = toml::from_str(
+            "[checks]\nlint = \"mise run lint\"\n[checks.focused]\nunit = \"jouet test --affected\"\n[checks.ci]\ne2e = \"mise run test:e2e\"\n[checks.broken]\n\"mise run lint\" = \"golangci-lint is built with Go 1.26\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            line(&project.checks).unwrap(),
+            "jouet: this project's checks (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
+        );
+        let checks = &project.checks;
+        let why = Some("golangci-lint is built with Go 1.26");
+        assert_eq!(checks.broken("mise run lint"), why);
+        assert_eq!(checks.broken("jouet test --cmd -- mise run lint"), why);
+        assert_eq!(
+            checks.broken("jouet test --budget 900 --cmd -- mise run lint"),
+            why
+        );
+        assert_eq!(checks.broken("mise run lint:go"), None);
+        assert_eq!(checks.broken("mise run test"), None);
     }
 
     #[test]
