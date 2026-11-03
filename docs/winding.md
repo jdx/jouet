@@ -114,6 +114,8 @@ find sessions; reviews read the selected transcripts and may send their digests
 to the agent's model provider. Only sessions whose original worktree is under
 an opted-in root and whose recorded turns stay in that worktree are eligible.
 Sessions that span worktrees or cannot be inspected are reported, not reviewed.
+Blank lines are ignored; malformed records are left unavailable because they
+may conceal a change of project.
 
 Give the scheduled agent these instructions, substituting the agreed roots and
 limit. Use JSON output to pass paths as arguments, not by shell interpolation:

@@ -25,7 +25,7 @@ fn discover(
     paths: &Paths,
     root_args: &[String],
     idle_arg: Option<&str>,
-    limit: usize,
+    selection: (usize, Option<&str>),
 ) -> Result<wind::scheduled::Plan, (Exit, String)> {
     use std::path::PathBuf;
     if root_args.is_empty() {
@@ -59,7 +59,7 @@ fn discover(
         &roots,
         now_ms,
         idle,
-        limit,
+        selection,
         super::sessions::current_session().as_deref(),
         &scheduled,
     );
@@ -72,7 +72,7 @@ fn plan(paths: &Paths, args: &WindPlanArgs, out: &Output) -> Exit {
     if !(1..=100).contains(&limit) {
         return out.error(Exit::Usage, "--limit must be between 1 and 100");
     }
-    let report = match discover(paths, &args.root, args.idle.as_deref(), limit) {
+    let report = match discover(paths, &args.root, args.idle.as_deref(), (limit, None)) {
         Ok(report) => report,
         Err((exit, message)) => return out.error(exit, &message),
     };
@@ -88,7 +88,12 @@ fn plan(paths: &Paths, args: &WindPlanArgs, out: &Output) -> Exit {
 }
 
 fn claim(paths: &Paths, args: &WindClaimArgs, out: &Output) -> Exit {
-    let report = match discover(paths, &args.root, args.idle.as_deref(), usize::MAX) {
+    let report = match discover(
+        paths,
+        &args.root,
+        args.idle.as_deref(),
+        (1, Some(&args.snapshot)),
+    ) {
         Ok(report) => report,
         Err((exit, message)) => return out.error(exit, &message),
     };

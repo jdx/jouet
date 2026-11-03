@@ -115,7 +115,7 @@ pub(crate) fn plan(
     roots: &[PathBuf],
     now_ms: i64,
     idle_ms: i64,
-    limit: usize,
+    selection: (usize, Option<&str>),
     current: Option<&str>,
     state: &Scheduled,
 ) -> Plan {
@@ -178,6 +178,11 @@ pub(crate) fn plan(
             .map(|b| format!("{b:02x}"))
             .collect();
         let snapshot = snapshot(&key, metadata.len(), modified.as_nanos());
+        // Inspect a claim's requested snapshot without spending its budget on
+        // unrelated sessions that may have appeared since the plan.
+        if selection.1.is_some_and(|wanted| wanted != snapshot) {
+            continue;
+        }
         if state.receipts.get(&key) == Some(&snapshot) {
             reviewed += 1;
             continue;
@@ -247,7 +252,7 @@ pub(crate) fn plan(
                     continue;
                 }
                 eligible += 1;
-                if candidates.len() < limit {
+                if candidates.len() < selection.0 {
                     candidates.push(candidate);
                 }
             }
@@ -297,6 +302,9 @@ fn one_project(path: &Path, expected: &Path) -> std::io::Result<bool> {
     let file = std::fs::File::open(path)?;
     for line in BufReader::new(file).lines() {
         let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
         let value: serde_json::Value =
             serde_json::from_str(&line).map_err(std::io::Error::other)?;
         if value["type"] == "turn_context"
@@ -520,13 +528,25 @@ mod tests {
             std::slice::from_ref(&root),
             now,
             900_000,
-            2,
+            (2, None),
             None,
             &Scheduled::default(),
         );
         assert_eq!(first.eligible, 3);
         assert_eq!(first.left_out, 1);
         assert_ne!(first.candidates[0].project, first.candidates[1].project);
+        let wanted = &first.candidates[1].snapshot;
+        let target = plan(
+            sessions.clone(),
+            std::slice::from_ref(&root),
+            now,
+            900_000,
+            (1, Some(wanted)),
+            None,
+            &Scheduled::default(),
+        );
+        assert_eq!(target.eligible, 1);
+        assert_eq!(&target.candidates[0].snapshot, wanted);
         let snapshot = first.candidates[0].snapshot.clone();
         let transcript = &first.candidates[0].transcript;
         use std::io::Write as _;
@@ -543,7 +563,7 @@ mod tests {
             std::slice::from_ref(&root),
             now,
             900_000,
-            3,
+            (3, None),
             None,
             &Scheduled::default(),
         );
@@ -553,6 +573,16 @@ mod tests {
             .find(|c| &c.transcript == transcript)
             .unwrap();
         assert_ne!(snapshot, changed.snapshot);
+    }
+
+    #[test]
+    fn project_inspection_ignores_blank_lines_but_refuses_malformed_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("session.jsonl");
+        std::fs::write(&transcript, "\n  \n{\"type\":\"event_msg\"}\n").unwrap();
+        assert!(one_project(&transcript, dir.path()).unwrap());
+        std::fs::write(&transcript, "{\"type\":\"turn_context\"\n").unwrap();
+        assert!(one_project(&transcript, dir.path()).is_err());
     }
 
     #[test]
@@ -589,7 +619,7 @@ mod tests {
             std::slice::from_ref(&allowed),
             now,
             900_000,
-            10,
+            (10, None),
             Some("current"),
             &Scheduled::default(),
         );
@@ -625,7 +655,7 @@ mod tests {
             std::slice::from_ref(&root),
             now,
             0,
-            10,
+            (10, None),
             None,
             &Scheduled::default(),
         );
@@ -645,7 +675,7 @@ mod tests {
             std::slice::from_ref(&root),
             now,
             0,
-            10,
+            (10, None),
             None,
             &Scheduled::default(),
         );
@@ -682,7 +712,7 @@ mod tests {
                 std::slice::from_ref(&root),
                 i64::try_from(now + 1).unwrap() * 1000,
                 0,
-                10,
+                (10, None),
                 None,
                 &Scheduled::load(&paths).unwrap(),
             )
@@ -759,7 +789,7 @@ mod tests {
                 std::slice::from_ref(&root),
                 i64::try_from(now + 1).unwrap() * 1000,
                 0,
-                10,
+                (10, None),
                 None,
                 &Scheduled::load(&paths).unwrap(),
             )
