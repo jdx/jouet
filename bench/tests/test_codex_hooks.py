@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import uuid
 from unittest.mock import patch
@@ -67,11 +68,27 @@ class CodexHooksTest(unittest.TestCase):
                     arms.reviewed_codex(Codex(), env, root, opts)
                 lookup.assert_not_called()
             (reviewed / "hooks.json").write_text((expected / "hooks.json").read_text())
-            hooks = [{**hook, "sourcePath": str(reviewed / "hooks.json")} for hook in self.hooks]
+            with patch("jbench.arms.codex_hooks.list_hooks") as lookup:
+                with self.assertRaisesRegex(HookPreflightError, "not been reviewed"):
+                    arms.reviewed_codex(Codex(), env, root, opts)
+                lookup.assert_not_called()
+            source = reviewed / "hooks.json"
+            (reviewed / "config.toml").write_text(
+                'cli_auth_credentials_store = "file"\n\n'
+                f'[hooks.state."{source}:stop:0:0"]\ntrusted_hash = "sha256:aa"\n\n'
+                '[hooks.state."/elsewhere/.codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:bb"\n')
+            (expected / "config.toml").write_text('[projects."/w"]\ntrust_level = "trusted"\n')
+            hooks = [{**hook, "sourcePath": str(expected / "hooks.json")} for hook in self.hooks]
             with patch("jbench.arms.codex_hooks.list_hooks", return_value={"data": [{"hooks": hooks}]}) as lookup:
                 arms.reviewed_codex(Codex(), env, root, opts)
-                self.assertEqual(env["CODEX_HOME"], str(reviewed))
+                self.assertEqual(env["CODEX_HOME"], str(expected))
                 lookup.assert_called_once()
+            copied = tomllib.loads((expected / "config.toml").read_text())
+            self.assertEqual(copied["projects"], {"/w": {"trust_level": "trusted"}})
+            self.assertEqual(copied["hooks"]["state"],
+                             {f"{expected / 'hooks.json'}:stop:0:0": {"trusted_hash": "sha256:aa"}})
+            with self.assertRaisesRegex(HookPreflightError, "already has hook settings"):
+                arms.reviewed_codex(Codex(), env, root, opts)
 
     def test_session_start_requires_an_observed_ledger_event(self):
         with tempfile.TemporaryDirectory() as directory:

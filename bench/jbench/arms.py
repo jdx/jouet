@@ -227,7 +227,15 @@ def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path) -> dict[st
 
 def reviewed_codex(harness: Harness, env: dict[str, str], workdir: Path,
                    opts: dict[str, Any]) -> None:
-    """Use the reviewed benchmark home only after Codex confirms its hooks."""
+    """Trust the run's own hooks as a person trusted them in the reviewed
+    home, then require Codex to confirm them.
+
+    Codex keys a hook's trust by its file's path and stores the hash of what
+    was reviewed, so the run's copy of each reviewed hash is honored only
+    while the run's hooks are the ones reviewed: a changed hook reads as
+    modified, and needs a new review. One reviewed home serves any number of
+    concurrent runs and jouet builds, and no run writes to it.
+    """
     if harness.name != "codex":
         return
     home = opts.get("codex_reviewed_home")
@@ -238,19 +246,15 @@ def reviewed_codex(harness: Harness, env: dict[str, str], workdir: Path,
             or config.name != ".codex"
             or not (config.parent / ".jouet-bench-codex-home").is_file()):
         raise codex_hooks.HookPreflightError("Use a dedicated home created by prepare-codex")
-    if (config / "auth.json").is_symlink():
-        raise codex_hooks.HookPreflightError("The benchmark credential must not be a symlink")
-    if (config / "auth.json").exists():
-        raise codex_hooks.HookPreflightError("Sign out of the dedicated Codex home before running a trial")
-    expected = Path(env["CODEX_HOME"]) / "hooks.json"
+    run = Path(env["CODEX_HOME"])
     try:
-        if json.loads((config / "hooks.json").read_text()) != json.loads(expected.read_text()):
+        if json.loads((config / "hooks.json").read_text()) != json.loads((run / "hooks.json").read_text()):
             raise codex_hooks.HookPreflightError("Reviewed hooks differ from this jouet build")
     except (OSError, ValueError) as error:
         raise codex_hooks.HookPreflightError("Cannot compare reviewed hooks with this jouet build") from error
-    env["CODEX_HOME"] = str(config)
+    codex_hooks.copy_trust(config, run)
     result = codex_hooks.list_hooks(str(opts["harness_bins"]["codex"]), env, workdir)
-    codex_hooks.require_reviewed(result, config / "hooks.json")
+    codex_hooks.require_reviewed(result, run / "hooks.json")
 
 
 def codex_tools(bin_dir: Path, jouet: bool) -> tuple[str, bytes | None]:
