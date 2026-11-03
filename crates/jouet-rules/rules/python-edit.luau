@@ -121,41 +121,138 @@ local function literal(code: string, at: number): (string?, number?)
 	return nil, nil
 end
 
+-- The code with every string literal's text and every comment blanked out,
+-- the same length, so a search finds only Python: not a `p = ` or a
+-- `.replace(` in the Go or JavaScript a script writes.
+local function blanked(code: string): string
+	local out = {}
+	local i = 1
+	while i <= #code do
+		local c = string.sub(code, i, i)
+		local _, after = nil, nil
+		if c == "'" or c == "\"" then
+			_, after = literal(code, i)
+		end
+		if after then
+			table.insert(out, c .. string.rep(" ", after - i - 2) .. c)
+			i = after
+		elseif c == "#" then
+			local stop = string.find(code, "\n", i, true) or #code + 1
+			table.insert(out, string.rep(" ", stop - i))
+			i = stop
+		else
+			table.insert(out, c)
+			i += 1
+		end
+	end
+	return table.concat(out)
+end
+
+-- Where each statement in the code starts: a line's start, or just after a
+-- `;` that runs two statements on one line (`p='a.go'; s=open(p).read()`).
+local function statements(python: string): { number }
+	local starts = { 1 }
+	for at in string.gmatch(python, "[\n;]()") do
+		table.insert(starts, at)
+	end
+	return starts
+end
+
+-- Every literal the code assigns to `name` (`name = '...'`, `name = """..."""`,
+-- `name = Path('...')`) and where, in order; nil when one is not a literal,
+-- since then what it holds cannot be told.
+local function values_of(code: string, name: string): { { text: string, at: number } }?
+	local values = {}
+	local python = blanked(code)
+	for _, at in statements(python) do
+		local _, e = string.find(python, "^[ \t]*" .. name .. "%s*=%s*", at)
+		if e and string.sub(code, e + 1, e + 1) ~= "=" then
+			local path = string.match(code, "^Path%(%s*()", e + 1)
+			local text = literal(code, path or e + 1)
+			if not text then
+				return nil
+			end
+			table.insert(values, { text = text, at = at })
+		end
+	end
+	table.sort(values, function(a, b)
+		return a.at < b.at
+	end)
+	return values
+end
+
 -- The old text of every `.replace(old, new)` in the code, each a plain
--- literal; nil when one is not (a variable, a concatenation, an f-string),
+-- literal or a variable, by the literal last assigned it before the call
+-- (`marker = '...'`); nil when one is not (a concatenation, an f-string, a loop variable),
 -- since then what it matches cannot be told.
-local function replace_olds(code: string): { string }?
+local function replace_olds(code: string): { { text: string, at: number } }?
 	local olds = {}
+	local python = blanked(code)
 	local from = 1
 	while true do
-		local s, e = string.find(code, "%.replace%(%s*", from)
+		local s, e = string.find(python, "%.replace%(%s*", from)
 		if not s or not e then
 			break
 		end
 		local text, after = literal(code, e + 1)
-		if not text or not after or not string.match(code, "^%s*,", after) then
+		if not text then
+			local name, past = string.match(code, "^([%a_][%w_]*)()", e + 1)
+			local values = if name then values_of(code, name) else nil
+			for _, value in values or {} do
+				if value.at < s then
+					text = value.text
+				end
+			end
+			if not text then
+				return nil
+			end
+			after = past
+		end
+		if not after or not string.match(code, "^%s*,", after) then
 			return nil
 		end
-		table.insert(olds, text)
+		table.insert(olds, { text = text, at = s })
 		from = after
 	end
 	return olds
 end
 
--- The path a target names: a literal as it is, or a variable's value where
--- the code assigns it one literal (`p = 'src/a.rs'`, `p = Path("src/a.rs")`).
-local function path_of(code: string, target: string): string?
-	if not string.match(target, "^[%a_][%w_]*$") then
-		return target
-	end
-	for line in string.gmatch(code, "[^\n]+") do
-		local value = string.match(line, "^%s*" .. target .. "%s*=%s*['\"]([^'\"]+)['\"]%s*$")
-			or string.match(line, "^%s*" .. target .. "%s*=%s*Path%(%s*['\"]([^'\"]+)['\"]%s*%)%s*$")
-		if value then
-			return value
+-- Every literal in the code and where it starts, for text a script writes
+-- itself: what one replacement inserts can be what a later one replaces.
+local function literals(code: string): { { text: string, at: number } }
+	local out = {}
+	local from = 1
+	while true do
+		local at = string.find(code, "['\"]", from)
+		if not at then
+			return out
+		end
+		local text, after = literal(code, at)
+		if text and after then
+			table.insert(out, { text = text, at = at })
+			from = after
+		else
+			from = at + 1
 		end
 	end
-	return nil
+end
+
+-- The paths a target names: a literal as it is, or each literal the code
+-- assigns the variable, as a script that edits files in turn does
+-- (`p = 'a.go'` ... `p = 'a_test.go'`); nil when one is not a literal.
+local function paths_of(code: string, target: string): { string }?
+	if not string.match(target, "^[%a_][%w_]*$") then
+		return { target }
+	end
+	local values = values_of(code, target)
+	if not values or #values == 0 then
+		return nil
+	end
+	local paths = {}
+	for _, value in values do
+		table.insert(paths, value.text)
+	end
+	return paths
 end
 
 -- Whether every `.replace(` old text is in the files the code edits: true
@@ -168,16 +265,23 @@ local function olds_found(code: string, targets: { string }, dir: string | false
 	end
 	local paths = {}
 	for _, target in targets do
-		local path = path_of(code, target)
-		if not path or string.sub(path, 1, 1) == "~" then
+		local named = paths_of(code, target)
+		if not named then
 			return nil, nil, nil
 		end
-		if dir and string.sub(path, 1, 1) ~= "/" then
-			path = `{dir}/{path}`
+		for _, path in named do
+			if string.sub(path, 1, 1) == "~" then
+				return nil, nil, nil
+			end
+			if dir and string.sub(path, 1, 1) ~= "/" then
+				path = `{dir}/{path}`
+			end
+			table.insert(paths, path)
 		end
-		table.insert(paths, path)
 	end
-	for _, old in olds do
+	local written = literals(code)
+	for _, replacement in olds do
+		local old = replacement.text
 		local found = false
 		for _, path in paths do
 			local yes, err = jouet.file.contains(path, old)
@@ -190,7 +294,15 @@ local function olds_found(code: string, targets: { string }, dir: string | false
 			end
 		end
 		if not found then
-			return false, old, paths[1]
+			for _, earlier in written do
+				if earlier.at < replacement.at and earlier.text ~= old and string.find(earlier.text, old, 1, true) then
+					found = true
+					break
+				end
+			end
+		end
+		if not found then
+			return false, old, table.concat(paths, " or ")
 		end
 	end
 	return true, nil, nil

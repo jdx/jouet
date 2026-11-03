@@ -549,6 +549,36 @@ open('a.rs','w').write(s.replace('old();', 'new();'))
 E"
 	assert_success
 	assert_output ""
+
+	# One script editing two files in turn through the same variable, with
+	# statements joined by `;`, an old text held in a variable, and a
+	# replacement of text an earlier one inserted: every old text is found.
+	printf '#[test]\nfn t() {}\n' >repo/src/a_test.rs
+	run --separate-stderr edit "python3 - <<'E'
+p='src/a.rs'; s=open(p).read()
+s=s.replace('old();', 'new();\n    added();')
+s=s.replace('added();', 'more();')
+open(p,'w').write(s)
+p='src/a_test.rs'
+s=open(p).read()
+marker='fn t() {}'
+s=s.replace(marker, 'fn u() {}\n'+marker, 1)
+open(p,'w').write(s)
+E"
+	assert_success
+	assert_output ""
+
+	# Text in neither file is still named, with both files.
+	run --separate-stderr edit "python3 - <<'E'
+p='src/a.rs'; s=open(p).read()
+s=s.replace('old();', 'new();')
+open(p,'w').write(s)
+p='src/a_test.rs'; s=open(p).read()
+s=s.replace('fn gone() {}', 'fn u() {}')
+open(p,'w').write(s)
+E"
+	assert_output --partial 'fn gone() {}'
+	assert_output --partial 'is not in src/a.rs or src/a_test.rs'
 }
 
 @test "a check run in bypassPermissions gets a 10-minute timeout, so it ends in that call" {
