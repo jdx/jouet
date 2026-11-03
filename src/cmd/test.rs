@@ -252,6 +252,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     } else {
         added_lines(&cwd)
     };
+    // And the files it touches, for naming its warnings.
+    let touched = if args.dry_run {
+        None
+    } else {
+        touched_files(&cwd)
+    };
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
     let mut environment: Vec<Option<String>> = Vec::new();
@@ -296,6 +302,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
                 digest.passed_changed = changed_tests(&digest.passed_all, &added);
+            }
+            if let Some(touched) = &touched
+                && digest.warning_names.is_empty()
+                && !digest.warnings_all.is_empty()
+            {
+                digest.warnings_changed =
+                    Some(changed_warnings(&digest.warnings_all, &job.dir, touched));
             }
             let empty_test = args.cmd
                 && code == 0
@@ -661,6 +674,84 @@ fn added_lines(dir: &Path) -> String {
         }
     }
     added
+}
+
+/// What a change touches: the repository's root, and the files the work
+/// tree changes since HEAD and its untracked ones, as absolute paths. None
+/// when git cannot tell, as before a first commit.
+struct Touched {
+    root: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+fn touched_files(dir: &Path) -> Option<Touched> {
+    let git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    // Canonical, as the run's directory and each warning's path are, since
+    // git's form can differ (`C:/a` for `\\?\C:\a`, `/tmp` for `/private/tmp`).
+    let root = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim_end());
+    let root = root.canonicalize().unwrap_or(root);
+    let changed = git(
+        &root,
+        &["diff", "HEAD", "--name-only", "--no-ext-diff", "-z"],
+    )?;
+    let untracked = git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut files: Vec<PathBuf> = changed
+        .split('\0')
+        .chain(untracked.split('\0'))
+        .filter(|f| !f.is_empty())
+        .map(|f| {
+            let path = root.join(f);
+            path.canonicalize().unwrap_or(path)
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    Some(Touched { root, files })
+}
+
+/// The warnings (`headline (path:line:col)`) whose file is one the change
+/// touches. A warning's path is absolute, or relative to where the compiler
+/// ran: the run's directory, or for cargo the workspace's, so the
+/// repository's root when the run's directory has no such file.
+fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<String> {
+    warnings
+        .iter()
+        .filter(|w| {
+            let Some(at) = w.rsplit_once(" (").map(|(_, at)| at.trim_end_matches(')')) else {
+                return false;
+            };
+            // `:line:col` from the right, so `C:\a.rs:1:2` keeps its drive.
+            let mut path = at;
+            for _ in 0..2 {
+                match path.rsplit_once(':') {
+                    Some((head, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                        path = head
+                    }
+                    _ => break,
+                }
+            }
+            let path = Path::new(path);
+            // The run's own file when there is one, so `src/lib.rs` in a
+            // crate is not the root's; the root's only when it is not.
+            let own = cwd.join(path);
+            let path = own
+                .canonicalize()
+                .or_else(|_| touched.root.join(path).canonicalize())
+                .unwrap_or(own);
+            touched.files.contains(&path)
+        })
+        .cloned()
+        .collect()
 }
 
 /// The passing tests whose name, or its last part (`a::tests::b`'s `b`,
@@ -1249,6 +1340,25 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
             for warning in &digest.warning_names {
                 let _ = writeln!(s, "  warning: {warning}");
             }
+            // Too many to name: those in the files the change touches.
+            match &digest.warnings_changed {
+                Some(changed) if changed.is_empty() => {
+                    s.push_str("  none of the warnings is in a file this change touches\n");
+                }
+                Some(changed) => {
+                    for warning in changed.iter().take(testlog::WARNINGS_NAMED) {
+                        let _ = writeln!(s, "  warning in a changed file: {warning}");
+                    }
+                    if let Some(more) = changed
+                        .len()
+                        .checked_sub(testlog::WARNINGS_NAMED)
+                        .filter(|&n| n > 0)
+                    {
+                        let _ = writeln!(s, "  and {more} more in changed files (see the log)");
+                    }
+                }
+                None => {}
+            }
         }
         return s;
     }
@@ -1326,5 +1436,68 @@ mod tests {
         assert!(changed_tests(&bats, "run jouet --json search x\n").is_empty());
         let dotted = ["tests.test_a.T.test_json".to_string()];
         assert_eq!(changed_tests(&dotted, "    def test_json(self):\n"), dotted);
+    }
+
+    #[test]
+    fn warnings_in_the_changed_files_are_named() {
+        let warnings: Vec<String> = [
+            "unused import: `std::fs` (src/cmd/edit.rs:3:5)",
+            "unused variable: `x` (crates/a/src/lib.rs:10:9)",
+            "field `y` is never read (src/old.rs:7:5)",
+        ]
+        .map(String::from)
+        .into();
+        let root = PathBuf::from("/r");
+        let touched = |files: &[&str]| Touched {
+            root: root.clone(),
+            files: files.iter().map(|f| root.join(f)).collect(),
+        };
+        // Paths from the workspace root, as cargo prints them.
+        let both = touched(&["src/cmd/edit.rs", "crates/a/src/lib.rs"]);
+        assert_eq!(changed_warnings(&warnings, &root, &both), &warnings[..2]);
+        assert!(changed_warnings(&warnings, &root, &touched(&["README.md"])).is_empty());
+        // From the crate's own directory, and only that crate's.
+        let in_crate = ["unused variable: `x` (src/lib.rs:10:9)".to_string()];
+        let a = touched(&["crates/a/src/lib.rs"]);
+        assert_eq!(
+            changed_warnings(&in_crate, &root.join("crates/a"), &a),
+            in_crate
+        );
+        assert!(changed_warnings(&in_crate, &root.join("crates/b"), &a).is_empty());
+        // An absolute path, and one with a space.
+        let spaced = touched(&["my dir/x.rs"]);
+        let absolute = ["unused: `z` (/r/my dir/x.rs:1:2)".to_string()];
+        assert_eq!(
+            changed_warnings(&absolute, Path::new("/elsewhere"), &spaced),
+            absolute
+        );
+        // Through a symlink to the run's directory, as `/tmp` on macOS.
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let real = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(real.join("src")).unwrap();
+            std::fs::write(real.join("src/lib.rs"), "").unwrap();
+            std::os::unix::fs::symlink(&real, real.join("link")).unwrap();
+            let linked = Touched {
+                root: real.clone(),
+                files: vec![real.join("src/lib.rs")],
+            };
+            let warning = ["unused: `w` (src/lib.rs:1:1)".to_string()];
+            assert_eq!(
+                changed_warnings(&warning, &real.join("link"), &linked),
+                warning
+            );
+            // From a crate with its own unchanged src/lib.rs, a warning there
+            // is not the root's changed one; from one without, it is.
+            std::fs::create_dir_all(real.join("crates/a/src")).unwrap();
+            std::fs::write(real.join("crates/a/src/lib.rs"), "").unwrap();
+            std::fs::create_dir_all(real.join("crates/b")).unwrap();
+            assert!(changed_warnings(&warning, &real.join("crates/a"), &linked).is_empty());
+            assert_eq!(
+                changed_warnings(&warning, &real.join("crates/b"), &linked),
+                warning
+            );
+        }
     }
 }

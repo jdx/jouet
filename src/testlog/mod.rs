@@ -51,6 +51,15 @@ pub(crate) struct Digest {
     /// log, to see whether a warning is its own.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) warning_names: Vec<String>,
+    /// Every warning's headline and location, however many: what a larger
+    /// count's warnings in the changed files are picked from (see `jouet test`).
+    #[serde(skip)]
+    pub(crate) warnings_all: Vec<String>,
+    /// Of warnings too many to name, those in the files the change touches,
+    /// all of them (the text names the first few): empty when none is, so
+    /// the agent need not read the log to see whether one is its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) warnings_changed: Option<Vec<String>>,
     /// The failures that fit the budget, in the order the output has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) failures: Vec<Failure>,
@@ -135,7 +144,7 @@ fn no_tests(lines: &[String]) -> bool {
 const PASSES_NAMED: usize = 8;
 
 /// The most compiler warnings a digest names.
-const WARNINGS_NAMED: usize = 5;
+pub(crate) const WARNINGS_NAMED: usize = 5;
 
 /// The longest name a digest lists, in characters.
 const NAME_MAX: usize = 120;
@@ -278,7 +287,7 @@ regexes! {
     RUSTC_WARNING = r"^warning(?:\[[^\]]+\])?: ";
     // cargo's count of a target's warnings, not a warning of its own.
     CARGO_WARNING_SUMMARY = r"^warning: `[^`]+` \([^)]+\) generated \d+ warnings?";
-    RUSTC_AT = r"^\s*--> (\S+)$";
+    RUSTC_AT = r"^\s*--> (.*\S)\s*$";
     // rustfmt --check, `cargo fmt --check`: each place it would change.
     RUSTFMT_DIFF = r"^Diff in (\S+?)(?::(\d+):| at line (\d+):)$";
     // cargo's build scripts, whose own output is indented under it.
@@ -493,6 +502,10 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
     let lines = clean(text);
     let parsed = parse(&lines, formats);
     let mut found = merge(parsed.found);
+    // cargo reports a warning once for each target that builds it.
+    let mut warnings_all = parsed.warning_names.clone();
+    warnings_all.sort();
+    warnings_all.dedup();
     if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
         let end = trim_excerpt(tail.clone(), OUTPUT_TAIL).lines;
@@ -542,18 +555,13 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         },
         passed_all: parsed.passed_names.clone(),
         passed_changed: Vec::new(),
-        warning_names: {
-            // cargo reports a warning once for each target that builds it.
-            let mut names = parsed.warning_names.clone();
-            names.dedup();
-            names.sort();
-            names.dedup();
-            if names.len() <= WARNINGS_NAMED {
-                names
-            } else {
-                Vec::new()
-            }
+        warning_names: if warnings_all.len() <= WARNINGS_NAMED {
+            warnings_all.clone()
+        } else {
+            Vec::new()
         },
+        warnings_all,
+        warnings_changed: None,
         no_tests,
     }
 }
