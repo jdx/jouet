@@ -361,8 +361,17 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(interrupted["usage"]["input_tokens"], 123)
                 self.assertNotEqual(record["workdir"], interrupted["workdir"])
 
+                # An ephemeral capacity failure before usage is observable
+                # retains the diagnosis but stops the suite on unknown cost.
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"}), event]
+                no_usage = runner.execute(runner.Planned(4, "smoke", "codex", "plain"), opts, root, root)
+                check.assert_not_called()
+                self.assertIn("capacity", no_usage["error"])
+                self.assertEqual(no_usage["error_kind"], "codex_usage_unavailable")
+
                 # A stopped run keeps its timeout classification even if
                 # the stream also reported capacity.
+                agent["lines"] = [event]
                 agent["stopped"] = "timeout"
                 check.return_value = {"passed": True, "exit_code": 0, "output": "ok"}
                 stopped = runner.execute(runner.Planned(3, "smoke", "codex", "plain"), opts, root, root)
@@ -370,6 +379,11 @@ class PlanTest(unittest.TestCase):
                 self.assertNotIn("error", stopped)
                 self.assertEqual(stopped["stopped"], "timeout")
                 self.assertFalse(stopped["success"])
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"})]
+                unknown = runner.execute(runner.Planned(5, "smoke", "codex", "plain"), opts, root, root)
+                self.assertEqual(unknown["stopped"], "timeout")
+                self.assertEqual(unknown["error_kind"], "codex_usage_unavailable")
+                self.assertIsNone(unknown["check"]["exit_code"])
 
 
 class StopTest(unittest.TestCase):

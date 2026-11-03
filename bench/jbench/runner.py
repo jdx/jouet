@@ -531,10 +531,10 @@ def execute(
     missing_usage = harness.name == "codex" and usage.extra.get("usage_observed") is False
     if missing_hook:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: jouet's Codex session-start hook was not observed."}
-    elif missing_usage:
-        check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex reported no token usage."}
     elif capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
+    elif missing_usage:
+        check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex reported no token usage."}
     else:
         check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
@@ -568,11 +568,13 @@ def execute(
     if missing_hook:
         record["error"] = "Codex did not record the jouet session-start hook"
         record["error_kind"] = "codex_hook_preflight"
+    elif capacity:
+        record["error"] = "Codex model at capacity before the run completed"
+        if missing_usage:
+            record["error_kind"] = "codex_usage_unavailable"
     elif missing_usage:
         record["error"] = "Codex token usage is unavailable"
         record["error_kind"] = "codex_usage_unavailable"
-    elif capacity:
-        record["error"] = "Codex model at capacity before the run completed"
     if opts.get("keep_work"):
         record["workdir"] = str(workdir)
         record["tmp_dir"] = str(tmp_dir)
