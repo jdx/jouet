@@ -350,7 +350,7 @@ pub(super) fn compare(
     root: &Path,
     base: affected::Base,
     formats: &[Format],
-    failed: &[(&Job, Option<Evidence>, u64)],
+    failed: &[(&Job, Option<Evidence>, u64, u64)],
     mode: Mode,
 ) -> Result<Option<Baseline>, NotCompared> {
     let setup = affected::project_config::baseline_setup(root).map_err(|e| {
@@ -366,7 +366,7 @@ pub(super) fn compare(
     let mut new = BTreeSet::new();
     let mut unknown = BTreeSet::new();
     let mut prepared = false;
-    for (i, (job, now, ran)) in failed.iter().enumerate() {
+    for (i, (job, now, ran, not_failed)) in failed.iter().enumerate() {
         let key = command_key(job, root);
         let kept = if setup.is_empty() {
             known::lookup(root, &base.merge_base, &key).filter(|outcome| {
@@ -477,24 +477,27 @@ pub(super) fn compare(
                 }
                 known::Outcome::Failed {
                     names,
-                    ran,
+                    ran: base_ran,
                     non_failed,
                     details,
                     details_version: _,
                 } => {
                     // A broken checkout can make every test fail in setup.
                     // Matching names in that run do not establish that the
-                    // current failures existed.
-                    if ran > 1 && non_failed == Some(0) {
+                    // current failures existed. When the current run shows
+                    // no test that passed or was skipped either, as when only
+                    // failures are printed, the two runs look alike, and the
+                    // details compared below tell a setup failure apart.
+                    if base_ran > 1 && non_failed == Some(0) && *not_failed > 0 {
                         return Err(NotCompared::from(format!(
-                            "all {ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
+                            "all {base_ran} tests failed at {}; failures cannot be compared safely because the baseline may not have reached the tests",
                             base.name
                         )));
                     }
                     (
                         names.into_iter().collect(),
                         details.unwrap_or_default(),
-                        ran,
+                        base_ran,
                     )
                 }
                 known::Outcome::Unnamed { exit, log } => {

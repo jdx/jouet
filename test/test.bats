@@ -914,6 +914,26 @@ SH
 	assert_output --partial 'all 3 tests failed at'
 }
 
+@test "--baseline equates the same failures when both runs show only failures" {
+	printf 'base\n' >tracked
+	cat >check-command <<'SH'
+#!/bin/sh
+echo '1..2'
+printf 'not ok 1 target\n# wrong answer\nnot ok 2 another\n# wrong answer\n'
+exit 1
+SH
+	chmod +x check-command
+	git add tracked check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >tracked
+
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	refute_output --partial 'cannot be compared safely'
+	assert_output --partial 'baseline: all 2 failures also fail at'
+}
+
 @test "--baseline does not count Go subtest names as separate failed tests" {
 	export GO_RUNS_FILE="$BATS_TEST_TMPDIR/go-runs"
 	cat >check-command <<'SH'
