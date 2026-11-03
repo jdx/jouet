@@ -895,12 +895,18 @@ fn record(payload: &Value, call: &Call) -> (Vec<Record>, Option<Ran>) {
                 .cloned()
                 .collect();
             let commands: Vec<String> = here.iter().map(|r| r.command.clone()).collect();
+            let failed: Vec<String> = here
+                .iter()
+                .filter(|r| r.exit_code != 0)
+                .map(|r| r.command.clone())
+                .collect();
             state.record(root, here, tree.as_deref());
             if let Some(cause) = &cause {
                 for command in &commands {
                     state.mark_environment(root, command, cause);
                 }
             }
+            mark_broken(state, root, &failed);
         }
     });
     let tree = trees.into_iter().next().and_then(|(_, _, tree)| tree);
@@ -1088,6 +1094,12 @@ pub(crate) fn record_own_run(
                     state.mark_environment(&root, &record.command, cause);
                 }
             }
+            let failed: Vec<String> = records
+                .iter()
+                .filter(|r| r.exit_code != 0)
+                .map(|r| r.command.clone())
+                .collect();
+            mark_broken(state, &root, &failed);
         });
     }
     if hooks.ledger
@@ -1162,6 +1174,27 @@ pub(crate) fn checks(cwd: &Path, command: &str) -> Vec<Record> {
         ..Call::default()
     };
     rules::load(cwd).engine.evaluate(&call).records
+}
+
+/// Marks each of `failed` that the trusted `.jouet/project.toml` lists as
+/// failing before any change, as a failure that blames the machine is: it
+/// does not hold up finishing, and the stop says it in a note.
+fn mark_broken(state: &mut verify::State, root: &str, failed: &[String]) {
+    if failed.is_empty() {
+        return;
+    }
+    let Some(Ok(project)) = crate::project::trusted(Path::new(root)) else {
+        return;
+    };
+    for command in failed {
+        if let Some(why) = project.checks.broken(command) {
+            state.mark_environment(
+                root,
+                command,
+                &format!("fails here before any change: {why} (.jouet/project.toml)"),
+            );
+        }
+    }
 }
 
 /// A recorded run, as the ledger keeps it: its kind and scope, never what

@@ -727,6 +727,34 @@ claude_payload() {
 	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
 }
 
+@test "a check .jouet/project.toml lists as broken is a note, not a block, once trusted" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '[checks.broken]\n"mise run lint" = "golangci-lint is built with an older Go"\n' >repo/.jouet/project.toml
+	lint_failed() {
+		jq -cn --arg cwd "$PWD/repo" --arg command "$1" --arg session "$2" \
+			'{session_id: $session, cwd: $cwd, hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+			  tool_input: {command: $command}, error: "Exit code 1\n[lint] ERROR task failed\n"}' |
+			jouet hook claude post-tool-use-failure
+	}
+	stopping() {
+		jq -cn --arg cwd "$PWD/repo" --arg session "$1" '{session_id: $session, cwd: $cwd, stop_hook_active: false}' |
+			jouet hook claude stop
+	}
+	# Untrusted, it is not taken at its word.
+	lint_failed "mise run lint" s1
+	run --separate-stderr stopping s1
+	run jq -r '.decision // "none"' <<<"$output"
+	assert_output block
+	(cd repo && jouet trust --yes >/dev/null)
+	# A new session, so nothing was said before.
+	lint_failed "jouet test --cmd -- mise run lint" s2
+	run --separate-stderr stopping s2
+	run jq -r '[.decision // "none", .systemMessage // ""] | @tsv' <<<"$output"
+	assert_output --partial none
+	assert_output --partial "fails here before any change: golangci-lint is built with an older Go"
+}
+
 @test "trust refuses a .jouet/project.toml that does not parse" {
 	git init -q repo
 	mkdir -p repo/.jouet
