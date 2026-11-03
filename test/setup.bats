@@ -59,7 +59,7 @@ hook_command() {
 
 	assert_success
 	assert_output --partial "would create $HOME/.claude/settings.json"
-	assert_output --partial '+            "command": "sh -c '"'"'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"'"'",'
+	assert_output --partial '+            "command": "sh -c '"'"'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"'"'",'
 	assert_line "would create $HOME/.claude/skills/jouet-init/SKILL.md"
 	assert [ ! -e "$HOME/.claude" ]
 }
@@ -141,7 +141,7 @@ hook_command() {
 	assert_line "updated $HOME/.claude/settings.json"
 	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
 	run jq -c '[.model, [.hooks.Stop[].hooks[].command]]' "$HOME/.claude/settings.json"
-	assert_output '["opus",["other-tool stop","sh -c '"'"'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"'"'"]]'
+	assert_output '["opus",["other-tool stop","sh -c '"'"'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"'"'"]]'
 
 	cp "$HOME/.claude/settings.json" before.json
 	run --separate-stderr jouet setup claude --skill
@@ -254,7 +254,7 @@ hook_command() {
 	assert [ -L "$HOME/.claude/settings.json" ]
 	run jq -r '.model, .hooks.Stop[0].hooks[0].command' "$HOME/dotfiles/settings.json"
 	assert_output "opus
-sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
+sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run sh -c 'stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"' _ "$HOME/dotfiles/settings.json"
 	assert_output 644
 }
@@ -290,6 +290,117 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert_output '["project",true]'
 	assert_golden .claude/settings.json claude-hooks.json
 	assert [ ! -e .claude/settings.local.json ]
+}
+
+@test "Claude Code's project skill links to the shared .agents copy, and uninstalling removes only the link" {
+	init_repo
+	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared >/dev/null
+	assert [ -L .claude/skills/jouet-init ]
+	assert_equal "$(readlink .claude/skills/jouet-init)" ../../.agents/skills/jouet-init
+	assert [ -f .agents/skills/jouet-init/SKILL.md ]
+	# Running it again changes nothing.
+	run --separate-stderr jouet setup claude --shared --json
+	assert_success
+	run jq -r '.files[] | select(.path | contains("jouet-init")) | .action' <<<"$output"
+	# The shared copy and the link to it.
+	assert_output $'unchanged\nunchanged'
+	jouet setup claude --shared --uninstall >/dev/null
+	assert [ ! -e .claude/skills/jouet-init ]
+	assert [ -f .agents/skills/jouet-init/SKILL.md ]
+}
+
+@test "uninstalling Claude Code's shared skill, with no other harness set up, removes the shared copy too" {
+	init_repo
+	jouet setup claude --shared >/dev/null
+	assert [ -L .claude/skills/jouet-init ]
+	jouet setup claude --shared --uninstall >/dev/null
+	assert [ ! -e .claude/skills/jouet-init ]
+	assert [ ! -e .agents/skills/jouet-init ]
+}
+
+@test "a dry run shows the shared copy and the link, and other harnesses keep the copy Claude Code links to" {
+	init_repo
+	work=$(pwd -P)
+	run --separate-stderr jouet setup claude --shared --dry-run
+	assert_success
+	assert_line "would create $work/.agents/skills/jouet-init/SKILL.md"
+	assert_line "would link $work/.claude/skills/jouet-init"
+	assert [ ! -e .claude/skills/jouet-init ]
+	jouet setup claude --shared >/dev/null
+	jouet setup codex --shared >/dev/null
+	# Uninstalling Codex leaves the copy Claude Code still reads.
+	run --separate-stderr jouet setup codex --shared --uninstall
+	assert_success
+	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
+	# A dangling link from an older jouet is made whole again.
+	rm -r .agents/skills/jouet-init
+	jouet setup claude --shared >/dev/null
+	assert [ -L .claude/skills/jouet-init ]
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
+}
+
+@test "uninstalling Codex keeps the skill Claude Code reads through a linked .claude/skills" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p .agents/skills .claude
+	ln -s ../.agents/skills .claude/skills
+	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared >/dev/null
+	assert [ ! -L .claude/skills/jouet-init ]
+	run --separate-stderr jouet setup codex --shared --uninstall
+	assert_success
+	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
+	assert [ -f .claude/skills/jouet-init/SKILL.md ]
+}
+
+@test "a link of your own to another skill is never replaced or removed" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p mine/jouet-init .claude/skills
+	echo "my skill" >mine/jouet-init/SKILL.md
+	ln -s ../../mine/jouet-init .claude/skills/jouet-init
+	run --separate-stderr jouet setup claude --shared
+	assert_success
+	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
+	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
+	run --separate-stderr jouet setup claude --shared --uninstall
+	assert_success
+	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
+	assert_content mine/jouet-init/SKILL.md $'my skill\n'
+}
+
+@test "uninstalling Claude Code keeps the skill another harness reads through a linked .claude/skills" {
+	init_repo
+	work=$(pwd -P)
+	mkdir -p .agents/skills .claude
+	ln -s ../.agents/skills .claude/skills
+	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared >/dev/null
+	run --separate-stderr jouet setup claude --shared --uninstall
+	assert_success
+	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
+	assert [ -f .agents/skills/jouet-init/SKILL.md ]
+}
+
+@test "an earlier setup's own Claude Code skill directory becomes the link" {
+	init_repo
+	jouet setup claude --shared >/dev/null
+	rm .claude/skills/jouet-init
+	mkdir -p .claude/skills/jouet-init
+	cp .agents/skills/jouet-init/SKILL.md .claude/skills/jouet-init/SKILL.md
+	rm -r .agents/skills/jouet-init
+	jouet setup claude --shared >/dev/null
+	assert [ -L .claude/skills/jouet-init ]
+	assert [ -f .agents/skills/jouet-init/SKILL.md ]
+	# A directory of someone else's is left as it is.
+	rm .claude/skills/jouet-init
+	mkdir -p .claude/skills/jouet-init
+	echo "mine" >.claude/skills/jouet-init/notes.md
+	jouet setup claude --shared >/dev/null
+	assert [ ! -L .claude/skills/jouet-init ]
+	assert [ -f .claude/skills/jouet-init/notes.md ]
 }
 
 @test "setup --project from a linked worktree writes the main checkout's settings.local.json" {
@@ -344,7 +455,10 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup claude --project --uninstall
 	assert_success
 	assert_line "updated $work/.claude/settings.json"
-	assert_line "removed $work/.claude/skills/jouet/SKILL.md"
+	# The shared install's link, and the copy it names, which nothing else reads.
+	assert_line "removed $work/.claude/skills/jouet"
+	assert_line "removed $work/.agents/skills/jouet/SKILL.md"
+	assert [ ! -e .claude/skills/jouet ]
 	assert_content .claude/settings.json $'{}\n'
 
 	jouet setup claude --project >/dev/null
@@ -366,6 +480,14 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	# A PATH with a shell and nothing else.
 	mkdir -p "$BATS_TEST_TMPDIR/sh-only"
 	ln -s "$(command -v sh)" "$BATS_TEST_TMPDIR/sh-only/sh"
+	run --separate-stderr env PATH="$BATS_TEST_TMPDIR/sh-only" sh -c "$command" <<<"$input"
+	assert_success
+	assert_output ""
+	assert_equal "$stderr" ""
+
+	# A jouet that cannot run, like a mise shim for a version not installed.
+	printf '#!/bin/sh\necho "mise ERROR jouet@0.0.3 is not installed" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/sh-only/jouet"
+	chmod +x "$BATS_TEST_TMPDIR/sh-only/jouet"
 	run --separate-stderr env PATH="$BATS_TEST_TMPDIR/sh-only" sh -c "$command" <<<"$input"
 	assert_success
 	assert_output ""
@@ -415,7 +537,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup gemini
 	assert_success
 	run jq -c '[.ui.theme, [.hooks.AfterAgent[].hooks[].command]]' "$HOME/.gemini/settings.json"
-	assert_output '["GitHub",["notify-send done","sh -c '"'"'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"'"'"]]'
+	assert_output '["GitHub",["notify-send done","sh -c '"'"'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'"'"'"]]'
 
 	run --separate-stderr jouet setup gemini
 	assert_line "unchanged $HOME/.gemini/settings.json"
@@ -434,7 +556,7 @@ sh -c 'command -v jouet >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr jouet setup cursor
 	assert_success
 	run jq -c '[.version, [.hooks.stop[].command]]' "$HOME/.cursor/hooks.json"
-	assert_output '[1,["./notify.sh","sh -c '"'"'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'"'"'"]]'
+	assert_output '[1,["./notify.sh","sh -c '"'"'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook cursor stop'"'"'"]]'
 
 	run --separate-stderr jouet setup cursor --uninstall
 	run jq -c . "$HOME/.cursor/hooks.json"

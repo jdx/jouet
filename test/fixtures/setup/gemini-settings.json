@@ -6,7 +6,7 @@
           {
             "name": "jouet-session-start",
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini session-start'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini session-start'",
             "timeout": 10000
           }
         ]
@@ -19,7 +19,7 @@
           {
             "name": "jouet-pre-tool-use",
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini pre-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini pre-tool-use'",
             "timeout": 10000
           }
         ]
@@ -32,7 +32,7 @@
           {
             "name": "jouet-post-tool-use",
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-tool-use'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-tool-use'",
             "timeout": 10000
           }
         ]
@@ -43,7 +43,7 @@
           {
             "name": "jouet-post-edit",
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-edit'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini post-edit'",
             "timeout": 10000
           }
         ]
@@ -55,7 +55,7 @@
           {
             "name": "jouet-stop",
             "type": "command",
-            "command": "sh -c 'command -v jouet >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || { echo {}; exit 0; }; exec jouet hook gemini stop'",
             "timeout": 10000
           }
         ]
