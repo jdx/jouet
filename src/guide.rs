@@ -281,7 +281,7 @@ const USAGE: &[Usage] = &[
         lines: &[
             (
                 "jouet edit replace <PATHS>... --old TEXT --new TEXT",
-                "exactly one match in each file; repeat --old/--new pairs, applied in order, all or nothing",
+                "exactly one match per file; repeat pairs, all or nothing; arguments are literal, so use actual newlines or `jouet edit` with a spec on stdin",
             ),
             (
                 "jouet edit replace <PATHS>... --old TEXT --new TEXT --all",

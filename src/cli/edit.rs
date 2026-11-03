@@ -136,6 +136,10 @@ pub(crate) enum EditCmd {
 /// is checked before any is written, so a rename across files is one call
 /// that lands whole or not at all.
 ///
+/// Arguments are literal: `\n` is not expanded into a newline. For multiline
+/// edits, pass actual newlines, or use `jouet edit` with a patch or
+/// search/replace spec on stdin.
+///
 /// Examples:
 ///   jouet edit replace src/lib.rs --old 'let x = 1;' --new 'let x = 2;'
 ///   jouet edit replace a.py b.py --old retry_limit --new max_attempts --all
