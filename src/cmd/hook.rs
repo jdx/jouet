@@ -1403,12 +1403,22 @@ fn fix_after_edit(
 fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> State {
     let mut state = State::default();
     let cwd = session_dir(payload);
+    let formats = cwd
+        .as_deref()
+        .map(|c| testlog::format::load(c).0)
+        .unwrap_or_default();
     for verify::Ran {
         command,
         exit_code,
         at: when,
+        output,
     } in commands
     {
+        // A failure whose output blames the machine is marked so, as the
+        // other harnesses' failures are.
+        let cause = output
+            .as_deref()
+            .and_then(|text| testlog::environment_cause(text, &formats));
         let call = Call {
             event: Some(Event::PostToolUse),
             harness: "codex".into(),
@@ -1423,7 +1433,11 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         for record in evaluate(engine, &call).records {
             let at = run_dir(cwd.as_deref(), record.dir.as_deref());
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            let recorded = record.command.clone();
             state.record(&root, [record], None);
+            if let Some(cause) = &cause {
+                state.mark_environment(&root, &recorded, cause);
+            }
             // Read again at every stop: dated now, a run in another work
             // tree would never be left behind (see `set_aside_settled`).
             if let Some(when) = when {
@@ -1555,6 +1569,7 @@ mod tests {
             command: command.into(),
             exit_code,
             at: None,
+            output: None,
         }
     }
 
