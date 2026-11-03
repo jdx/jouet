@@ -1411,7 +1411,8 @@ SCRIPT
 	run --separate-stderr jouet test --baseline --cmd -- sh run.sh
 	assert_failure 1
 	assert_output --partial 'baseline: the run at main failed (exit 1) without naming a failing test, so the failures could not be compared'
-	refute_output --partial 'new'
+	# Not the bare word: the log's temporary path can hold it (bats-run-GhnewL).
+	refute_output --regexp '(is|are) new'
 
 	# Once the environment is fixed, an explicit retry replaces the cached
 	# inconclusive result and can compare the same failures.
