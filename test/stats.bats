@@ -23,8 +23,8 @@ setup() {
 	assert_equal "$stderr" ""
 	assert_line --index 0 'jouet stats: 14 ledger entries in 2 sessions, 2026-10-31T00:00:00Z to 2026-10-31T00:07:00Z'
 	assert_line --regexp '^  jouet wait ci +claude +1 +1 +0 +0 +4m$'
-	assert_line --regexp '^  sleep-poll +1 +0 +0 +1 +0 +0$'
-	assert_line --regexp '^  python-edit +1 +0 +1 +0 +1 +0$'
+	assert_line --regexp '^  sleep-poll +1 +0 +1 +0 +0 +1 +0 +0$'
+	assert_line --regexp '^  python-edit +1 +0 +1 +0 +1 +0 +1 +0$'
 	assert_line '  checks recorded: test 1 (1 failed)'
 	assert_line "  failing CI logs returned as the failing step's excerpt: 1"
 	assert_line '  - jouet wait ci/run/pr: 1 run, not estimated: only 1 CI wait before setup, and an estimate needs 20'

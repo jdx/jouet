@@ -159,6 +159,13 @@ pub struct RuleCounts {
     pub denies: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub warns: u64,
+    /// The sessions it denied or warned in.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sessions: u64,
+    /// Of those, the sessions it denied or warned in more than once: its
+    /// message did not keep the agent from doing it again.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sessions_again: u64,
     /// The same command again after a deny or warning.
     #[serde(skip_serializing_if = "is_zero")]
     pub overrides: u64,
@@ -245,6 +252,8 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut rules: BTreeMap<String, RuleCounts> = BTreeMap::new();
     let mut checks: BTreeMap<String, CheckRuns> = BTreeMap::new();
     let mut overhead: BTreeMap<String, Overhead> = BTreeMap::new();
+    // How often each rule denied or warned in each session.
+    let mut fired: HashMap<(&str, &str), u64> = HashMap::new();
     // The next pre-tool-use entry of each session, for "what came next".
     let mut by_session: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
     for (i, e) in kept.iter().enumerate() {
@@ -259,6 +268,9 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 ..Overhead::default()
             });
         for d in &e.decisions {
+            if let ("deny" | "warn", Some(session)) = (d.action.as_str(), e.session.as_deref()) {
+                *fired.entry((d.rule.as_str(), session)).or_default() += 1;
+            }
             match d.action.as_str() {
                 "deny" => {
                     rule_counts(&mut rules, &d.rule).denies += 1;
@@ -348,6 +360,11 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 }
             }
         }
+    }
+    for ((rule, _), n) in fired {
+        let r = rule_counts(&mut rules, rule);
+        r.sessions += 1;
+        r.sessions_again += u64::from(n > 1);
     }
     m.sessions = sessions.len() as u64;
     m.commands = commands.into_values().collect();
