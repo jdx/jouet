@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -138,14 +139,42 @@ def prepared(
     return {"patch": patch, "meta": meta, "cached": False}
 
 
-def apply(workdir: Path, patch: Path) -> str | None:
-    """Applies the init patch and commits it; the new HEAD, or None when the
-    skill changed nothing."""
+def apply(workdir: Path, patch: Path, task: tasks_mod.Task, shas: dict[str, str]) -> None:
+    """Put initialization on the baseline, then replay any task commits.
+
+    The patch is made against the task head. A three-way apply also lets it
+    apply to the baseline when the task already has commits; if it cannot,
+    fail the trial rather than measure configuration as task work.
+    """
     if not patch.read_text().strip():
-        return None
-    git(workdir, "apply", "--index", "--binary", str(patch))
-    git(workdir, "commit", "-q", "--no-verify", "-m", "chore: configure jouet (jouet-init)")
-    return git(workdir, "rev-parse", "HEAD").strip()
+        return
+    base = shas["base_sha"]
+    with tempfile.TemporaryDirectory(prefix="init-base-", dir=workdir.parent) as directory:
+        baseline = Path(directory)
+        git(workdir, "worktree", "add", "--detach", "-q", str(baseline), base)
+        try:
+            try:
+                git(baseline, "apply", "--3way", "--index", "--binary", str(patch))
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"init patch cannot be applied to the task baseline: {e.stderr.strip()}") from e
+            git(baseline, "commit", "-q", "--no-verify", "-m", "chore: configure jouet (jouet-init)")
+            configured_base = git(baseline, "rev-parse", "HEAD").strip()
+        finally:
+            git(workdir, "worktree", "remove", "--force", str(baseline))
+    try:
+        git(workdir, "rebase", "--onto", configured_base, base)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"task commits cannot be replayed on the initialized baseline: {e.stderr.strip()}") from e
+    shas["base_sha"] = configured_base
+    shas["head_sha"] = git(workdir, "rev-parse", "HEAD").strip()
+    if task.upstream:
+        if not task.remote:
+            # Never contact the configured URL: this is the per-run local origin.
+            origin = workdir.parent / "origin.git"
+            git(workdir, "push", "-q", str(origin), f"{configured_base}:refs/heads/main")
+        git(workdir, "update-ref", "refs/remotes/origin/main", configured_base)
+        if task.remote and task.branch and task.branch != "main":
+            git(workdir, "update-ref", f"refs/remotes/origin/{task.branch}", shas["head_sha"])
 
 
 def trust(env: dict[str, str], workdir: Path) -> None:

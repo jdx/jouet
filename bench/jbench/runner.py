@@ -436,8 +436,7 @@ def execute(
     if arm.init:
         # Made once per task and build, by running the skill, then reused.
         init = init_mod.prepared(task, harness, shas, opts, work_root, run_agent)
-        if head := init_mod.apply(workdir, init["patch"]):
-            shas["head_sha"] = head
+        init_mod.apply(workdir, init["patch"], task, shas)
     if note := (opts.get("cost_notes") or {}).get(task.name):
         costs_mod.apply(workdir, note, shas["head_sha"])
     fixture = task.github_fixture(shas)
