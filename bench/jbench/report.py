@@ -72,8 +72,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                     for r in runs
                 ],
             }
-        # Against plain: `jouet`, or `jouet-init` in a pilot without it.
-        treat = next((a for a in ("jouet", "jouet-init") if a in by_arm), None)
+        # Prefer the committed project configuration when the pilot includes it.
+        treat = next((a for a in ("jouet-init", "jouet") if a in by_arm), None)
         cell["treatment"] = treat
         init_runs = [r["init"] for r in by_arm.get("jouet-init", []) if r.get("init")]
         if init_runs:
