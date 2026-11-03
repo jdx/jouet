@@ -1308,6 +1308,9 @@ pub(crate) struct Ran {
     pub exit_code: i32,
     /// When, from the line's `timestamp`, in seconds since the Unix epoch.
     pub at: Option<i64>,
+    /// A failed command's output, as Codex recorded it, so a failure that
+    /// blames the machine can be told apart as it is for other harnesses.
+    pub output: Option<String>,
 }
 
 /// The finished commands at the end of a Codex session transcript, oldest
@@ -1362,9 +1365,14 @@ fn codex_command(line: &str) -> Option<Ran> {
         [_, flag, script] if flag.starts_with('-') && flag.contains('c') => script.to_string(),
         words => words.join(" "),
     };
+    let output = (exit_code != 0)
+        .then(|| event.get("aggregated_output").and_then(|o| o.as_str()))
+        .flatten()
+        .map(str::to_string);
     Some(Ran {
         command: script,
         exit_code,
+        output,
         at: value
             .get("timestamp")
             .and_then(|t| t.as_str())
@@ -2567,6 +2575,7 @@ mod tests {
             command: command.into(),
             exit_code,
             at,
+            output: None,
         };
         assert_eq!(
             codex_commands(&path),

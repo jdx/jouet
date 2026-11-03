@@ -1489,6 +1489,7 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         command,
         exit_code,
         at: when,
+        output,
     } in commands
     {
         let call = Call {
@@ -1505,6 +1506,17 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         for record in evaluate(engine, &call).records {
             let at = run_dir(cwd.as_deref(), record.dir.as_deref());
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            // A failure whose output blames the machine is marked so, as the
+            // other harnesses' failures are, judged with the formats of the
+            // work tree it ran in.
+            let cause = output.as_deref().and_then(|text| {
+                let formats = at
+                    .as_deref()
+                    .map(|dir| testlog::format::load(dir).0)
+                    .unwrap_or_default();
+                testlog::environment_cause(text, &formats)
+            });
+            let recorded = record.command.clone();
             if record.exit_code != 0 {
                 failed
                     .entry(root.clone())
@@ -1512,6 +1524,9 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
                     .push(record.command.clone());
             }
             state.record(&root, [record], None);
+            if let Some(cause) = &cause {
+                state.mark_environment(&root, &recorded, cause);
+            }
             // Read again at every stop: dated now, a run in another work
             // tree would never be left behind (see `set_aside_settled`).
             if let Some(when) = when {
@@ -1686,6 +1701,7 @@ mod tests {
             command: command.into(),
             exit_code,
             at: None,
+            output: None,
         }
     }
 

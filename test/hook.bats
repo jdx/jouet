@@ -403,6 +403,27 @@ stop_reason() {
 	assert_output --partial '[jouet rule: scoped-lint]'
 }
 
+@test "stop for codex lets a failure whose output blames the machine through, with a note" {
+	git init -q repo
+	item() {
+		jq -cn --arg command "$1" --arg output "$2" \
+			'{type: "event_msg", payload: {type: "item_completed", item: {type: "CommandExecution",
+			  command: ["/bin/zsh", "-lc", $command], exit_code: 1, aggregated_output: $output}}}'
+	}
+	codex_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	}
+	item "bats test/edit.bats" $'1..1\nnot ok 1 keychain secrets\n# Failed to initialize OS keyring store: Platform failure: DBus error: no session bus\n' >rollout.jsonl
+	run --separate-stderr codex_stop
+	assert_success
+	refute_output --partial '"decision":"block"'
+	assert_output --partial 'blame the machine'
+	# The same command failing on the change's own assertion still blocks.
+	item "bats test/edit.bats" $'1..1\nnot ok 1 keychain secrets\n# expected: 1\n# actual: 2\n' >rollout.jsonl
+	run --separate-stderr codex_stop
+	assert_output --partial '"decision":"block"'
+}
+
 @test "stop for codex reads exit codes from the transcript and always prints JSON" {
 	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["/bin/zsh","-lc","cargo clippy -- -D warnings"],"exit_code":101}}}' >rollout.jsonl
 
