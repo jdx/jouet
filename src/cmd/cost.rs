@@ -149,7 +149,7 @@ fn text(report: &Report, empty: bool) -> String {
                 "  {} → {}: median {} for the second check ({} pairs; range {}–{})",
                 sequence.before,
                 sequence.after,
-                duration(sequence.median_ms),
+                sequence_bound(sequence.median_ms),
                 sequence.samples,
                 sequence_bound(sequence.min_ms),
                 sequence_bound(sequence.max_ms)
@@ -177,7 +177,7 @@ fn runs(n: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::sequence_bound;
+    use super::{Observation, Report, sequence_bound, text};
 
     #[test]
     fn sequence_bounds_keep_millisecond_precision() {
@@ -185,5 +185,27 @@ mod tests {
         assert_eq!(sequence_bound(1_000), "1s");
         assert_eq!(sequence_bound(7_939), "7.939s");
         assert_eq!(sequence_bound(60_001), "60.001s");
+    }
+
+    #[test]
+    fn sequence_median_and_bounds_use_the_same_precision() {
+        let report = Report {
+            commands: Vec::new(),
+            scale: 1.0,
+            scaled_by: 0,
+            sequences: Some(vec![Observation {
+                before: "build".into(),
+                after: "test".into(),
+                median_ms: 1_500,
+                min_ms: 1_200,
+                max_ms: 1_800,
+                samples: 3,
+            }]),
+            sequences_recording: Some(true),
+        };
+        assert!(
+            text(&report, false)
+                .contains("median 1.500s for the second check (3 pairs; range 1.200s–1.800s)")
+        );
     }
 }
