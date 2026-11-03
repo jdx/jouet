@@ -555,7 +555,7 @@ impl Log<'_> {
                     "warn".into()
                 },
                 scope: None,
-                revision: revision(engine, &d.rule),
+                revision: Some(d.revision.clone()).filter(|r| !r.is_empty()),
             })
             .collect();
         ledger::append(dir, &entry);
@@ -587,6 +587,7 @@ impl Log<'_> {
                 rule: d.rule.clone(),
                 action: "warn".into(),
                 scope: None,
+                revision: Some(d.revision.clone()).filter(|r| !r.is_empty()),
             }));
         self.append(entry);
     }

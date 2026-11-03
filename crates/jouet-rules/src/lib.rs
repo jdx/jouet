@@ -522,6 +522,9 @@ pub struct Decision {
     /// The command a matcher rule suggests running instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggest: Option<String>,
+    /// The revision of the rule that decided (see [`Rule::revision`]).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub revision: String,
 }
 
 #[derive(
@@ -1504,6 +1507,7 @@ impl Engine {
                     action,
                     message,
                     suggest,
+                    revision: rule.revision.clone(),
                 })
             }
             Some(Err(type_name)) => {
