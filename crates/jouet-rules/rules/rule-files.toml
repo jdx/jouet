@@ -17,7 +17,7 @@ script = "rule-files.luau"
 
 [[rule.match]]
 tool = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
-paths = ["**/jouet/rules/**", "**/.jouet/rules/**"]
+paths = ["**/jouet/**/rules/**", "**/.jouet/**/rules/**"]
 
 [[rule.match]]
 command = ["rm", "unlink", "shred", "mv", "cp", "install", "tee", "truncate"]
@@ -26,7 +26,7 @@ args = ["*jouet/*rules", "*jouet/*rules/", "*jouet/*rules/*"]
 # `--target-directory=DIR` is an option, so `args` does not see DIR.
 [[rule.match]]
 command = ["mv", "cp", "install"]
-text = "jouet/+rules"
+text = "jouet/[./]*rules"
 
 [[rule.match]]
 command = "sed"
@@ -48,6 +48,10 @@ fires = [
   { tool = "MultiEdit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = \"deny\"\nauthor = \"theirs\"" }, action = "deny" },
   # A script's mode is in the TOML beside it.
   { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.luau", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = "/home/u/.config/jouet//rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Write", path = "/home/u/.config/jouet/./rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { tool = "Edit", path = ".jouet/./rules/no-curl.toml", action = "warn" },
+  { command = "cp -t ~/.config/jouet/./rules /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
   { tool = "Edit", path = "/etc/jouet/rules/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "rm ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "mv ~/.config/jouet/rules/no-tags.toml /tmp/", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
