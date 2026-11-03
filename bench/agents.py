@@ -14,7 +14,6 @@ See docs/benchmarks.md for the method and its limits.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -32,6 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from jbench import arms, init, report, runner, tasks  # noqa: E402
 from jbench.fake_github import FakeGitHub  # noqa: E402
 from jbench.harness import HARNESSES  # noqa: E402
+
+# Where prepare-codex puts the reviewed home unless told otherwise.
+REVIEWED_CODEX_HOME = Path("~/.cache/jouet-bench/reviewed-codex/.codex")
 
 DEFAULTS = {
     "claude_model": "claude-sonnet-5-5",
@@ -93,8 +95,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     run.add_argument("--timeout", type=int, help="cap every task's timeout, in seconds")
     run.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
-    run.add_argument("--codex-reviewed-home", type=Path,
-                     help="dedicated CODEX_HOME whose jouet hooks were reviewed in Codex")
+    run.add_argument("--codex-reviewed-home", type=Path, default=REVIEWED_CODEX_HOME,
+                     help="dedicated CODEX_HOME whose jouet hooks were reviewed in Codex "
+                     "(default %(default)s); one review serves every run until the hooks change")
     run.add_argument(
         "--jouet-env",
         action="append",
@@ -116,7 +119,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     chk.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
 
     prepare = sub.add_parser("prepare-codex", help="prepare a new isolated Codex home for hook review")
-    prepare.add_argument("--home", required=True, type=Path, help="new dedicated benchmark home")
+    prepare.add_argument("--home", type=Path, default=REVIEWED_CODEX_HOME.parent,
+                         help="new dedicated benchmark home (default %(default)s)")
     prepare.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
     return parser.parse_args(argv)
 
@@ -171,7 +175,8 @@ def cmd_prepare_codex(args: argparse.Namespace) -> int:
         return 1
     (home / ".jouet-bench-codex-home").write_text("jouet benchmark Codex home\n")
     print(f"Prepared Codex hooks in {config}. Review them in Codex with /hooks before running trials.")
-    print(f"Use --codex-reviewed-home {config} when running the benchmark.")
+    if config != REVIEWED_CODEX_HOME.expanduser().resolve():
+        print(f"Use --codex-reviewed-home {config} when running the benchmark.")
     return 0
 
 
@@ -227,12 +232,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if any(arms.ARMS[a].jouet for a in args.arms if a in arms.ARMS) and not args.jouet.exists():
         problems.append(f"no jouet binary at {args.jouet}; run `mise run build` or pass --jouet")
     if "codex" in args.harness and any(arms.ARMS[a].jouet for a in args.arms if a in arms.ARMS):
-        if not args.codex_reviewed_home:
-            problems.append("Codex jouet runs require --codex-reviewed-home with reviewed hooks")
-        elif not (args.codex_reviewed_home / "hooks.json").is_file() or not (
+        if not (args.codex_reviewed_home / "hooks.json").is_file() or not (
             args.codex_reviewed_home.parent / ".jouet-bench-codex-home"
         ).is_file():
-            problems.append("use a dedicated home created by prepare-codex")
+            problems.append(f"no reviewed Codex home at {args.codex_reviewed_home}: create one with "
+                            "prepare-codex and review its hooks (docs/benchmarks.md)")
     if len(planned) > args.max_runs:
         problems.append(f"{len(planned)} runs planned, over --max-runs {args.max_runs}")
 
@@ -312,36 +316,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         meta["jouet_version"] = runner.version([str(binary), "--version"])
         (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
-    lock = None
-    if opts["codex_reviewed_home"] and "codex" in args.harness:
+    if opts["codex_reviewed_home"] and "codex" in args.harness and any(
+        arms.ARMS[name].jouet for name in args.arms
+    ):
         try:
-            lock_path = Path(opts["codex_reviewed_home"]).parent / ".jouet-bench.lock"
-            lock = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            if lock is not None:
-                os.close(lock)
-            print(f"cannot lock the reviewed Codex home: {error}", file=sys.stderr)
+            with tempfile.TemporaryDirectory(prefix="jouet-hook-preflight-") as directory:
+                work = Path(directory).resolve()
+                harness = HARNESSES["codex"]
+                env = arms.build(work, harness, arms.ARMS["jouet"], bins["codex"],
+                                 opts["jouet_bin"], None, "jdx/demo")
+                arms.setup_jouet(harness, env, work)
+                arms.reviewed_codex(harness, env, work, opts)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+            print(f"Codex hook preflight failed: {error}", file=sys.stderr)
             return 4
-    try:
-        if opts["codex_reviewed_home"] and "codex" in args.harness and any(
-            arms.ARMS[name].jouet for name in args.arms
-        ):
-            try:
-                with tempfile.TemporaryDirectory(prefix="jouet-hook-preflight-") as directory:
-                    work = Path(directory).resolve()
-                    harness = HARNESSES["codex"]
-                    env = arms.build(work, harness, arms.ARMS["jouet"], bins["codex"],
-                                     opts["jouet_bin"], None, "jdx/demo")
-                    arms.setup_jouet(harness, env, work)
-                    arms.reviewed_codex(harness, env, work, opts)
-            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-                print(f"Codex hook preflight failed: {error}", file=sys.stderr)
-                return 4
-        records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
-    finally:
-        if lock is not None:
-            os.close(lock)
+    records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
     write_summary(out, records, meta)
     print(f"results: {out}")
     return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable")

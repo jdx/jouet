@@ -146,16 +146,18 @@ The models under test may have seen these issues and fixes in training. Both arm
 - **plain:** the harness as installed, with no jouet on `PATH`.
 - **jouet:** `jouet` on `PATH`, and `jouet setup claude` or `jouet setup codex` run in the run's home, which installs the hooks and the session-start primer that points the agent at `jouet agent-help`.
 
-Codex trials use a dedicated configuration whose hooks a person has reviewed. Create a new home and review the hooks before running a Codex jouet arm:
+Codex trials need a person to review jouet's hooks once. Create the reviewed home and review the hooks:
 
 ```sh
-python3 bench/agents.py prepare-codex --home "$HOME/.cache/jouet-bench/reviewed-codex"
-HOME="$HOME/.cache/jouet-bench/reviewed-codex" CODEX_HOME="$HOME/.cache/jouet-bench/reviewed-codex/.codex" codex -c 'cli_auth_credentials_store="ephemeral"'
+python3 bench/agents.py prepare-codex
+HOME=~/.cache/jouet-bench/reviewed-codex CODEX_HOME=~/.cache/jouet-bench/reviewed-codex/.codex codex -c 'cli_auth_credentials_store="ephemeral"'
 # In Codex, open /hooks and review and trust the jouet hooks. Then exit.
-python3 bench/agents.py run --harness codex --codex-reviewed-home "$HOME/.cache/jouet-bench/reviewed-codex/.codex"
+python3 bench/agents.py run --harness codex
 ```
 
-The review command uses an ephemeral credential store; it does not need `codex logout`. The harness uses the dedicated file credential store, lends credentials for each run, and returns any refresh before removing its copy. It refuses concurrent use of the dedicated home and checks that Codex reports the exact hooks for this jouet build as enabled and trusted. A changed hook needs a new review. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
+The review command uses an ephemeral credential store, so it does not need `codex logout`. `prepare-codex` and `run` default to `~/.cache/jouet-bench/reviewed-codex`; pass `--home` and `--codex-reviewed-home` to use another.
+
+Codex records a hook's trust under the path of its `hooks.json`, with the hash of the hook that was reviewed. Each run has a Codex home of its own, so the harness copies the reviewed home's trust for its own `hooks.json` to the run's path. It then checks that Codex reports exactly the hooks for this jouet build as enabled and trusted. Codex honors a copied hash only while the run's hook matches the one reviewed. The hooks call `jouet` from `PATH`, so a review covers every jouet build until a change to `jouet setup codex` changes the hooks. A changed hook reads as modified and needs a new review in a new home. No run writes to the reviewed home, so any number of suites can share it. The harness checks for a recorded session-start event and excludes a run if it did not occur. Other enabled hooks cause the preflight to fail.
 
 Codex runs use ephemeral sessions. The harness records live cumulative token counts and selected agent events, but not every tool call or output. `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs.
 
@@ -205,7 +207,7 @@ When a run fails because the harness cannot log in at all, the suite stops inste
 ### Running the agents
 
 - **Claude Code:** `claude -p --output-format stream-json --verbose --model M --effort E --permission-mode bypassPermissions --strict-mcp-config --settings '{"syncClaudeAiSkills": false}' --max-budget-usd N`. The stream carries each response's usage, and its last event has the totals, turn count and cost. Skill syncing is off because a claude.ai login otherwise downloads the account's skills in the background, and their listing, about 3.8k tokens, joins every request after it lands. It landed in longer runs and not in shorter ones, so it counted against whichever arm made more requests. Runs before this change include it.
-- **Codex:** `codex exec --json --model M -c model_reasoning_effort=E --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust`. Codex skips hooks nobody has trusted, and the throwaway `CODEX_HOME` has trusted none. Its usage arrives only at the end of the turn, so the per-run token cap is enforced from the session file Codex writes as it goes.
+- **Codex:** one ephemeral thread through `codex app-server`, with approvals off and full sandbox access, and the model and effort set per thread. Codex runs only hooks it trusts, so a jouet run carries the reviewed trust (see above). Usage arrives as live app-server events, which enforce the per-run token cap.
 
 ### A fake GitHub
 
