@@ -1484,10 +1484,6 @@ fn fix_after_edit(
 fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> State {
     let mut state = State::default();
     let cwd = session_dir(payload);
-    let formats = cwd
-        .as_deref()
-        .map(|c| testlog::format::load(c).0)
-        .unwrap_or_default();
     let mut failed = std::collections::BTreeMap::<String, Vec<String>>::new();
     for verify::Ran {
         command,
@@ -1496,11 +1492,6 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         output,
     } in commands
     {
-        // A failure whose output blames the machine is marked so, as the
-        // other harnesses' failures are.
-        let cause = output
-            .as_deref()
-            .and_then(|text| testlog::environment_cause(text, &formats));
         let call = Call {
             event: Some(Event::PostToolUse),
             harness: "codex".into(),
@@ -1515,6 +1506,16 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         for record in evaluate(engine, &call).records {
             let at = run_dir(cwd.as_deref(), record.dir.as_deref());
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
+            // A failure whose output blames the machine is marked so, as the
+            // other harnesses' failures are, judged with the formats of the
+            // work tree it ran in.
+            let cause = output.as_deref().and_then(|text| {
+                let formats = at
+                    .as_deref()
+                    .map(|dir| testlog::format::load(dir).0)
+                    .unwrap_or_default();
+                testlog::environment_cause(text, &formats)
+            });
             let recorded = record.command.clone();
             if record.exit_code != 0 {
                 failed
