@@ -1,7 +1,10 @@
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch as patch_env
 
 from jbench import arms, init, report
 
@@ -11,6 +14,12 @@ def git(cwd, *args):
 
 
 class InitTest(unittest.TestCase):
+    def apply(self, work, patch):
+        head = init.git(work, "rev-parse", "HEAD").strip()
+        shas = {"base_sha": head, "head_sha": head}
+        init.apply(work, patch, SimpleNamespace(upstream=False), shas)
+        return shas
+
     def repo(self, d):
         work = Path(d) / "work"
         work.mkdir()
@@ -35,8 +44,9 @@ class InitTest(unittest.TestCase):
             git(work, "reset", "-q", "--hard")
             git(work, "clean", "-qfd")
 
-            head = init.apply(work, patch)
-            self.assertEqual(head, git(work, "rev-parse", "HEAD").strip())
+            shas = self.apply(work, patch)
+            self.assertEqual(shas["head_sha"], git(work, "rev-parse", "HEAD").strip())
+            self.assertEqual(shas["base_sha"], shas["head_sha"])
             self.assertEqual(git(work, "status", "--porcelain"), "")
             self.assertEqual((work / ".jouet" / "test.toml").read_text(), "[test]\n")
 
@@ -58,7 +68,7 @@ class InitTest(unittest.TestCase):
             # A fresh tree, with that file untracked again, applies it cleanly.
             init.git(work, "reset", "-q", "--hard", "HEAD~1")
             (work / "notes.md").write_text("theirs\n")
-            self.assertIsNotNone(init.apply(work, patch))
+            self.apply(work, patch)
             self.assertEqual((work / "notes.md").read_text(), "theirs\n")
 
     def test_a_skill_that_changed_nothing_leaves_the_tree_as_it_was(self):
@@ -67,8 +77,107 @@ class InitTest(unittest.TestCase):
             before = git(work, "rev-parse", "HEAD")
             patch = Path(d) / "init.patch"
             patch.write_text("")
-            self.assertIsNone(init.apply(work, patch))
+            self.apply(work, patch)
             self.assertEqual(git(work, "rev-parse", "HEAD"), before)
+
+    def test_configuration_is_in_the_baseline_and_task_changes_remain(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = self.repo(d)
+            base = git(work, "rev-parse", "HEAD").strip()
+            origin = work.parent / "origin.git"
+            git(work.parent, "init", "--bare", "-q", str(origin))
+            git(work, "remote", "add", "origin", str(origin))
+            git(work, "push", "-q", "origin", "HEAD:refs/heads/main")
+            git(work, "fetch", "-q", "origin")
+            (work / "task.txt").write_text("task change\n")
+            git(work, "add", "task.txt")
+            git(work, "commit", "-q", "-m", "task")
+            head = git(work, "rev-parse", "HEAD").strip()
+            (work / "config.txt").write_text("configuration\n")
+            git(work, "add", "config.txt")
+            patch = Path(d) / "init.patch"
+            patch.write_text(git(work, "diff", "--cached", "--binary", "HEAD"))
+            git(work, "reset", "-q", "--hard")
+            shas = {"base_sha": base, "head_sha": head}
+
+            init.apply(work, patch, SimpleNamespace(upstream=True, remote=False), shas)
+
+            self.assertEqual(git(work, "rev-parse", "origin/main").strip(), shas["base_sha"])
+            self.assertEqual(git(origin, "rev-parse", "refs/heads/main").strip(), shas["base_sha"])
+            self.assertEqual(git(work, "diff", "--name-only", "origin/main", "HEAD"), "task.txt\n")
+            self.assertEqual(git(work, "show", "origin/main:config.txt"), "configuration\n")
+            git(work, "fetch", "-q", "origin")
+            self.assertEqual(git(work, "rev-parse", "origin/main").strip(), shas["base_sha"])
+
+    def test_configuration_that_depends_on_task_changes_fails_before_the_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = self.repo(d)
+            base = git(work, "rev-parse", "HEAD").strip()
+            (work / "a.txt").write_text("task\n")
+            git(work, "add", "a.txt")
+            git(work, "commit", "-q", "-m", "task")
+            head = git(work, "rev-parse", "HEAD").strip()
+            (work / "a.txt").write_text("configured task\n")
+            git(work, "add", "a.txt")
+            patch = Path(d) / "init.patch"
+            patch.write_text(git(work, "diff", "--cached", "--binary", "HEAD"))
+            git(work, "reset", "-q", "--hard")
+            shas = {"base_sha": base, "head_sha": head}
+
+            with self.assertRaisesRegex(RuntimeError, "init patch cannot be applied to the task baseline"):
+                init.apply(work, patch, SimpleNamespace(upstream=False), shas)
+
+            self.assertEqual(shas, {"base_sha": base, "head_sha": head})
+            self.assertEqual(git(work, "rev-parse", "HEAD").strip(), head)
+            self.assertEqual(git(work, "status", "--porcelain"), "")
+
+    def test_replaying_task_commits_preserves_the_initialized_task_tree(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = self.repo(d)
+            (work / "a.txt").write_text("one\ntwo\nthree\nfour\nfive\nsix\nseven\n")
+            git(work, "add", "a.txt")
+            git(work, "commit", "-q", "-m", "base content")
+            base = git(work, "rev-parse", "HEAD").strip()
+            (work / "a.txt").write_text("task\ntwo\nthree\nfour\nfive\nsix\nseven\n")
+            git(work, "add", "a.txt")
+            git(work, "commit", "-q", "-m", "task")
+            head = git(work, "rev-parse", "HEAD").strip()
+            (work / "a.txt").write_text("task\ntwo\nthree\nfour\nfive\nsix\nconfig\n")
+            git(work, "add", "a.txt")
+            expected_tree = git(work, "write-tree").strip()
+            init_patch = Path(d) / "init.patch"
+            init_patch.write_text(git(work, "diff", "--cached", "--binary", "HEAD"))
+            git(work, "reset", "-q", "--hard")
+            shas = {"base_sha": base, "head_sha": head}
+
+            init.apply(work, init_patch, SimpleNamespace(upstream=False), shas)
+
+            self.assertEqual(git(work, "rev-parse", "HEAD^{tree}").strip(), expected_tree)
+            self.assertEqual(git(work, "show", f"{shas['base_sha']}:a.txt"),
+                             "one\ntwo\nthree\nfour\nfive\nsix\nconfig\n")
+
+    def test_init_does_not_follow_git_environment_into_another_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "trial").mkdir()
+            (root / "host").mkdir()
+            work = self.repo(root / "trial")
+            host = self.repo(root / "host")
+            host_head = git(host, "rev-parse", "HEAD").strip()
+            (work / "config.txt").write_text("configuration\n")
+            git(work, "add", "config.txt")
+            init_patch = root / "init.patch"
+            init_patch.write_text(git(work, "diff", "--cached", "--binary", "HEAD"))
+            git(work, "reset", "-q", "--hard")
+
+            with patch_env.dict(os.environ, {"GIT_DIR": str(host / ".git"), "GIT_WORK_TREE": str(host),
+                                            "GIT_INDEX_FILE": str(host / ".git" / "index")}):
+                shas = self.apply(work, init_patch)
+
+            self.assertEqual(git(work, "show", "HEAD:config.txt"), "configuration\n")
+            self.assertEqual(git(work, "rev-parse", "HEAD").strip(), shas["base_sha"])
+            self.assertEqual(git(host, "rev-parse", "HEAD").strip(), host_head)
+            self.assertEqual(git(host, "status", "--porcelain"), "")
 
     def test_the_arm_runs_jouet_after_init(self):
         arm = arms.ARMS["jouet-init"]
