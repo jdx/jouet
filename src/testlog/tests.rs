@@ -852,6 +852,10 @@ fn a_few_warnings_are_named_with_their_place_once_each() {
     let d = digest(summary, false, DEFAULT_BUDGET);
     assert_eq!(d.warning_names, ["unused import: `y` (src/b.rs:2:5)"]);
     assert_eq!(d.warnings, 1);
+    // A place with a space in its path.
+    let spaced = "warning: unused import: `z`\n --> my dir/d.rs:4:1\n";
+    let d = digest(spaced, false, DEFAULT_BUDGET);
+    assert_eq!(d.warning_names, ["unused import: `z` (my dir/d.rs:4:1)"]);
     // A long headline is cut, not its place.
     let long = format!("warning: {}\n --> src/c.rs:3:1\n", "x".repeat(300));
     let d = digest(&long, false, DEFAULT_BUDGET);

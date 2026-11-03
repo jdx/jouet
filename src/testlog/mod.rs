@@ -55,9 +55,9 @@ pub(crate) struct Digest {
     /// count's warnings in the changed files are picked from (see `jouet test`).
     #[serde(skip)]
     pub(crate) warnings_all: Vec<String>,
-    /// Of warnings too many to name, those in the files the change touches:
-    /// empty when none is, so the agent need not read the log to see
-    /// whether one is its own.
+    /// Of warnings too many to name, those in the files the change touches,
+    /// all of them (the text names the first few): empty when none is, so
+    /// the agent need not read the log to see whether one is its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) warnings_changed: Option<Vec<String>>,
     /// The failures that fit the budget, in the order the output has them.
@@ -262,7 +262,7 @@ regexes! {
     RUSTC_WARNING = r"^warning(?:\[[^\]]+\])?: ";
     // cargo's count of a target's warnings, not a warning of its own.
     CARGO_WARNING_SUMMARY = r"^warning: `[^`]+` \([^)]+\) generated \d+ warnings?";
-    RUSTC_AT = r"^\s*--> (\S+)$";
+    RUSTC_AT = r"^\s*--> (.*\S)\s*$";
     // rustfmt --check, `cargo fmt --check`: each place it would change.
     RUSTFMT_DIFF = r"^Diff in (\S+?)(?::(\d+):| at line (\d+):)$";
     // cargo's build scripts, whose own output is indented under it.

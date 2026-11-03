@@ -254,7 +254,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     };
     // And the files it touches, for naming its warnings.
     let touched = if args.dry_run {
-        Vec::new()
+        None
     } else {
         touched_files(&cwd)
     };
@@ -303,8 +303,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
                 digest.passed_changed = changed_tests(&digest.passed_all, &added);
             }
-            if digest.warning_names.is_empty() && !digest.warnings_all.is_empty() {
-                digest.warnings_changed = Some(changed_warnings(&digest.warnings_all, &touched));
+            if let Some(touched) = &touched
+                && digest.warning_names.is_empty()
+                && !digest.warnings_all.is_empty()
+            {
+                let dir = job.dir.canonicalize().unwrap_or_else(|_| job.dir.clone());
+                digest.warnings_changed =
+                    Some(changed_warnings(&digest.warnings_all, &dir, touched));
             }
             let empty_test = args.cmd
                 && code == 0
@@ -672,46 +677,69 @@ fn added_lines(dir: &Path) -> String {
     added
 }
 
-/// The files the work tree changes since HEAD, and its untracked ones, from
-/// the repository's root.
-fn touched_files(dir: &Path) -> Vec<String> {
-    let git = |args: &[&str]| {
-        Command::new("git")
+/// What a change touches: the repository's root, and the files the work
+/// tree changes since HEAD and its untracked ones, as absolute paths. None
+/// when git cannot tell, as before a first commit.
+struct Touched {
+    root: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+fn touched_files(dir: &Path) -> Option<Touched> {
+    let git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git")
             .args(args)
             .current_dir(dir)
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .unwrap_or_default()
+            .ok()
+            .filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let mut files: Vec<String> = git(&["diff", "HEAD", "--name-only", "--no-ext-diff"])
-        .lines()
-        .chain(git(&["ls-files", "--others", "--exclude-standard", "--full-name"]).lines())
-        .map(str::to_string)
+    let root = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim_end());
+    let changed = git(
+        &root,
+        &["diff", "HEAD", "--name-only", "--no-ext-diff", "-z"],
+    )?;
+    let untracked = git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut files: Vec<PathBuf> = changed
+        .split('\0')
+        .chain(untracked.split('\0'))
+        .filter(|f| !f.is_empty())
+        .map(|f| root.join(f))
         .collect();
     files.sort();
     files.dedup();
-    files
+    Some(Touched { root, files })
 }
 
 /// The warnings (`headline (path:line:col)`) whose file is one the change
-/// touches, up to [`WARNINGS_NAMED`]. A warning's path is from where the
-/// compiler ran, a touched one from the repository's root, so either may
-/// end with the other.
-fn changed_warnings(warnings: &[String], touched: &[String]) -> Vec<String> {
+/// touches. A warning's path is absolute, or relative to where the compiler
+/// ran: the run's directory, or for cargo the workspace's, so the
+/// repository's root too.
+fn changed_warnings(warnings: &[String], cwd: &Path, touched: &Touched) -> Vec<String> {
     warnings
         .iter()
         .filter(|w| {
             let Some(at) = w.rsplit_once(" (").map(|(_, at)| at.trim_end_matches(')')) else {
                 return false;
             };
-            let path = at.split(':').next().unwrap_or(at);
-            touched
+            // `:line:col` from the right, so `C:\a.rs:1:2` keeps its drive.
+            let mut path = at;
+            for _ in 0..2 {
+                match path.rsplit_once(':') {
+                    Some((head, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                        path = head
+                    }
+                    _ => break,
+                }
+            }
+            let path = Path::new(path);
+            [cwd.join(path), touched.root.join(path)]
                 .iter()
-                .any(|t| Path::new(t).ends_with(path) || Path::new(path).ends_with(t))
+                .any(|p| touched.files.contains(p))
         })
-        .take(testlog::WARNINGS_NAMED)
         .cloned()
         .collect()
 }
@@ -1308,8 +1336,15 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
                     s.push_str("  none of the warnings is in a file this change touches\n");
                 }
                 Some(changed) => {
-                    for warning in changed {
+                    for warning in changed.iter().take(testlog::WARNINGS_NAMED) {
                         let _ = writeln!(s, "  warning in a changed file: {warning}");
+                    }
+                    if let Some(more) = changed
+                        .len()
+                        .checked_sub(testlog::WARNINGS_NAMED)
+                        .filter(|&n| n > 0)
+                    {
+                        let _ = writeln!(s, "  and {more} more in changed files (see the log)");
                     }
                 }
                 None => {}
@@ -1402,13 +1437,29 @@ mod tests {
         ]
         .map(String::from)
         .into();
-        // A path from the crate's own directory matches one from the root.
-        let touched = ["src/cmd/edit.rs", "crates/a/src/lib.rs"].map(String::from);
-        assert_eq!(changed_warnings(&warnings, &touched), &warnings[..2]);
-        let touched = ["README.md".to_string()];
-        assert!(changed_warnings(&warnings, &touched).is_empty());
+        let root = PathBuf::from("/r");
+        let touched = |files: &[&str]| Touched {
+            root: root.clone(),
+            files: files.iter().map(|f| root.join(f)).collect(),
+        };
+        // Paths from the workspace root, as cargo prints them.
+        let both = touched(&["src/cmd/edit.rs", "crates/a/src/lib.rs"]);
+        assert_eq!(changed_warnings(&warnings, &root, &both), &warnings[..2]);
+        assert!(changed_warnings(&warnings, &root, &touched(&["README.md"])).is_empty());
+        // From the crate's own directory, and only that crate's.
         let in_crate = ["unused variable: `x` (src/lib.rs:10:9)".to_string()];
-        let touched = ["crates/a/src/lib.rs".to_string()];
-        assert_eq!(changed_warnings(&in_crate, &touched), in_crate);
+        let a = touched(&["crates/a/src/lib.rs"]);
+        assert_eq!(
+            changed_warnings(&in_crate, &root.join("crates/a"), &a),
+            in_crate
+        );
+        assert!(changed_warnings(&in_crate, &root.join("crates/b"), &a).is_empty());
+        // An absolute path, and one with a space.
+        let spaced = touched(&["my dir/x.rs"]);
+        let absolute = ["unused: `z` (/r/my dir/x.rs:1:2)".to_string()];
+        assert_eq!(
+            changed_warnings(&absolute, Path::new("/elsewhere"), &spaced),
+            absolute
+        );
     }
 }
