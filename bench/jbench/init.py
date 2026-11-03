@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 import tempfile
 from dataclasses import asdict
@@ -47,7 +46,7 @@ def git(workdir: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args],
         cwd=workdir,
-        env={**os.environ, **tasks_mod.GIT_ENV},
+        env=tasks_mod.git_env(),
         check=True,
         capture_output=True,
         text=True,

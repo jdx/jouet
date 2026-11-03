@@ -1,8 +1,10 @@
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch as patch_env
 
 from jbench import arms, init, report
 
@@ -13,7 +15,7 @@ def git(cwd, *args):
 
 class InitTest(unittest.TestCase):
     def apply(self, work, patch):
-        head = git(work, "rev-parse", "HEAD").strip()
+        head = init.git(work, "rev-parse", "HEAD").strip()
         shas = {"base_sha": head, "head_sha": head}
         init.apply(work, patch, SimpleNamespace(upstream=False), shas)
         return shas
@@ -128,6 +130,29 @@ class InitTest(unittest.TestCase):
             self.assertEqual(shas, {"base_sha": base, "head_sha": head})
             self.assertEqual(git(work, "rev-parse", "HEAD").strip(), head)
             self.assertEqual(git(work, "status", "--porcelain"), "")
+
+    def test_init_does_not_follow_git_environment_into_another_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "trial").mkdir()
+            (root / "host").mkdir()
+            work = self.repo(root / "trial")
+            host = self.repo(root / "host")
+            host_head = git(host, "rev-parse", "HEAD").strip()
+            (work / "config.txt").write_text("configuration\n")
+            git(work, "add", "config.txt")
+            init_patch = root / "init.patch"
+            init_patch.write_text(git(work, "diff", "--cached", "--binary", "HEAD"))
+            git(work, "reset", "-q", "--hard")
+
+            with patch_env.dict(os.environ, {"GIT_DIR": str(host / ".git"), "GIT_WORK_TREE": str(host),
+                                            "GIT_INDEX_FILE": str(host / ".git" / "index")}):
+                shas = self.apply(work, init_patch)
+
+            self.assertEqual(git(work, "show", "HEAD:config.txt"), "configuration\n")
+            self.assertEqual(git(work, "rev-parse", "HEAD").strip(), shas["base_sha"])
+            self.assertEqual(git(host, "rev-parse", "HEAD").strip(), host_head)
+            self.assertEqual(git(host, "status", "--porcelain"), "")
 
     def test_the_arm_runs_jouet_after_init(self):
         arm = arms.ARMS["jouet-init"]
