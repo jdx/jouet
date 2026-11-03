@@ -35,6 +35,8 @@ pub(crate) struct Observation {
     pub before: String,
     pub after: String,
     pub median_ms: u64,
+    pub min_ms: u64,
+    pub max_ms: u64,
     pub samples: usize,
 }
 
@@ -228,6 +230,8 @@ fn summarize(events: Vec<Event>) -> io::Result<Vec<Observation>> {
                 before,
                 after,
                 median_ms: super::median(&times).unwrap_or_default(),
+                min_ms: times.iter().copied().min().unwrap_or_default(),
+                max_ms: times.iter().copied().max().unwrap_or_default(),
                 samples: times.len(),
             })
         })
@@ -325,9 +329,11 @@ mod tests {
                 &*result[0].before,
                 &*result[0].after,
                 result[0].median_ms,
+                result[0].min_ms,
+                result[0].max_ms,
                 result[0].samples
             ),
-            ("cargo clippy", "cargo test", 6, 3)
+            ("cargo clippy", "cargo test", 6, 5, 7, 3)
         );
     }
 

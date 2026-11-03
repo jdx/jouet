@@ -63,12 +63,16 @@ setup() {
 	done
 	run --separate-stderr jouet cost --sequences --json
 	assert_success
-	run jq -c '[.sequences_recording, [.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]]' <<<"$output"
+	local sequence_json="$output"
+	run jq -c '[.sequences_recording, [.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .samples]]' <<<"$sequence_json"
 	assert_output '[false,[3]]'
+	run jq -e '.sequences[] | select(.before == "cargo clippy" and .after == "cargo test") | .min_ms <= .median_ms and .median_ms <= .max_ms' <<<"$sequence_json"
+	assert_output 'true'
 	run --separate-stderr jouet cost --sequences
 	assert_success
 	assert_line --partial 'other work and cache changes may intervene'
 	assert_line --partial 'cargo clippy → cargo test'
+	assert_line --partial 'pairs; range'
 	run grep -r 'private-session' "$XDG_STATE_HOME/jouet/cost-sequences"
 	assert_failure 1
 }

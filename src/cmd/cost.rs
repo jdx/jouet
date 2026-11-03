@@ -146,11 +146,13 @@ fn text(report: &Report, empty: bool) -> String {
         for sequence in sequences {
             let _ = writeln!(
                 s,
-                "  {} → {}: median {} for the second check ({} pairs)",
+                "  {} → {}: median {} for the second check ({} pairs; range {}–{})",
                 sequence.before,
                 sequence.after,
                 duration(sequence.median_ms),
-                sequence.samples
+                sequence.samples,
+                duration(sequence.min_ms),
+                duration(sequence.max_ms)
             );
         }
     }

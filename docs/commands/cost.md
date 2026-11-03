@@ -94,13 +94,13 @@ make test       1s  3 runs here
 make lint    201ms  3 runs here
 
 Successive recorded checks in the same session and worktree (other work and cache changes may intervene):
-  make lint → make test: median 1s for the second check (3 pairs)
+  make lint → make test: median 1s for the second check (3 pairs; range 900ms–3s)
 ```
 
-For each pair seen at least three times, it reports the second check's median duration and the number of pairs (`make test → make lint` was seen only twice here, so it is left out). Pairs must be adjacent among recorded `jouet test` jobs in the same session and worktree, successful, non-overlapping, and no more than 30 minutes apart. A failed or unrecognized job breaks the sequence. An unfinished job prevents later pairs in that session from being reported, because its end is unknown.
+For each pair seen at least three times, it reports the second check's median duration, observed minimum and maximum, and the number of pairs (`make test → make lint` was seen only twice here, so it is left out). The range shows variation in the observed samples; it does not predict the next run. Pairs must be adjacent among recorded `jouet test` jobs in the same session and worktree, successful, non-overlapping, and no more than 30 minutes apart. A failed or unrecognized job breaks the sequence. An unfinished job prevents later pairs in that session from being reported, because its end is unknown.
 
 Ordinary shell commands and other work are not recorded by this experiment and may intervene, and cache state is unknown. These are conditional observations, not measured savings or proof of cache reuse.
 
 Events are local and are not added to git notes or transferred by `cost push`. Commands use the same redaction as normal cost samples; session IDs, machine identity and the worktree path are hashed. The files stay under the jouet state directory until you delete them; recording stops with a warning once a file reaches 16 MiB, until the file is moved or deleted.
 
-Turn recording off with `JOUET_COST_SEQUENCES=0` or by removing the setting; `--sequences` can still read previously recorded data, and says when recording is off. The JSON output includes `sequences_recording` when `--sequences` is used, and `sequences` lists each pair's `before` and `after` commands, `median_ms` and `samples`. `--min` applies to the pairs' medians too.
+Turn recording off with `JOUET_COST_SEQUENCES=0` or by removing the setting; `--sequences` can still read previously recorded data, and says when recording is off. The JSON output includes `sequences_recording` when `--sequences` is used, and `sequences` lists each pair's `before` and `after` commands, `median_ms`, `min_ms`, `max_ms` and `samples`. `--min` applies to the pairs' medians too.
