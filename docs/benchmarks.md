@@ -174,7 +174,7 @@ The skill's run is not counted: a project commits the configuration once and kee
 Every run starts from nothing, in a temporary directory outside any checkout (so no parent `CLAUDE.md` or `AGENTS.md` leaks in):
 
 - a fresh copy of the task's repository;
-- its own `HOME`, XDG directories and `TMPDIR`, plus a fresh `CLAUDE_CONFIG_DIR` or, for a plain Codex run, `CODEX_HOME`. Codex jouet runs share the reviewed `CODEX_HOME` and use ephemeral sessions;
+- its own `HOME`, XDG directories and `TMPDIR`, plus a fresh `CLAUDE_CONFIG_DIR` or, for a plain Codex run, `CODEX_HOME`. A Codex jouet run also gets its own `CODEX_HOME`, with the hook trust copied from the reviewed home, and uses an ephemeral session;
 - a short `PATH` including a `bin/` directory holding the harness, `git`, `python3`, `node`, `gh` and a few other tools, plus `jouet` in the jouet arm. GNU `parallel`, `uv` and `uvx`, when installed on the host, are available to both arms for projects whose checks use them.
 
 A source task normally starts from a new single commit containing the pinned tree. To let an agent inspect the actual ancestors, set `history = true` in `[source]` and `remote = false` at the top level of `task.toml`. The harness copies the pinned commit and its ancestors into each independent run, without retaining the source's remote, tags or other refs. With `upstream = true`, it creates a local bare origin with pushing disabled. History mode requires a complete, non-shallow source clone and does not initialize submodules.

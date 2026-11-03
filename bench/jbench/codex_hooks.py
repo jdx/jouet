@@ -98,9 +98,9 @@ def copy_trust(reviewed: Path, run: Path) -> None:
     if not entries:
         raise HookPreflightError("Codex hooks in the benchmark home have not been reviewed")
     target = str(run / "hooks.json")
-    with config.open("a") as file:
+    with config.open("a", encoding="utf-8") as file:
         for suffix, digest in sorted(entries):
-            file.write(f"\n[hooks.state.{json.dumps(f'{target}:{suffix}')}]\ntrusted_hash = {json.dumps(digest)}\n")
+            file.write(f"\n[hooks.state.{json.dumps(f'{target}:{suffix}', ensure_ascii=False)}]\ntrusted_hash = {json.dumps(digest)}\n")
 
 
 def require_reviewed(result: dict[str, Any], hook_file: Path) -> None:
