@@ -151,14 +151,39 @@ fn text(report: &Report, empty: bool) -> String {
                 sequence.after,
                 duration(sequence.median_ms),
                 sequence.samples,
-                duration(sequence.min_ms),
-                duration(sequence.max_ms)
+                sequence_bound(sequence.min_ms),
+                sequence_bound(sequence.max_ms)
             );
         }
     }
     s
 }
 
+/// Keep sequence bounds exact: truncating the maximum could put an observed
+/// duration outside the range shown to the reader.
+fn sequence_bound(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else if ms.is_multiple_of(1000) {
+        format!("{}s", ms / 1000)
+    } else {
+        format!("{}.{:03}s", ms / 1000, ms % 1000)
+    }
+}
+
 fn runs(n: usize) -> &'static str {
     if n == 1 { "run" } else { "runs" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sequence_bound;
+
+    #[test]
+    fn sequence_bounds_keep_millisecond_precision() {
+        assert_eq!(sequence_bound(206), "206ms");
+        assert_eq!(sequence_bound(1_000), "1s");
+        assert_eq!(sequence_bound(7_939), "7.939s");
+        assert_eq!(sequence_bound(60_001), "60.001s");
+    }
 }
