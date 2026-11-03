@@ -598,6 +598,16 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			-- Through its wrappers, as a command's own argv is: `jouet test
 			-- --cmd -- mise x -- cargo test` ran cargo.
 			local argv, via = jouet.unwrap(given)
+			-- One command in a `sh -c` script is that command, its variable
+			-- assignments set: `jouet test --cmd -- sh -c 'PATH=… go test'`
+			-- ran go test, and its pass clears that test's failure.
+			local shell = if argv[1] then jouet.basename(argv[1]) else nil
+			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
+				local script = jouet.parse(argv[3], command.status)
+				if #script == 1 then
+					return classify(script[1], dir)
+				end
+			end
 			local inner: JouetCommand = {
 				words = given,
 				argv = argv,

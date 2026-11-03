@@ -43,7 +43,7 @@ setup() {
 	assert_success
 	assert_line --regexp '^ok    git-stash +[0-9]+ examples passed$'
 	assert_line --regexp '^ok    checks +[0-9]+ examples passed$'
-	assert_line '33 of 33 rules passed their examples'
+	assert_line '35 of 35 rules passed their examples'
 
 	cat >"$RULES/no-rm.toml" <<'TOML'
 [[rule]]
@@ -62,12 +62,12 @@ TOML
 	assert_line '            - expected: quiet'
 	assert_line '            + actual:   deny: rm deletes for good'
 	assert_line --regexp '^FAIL  bare +it has no examples$'
-	assert_line '33 of 35 rules passed their examples'
+	assert_line '35 of 37 rules passed their examples'
 	refute_line --partial 'echo rm'
 
 	run --separate-stderr jouet rule test --all --json
 	run jq -c '[.passed, .failed, (.rules[] | select(.rule == "no-rm") | [.passed, .failed])]' <<<"$output"
-	assert_output '[33,2,[2,1]]'
+	assert_output '[35,2,[2,1]]'
 
 	run --separate-stderr jouet rule test
 	assert_failure 2
@@ -354,7 +354,7 @@ TOML
 	run jq -r '.title, ."$id", (."$defs".Matcher.properties | keys | join(","))' <<<"$output"
 	assert_line 'jouet rules'
 	assert_line 'https://jouet.jdx.dev/schema/rules.json'
-	assert_line --partial 'command,exact_flags,flags'
+	assert_line --partial 'command,exact_flags,exit_code,flags'
 
 	# docs/public serves it at that URL; `jouet rule schema >docs/public/schema/rules.json`.
 	jouet rule schema >schema.json

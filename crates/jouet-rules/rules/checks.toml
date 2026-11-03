@@ -71,6 +71,8 @@ fires = [
   { command = "npm test", exit_code = 0, kind = "test", scope = "full" },
   { command = "go test ./...", exit_code = 0, kind = "test", scope = "full" },
   { command = "go test ./pkg -run TestWait", exit_code = 0, kind = "test", scope = "partial ./pkg -run TestWait" },
+  # One command in a `sh -c` script, its environment set there.
+  { command = "jouet test --cmd -- mise exec -- sh -c 'PATH=/b E2E=1 go test -tags=e2e ./e2e'", exit_code = 0, kind = "test", scope = "partial ./e2e" },
   { command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
   { command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
   { command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
@@ -161,6 +163,8 @@ quiet = [
   # directly.
   { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0 },
   { command = "./run-tests.sh", exit_code = 0 },
+  # A `sh -c` script of more than one command is not one check.
+  { command = "jouet test --cmd -- sh -c 'go test ./a && rm -rf out'", exit_code = 0 },
   # `diag check` refused (no hk config) or misused: no lint ran.
   { command = "jouet diag check wordcount.py", exit_code = 4 },
   { command = "jouet --json diag check --changed", exit_code = 4 },

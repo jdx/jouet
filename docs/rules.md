@@ -53,13 +53,13 @@ scoped-lint         enabled  warn    builtin  builtin  2026-10-30  While iterati
 …
 ```
 
-The columns are name, state, mode, scope, author, created, and why. The state is `enabled`, `disabled`, `needs` and the jouet command the rule is waiting for, `untrusted`, or `broken` and the error. The mode is `deny`, `warn`, or `record` for a rule that records checks after a call. The scope says where the rule comes from ([below](#where-rules-come-from)).
+The columns are name, state, mode, scope, author, created, and why. The state is `enabled`, `disabled`, `needs` and the jouet command the rule is waiting for, `untrusted`, or `broken` and the error. The mode is `deny`, `warn`, or `record` for a script rule that records checks after a call. A matcher rule that runs after a call shows `warn`, whatever its `mode`. The scope says where the rule comes from ([below](#where-rules-come-from)).
 
 The built-in rules, grouped by what they are about:
 
 | About | Rules |
 |---|---|
-| CI and pull requests | `sleep-poll`, `ci-rerun`, `review-threads` |
+| CI and pull requests | `sleep-poll`, `ci-rerun`, `ci-pending`, `ci-failed`, `review-threads` |
 | Editing files | `python-edit`, `sed-line-edit` |
 | git | `git-add-all`, `git-stash`, `no-verify`, `force-push`, `reset-to-remote`, `rebase-merged-base` |
 | Secrets | `print-secrets`, `secret-files`, `committed-secrets` |
@@ -134,12 +134,12 @@ When a rule cannot express what you need, `jouet rule gap "TEXT"` records the wi
 | `match` | Which calls it matches: a table, or a list of `[[rule.match]]` tables of which any may match. |
 | `examples` | `fires` and `quiet`, the calls it must fire on and leave alone. |
 | `script` | A Luau file beside this one, or below its directory, for logic a matcher cannot express. See [Scripts](#scripts). |
-| `on` | `pre-tool-use` (the default), or `post-tool-use` for a script that records checks. Only a `script` rule can run after a tool. |
+| `on` | `pre-tool-use` (the default), or `post-tool-use` to run after the tool, when the call's exit code is known. Such a rule only warns: see [After a tool](#after-a-tool). |
 | `primer` | `false` keeps a `deny` rule out of the session-start primer, which names the deny rules so the agent avoids the calls they deny; `true` if omitted. For a rule that denies on what a call would change, not on how it looks, such as `committed-secrets`, naming it saves no call. |
 
 ### Matching a command
 
-A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either; `text` is the exception, where every pattern must match. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `fnox` and `secret_files` is about a command, and needs `command`. A matcher with none of `command`, `tool` and `paths` would match every call, and is refused.
+A matcher's keys must all hold. A list in a key matches if any of its items does, so `command = ["npm test", "pnpm test"]` matches either; `text` is the exception, where every pattern must match. Every key but `tool`, `paths`, `unless_paths`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `fnox`, `secret_files` and `exit_code` is about a command, and needs `command`. A matcher with none of `command`, `tool` and `paths` would match every call, and is refused.
 
 | Key | Matches |
 |---|---|
@@ -171,6 +171,7 @@ A matcher's keys must all hold. A list in a key matches if any of its items does
 | `secret_vars` | The command expands, outside single quotes, a variable the project's fnox config defines as a secret: `$NAME` or `${NAME}`. |
 | `secret_args` | One of its arguments is the name of a secret the project's fnox config defines, as in `printenv NAME`. |
 | `secret_files` | The call reads a file a fnox `plain` provider reads secrets from: a file tool's path, or with `command`, one of its arguments, compared as paths from the working directory. |
+| `exit_code` | For a `post-tool-use` rule: the call exited with one of these codes, such as `exit_code = 8` for `gh pr checks` with checks still pending. With `command`, it is the exit status that command is known to have had, read as a script's `status` is ([below](#recording-checks)): in `npm test && gh pr checks` exiting 1, either may have failed, so neither matches. |
 
 For example, the built-in `force-push` rule has two matchers, either of which fires it:
 
@@ -272,7 +273,7 @@ Adding `unless_flags = ["-i", "--interactive"]` to the matcher fixes it. A file 
 
 ```output
 $ jouet rule test ./no-rm-rf.toml
-jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`, `unless_with`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `unless_paths`, `fnox`, `secret_files`, `secret_vars`, `secret_args`, `prints`, `stdout_to`
+jouet: no-rm-rf does not load: ./no-rm-rf.toml:12: unknown field `flag`, expected one of `tool`, `paths`, `command`, `via`, `flags`, `unless_flags`, `exact_flags`, `value_flags`, `args`, `unless_args`, `max_args`, `background`, `text`, `with`, `unless_with`, `input`, `unless_input`, `seen`, `min_read_lines`, `min_code_lines`, `min_tracked_files`, `unless_paths`, `fnox`, `secret_files`, `secret_vars`, `secret_args`, `prints`, `stdout_to`, `exit_code`
 ```
 
 `jouet rule test --all` runs every rule's examples: built in, the system's, yours, the plugins', and this repository's, trusted or not.
@@ -403,9 +404,32 @@ The `jouet` module has helpers for the common cases:
 
 `jouet rule types` prints the whole API as Luau type definitions.
 
+### After a tool
+
+A rule with `on = "post-tool-use"` runs after a shell command finished, when the harness says how it exited. It cannot deny anything, since the command already ran: a matcher rule warns, and a script's `jouet.deny` is a warning too. The warning reaches the agent with the command's result, before its next step, as `[jouet rule: NAME]` context like any other. This rule, a shorter copy of the built-in `ci-pending`, points at `jouet wait ci` when `gh pr checks` says checks are still pending:
+
+```toml
+[[rule]]
+name = "ci-pending"
+why = "`gh pr checks` exiting 8 means checks are still running; `jouet wait ci` blocks until they settle."
+on = "post-tool-use"
+needs = ["wait", "ci"]
+message = "Checks are still pending (`gh pr checks` exited 8). Run `jouet wait ci` next rather than checking again."
+
+[rule.match]
+command = "gh pr checks"
+exit_code = 8
+
+[rule.examples]
+fires = [{ command = "gh pr checks 12", exit_code = 8 }]
+quiet = [{ command = "gh pr checks 12", exit_code = 0 }, { command = "gh pr checks | grep pending", exit_code = 8 }]
+```
+
+Claude Code, Cursor, Gemini CLI and Copilot run the post-tool-use hook on shell commands; Codex does not, so these rules never fire there. A rule sees the command and its exit code, not its output.
+
 ### Recording checks
 
-A rule with `on = "post-tool-use"` runs its script after a command finished. Each top-level command then has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one piped into another without `set -o pipefail`: `cargo test | tail` exits with tail's status, so `cargo test` gets none.
+In a post-tool-use script, each top-level command has a `status`: the exit status it is known to have had. A failure belongs only to the last pipeline, so `cargo test; echo done` failing gives `cargo test` no status. Success belongs to every command in the final `&&` chain, except one piped into another without `set -o pipefail`: `cargo test | tail` exits with tail's status, so `cargo test` gets none.
 
 `jouet.record("test", command, scope, selector, dir)` records a run with that status; it does nothing when `status` is `nil`, and a kind other than `test`, `lint` or `build` is an error. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. `dir` is where a `cd` before the command moved it (relative, absolute, or under `~` or `$HOME`), so the run counts for that work tree. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so.
 

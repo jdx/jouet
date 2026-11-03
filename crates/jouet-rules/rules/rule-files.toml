@@ -23,6 +23,11 @@ paths = ["**/jouet/rules/**", "**/.jouet/rules/**"]
 command = ["rm", "unlink", "shred", "mv", "cp", "install", "tee", "truncate"]
 args = ["*jouet/rules", "*jouet/rules/", "*jouet/rules/*"]
 
+# `--target-directory=DIR` is an option, so `args` does not see DIR.
+[[rule.match]]
+command = ["mv", "cp", "install"]
+text = "jouet/rules"
+
 [[rule.match]]
 command = "sed"
 flags = ["-i", "--in-place"]
@@ -56,6 +61,12 @@ fires = [
   { command = "bash -c 'rm ~/.config/jouet/rules/no-tags.toml'", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "sudo rm /etc/jouet/rules/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
   { command = "rm -rf ~/.config/jouet/rules", action = "deny" },
+  { command = "rm ~/.config/jouet/rules/*", action = "deny" },
+  { command = "rm -f ~/.config/jouet/rules/*.toml", action = "deny" },
+  { command = "rm -rf ~/.config/jouet/rules/.", action = "deny" },
+  { command = "cp -t ~/.config/jouet/rules/ /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "mv --target-directory=/etc/jouet/rules /tmp/org.toml", files = { "/etc/jouet/rules/org.toml" = 'mode = "deny"' }, action = "deny" },
+  { command = "cp -rt ~/.config/jouet/rules /tmp/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' }, action = "deny" },
   # A repository's rules change through a reviewed PR, and stop running
   # until the user trusts them again.
   { tool = "Edit", path = ".jouet/rules/no-curl.toml", action = "warn" },
@@ -72,6 +83,9 @@ quiet = [
   { tool = "Write", path = "/home/u/.config/jouet/rules/no-tags.toml" },
   "cat <<'EOF' > ~/.config/jouet/rules/no-tags.toml\n[[rule]]\nname = \"no-tags\"\nEOF",
   "mv /tmp/no-tags.toml ~/.config/jouet/rules/",
+  "mv -t ~/.config/jouet/rules/ /tmp/no-tags.toml",
+  { command = "rm ~/.config/jouet/rules/*.md" },
+  { tool = "Edit", path = "/home/u/.config/jouet/rules/no-tags.toml", session = "mine", files = { "/home/u/.config/jouet/rules/no-tags.toml" = "mode = 'deny'\nauthor='mine'" } },
   # Reading a rule, or copying it elsewhere.
   { tool = "Read", path = "/home/u/.config/jouet/rules/no-tags.toml", files = { "/home/u/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },
   { command = "cat ~/.config/jouet/rules/no-tags.toml", files = { "~/.config/jouet/rules/no-tags.toml" = 'mode = "deny"' } },

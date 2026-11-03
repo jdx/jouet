@@ -501,6 +501,8 @@ fn measured_text(s: &mut String, m: &Measured) {
             "rule".to_string(),
             "deny".into(),
             "warn".into(),
+            "sessions".into(),
+            "again".into(),
             "overridden".into(),
             "then jouet".into(),
             "then other".into(),
@@ -511,6 +513,8 @@ fn measured_text(s: &mut String, m: &Measured) {
                 r.rule.clone(),
                 r.denies.to_string(),
                 r.warns.to_string(),
+                r.sessions.to_string(),
+                r.sessions_again.to_string(),
                 r.overrides.to_string(),
                 r.then_jouet.to_string(),
                 r.then_other.to_string(),
@@ -518,6 +522,10 @@ fn measured_text(s: &mut String, m: &Measured) {
             ]);
         }
         table(s, &rows, 1);
+        let _ = writeln!(
+            s,
+            "  (sessions: the sessions it denied or warned in; again: those in which it did so more than once)"
+        );
     }
     if !m.checks.is_empty() {
         let checks: Vec<String> = m

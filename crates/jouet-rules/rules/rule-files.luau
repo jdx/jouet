@@ -5,12 +5,18 @@
 -- deny mode that another author wrote. A file it cannot read is a new one,
 -- which only adds decisions.
 
-local DENY = { 'mode = "deny"', 'mode="deny"', "mode = 'deny'", "mode='deny'" }
+-- The ways a TOML or Luau file can write `key = "value"`.
+local function forms(key: string, value: string): { string }
+	return { `{key} = "{value}"`, `{key}="{value}"`, `{key} = '{value}'`, `{key}='{value}'` }
+end
+
+local DENY = forms("mode", "deny")
 
 -- Options that take a value, so the value is not a path.
 local SED_VALUES = { "-e", "--expression", "-f", "--file", "-l", "--line-length" }
 local TRUNCATE_VALUES = { "-s", "--size", "-r", "--reference" }
-local INSTALL_VALUES = { "-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix" }
+local INSTALL_VALUES =
+	{ "-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix", "-t", "--target-directory" }
 local JOUET_EDIT_VALUES = {
 	"--old",
 	"--new",
@@ -68,6 +74,42 @@ local function place(path: string): (string?, boolean)
 	return kind, dir
 end
 
+-- The directory GNU's `-t DIR`, `-tDIR` or `--target-directory[=]DIR` names.
+local function target_dir(args: { string }): string?
+	for i, arg in args do
+		if arg == "--" or string.sub(arg, 1, 1) ~= "-" then
+			if arg == "--" then
+				return nil
+			end
+		elseif arg == "--target-directory" then
+			return args[i + 1]
+		elseif string.sub(arg, 1, 19) == "--target-directory=" then
+			return string.sub(arg, 20)
+		elseif string.sub(arg, 1, 2) ~= "--" and string.sub(arg, 1, 2) == "-t" and #arg > 2 then
+			return string.sub(arg, 3)
+		elseif string.sub(arg, 1, 2) ~= "--" and string.sub(arg, -1) == "t" then
+			-- `-t` alone, or at the end of a cluster such as `-rt`.
+			return args[i + 1]
+		end
+	end
+	return nil
+end
+
+-- Whether a path's last part could name every rule file, or a rule file
+-- the shell finds: `.`, `..`, or a pattern such as `*` or `*.toml`, but not
+-- one that names another kind of file, such as `*.md`.
+local function broad(path: string): boolean
+	local name = string.match(path, "([^/\\]*)$") or path
+	if name == "." or name == ".." then
+		return true
+	end
+	if not string.find(name, "[%*%?%[{]") then
+		return false
+	end
+	local ext = string.match(name, "%.(%w+)$")
+	return ext == nil or ext == "toml" or ext == "luau"
+end
+
 -- What copying or moving `sources` to `dest` writes: `dest`, or the file of
 -- each source's name in it when it is a rules directory.
 local function into(dest: string, sources: { string }): { string }
@@ -94,8 +136,21 @@ local function written(command: JouetCommand): { string }
 	local argv, program = command.argv, command.program
 	local found: { string } = {}
 	if program == "cp" or program == "install" or program == "mv" then
-		local named = positional(rest(argv, 2), INSTALL_VALUES)
-		local dest = table.remove(named)
+		local args = rest(argv, 2)
+		local named = positional(args, INSTALL_VALUES)
+		-- GNU's `-t DIR` names the destination, and every argument is a source.
+		local target = target_dir(args)
+		local dest = target or table.remove(named)
+		if target then
+			-- A cluster such as `-rt DIR` leaves DIR among the arguments.
+			local kept = {}
+			for _, arg in named do
+				if arg ~= target then
+					table.insert(kept, arg)
+				end
+			end
+			named = kept
+		end
 		if dest and #named > 0 then
 			found = into(dest, named)
 			-- A move takes its sources away too.
@@ -152,8 +207,7 @@ local function guarded(path: string, session: string?): boolean
 	end
 	for _, file in files do
 		if holds_any(file, DENY) then
-			local own = session ~= nil
-				and holds_any(file, { `author = "{session}"`, `author="{session}"`, `author = '{session}'` })
+			local own = session ~= nil and holds_any(file, forms("author", session))
 			return not own
 		end
 	end
@@ -174,7 +228,7 @@ local rule: JouetRule = {
 		local repo: string? = nil
 		for _, path in paths do
 			local kind, dir = place(path)
-			if kind == "user" and dir then
+			if kind == "user" and (dir or broad(path)) then
 				return jouet.deny(
 					`{path} holds the user's jouet rules, which steer you; moving or deleting it switches them off, which is the user's decision: ask them. To add a restriction, write a rule of your own with \`jouet rule new NAME --why TEXT\`.`
 				)

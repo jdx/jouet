@@ -252,6 +252,42 @@ fn priced(harness: &str, kinds: Vec<KindBaseline>) -> Baseline {
     }
 }
 
+fn warned(session: &str, rule: &str) -> LedgerEntry {
+    LedgerEntry {
+        harness: "claude".into(),
+        session: Some(session.into()),
+        event: "pre-tool-use".into(),
+        shape: Some("cargo test | tail <arg>".into()),
+        decisions: vec![LedgerDecision {
+            rule: rule.into(),
+            action: "warn".into(),
+        }],
+        ..LedgerEntry::default()
+    }
+}
+
+#[test]
+fn counts_the_sessions_a_rule_fired_in_more_than_once() {
+    let entries = [
+        warned("a", "piped-test-output"),
+        warned("a", "piped-test-output"),
+        warned("a", "piped-test-output"),
+        warned("b", "piped-test-output"),
+        warned("b", "large-read"),
+        warned("c", "large-read"),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let counts: Vec<(&str, u64, u64, u64)> = m
+        .rules
+        .iter()
+        .map(|r| (r.rule.as_str(), r.warns, r.sessions, r.sessions_again))
+        .collect();
+    assert_eq!(
+        counts,
+        [("piped-test-output", 4, 2, 1), ("large-read", 2, 2, 0)]
+    );
+}
+
 fn post(shape: &str, exit_code: i32) -> LedgerEntry {
     LedgerEntry {
         harness: "claude".into(),
