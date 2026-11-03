@@ -37,6 +37,7 @@ quiet = [
   "python3 - <<'EOF'\nrows = open('data.csv').read().splitlines()\nopen('report.md', 'w').write('\\n'.join(rows))\nEOF",
   # Code that stops on a miss cannot silently change nothing.
   "python3 - <<'EOF'\np = 'a.rs'\ns = open(p).read()\nassert 'old' in s\nopen(p, 'w').write(s.replace('old', 'new'))\nEOF",
+  "python3 - <<'EOF'\ndef sub(p, a, b):\n    s = open(p).read(); assert a in s, (p, a); open(p, 'w').write(s.replace(a, b, 1))\nsub('a.md', 'old', 'new')\nEOF",
   "python3 - <<'EOF'\nimport sys\ns = open('a.rs').read()\nif 'old' not in s: sys.exit('no match')\nopen('a.rs', 'w').write(s.replace('old', 'new'))\nEOF",
   # Cutting by `.index()`, which raises on a miss, so nothing is written.
   "python3 - <<'PY'\np='src/config_root.rs'\ns=open(p).read()\na=s.index('/// The git checkout')\nb=s.index('mod tests')\ns=s[:a]+s[b:]\nopen(p,'w').write(s)\nPY",

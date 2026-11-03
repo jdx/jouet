@@ -58,13 +58,14 @@ end
 -- Libraries that parse and write a file whole, by structure.
 local STRUCTURED = { "json%.dump", "yaml%.dump", "yaml%.safe_dump", "toml%.dump", "tomlkit%.dump", "tomli_w%.dump" }
 
--- Whether the code stops on a miss before it writes: an `assert` line, or a
+-- Whether the code stops on a miss before it writes: an `assert` statement,
+-- on its own line or after a `;` (`s=open(p).read(); assert a in s`), or a
 -- `raise` or `sys.exit`, as `assert old in s` or `if old not in s: raise`;
 -- or it finds its place by `.index(` (or `.rindex(`), which raises on a miss,
 -- and changes no text by `.replace(` or `re.sub`, which would not.
 local function checked(code: string): boolean
 	for line in string.gmatch(code, "[^\n]+") do
-		if string.match(line, "^%s*assert%s") or string.find(line, "raise%s") or string.find(line, "sys%.exit%(") then
+		if string.match(line, "^%s*assert%s") or string.find(line, ";%s*assert%s") or string.find(line, "raise%s") or string.find(line, "sys%.exit%(") then
 			return true
 		end
 	end
