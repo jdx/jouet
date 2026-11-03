@@ -35,10 +35,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import codex_hooks
 from .harness import Harness
 
 # Tools linked into every run's bin/ when the machine has them.
 TOOLS = ("git", "python3", "node", "curl", "jq", "rg", "diff", "patch", "mise", "parallel", "uv", "uvx")
+CODEX_ISOLATION_ENV = {"CODEX_HOME", "HOME", "PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"}
 
 
 @dataclass(frozen=True)
@@ -221,3 +223,67 @@ def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path) -> dict[st
         raise RuntimeError(f"jouet setup {harness.name} failed: {proc.stderr.strip() or proc.stdout.strip()}")
     report = json.loads(proc.stdout)
     return {"files": [{"path": f["path"], "action": f["action"]} for f in report.get("files", [])]}
+
+
+def reviewed_codex(harness: Harness, env: dict[str, str], workdir: Path,
+                   opts: dict[str, Any]) -> None:
+    """Use the reviewed benchmark home only after Codex confirms its hooks."""
+    if harness.name != "codex":
+        return
+    home = opts.get("codex_reviewed_home")
+    if not home:
+        raise codex_hooks.HookPreflightError("Codex jouet runs require a reviewed benchmark home")
+    config = Path(home).resolve()
+    if (config == (Path.home() / ".codex").resolve()
+            or config.name != ".codex"
+            or not (config.parent / ".jouet-bench-codex-home").is_file()):
+        raise codex_hooks.HookPreflightError("Use a dedicated home created by prepare-codex")
+    if (config / "auth.json").is_symlink():
+        raise codex_hooks.HookPreflightError("The benchmark credential must not be a symlink")
+    if (config / "auth.json").exists():
+        raise codex_hooks.HookPreflightError("Sign out of the dedicated Codex home before running a trial")
+    expected = Path(env["CODEX_HOME"]) / "hooks.json"
+    try:
+        if json.loads((config / "hooks.json").read_text()) != json.loads(expected.read_text()):
+            raise codex_hooks.HookPreflightError("Reviewed hooks differ from this jouet build")
+    except (OSError, ValueError) as error:
+        raise codex_hooks.HookPreflightError("Cannot compare reviewed hooks with this jouet build") from error
+    env["CODEX_HOME"] = str(config)
+    result = codex_hooks.list_hooks(str(opts["harness_bins"]["codex"]), env, workdir)
+    codex_hooks.require_reviewed(result, config / "hooks.json")
+
+
+def codex_tools(bin_dir: Path, jouet: bool) -> tuple[str, bytes | None]:
+    """Identify the harness and jouet wrappers before a task adds its tools."""
+    try:
+        codex = bin_dir / "codex"
+        link = os.readlink(codex)
+        wrapper_path = bin_dir / "jouet"
+        if jouet and (wrapper_path.is_symlink() or not wrapper_path.is_file()):
+            raise codex_hooks.HookPreflightError("The jouet benchmark wrapper was replaced")
+        return link, wrapper_path.read_bytes() if jouet else None
+    except OSError as error:
+        raise codex_hooks.HookPreflightError("Cannot identify the Codex benchmark tools") from error
+
+
+def verify_codex_path(bin_dir: Path, env: dict[str, str], jouet: bool) -> None:
+    """Ensure setup did not put a different tool ahead of the benchmark wrappers."""
+    for name in ("codex", "jouet") if jouet else ("codex",):
+        found = shutil.which(name, path=env.get("PATH", ""))
+        if not found or Path(found).parent.resolve() != bin_dir.resolve():
+            raise codex_hooks.HookPreflightError(f"PATH does not select the benchmark {name}")
+    if not jouet and shutil.which("jouet", path=env.get("PATH", "")):
+        raise codex_hooks.HookPreflightError("The plain Codex arm has jouet on PATH")
+
+
+def codex_started(env: dict[str, str]) -> bool:
+    """A reviewed hook may still fail to run; require its per-run ledger event."""
+    root = Path(env["XDG_STATE_HOME"]) / "jouet" / "ledger"
+    for path in root.rglob("*.jsonl"):
+        try:
+            for line in path.read_text().splitlines():
+                if json.loads(line).get("event") == "session-start":
+                    return True
+        except (OSError, ValueError, AttributeError):
+            return False
+    return False

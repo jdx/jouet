@@ -14,6 +14,7 @@ See docs/benchmarks.md for the method and its limits.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -92,6 +93,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     run.add_argument("--timeout", type=int, help="cap every task's timeout, in seconds")
     run.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
+    run.add_argument("--codex-reviewed-home", type=Path,
+                     help="dedicated CODEX_HOME whose jouet hooks were reviewed in Codex")
     run.add_argument(
         "--jouet-env",
         action="append",
@@ -111,6 +114,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     chk.add_argument("--tasks", type=csv)
     chk.add_argument("--tasks-dir", type=Path, action="append", default=[], help=TASKS_DIR_HELP)
     chk.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
+
+    prepare = sub.add_parser("prepare-codex", help="prepare a new isolated Codex home for hook review")
+    prepare.add_argument("--home", required=True, type=Path, help="new dedicated benchmark home")
+    prepare.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
     return parser.parse_args(argv)
 
 
@@ -119,6 +126,53 @@ def git_commit() -> str | None:
         ["git", "rev-parse", "--short=12", "HEAD"], cwd=runner.REPO_ROOT, capture_output=True, text=True
     )
     return proc.stdout.strip() or None
+
+
+def cmd_prepare_codex(args: argparse.Namespace) -> int:
+    """Prepare the exact hooks for review, without changing Codex trust."""
+    home = args.home.expanduser().resolve()
+    binary = args.jouet.expanduser().resolve()
+    try:
+        for root in tasks.checkout_roots(runner.REPO_ROOT):
+            if home.is_relative_to(root) or any(
+                ancestor.exists() and ancestor.samefile(root) for ancestor in (home, *home.parents)
+            ):
+                print("the benchmark home must be outside jouet checkouts", file=sys.stderr)
+                return 2
+    except (OSError, RuntimeError, subprocess.CalledProcessError):
+        print("cannot verify jouet worktree locations", file=sys.stderr)
+        return 2
+    if not binary.is_file():
+        print(f"no jouet binary at {binary}", file=sys.stderr)
+        return 2
+    try:
+        home.mkdir(parents=True, mode=0o700, exist_ok=False)
+    except OSError as error:
+        print(f"cannot create a new benchmark home: {error}", file=sys.stderr)
+        return 2
+    config = home / ".codex"
+    env = {**os.environ, "HOME": str(home), "CODEX_HOME": str(config),
+           "XDG_CONFIG_HOME": str(home / ".config"), "XDG_CACHE_HOME": str(home / ".cache"),
+           "XDG_DATA_HOME": str(home / ".local/share"), "XDG_STATE_HOME": str(home / ".local/state")}
+    try:
+        result = subprocess.run([str(binary), "setup", "codex", "--json"], cwd=home, env=env,
+                                capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"jouet setup failed: {error}", file=sys.stderr)
+        return 1
+    if result.returncode or not (config / "hooks.json").is_file():
+        print("jouet setup did not create the Codex hooks", file=sys.stderr)
+        return 1
+    try:
+        with (config / "config.toml").open("x") as file:
+            file.write('cli_auth_credentials_store = "file"\n')
+    except OSError as error:
+        print(f"cannot configure the dedicated credential store: {error}", file=sys.stderr)
+        return 1
+    (home / ".jouet-bench-codex-home").write_text("jouet benchmark Codex home\n")
+    print(f"Prepared Codex hooks in {config}. Review them in Codex with /hooks before running trials.")
+    print(f"Use --codex-reviewed-home {config} when running the benchmark.")
+    return 0
 
 
 def use_task_dirs(args: argparse.Namespace) -> list[str] | None:
@@ -132,6 +186,8 @@ def use_task_dirs(args: argparse.Namespace) -> list[str] | None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.codex_reviewed_home:
+        args.codex_reviewed_home = args.codex_reviewed_home.expanduser().resolve()
     names = use_task_dirs(args)
     if names is None:
         return 2
@@ -151,6 +207,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         log(f"--jouet-env takes KEY=VALUE: {', '.join(bad_env)}")
         return 2
     jouet_env = dict(e.split("=", 1) for e in args.jouet_env)
+    if "codex" in args.harness and arms.CODEX_ISOLATION_ENV.intersection(jouet_env):
+        log("--jouet-env cannot override Codex isolation paths")
+        return 2
     seed = args.seed if args.seed is not None else int(time.time())
     planned = runner.plan(selected, args.harness, args.arms, args.rounds, seed)
 
@@ -167,6 +226,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             problems.append(f"{name}: no credentials ({', '.join(h.auth_env)} or {h.auth_files[0]})")
     if any(arms.ARMS[a].jouet for a in args.arms if a in arms.ARMS) and not args.jouet.exists():
         problems.append(f"no jouet binary at {args.jouet}; run `mise run build` or pass --jouet")
+    if "codex" in args.harness and any(arms.ARMS[a].jouet for a in args.arms if a in arms.ARMS):
+        if not args.codex_reviewed_home:
+            problems.append("Codex jouet runs require --codex-reviewed-home with reviewed hooks")
+        elif not (args.codex_reviewed_home / "hooks.json").is_file() or not (
+            args.codex_reviewed_home.parent / ".jouet-bench-codex-home"
+        ).is_file():
+            problems.append("use a dedicated home created by prepare-codex")
     if len(planned) > args.max_runs:
         problems.append(f"{len(planned)} runs planned, over --max-runs {args.max_runs}")
 
@@ -235,6 +301,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "max_total_tokens": args.max_total_tokens,
         "timeout_s": args.timeout,
         "jouet_bin": args.jouet.resolve(),
+        "codex_reviewed_home": str(args.codex_reviewed_home.resolve()) if args.codex_reviewed_home else None,
         "jouet_env": jouet_env,
         "harness_bins": bins,
         "keep_work": args.keep_work,
@@ -245,10 +312,40 @@ def cmd_run(args: argparse.Namespace) -> int:
         meta["jouet_version"] = runner.version([str(binary), "--version"])
         (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
-    records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
+    lock = None
+    if opts["codex_reviewed_home"] and "codex" in args.harness:
+        try:
+            lock_path = Path(opts["codex_reviewed_home"]).parent / ".jouet-bench.lock"
+            lock = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if lock is not None:
+                os.close(lock)
+            print(f"cannot lock the reviewed Codex home: {error}", file=sys.stderr)
+            return 4
+    try:
+        if opts["codex_reviewed_home"] and "codex" in args.harness and any(
+            arms.ARMS[name].jouet for name in args.arms
+        ):
+            try:
+                with tempfile.TemporaryDirectory(prefix="jouet-hook-preflight-") as directory:
+                    work = Path(directory).resolve()
+                    harness = HARNESSES["codex"]
+                    env = arms.build(work, harness, arms.ARMS["jouet"], bins["codex"],
+                                     opts["jouet_bin"], None, "jdx/demo")
+                    arms.setup_jouet(harness, env, work)
+                    arms.reviewed_codex(harness, env, work, opts)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                print(f"Codex hook preflight failed: {error}", file=sys.stderr)
+                return 4
+        records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
+    finally:
+        if lock is not None:
+            os.close(lock)
     write_summary(out, records, meta)
     print(f"results: {out}")
-    return 0
+    return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable")
+                    for r in records) else 0
 
 
 def write_summary(out: Path, records: list[dict], meta: dict) -> None:
@@ -432,7 +529,8 @@ def main(argv: list[str]) -> int:
             if init_selected and in_checkout(init.CACHE.resolve()):
                 print("external tasks require the jouet-init cache outside the jouet checkout", file=sys.stderr)
                 return 2
-    return {"run": cmd_run, "report": cmd_report, "check-tasks": cmd_check_tasks}[args.command](args)
+    return {"run": cmd_run, "report": cmd_report, "check-tasks": cmd_check_tasks,
+            "prepare-codex": cmd_prepare_codex}[args.command](args)
 
 
 if __name__ == "__main__":

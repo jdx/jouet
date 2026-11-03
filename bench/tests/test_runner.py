@@ -142,6 +142,8 @@ class PlanTest(unittest.TestCase):
                 return result
 
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                    patch.object(runner.arms_mod, "verify_codex_path"), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", side_effect=agent_with_session), \
@@ -159,6 +161,49 @@ class PlanTest(unittest.TestCase):
             self.assertEqual({(p.task, p.arm) for p in in_round}, {(t, a) for t in "ab" for a in ("plain", "jouet")})
         again = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
         self.assertEqual([p.id for p in planned], [p.id for p in again])
+
+    def test_hook_preflight_failure_stops_the_suite(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "jouet"),
+                   runner.Planned(1, "second", "codex", "plain")]
+        failures = [runner.codex_hooks.HookPreflightError("untrusted"),
+                    {"id": planned[0].id, "task": "first", "success": False,
+                     "error_kind": "codex_hook_preflight", "usage": {"input_tokens": 12}}]
+        for failure in failures:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                messages = []
+                with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                        patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                        patch.object(runner.costs_mod, "seeds", return_value={}), \
+                        patch.object(runner, "execute", side_effect=[failure]) as execute:
+                    records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["error_kind"], "codex_hook_preflight")
+                self.assertEqual(execute.call_count, 1)
+                self.assertTrue(any("hooks could not be verified" in message for message in messages))
+
+    def test_missing_codex_usage_stops_the_suite(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain"),
+                   runner.Planned(1, "second", "codex", "jouet")]
+        record = {"id": planned[0].id, "task": "first", "success": False,
+                  "error_kind": "codex_usage_unavailable", "usage": {}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", return_value=record) as execute:
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(execute.call_count, 1)
+            self.assertTrue(any("usage could not be measured" in message for message in messages))
 
     def test_failed_environment_skips_only_that_task(self):
         import os
@@ -208,6 +253,42 @@ class PlanTest(unittest.TestCase):
                 runner.run_suite([], {"jouet_bin": binary}, root, lambda _: None, on_snapshot=on_snapshot)
             self.assertEqual(seen, [b"original"])
 
+    def test_a_task_cannot_replace_a_codex_benchmark_tool(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", side_effect=[("old", None), ("new", None)]), \
+                    patch.object(runner, "run_agent") as agent:
+                with self.assertRaisesRegex(runner.codex_hooks.HookPreflightError, "replaced"):
+                    runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                agent.assert_not_called()
+
+    def test_dependency_setup_cannot_replace_a_codex_benchmark_tool(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", side_effect=[("old", None), ("old", None), ("new", None)]), \
+                    patch.object(runner.tasks_mod, "setup_environment", return_value=None) as setup, \
+                    patch.object(runner, "run_agent") as agent:
+                with self.assertRaisesRegex(runner.codex_hooks.HookPreflightError, "Setup replaced"):
+                    runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                setup.assert_called_once()
+                agent.assert_not_called()
+
     def test_agent_exit_is_part_of_success(self):
         from unittest.mock import patch
 
@@ -220,6 +301,8 @@ class PlanTest(unittest.TestCase):
             opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
                     "codex_model": "test", "tmp_root": str(root), "keep_work": True}
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                    patch.object(runner.arms_mod, "verify_codex_path"), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", return_value=agent), \
@@ -250,6 +333,8 @@ class PlanTest(unittest.TestCase):
             opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
                     "codex_model": "test", "tmp_root": str(root), "keep_work": True}
             with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                    patch.object(runner.arms_mod, "verify_codex_path"), \
                     patch.object(runner.credentials, "lend", return_value=[]), \
                     patch.object(runner.credentials, "give_back", return_value=[]), \
                     patch.object(runner, "run_agent", return_value=agent), \
@@ -276,8 +361,17 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(interrupted["usage"]["input_tokens"], 123)
                 self.assertNotEqual(record["workdir"], interrupted["workdir"])
 
+                # An ephemeral capacity failure before usage is observable
+                # retains the diagnosis but stops the suite on unknown cost.
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"}), event]
+                no_usage = runner.execute(runner.Planned(4, "smoke", "codex", "plain"), opts, root, root)
+                check.assert_not_called()
+                self.assertIn("capacity", no_usage["error"])
+                self.assertEqual(no_usage["error_kind"], "codex_usage_unavailable")
+
                 # A stopped run keeps its timeout classification even if
                 # the stream also reported capacity.
+                agent["lines"] = [event]
                 agent["stopped"] = "timeout"
                 check.return_value = {"passed": True, "exit_code": 0, "output": "ok"}
                 stopped = runner.execute(runner.Planned(3, "smoke", "codex", "plain"), opts, root, root)
@@ -285,6 +379,11 @@ class PlanTest(unittest.TestCase):
                 self.assertNotIn("error", stopped)
                 self.assertEqual(stopped["stopped"], "timeout")
                 self.assertFalse(stopped["success"])
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"})]
+                unknown = runner.execute(runner.Planned(5, "smoke", "codex", "plain"), opts, root, root)
+                self.assertEqual(unknown["stopped"], "timeout")
+                self.assertEqual(unknown["error_kind"], "codex_usage_unavailable")
+                self.assertIsNone(unknown["check"]["exit_code"])
 
 
 class StopTest(unittest.TestCase):

@@ -13,6 +13,7 @@ token for token; the suite repeats runs and pairs them instead.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -190,26 +191,12 @@ class Codex(Harness):
 
     def command(self, binary: str, prompt: str, opts: dict[str, Any], workdir: Path) -> list[str]:
         cmd = [
-            binary,
-            "exec",
-            "--json",
-            "--model",
-            opts["codex_model"],
-            # Codex's workspace-write sandbox needs bubblewrap and
-            # unprivileged user namespaces, which a container often forbids;
-            # there every sandboxed command fails. The run's PATH has a
-            # `sudo` that refuses instead.
-            "--dangerously-bypass-approvals-and-sandbox",
-            # jouet's hooks are new to this throwaway CODEX_HOME, and Codex
-            # skips hooks nobody has trusted. The plain arm has no hooks.
-            "--dangerously-bypass-hook-trust",
-            "--skip-git-repo-check",
-            "--cd",
-            str(workdir),
+            sys.executable, str(Path(__file__).with_name("codex_ephemeral.py")),
+            "--codex", binary, "--cwd", str(workdir), "--model", opts["codex_model"],
         ]
         if opts.get("effort"):
-            cmd += ["-c", f'model_reasoning_effort="{opts["effort"]}"']
-        return cmd + [prompt]
+            cmd += ["--effort", opts["effort"]]
+        return cmd + ["--", prompt]
 
     def _session_usage(self, config_dir: Path) -> tuple[dict[str, Any], str | None]:
         latest: dict[str, Any] = {}
@@ -224,6 +211,11 @@ class Codex(Harness):
         return latest, model
 
     def tokens_so_far(self, stream_lines: list[str], config_dir: Path) -> int:
+        live = [e.get("usage") or {} for e in _json_lines(stream_lines) if e.get("type") == "jouet.token_usage"]
+        if live:
+            return int(live[-1].get("inputTokens") or 0) + int(live[-1].get("outputTokens") or 0)
+        if any(e.get("type") == "jouet.ephemeral" for e in _json_lines(stream_lines)):
+            return 0
         u, _ = self._session_usage(config_dir)
         return int(u.get("input_tokens") or 0) + int(u.get("output_tokens") or 0)
 
@@ -231,8 +223,18 @@ class Codex(Harness):
         events = _json_lines(stream_lines)
         done = [e for e in events if e.get("type") == "turn.completed"]
         failed = any(e.get("type") in ("turn.failed", "error") for e in events)
-        u = done[-1]["usage"] if done else self._session_usage(config_dir)[0]
-        _, model = self._session_usage(config_dir)
+        ephemeral = any(e.get("type") == "jouet.ephemeral" for e in events)
+        live = [e.get("usage") or {} for e in events if e.get("type") == "jouet.token_usage"]
+        if done:
+            u = done[-1]["usage"]
+        elif ephemeral:
+            last = live[-1] if live else {}
+            u = {"input_tokens": last.get("inputTokens"), "cached_input_tokens": last.get("cachedInputTokens"),
+                 "cache_write_input_tokens": last.get("cacheWriteInputTokens"), "output_tokens": last.get("outputTokens"),
+                 "reasoning_output_tokens": last.get("reasoningOutputTokens")}
+        else:
+            u = self._session_usage(config_dir)[0]
+        model = next((e.get("model") for e in events if e.get("type") == "thread.started"), None) if ephemeral else self._session_usage(config_dir)[1]
         messages = [
             e["item"].get("text")
             for e in events
@@ -254,7 +256,8 @@ class Codex(Harness):
             result=messages[-1] if messages else None,
             session_id=thread,
             model=model,
-            extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity},
+            extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity,
+                   **({"usage_observed": bool(done or live)} if ephemeral else {})},
         )
 
 
