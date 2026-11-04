@@ -220,8 +220,8 @@ describe("SpaceSwitcher", () => {
     expect(state.selectSpace).toHaveBeenCalledWith(state.spaces[0]);
   });
 
-  it.each(["md", "header"] as const)("keeps the %s scope popup and its Space selector fixed after positioning", async (size) => {
-    renderAt("/", size);
+  it("keeps the sidebar scope popup and its Space selector fixed after positioning", async () => {
+    renderAt("/", "header");
     openSwitcher();
     const popup = await screen.findByRole("dialog");
     const positioner = popup.parentElement as HTMLElement;

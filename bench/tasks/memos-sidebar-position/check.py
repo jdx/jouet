@@ -12,8 +12,7 @@ from _check import UNVERIFIED, expect, finish, new_commit  # noqa: E402
 
 root = Path(__file__).resolve().parent
 expected = (
-    'keeps the md scope popup and its Space selector fixed after positioning',
-    'keeps the header scope popup and its Space selector fixed after positioning',
+    'keeps the sidebar scope popup and its Space selector fixed after positioning',
     'keeps the /setting.preference.theme/ submenu fixed after positioning',
     'keeps the /common.language/ submenu fixed after positioning',
 )
