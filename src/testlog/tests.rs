@@ -131,6 +131,153 @@ fn nextest_failures_are_named_once_with_their_streams() {
 }
 
 #[test]
+fn a_nextest_run_inside_a_passing_cargo_test_is_not_counted() {
+    // A test that runs nextest itself, which kills one of its tests on
+    // purpose; libtest still reports the outer test as ok.
+    let d = digest(&fixture("cargo-test-nested-nextest"), false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [11, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn a_nested_no_capture_or_verbose_nextest_run_is_not_counted_either() {
+    // The nested run's unindented libtest result and cargo's verbose rustc
+    // line come before its failure, and end neither the outer binary.
+    let log = "     Running tests/nested.rs (target/debug/deps/nested-0123)
+
+running 1 test
+     Running `rustc --crate-name inner --edition=2021 src/lib.rs`
+    Starting 2 tests across 1 binary
+running 1 test
+test passes ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+        PASS [   0.004s] (1/2) inner passes
+        FAIL [   0.004s] (2/2) inner fails
+     Summary [   0.005s] 2 tests run: 1 passed, 1 failed, 0 skipped
+error: test run failed
+test runs_nextest ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn a_cargo_test_a_test_runs_and_means_to_fail_is_not_counted() {
+    // The inner cargo's lines are the outer's, `error: test failed`
+    // included; only libtest's counts tell the runs apart.
+    let log = "     Running tests/wrapper.rs (target/debug/deps/wrapper-0123)
+
+running 3 tests
+     Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+running 1 test
+test inner_fails ... FAILED
+
+failures:
+
+---- inner_fails stdout ----
+thread 'inner_fails' panicked at src/lib.rs:1:1:
+boom
+
+failures:
+    inner_fails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+test runs_a_failing_cargo_test ... ok
+running 2 tests
+test inner_crashes ... FAILED
+     Summary [   0.005s] 1 test run: 0 passed, 1 failed, 0 skipped
+test runs_a_crashing_binary_and_nextest ... ok
+test passes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [3, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn a_nested_binary_that_crashes_does_not_take_the_outer_result() {
+    // Both run two tests, so only cargo's error says the inner one ended.
+    let log = "running 2 tests
+     Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+running 2 tests
+test inner_fails ... FAILED
+error: test failed, to rerun pass `--lib`
+
+Caused by:
+  process didn't exit successfully: `target/debug/deps/inner-0123` (signal: 6, SIGABRT: process abort signal)
+test runs_a_crashing_binary ... ok
+test passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [2, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn a_nested_nextest_run_is_not_counted_without_cargo_lines() {
+    // `cargo test -q` prints none of cargo's lines.
+    let log = "
+running 1 test
+     Summary [   0.005s] 1 test run: 0 passed, 1 failed, 0 skipped
+error: test run failed
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 0, 0]);
+}
+
+#[test]
+fn a_cargo_line_captured_by_nextest_hides_no_later_failure() {
+    let log = "    Starting 2 tests across 1 binary
+        FAIL [   0.004s] (1/2) demo runs_cargo
+  stdout ───
+
+         Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+        FAIL [   0.004s] (2/2) demo fails
+     Summary [   0.005s] 2 tests run: 0 passed, 2 failed, 0 skipped
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 2, 0]);
+    assert_eq!(names(&d), ["demo runs_cargo", "demo fails"]);
+}
+
+#[test]
+fn nextest_alone_is_counted_even_after_a_crash_or_a_cargo_test_run() {
+    // cargo test first, then a nextest run whose test crashed before
+    // libtest's result, with --no-capture.
+    let log = "     Running unittests src/lib.rs (target/debug/deps/demo-0123)
+
+running 1 test
+test ok ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Starting 2 tests across 1 binary
+running 1 test
+    SIGSEGV [   0.004s] (1/2) demo crashes
+        PASS [   0.004s] (2/2) demo passes
+     Summary [   0.005s] 2 tests run: 1 passed, 1 failed, 0 skipped
+error: test run failed
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [2, 1, 0]);
+    assert_eq!(names(&d), ["demo crashes"]);
+}
+
+#[test]
 fn rustc_errors_are_named_by_location_and_warnings_counted() {
     let d = digest(&fixture("cargo-build"), true, DEFAULT_BUDGET);
     assert_eq!(
