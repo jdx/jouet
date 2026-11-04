@@ -43,6 +43,9 @@ fn main() -> ExitCode {
     if let Some(exit) = routine_typo() {
         return exit;
     }
+    if let Some(exit) = json_parse_error() {
+        return exit;
+    }
     let cli = Jouet::parse();
     // Hooks too, so a rule's PR probe knows the configured hosts. The config
     // is read only when an unknown host comes up, and an unreadable one names
@@ -101,6 +104,42 @@ fn main() -> ExitCode {
         Cmd::Hook(_) => unreachable!("handled above"),
     };
     recorded(exit.into())
+}
+
+/// Leave ordinary invocations and control requests to usage-rs, but return
+/// parse failures as a JSON error when that output format was requested.
+fn json_parse_error() -> Option<ExitCode> {
+    if !std::env::args_os()
+        .skip(1)
+        .take_while(|arg| arg != "--")
+        .any(|arg| arg == "--json")
+    {
+        return None;
+    }
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let argv: Vec<&std::ffi::OsStr> = args.iter().map(AsRef::as_ref).collect();
+    if Jouet::spec_request(&argv[1..]).is_some() || Jouet::completion_request(&args[1..]).is_some()
+    {
+        return None;
+    }
+    let error = match Jouet::parse_from_argv(&argv) {
+        Ok(_)
+        | Err(
+            usage_rs::Error::Help { .. }
+            | usage_rs::Error::HelpAll { .. }
+            | usage_rs::Error::Version { .. },
+        ) => return None,
+        Err(error) => error,
+    };
+    let message = usage_rs::diagnostic::render(
+        Jouet::spec(),
+        &argv[1..],
+        &error,
+        usage_rs::diagnostic::Style::PLAIN,
+    );
+    let out = cmd::Output::new(true, None);
+    out.error_with_hint(jouet_output::exit::Exit::Usage, message.trim(), None);
+    Some(ExitCode::from(jouet_output::exit::Exit::Usage.code()))
 }
 
 /// Records the command's own exit code in the ledger (see
