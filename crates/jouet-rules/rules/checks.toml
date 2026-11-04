@@ -82,6 +82,16 @@ fires = [
   { command = "jouet test --cmd -- sh -c 'cargo build && cargo test -p $(cd .. && echo a)'", exit_code = 0, kind = "build" },
   { command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
   { command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
+  { command = "vitest run --exclude=tests/b.test.ts", exit_code = 0, kind = "test", scope = "partial --exclude=tests/b.test.ts" },
+  { command = "jouet test --cmd -- vitest run --exclude tests/b.test.ts", exit_code = 0, kind = "test", scope = "partial --exclude tests/b.test.ts" },
+  { command = "pnpm exec vitest run", exit_code = 1, kind = "test", scope = "partial @jouet:pnpm:dir=.:vitest" },
+  { command = "pnpm --dir web test", exit_code = 1, kind = "test", scope = "partial @jouet:pnpm:dir=web:test" },
+  { command = "cd service && pnpm --dir web test", exit_code = 1, kind = "test", scope = "partial @jouet:cwd=.:cd=service @jouet:pnpm:dir=web:test" },
+  { command = "cd 'service app' && pnpm --dir web test", exit_code = 1, kind = "test", scope = "partial @jouet:cwd=.:cd=service%20app @jouet:pnpm:dir=web:test" },
+  { command = "jouet test --cmd -- env TZ=UTC pnpm --dir web exec vitest run --exclude tests/b.test.ts", exit_code = 0, kind = "test", scope = "partial @jouet:pnpm:dir=web:vitest --exclude tests/b.test.ts" },
+  { command = "pnpm --dir=web exec vitest run tests/a.test.ts", exit_code = 1, kind = "test", scope = "partial @jouet:pnpm:dir=web:vitest tests/a.test.ts" },
+  { command = "pnpm -C web exec vitest run --config=integration.ts", exit_code = 0, kind = "test", scope = "partial @jouet:pnpm:dir=web:vitest --config=integration.ts" },
+  { command = "vitest run -c other.config.ts", exit_code = 0, kind = "test", scope = "partial -c other.config.ts" },
   { command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
   { command = "hk check", exit_code = 1, kind = "lint", scope = "partial changed files" },
   { command = "hk run check --all", exit_code = 0, kind = "lint", scope = "full" },
@@ -125,6 +135,9 @@ fires = [
   { command = "jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test", exit_code = 1, kind = "test", scope = "partial" },
 ]
 quiet = [
+  # The verifier cannot safely compare dynamic directories or multiword selectors.
+  { command = "pnpm --dir \"$PROJECT\" test", exit_code = 1 },
+  { command = "pnpm --dir web exec vitest run -t 'some name'", exit_code = 1 },
   { command = "cargo fmt", exit_code = 0 },
   { command = "hk fix", exit_code = 0 },
   { command = "hk run fix --all", exit_code = 0 },

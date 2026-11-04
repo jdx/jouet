@@ -1692,6 +1692,85 @@ mod tests {
     }
 
     #[test]
+    fn scoped_pnpm_exclusions_do_not_clear_other_checks() {
+        let mut state = Checks::default();
+        state.record(
+            [test("pnpm --dir web test", 1, "@jouet:pnpm:dir=web:test")],
+            Some("t1"),
+        );
+        for (command, scope) in [
+            (
+                "pnpm --dir web exec vitest run --exclude tests/b.test.ts",
+                "@jouet:pnpm:dir=web:vitest --exclude tests/b.test.ts",
+            ),
+            ("pnpm --dir admin test", "@jouet:pnpm:dir=admin:test"),
+        ] {
+            state.record([test(command, 0, scope)], Some("t1"));
+            assert!(
+                reason(&state, "t1")
+                    .unwrap()
+                    .contains("pnpm --dir web test")
+            );
+        }
+        state.record(
+            [test("pnpm --dir web test", 0, "@jouet:pnpm:dir=web:test")],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut vitest = Checks::default();
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run tests/b.test.ts",
+                1,
+                "@jouet:pnpm:dir=web:vitest tests/b.test.ts",
+            )],
+            Some("t1"),
+        );
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run --exclude tests/b.test.ts",
+                0,
+                "@jouet:pnpm:dir=web:vitest --exclude tests/b.test.ts",
+            )],
+            Some("t1"),
+        );
+        assert!(reason(&vitest, "t1").unwrap().contains("tests/b.test.ts"));
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run",
+                0,
+                "@jouet:pnpm:dir=web:vitest",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&vitest, "t1"), None);
+
+        let mut different_cwd = Checks::default();
+        different_cwd.record(
+            [test(
+                "pnpm --dir web test",
+                1,
+                "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:test",
+            )],
+            Some("t1"),
+        );
+        different_cwd.record(
+            [test(
+                "pnpm --dir web test",
+                0,
+                "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:test",
+            )],
+            Some("t1"),
+        );
+        assert!(
+            reason(&different_cwd, "t1")
+                .unwrap()
+                .contains("pnpm --dir web test")
+        );
+    }
+
+    #[test]
     fn an_affected_baseline_does_not_clear_a_different_tree() {
         let mut checks = Checks::default();
         checks.record(

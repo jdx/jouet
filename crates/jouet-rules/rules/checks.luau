@@ -47,6 +47,14 @@ local function partial(selector: string?): Scope
 	return { full = false, selector = if selector and selector ~= "" then selector else nil }
 end
 
+-- Keep a directory one verifier word even when it contains whitespace or
+-- punctuation. Percent itself is escaped, so different paths stay distinct.
+local function scope_path(path: string): string
+	return (string.gsub(path, "[^%w%._/%-]", function(c)
+		return string.format("%%%02x", string.byte(c) or 0)
+	end))
+end
+
 local function set(list: { string }): { [string]: boolean }
 	local out = {}
 	for _, item in list do
@@ -226,10 +234,10 @@ end
 local RUNNER_PICK = set({
 	"-k", "-m", "--lf", "--last-failed", "--deselect", "--sw", "--stepwise", "-t", "--testNamePattern",
 	"--onlyChanged", "-o", "--changed", "--related", "--findRelatedTests", "--shard", "--project",
-	"--tag", "-e", "--example", "--filter", "--tests", "--grep", "-g",
+	"--tag", "-e", "--example", "--filter", "--tests", "--grep", "-g", "--exclude", "-c", "--config",
 })
 local RUNNER_VALUE = set({
-	"-n", "-p", "-c", "--config", "--maxfail", "--rootdir", "--tb", "-W", "--durations", "--basetemp",
+	"-n", "-p", "--maxfail", "--rootdir", "--tb", "-W", "--durations", "--basetemp",
 	"--junitxml", "--reporter", "--maxWorkers", "-w", "--pool", "--format", "-f", "--require", "-r",
 })
 local function runner_scope(args: { string }, from: number): Scope
@@ -253,6 +261,48 @@ local function runner_scope(args: { string }, from: number): Scope
 		end
 	end
 	return if #picks == 0 then FULL else partial(table.concat(picks, " "))
+end
+
+-- A pnpm directory is a package selection, even when its test script or
+-- Vitest runs its entire own suite. Keep it separate from other projects and
+-- from other runners so its pass cannot clear a different project's failure.
+local function pnpm_scope(args: { string }): (Kind?, Scope)
+	local unknown = partial(nil)
+	local dir = "."
+	local at = 1
+	if args[1] == "--dir" or args[1] == "-C" then
+		dir = args[2] or ""
+		at = 3
+	elseif args[1] and string.match(args[1], "^%-%-dir=") then
+		dir = string.sub(args[1], 7)
+		at = 2
+	end
+	-- Dynamic or ambiguous paths cannot safely share a recorded selection.
+	if not string.match(dir, "^[%w%._/%-]+$") then
+		return nil, unknown
+	end
+	local prefix = `@jouet:pnpm:dir={dir}:`
+	if args[at] == "exec" and args[at + 1] == "vitest" then
+		-- Selection strings are compared as words by the verifier. Do not
+		-- conflate one quoted or dynamic argument with several other words.
+		for i = at + 2, #args do
+			if args[i] == "" or string.find(args[i], "[^%w%._/%-:=@]") then
+				return nil, unknown
+			end
+		end
+		local from = if args[at + 2] == "run" then at + 3 else at + 2
+		local scope = runner_scope(args, from)
+		return "test", partial(prefix .. "vitest" .. (if scope.selector then " " .. scope.selector else ""))
+	elseif at > 1 and (args[at] == "test" or args[at] == "t") then
+		for i = at + 1, #args do
+			if args[i] == "" or string.find(args[i], "[^%w%._/%-:=@]") then
+				return nil, unknown
+			end
+		end
+		local scope = task_scope(args, at)
+		return "test", partial(prefix .. "test" .. (if scope.selector then " " .. scope.selector else ""))
+	end
+	return nil, unknown
 end
 
 -- `python -m unittest`: with no test named, or `discover` with its default
@@ -566,6 +616,9 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	if playwright_at then
 		return playwright_scope(args, playwright_at, workspace)
 	end
+	if program == "pnpm" and (first == "exec" or first == "--dir" or first == "-C" or (first and string.match(first, "^%-%-dir="))) then
+		return pnpm_scope(args)
+	end
 	if program == "cargo" or program == "mbx" or program == "cross" then
 		if first == "fmt" then
 			if not jouet.contains(args, "--check") then
@@ -740,9 +793,24 @@ local rule: JouetRule = {
 					continue
 				end
 				local project_dir = if type(dir) == "string" then dir else nil
-				for _, ran in script_commands(command, project_dir) or { command } do
+				for _, ran in ipairs(script_commands(command, project_dir) or { command }) do
 					local kind, scope = classify(ran, project_dir)
 					if kind then
+						if scope.selector and string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" then
+							-- Identical --dir arguments can refer to different projects
+							-- when calls start in different directories.
+							if not call.cwd and call.harness ~= "test" then
+								continue
+							end
+							local cwd = call.cwd or "."
+							local cd = project_dir or "."
+							if cwd == "" or cd == "" or string.sub(cd, 1, 1) == "~" or string.find(cd, "[%$`*?%[%]]") then
+								continue
+							end
+							if call.cwd or project_dir then
+								scope = partial(`@jouet:cwd={scope_path(cwd)}:cd={scope_path(cd)} {scope.selector}`)
+							end
+						end
 						-- Ignored when the command's own exit status is unknown.
 						jouet.record(kind, ran, if scope.full then "full" else "partial", scope.selector, project_dir)
 					end
