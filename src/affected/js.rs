@@ -24,6 +24,18 @@ const CODE: &[&str] = &[
     "js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts", "vue", "svelte",
 ];
 
+/// Only conventional test filenames: files in test directories can be helpers.
+pub(crate) fn named_test(path: &str) -> bool {
+    let name = file_name(path).to_ascii_lowercase();
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    CODE.contains(&ext)
+        && [".test", ".spec", "_test", "_spec", "-test", "-spec"]
+            .iter()
+            .any(|suffix| stem.ends_with(suffix))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Runner {
     Vitest,
@@ -500,6 +512,20 @@ fn normalize(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conventional_test_names_do_not_include_test_helpers() {
+        for path in [
+            "src/widget.test.tsx",
+            "test/foo.spec.js",
+            "src/foo_test.mjs",
+        ] {
+            assert!(named_test(path), "{path}");
+        }
+        for path in ["test/helpers.ts", "src/test-utils.ts", "README.md"] {
+            assert!(!named_test(path), "{path}");
+        }
+    }
 
     #[test]
     fn reads_every_kind_of_import() {

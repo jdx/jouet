@@ -447,11 +447,57 @@ pub(crate) fn plan(
             Ok(suite)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    check_changed_js_tests(&suites, &changes)?;
     Ok(Plan {
         base,
         changes,
         suites,
     })
+}
+
+/// A runner's graph can omit a changed test when a different configuration
+/// owns it. Never present such a selection without naming the omission.
+fn check_changed_js_tests(suites: &[Suite], changes: &[Change]) -> Result<(), Error> {
+    let javascript: Vec<_> = suites
+        .iter()
+        .filter(|suite| matches!(suite.adapter.name(), "vitest" | "jest"))
+        .collect();
+    if javascript.is_empty()
+        || javascript
+            .iter()
+            .any(|suite| matches!(suite.decision, Decision::Full(_)))
+    {
+        return Ok(());
+    }
+    let missing: Vec<_> = changes
+        .iter()
+        .filter(|change| change.status != Status::Deleted && js::named_test(&change.path))
+        .filter(|change| {
+            javascript.iter().any(|suite| {
+                suite
+                    .files
+                    .iter()
+                    .any(|file| file.path == change.path && matches!(file.effect, Effect::Source))
+            })
+        })
+        .filter(|change| {
+            !javascript
+                .iter()
+                .any(|suite| suite.tests.iter().any(|test| test.path == change.path))
+        })
+        .map(|change| change.path.as_str())
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(Error::new(
+        Exit::Precondition,
+        format!(
+            "the selected Vitest/Jest configurations did not select changed test files:\n{}",
+            missing.join("\n")
+        ),
+    )
+    .hint("check the runner configuration, or run those tests directly with `jouet test --cmd`"))
 }
 
 /// `name`'s whole suite in `project`, for `jouet test` without a test task.
