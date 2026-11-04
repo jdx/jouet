@@ -266,15 +266,44 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
 /// not as vitest does).
 fn same_runner(a: &str, b: &str) -> bool {
     let runner = |command: &str| -> Vec<String> {
-        let words: Vec<&str> = command.split_whitespace().collect();
+        let words = runner_argv(command);
         match words.as_slice() {
-            ["cargo", sub, ..] => vec!["cargo".into(), (*sub).into()],
-            [program, ..] => vec![(*program).into()],
+            [cargo, sub, ..] if cargo == "cargo" => vec![cargo.clone(), sub.clone()],
+            [program, ..] => vec![program.clone()],
             [] => Vec::new(),
         }
     };
     let (a, b) = (runner(a), runner(b));
     !a.is_empty() && a == b
+}
+
+/// The words of the test runner a recorded command ran, through `jouet test
+/// --cmd --`, wrappers such as `mise x --` and `timeout 300`, and cargo's
+/// `+toolchain`: `jouet test --cmd -- mise x -- cargo +stable test -p a`
+/// ran `cargo test -p a`.
+fn runner_argv(command: &str) -> Vec<String> {
+    use jouet_rules::shell::{Command, parse};
+    let Some(first) = parse(command).commands.into_iter().next() else {
+        return Vec::new();
+    };
+    let mut argv = first.argv().to_vec();
+    if argv.first().map(String::as_str) == Some("jouet")
+        && argv.get(1).map(String::as_str) == Some("test")
+        && let Some(separator) = argv.iter().position(|word| word == "--")
+    {
+        argv = Command {
+            words: argv[separator + 1..].to_vec(),
+            ..Command::default()
+        }
+        .argv()
+        .to_vec();
+    }
+    if argv.first().map(String::as_str) == Some("cargo")
+        && argv.get(1).is_some_and(|word| word.starts_with('+'))
+    {
+        argv.remove(1);
+    }
+    argv
 }
 
 /// Whether `wanted` is `ran` with plain names after it: words that are
@@ -331,7 +360,10 @@ fn without_name_filter(ran: &str, wanted: &str) -> bool {
 /// them (`--bin jouet`, `-p mise`). Not with `--exact`, which matches whole
 /// names.
 fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
-    if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
+    let runner = runner_argv(command);
+    if !(runner.first().map(String::as_str) == Some("cargo")
+        && matches!(runner.get(1).map(String::as_str), Some("test" | "nextest")))
+    {
         return false;
     }
     // The picks the checks rule records that take no value.
@@ -2083,6 +2115,42 @@ mod tests {
         assert!(reason(&state, "t1").is_some());
         assert!(same_runner("cargo test -p a", "cargo test --workspace"));
         assert!(!same_runner("cargo test -p a", "cargo nextest run -p a"));
+        // Through `jouet test --cmd --` and its wrappers, the runner is the
+        // command it ran.
+        assert!(same_runner(
+            "jouet test --cmd -- mise x -- cargo +stable test -p a",
+            "cargo test -p a"
+        ));
+        assert!(!same_runner(
+            "jouet test --cmd -- cargo test -p a",
+            "jouet test --cmd -- pytest -p a"
+        ));
+    }
+
+    #[test]
+    fn a_wider_filter_through_jouet_test_covers_a_failed_check_of_the_fix() {
+        // A test passes, fails with the fix taken out, and the fix goes back:
+        // the pass at the files now covers the failure, through `jouet test`
+        // and a toolchain as directly.
+        let mut state = Checks::default();
+        state.record(
+            [test(
+                "jouet test --cmd -- cargo +stable test -p mbx --lib tests::",
+                0,
+                "-p mbx --lib tests::",
+            )],
+            Some("t1"),
+        );
+        state.record(
+            [test(
+                "jouet test --cmd -- cargo +stable test -p mbx --lib tests::a_program_run",
+                1,
+                "-p mbx --lib tests::a_program_run",
+            )],
+            Some("t2"),
+        );
+        assert!(reason(&state, "t2").is_some());
+        assert_eq!(reason(&state, "t1"), None);
     }
 
     #[test]
