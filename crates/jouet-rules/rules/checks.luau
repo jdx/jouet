@@ -234,22 +234,24 @@ end
 local RUNNER_PICK = set({
 	"-k", "-m", "--lf", "--last-failed", "--deselect", "--sw", "--stepwise", "-t", "--testNamePattern",
 	"--onlyChanged", "-o", "--changed", "--related", "--findRelatedTests", "--shard", "--project",
-	"--tag", "-e", "--example", "--filter", "--tests", "--grep", "-g", "--exclude", "-c", "--config",
+	"--tag", "-e", "--example", "--filter", "--tests", "--grep", "-g", "--exclude",
 })
 local RUNNER_VALUE = set({
-	"-n", "-p", "--maxfail", "--rootdir", "--tb", "-W", "--durations", "--basetemp",
+	"-n", "-p", "-c", "--config", "--maxfail", "--rootdir", "--tb", "-W", "--durations", "--basetemp",
 	"--junitxml", "--reporter", "--maxWorkers", "-w", "--pool", "--format", "-f", "--require", "-r",
 })
-local function runner_scope(args: { string }, from: number): Scope
+local VITEST_PICK = set({ "-c", "--config", "-r", "--root", "--typecheck.only" })
+local function runner_scope(args: { string }, from: number, vitest: boolean?): Scope
 	local picks: { string } = {}
 	local i = from
 	while i <= #args do
 		local arg = args[i]
 		i += 1
-		local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
-		if RUNNER_PICK[name] then
-			table.insert(picks, if name == arg then `{arg} {args[i] or ""}` else arg)
-			if name == arg and name ~= "--lf" and name ~= "--last-failed" and name ~= "--sw" and name ~= "--stepwise" and name ~= "--onlyChanged" and name ~= "--changed" then
+		local name = string.match(arg, "^(%-%-?[%w%.%-]+)=") or arg
+		if RUNNER_PICK[name] or (vitest and VITEST_PICK[name]) then
+			local boolean = name == "--lf" or name == "--last-failed" or name == "--sw" or name == "--stepwise" or name == "--onlyChanged" or name == "--changed" or name == "--typecheck.only"
+			table.insert(picks, if name == arg and not boolean then `{arg} {args[i] or ""}` else arg)
+			if name == arg and not boolean then
 				i += 1
 			end
 		elseif RUNNER_VALUE[name] then
@@ -257,6 +259,10 @@ local function runner_scope(args: { string }, from: number): Scope
 				i += 1
 			end
 		elseif string.sub(arg, 1, 1) ~= "-" then
+			table.insert(picks, arg)
+		elseif vitest then
+			-- An unknown Vitest option might narrow the run. Never turn it into
+			-- an unfiltered pass merely because this rule does not know it.
 			table.insert(picks, arg)
 		end
 	end
@@ -266,7 +272,7 @@ end
 -- A pnpm directory is a package selection, even when its test script or
 -- Vitest runs its entire own suite. Keep it separate from other projects and
 -- from other runners so its pass cannot clear a different project's failure.
-local function pnpm_scope(args: { string }): (Kind?, Scope)
+local function pnpm_scope(args: { string }, scoped_test: boolean?): (Kind?, Scope)
 	local unknown = partial(nil)
 	local dir = "."
 	local at = 1
@@ -291,15 +297,16 @@ local function pnpm_scope(args: { string }): (Kind?, Scope)
 			end
 		end
 		local from = if args[at + 2] == "run" then at + 3 else at + 2
-		local scope = runner_scope(args, from)
+		local scope = runner_scope(args, from, true)
 		return "test", partial(prefix .. "vitest" .. (if scope.selector then " " .. scope.selector else ""))
-	elseif at > 1 and (args[at] == "test" or args[at] == "t") then
-		for i = at + 1, #args do
+	elseif (at > 1 or scoped_test) and (args[at] == "test" or args[at] == "t" or ((args[at] == "run" or args[at] == "run-script") and (args[at + 1] == "test" or args[at + 1] == "t"))) then
+		local test_at = if args[at] == "run" or args[at] == "run-script" then at + 1 else at
+		for i = test_at + 1, #args do
 			if args[i] == "" or string.find(args[i], "[^%w%._/%-:=@]") then
 				return nil, unknown
 			end
 		end
-		local scope = task_scope(args, at)
+		local scope = task_scope(args, test_at)
 		return "test", partial(prefix .. "test" .. (if scope.selector then " " .. scope.selector else ""))
 	end
 	return nil, unknown
@@ -598,7 +605,7 @@ local function top_level(script: { JouetCommand }): { JouetCommand }
 	return top
 end
 
-local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
+local function classify(command: JouetCommand, dir: string | false | nil, cwd: string?, harness: string?): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
 	for _, arg in args do
@@ -616,8 +623,16 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	if playwright_at then
 		return playwright_scope(args, playwright_at, workspace)
 	end
-	if program == "pnpm" and (first == "exec" or first == "--dir" or first == "-C" or (first and string.match(first, "^%-%-dir="))) then
-		return pnpm_scope(args)
+	if program == "pnpm" then
+		local is_test = first == "test" or first == "t" or ((first == "run" or first == "run-script") and (args[2] == "test" or args[2] == "t"))
+		local scoped_test = dir ~= nil
+		if is_test and not scoped_test then
+			local repo = if cwd then jouet.repo() else nil
+			scoped_test = if cwd then not repo or cwd ~= repo.root else harness ~= "test"
+		end
+		if (scoped_test and is_test) or first == "exec" or first == "--dir" or first == "-C" or (first and string.match(first, "^%-%-dir=")) then
+			return pnpm_scope(args, scoped_test)
+		end
 	end
 	if program == "cargo" or program == "mbx" or program == "cross" then
 		if first == "fmt" then
@@ -662,7 +677,7 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 		return diag_scope(args)
 	elseif program == "pytest" or program == "vitest" or program == "jest" or program == "rspec" then
 		-- `vitest run` is vitest without watching.
-		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1)
+		return "test", runner_scope(args, if program == "vitest" and first == "run" then 2 else 1, program == "vitest")
 	elseif program == "jouet" then
 		local kind: Kind?, scope: Scope, given: { string }? = jouet_test(args)
 		if given and #given > 0 then
@@ -686,7 +701,7 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 					if command.status ~= nil and top[1].status == nil then
 						return nil, unknown
 					end
-					return classify(top[1], dir)
+					return classify(top[1], dir, cwd, harness)
 				end
 			end
 			local inner: JouetCommand = {
@@ -702,7 +717,7 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 				text = command.text,
 				line = command.line,
 			}
-			local inner_kind: Kind?, inner_scope: Scope = classify(inner, dir)
+			local inner_kind: Kind?, inner_scope: Scope = classify(inner, dir, cwd, harness)
 			return inner_kind, inner_scope
 		end
 		return kind, scope
@@ -740,7 +755,7 @@ end
 -- failed script says nothing of which command failed, and a command that
 -- is not a check may change the files after the checks ran. One command is
 -- classified as itself (see `classify`).
-local function script_commands(command: JouetCommand, dir: string?): { JouetCommand }?
+local function script_commands(command: JouetCommand, dir: string?, cwd: string?, harness: string?): { JouetCommand }?
 	if command.program ~= "jouet" or command.status ~= 0 then
 		return nil
 	end
@@ -774,7 +789,7 @@ local function script_commands(command: JouetCommand, dir: string?): { JouetComm
 		end
 		-- Each check must be known to have passed: not negated with `!`,
 		-- nor piped into another command without pipefail.
-		if not classify(inner, dir) or inner.status ~= 0 then
+		if not classify(inner, dir, cwd, harness) or inner.status ~= 0 then
 			return nil
 		end
 	end
@@ -793,8 +808,8 @@ local rule: JouetRule = {
 					continue
 				end
 				local project_dir = if type(dir) == "string" then dir else nil
-				for _, ran in ipairs(script_commands(command, project_dir) or { command }) do
-					local kind, scope = classify(ran, project_dir)
+				for _, ran in ipairs(script_commands(command, project_dir, call.cwd, call.harness) or { command }) do
+					local kind, scope = classify(ran, project_dir, call.cwd, call.harness)
 					if kind then
 						if scope.selector and string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" then
 							-- Identical --dir arguments can refer to different projects

@@ -140,10 +140,12 @@ stop_reason() {
 
 @test "an excluded pnpm Vitest run does not clear a failed package test" {
 	git init -q repo
+	mkdir -p repo/admin
 	echo 'export {}' >repo/index.ts
 	git -C repo add index.ts
 
 	ran 'pnpm --dir web test' 1
+	ran 'cd admin && pnpm test' 0
 	ran 'jouet test --cmd -- pnpm --dir web exec vitest run --exclude tests/b.test.ts' 0
 	run stop_reason
 	assert_output --partial 'pnpm --dir web test'

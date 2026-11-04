@@ -143,6 +143,10 @@ impl Run {
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
         }
+        if same_runner(&self.command, &failed.command) && pnpm_vitest_covers_exclusions(ran, wanted)
+        {
+            return true;
+        }
         if ran == wanted {
             return true;
         }
@@ -259,6 +263,46 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
         && (ran.names.is_empty()
             || (!wanted.names.is_empty()
                 && wanted.names.iter().all(|name| ran.names.contains(name))))
+}
+
+/// An unfiltered package run covers its own excluded suite, but not a
+/// different configuration, root, or unknown filter.
+fn pnpm_vitest_covers_exclusions(ran: &str, wanted: &str) -> bool {
+    let ran: Vec<_> = ran.split_whitespace().collect();
+    let wanted: Vec<_> = wanted.split_whitespace().collect();
+    let prefix_len = if ran
+        .first()
+        .is_some_and(|word| word.starts_with("@jouet:cwd="))
+    {
+        2
+    } else {
+        1
+    };
+    if ran.len() != prefix_len
+        || !ran[prefix_len - 1].starts_with("@jouet:pnpm:")
+        || !ran[prefix_len - 1].ends_with(":vitest")
+        || !wanted.starts_with(&ran)
+    {
+        return false;
+    }
+    let mut rest = &wanted[prefix_len..];
+    let mut excluded = false;
+    while let Some((flag, next)) = rest.split_first() {
+        if let Some(value) = flag.strip_prefix("--exclude=") {
+            if value.is_empty() {
+                return false;
+            }
+            excluded = true;
+            rest = next;
+        } else if *flag == "--exclude" && next.first().is_some_and(|value| !value.starts_with('-'))
+        {
+            excluded = true;
+            rest = &next[1..];
+        } else {
+            return false;
+        }
+    }
+    excluded
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -1768,6 +1812,51 @@ mod tests {
                 .unwrap()
                 .contains("pnpm --dir web test")
         );
+    }
+
+    #[test]
+    fn an_unfiltered_pnpm_vitest_run_clears_only_its_excluded_suite() {
+        let mut state = Checks::default();
+        let prefix = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:vitest";
+        state.record(
+            [test(
+                "pnpm --dir web exec vitest run --exclude=tests/b",
+                1,
+                &format!("{prefix} --exclude=tests/b"),
+            )],
+            Some("t1"),
+        );
+        state.record(
+            [test("pnpm --dir web exec vitest run", 0, prefix)],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        for filter in [
+            "--root=other",
+            "--config=other",
+            "--typecheck.only",
+            "--unknown",
+        ] {
+            let mut state = Checks::default();
+            state.record(
+                [test(
+                    "pnpm --dir web exec vitest run filtered",
+                    1,
+                    &format!("{prefix} {filter}"),
+                )],
+                Some("t1"),
+            );
+            state.record(
+                [test("pnpm --dir web exec vitest run", 0, prefix)],
+                Some("t1"),
+            );
+            assert!(reason(&state, "t1").is_some(), "must retain {filter}");
+        }
+        assert!(!pnpm_vitest_covers_exclusions(
+            "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:vitest",
+            "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:vitest --exclude tests/b"
+        ));
     }
 
     #[test]
