@@ -38,6 +38,9 @@ pub struct Command {
     pub stdout_to: Option<String>,
     /// It runs inside `$(...)`, whose output becomes part of a word.
     pub captured: bool,
+    /// It starts a pipeline negated with `!`, whose status is the opposite
+    /// of its last command's.
+    pub negated: bool,
 }
 
 /// A parsed script: its top-level commands, and the commands inside command
@@ -106,7 +109,24 @@ fn pipefail_before(commands: &[Command]) -> bool {
 ///   output is piped into another: `cargo test | tail` exits with tail's 0
 ///   whatever the tests did.
 /// - A script that ends in the background says nothing about anything.
+/// - A pipeline negated with `!` says nothing either way: `! cargo test &&
+///   cargo build` exits 0 when the tests fail.
 pub fn statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
+    let mut out = known_statuses(commands, exit_code);
+    let mut negated = false;
+    for (i, command) in commands.iter().enumerate() {
+        // A pipeline starts after any operator but a pipe.
+        if i == 0 || commands[i - 1].op != Some(Op::Pipe) {
+            negated = command.negated;
+        }
+        if negated {
+            out[i] = None;
+        }
+    }
+    out
+}
+
+fn known_statuses(commands: &[Command], exit_code: i32) -> Vec<Option<i32>> {
     let mut out = vec![None; commands.len()];
     let Some(last) = commands.last() else {
         return out;
@@ -352,6 +372,7 @@ impl Builder {
             .iter()
             .position(|w| !RESERVED.contains(&w.as_str()) && !is_assignment(w))
             .unwrap_or(command.words.len());
+        command.negated = command.words[..keep].iter().any(|w| w == "!");
         command.env = command
             .words
             .drain(..keep)
@@ -845,6 +866,16 @@ mod tests {
         assert_eq!(status_of("cargo test; echo done", 1), [None, Some(1)]);
         assert_eq!(status_of("cargo test &", 0), [None]);
         assert_eq!(status_of("false || cargo test", 101), [None, Some(101)]);
+    }
+
+    #[test]
+    fn a_negated_pipeline_says_nothing_of_its_commands() {
+        assert_eq!(
+            status_of("! cargo test --workspace && cargo build", 0),
+            [None, Some(0)]
+        );
+        assert_eq!(status_of("! cargo test | tail", 1), [None, None]);
+        assert_eq!(status_of("cargo build && ! cargo test", 1), [None, None]);
     }
 
     #[test]

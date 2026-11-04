@@ -536,6 +536,18 @@ local function playwright_scope(args: { string }, at: number, workspace: string?
 	return "test", partial(suite .. (if selection ~= "" then " " .. selection else ""))
 end
 
+-- A script's own commands, without those in `$(...)`, which run in a
+-- subshell and are part of a word.
+local function top_level(script: { JouetCommand }): { JouetCommand }
+	local top: { JouetCommand } = {}
+	for _, command in script do
+		if not command.nested then
+			table.insert(top, command)
+		end
+	end
+	return top
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -613,9 +625,15 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			-- ran go test, and its pass clears that test's failure.
 			local shell = if argv[1] then jouet.basename(argv[1]) else nil
 			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
-				local script = jouet.parse(argv[3], command.status)
-				if #script == 1 then
-					return classify(script[1], dir)
+				local top = top_level(jouet.parse(argv[3], command.status))
+				if #top == 1 then
+					-- Its own status is unknown when the script says nothing
+					-- of it: negated with `!`, or piped into another command
+					-- without pipefail.
+					if command.status ~= nil and top[1].status == nil then
+						return nil, unknown
+					end
+					return classify(top[1], dir)
 				end
 			end
 			local inner: JouetCommand = {
@@ -662,6 +680,54 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	return nil, unknown
 end
 
+-- The commands of the `sh -c` script `jouet test --cmd --` ran, when it has
+-- more than one, passed, stays in the work tree it started in, and runs
+-- only checks, each with its own status as if it ran directly: `sh -c
+-- 'cargo build && cargo test'` that passed ran both, and passed both. A
+-- failed script says nothing of which command failed, and a command that
+-- is not a check may change the files after the checks ran. One command is
+-- classified as itself (see `classify`).
+local function script_commands(command: JouetCommand, dir: string?): { JouetCommand }?
+	if command.program ~= "jouet" or command.status ~= 0 then
+		return nil
+	end
+	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
+	local _, _, given = jouet_test(args)
+	if not given or #given == 0 then
+		return nil
+	end
+	local argv = jouet.unwrap(given)
+	local shell = if argv[1] then jouet.basename(argv[1]) else nil
+	if not ((shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3) then
+		return nil
+	end
+	-- A wrapper that changes directory (`env -C`, `mise x -C`) ran the
+	-- script in a work tree the rule cannot name.
+	for i = 1, #given - #argv do
+		local word = given[i]
+		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+			return nil
+		end
+	end
+	-- A command in `$(...)` runs in a subshell: its `cd` moves nothing, and
+	-- it is not one of the script's checks.
+	local script = top_level(jouet.parse(argv[3], command.status))
+	if #script < 2 then
+		return nil
+	end
+	for _, inner in script do
+		if inner.program == "cd" or inner.program == "pushd" then
+			return nil
+		end
+		-- Each check must be known to have passed: not negated with `!`,
+		-- nor piped into another command without pipefail.
+		if not classify(inner, dir) or inner.status ~= 0 then
+			return nil
+		end
+	end
+	return script
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		local dirs = jouet.dirs(call.commands)
@@ -674,10 +740,12 @@ local rule: JouetRule = {
 					continue
 				end
 				local project_dir = if type(dir) == "string" then dir else nil
-				local kind, scope = classify(command, project_dir)
-				if kind then
-					-- Ignored when the command's own exit status is unknown.
-					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector, project_dir)
+				for _, ran in script_commands(command, project_dir) or { command } do
+					local kind, scope = classify(ran, project_dir)
+					if kind then
+						-- Ignored when the command's own exit status is unknown.
+						jouet.record(kind, ran, if scope.full then "full" else "partial", scope.selector, project_dir)
+					end
 				end
 			end
 		end

@@ -71,8 +71,15 @@ fires = [
   { command = "npm test", exit_code = 0, kind = "test", scope = "full" },
   { command = "go test ./...", exit_code = 0, kind = "test", scope = "full" },
   { command = "go test ./pkg -run TestWait", exit_code = 0, kind = "test", scope = "partial ./pkg -run TestWait" },
-  # One command in a `sh -c` script, its environment set there.
+  # One command in a `sh -c` script, its environment set there, passing or
+  # failing, with a `$(...)` in its words or not.
+  { command = "jouet test --cmd -- sh -c 'cargo test -p $(echo a)'", exit_code = 101, kind = "test" },
   { command = "jouet test --cmd -- mise exec -- sh -c 'PATH=/b E2E=1 go test -tags=e2e ./e2e'", exit_code = 0, kind = "test", scope = "partial ./e2e" },
+  # A script of several commands that passed ran each of its checks, as the
+  # same commands run directly do.
+  { command = "jouet test --cmd -- bash -c 'cargo test -p mise --lib -- miserc && mise run lint'", exit_code = 0, kind = "test", scope = "partial -p mise --lib miserc" },
+  # A `cd` in `$(...)` moves only its subshell.
+  { command = "jouet test --cmd -- sh -c 'cargo build && cargo test -p $(cd .. && echo a)'", exit_code = 0, kind = "build" },
   { command = "pytest -x -n 4", exit_code = 0, kind = "test", scope = "full" },
   { command = "pytest tests/test_a.py -k slow", exit_code = 0, kind = "test", scope = "partial tests/test_a.py -k slow" },
   { command = "hk check --all", exit_code = 0, kind = "lint", scope = "full" },
@@ -165,8 +172,21 @@ quiet = [
   # directly.
   { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0 },
   { command = "./run-tests.sh", exit_code = 0 },
-  # A `sh -c` script of more than one command is not one check.
+  # A script that failed says nothing of which of its commands did, and
+  # one that changes directory ran its checks in a work tree the rule
+  # cannot name.
+  { command = "jouet test --cmd -- sh -c 'cargo build && cargo test'", exit_code = 101 },
+  { command = "jouet test --cmd -- sh -c 'cd sub && cargo build && cargo test'", exit_code = 0 },
+  { command = "jouet test --cmd -- env -C ../other sh -c 'cargo build && cargo test'", exit_code = 0 },
+  { command = "jouet test --cmd -- env -C../other sh -c 'cargo build && cargo test'", exit_code = 0 },
+  # A command that is not a check may change the files after the checks
+  # ran.
   { command = "jouet test --cmd -- sh -c 'go test ./a && rm -rf out'", exit_code = 0 },
+  # `!` turns a failing test run into a script that exits 0.
+  { command = "jouet test --cmd -- sh -c '! cargo test --workspace'", exit_code = 0 },
+  { command = "jouet test --cmd -- sh -c 'cargo test --workspace | tail'", exit_code = 0 },
+  { command = "jouet test --cmd -- sh -c '! cargo test --workspace && cargo build'", exit_code = 0 },
+  { command = "jouet test --cmd -- sh -c \"cargo test --workspace && sed -i s/a/b/ src/lib.rs\"", exit_code = 0 },
   # `diag check` refused (no hk config) or misused: no lint ran.
   { command = "jouet diag check wordcount.py", exit_code = 4 },
   { command = "jouet --json diag check --changed", exit_code = 4 },
