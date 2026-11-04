@@ -391,7 +391,13 @@ fn check_nested_projects(project: &Project, changes: &[Change]) -> Result<(), Er
             if dir == project.dir || !dir.starts_with(&project.dir) {
                 break;
             }
-            let names = detect(dir);
+            // A nested graph runner can be a module covered by the root
+            // runner (for example Maven or Gradle). Its manifest alone does
+            // not prove that the root suite misses it.
+            let names: Vec<_> = detect(dir)
+                .into_iter()
+                .filter(|name| *name != "graph")
+                .collect();
             if !names.is_empty() {
                 let relative = dir.strip_prefix(&project.root).unwrap_or(dir);
                 projects.insert(relative.display().to_string(), names.join(", "));

@@ -125,6 +125,25 @@ fn nested_documentation_does_not_refuse_root_selection() {
     assert!(check_nested_projects(&project, &changes).is_ok());
 }
 
+#[test]
+fn root_graph_does_not_refuse_a_nested_maven_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(&root.join("pom.xml"), "<project/>\n");
+    write(&root.join("service/pom.xml"), "<project/>\n");
+    let project = Project {
+        root: root.into(),
+        dir: root.into(),
+        rel: String::new(),
+    };
+    let changes = vec![Change {
+        path: "service/src/Main.java".into(),
+        status: Status::Modified,
+    }];
+    assert!(detect(&root.join("service")).contains(&"graph"));
+    assert!(check_nested_projects(&project, &changes).is_ok());
+}
+
 fn tests_of(suite: &Suite) -> Vec<(&str, Vec<&str>)> {
     suite
         .tests
