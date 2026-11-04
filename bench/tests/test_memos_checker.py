@@ -50,8 +50,7 @@ names = ([
     'preserves the default positioning for other dropdown menus',
     'preserves the default positioning for other selects',
 ] if browser else [
-    'keeps the md scope popup and its Space selector fixed after positioning',
-    'keeps the header scope popup and its Space selector fixed after positioning',
+    'keeps the sidebar scope popup and its Space selector fixed after positioning',
     'keeps the /setting.preference.theme/ submenu fixed after positioning',
     'keeps the /common.language/ submenu fixed after positioning',
 ])
