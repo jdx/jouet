@@ -985,7 +985,13 @@ fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
         .map(|c| jouet::Run {
             command: c.command.as_deref().unwrap_or_default(),
             exit_code: exit_code(c),
-            output: c.output.as_deref().or(c.error.as_deref()),
+            // An exec cell can run several tools and transform their results;
+            // its envelope is not the output of any particular command.
+            output: if c.name.as_deref() == Some("exec") {
+                None
+            } else {
+                c.output.as_deref().or(c.error.as_deref())
+            },
         })
         .collect();
     jouet::scan(&runs)

@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn codex_exec_envelopes_are_not_reported_as_jouet_output() {
+    let mut call = Call::shell("jouet pr threads 42 --json");
+    call.name = Some("exec".into());
+    call.exit_code = Some(0);
+    call.output =
+        Some("Script completed\nWall time 1 second\nOutput:\n{\"repo\":\"example\"}".into());
+    let transcript = Transcript {
+        calls: vec![call],
+        ..Default::default()
+    };
+    assert!(jouet_findings(&transcript).is_empty());
+}
+
+#[test]
 fn cache_split_labels_incomplete_or_inconsistent_request_usage() {
     use crate::event::Request;
 
