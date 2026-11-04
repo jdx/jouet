@@ -109,7 +109,7 @@ jouet looks for adapters in the current directory, then each directory above it 
 - **Limits:** a test that reads a file at run time without importing it, such as a fixture loaded with `fs.readFileSync`, is not in the module graph. A deleted file runs the whole suite, because the graph cannot follow a file that is gone.
 - **Runner:** `node_modules/.bin/vitest` in the project or a directory above it. Yarn Plug'n'Play installs, which have no `node_modules`, are not supported yet.
 
-For a project with a non-default Vitest configuration, run from that package and pass it to the runner, for example `jouet test --affected -- --config vitest.acceptance.config.ts`. jouet uses the same configuration when listing and running the affected tests. A change to that configuration runs its whole suite. This limits the run to that configuration; other suites are not verified.
+For a project with a non-default Vitest configuration, run from that package and pass it to the runner, for example `jouet test --affected -- --config vitest.acceptance.config.ts`. jouet uses the same configuration when listing and running the affected tests. A change to that configuration runs its whole suite. This limits the run to that configuration; other suites are not verified. For Vitest and Jest affected selections, jouet refuses the plan if a changed, conventionally named test file is absent from every selected JavaScript runner. Check the runner configuration or run the missing tests directly with `jouet test --cmd`. This check does not cover nonconventional test names or whole-suite plans.
 
 ### jest
 

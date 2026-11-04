@@ -380,6 +380,78 @@ fn a_module_no_test_imports_runs_nothing() {
 }
 
 #[test]
+fn a_changed_js_test_omitted_by_the_runner_is_not_silently_skipped() {
+    let dir = repo("vitest", "");
+    let root = dir.path();
+    write(
+        &root.join("test/new.browser.test.js"),
+        "test('new', () => {})\n",
+    );
+    let runner = root.join("node_modules/.bin/vitest");
+    let listing = |path: &str| {
+        write(
+            &runner,
+            &format!(
+                r##"#!/bin/sh
+for arg in "$@"; do case "$arg" in --json=*) printf '["%s/{path}"]' "$PWD" > "${{arg#--json=}}";; esac; done
+"##
+            ),
+        );
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    listing("test/fmt.test.js");
+    let error = plan_in(root).err().unwrap();
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(error.message.contains("test/new.browser.test.js"));
+    listing("test/new.browser.test.js");
+    let plan = plan_in(root).unwrap();
+    assert!(
+        plan.suites[0]
+            .tests
+            .iter()
+            .any(|test| test.path == "test/new.browser.test.js")
+    );
+}
+
+#[test]
+fn a_changed_js_test_selected_by_another_runner_is_not_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = Project {
+        root: dir.path().into(),
+        dir: dir.path().into(),
+        rel: String::new(),
+    };
+    let change = Change {
+        path: "src/new.test.ts".into(),
+        status: Status::Modified,
+    };
+    let suite = |adapter: Box<dyn Adapter>, tests: Vec<Test>| Suite {
+        adapter,
+        project: project.clone(),
+        files: vec![FileEffect {
+            path: change.path.clone(),
+            status: change.status,
+            effect: Effect::Source,
+        }],
+        decision: Decision::Affected,
+        tests,
+        command: None,
+        note: None,
+    };
+    let suites = vec![
+        suite(Box::new(js::Js::vitest(&project)), Vec::new()),
+        suite(
+            Box::new(js::Js::jest(&project)),
+            vec![Test {
+                path: change.path.clone(),
+                via: Vec::new(),
+            }],
+        ),
+    ];
+    assert!(check_changed_js_tests(&suites, &[change]).is_ok());
+}
+
+#[test]
 fn docs_only_runs_nothing_and_no_change_runs_nothing() {
     let dir = repo("pytest", "");
     let root = dir.path();
