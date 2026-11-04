@@ -146,6 +146,10 @@ def check(task_dir: Path) -> None:
         partial = "".join(out.decode(errors="replace") if isinstance(out, bytes) else out
                           for out in (error.stdout, error.stderr) if out)
         save_log(spec, partial)
+        parser = PARSERS.get(spec["log_format"])
+        if parser is not None:
+            failed = [name for name, status in parser(partial).items() if status == FAIL]
+            expect(not failed, "tests failed before the timeout: " + ", ".join(failed))
         UNVERIFIED.append(f"the tests timed out: {' '.join(command)}\n{partial[-3000:]}")
         finish()
         return
@@ -163,7 +167,7 @@ def check(task_dir: Path) -> None:
         print(f"{sum(s == PASS for s in statuses.values())} of {len(statuses)} named results passed "
               "(a test can have multiple names)")
         expect(not problems, "the instance's tests fail:\n" + "\n".join(problems) + f"\n{log[-2500:]}")
-    else:
+    elif spec["log_format"] != "exit":
         UNVERIFIED.append(f"no parser for test log format {spec['log_format']!r}")
     # Not a condition of the check: the prompt asks for a commit.
     print(f"committed: {new_commit()}")

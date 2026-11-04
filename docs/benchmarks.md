@@ -114,6 +114,8 @@ The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://g
 - the prompt is `problem_statement` and the line the other real-project tasks end with;
 - `hidden/` holds the test files as `test_patch` leaves them, and `fix.patch` is `patch`;
 - `check.py` puts `hidden/` in place and runs the instance's test modules with the repository's runner. It passes only when the command exits zero and every required `FAIL_TO_PASS` and `PASS_TO_PASS` test passes. A skipped, expected-failing or unnamed required test, or a timeout, makes the outcome unverified; an observed failure still fails the check. Unverified runs are excluded from accuracy and performance comparisons. The logs are read from Django's runner, sympy's `bin/test` and pytest's `-rA` summary. Django tests with docstrings are recorded under both their test ID and description, so the reported number of named results is not a test count. `swebench.json` holds the instance's tests and the command;
+
+  A custom `--test-cmd` is an exit-code-only checker: its author is responsible for ensuring it checks the required coverage. Its zero exit is treated as a pass, but a timeout remains unverified.
 - `solve.py` applies `fix.patch` and commits it.
 
 ```sh

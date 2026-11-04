@@ -384,6 +384,35 @@ class ImportTest(unittest.TestCase):
         self.assertIn("started", proc.stdout)
         self.assertIn("started", (self.tmp / "acme__calc-7.test.log").read_text())
 
+    def test_a_failure_observed_before_timeout_is_a_failure(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["test_command"] = ["{python}", "-c", "import time; print('test_add (test_calc.CalcTest) ... FAIL', flush=True); time.sleep(30)"]
+        meta["test_timeout_s"] = 2
+        meta_path.write_text(json.dumps(meta))
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("test_add (test_calc.CalcTest)", proc.stdout)
+
+    def test_custom_exit_only_checker_and_unknown_format(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["test_command"] = ["{python}", "-c", "pass"]
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        for log_format, expected in (("exit", 0), ("unknown", 3)):
+            with self.subTest(log_format=log_format):
+                meta["log_format"] = log_format
+                meta_path.write_text(json.dumps(meta))
+                proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                      env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                      capture_output=True, text=True)
+                self.assertEqual(proc.returncode, expected, proc.stdout + proc.stderr)
+
 
 class ToolTest(unittest.TestCase):
     def test_a_path_replaces_a_default_tool(self):
