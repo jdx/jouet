@@ -183,6 +183,9 @@ class LogTest(unittest.TestCase):
         log = "\n".join([
             "tests/a.py::test_early FAILED [ 10%]",
             "tests/a.py::test_skip SKIPPED [ 20%]",
+            "retry FAILED",
+            "============================= PASSES =============================",
+            "fake.py::test_output FAILED",
             "PASSED tests/a.py::test_x[1]",
             "FAILED tests/a.py::test_y - AssertionError: no",
             "SKIPPED [1] tests/a.py:9: needs docutils",

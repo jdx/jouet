@@ -89,7 +89,9 @@ def parse_sympy(log: str) -> dict[str, str]:
 def parse_pytest(log: str) -> dict[str, str]:
     """Read verbose progress and the `-rA` summary, including partial runs."""
     statuses = {}
-    for m in re.finditer(r"^(\S+) (PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)(?:\s|$)", log, re.M):
+    progress = re.split(r"^={3,}\s*(?:FAILURES|ERRORS|PASSES|warnings summary|short test summary info)\s*={3,}\s*$",
+                        log, maxsplit=1, flags=re.M)[0]
+    for m in re.finditer(r"^(\S+\.py::\S+) (PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)(?:\s|$)", progress, re.M):
         status = {"PASSED": PASS, "XFAIL": XFAIL, "SKIPPED": SKIP}.get(m.group(2), FAIL)
         record(statuses, m.group(1), status)
     for m in re.finditer(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED) (\S+)", log, re.M):
