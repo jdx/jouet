@@ -287,8 +287,10 @@ fn runner_argv(command: &str) -> Vec<String> {
         return Vec::new();
     };
     let mut argv = first.argv().to_vec();
-    if argv.first().map(String::as_str) == Some("jouet")
-        && argv.get(1).map(String::as_str) == Some("test")
+    // `jouet --json test --cmd -- …` and a path to jouet are the same call.
+    if first.program() == Some("jouet")
+        && argv.iter().any(|word| word == "test")
+        && argv.iter().any(|word| word == "--cmd")
         && let Some(separator) = argv.iter().position(|word| word == "--")
     {
         argv = Command {
@@ -2124,6 +2126,10 @@ mod tests {
         assert!(!same_runner(
             "jouet test --cmd -- cargo test -p a",
             "jouet test --cmd -- pytest -p a"
+        ));
+        assert!(same_runner(
+            "/home/u/.local/bin/jouet --json test --cmd -- cargo test -p a",
+            "cargo test -p a"
         ));
     }
 
