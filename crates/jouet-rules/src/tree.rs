@@ -220,9 +220,10 @@ pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<S
 /// When HEAD in the repository containing `dir` is a merge commit that
 /// changed nothing beyond what the merged branch brought, the trees of its
 /// first parent and of HEAD, hashed as [`commit_tree`] hashes them. Every
-/// file HEAD changes from its first parent must be one the first parent left
-/// as the merge base had it, with the merged branch's content: no conflict
-/// resolved, no file merged from two sides, no edit amended in. None for any
+/// file the merged branch changed must be one the first parent left as the
+/// merge base had it, and HEAD must differ from the first parent by exactly
+/// those files' new content: no conflict resolved (kept as ours or not), no
+/// file merged from two sides, no edit amended in, nothing of theirs dropped. None for any
 /// other HEAD, a merge of more than two branches included. Only reads, as
 /// `git merge-tree --write-tree` would not.
 pub fn clean_merge(
@@ -265,9 +266,10 @@ pub fn clean_merge(
     let merged = changes(ours, head)?;
     let mine = changes(base, ours)?;
     let brought = changes(base, theirs)?;
-    let clean = merged
-        .iter()
-        .all(|(path, now)| !mine.contains_key(path) && brought.get(path) == Some(now));
+    // With no file changed on both sides, HEAD differs from the first
+    // parent by exactly what the other branch brought; a conflict kept as
+    // ours is a file both changed, though HEAD does not differ there.
+    let clean = !brought.keys().any(|path| mine.contains_key(path)) && merged == brought;
     if !clean {
         return Ok(None);
     }
@@ -569,5 +571,19 @@ mod tests {
         write("a.rs", "resolved");
         run(dir, &["commit", "-qam", "resolved"]);
         assert_eq!(clean_merge(Some(dir), T), Ok(None), "resolved");
+
+        // A conflict kept as ours leaves HEAD as ours there, but it is still
+        // a file both sides changed.
+        run(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["merge", "-q", "--no-edit", "main"])
+            .output();
+        run(dir, &["checkout", "-q", "--ours", "a.rs"]);
+        run(dir, &["add", "a.rs"]);
+        run(dir, &["commit", "-qm", "kept ours"]);
+        assert_eq!(clean_merge(Some(dir), T), Ok(None), "kept ours");
     }
 }

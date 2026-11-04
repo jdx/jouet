@@ -190,22 +190,23 @@ stop_reason() {
 	git init -q -b work repo
 	echo 'fn main() {}' >repo/main.rs
 	echo 'fn lib() {}' >repo/lib.rs
-	git -C repo add main.rs lib.rs
-	git -C repo commit -qm base
-	git -C repo checkout -qb main
+	g() { git -C repo -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+	g add main.rs lib.rs
+	g commit -qm base
+	g checkout -qb main
 	echo 'fn lib() { 1 }' >repo/lib.rs
-	git -C repo commit -qam theirs
-	git -C repo checkout -q work
+	g commit -qam theirs
+	g checkout -q work
 	echo 'fn main() { 1 }' >repo/main.rs
-	git -C repo commit -qam mine
+	g commit -qam mine
 
 	ran 'cargo test --workspace' 0
-	git -C repo merge -q --no-edit main
+	g merge -q --no-edit main
 	run stop_reason
 	assert_output ""
 	# An edit amended into the merge is still a change.
 	echo 'fn lib() { 2 }' >repo/lib.rs
-	git -C repo commit -qa --amend --no-edit
+	g commit -qa --amend --no-edit
 	run stop_reason
 	assert_output --partial 'Files changed after the last test run passed ('
 }
