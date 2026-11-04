@@ -699,18 +699,18 @@ impl Parser {
         let start = self.pos - 1;
         // Parentheses of an extglob (`@(a|b)`) nest inside the array's.
         let mut depth = 0;
+        // Whether the next character starts an element: only there does `#`
+        // start a comment, not in `@(#x)` or after an escaped space.
+        let mut word_start = true;
         while let Some(c) = self.peek() {
             self.pos += 1;
+            let at_start = std::mem::replace(&mut word_start, matches!(c, ' ' | '\t' | '\n'));
             match c {
                 ')' if depth == 0 => break,
                 ')' => depth -= 1,
                 '(' => depth += 1,
                 // A comment runs to the end of its line, `)` and all.
-                '#' if matches!(
-                    self.chars.get(self.pos.wrapping_sub(2)),
-                    Some(' ' | '\t' | '\n' | '(')
-                ) =>
-                {
+                '#' if at_start => {
                     while self.peek().is_some_and(|c| c != '\n') {
                         self.pos += 1;
                     }
@@ -952,6 +952,9 @@ mod tests {
         let script = parse("X=(<(git ls-files) @(a|b) # c)\n d) && make");
         assert_eq!(script.commands[0].words, ["make"]);
         assert_eq!(script.nested[0].words, ["git", "ls-files"]);
+        // A `#` inside an element, an extglob or after an escaped space is
+        // a character, not a comment.
+        assert_eq!(words(r"X=(a#b @(#c) d\ #e) && make"), [["make"]]);
         // An empty array, and a subshell after a command, are as before.
         assert_eq!(
             words("X=() && (cd a && make)"),
