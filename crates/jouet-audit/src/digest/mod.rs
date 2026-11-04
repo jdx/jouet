@@ -288,6 +288,9 @@ pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Opti
         .requests
         .iter()
         .filter_map(|request| {
+            if !request.input_tokens_complete {
+                return None;
+            }
             let input = request.input_tokens?;
             let read = request.cached_input_tokens?;
             Some((read, input.checked_sub(read)?))

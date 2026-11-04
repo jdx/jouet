@@ -275,6 +275,9 @@ impl State {
             if input > 0 && request.input_tokens.is_none() {
                 request.input_tokens = Some(input);
                 request.cached_input_tokens = usage.cache_read_input_tokens.u64();
+                request.input_tokens_complete = usage.input_tokens.u64().is_some()
+                    && usage.cache_creation_input_tokens.u64().is_some()
+                    && usage.cache_read_input_tokens.u64().is_some();
             }
             if let Some(output) = usage.output_tokens.u64() {
                 request.output_tokens = Some(request.output_tokens.unwrap_or(0).max(output));
@@ -626,6 +629,22 @@ mod tests {
         assert_eq!(t.bad_lines, 1);
         assert_eq!(t.requests.len(), 2);
         assert_eq!(t.requests[0].input_tokens, Some(1003));
+        assert!(t.requests[0].input_tokens_complete);
+        // The second request lacks cache creation usage; its total is partial.
+        assert!(!t.requests[1].input_tokens_complete);
+        let digest = crate::digest::digest(
+            "claude",
+            &t,
+            "fixture.jsonl",
+            &crate::digest::Options {
+                home: None,
+                redact: &crate::redact,
+            },
+        );
+        assert_eq!(digest.totals.cache_read_input_tokens, Some(900));
+        assert_eq!(digest.totals.other_input_tokens, Some(103));
+        assert_eq!(digest.totals.cache_split_requests, Some(1));
+        assert!(crate::digest::render(&digest, 4000).contains("across 1/2 requests"));
         assert_eq!(t.requests[0].output_tokens, Some(45));
         assert_eq!(t.requests[0].calls, 0..1);
         assert_eq!(t.requests[1].calls, 1..3);
