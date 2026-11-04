@@ -474,6 +474,8 @@ def execute(
             arms_mod.reviewed_codex(harness, env, workdir, opts)
         if arm.init:
             init_mod.trust(env, workdir)
+            if init_mod.has_mise(workdir):
+                init_mod.mise_env(env, workdir, created=bool(init and init["meta"].get("mise_created")))
         if arm.jouet:
             # After setup, so that turning priming off here measures a
             # session without the primer rather than one with the skill.

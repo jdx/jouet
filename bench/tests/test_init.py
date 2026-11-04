@@ -14,6 +14,26 @@ def git(cwd, *args):
 
 
 class InitTest(unittest.TestCase):
+    def test_a_mise_config_init_wrote_is_trusted_and_its_tools_shared(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = Path(d)
+            self.assertFalse(init.has_mise(work))
+            (work / "mise.toml").write_text("[tasks.test]\nrun = 'true'\n")
+            self.assertTrue(init.has_mise(work))
+            env = {"MISE_TRUSTED_CONFIG_PATHS": "/other"}
+            init.mise_env(env, work, created=True)
+            init.mise_env(env, work, created=True)
+            self.assertEqual(env["MISE_TRUSTED_CONFIG_PATHS"], os.pathsep.join(["/other", str(work)]))
+            self.assertEqual(env["MISE_DATA_DIR"], str(init.MISE_DATA))
+            # A task's own data directory stays, and a project that already
+            # had mise keeps installing into its run as before.
+            env = {"MISE_DATA_DIR": "/task"}
+            init.mise_env(env, work, created=True)
+            self.assertEqual(env["MISE_DATA_DIR"], "/task")
+            env = {}
+            init.mise_env(env, work, created=False)
+            self.assertNotIn("MISE_DATA_DIR", env)
+
     def apply(self, work, patch):
         head = init.git(work, "rev-parse", "HEAD").strip()
         shas = {"base_sha": head, "head_sha": head}

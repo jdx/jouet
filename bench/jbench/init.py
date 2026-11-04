@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 from dataclasses import asdict
@@ -132,6 +133,10 @@ def prepared(
         arms_mod.verify_codex_path(run_dir / "bin", env, True)
     arms_mod.setup_jouet(harness, env, workdir)
     arms_mod.reviewed_codex(harness, env, workdir, opts)
+    # The skill sets the project up in mise, and checks what it wrote by
+    # running it: as in the person's own repository, mise may run it.
+    had_mise = has_mise(workdir)
+    mise_env(env, workdir, created=not had_mise)
     arms_mod.login_shell_path(env)
     config_dir = Path(env[harness.config_dir_env])
     try:
@@ -180,6 +185,7 @@ def prepared(
         "wall_s": agent["wall_s"],
         "usage": asdict(usage),
         "files": files,
+        "mise_created": not had_mise and has_mise(workdir),
     }
     meta_path.write_text(json.dumps(meta, indent=2))
     return {"patch": patch, "meta": meta, "cached": False}
@@ -221,6 +227,30 @@ def apply(workdir: Path, patch: Path, task: tasks_mod.Task, shas: dict[str, str]
         git(workdir, "update-ref", "refs/remotes/origin/main", configured_base)
         if task.remote and task.branch and task.branch != "main":
             git(workdir, "update-ref", f"refs/remotes/origin/{task.branch}", shas["head_sha"])
+
+
+# Where mise looks for a project's shared config, as jouet-init may write it.
+MISE_CONFIGS = ("mise.toml", ".mise.toml", "mise/config.toml", ".mise/config.toml",
+                ".config/mise.toml", ".config/mise/config.toml")
+
+# Tools a mise.toml that jouet-init created pins, installed once and shared
+# by every run, as on a developer's machine, rather than in each run's home.
+MISE_DATA = Path.home() / ".cache" / "jouet-bench" / "mise-data"
+
+
+def has_mise(workdir: Path) -> bool:
+    return any((workdir / name).is_file() for name in MISE_CONFIGS)
+
+
+def mise_env(env: dict[str, str], workdir: Path, created: bool) -> None:
+    """Lets mise run the work tree's config, as a person who reviewed it
+    trusts it, and, when jouet-init created that config, keeps the tools it
+    pins in the shared data directory unless the task names its own."""
+    trusted = [p for p in env.get("MISE_TRUSTED_CONFIG_PATHS", "").split(os.pathsep) if p]
+    if str(workdir) not in trusted:
+        env["MISE_TRUSTED_CONFIG_PATHS"] = os.pathsep.join([*trusted, str(workdir)])
+    if created:
+        env.setdefault("MISE_DATA_DIR", str(MISE_DATA))
 
 
 def trust(env: dict[str, str], workdir: Path) -> None:
