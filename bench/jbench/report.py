@@ -58,7 +58,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
     for (task, harness), by_arm in sorted(group(records).items()):
         cell: dict[str, Any] = {"task": task, "harness": harness, "arms": {}, "paired": {}}
         for arm, runs in sorted(by_arm.items()):
-            finished = [r for r in runs if not r.get("error")]
+            finished = [r for r in runs if not r.get("error") and isinstance(r.get("success"), bool)]
             decisions: dict[str, int] = defaultdict(int)
             unanswered: set[str] = set()
             for r in finished:
@@ -67,6 +67,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 unanswered.update((r.get("github") or {}).get("unanswered_examples") or [])
             cell["arms"][arm] = {
                 "runs": len(finished),
+                "unverified": [{"round": r.get("round"), "reason": (r.get("check") or {}).get("reason", "coverage unavailable")}
+                               for r in runs if not r.get("error") and r.get("success") is None],
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in finished if r.get("stopped")],
                 "successes": sum(1 for r in finished if r.get("success")),
@@ -118,8 +120,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             passed_rounds = [n for n in rounds if paired_runs["plain"][n]["success"] and paired_runs["jouet"][n]["success"]]
             cell["paired_when_both_pass"] = {}
             for key, _, get, _ in METRICS:
-                plain = {r["round"]: get(r) for r in by_arm["plain"] if not r.get("error")}
-                jouet = {r["round"]: get(r) for r in by_arm[treat] if not r.get("error")}
+                plain = {n: get(r) for n, r in paired_runs["plain"].items()}
+                jouet = {n: get(r) for n, r in paired_runs["jouet"].items()}
                 cell["paired"][key] = stats.paired(plain, jouet)
                 cell["paired_when_both_pass"][key] = stats.paired(
                     {n: get(paired_runs["plain"][n]) for n in passed_rounds},
@@ -198,6 +200,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "Success means the agent exited normally and the task checker passed. Checkers vary:",
         "some verify behavior without requiring every requested deliverable, such as a commit.",
         "Inspect the task's checker and run evidence before treating success as complete accuracy.",
+        "Unverified runs are excluded from success rates and performance metrics. "
         "Deltas compare only pairs where both arms passed the task checker.",
         "",
         "| task | harness | success plain | success jouet | both passed | input tokens Δ | output tokens Δ | requests Δ | tool calls Δ | wall Δ |",
@@ -287,6 +290,8 @@ def markdown(summary: dict[str, Any]) -> str:
                              f"{signed(delta['median_diff'] if delta else None, kind)} |")
         notes = []
         for arm, a in sorted(cell["arms"].items()):
+            for item in a.get("unverified", []):
+                notes.append(f"- **{arm} unverified (round {item['round']}):** {item['reason']}; see the run's check.log.")
             for change in a.get("changes", []):
                 paths = change["paths"]
                 if paths is None:

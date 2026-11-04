@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 PROBLEMS: list[str] = []
+UNVERIFIED: list[str] = []
+UNVERIFIED_MARKER = "JOUET_BENCH_UNVERIFIED_V1"
 
 
 def git(*args: str) -> str:
@@ -32,6 +34,11 @@ def finish() -> None:
         print(f"- {p}")
     if PROBLEMS:
         sys.exit(1)
+    if UNVERIFIED:
+        for reason in UNVERIFIED:
+            print(f"- unverified: {reason}")
+        print(UNVERIFIED_MARKER)
+        sys.exit(3)
     print("ok")
 
 

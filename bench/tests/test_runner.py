@@ -1206,6 +1206,24 @@ class TasksTest(unittest.TestCase):
             check = tasks.run_check(task, Path(d), {"PATH": "/usr/bin:/bin", "HOME": f"{d}/home"}, {"BENCH_X": "1"})
             self.assertEqual(check["output"], f"{d}/home 1 None")
 
+    def test_unverified_check_requires_marker_and_preserves_stderr(self):
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as d:
+            task_dir = Path(d) / "task"
+            task_dir.mkdir()
+            task = dataclasses.replace(tasks.load("smoke"), dir=task_dir)
+            script = task_dir / "check.py"
+            base = {"PATH": "/usr/bin:/bin", "HOME": d}
+            script.write_text("import sys\nprint('missing test')\nprint('JOUET_BENCH_UNVERIFIED_V1')\n"
+                              "print('warning', file=sys.stderr)\nsys.exit(3)\n")
+            result = tasks.run_check(task, Path(d), base, {})
+            self.assertIsNone(result["passed"])
+            self.assertIn("missing test", result["output"])
+            self.assertIn("warning", result["output"])
+            script.write_text("import sys\nsys.exit(3)\n")
+            self.assertIs(tasks.run_check(task, Path(d), base, {})["passed"], False)
+
     def test_an_upstream_task_tracks_a_local_origin_at_the_base(self):
         import dataclasses
 
@@ -1588,6 +1606,20 @@ class ReportTest(unittest.TestCase):
         text = report.markdown({"meta": {}, "cells": [cell]})
         self.assertIn("| t | codex | 3/5 | 1/3 | 0 | – | – | – | – | – |", text)
         self.assertIn("Both-pass pairs (0): median jouet minus plain: no comparable metrics.", text)
+
+    def test_unverified_runs_are_excluded_from_all_comparisons(self):
+        def record(arm, round_number, success, tokens):
+            return {"task": "t", "harness": "codex", "arm": arm, "round": round_number,
+                    "success": success, "usage": {"input_tokens": tokens, "cached_input_tokens": 0}}
+
+        records = [record("plain", 1, True, 100), record("jouet", 1, True, 90),
+                   record("plain", 2, True, 200), record("jouet", 2, None, 10000)]
+        cell = report.summarize(records, {})["cells"][0]
+        self.assertEqual(cell["arms"]["jouet"]["runs"], 1)
+        self.assertEqual(len(cell["arms"]["jouet"]["unverified"]), 1)
+        self.assertEqual(cell["arms"]["jouet"]["metrics"]["input_tokens"]["median"], 90)
+        self.assertEqual(cell["paired"]["input_tokens"]["pairs"], 1)
+        self.assertIn("jouet unverified (round 2)", report.markdown({"meta": {}, "cells": [cell]}))
 
 
 if __name__ == "__main__":

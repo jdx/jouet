@@ -586,6 +586,11 @@ def run_check(task: Task, workdir: Path, base: dict[str, str], env: dict[str, st
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
-        return {"passed": False, "exit_code": None, "output": "check timed out"}
+        return {"passed": None, "exit_code": None, "output": "check timed out", "reason": "check timed out"}
     output = (proc.stdout + proc.stderr).strip()
-    return {"passed": proc.returncode == 0, "exit_code": proc.returncode, "output": output[-4000:]}
+    marker = "JOUET_BENCH_UNVERIFIED_V1"
+    stdout = proc.stdout.rstrip()
+    if proc.returncode == 3 and stdout.splitlines()[-1:] == [marker]:
+        output = (stdout[: -len(marker)].rstrip() + "\n" + proc.stderr).strip()
+        return {"passed": None, "exit_code": 3, "output": output, "reason": "required checks were not verified"}
+    return {"passed": proc.returncode == 0, "exit_code": proc.returncode, "output": output}

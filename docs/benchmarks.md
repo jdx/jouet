@@ -24,6 +24,10 @@ A task is a small fixture repository, a prompt and a success check, chosen from 
 
 Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), `repo/` (committed on `main`), an optional `pr/` (committed on the PR branch), an optional `github.json` (the fake GitHub's fixture), `check.py` (exit 0 means success) and `solve.py` (a reference solution). Commits use a fixed author and date, so a task's SHAs are the same everywhere.
 
+A checker can report incomplete evidence through `_check.UNVERIFIED` and `_check.finish()`. If no assertion failed, the helper prints the reasons and a `JOUET_BENCH_UNVERIFIED_V1` marker, then exits 3. Exit 3 without that marker remains a failure. A checker timeout is also unverified. `check-tasks` reports unverified results and does not claim the reference solution was validated; run details remain in `check.log`.
+
+Older SWE-bench results may have counted skipped or unnamed regression tests as passing. Re-run those tasks with this checker before relying on their accuracy or performance comparisons; rewriting an old report cannot recover missing coverage evidence.
+
 ### Tasks from real projects
 
 Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and a pinned commit before the fix (`[source]`) instead of a `repo/`. Prompts describe the original issue and ask for a fix, a test and a commit. The checker runs a hidden regression test and `solve.py` applies a reference fix. They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
@@ -109,7 +113,7 @@ The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://g
 - `[source]` is a clone under `~/src/swebench/<owner>__<repo>` at `base_commit`, cloned once if missing;
 - the prompt is `problem_statement` and the line the other real-project tasks end with;
 - `hidden/` holds the test files as `test_patch` leaves them, and `fix.patch` is `patch`;
-- `check.py` puts `hidden/` in place, runs the instance's test modules with the repository's runner, and passes when the test command exits zero, every `FAIL_TO_PASS` test passes and no `PASS_TO_PASS` test fails. An expected failure does not count as a passing `FAIL_TO_PASS` test. A `PASS_TO_PASS` test that is skipped, expected-failing or not named in the log is reported as unverified but does not fail the check. The logs are read from Django's runner, sympy's `bin/test` and pytest's `-rA` summary. Django tests with docstrings are recorded under both their test ID and description, so the reported number of named results is not a test count. `swebench.json` holds the instance's tests and the command;
+- `check.py` puts `hidden/` in place and runs the instance's test modules with the repository's runner. It passes only when the command exits zero and every required `FAIL_TO_PASS` and `PASS_TO_PASS` test passes. A skipped, expected-failing or unnamed required test, or a timeout, makes the outcome unverified; an observed failure still fails the check. Unverified runs are excluded from accuracy and performance comparisons. The logs are read from Django's runner, sympy's `bin/test` and pytest's `-rA` summary. Django tests with docstrings are recorded under both their test ID and description, so the reported number of named results is not a test count. `swebench.json` holds the instance's tests and the command;
 - `solve.py` applies `fix.patch` and commits it.
 
 ```sh
