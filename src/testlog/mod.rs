@@ -260,6 +260,8 @@ regexes! {
     LIBTEST_END = r"^(---- .+ ----|failures:|test result: .*)$";
     LIBTEST_RESULT = r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored(?:; (\d+) measured)?";
     LIBTEST_RUNNING = r"^running (\d+) tests?$";
+    // cargo giving up after a test binary failed.
+    CARGO_TEST_FAILED = r"^error: test failed, to rerun pass ";
     CARGO_TEST_BINARY = r"^\s*Running (?:unittests )?(.+?) \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
@@ -642,8 +644,8 @@ fn libtest(lines: &[String], out: &mut Parsed) {
 /// test or nextest run that a test starts prints inside its binary's run.
 /// What a test prints there is its own, and libtest's result already says
 /// whether the test passed, so a run inside one must not add its failures.
-/// A run that never printed its result (it crashed) ends where the run
-/// around it does; one that nothing closes holds nothing, as under nextest's
+/// A run that never printed its result (it crashed) ends at cargo's
+/// `error: test failed` for it, or else where the run around it does; one that nothing closes holds nothing, as under nextest's
 /// `--no-capture` when a test crashed. nextest indents what it captures, so
 /// its own output holds no runs.
 fn libtest_depth(lines: &[String]) -> Vec<usize> {
@@ -651,10 +653,23 @@ fn libtest_depth(lines: &[String]) -> Vec<usize> {
     let mut starts = vec![0; lines.len()];
     let mut ends = vec![0; lines.len() + 1];
     let mut open: Vec<(usize, u64)> = Vec::new();
+    let mut last_result = None;
     for (i, line) in lines.iter().enumerate() {
         if let Some(c) = LIBTEST_RUNNING.captures(line) {
             open.push((i, c[1].parse().unwrap_or(0)));
+        } else if CARGO_TEST_FAILED.is_match(line) {
+            // cargo says a binary failed. One that printed its result did
+            // so before this; a run opened since the last result crashed,
+            // and ends here.
+            if let Some(&(start, _)) = open.last()
+                && last_result.is_none_or(|r| start > r)
+            {
+                starts[start] += 1;
+                ends[i] += 1;
+                open.pop();
+            }
         } else if let Some(c) = LIBTEST_RESULT.captures(line) {
+            last_result = Some(i);
             let total: u64 = (1..=4)
                 .filter_map(|k| c.get(k)?.as_str().parse::<u64>().ok())
                 .sum();

@@ -203,6 +203,28 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 }
 
 #[test]
+fn a_nested_binary_that_crashes_does_not_take_the_outer_result() {
+    // Both run two tests, so only cargo's error says the inner one ended.
+    let log = "running 2 tests
+     Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+running 2 tests
+test inner_fails ... FAILED
+error: test failed, to rerun pass `--lib`
+
+Caused by:
+  process didn't exit successfully: `target/debug/deps/inner-0123` (signal: 6, SIGABRT: process abort signal)
+test runs_a_crashing_binary ... ok
+test passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [2, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
 fn a_nested_nextest_run_is_not_counted_without_cargo_lines() {
     // `cargo test -q` prints none of cargo's lines.
     let log = "
