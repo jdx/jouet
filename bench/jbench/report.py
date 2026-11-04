@@ -53,12 +53,18 @@ def group(records: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, list
     return out
 
 
+def unverified(record: dict[str, Any]) -> bool:
+    check = record.get("check") or {}
+    return record.get("success") is None or ("passed" in check and check["passed"] is None)
+
+
 def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
     cells = []
     for (task, harness), by_arm in sorted(group(records).items()):
         cell: dict[str, Any] = {"task": task, "harness": harness, "arms": {}, "paired": {}}
         for arm, runs in sorted(by_arm.items()):
-            finished = [r for r in runs if not r.get("error") and isinstance(r.get("success"), bool)]
+            finished = [r for r in runs if not r.get("error") and not unverified(r)
+                        and isinstance(r.get("success"), bool)]
             decisions: dict[str, int] = defaultdict(int)
             unanswered: set[str] = set()
             for r in finished:
@@ -68,7 +74,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             cell["arms"][arm] = {
                 "runs": len(finished),
                 "unverified": [{"round": r.get("round"), "reason": (r.get("check") or {}).get("reason", "coverage unavailable")}
-                               for r in runs if not r.get("error") and r.get("success") is None],
+                               for r in runs if not r.get("error") and unverified(r)],
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in finished if r.get("stopped")],
                 "successes": sum(1 for r in finished if r.get("success")),
@@ -89,7 +95,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
         if "jouet" in by_arm and "jouet-init" in by_arm:
             pairs = {
                 arm: {r["round"]: r for r in by_arm[arm]
-                      if not r.get("error") and isinstance(r.get("success"), bool)}
+                      if not r.get("error") and not unverified(r) and isinstance(r.get("success"), bool)}
                 for arm in ("jouet", "jouet-init")
             }
             rounds = sorted(pairs["jouet"].keys() & pairs["jouet-init"].keys())
@@ -105,7 +111,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             }
         if "plain" in by_arm and treat:
             paired_runs = {
-                arm: {r["round"]: r for r in by_arm[arm] if not r.get("error") and isinstance(r.get("success"), bool)}
+                arm: {r["round"]: r for r in by_arm[arm]
+                      if not r.get("error") and not unverified(r) and isinstance(r.get("success"), bool)}
                 for arm in ("plain", treat)
             }
             paired_runs["jouet"] = paired_runs[treat]

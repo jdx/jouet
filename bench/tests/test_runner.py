@@ -1614,9 +1614,11 @@ class ReportTest(unittest.TestCase):
 
         records = [record("plain", 1, True, 100), record("jouet", 1, True, 90),
                    record("plain", 2, True, 200), record("jouet", 2, None, 10000)]
+        records += [record("plain", 3, True, 300),
+                    {**record("jouet", 3, False, 20000), "check": {"passed": None}}]
         cell = report.summarize(records, {})["cells"][0]
         self.assertEqual(cell["arms"]["jouet"]["runs"], 1)
-        self.assertEqual(len(cell["arms"]["jouet"]["unverified"]), 1)
+        self.assertEqual(len(cell["arms"]["jouet"]["unverified"]), 2)
         self.assertEqual(cell["arms"]["jouet"]["metrics"]["input_tokens"]["median"], 90)
         self.assertEqual(cell["paired"]["input_tokens"]["pairs"], 1)
         self.assertIn("jouet unverified (round 2)", report.markdown({"meta": {}, "cells": [cell]}))
