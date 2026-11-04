@@ -690,10 +690,24 @@ pub fn baseline(report: &HarnessReport, until: Option<u64>) -> Baseline {
         kinds: Kind::ALL
             .into_iter()
             .filter_map(|kind| {
-                let c = report
+                let Some(c) = report
                     .categories
                     .iter()
-                    .find(|c| c.category == kind.category())?;
+                    .find(|c| c.category == kind.category())
+                else {
+                    // Kept with nothing in it, so a baseline without one is
+                    // known to predate test runs (see `estimate`).
+                    return (kind == Kind::Test).then_some(KindBaseline {
+                        kind,
+                        runs: 0,
+                        requests: 0,
+                        input_tokens: 0,
+                        calls: 0,
+                        failed: 0,
+                        output_bytes: 0,
+                        linked_waits: false,
+                    });
+                };
                 Some(KindBaseline {
                     kind,
                     runs: if kind == Kind::ProcessWait {
@@ -793,6 +807,11 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
             let found = b.kinds.iter().find(|k| k.kind == kind);
             if kind == Kind::ProcessWait && found.is_some_and(|k| !k.linked_waits) {
                 return refuse("the saved process-wait baseline has no linked job evidence; run `jouet stats` to refresh it".to_string());
+            }
+            // A baseline has an entry for every kind (`Kind::ALL`), so one
+            // with none for test runs was saved before they were counted.
+            if kind == Kind::Test && found.is_none() {
+                return refuse("the saved baseline predates test runs; run `jouet stats --rescan`".to_string());
             }
             let before = found.map_or(0, |k| k.runs);
             if before < MIN_BASELINE_RUNS {

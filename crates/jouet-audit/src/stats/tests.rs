@@ -72,6 +72,15 @@ fn jouet_test_saves_the_output_it_cut_counted_once() {
     let e = estimate(&m, &[baseline(0)]);
     let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
     assert!(e.refused.as_deref().unwrap().contains("--rescan"));
+    // So does one saved before test runs were a kind, which has no entry
+    // for them: a baseline made now always has one.
+    let stale = Baseline {
+        kinds: Vec::new(),
+        ..baseline(0)
+    };
+    let e = estimate(&m, &[stale]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert!(e.refused.as_deref().unwrap().contains("--rescan"));
     // Printing more than before saves nothing.
     let e = estimate(&m, &[baseline(100_000)]);
     assert_eq!(
