@@ -73,7 +73,7 @@ pub(crate) struct TestSettings {
     #[usage(env = "JOUET_TEST_BASELINE_CMD_UNDER_MS", default = 60000)]
     pub baseline_cmd_under_ms: u64,
     /// Seconds for which a run is answered from an earlier run of the same command on the same files (tracked and untracked, less ignored ones), HEAD and environment; 0 always runs
-    #[usage(env = "JOUET_TEST_REUSE_S", default = 3600)]
+    #[usage(env = "JOUET_TEST_REUSE_S", default = 0)]
     pub reuse_s: u64,
 }
 
