@@ -165,6 +165,36 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 }
 
 #[test]
+fn a_nested_nextest_run_is_not_counted_without_cargo_lines() {
+    // `cargo test -q` prints none of cargo's lines.
+    let log = "
+running 1 test
+     Summary [   0.005s] 1 test run: 0 passed, 1 failed, 0 skipped
+error: test run failed
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 0, 0]);
+}
+
+#[test]
+fn a_cargo_line_captured_by_nextest_hides_no_later_failure() {
+    let log = "    Starting 2 tests across 1 binary
+        FAIL [   0.004s] (1/2) demo runs_cargo
+  stdout ───
+
+         Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+        FAIL [   0.004s] (2/2) demo fails
+     Summary [   0.005s] 2 tests run: 0 passed, 2 failed, 0 skipped
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [0, 2, 0]);
+    assert_eq!(names(&d), ["demo runs_cargo", "demo fails"]);
+}
+
+#[test]
 fn nextest_alone_is_counted_even_after_a_crash_or_a_cargo_test_run() {
     // cargo test first, then a nextest run whose test crashed before
     // libtest's result, with --no-capture.

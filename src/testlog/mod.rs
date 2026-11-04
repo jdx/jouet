@@ -268,8 +268,10 @@ regexes! {
     GO_PACKAGE_NO_TESTS = r"^\?\s+\S+\s+\[no test files\]\s*$";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
-    // cargo starting a crate's doctests, and giving up after a binary failed.
-    CARGO_DOC_TESTS = r"^\s+Doc-tests \S+$";
+    // cargo starting a test binary or a crate's doctests, right-aligned as
+    // cargo prints its status, so not a line captured in nextest's output;
+    // and cargo giving up after a binary failed.
+    CARGO_BINARY_START = r"^( {5}Running (?:unittests )?.+ \(.+\)|   Doc-tests \S+)$";
     CARGO_TEST_FAILED = r"^error: test failed, to rerun pass ";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
@@ -643,26 +645,40 @@ fn libtest(lines: &[String], out: &mut Parsed) {
 
 /// The lines of each test binary cargo test ran: from cargo's
 /// `Running` or `Doc-tests` line to the binary's last `test result:` before
-/// the next one, or, for a binary that crashed, to the next one. What a test
+/// the next one, or, for a binary that crashed, to the next one. Without
+/// cargo's lines (`cargo test -q`, a binary run directly), from libtest's
+/// `running N tests` to its result, and nothing when it has none, as under
+/// nextest's `--no-capture` when a test crashed. What a test
 /// prints there is its own, and libtest's result already says whether the
 /// test passed: a test that runs nextest itself must not add the nested
 /// run's failures. The last result is the binary's, since a nested
 /// `--no-capture` run prints its tests' results unindented first. nextest
 /// alone prints neither of cargo's lines, so none of its output is in one.
 fn cargo_test_binaries(lines: &[String]) -> Vec<Range<usize>> {
-    let starts = |l: &String| CARGO_TEST_BINARY.is_match(l) || CARGO_DOC_TESTS.is_match(l);
+    let cargo = |l: &String| CARGO_BINARY_START.is_match(l);
     let mut binaries = Vec::new();
     let mut i = 0;
     while i < lines.len() {
-        if !starts(&lines[i]) {
+        let by_cargo = cargo(&lines[i]);
+        if !by_cargo && !LIBTEST_RUNNING.is_match(&lines[i]) {
             i += 1;
             continue;
         }
+        // libtest's own start ends at the next one, since nothing else
+        // marks where a binary run without cargo's lines stops.
         let end = (i + 1..lines.len())
-            .find(|&j| starts(&lines[j]) || CARGO_TEST_FAILED.is_match(&lines[j]))
+            .find(|&j| {
+                cargo(&lines[j])
+                    || CARGO_TEST_FAILED.is_match(&lines[j])
+                    || (!by_cargo && LIBTEST_RUNNING.is_match(&lines[j]))
+            })
             .unwrap_or(lines.len());
         let last = (i..end).rev().find(|&j| LIBTEST_RESULT.is_match(&lines[j]));
-        binaries.push(i..last.map_or(end, |r| r + 1));
+        match last {
+            Some(r) => binaries.push(i..r + 1),
+            None if by_cargo => binaries.push(i..end),
+            None => {}
+        }
         i = end;
     }
     binaries
