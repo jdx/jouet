@@ -301,13 +301,18 @@ fn pnpm_vitest_covers(ran: &str, wanted: &str) -> bool {
     let mut rest = &wanted[prefix_len..];
     let mut selected = false;
     while let Some((flag, next)) = rest.split_first() {
-        if let Some(value) = flag.strip_prefix("--exclude=") {
+        if let Some(value) = flag
+            .strip_prefix("--exclude=")
+            .or_else(|| flag.strip_prefix("--testNamePattern="))
+            .or_else(|| flag.strip_prefix("-t="))
+        {
             if value.is_empty() {
                 return false;
             }
             selected = true;
             rest = next;
-        } else if *flag == "--exclude" && next.first().is_some_and(|value| !value.starts_with('-'))
+        } else if matches!(*flag, "--exclude" | "--testNamePattern" | "-t")
+            && next.first().is_some_and(|value| !value.starts_with('-'))
         {
             selected = true;
             rest = &next[1..];
@@ -1903,6 +1908,28 @@ mod tests {
         checks.record([test("pnpm test", 1, unknown)], Some("t1"));
         checks.record([test("pnpm test", 0, unknown)], Some("t1"));
         assert!(reason(&checks, "t1").is_some());
+    }
+
+    #[test]
+    fn unfiltered_pnpm_vitest_clears_name_filtered_failures() {
+        let prefix = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:vitest";
+        for filter in [
+            "-t case",
+            "--testNamePattern case",
+            "--testNamePattern=case",
+        ] {
+            let mut checks = Checks::default();
+            checks.record(
+                [test(
+                    "pnpm exec vitest run -t case",
+                    1,
+                    &format!("{prefix} {filter}"),
+                )],
+                Some("t1"),
+            );
+            checks.record([test("pnpm exec vitest run", 0, prefix)], Some("t1"));
+            assert_eq!(reason(&checks, "t1"), None, "{filter}");
+        }
     }
 
     #[test]
