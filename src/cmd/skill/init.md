@@ -16,8 +16,10 @@ other configuration is a successful outcome.
 Read the project instructions, relevant manifests, task definitions, CI and
 existing `.jouet` files. Identify the actual full test command, focused checks,
 generated files and any setup they require. Follow the project's task runner;
-a task's name alone does not establish what it covers. Read only the files
-needed to establish those facts.
+a task's name alone does not establish what it covers. In a monorepo, check
+which packages and test types each runner configuration includes or excludes;
+a command verified for one package or test type may not run another. Read only
+the files needed to establish those facts.
 
 Run `jouet agent-help` and consult `jouet agent-help COMMAND --full` for the
 commands and configuration you need. Use the installed version's help rather
@@ -91,7 +93,13 @@ needs an `hk.pkl`; otherwise use the project's own lint command.
 
 Run each check you record once, at the current commit, before recording it:
 the focused checks, `lint` and `before_push`, and `full` when its recorded
-time is short or the user agrees. A check that cannot run because mise or
+time is short or the user agrees. For a parameterized focused command, verify
+it against a representative test in each package or test type it claims to
+cover; record separate commands where runner configurations differ. A run that
+selects no tests or no affected projects does not establish coverage. If a
+representative run is unavailable or too costly, report that scope as
+unverified instead of recording it as a working focused check. A check that
+cannot run because mise or
 jouet refuses an untrusted config is recorded as unverified in your report;
 ask the person to review and trust it, then run it. Record what you saw:
 
