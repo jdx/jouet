@@ -98,6 +98,8 @@ A package is a directory with a manifest: `package.json`, `pyproject.toml`, `set
 
 jouet looks for adapters in the current directory, then each directory above it up to the repository root, and uses the first directory that has any. Every adapter found there runs, one after the other (a directory with both `package.json` and `pyproject.toml` runs vitest and pytest), unless `--adapter` picks one. To test one package of a monorepo, run `jouet test --affected` from that package's directory.
 
+When the root has only a graph adapter and changed files belong to a detected nested test project, jouet stops and names those projects instead of running only the root suite. Run affected checks from each relevant project and the root checks as needed. `--adapter graph` explicitly selects only the root adapter. This check relies on test project files present in the worktree; it does not discover every possible nested suite.
+
 ## Adapters
 
 ### vitest

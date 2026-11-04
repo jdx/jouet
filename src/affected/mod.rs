@@ -382,6 +382,38 @@ pub(crate) fn locate(
     Ok((root, project, names))
 }
 
+/// Stop when a root graph suite would miss a separate changed test project.
+fn check_nested_projects(project: &Project, changes: &[Change]) -> Result<(), Error> {
+    let mut projects = std::collections::BTreeMap::new();
+    for change in changes.iter().filter(|c| !classify::is_docs(&c.path)) {
+        let path = project.root.join(&change.path);
+        for dir in path.parent().into_iter().flat_map(Path::ancestors) {
+            if dir == project.dir || !dir.starts_with(&project.dir) {
+                break;
+            }
+            let names = detect(dir);
+            if !names.is_empty() {
+                let relative = dir.strip_prefix(&project.root).unwrap_or(dir);
+                projects.insert(relative.display().to_string(), names.join(", "));
+                break;
+            }
+        }
+    }
+    if projects.is_empty() {
+        return Ok(());
+    }
+    let found = projects
+        .iter()
+        .map(|(path, names)| format!("{path} ({names})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(Error::new(
+        Exit::Precondition,
+        format!("changed files belong to nested test projects not covered by the root suite: {found}"),
+    )
+    .hint("run `jouet test --affected` from each relevant project directory and run the root checks as needed; use `--adapter graph` for an explicitly root-only selection"))
+}
+
 /// Plans an affected run from `cwd`.
 pub(crate) fn plan(
     cwd: &Path,
@@ -397,6 +429,9 @@ pub(crate) fn plan(
     };
     let base = changes::base(&root, since)?;
     let changes = changes::changed(&root, &base.merge_base)?;
+    if only.is_none() && project.rel.is_empty() && names == ["graph"] {
+        check_nested_projects(&project, &changes)?;
+    }
     let adapters: Vec<Box<dyn Adapter>> = names.iter().filter_map(|n| load(n, &project)).collect();
     let mut packages = Packages::new(&root);
     let effects: Vec<Vec<FileEffect>> = (0..adapters.len())
