@@ -1010,11 +1010,14 @@ SH
 	refute_output --partial 'baseline checkout reports missing node_modules'
 	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 2
 
+	# The same command on the same files is answered from the first run;
+	# only the merge base runs again.
 	run --separate-stderr jouet test --baseline --json --cmd -- ./fail-command
 	assert_failure 1
 	assert_stderr --partial 'without naming a failing test, so the failures could not be compared'
 	assert_equal "$(jq -r '.ok' <<<"$output")" false
-	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 4
+	assert_equal "$(jq -r '.suites[0].reused' <<<"$output")" true
+	assert_equal "$(wc -l <"$RUNS_FILE" | tr -d ' ')" 3
 }
 
 @test "a baseline missing pnpm dependencies suggests the opt-in setup" {
@@ -1217,21 +1220,22 @@ SH
 	local known=("$XDG_STATE_HOME"/jouet/known/*.json)
 	jq '(.entries[] | select(.outcome == "failed")) |= del(.non_failed)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
 	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
+	# The command itself is answered from the first run on these files.
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_success
-	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 4
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 3
 
 	# Cached failures from before detail fingerprints also require a rerun.
 	jq '(.entries[] | select(.outcome == "failed")) |= del(.details)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
 	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_success
-	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 6
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 4
 	jq '(.entries[] | select(.outcome == "failed")) |= del(.details_version)' "${known[0]}" >"$BATS_TEST_TMPDIR/old-known.json"
 	cp "$BATS_TEST_TMPDIR/old-known.json" "${known[0]}"
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_success
-	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 8
+	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 5
 }
 
 @test "--baseline passes a run whose every failure also fails at the merge base" {
@@ -1683,8 +1687,13 @@ SCRIPT
 	assert_output --partial 'baseline: the failure also fails at main'
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
 
-	# The suite's own command, run through --cmd, shares what is kept.
+	# The suite's own command, run through --cmd, shares what is kept; on
+	# the same files it is answered from the last run.
 	run --separate-stderr jouet test --cmd -- python3 -m unittest discover -s tests
+	assert_success
+	assert_output --regexp 'reused: .python3 -m unittest discover -s tests. ran on these same files'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
+	run --separate-stderr jouet test --fresh --cmd -- python3 -m unittest discover -s tests
 	assert_success
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 4
 	# Another command has nothing kept. Past the limit, --cmd does not run
@@ -1738,10 +1747,12 @@ SCRIPT
 	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 1
 	# --baseline still compares it: it runs at the merge base, and fails the
 	# same way there.
+	# The run here is not repeated: the files are as they were.
 	run --separate-stderr jouet test --baseline --cmd -- ./keyring.sh
 	assert_success
 	assert_output --partial 'baseline: the failure also fails at main'
-	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 3
+	assert_output --regexp 'reused: .\./keyring\.sh. ran on these same files'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/runs")" 2
 }
 
 @test "failing Go tests are run alone at the merge base, not the whole command" {

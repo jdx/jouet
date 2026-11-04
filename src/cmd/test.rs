@@ -19,6 +19,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 mod baseline;
+mod reuse;
 
 /// How many selected tests the text output explains before counting the
 /// rest; the runner lists what it runs anyway.
@@ -76,6 +77,9 @@ struct SuiteReport {
     log: Option<String>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     digest: Option<Digest>,
+    /// Answered from an earlier run of the command on the same files.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    reused: bool,
 }
 
 #[derive(Serialize)]
@@ -275,28 +279,77 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     if runs {
         super::hook::mark_own_run(&cwd, &own_command(), true);
     }
+    // The files as they are, for answering a command that already ran on
+    // them from what that run said.
+    let reuse_s = crate::settings::Settings::load().test.reuse_s;
+    let mut tree = (runs && reuse_s > 0).then(|| reuse::state(&root)).flatten();
     if !args.dry_run {
         for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
-            let log = log_path(i);
-            let ticket = sequences
-                .then(|| crate::cost::sequences::begin(&job.dir, i))
+            let key = tree
+                .as_deref()
+                .map(|tree| reuse::key(tree, job, std::env::vars()));
+            let kept = key
+                .as_deref()
+                .filter(|_| !args.fresh)
+                .and_then(|key| reuse::lookup(key, reuse_s));
+            let log = kept
+                .as_ref()
+                .map_or_else(|| log_path(i), |kept| kept.log.clone());
+            let ticket = kept
+                .is_none()
+                .then(|| sequences.then(|| crate::cost::sequences::begin(&job.dir, i)))
+                .flatten()
                 .flatten();
-            let (code, ms) = match execute(job, &log, stream) {
-                Ok(ran) => ran,
-                Err(e) => {
-                    if let Some(ticket) = ticket {
-                        ticket.finish(None, 0, false);
-                    }
-                    return out.error(Exit::Precondition, &e);
+            let (code, ms) = if let Some(kept) = &kept {
+                if !out.json {
+                    emit(&format!(
+                        "reused: `{}` ran on these same files {} ago ({}s, exit {}); --fresh runs it again\n",
+                        command_line(&job.argv),
+                        reuse::ago(kept.at),
+                        kept.ms / 1000,
+                        kept.code
+                    ));
                 }
+                suite.reused = true;
+                (kept.code, kept.ms)
+            } else {
+                let ran = match execute(job, &log, stream) {
+                    Ok(ran) => ran,
+                    Err(e) => {
+                        if let Some(ticket) = ticket {
+                            ticket.finish(None, 0, false);
+                        }
+                        return out.error(Exit::Precondition, &e);
+                    }
+                };
+                // Kept only when the run left the files as it found them: a
+                // formatter or a generator is never answered from it.
+                let after = tree.as_ref().and_then(|_| reuse::state(&root));
+                if let Some(key) = &key
+                    && after.is_some()
+                    && after == tree
+                {
+                    let (code, ms) = ran;
+                    let kept = reuse::Kept {
+                        at: 0,
+                        code,
+                        ms,
+                        log: log.clone(),
+                    };
+                    reuse::keep(key, &kept, reuse_s);
+                }
+                tree = after;
+                ran
             };
             suite.exit_code = Some(code);
             suite.duration_ms = Some(ms);
             // A job is one command; one that runs several checks is not
             // split between them.
             let records = super::hook::checks(&job.dir, &command_line(&job.argv));
-            if let [record] = records.as_slice() {
+            if let [record] = records.as_slice()
+                && kept.is_none()
+            {
                 timed.push(crate::cost::Sample::of(record, ms, code));
             }
             suite.log = Some(log.display().to_string());
@@ -986,6 +1039,7 @@ fn given(cwd: &Path, args: &TestArgs) -> (Report, Vec<Option<Job>>) {
         duration_ms: None,
         log: None,
         digest: None,
+        reused: false,
     };
     let job = Job {
         argv: args.extra.clone(),
@@ -1032,6 +1086,7 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             duration_ms: None,
             log: None,
             digest: None,
+            reused: false,
         };
         let job = Job {
             argv,
@@ -1240,6 +1295,7 @@ fn suite_report(suite: &Suite) -> SuiteReport {
         duration_ms: None,
         log: None,
         digest: None,
+        reused: false,
     }
 }
 

@@ -82,6 +82,10 @@ pub(crate) struct TestArgs {
     /// of REF) and pass it if every failure also fails there
     #[usage(long)]
     pub(crate) baseline: bool,
+    /// Run the command even when it already ran on the same files, instead
+    /// of answering from that run
+    #[usage(long)]
+    pub(crate) fresh: bool,
     /// Bytes of failure text to show (default 4000; 0 shows every failure
     /// whole)
     #[usage(long, value_name = "BYTES")]

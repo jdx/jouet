@@ -27,5 +27,6 @@ Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when no runne
 - **`--dry-run`** — Print what would run and why, running nothing
 - **`--cmd`** — Run the words after `--` as the command, instead of the test task
 - **`--baseline`** — When the run fails, run it again at the merge base (with --since, of REF) and pass it if every failure also fails there
+- **`--fresh`** — Run the command even when it already ran on the same files, instead of answering from that run
 - **`--budget <BYTES>`** — Bytes of failure text to show (default 4000; 0 shows every failure whole)
 - **`-h --help`** — Print help

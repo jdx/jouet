@@ -23,8 +23,8 @@ Each picked test is listed with the chain of imports that links it to a changed 
 Without `--affected`, `jouet test` runs the [full suite](#the-full-suite), and `jouet test --cmd -- CMD` runs [any other](#any-command-cmd) test, e2e or build command. Every run keeps its whole output in a log and prints, for an agent, [only what it needs](#what-a-run-prints): one line when it passes, each failure with its error when it fails.
 
 ```text
-jouet test [--affected] [--since REF] [--adapter NAME] [--baseline] [--dry-run] [--budget BYTES] [-- ARGS...]
-jouet test --cmd [--baseline] [--since REF] [--budget BYTES] -- CMD...
+jouet test [--affected] [--since REF] [--adapter NAME] [--baseline] [--fresh] [--dry-run] [--budget BYTES] [-- ARGS...]
+jouet test --cmd [--baseline] [--fresh] [--since REF] [--budget BYTES] -- CMD...
 ```
 
 Words after `--` go to the test runner, or with `--cmd` are the command. `--since` and `--adapter` choose what `--affected` selects, so they need it; `--since` also names the base for `--baseline`. Each flag is described in the [CLI reference](/cli/test).
@@ -189,6 +189,21 @@ These fit the same adapter trait and are follow-ups:
 - `go.mod` (`go test ./...`).
 
 Without one, it runs the whole suite of each adapter found. Words after `--` are passed on, after a `--` of its own for `npm test`.
+
+### The same command on the same files: `--fresh`
+
+An agent often runs a check again on files that have not changed since it last ran: to compare a slow failure with `--baseline`, after a stop-gate block, or to read the result once more. `jouet test` answers such a run from the last one, without running the command:
+
+```output
+$ jouet test --baseline --cmd -- mise run check
+reused: `mise run check` ran on these same files 3m ago (115s, exit 1); --fresh runs it again
+```
+
+The output, the log, the [baseline](#failures-that-were-there-before-baseline) comparison and what the stop gate records are those of the earlier run, and `--json` marks the suite `"reused": true`.
+
+A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. A run is kept for this only when it left the working tree as it found it, so a formatter, a code generator or a snapshot update always runs. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 3600 by default; 0 always runs).
+
+Ignored files are not part of the key: after changing one a test reads, such as a `.env` file, or for a test that is flaky or reaches the network, run with `--fresh`, which runs the command and keeps its result for the next run.
 
 ### Failures that were there before: `--baseline`
 
