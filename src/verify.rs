@@ -346,7 +346,12 @@ fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
     ];
     fn split(selector: &str) -> Option<(Vec<&str>, Vec<&str>)> {
         let words: Vec<&str> = selector.split_whitespace().collect();
-        if words.contains(&"--exact") {
+        // A nextest filter expression is not a name filter, and its words
+        // may hold spaces.
+        if words
+            .iter()
+            .any(|w| matches!(*w, "--exact" | "-E" | "--filter-expr" | "--filterset"))
+        {
             return None;
         }
         let mut at = words.len()
@@ -2125,6 +2130,11 @@ mod tests {
             c,
             "-p mise --lib cutoff",
             "-p mise --bins test_cutoff_x"
+        ));
+        assert!(!wider_filter(
+            "cargo nextest run -E x",
+            "-p mise -E test(a) | b",
+            "-p mise -E test(a) | bc"
         ));
         // A package name is not a filter.
         assert!(!wider_filter(c, "-p mi", "-p mise"));
