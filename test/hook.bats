@@ -793,7 +793,10 @@ claude_payload() {
 	}
 	run map_start
 	refute_output --partial '.jouet/map.md'
-	(cd repo && jouet trust --yes >/dev/null)
+	# Trusting it shows it for review.
+	run bash -c 'cd repo && jouet trust --yes'
+	assert_output --partial 'map.md (every session is told to read it):'
+	assert_output --partial 'one file per backend'
 	run map_start
 	assert_output --partial 'jouet: .jouet/map.md maps where this project'"'"'s code, tests and generated files live (3 lines): read it before searching'
 	refute_output --partial 'one file per backend'

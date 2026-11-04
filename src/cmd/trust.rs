@@ -126,6 +126,9 @@ struct Trusted {
     /// Why `project.toml` does not parse, which refuses the trust.
     #[serde(skip_serializing_if = "Option::is_none")]
     project_error: Option<String>,
+    /// `.jouet/map.md`, which the primer tells every session to read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map: Option<String>,
 }
 
 /// This repository's set.
@@ -219,6 +222,7 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         test_config: std::fs::read_to_string(set.root.join("test.toml")).ok(),
         project,
         project_error,
+        map: std::fs::read_to_string(set.root.join("map.md")).ok(),
     };
     let reviewed = |report: &Trusted| {
         let mut text = checked_text(&report.rules);
@@ -233,6 +237,9 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         }
         if let Some(error) = &report.project_error {
             let _ = writeln!(text, "project.toml does not parse: {error}");
+        }
+        if let Some(map) = &report.map {
+            let _ = writeln!(text, "map.md (every session is told to read it):\n{map}");
         }
         text
     };
