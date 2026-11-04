@@ -322,27 +322,40 @@ fn without_name_filter(ran: &str, wanted: &str) -> bool {
         && !wanted[ran.len() + 1..].iter().any(a_path)
 }
 
-/// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
-/// cut to part of it: cargo and nextest run every test whose name holds the
-/// filter, so `affected::` runs all that `affected::cargo` does. Not with
-/// `--exact`, which matches whole names.
+/// Whether `ran` is `wanted` with its cargo test-name filters widened:
+/// cargo and nextest run every test whose name holds any filter, so
+/// `affected::` runs all that `affected::cargo` does, and `-- a b` all that
+/// `-- ab` does. The filters are the words after `--`, or without one the
+/// last word. Not with `--exact`, which matches whole names, nor with any
+/// other option among the filters.
 fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
     if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
         return false;
     }
-    let ran: Vec<&str> = ran.split_whitespace().collect();
-    let wanted: Vec<&str> = wanted.split_whitespace().collect();
-    let (Some((r, ran_rest)), Some((w, wanted_rest))) = (ran.split_last(), wanted.split_last())
-    else {
+    fn option(w: &&str) -> bool {
+        w.starts_with('-')
+    }
+    fn split(s: &str) -> Option<(Vec<&str>, Vec<&str>)> {
+        let words: Vec<&str> = s.split_whitespace().collect();
+        let (head, filters) = match words.iter().position(|w| *w == "--") {
+            Some(i) => (words[..i].to_vec(), words[i + 1..].to_vec()),
+            // An option just before the last word may take it as its value.
+            None => {
+                let (last, head) = words.split_last()?;
+                if head.last().is_some_and(option) {
+                    return None;
+                }
+                (head.to_vec(), vec![*last])
+            }
+        };
+        let clean =
+            !filters.is_empty() && !filters.iter().any(option) && !head.contains(&"--exact");
+        clean.then_some((head, filters))
+    }
+    let (Some((ran_head, ran)), Some((wanted_head, wanted))) = (split(ran), split(wanted)) else {
         return false;
     };
-    let option = |w: &&str| w.starts_with('-');
-    ran_rest == wanted_rest
-        && !option(r)
-        && !option(w)
-        && !ran_rest.last().is_some_and(option)
-        && !ran_rest.contains(&"--exact")
-        && w.contains(r)
+    ran_head == wanted_head && wanted.iter().all(|w| ran.iter().any(|r| w.contains(r)))
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -2075,6 +2088,33 @@ mod tests {
             "--bin jouet affected::cargo"
         ));
         assert!(!wider_filter(c, "-- --exact a", "-- --exact ab"));
+        // Filters after `--` widen one by one: a run of several, one of
+        // them the failed test's name or part of it, covers that test.
+        assert!(wider_filter(
+            c,
+            "-p mise --lib -- test_b test_ab cutoff",
+            "-p mise --lib -- test_ab"
+        ));
+        assert!(wider_filter(
+            c,
+            "-p mise --lib -- cutoff latest",
+            "-p mise --lib -- test_cutoff_x"
+        ));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib -- latest",
+            "-p mise --lib -- test_cutoff_x test_other"
+        ));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib -- cutoff",
+            "-p mise --bins -- test_cutoff_x"
+        ));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib -- cutoff --exact",
+            "-p mise --lib -- cutoff"
+        ));
         assert!(!wider_filter(
             "mise run test:e2e test_ab",
             "test:e2e test_a",
