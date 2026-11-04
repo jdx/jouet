@@ -346,6 +346,7 @@ impl State {
         t.requests.push(Request {
             at,
             input_tokens: last.input_tokens.u64(),
+            input_tokens_complete: last.input_tokens.u64().is_some(),
             cached_input_tokens: last.cached_input_tokens.u64(),
             output_tokens: last.output_tokens.u64(),
             calls: self.request_start..t.calls.len(),

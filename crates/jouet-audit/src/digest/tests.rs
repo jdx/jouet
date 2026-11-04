@@ -6,6 +6,7 @@ fn cache_split_labels_incomplete_or_inconsistent_request_usage() {
 
     let request = |input, cached| Request {
         input_tokens: input,
+        input_tokens_complete: input.is_some(),
         cached_input_tokens: cached,
         ..Default::default()
     };

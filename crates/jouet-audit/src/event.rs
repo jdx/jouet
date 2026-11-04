@@ -61,6 +61,8 @@ pub struct Request {
     /// The context it read: every input token, cached or not, since a
     /// request is billed and timed by the whole context it re-reads.
     pub input_tokens: Option<u64>,
+    /// Whether input_tokens includes every input-usage component the reader needs.
+    pub input_tokens_complete: bool,
     /// Input tokens served from the prompt cache, when reported.
     pub cached_input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
