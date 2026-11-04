@@ -48,8 +48,9 @@ static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)^(?:error|fail|failed|failure|fatal|panic|exception|traceback)\b")
         .expect("failure prefix pattern")
 });
-static ZERO_ERRORS: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?i)\b0 errors?\b").expect("zero errors pattern"));
+static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\b0 (?:errors?|failed|failures?)\b").expect("zero failures pattern")
+});
 const DETAILS_VERSION: u32 = 3;
 
 /// What a failing run's failures were at the merge base.
@@ -227,7 +228,7 @@ fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
             .filter(|word| !word.contains(['/', '\\']) || FAILURE_PREFIX.is_match(word))
             .collect::<Vec<_>>()
             .join(" ");
-        EARLIER_FAILURE.is_match(&ZERO_ERRORS.replace_all(&words, ""))
+        EARLIER_FAILURE.is_match(&ZERO_FAILURES.replace_all(&words, ""))
     }) {
         return None;
     }
@@ -1235,6 +1236,8 @@ docs/README.md\n\
         assert!(evidence(&format!("ERROR:/src/other.rs\n{output}")).is_none());
         assert!(evidence(&format!("not ok 1 unnamed\n{output}")).is_none());
         assert!(evidence(&format!("Earlier task: 0 errors\n{output}")).is_some());
+        assert!(evidence(&format!("3 passed, 0 failed, 0 failures\n{output}")).is_some());
+        assert!(evidence(&format!("0 failed, 1 error\n{output}")).is_none());
         assert!(evidence(&format!("Checked docs/error-handling.md\n{output}")).is_some());
         assert!(evidence(&output.replace("[ELIFECYCLE]", "ELIFECYCLE ")).is_some());
         assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
