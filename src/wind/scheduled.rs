@@ -314,6 +314,8 @@ fn one_project(path: &Path, expected: &Path, limit: u64) -> (std::io::Result<Opt
         return (Ok(None), bytes);
     }
     let result = (|| {
+        let mut turn_cwd = None;
+        let mut uncertain = false;
         for line in content.split(|&byte| byte == b'\n') {
             if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
@@ -327,9 +329,61 @@ fn one_project(path: &Path, expected: &Path, limit: u64) -> (std::io::Result<Opt
                 if jouet_output::paths::work_tree(Path::new(cwd)).as_deref() != Some(expected) {
                     return Ok(Some(false));
                 }
+                turn_cwd = Some(PathBuf::from(cwd));
+            }
+            let payload = &value["payload"];
+            if value["type"] != "response_item"
+                || payload["type"] != "function_call"
+                || !matches!(
+                    payload["name"].as_str(),
+                    Some("exec_command" | "functions.exec_command")
+                )
+            {
+                continue;
+            }
+            let arguments = match &payload["arguments"] {
+                serde_json::Value::String(text) => serde_json::from_str(text).ok(),
+                serde_json::Value::Object(_) => Some(payload["arguments"].clone()),
+                _ => None,
+            };
+            let Some(arguments) = arguments else {
+                uncertain = true;
+                continue;
+            };
+            if !arguments.is_object() {
+                uncertain = true;
+                continue;
+            }
+            let Some(workdir) = arguments.get("workdir") else {
+                continue;
+            };
+            if workdir.is_null() {
+                continue;
+            }
+            let Some(workdir) = workdir.as_str().filter(|path| !path.is_empty()) else {
+                uncertain = true;
+                continue;
+            };
+            let path = Path::new(workdir);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else if let Some(cwd) = &turn_cwd {
+                cwd.join(path)
+            } else {
+                uncertain = true;
+                continue;
+            };
+            if !path.is_dir() {
+                uncertain = true;
+                continue;
+            }
+            if let Some(project) = jouet_output::paths::work_tree(&path)
+                && project != expected
+            {
+                return Ok(Some(false));
             }
         }
-        Ok(Some(true))
+        Ok((!uncertain).then_some(true))
     })();
     (result, bytes)
 }
@@ -713,6 +767,50 @@ mod tests {
         assert!(one_project(&transcript, dir.path(), 1024).0.is_err());
         std::fs::write(&transcript, "{\"type\":\"turn_context\",\"payload\":{}}\n").unwrap();
         assert!(one_project(&transcript, dir.path(), 1024).0.is_err());
+    }
+
+    #[test]
+    fn project_inspection_checks_structured_command_workdirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        for project in [&a, &b] {
+            std::fs::create_dir_all(project.join(".git")).unwrap();
+        }
+        let transcript = root.join("session.jsonl");
+        let turn = serde_json::json!({"type":"turn_context", "payload":{"cwd":a}});
+        let command = |workdir: &str| {
+            serde_json::json!({"type":"response_item", "payload":{
+                "type":"function_call", "name":"exec_command",
+                "arguments":serde_json::json!({"cmd":"pwd", "workdir":workdir}).to_string()
+            }})
+        };
+        std::fs::write(&transcript, format!("{turn}\n{}\n", command("."))).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), Some(true));
+        std::fs::write(&transcript, format!("{turn}\n{}\n", command("../b"))).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), Some(false));
+        let object_command = serde_json::json!({"type":"response_item", "payload":{
+            "type":"function_call", "name":"exec_command",
+            "arguments":{"cmd":"pwd", "workdir":b}
+        }});
+        std::fs::write(&transcript, format!("{turn}\n{object_command}\n")).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), Some(false));
+        std::fs::write(&transcript, format!("{turn}\n{}\n", command("../removed"))).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), None);
+        std::fs::write(
+            &transcript,
+            format!("{turn}\n{}\n", command(root.to_str().unwrap())),
+        )
+        .unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), Some(true));
+        let malformed = serde_json::json!({"type":"response_item", "payload":{
+            "type":"function_call", "name":"exec_command", "arguments":"not json"
+        }});
+        std::fs::write(&transcript, format!("{turn}\n{malformed}\n")).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), None);
+        std::fs::write(&transcript, format!("{}\n", command("."))).unwrap();
+        assert_eq!(one_project(&transcript, &a, 8192).0.unwrap(), None);
     }
 
     #[test]
