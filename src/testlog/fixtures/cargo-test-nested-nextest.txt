@@ -1,0 +1,89 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running tests/gc_rustc_version.rs (target/debug/build/mbx/b5ab08fa3a881ea4/out/gc_rustc_version-b5ab08fa3a881ea4)
+
+running 2 tests
+test the_automatic_sweep_rejects_a_named_compiler ... ok
+test a_named_compiler_is_accepted_by_an_explicit_dry_run ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/nextest_scheduling.rs (target/debug/build/mbx/dce9cc994602914c/out/nextest_scheduling-dce9cc994602914c)
+
+running 6 tests
+test unix::a_cargo_alias_for_nextest_is_scheduled ... ok
+test unix::configured_and_environment_runners_compose_and_filters_remain_intact ... ok
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+info: using target runner `mbx-test-runner x86_64-unknown-linux-gnu` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+info: using target runner `mbx-test-runner x86_64-unknown-linux-gnu` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID d66adc88-0ebf-4a88-ab8d-96c26bf6a69b with nextest profile: default
+    Starting 4 tests across 1 binary
+────────────
+ Nextest run ID dd2b7b6e-a149-4b51-a717-36216485c4e9 with nextest profile: default
+    Starting 4 tests across 1 binary
+        PASS [   0.659s] (1/4) schedule-second three
+        PASS [   0.659s] (2/4) schedule-second two
+        PASS [   1.325s] (3/4) schedule-second four
+        PASS [   1.342s] (4/4) schedule-second one
+────────────
+     Summary [   1.343s] 4 tests run: 4 passed, 0 skipped
+        PASS [   1.976s] (1/4) schedule-first four
+        PASS [   1.990s] (2/4) schedule-first three
+test unix::listing_never_waits_for_a_permit_but_execution_does ... ok
+        PASS [   2.640s] (3/4) schedule-first one
+        PASS [   2.654s] (4/4) schedule-first two
+────────────
+     Summary [   2.655s] 4 tests run: 4 passed, 0 skipped
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID f24f9dcc-8591-43a1-b5d1-cac6db352e09 with nextest profile: default
+    Starting 4 tests across 1 binary
+────────────
+ Nextest run ID 1bce159d-0692-40e1-bc74-2600d1423ce9 with nextest profile: default
+    Starting 4 tests across 1 binary
+        PASS [   0.655s] (1/4) schedule-second three
+        PASS [   0.655s] (2/4) schedule-second two
+        PASS [   0.655s] (3/4) schedule-second four
+        PASS [   0.654s] (1/4) schedule-first two
+        PASS [   0.655s] (4/4) schedule-second one
+        PASS [   0.654s] (2/4) schedule-first three
+────────────
+     Summary [   0.655s] 4 tests run: 4 passed, 0 skipped
+        PASS [   0.655s] (3/4) schedule-first four
+        PASS [   0.655s] (4/4) schedule-first one
+────────────
+     Summary [   0.655s] 4 tests run: 4 passed, 0 skipped
+test unix::independent_nextest_invocations_share_capacity_and_allow_overlap ... ok
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+info: using target runner `mbx-test-runner x86_64-unknown-linux-gnu` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID d3e84d8c-48ad-4be6-9bbd-7e16679275e6 with nextest profile: default
+    Starting 1 test across 1 binary (1 test skipped)
+     SIGTERM [   0.010s] (1/1) schedule_cancel signal_hold
+  stdout ───
+
+    running 1 test
+
+    (test aborted with signal 15: SIGTERM)
+
+  Cancelling due to test failure: 
+────────────
+     Summary [   0.011s] 1 test run: 0 passed, 1 failed, 1 skipped
+     SIGTERM [   0.010s] (1/1) schedule_cancel signal_hold
+error: test run failed
+test unix::nextest_timeout_queue_and_signal_release_every_permit ... ok
+mbx[progress]: 1m 15s elapsed; 0 hits, 1 misses, 0 bypassed, 0 not looked up; ~0s compiler work saved
+test unix::nextest_history_is_per_test_and_cargo_test_keeps_suite_history ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.69s
+
+     Running tests/session_scope.rs (target/debug/build/mbx/f6f2caa0a087c7d8/out/session_scope-f6f2caa0a087c7d8)
+
+running 3 tests
+test command_line_runner_override_uses_original_environment ... ok
+test nextest_test_threads_do_not_limit_build_permits_through_an_alias ... ok
+test cargo_run_restores_settings_before_starting_application ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s

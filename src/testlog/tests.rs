@@ -131,6 +131,15 @@ fn nextest_failures_are_named_once_with_their_streams() {
 }
 
 #[test]
+fn a_nextest_run_inside_a_passing_cargo_test_is_not_counted() {
+    // A test that runs nextest itself, which kills one of its tests on
+    // purpose; libtest still reports the outer test as ok.
+    let d = digest(&fixture("cargo-test-nested-nextest"), false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [11, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
 fn rustc_errors_are_named_by_location_and_warnings_counted() {
     let d = digest(&fixture("cargo-build"), true, DEFAULT_BUDGET);
     assert_eq!(

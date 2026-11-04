@@ -267,6 +267,9 @@ regexes! {
     GO_PACKAGE_NO_TESTS = r"^\?\s+\S+\s+\[no test files\]\s*$";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
+    // Where cargo moves to the next test binary, which ends a binary's run
+    // that stopped before its result line.
+    CARGO_NEXT_BINARY = r"^\s+(Running|Doc-tests) \S";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
     // it prints last.
@@ -632,8 +635,32 @@ fn libtest(lines: &[String], out: &mut Parsed) {
     }
 }
 
+/// Which lines are inside a libtest binary's run, from `running N tests` to
+/// its `test result:`. What a test prints there is its own, and libtest's
+/// result already says whether the test passed: a test that runs nextest
+/// itself must not add the nested run's failures. nextest's own captured
+/// streams are indented, so they never start such a run.
+fn in_libtest_run(lines: &[String]) -> Vec<bool> {
+    let mut inside = false;
+    lines
+        .iter()
+        .map(|line| {
+            if LIBTEST_RUNNING.is_match(line) {
+                inside = true;
+            } else if LIBTEST_RESULT.is_match(line) || CARGO_NEXT_BINARY.is_match(line) {
+                inside = false;
+            }
+            inside
+        })
+        .collect()
+}
+
 fn nextest(lines: &[String], out: &mut Parsed) {
+    let nested = in_libtest_run(lines);
     for (i, line) in lines.iter().enumerate() {
+        if nested[i] {
+            continue;
+        }
         if let Some(c) = NEXTEST_FAIL.captures(line) {
             out.push(i, c[1].trim(), until(lines, i + 1, &NEXTEST_NEXT));
         } else if let Some(c) = NEXTEST_SUMMARY.captures(line) {
