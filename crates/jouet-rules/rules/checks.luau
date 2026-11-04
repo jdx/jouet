@@ -663,12 +663,14 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 end
 
 -- The commands of the `sh -c` script `jouet test --cmd --` ran, when it has
--- more than one and stays in the work tree it started in, each with its own
--- status as if it ran directly: `sh -c 'cargo build && cargo test'` that
--- passed ran both, and passed both. One command is classified as itself
--- (see `classify`).
-local function script_commands(command: JouetCommand): { JouetCommand }?
-	if command.program ~= "jouet" then
+-- more than one, passed, stays in the work tree it started in, and runs
+-- only checks, each with its own status as if it ran directly: `sh -c
+-- 'cargo build && cargo test'` that passed ran both, and passed both. A
+-- failed script says nothing of which command failed, and a command that
+-- is not a check may change the files after the checks ran. One command is
+-- classified as itself (see `classify`).
+local function script_commands(command: JouetCommand, dir: string?): { JouetCommand }?
+	if command.program ~= "jouet" or command.status ~= 0 then
 		return nil
 	end
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -681,16 +683,33 @@ local function script_commands(command: JouetCommand): { JouetCommand }?
 	if not ((shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3) then
 		return nil
 	end
+	-- A wrapper that changes directory (`env -C`, `mise x -C`) ran the
+	-- script in a work tree the rule cannot name.
+	for i = 1, #given - #argv do
+		local word = given[i]
+		if word == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+			return nil
+		end
+	end
 	local script = jouet.parse(argv[3], command.status)
 	if #script < 2 then
 		return nil
 	end
+	local ran: { JouetCommand } = {}
 	for _, inner in script do
-		if inner.program == "cd" or inner.program == "pushd" then
-			return nil
+		-- A command in `$(...)` runs in a subshell: its `cd` moves nothing,
+		-- and it is not one of the script's checks.
+		if not inner.nested then
+			if inner.program == "cd" or inner.program == "pushd" then
+				return nil
+			end
+			if not classify(inner, dir) then
+				return nil
+			end
+			table.insert(ran, inner)
 		end
 	end
-	return script
+	return ran
 end
 
 local rule: JouetRule = {
@@ -705,7 +724,7 @@ local rule: JouetRule = {
 					continue
 				end
 				local project_dir = if type(dir) == "string" then dir else nil
-				for _, ran in script_commands(command) or { command } do
+				for _, ran in script_commands(command, project_dir) or { command } do
 					local kind, scope = classify(ran, project_dir)
 					if kind then
 						-- Ignored when the command's own exit status is unknown.
