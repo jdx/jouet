@@ -43,6 +43,8 @@ struct CheckRun {
 /// What the fake GitHub says. Tests change it while a wait runs.
 struct World {
     head: &'static str,
+    advance_head_after_pr_read: bool,
+    advance_head_after_graphql_read: bool,
     mergeable: Option<bool>,
     mergeable_state: &'static str,
     checks: BTreeMap<&'static str, Vec<CheckRun>>,
@@ -69,6 +71,8 @@ impl Default for World {
     fn default() -> Self {
         Self {
             head: SHA_A,
+            advance_head_after_pr_read: false,
+            advance_head_after_graphql_read: false,
             mergeable: Some(true),
             mergeable_state: "clean",
             checks: BTreeMap::new(),
@@ -155,7 +159,11 @@ fn respond(
 ) -> (u16, Vec<(String, String)>, String) {
     let (path, _query) = target.split_once('?').unwrap_or((target, ""));
     if method == "POST" && path == "/graphql" {
-        return (200, Vec::new(), graphql(world, body));
+        let response = graphql(world, body);
+        if std::mem::take(&mut world.advance_head_after_graphql_read) {
+            world.head = SHA_B;
+        }
+        return (200, Vec::new(), response);
     }
     if let Some(after) = world.rate_limit_for.take() {
         let reset = std::time::SystemTime::now()
@@ -177,11 +185,17 @@ fn respond(
     let rest = path.strip_prefix(REPO).unwrap_or("");
     let parts: Vec<&str> = rest.trim_start_matches('/').split('/').collect();
     match parts.as_slice() {
-        ["pulls", "7"] => ok(json!({
-            "number": 7, "state": "open", "merged": false, "merged_at": null,
-            "head": { "sha": world.head }, "base": { "ref": "main" },
-            "mergeable": world.mergeable, "mergeable_state": world.mergeable_state,
-        })),
+        ["pulls", "7"] => {
+            let response = ok(json!({
+                "number": 7, "state": "open", "merged": false, "merged_at": null,
+                "head": { "sha": world.head }, "base": { "ref": "main" },
+                "mergeable": world.mergeable, "mergeable_state": world.mergeable_state,
+            }));
+            if std::mem::take(&mut world.advance_head_after_pr_read) {
+                world.head = SHA_B;
+            }
+            response
+        }
         ["pulls"] => ok(json!([{ "number": 7 }])),
         ["pulls", "7", "files"] => ok(Value::Array(
             world
@@ -627,28 +641,22 @@ fn ci_fails_fast_with_the_failed_steps_log_while_the_run_is_in_progress() {
 #[test]
 fn ci_follows_a_moved_head() {
     let dir = tempfile::tempdir().unwrap();
-    let mut world = World::default();
+    let mut world = World {
+        advance_head_after_pr_read: true,
+        ..World::default()
+    };
     world
         .checks
         .insert(SHA_A, vec![check(1, "unit", "in_progress", None)]);
     world
         .checks
-        .insert(SHA_B, vec![check(2, "unit", "in_progress", None)]);
+        .insert(SHA_B, vec![check(2, "unit", "completed", Some("success"))]);
     let fake = serve(world);
     let child = spawn(
         &fake,
         dir.path(),
-        &[&CI[..], &["100ms", "--jsonl"]].concat(),
+        &[&CI[..], &["100ms", "--timeout", "15s", "--jsonl"]].concat(),
     );
-    let w = handle(&fake);
-    after(500, move || {
-        let mut w = w.lock().unwrap();
-        w.head = SHA_B;
-        w.checks
-            .insert(SHA_B, vec![check(2, "unit", "completed", Some("success"))]);
-    })
-    .join()
-    .unwrap();
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -1092,7 +1100,10 @@ fn pr_mergeable_waits_out_unknown() {
 #[test]
 fn pr_any_change_returns_the_first_change() {
     let dir = tempfile::tempdir().unwrap();
-    let fake = serve(World::default());
+    let fake = serve(World {
+        advance_head_after_graphql_read: true,
+        ..World::default()
+    });
     let child = spawn(
         &fake,
         dir.path(),
@@ -1106,13 +1117,11 @@ fn pr_any_change_returns_the_first_change() {
             "any-change",
             "--interval",
             "100ms",
+            "--timeout",
+            "15s",
             "--json",
         ],
     );
-    let w = handle(&fake);
-    after(500, move || w.lock().unwrap().head = SHA_B)
-        .join()
-        .unwrap();
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),
