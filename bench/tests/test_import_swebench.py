@@ -387,7 +387,7 @@ class ImportTest(unittest.TestCase):
     def test_a_failure_observed_before_timeout_is_a_failure(self):
         meta_path = self.task / "swebench.json"
         meta = json.loads(meta_path.read_text())
-        meta["test_command"] = ["{python}", "-c", "import time; print('test_add (test_calc.CalcTest) ... FAIL', flush=True); time.sleep(30)"]
+        meta["test_command"] = ["{python}", "-c", "import time; print('test_add (test_calc.CalcTest) ... FAIL\\nexception details', flush=True); time.sleep(30)"]
         meta["test_timeout_s"] = 2
         meta_path.write_text(json.dumps(meta))
         work = self.tmp / "work"
@@ -397,6 +397,7 @@ class ImportTest(unittest.TestCase):
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("test_add (test_calc.CalcTest)", proc.stdout)
+        self.assertIn("exception details", proc.stdout)
 
     def test_custom_exit_only_checker_and_unknown_format(self):
         meta_path = self.task / "swebench.json"

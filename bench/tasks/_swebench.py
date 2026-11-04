@@ -149,8 +149,8 @@ def check(task_dir: Path) -> None:
         parser = PARSERS.get(spec["log_format"])
         if parser is not None:
             failed = [name for name, status in parser(partial).items() if status == FAIL]
-            expect(not failed, "tests failed before the timeout: " + ", ".join(failed))
-        UNVERIFIED.append(f"the tests timed out: {' '.join(command)}\n{partial[-3000:]}")
+            expect(not failed, "tests failed before the timeout: " + ", ".join(failed) + f"\n{partial}")
+        UNVERIFIED.append(f"the tests timed out: {' '.join(command)}\n{partial}")
         finish()
         return
     log = proc.stdout + proc.stderr
