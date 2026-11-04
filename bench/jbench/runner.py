@@ -549,7 +549,7 @@ def execute(
         "task_dir": str(task.dir.parent),
         "harness": p.harness,
         "arm": p.arm,
-        "success": check["passed"] and not agent["stopped"] and agent["exit_code"] == 0,
+        "success": (False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]),
         "check": {k: v for k, v in check.items() if k != "output"},
         "stopped": agent["stopped"],
         "exit_code": agent["exit_code"],
@@ -697,7 +697,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 f.write(json.dumps(record) + "\n")
             u = record.get("usage") or {}
             log(
-                f"    {'ok' if record['success'] else 'FAILED'}"
+                f"    {'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
                 f"  {record.get('wall_s', '-')}s"
                 f"  in {u.get('input_tokens', '-')} out {u.get('output_tokens', '-')}"
                 + (f"  stopped: {record['stopped']}" if record.get("stopped") else "")

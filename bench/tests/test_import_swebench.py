@@ -139,7 +139,9 @@ class CommandTest(unittest.TestCase):
     def test_pytest_files_from_node_ids(self):
         spec = imp.spec_for("pylint-dev/pylint", "2.9")
         rec = {"FAIL_TO_PASS": ["tests/a.py::test_x[1]"], "PASS_TO_PASS": ["tests/b.py::T::test_y", "tests/a.py::z"]}
-        self.assertEqual(imp.test_command(spec, rec, [])[-2:], ["tests/a.py", "tests/b.py"])
+        command = imp.test_command(spec, rec, [])
+        self.assertEqual(command[-2:], ["tests/a.py", "tests/b.py"])
+        self.assertIn("-v", command)
 
     def test_python_versions(self):
         self.assertEqual(imp.spec_for("django/django", "3.0").python, "3.8")
@@ -179,6 +181,11 @@ class LogTest(unittest.TestCase):
 
     def test_pytest(self):
         log = "\n".join([
+            "tests/a.py::test_early FAILED [ 10%]",
+            "tests/a.py::test_skip SKIPPED [ 20%]",
+            "retry FAILED",
+            "============================= PASSES =============================",
+            "fake.py::test_output FAILED",
             "PASSED tests/a.py::test_x[1]",
             "FAILED tests/a.py::test_y - AssertionError: no",
             "SKIPPED [1] tests/a.py:9: needs docutils",
@@ -187,22 +194,16 @@ class LogTest(unittest.TestCase):
         ])
         self.assertEqual(_swebench.parse_pytest(log), {
             "tests/a.py::test_x[1]": "pass", "tests/a.py::test_y": "fail", "tests/a.py::test_z": "xfail",
-            "tests/a.py::test_w[a:": "pass",
+            "tests/a.py::test_w[a:": "pass", "tests/a.py::test_early": "fail", "tests/a.py::test_skip": "skip",
         })
 
     def test_verdict(self):
-        import contextlib
-        import io
-
         spec = {"fail_to_pass": ["a", "b"], "pass_to_pass": ["c", "d", "e", "f"]}
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            problems = _swebench.verdict(spec, {"a": "pass", "b": "skip", "c": "fail",
-                                               "d": "skip", "f": "xfail"})
-        self.assertEqual(problems, ["FAIL_TO_PASS b: skip", "PASS_TO_PASS c: fail"])
-        self.assertIn("d (skip)", output.getvalue())
-        self.assertIn("e (not run or not named)", output.getvalue())
-        self.assertIn("f (xfail)", output.getvalue())
+        problems, unverified = _swebench.verdict(spec, {"a": "pass", "b": "skip", "c": "fail",
+                                                       "d": "skip", "f": "xfail"})
+        self.assertEqual(problems, ["PASS_TO_PASS c: fail"])
+        self.assertEqual(unverified, ["FAIL_TO_PASS b: skip", "PASS_TO_PASS d: skip",
+                                      "PASS_TO_PASS e: not run or not named", "PASS_TO_PASS f: xfail"])
 
 
 class ImportTest(unittest.TestCase):
@@ -228,7 +229,12 @@ class ImportTest(unittest.TestCase):
         self.out.mkdir()
         for helper in ("_check.py", "_swebench.py"):
             shutil.copy(tasks.TASKS_DIR / helper, self.out / helper)
-        spec = imp.Spec(None, "command", "exit", command=["{python}", "-m", "unittest", "-v", "test_calc"])
+        # Keep unittest's verbose names stable across Python versions.
+        run_tests = ("import unittest; "
+                     "unittest.TestCase.__str__ = lambda t: '%s (%s.%s)' % "
+                     "(t._testMethodName, t.__class__.__module__, t.__class__.__qualname__); "
+                     "unittest.main(module='test_calc', verbosity=2)")
+        spec = imp.Spec(None, "command", "django", command=["{python}", "-c", run_tests])
         self.task = imp.write_task(imp.normalize(record(base_commit=self.base)), self.out, self.tmp / "clones",
                                    self.tmp / "envs", "Test bench", spec)
 
@@ -319,8 +325,31 @@ class ImportTest(unittest.TestCase):
                 proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
                                       env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
                                       capture_output=True, text=True)
-                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
                 self.assertIn("FAIL_TO_PASS", proc.stdout)
+
+    def test_skipped_regression_test_makes_the_result_unverified(self):
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta.update(log_format="django", fail_to_pass=["test_fix (case.Test)"],
+                    pass_to_pass=["test_regression (case.Test)"],
+                    test_command=["{python}", "-c", "print(\"test_fix (case.Test) ... ok\\ntest_regression (case.Test) ... skipped 'no backend'\")"])
+        meta_path.write_text(json.dumps(meta))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertIn("PASS_TO_PASS test_regression (case.Test): skip", proc.stdout)
+        self.assertTrue(proc.stdout.rstrip().endswith("JOUET_BENCH_UNVERIFIED_V1"))
+        meta["test_command"] = ["{python}", "-c", "print(\"test_fix (case.Test) ... FAIL\\ntest_regression (case.Test) ... skipped 'no backend'\")"]
+        meta_path.write_text(json.dumps(meta))
+        failed = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertNotIn("JOUET_BENCH_UNVERIFIED_V1", failed.stdout)
 
     def test_check_rejects_a_failure_despite_a_zero_exit(self):
         work = self.tmp / "work"
@@ -357,10 +386,55 @@ class ImportTest(unittest.TestCase):
         proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
                               env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
                               capture_output=True, text=True)
-        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.returncode, 3)
         self.assertIn("timed out", proc.stdout)
         self.assertIn("started", proc.stdout)
         self.assertIn("started", (self.tmp / "acme__calc-7.test.log").read_text())
+
+    def test_a_failure_observed_before_timeout_is_a_failure(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["test_command"] = ["{python}", "-c", "import time; print('test_add (test_calc.CalcTest) ... FAIL\\nexception details', flush=True); time.sleep(30)"]
+        meta["test_timeout_s"] = 2
+        meta_path.write_text(json.dumps(meta))
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("test_add (test_calc.CalcTest)", proc.stdout)
+        self.assertIn("exception details", proc.stdout)
+
+    def test_pytest_verbose_failure_before_timeout_is_a_failure(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["log_format"] = "pytest"
+        meta["test_command"] = ["{python}", "-c", "import time; print('tests/test_calc.py::test_add FAILED [ 50%]', flush=True); time.sleep(30)"]
+        meta["test_timeout_s"] = 2
+        meta_path.write_text(json.dumps(meta))
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("tests/test_calc.py::test_add", proc.stdout)
+
+    def test_custom_exit_only_checker_and_unknown_format(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["test_command"] = ["{python}", "-c", "pass"]
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        for log_format, expected in (("exit", 0), ("unknown", 3)):
+            with self.subTest(log_format=log_format):
+                meta["log_format"] = log_format
+                meta_path.write_text(json.dumps(meta))
+                proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                                      env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                                      capture_output=True, text=True)
+                self.assertEqual(proc.returncode, expected, proc.stdout + proc.stderr)
 
 
 class ToolTest(unittest.TestCase):

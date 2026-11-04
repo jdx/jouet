@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _check import commit, expect, finish, new_commit  # noqa: E402
+from _check import UNVERIFIED, commit, expect, finish, new_commit  # noqa: E402
 
 PASS, FAIL, SKIP, XFAIL = "pass", "fail", "skip", "xfail"
 
@@ -87,9 +87,13 @@ def parse_sympy(log: str) -> dict[str, str]:
 
 
 def parse_pytest(log: str) -> dict[str, str]:
-    """pytest's `-rA` summary: `PASSED nodeid`, `FAILED nodeid - reason`.
-    A node id is cut at its first space, as SWE-bench names tests."""
+    """Read verbose progress and the `-rA` summary, including partial runs."""
     statuses = {}
+    progress = re.split(r"^={3,}\s*(?:FAILURES|ERRORS|PASSES|warnings summary|short test summary info)\s*={3,}\s*$",
+                        log, maxsplit=1, flags=re.M)[0]
+    for m in re.finditer(r"^(\S+\.py::\S+) (PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)(?:\s|$)", progress, re.M):
+        status = {"PASSED": PASS, "XFAIL": XFAIL, "SKIPPED": SKIP}.get(m.group(2), FAIL)
+        record(statuses, m.group(1), status)
     for m in re.finditer(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED) (\S+)", log, re.M):
         if m.group(1) == "SKIPPED":
             continue  # `SKIPPED [1] path:line: reason` names no test.
@@ -101,26 +105,19 @@ def parse_pytest(log: str) -> dict[str, str]:
 PARSERS = {"django": parse_django, "sympy": parse_sympy, "pytest": parse_pytest}
 
 
-def verdict(spec: dict, statuses: dict[str, str]) -> list[str]:
-    """What failed: every FAIL_TO_PASS test must pass; a PASS_TO_PASS test
-    must not fail. A skipped, expected-failing or missing PASS_TO_PASS test
-    is reported as unverified, but does not fail the check."""
+def verdict(spec: dict, statuses: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Separate observed failures from required tests without a passing result."""
     problems = []
-    for name in spec["fail_to_pass"]:
-        status = statuses.get(name)
-        if status != PASS:
-            problems.append(f"FAIL_TO_PASS {name}: {status or 'not run'}")
     unverified = []
-    for name in spec["pass_to_pass"]:
-        status = statuses.get(name)
-        if status == FAIL:
-            problems.append(f"PASS_TO_PASS {name}: fail")
-        elif status != PASS:
-            unverified.append(f"{name} ({status or 'not run or not named'})")
-    if unverified:
-        print(f"{len(unverified)} PASS_TO_PASS tests were not verified: {unverified[:5]}"
-              + (f" ... {len(unverified) - 5} more" if len(unverified) > 5 else ""))
-    return problems
+    for category in ("fail_to_pass", "pass_to_pass"):
+        for name in spec[category]:
+            status = statuses.get(name)
+            detail = f"{category.upper()} {name}: {status or 'not run or not named'}"
+            if status == FAIL:
+                problems.append(detail)
+            elif status != PASS:
+                unverified.append(detail)
+    return problems, unverified
 
 
 def place_hidden(task_dir: Path, spec: dict) -> None:
@@ -153,7 +150,11 @@ def check(task_dir: Path) -> None:
         partial = "".join(out.decode(errors="replace") if isinstance(out, bytes) else out
                           for out in (error.stdout, error.stderr) if out)
         save_log(spec, partial)
-        expect(False, f"the tests timed out: {' '.join(command)}\n{partial[-3000:]}")
+        parser = PARSERS.get(spec["log_format"])
+        if parser is not None:
+            failed = [name for name, status in parser(partial).items() if status == FAIL]
+            expect(not failed, "tests failed before the timeout: " + ", ".join(failed) + f"\n{partial}")
+        UNVERIFIED.append(f"the tests timed out: {' '.join(command)}\n{partial}")
         finish()
         return
     log = proc.stdout + proc.stderr
@@ -165,10 +166,13 @@ def check(task_dir: Path) -> None:
         failed = [name for name, status in statuses.items() if status == FAIL]
         if proc.returncode == 0 and failed:
             expect(False, "the tests exited 0 but reported failures: " + ", ".join(failed))
-        problems = verdict(spec, statuses)
+        problems, unverified = verdict(spec, statuses)
+        UNVERIFIED.extend(unverified)
         print(f"{sum(s == PASS for s in statuses.values())} of {len(statuses)} named results passed "
               "(a test can have multiple names)")
         expect(not problems, "the instance's tests fail:\n" + "\n".join(problems) + f"\n{log[-2500:]}")
+    elif spec["log_format"] != "exit":
+        UNVERIFIED.append(f"no parser for test log format {spec['log_format']!r}")
     # Not a condition of the check: the prompt asks for a commit.
     print(f"committed: {new_commit()}")
     finish()

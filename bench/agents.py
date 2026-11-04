@@ -433,7 +433,9 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                 check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None))
                 runner.sweep(run_dir, None)
                 runner.sweep(workdir, None)
-                if check["passed"] != solve:
+                if check["passed"] is None:
+                    failures.append(f"{name}: the check is unverified when {label}:\n{check['output']}")
+                elif check["passed"] != solve:
                     want = "pass" if solve else "fail"
                     failures.append(f"{name}: the check should {want} when {label}:\n{check['output']}")
                 else:
