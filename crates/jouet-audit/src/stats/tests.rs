@@ -15,8 +15,72 @@ fn kind(kind: Kind, runs: u64, requests: u64, input_tokens: u64) -> KindBaseline
         input_tokens,
         calls: requests,
         failed: 0,
+        output_bytes: 0,
         linked_waits: false,
     }
+}
+
+#[test]
+fn jouet_test_saves_the_output_it_cut_counted_once() {
+    let with = |shape: &str, bytes: u64| LedgerEntry {
+        output_bytes: Some(bytes),
+        ..post(shape, 0)
+    };
+    let entries = [
+        with("jouet test --affected", 1_000),
+        with("jouet test --cmd -- <arg>", 3_000),
+        // Output a call shares with another command is not jouet test's.
+        with(
+            "jouet test --affected && jouet commit <arg> --message <arg>",
+            90_000,
+        ),
+        with("cargo test && jouet test --affected", 90_000),
+        // No size recorded.
+        post("jouet test --affected", 0),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let test = m
+        .commands
+        .iter()
+        .find(|c| c.command == "jouet test")
+        .unwrap();
+    assert_eq!(
+        (test.runs, test.output_calls, test.output_bytes),
+        (5, 2, 4_000)
+    );
+    let baseline = |output_bytes: u64| Baseline {
+        harness: "claude".into(),
+        requests_with_tokens: 1000,
+        input_tokens: 100_000_000,
+        kinds: vec![KindBaseline {
+            output_bytes,
+            ..kind(Kind::Test, 100, 100, 10_000_000)
+        }],
+        ..Baseline::default()
+    };
+    // 100 calls printed 2 MB before: 20,000 bytes each, against 2,000.
+    let e = estimate(&m, &[baseline(2_000_000)]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert_eq!(e.input_tokens, Some(9_000));
+    assert!(
+        e.basis
+            .contains("20,000 bytes of output on average; jouet test gave 2,000 over the 2 calls"),
+        "{}",
+        e.basis
+    );
+    // A baseline saved before output sizes were kept asks for a rescan.
+    let e = estimate(&m, &[baseline(0)]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert!(e.refused.as_deref().unwrap().contains("--rescan"));
+    // Printing more than before saves nothing.
+    let e = estimate(&m, &[baseline(100_000)]);
+    assert_eq!(
+        e.iter()
+            .find(|e| e.kind == Kind::Test)
+            .unwrap()
+            .input_tokens,
+        Some(0)
+    );
 }
 
 #[test]

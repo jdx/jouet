@@ -167,6 +167,12 @@ pub struct CommandRuns {
     pub own_failed: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub duration_ms: u64,
+    /// Calls that ran only it and recorded how much output they gave the
+    /// agent, and that output's bytes.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub output_calls: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub output_bytes: u64,
 }
 
 /// The program each stage of a shape runs, a `cd` left out.
@@ -387,6 +393,17 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         // jouet test` exiting 1 is a failing test, not a failed edit.
         let code = e.exit_code.unwrap_or(0);
         let answered = code != 0 && is_answer(&ran, code);
+        // Output is the call's, so it is the command's only when the call
+        // ran nothing else.
+        let alone = e
+            .shape
+            .as_deref()
+            .is_some_and(|s| ran.len() == 1 && programs(s).len() == 1);
+        if let (true, Some(bytes), [command]) = (alone, e.output_bytes, ran.as_slice()) {
+            let c = command_runs(&mut commands, &e.harness, command);
+            c.output_calls += 1;
+            c.output_bytes += bytes;
+        }
         for command in ran {
             let failed =
                 code != 0 && (!answered || is_answer(std::slice::from_ref(&command), code));
@@ -509,15 +526,18 @@ pub enum Kind {
     PrStatus,
     PrThreads,
     Edit,
+    /// A test, lint or build run whose output jouet cut to its failures.
+    Test,
 }
 
 impl Kind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::CiWait,
         Self::ProcessWait,
         Self::PrStatus,
         Self::PrThreads,
         Self::Edit,
+        Self::Test,
     ];
 
     /// The jouet commands that do this work.
@@ -540,6 +560,7 @@ impl Kind {
                 "jouet pr threads apply",
             ],
             Self::Edit => &["jouet edit", "jouet edit replace"],
+            Self::Test => &["jouet test"],
         }
     }
 
@@ -551,6 +572,7 @@ impl Kind {
             Self::PrStatus => "jouet pr status",
             Self::PrThreads => "jouet pr threads",
             Self::Edit => "jouet edit",
+            Self::Test => "jouet test",
         }
     }
 
@@ -562,6 +584,7 @@ impl Kind {
             Self::PrStatus => "PR status check",
             Self::PrThreads => "review-thread round",
             Self::Edit => "edit",
+            Self::Test => "test, lint or build call",
         };
         if n == 1 {
             format!("1 {one}")
@@ -577,6 +600,7 @@ impl Kind {
             Self::PrStatus => Category::PrStatus,
             Self::PrThreads => Category::PrThreads,
             Self::Edit => Category::Edits,
+            Self::Test => Category::BuildTestLint,
         }
     }
 
@@ -627,6 +651,10 @@ pub struct KindBaseline {
     pub calls: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub failed: u64,
+    /// The bytes of output its calls gave the agent. Absent on saved older
+    /// baselines.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub output_bytes: u64,
     /// Process-wait runs were built from linked, eligible checks, not the
     /// old category-wide grouping. Absent on saved older baselines.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -694,6 +722,7 @@ pub fn baseline(report: &HarnessReport, until: Option<u64>) -> Baseline {
                     },
                     calls: c.calls,
                     failed: c.failed,
+                    output_bytes: c.output_bytes,
                     linked_waits: kind == Kind::ProcessWait,
                 })
             })
@@ -730,16 +759,22 @@ pub struct Estimate {
 /// [`costs`] charges the difference.
 pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
     let mut runs: BTreeMap<(String, Kind), (u64, u64, u64)> = BTreeMap::new();
+    let mut output: BTreeMap<(String, Kind), (u64, u64)> = BTreeMap::new();
     for c in &measured.commands {
         if let Some(kind) = Kind::of(&c.command) {
             let r = runs.entry((c.harness.clone(), kind)).or_default();
             r.0 += c.runs;
             r.1 += c.own_runs;
             r.2 += c.own_failed;
+            let o = output.entry((c.harness.clone(), kind)).or_default();
+            o.0 += c.output_calls;
+            o.1 += c.output_bytes;
         }
     }
     runs.into_iter()
         .map(|((harness, kind), (runs, own_runs, failed))| {
+            let (output_calls, output_bytes) =
+                output.get(&(harness.clone(), kind)).copied().unwrap_or_default();
             let refuse = |reason: String| Estimate {
                 harness: harness.clone(),
                 kind,
@@ -776,7 +811,30 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                     "no jouet edit run recorded its own exit code (from this release on, each does), and the exit code of the whole call mixes in failures of whatever else it ran".to_string(),
                 );
             }
-            let (tokens, avoided, basis) = if kind == Kind::Edit {
+            if kind == Kind::Test && output_calls == 0 {
+                return refuse("no jouet test call recorded how much output it gave the agent (from this release on, each does in Claude Code)".to_string());
+            }
+            if kind == Kind::Test && k.calls > 0 && k.output_bytes == 0 {
+                return refuse("the saved baseline has no output sizes; run `jouet stats --rescan`".to_string());
+            }
+            let (tokens, avoided, basis) = if kind == Kind::Test {
+                // What a check printed before setup, against what jouet test
+                // printed, counted once: the output stays in the context of
+                // every later request, so this is a lower bound.
+                let before = ratio(k.output_bytes, k.calls);
+                let after = ratio(output_bytes, output_calls);
+                (
+                    output_calls as f64 * (before - after).max(0.0) / BYTES_PER_TOKEN,
+                    None,
+                    format!(
+                        "{} before setup gave the agent {} bytes of output on average; jouet test gave {} over the {} calls that recorded it, at {BYTES_PER_TOKEN} bytes a token, counted once though output stays in the context of every later request",
+                        kind.count(k.calls),
+                        count_text(before.round() as u64),
+                        count_text(after.round() as u64),
+                        count_text(output_calls),
+                    ),
+                )
+            } else if kind == Kind::Edit {
                 // Its own rate, from the runs that recorded their exit code.
                 let before = k.failure_rate();
                 let after = ratio(failed, own_runs);
@@ -826,6 +884,9 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
         .collect()
 }
 
+/// About how many bytes of tool output make a token.
+const BYTES_PER_TOKEN: f64 = 4.0;
+
 /// What one jouet run of each kind would save, by each harness's history:
 /// the view when there is no ledger to measure from yet. Kinds without
 /// enough history are refused, as in [`estimate`].
@@ -833,13 +894,18 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
     let commands = baselines
         .iter()
         .flat_map(|b| {
-            Kind::ALL.into_iter().map(|kind| CommandRuns {
-                command: kind.commands()[0].to_string(),
-                harness: b.harness.clone(),
-                runs: 1,
-                own_runs: 1,
-                ..CommandRuns::default()
-            })
+            Kind::ALL
+                .into_iter()
+                .map(|kind| CommandRuns {
+                    command: kind.commands()[0].to_string(),
+                    harness: b.harness.clone(),
+                    runs: 1,
+                    own_runs: 1,
+                    ..CommandRuns::default()
+                })
+                // What jouet test prints depends on the run, which no ledger has
+                // measured yet.
+                .filter(|c| c.command != "jouet test")
         })
         .collect();
     let mut estimates = estimate(
