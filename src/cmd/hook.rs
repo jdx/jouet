@@ -162,6 +162,8 @@ fn handle(
                 .collect();
             // The checks the project committed, so the agent need not look.
             notes.extend(cwd.and_then(crate::project::primer_line));
+            // And where things are, read when needed.
+            notes.extend(cwd.and_then(crate::project::map_line));
             notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(

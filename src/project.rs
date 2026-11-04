@@ -106,11 +106,32 @@ pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
 /// trusted: it is text an agent acts on.
 pub(crate) fn trusted(root: &Path) -> Option<Result<Project, String>> {
     let project = read(root)?;
+    repo_trusted(root).then_some(project)
+}
+
+/// Whether the repository's jouet files at `root` run.
+fn repo_trusted(root: &Path) -> bool {
     let mut errors = Vec::new();
     sources::sets(root, None, &mut sources::digests(), &mut errors)
         .iter()
         .any(|set| set.kind == Kind::Repo && set.status.runs())
-        .then_some(project)
+}
+
+/// One line for the session-start primer pointing at the repository's
+/// `.jouet/map.md`, once its jouet files are trusted. The map is read once,
+/// when the agent needs it, rather than carried by every request.
+pub(crate) fn map_line(cwd: &Path) -> Option<String> {
+    let root = crate::verify::root_of(cwd);
+    let root = Path::new(&root);
+    let text = std::fs::read_to_string(root.join(".jouet/map.md")).ok()?;
+    repo_trusted(root).then(|| map_note(&text))
+}
+
+fn map_note(text: &str) -> String {
+    format!(
+        "jouet: .jouet/map.md maps where this project's code, tests and generated files live ({} lines): read it before searching for where something is.",
+        text.lines().count()
+    )
 }
 
 fn line(checks: &Checks) -> Option<String> {
@@ -172,6 +193,14 @@ fn line(checks: &Checks) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_map_is_named_with_its_length_not_inlined() {
+        assert_eq!(
+            map_note("# Map\n\n- `src/`: the code\n"),
+            "jouet: .jouet/map.md maps where this project's code, tests and generated files live (3 lines): read it before searching for where something is."
+        );
+    }
 
     #[test]
     fn the_checks_make_one_line_in_a_fixed_order() {

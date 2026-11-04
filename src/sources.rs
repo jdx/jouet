@@ -14,6 +14,7 @@ pub(crate) const ENTRIES: &[&str] = &[
     "plugins.toml",
     "test.toml",
     "project.toml",
+    "map.md",
 ];
 
 /// Where a set comes from.

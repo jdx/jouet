@@ -137,7 +137,7 @@ fn target(cwd: &Path) -> Result<Set, (Exit, String)> {
         .ok_or_else(|| {
             (
             Exit::NotFound,
-            "no .jouet/rules, .jouet/routines, .jouet/test.toml, .jouet/project.toml or .jouet/plugins.toml at the root of this repository"
+            "no .jouet/rules, .jouet/routines, .jouet/test.toml, .jouet/project.toml, .jouet/map.md or .jouet/plugins.toml at the root of this repository"
                 .into(),
         )
         })

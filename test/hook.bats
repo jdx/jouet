@@ -783,6 +783,26 @@ claude_payload() {
 	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
 }
 
+@test "session-start points at a trusted .jouet/map.md without inlining it" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '# Map\n\n- src/backend/: one file per backend\n' >repo/.jouet/map.md
+	map_start() {
+		jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", source: "startup", cwd: $cwd}' |
+			jouet hook claude session-start | jq -r '.hookSpecificOutput.additionalContext'
+	}
+	run map_start
+	refute_output --partial '.jouet/map.md'
+	(cd repo && jouet trust --yes >/dev/null)
+	run map_start
+	assert_output --partial 'jouet: .jouet/map.md maps where this project'"'"'s code, tests and generated files live (3 lines): read it before searching'
+	refute_output --partial 'one file per backend'
+	# A changed map needs trusting again.
+	echo '- lib/: more' >>repo/.jouet/map.md
+	run map_start
+	refute_output --partial '.jouet/map.md maps'
+}
+
 @test "a check .jouet/project.toml lists as broken is a note, not a block, once trusted" {
 	git init -q repo
 	mkdir -p repo/.jouet
