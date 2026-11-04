@@ -102,6 +102,12 @@ pub struct Overhead {
     /// Sessions stopped from finishing after a failed check.
     #[serde(skip_serializing_if = "is_zero")]
     pub stop_blocks: u64,
+    /// Of those, the ones a passing check followed before the session next
+    /// stopped: the block held the agent until its check passed, which a
+    /// correct change needs anyway. The rest finished with no check passing:
+    /// the agent spent a request on the block and changed nothing it tested.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stop_blocks_resolved: u64,
     /// Calls a rule denied.
     #[serde(skip_serializing_if = "is_zero")]
     pub denials: u64,
@@ -277,8 +283,14 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut not_loaded: BTreeSet<String> = BTreeSet::new();
     // The next pre-tool-use entry of each session, for "what came next".
     let mut by_session: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
+    // Every entry of each session, for what followed a stop block.
+    let mut whole_session: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut blocks: Vec<usize> = Vec::new();
     for (i, e) in kept.iter().enumerate() {
         sessions.insert(e.session.as_deref());
+        if let Some(session) = e.session.as_deref() {
+            whole_session.entry(session).or_default().push(i);
+        }
         if e.event == "pre-tool-use" {
             by_session.entry(e.session.as_deref()).or_default().push(i);
         }
@@ -323,6 +335,7 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 "block" if d.rule == "verify" => {
                     m.verify_blocks += 1;
                     added.stop_blocks += 1;
+                    blocks.push(i);
                 }
                 action => {
                     if let Some(kind) = action.strip_prefix("record:") {
@@ -404,6 +417,23 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             }
         }
     }
+    for &i in &blocks {
+        let Some(entries) = kept[i]
+            .session
+            .as_deref()
+            .and_then(|s| whole_session.get(s))
+        else {
+            continue;
+        };
+        let after = entries.iter().skip_while(|&&j| j != i).skip(1);
+        let resolved = after
+            .map(|&j| kept[j])
+            .take_while(|e| e.event != "stop")
+            .any(passing_check);
+        if resolved && let Some(o) = overhead.get_mut(&kept[i].harness) {
+            o.stop_blocks_resolved += 1;
+        }
+    }
     for ((rule, _), n) in fired {
         let r = rule_counts(&mut rules, rule);
         r.sessions += 1;
@@ -435,6 +465,17 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         })
         .collect();
     m
+}
+
+/// Whether `e` is a test, lint or build run that passed: one the `checks`
+/// rule recorded, or a `jouet test` that recorded its own exit code.
+fn passing_check(e: &LedgerEntry) -> bool {
+    e.exit_code == Some(0)
+        && (e.decisions.iter().any(|d| d.action.starts_with("record:"))
+            || (e.event == "jouet-run"
+                && e.shape
+                    .as_deref()
+                    .is_some_and(|s| jouet_commands(s).iter().any(|c| c == "jouet test"))))
 }
 
 fn command_runs<'a>(
