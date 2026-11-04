@@ -21,6 +21,8 @@ browser_names = ('keeps a fixed sidebar popup in place when the page scrolls',
                  'preserves the default positioning for other dropdown menus',
                  'preserves the default positioning for other selects',
                  'keeps sidebar Timeline settings fixed while scrolling',
+                 'keeps sidebar Timeline memo.order-by selector fixed while scrolling',
+                 'keeps sidebar Timeline memo.direction selector fixed while scrolling',
                  'keeps sidebar memo Share fixed while scrolling',
                  'keeps sidebar Tags fixed while scrolling',
                  'keeps sidebar Views fixed while scrolling')

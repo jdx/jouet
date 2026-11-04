@@ -70,6 +70,16 @@ it('keeps sidebar Timeline settings fixed while scrolling', async () => {
   await remainsFixed(await screen.findByRole('dialog', { name: 'common.timeline · memo.view-options' }));
 });
 
+it.each(['memo.order-by', 'memo.direction'])('keeps sidebar Timeline %s selector fixed while scrolling', async (label) => {
+  renderSidebar();
+  fireEvent.click(screen.getByRole('button', { name: 'common.timeline · memo.view-options' }));
+  fireEvent.click(await screen.findByRole('combobox', { name: label }));
+  const listbox = await screen.findByRole('listbox');
+  const popup = listbox.closest('[data-slot=select-content]') as HTMLElement;
+  expect(popup).not.toBeNull();
+  await remainsFixed(popup);
+});
+
 it('keeps sidebar Tags fixed while scrolling', async () => {
   renderSidebar();
   fireEvent.click(screen.getByRole('button', { name: 'common.tags: common.more' }));
