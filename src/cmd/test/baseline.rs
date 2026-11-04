@@ -30,6 +30,27 @@ static GO_FRAME_ARGS: LazyLock<regex::Regex> = LazyLock::new(|| {
 static GO_FRAME_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\s+\S+\.go:\d+) \+0x[0-9a-fA-F]+$").expect("frame offset pattern")
 });
+static REMARK_WARNING: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"^\s*(\d+:\d+(?:-\d+:\d+)?)\s+warning\s+(.+\s+remark-validate-links:[\w-]+)\s*$",
+    )
+    .expect("remark warning pattern")
+});
+static REMARK_SUMMARY: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^⚠\s+(\d+) warnings?$").expect("remark summary pattern"));
+static EARLIER_FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)\b(?:error|errors|fail|failed|failure|failures|fatal|panic|panicked|broke|broken|crash|crashed|exception|traceback)\b|\bnot\s+ok\b",
+    )
+    .expect("earlier failure pattern")
+});
+static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)^(?:error|fail|failed|failure|fatal|panic|exception|traceback)\b")
+        .expect("failure prefix pattern")
+});
+static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\b0 (?:errors?|failed|failures?)\b").expect("zero failures pattern")
+});
 const DETAILS_VERSION: u32 = 3;
 
 /// What a failing run's failures were at the merge base.
@@ -178,13 +199,105 @@ pub(super) struct Evidence {
     go: Option<BTreeMap<String, BTreeSet<String>>>,
 }
 
+/// Only the complete, terminal output of remark's explicit frail link check
+/// is comparable. A warning alone does not prove why a command exited nonzero.
+fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
+    let lines = testlog::clean(output);
+    let start = lines.iter().rposition(|line| {
+        let words: Vec<_> = line.split_whitespace().collect();
+        let direct = words.starts_with(&["$", "remark"]);
+        let piped = words.starts_with(&["$", "xargs", "-0", "remark"])
+            || words
+                .windows(4)
+                .any(|w| w == ["|", "xargs", "-0", "remark"]);
+        line.starts_with("$ ")
+            && (direct || piped)
+            && words.ends_with(&[
+                "remark",
+                "--use",
+                "remark-validate-links",
+                "--frail",
+                "--quiet",
+            ])
+    })?;
+    // Unknown earlier failures cannot be attributed to the final remark
+    // command. Ignore path tokens, which can contain names such as error.rs.
+    if lines[..start].iter().any(|line| {
+        let words = line
+            .split_whitespace()
+            .filter(|word| !word.contains(['/', '\\']) || FAILURE_PREFIX.is_match(word))
+            .collect::<Vec<_>>()
+            .join(" ");
+        EARLIER_FAILURE.is_match(&ZERO_FAILURES.replace_all(&words, ""))
+    }) {
+        return None;
+    }
+    let mut file = None;
+    let mut file_has_warning = false;
+    let mut details = BTreeMap::new();
+    let mut summary = None;
+    for (offset, line) in lines[start + 1..].iter().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(c) = REMARK_SUMMARY.captures(line) {
+            summary = Some((start + offset + 2, c[1].parse::<usize>().ok()?));
+            break;
+        }
+        if line.ends_with(".md") && !line.contains(':') {
+            if file.is_some() && !file_has_warning {
+                return None;
+            }
+            file = Some(from_root(line, root));
+            file_has_warning = false;
+            continue;
+        }
+        let c = REMARK_WARNING.captures(line)?;
+        let name = format!("remark {}:{}", file.as_ref()?, &c[1]);
+        let detail = from_root(line, root);
+        let hash = Sha256::digest(detail.as_bytes());
+        let hash: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        if details.insert(name, hash).is_some() {
+            return None;
+        }
+        file_has_warning = true;
+    }
+    let (end, count) = summary?;
+    let trailer: Vec<_> = lines[end..]
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if !file_has_warning
+        || count == 0
+        || count != details.len()
+        || trailer.is_empty()
+        || trailer.iter().any(|line| {
+            !matches!(
+                line.trim(),
+                "[ELIFECYCLE] Command failed with exit code 1."
+                    | "ELIFECYCLE  Command failed with exit code 1."
+            )
+        })
+    {
+        return None;
+    }
+    Some(Evidence {
+        names: details.keys().cloned().collect(),
+        details,
+        go: None,
+    })
+}
+
 pub(super) fn failure_evidence(
     output: &str,
     formats: &[Format],
     root: &Path,
     scoped: bool,
 ) -> Option<Evidence> {
-    let names = failure_names(output, formats, root, scoped)?;
+    let Some(names) = failure_names(output, formats, root, scoped) else {
+        return (!scoped).then(|| remark_evidence(output, root)).flatten();
+    };
     let found = testlog::failure_details(output, formats);
     let matches = |name: &str, f: &testlog::FailureDetail| {
         let candidate = from_root(&f.name, root);
@@ -1093,6 +1206,42 @@ mod tests {
             failure_names("something broke\n", &[], Path::new("/x"), false),
             None
         );
+    }
+
+    #[test]
+    fn remark_frail_requires_complete_matching_diagnostics() {
+        let output = "$ git ls-files '*.md' | xargs -0 remark --use remark-validate-links --frail --quiet\n\
+docs/README.md\n\
+5:149-5:212 warning Cannot find heading `#l13` missing-heading-in-file remark-validate-links:missing-heading-in-file\n\
+6:162-6:230 warning Cannot find heading `#l97` missing-heading-in-file remark-validate-links:missing-heading-in-file\n\
+\n⚠ 2 warnings\n[ELIFECYCLE] Command failed with exit code 1.\n";
+        let evidence = |text: &str| failure_evidence(text, &[], Path::new("/work"), false);
+        let original = evidence(output).unwrap();
+        assert_eq!(original.names.len(), 2);
+        assert_eq!(original.names, evidence(output).unwrap().names);
+        assert_eq!(original.details, evidence(output).unwrap().details);
+        let changed = evidence(&output.replace("`#l13`", "`#different` ")).unwrap();
+        assert_eq!(original.names, changed.names);
+        assert_ne!(original.details, changed.details);
+        assert!(evidence(&output.replace("--frail", "--no-frail")).is_none());
+        assert!(evidence(&output.replace("xargs -0 remark", "echo remark")).is_none());
+        assert!(evidence(&output.replace("⚠ 2 warnings", "⚠ 3 warnings")).is_none());
+        assert!(evidence(&output.replace("⚠ 2 warnings", "other.md\n⚠ 2 warnings")).is_none());
+        assert!(
+            evidence(&output.replace("[ELIFECYCLE] Command failed with exit code 1.", ""))
+                .is_none()
+        );
+        assert!(evidence(&format!("{output}another error\n")).is_none());
+        assert!(evidence(&format!("Earlier task failed unexpectedly\n{output}")).is_none());
+        assert!(evidence(&format!("ERROR:/src/other.rs\n{output}")).is_none());
+        assert!(evidence(&format!("not ok 1 unnamed\n{output}")).is_none());
+        assert!(evidence(&format!("Earlier task: 0 errors\n{output}")).is_some());
+        assert!(evidence(&format!("3 passed, 0 failed, 0 failures\n{output}")).is_some());
+        assert!(evidence(&format!("0 failed, 1 error\n{output}")).is_none());
+        assert!(evidence(&format!("Checked docs/error-handling.md\n{output}")).is_some());
+        assert!(evidence(&output.replace("docs/README.md", "docs/Release Notes.md")).is_some());
+        assert!(evidence(&output.replace("[ELIFECYCLE]", "ELIFECYCLE ")).is_some());
+        assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
     }
 
     #[test]

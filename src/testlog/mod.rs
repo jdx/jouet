@@ -583,7 +583,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
 /// task when most lines have one, as many deep as tasks were nested: a task
 /// that runs `mise run` prefixes its children's lines again
 /// (`[test:bats] [test:bats:libgit2] not ok 1`).
-fn clean(text: &str) -> Vec<String> {
+pub(crate) fn clean(text: &str) -> Vec<String> {
     let lines: Vec<String> = text
         .lines()
         .map(|line| {

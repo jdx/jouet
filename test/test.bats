@@ -1152,6 +1152,40 @@ SH
 	assert_output --partial 'baseline: all 2 failures also fail at'
 }
 
+@test "--baseline compares complete remark link warnings with their details" {
+	printf 'missing heading\n' >reason
+	cat >check-command <<'SH'
+#!/bin/sh
+test ! -f earlier || cat earlier
+printf '%s\n' '$ xargs -0 remark --use remark-validate-links --frail --quiet' \
+  'docs/README.md' \
+  "1:1-1:2 warning $(cat reason) missing-heading-in-file remark-validate-links:missing-heading-in-file" \
+  '⚠ 1 warning' \
+  '[ELIFECYCLE] Command failed with exit code 1.'
+exit 1
+SH
+	chmod +x check-command
+	git add reason check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >changed
+	git add changed
+	git commit -qm change
+
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_output --partial 'remark docs/README.md:1:1-1:2'
+	printf 'different heading\n' >reason
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	printf 'missing heading\n' >reason
+	printf 'Earlier task failed unexpectedly\n' >earlier
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+}
+
 @test "--baseline does not count Go subtest names as separate failed tests" {
 	export GO_RUNS_FILE="$BATS_TEST_TMPDIR/go-runs"
 	cat >check-command <<'SH'
