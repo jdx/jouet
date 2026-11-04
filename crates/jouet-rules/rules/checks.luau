@@ -536,6 +536,18 @@ local function playwright_scope(args: { string }, at: number, workspace: string?
 	return "test", partial(suite .. (if selection ~= "" then " " .. selection else ""))
 end
 
+-- A script's own commands, without those in `$(...)`, which run in a
+-- subshell and are part of a word.
+local function top_level(script: { JouetCommand }): { JouetCommand }
+	local top: { JouetCommand } = {}
+	for _, command in script do
+		if not command.nested then
+			table.insert(top, command)
+		end
+	end
+	return top
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -613,9 +625,9 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			-- ran go test, and its pass clears that test's failure.
 			local shell = if argv[1] then jouet.basename(argv[1]) else nil
 			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
-				local script = jouet.parse(argv[3], command.status)
-				if #script == 1 then
-					return classify(script[1], dir)
+				local top = top_level(jouet.parse(argv[3], command.status))
+				if #top == 1 then
+					return classify(top[1], dir)
 				end
 			end
 			local inner: JouetCommand = {
@@ -687,31 +699,27 @@ local function script_commands(command: JouetCommand, dir: string?): { JouetComm
 	-- script in a work tree the rule cannot name.
 	for i = 1, #given - #argv do
 		local word = given[i]
-		if word == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
 			return nil
 		end
 	end
-	local script = jouet.parse(argv[3], command.status)
+	-- A command in `$(...)` runs in a subshell: its `cd` moves nothing, and
+	-- it is not one of the script's checks.
+	local script = top_level(jouet.parse(argv[3], command.status))
 	if #script < 2 then
 		return nil
 	end
-	local ran: { JouetCommand } = {}
 	for _, inner in script do
-		-- A command in `$(...)` runs in a subshell: its `cd` moves nothing,
-		-- and it is not one of the script's checks.
-		if not inner.nested then
-			if inner.program == "cd" or inner.program == "pushd" then
-				return nil
-			end
-			-- Each check must be known to have passed: not negated with `!`,
-			-- nor piped into another command without pipefail.
-			if not classify(inner, dir) or inner.status ~= 0 then
-				return nil
-			end
-			table.insert(ran, inner)
+		if inner.program == "cd" or inner.program == "pushd" then
+			return nil
+		end
+		-- Each check must be known to have passed: not negated with `!`,
+		-- nor piped into another command without pipefail.
+		if not classify(inner, dir) or inner.status ~= 0 then
+			return nil
 		end
 	end
-	return ran
+	return script
 end
 
 local rule: JouetRule = {
