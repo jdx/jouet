@@ -1,0 +1,32 @@
+description = "Keep sidebar menus anchored during scrolling (usememos/memos#6410)"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 1800
+check_timeout_s = 300
+isolated_setup = [["pnpm", "--dir", "web", "--store-dir", "~/.cache/jouet-bench/memos-store", "install", "--offline", "--frozen-lockfile"]]
+prompt = '''
+On a desktop-width page, the user menu opened from the fixed sidebar moves with
+the document while scrolling, then snaps back to its button. Other popups
+anchored in the sidebar can have the same problem. Expose Base UI's
+`positionMethod` choice through the shared popover, dropdown, and select
+wrappers and use fixed positioning for sidebar-owned popups, including nested
+selectors and preference submenus. Keep the wrappers' defaults unchanged for
+other callers. Add regression coverage and commit your changes.
+'''
+
+[source]
+git = "~/src/memos-bench-history"
+commit = "6529609283f6beb3db44e9077332fe3e6a2fcc89"
+history = true
+
+[tools]
+node = "node"
+pnpm = "~/.cache/jouet-bench/memos-pnpm/node_modules/.bin/pnpm"
+
+[env]
+CI = "1"
+PNPM_CONFIG_STORE_DIR = "~/.cache/jouet-bench/memos-store"
+PLAYWRIGHT_BROWSERS_PATH = "~/.cache/jouet-bench/memos-playwright"

@@ -1,0 +1,171 @@
+diff --git a/web/src/components/AppSidebar/SpaceSwitcher.tsx b/web/src/components/AppSidebar/SpaceSwitcher.tsx
+index 35f42e8f..25ef3d63 100644
+--- a/web/src/components/AppSidebar/SpaceSwitcher.tsx
++++ b/web/src/components/AppSidebar/SpaceSwitcher.tsx
+@@ -152,6 +152,7 @@ function SpaceSwitcher({ className, size = "md" }: { className?: string; size?:
+         </PopoverTrigger>
+         <PopoverContent
+           align="start"
++          positionMethod="fixed"
+           side="bottom"
+           sideOffset={4}
+           className="w-[min(15rem,calc(100vw-1rem))] max-h-[min(27rem,calc(100dvh-5rem))] overflow-y-auto p-0"
+@@ -238,7 +239,11 @@ function SpaceSwitcher({ className, size = "md" }: { className?: string; size?:
+                       )}
+                       <span className="min-w-0 flex-1 truncate text-start">{selectedSpaceName ? spaceLabel : allSpacesLabel}</span>
+                     </SelectTrigger>
+-                    <SelectContent className="max-h-64 w-(--anchor-width) min-w-0 max-w-[calc(100vw-2rem)]" align="start">
++                    <SelectContent
++                      className="max-h-64 w-(--anchor-width) min-w-0 max-w-[calc(100vw-2rem)]"
++                      align="start"
++                      positionMethod="fixed"
++                    >
+                       <SelectItem value="all">
+                         <span className="flex items-center gap-2">
+                           <AstroidIcon className="size-4" />
+diff --git a/web/src/components/UserMenu.tsx b/web/src/components/UserMenu.tsx
+index aa58230e..73fac29d 100644
+--- a/web/src/components/UserMenu.tsx
++++ b/web/src/components/UserMenu.tsx
+@@ -68,6 +68,7 @@ const PreferenceSubmenu = ({ icon: Icon, label, value, options, onChange, classN
+       sideOffset={8}
+       alignOffset={-4}
+       collisionAvoidance={{ fallbackAxisSide: "end" }}
++      positionMethod="fixed"
+       size="sm"
+       className={className}
+     >
+diff --git a/web/src/components/ui/dropdown-menu.tsx b/web/src/components/ui/dropdown-menu.tsx
+index 77073ff1..bf19ec60 100644
+--- a/web/src/components/ui/dropdown-menu.tsx
++++ b/web/src/components/ui/dropdown-menu.tsx
+@@ -20,12 +20,15 @@ const DropdownMenuTrigger = React.forwardRef<HTMLButtonElement, DropdownMenuPrim
+ DropdownMenuTrigger.displayName = "DropdownMenuTrigger";
+ 
+ type DropdownMenuContentProps = DropdownMenuPrimitive.Popup.Props &
+-  Pick<DropdownMenuPrimitive.Positioner.Props, "align" | "alignOffset" | "collisionAvoidance" | "side" | "sideOffset"> & {
++  Pick<
++    DropdownMenuPrimitive.Positioner.Props,
++    "align" | "alignOffset" | "collisionAvoidance" | "positionMethod" | "side" | "sideOffset"
++  > & {
+     size?: DropdownMenuSize;
+   };
+ 
+ const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenuContentProps>(
+-  ({ className, align, alignOffset, collisionAvoidance, side, sideOffset = 4, size = "default", ...props }, ref) => {
++  ({ className, align, alignOffset, collisionAvoidance, positionMethod, side, sideOffset = 4, size = "default", ...props }, ref) => {
+     return (
+       <DropdownMenuSizeContext.Provider value={size}>
+         <DropdownMenuPrimitive.Portal>
+@@ -33,6 +36,7 @@ const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenuContent
+             align={align}
+             alignOffset={alignOffset}
+             collisionAvoidance={collisionAvoidance}
++            positionMethod={positionMethod}
+             side={side}
+             sideOffset={sideOffset}
+             className="isolate z-dropdown outline-none"
+diff --git a/web/src/components/ui/popover.tsx b/web/src/components/ui/popover.tsx
+index 42495ad8..1c23f8d3 100644
+--- a/web/src/components/ui/popover.tsx
++++ b/web/src/components/ui/popover.tsx
+@@ -14,14 +14,16 @@ PopoverTrigger.displayName = "PopoverTrigger";
+ 
+ const PopoverContent = React.forwardRef<
+   HTMLDivElement,
+-  PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "anchor" | "align" | "alignOffset" | "side" | "sideOffset">
+->(({ className, anchor, align = "center", alignOffset, side, sideOffset = 4, ...props }, ref) => {
++  PopoverPrimitive.Popup.Props &
++    Pick<PopoverPrimitive.Positioner.Props, "anchor" | "align" | "alignOffset" | "positionMethod" | "side" | "sideOffset">
++>(({ className, anchor, align = "center", alignOffset, positionMethod, side, sideOffset = 4, ...props }, ref) => {
+   return (
+     <PopoverPrimitive.Portal>
+       <PopoverPrimitive.Positioner
+         anchor={anchor}
+         align={align}
+         alignOffset={alignOffset}
++        positionMethod={positionMethod}
+         side={side}
+         sideOffset={sideOffset}
+         className="isolate z-dropdown"
+diff --git a/web/src/components/ui/select.tsx b/web/src/components/ui/select.tsx
+index 4660ceb0..36bc9413 100644
+--- a/web/src/components/ui/select.tsx
++++ b/web/src/components/ui/select.tsx
+@@ -51,7 +51,7 @@ function SelectTrigger({
+ }
+ 
+ type SelectContentProps = SelectPrimitive.Popup.Props &
+-  Pick<SelectPrimitive.Positioner.Props, "align" | "alignItemWithTrigger" | "alignOffset" | "side" | "sideOffset">;
++  Pick<SelectPrimitive.Positioner.Props, "align" | "alignItemWithTrigger" | "alignOffset" | "positionMethod" | "side" | "sideOffset">;
+ 
+ function SelectContent({
+   className,
+@@ -59,6 +59,7 @@ function SelectContent({
+   align = "start",
+   alignItemWithTrigger = false,
+   alignOffset,
++  positionMethod,
+   side,
+   sideOffset = 4,
+   ...props
+@@ -69,6 +70,7 @@ function SelectContent({
+         align={align}
+         alignItemWithTrigger={alignItemWithTrigger}
+         alignOffset={alignOffset}
++        positionMethod={positionMethod}
+         side={side}
+         sideOffset={sideOffset}
+         className="isolate z-dropdown"
+diff --git a/web/tests/space-switcher.test.tsx b/web/tests/space-switcher.test.tsx
+index 5ea5073c..7e632978 100644
+--- a/web/tests/space-switcher.test.tsx
++++ b/web/tests/space-switcher.test.tsx
+@@ -220,6 +220,25 @@ describe("SpaceSwitcher", () => {
+     expect(state.selectSpace).toHaveBeenCalledWith(state.spaces[0]);
+   });
+ 
++  it.each(["md", "header"] as const)("keeps the %s scope popup and its Space selector fixed after positioning", async (size) => {
++    renderAt("/", size);
++    openSwitcher();
++    const popup = await screen.findByRole("dialog");
++    const positioner = popup.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(positioner.style.opacity).not.toBe("0");
++      expect(positioner.style.position).toBe("fixed");
++    });
++
++    fireEvent.click(screen.getByRole("combobox", { name: "space.switch" }));
++    const option = await screen.findByRole("option", { name: "Product" });
++    const selectPositioner = option.closest('[data-slot="select-content"]')?.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(selectPositioner.style.opacity).not.toBe("0");
++      expect(selectPositioner.style.position).toBe("fixed");
++    });
++  });
++
+   it("gives guests on Explore only the account panel, with no single-choice Browse control", () => {
+     state.currentUser = undefined;
+     renderAt("/explore");
+diff --git a/web/tests/user-menu.test.tsx b/web/tests/user-menu.test.tsx
+index 3006f815..33c620a9 100644
+--- a/web/tests/user-menu.test.tsx
++++ b/web/tests/user-menu.test.tsx
+@@ -131,6 +131,17 @@ describe("User menu panel", () => {
+     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+   });
+ 
++  it.each([/setting.preference.theme/, /common.language/])("keeps the %s submenu fixed after positioning", async (row) => {
++    renderMenu();
++    fireEvent.click(screen.getByRole("button", { name: row }));
++    const menu = await screen.findByRole("menu");
++    const positioner = menu.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(positioner.style.opacity).not.toBe("0");
++      expect(positioner.style.position).toBe("fixed");
++    });
++  });
++
+   it.each([
+     {
+       row: /setting.preference.theme/,
