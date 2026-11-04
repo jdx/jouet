@@ -1,7 +1,7 @@
 #!/bin/sh
 # Populate the optional task's isolated pnpm and Chromium caches.
 set -eu
-root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 source_repo="$HOME/src/memos-bench-history"
 cache="$HOME/.cache/jouet-bench"
 pnpm_root="$cache/memos-pnpm"
@@ -9,8 +9,8 @@ store="$cache/memos-store"
 browsers="$cache/memos-playwright"
 revision=6529609283f6beb3db44e9077332fe3e6a2fcc89
 if [ ! -d "$source_repo/.git" ]; then
-  printf 'Clone usememos/memos to %s first.\n' "$source_repo" >&2
-  exit 1
+	printf 'Clone usememos/memos to %s first.\n' "$source_repo" >&2
+	exit 1
 fi
 mkdir -p "$cache"
 npm install --prefix "$pnpm_root" --no-save --ignore-scripts pnpm@11.0.1

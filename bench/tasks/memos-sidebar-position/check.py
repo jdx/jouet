@@ -56,6 +56,7 @@ def check():
         install = subprocess.run(['pnpm', '--dir', 'web', '--store-dir', os.environ['PNPM_CONFIG_STORE_DIR'], 'install', '--offline', '--frozen-lockfile'],
                                  cwd=checkout, capture_output=True, text=True, timeout=120)
         if install.returncode:
+            print(f'Checker dependency setup output:\n{install.stdout}{install.stderr}')
             UNVERIFIED.append('offline checker dependencies unavailable: ' + install.stderr.strip())
             return
         web = checkout / 'web'
@@ -83,11 +84,20 @@ def check():
                           str(Path(directory) / 'browser.json')], browser_names, 'browser.json'),
         ]
         for label, command, names, result_file in commands:
+            proc = None
             try:
                 proc = subprocess.run(command, cwd=web, capture_output=True, text=True, timeout=90)
                 results = json.loads((Path(directory) / result_file).read_text())
                 rows = [row for suite in results['testResults'] for row in suite['assertionResults']]
-            except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
+                parts = (error.stdout, error.stderr)
+                output = ''.join(part.decode(errors='replace') if isinstance(part, bytes) else part or '' for part in parts)
+                print(f'{label} output before timeout:\n{output}')
+                UNVERIFIED.append(f'{label} check timed out')
+                continue
+            except (OSError, ValueError, KeyError) as error:
+                if proc is not None:
+                    print(f'{label} output:\n{proc.stdout}{proc.stderr}')
                 UNVERIFIED.append(f'{label} check could not report results: {error}')
                 continue
             failures = [row.get('fullName', '<unnamed>') for row in rows if row.get('status') == 'failed']
@@ -110,6 +120,11 @@ def check():
 if __name__ == '__main__':
     try:
         check()
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        parts = (error.stdout, error.stderr)
+        output = ''.join(part.decode(errors='replace') if isinstance(part, bytes) else part or '' for part in parts)
+        print(f'Checker setup output before timeout:\n{output}')
+        UNVERIFIED.append(f'checker setup timed out: {error}')
+    except (OSError, subprocess.CalledProcessError) as error:
         UNVERIFIED.append(f'checker setup could not be completed: {error}')
     finish()
