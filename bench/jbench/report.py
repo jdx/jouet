@@ -58,6 +58,16 @@ def unverified(record: dict[str, Any]) -> bool:
     return record.get("success") is None or ("passed" in check and check["passed"] is None)
 
 
+def scored(record: dict[str, Any]) -> bool:
+    """A failed or stopped agent is a known failure even if its check is incomplete."""
+    exit_code = record.get("exit_code")
+    agent_failed = record.get("success") is False and (
+        bool(record.get("stopped")) or (type(exit_code) is int and exit_code != 0)
+    )
+    return (not record.get("error") and isinstance(record.get("success"), bool)
+            and (not unverified(record) or agent_failed))
+
+
 def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
     cells = []
     for (task, harness), by_arm in sorted(group(records).items()):
@@ -65,6 +75,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
         for arm, runs in sorted(by_arm.items()):
             finished = [r for r in runs if not r.get("error") and not unverified(r)
                         and isinstance(r.get("success"), bool)]
+            outcomes = [r for r in runs if scored(r)]
             decisions: dict[str, int] = defaultdict(int)
             unanswered: set[str] = set()
             for r in finished:
@@ -72,12 +83,12 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                     decisions[k] += v
                 unanswered.update((r.get("github") or {}).get("unanswered_examples") or [])
             cell["arms"][arm] = {
-                "runs": len(finished),
+                "runs": len(outcomes),
                 "unverified": [{"round": r.get("round"), "reason": (r.get("check") or {}).get("reason", "coverage unavailable")}
                                for r in runs if not r.get("error") and unverified(r)],
                 "errors": [r["error"] for r in runs if r.get("error")],
-                "stopped": [r["stopped"] for r in finished if r.get("stopped")],
-                "successes": sum(1 for r in finished if r.get("success")),
+                "stopped": [r["stopped"] for r in outcomes if r.get("stopped")],
+                "successes": sum(1 for r in outcomes if r.get("success")),
                 "metrics": {key: stats.summarize(get(r) for r in finished) for key, _, get, _ in METRICS},
                 "rule_decisions": dict(sorted(decisions.items())),
                 "github_unanswered": sorted(unanswered),
@@ -117,7 +128,13 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             }
             paired_runs["jouet"] = paired_runs[treat]
             rounds = sorted(paired_runs["plain"].keys() & paired_runs["jouet"].keys())
-            outcomes = [(paired_runs["plain"][n]["success"], paired_runs["jouet"][n]["success"]) for n in rounds]
+            outcome_pairs = {
+                arm: {r["round"]: r for r in by_arm[arm] if scored(r)}
+                for arm in ("plain", treat)
+            }
+            outcome_rounds = sorted(outcome_pairs["plain"].keys() & outcome_pairs[treat].keys())
+            outcomes = [(outcome_pairs["plain"][n]["success"], outcome_pairs[treat][n]["success"])
+                        for n in outcome_rounds]
             cell["paired_outcomes"] = {
                 "both_passed": outcomes.count((True, True)),
                 "plain_only": outcomes.count((True, False)),
@@ -207,7 +224,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "Success means the agent exited normally and the task checker passed. Checkers vary:",
         "some verify behavior without requiring every requested deliverable, such as a commit.",
         "Inspect the task's checker and run evidence before treating success as complete accuracy.",
-        "Unverified runs are excluded from success rates and performance metrics. "
+        "Unverified checks exclude runs from performance metrics; agents that fail or stop still count as failures. "
         "Deltas compare only pairs where both arms passed the task checker.",
         "",
         "| task | harness | success plain | success jouet | both passed | input tokens Δ | output tokens Δ | requests Δ | tool calls Δ | wall Δ |",
@@ -298,7 +315,7 @@ def markdown(summary: dict[str, Any]) -> str:
         notes = []
         for arm, a in sorted(cell["arms"].items()):
             for item in a.get("unverified", []):
-                notes.append(f"- **{arm} unverified (round {item['round']}):** {item['reason']}; see the run's check.log.")
+                notes.append(f"- **{arm} check unverified (round {item['round']}):** {item['reason']}; see the run's check.log.")
             for change in a.get("changes", []):
                 paths = change["paths"]
                 if paths is None:

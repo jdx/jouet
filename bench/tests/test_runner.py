@@ -1621,7 +1621,28 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(cell["arms"]["jouet"]["unverified"]), 2)
         self.assertEqual(cell["arms"]["jouet"]["metrics"]["input_tokens"]["median"], 90)
         self.assertEqual(cell["paired"]["input_tokens"]["pairs"], 1)
-        self.assertIn("jouet unverified (round 2)", report.markdown({"meta": {}, "cells": [cell]}))
+        self.assertIn("jouet check unverified (round 2)", report.markdown({"meta": {}, "cells": [cell]}))
+
+    def test_unverified_checks_do_not_hide_agent_failures(self):
+        def record(arm, round_number, success, **extra):
+            return {"task": "t", "harness": "codex", "arm": arm, "round": round_number,
+                    "success": success, "usage": {"input_tokens": 100, "cached_input_tokens": 0}, **extra}
+
+        records = [record("plain", n, True, exit_code=0) for n in range(1, 5)]
+        records += [
+            record("jouet", 1, False, exit_code=1, check={"passed": None}),
+            record("jouet", 2, False, exit_code=None, stopped="token budget", check={"passed": None}),
+            record("jouet", 3, None, exit_code=0, check={"passed": None}),
+            record("jouet", 4, False, check={"passed": None}),
+        ]
+        cell = report.summarize(records, {})["cells"][0]
+        self.assertEqual((cell["arms"]["jouet"]["successes"], cell["arms"]["jouet"]["runs"]), (0, 2))
+        self.assertEqual(len(cell["arms"]["jouet"]["unverified"]), 4)
+        self.assertEqual(cell["arms"]["jouet"]["stopped"], ["token budget"])
+        self.assertEqual(cell["paired_outcomes"]["plain_only"], 2)
+        self.assertIsNone(cell["arms"]["jouet"]["metrics"]["input_tokens"])
+        self.assertIsNone(cell["paired"]["input_tokens"])
+        self.assertIsNone(cell["paired_when_both_pass"]["input_tokens"])
 
 
 if __name__ == "__main__":
