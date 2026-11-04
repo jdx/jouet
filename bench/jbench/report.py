@@ -105,8 +105,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
             cell["init"] = init_runs[0]
         if "jouet" in by_arm and "jouet-init" in by_arm:
             pairs = {
-                arm: {r["round"]: r for r in by_arm[arm]
-                      if not r.get("error") and not unverified(r) and isinstance(r.get("success"), bool)}
+                arm: {r["round"]: r for r in by_arm[arm] if scored(r)}
                 for arm in ("jouet", "jouet-init")
             }
             rounds = sorted(pairs["jouet"].keys() & pairs["jouet-init"].keys())

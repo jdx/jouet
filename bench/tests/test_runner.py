@@ -1644,6 +1644,21 @@ class ReportTest(unittest.TestCase):
         self.assertIsNone(cell["paired"]["input_tokens"])
         self.assertIsNone(cell["paired_when_both_pass"]["input_tokens"])
 
+    def test_init_comparison_counts_known_failures_with_unverified_checks(self):
+        records = [
+            {"task": "t", "harness": "codex", "arm": "jouet", "round": 1,
+             "success": False, "exit_code": 1, "check": {"passed": None}},
+            {"task": "t", "harness": "codex", "arm": "jouet-init", "round": 1,
+             "success": True, "exit_code": 0},
+            {"task": "t", "harness": "codex", "arm": "jouet", "round": 2,
+             "success": None, "exit_code": 0, "check": {"passed": None}},
+            {"task": "t", "harness": "codex", "arm": "jouet-init", "round": 2,
+             "success": True, "exit_code": 0},
+        ]
+        comparison = report.summarize(records, {})["cells"][0]["init_comparison"]
+        self.assertEqual((comparison["pairs"], comparison["both_passed"]), (1, 0))
+        self.assertIsNone(comparison["paired_when_both_pass"]["input_tokens"])
+
 
 if __name__ == "__main__":
     unittest.main()
