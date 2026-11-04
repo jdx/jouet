@@ -814,15 +814,12 @@ local rule: JouetRule = {
 						if scope.selector and string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" then
 							-- Identical --dir arguments can refer to different projects
 							-- when calls start in different directories.
-							if not call.cwd and call.harness ~= "test" then
-								continue
-							end
-							local cwd = call.cwd or "."
+							local cwd = call.cwd or (if call.harness == "test" then "." else "unknown")
 							local cd = project_dir or "."
 							if cwd == "" or cd == "" or string.sub(cd, 1, 1) == "~" or string.find(cd, "[%$`*?%[%]]") then
 								continue
 							end
-							if call.cwd or project_dir then
+							if call.cwd or project_dir or call.harness ~= "test" then
 								scope = partial(`@jouet:cwd={scope_path(cwd)}:cd={scope_path(cd)} {scope.selector}`)
 							end
 						end

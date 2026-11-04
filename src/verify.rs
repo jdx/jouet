@@ -143,9 +143,22 @@ impl Run {
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
         }
-        if same_runner(&self.command, &failed.command) && pnpm_vitest_covers_exclusions(ran, wanted)
-        {
-            return true;
+        let pnpm = |selection: &str| {
+            selection
+                .split_whitespace()
+                .any(|word| word.starts_with("@jouet:pnpm:"))
+        };
+        match (pnpm(ran), pnpm(wanted)) {
+            (true, true) => {
+                if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
+                    return false;
+                }
+                return ran == wanted
+                    || (same_runner(&self.command, &failed.command)
+                        && pnpm_vitest_covers(ran, wanted));
+            }
+            (true, false) | (false, true) => return false,
+            (false, false) => {}
         }
         if ran == wanted {
             return true;
@@ -267,7 +280,7 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
 
 /// An unfiltered package run covers its own excluded suite, but not a
 /// different configuration, root, or unknown filter.
-fn pnpm_vitest_covers_exclusions(ran: &str, wanted: &str) -> bool {
+fn pnpm_vitest_covers(ran: &str, wanted: &str) -> bool {
     let ran: Vec<_> = ran.split_whitespace().collect();
     let wanted: Vec<_> = wanted.split_whitespace().collect();
     let prefix_len = if ran
@@ -286,23 +299,26 @@ fn pnpm_vitest_covers_exclusions(ran: &str, wanted: &str) -> bool {
         return false;
     }
     let mut rest = &wanted[prefix_len..];
-    let mut excluded = false;
+    let mut selected = false;
     while let Some((flag, next)) = rest.split_first() {
         if let Some(value) = flag.strip_prefix("--exclude=") {
             if value.is_empty() {
                 return false;
             }
-            excluded = true;
+            selected = true;
             rest = next;
         } else if *flag == "--exclude" && next.first().is_some_and(|value| !value.starts_with('-'))
         {
-            excluded = true;
+            selected = true;
             rest = &next[1..];
+        } else if !flag.starts_with('-') {
+            selected = true;
+            rest = next;
         } else {
             return false;
         }
     }
-    excluded
+    selected
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -1557,6 +1573,8 @@ const TRANSCRIPT_TAIL: u64 = 8 * 1024 * 1024;
 pub(crate) struct Ran {
     pub command: String,
     pub exit_code: i32,
+    /// The command's own working directory, when recorded by Codex.
+    pub cwd: Option<String>,
     /// When, from the line's `timestamp`, in seconds since the Unix epoch.
     pub at: Option<i64>,
     /// A failed command's output, as Codex recorded it, so a failure that
@@ -1624,6 +1642,11 @@ fn codex_command(line: &str) -> Option<Ran> {
         command: script,
         exit_code,
         output,
+        cwd: event
+            .get("cwd")
+            .and_then(|cwd| cwd.as_str())
+            .filter(|cwd| std::path::Path::new(cwd).is_absolute())
+            .map(str::to_string),
         at: value
             .get("timestamp")
             .and_then(|t| t.as_str())
@@ -1853,10 +1876,33 @@ mod tests {
             );
             assert!(reason(&state, "t1").is_some(), "must retain {filter}");
         }
-        assert!(!pnpm_vitest_covers_exclusions(
+        assert!(!pnpm_vitest_covers(
             "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:vitest",
             "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:vitest --exclude tests/b"
         ));
+    }
+
+    #[test]
+    fn selected_pnpm_runs_do_not_clear_unfiltered_failures() {
+        for runner in ["vitest", "test"] {
+            let prefix = format!("@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:{runner}");
+            let mut checks = Checks::default();
+            checks.record([test("pnpm test", 1, &prefix)], Some("t1"));
+            checks.record(
+                [test(
+                    "pnpm test a.test.ts",
+                    0,
+                    &format!("{prefix} a.test.ts"),
+                )],
+                Some("t1"),
+            );
+            assert!(reason(&checks, "t1").is_some(), "{runner}");
+        }
+        let mut checks = Checks::default();
+        let unknown = "@jouet:cwd=unknown:cd=. @jouet:pnpm:dir=web:test";
+        checks.record([test("pnpm test", 1, unknown)], Some("t1"));
+        checks.record([test("pnpm test", 0, unknown)], Some("t1"));
+        assert!(reason(&checks, "t1").is_some());
     }
 
     #[test]
@@ -3079,6 +3125,7 @@ mod tests {
             exit_code,
             at,
             output: None,
+            cwd: None,
         };
         assert_eq!(
             codex_commands(&path),
@@ -3092,6 +3139,20 @@ mod tests {
             ]
         );
         assert!(codex_commands(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn codex_command_uses_only_an_absolute_recorded_cwd() {
+        let line = |cwd: &str| {
+            serde_json::json!({"payload": {"type": "exec_command_end", "command": ["pnpm", "test"], "exit_code": 1, "cwd": cwd}}).to_string()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        assert_eq!(
+            codex_command(&line(path)).unwrap().cwd.as_deref(),
+            Some(path)
+        );
+        assert_eq!(codex_command(&line("relative")).unwrap().cwd, None);
     }
 }
 

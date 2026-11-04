@@ -1530,6 +1530,7 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
         exit_code,
         at: when,
         output,
+        cwd: command_cwd,
     } in commands
     {
         let call = Call {
@@ -1538,13 +1539,16 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
             tool: "Bash".into(),
             command: Some(command),
             path: None,
-            cwd: None,
+            cwd: command_cwd.clone(),
             exit_code: Some(exit_code),
             ..Call::default()
         };
         // The transcript does not say what tree each command saw.
         for record in evaluate(engine, &call).records {
-            let at = run_dir(cwd.as_deref(), record.dir.as_deref());
+            let at = run_dir(
+                command_cwd.as_deref().map(Path::new).or(cwd.as_deref()),
+                record.dir.as_deref(),
+            );
             let root = at.as_deref().map(verify::root_of).unwrap_or_default();
             // A failure whose output blames the machine is marked so, as the
             // other harnesses' failures are, judged with the formats of the
@@ -1753,6 +1757,7 @@ mod tests {
             exit_code,
             at: None,
             output: None,
+            cwd: None,
         }
     }
 
@@ -1777,6 +1782,33 @@ mod tests {
             }],
         );
         assert_eq!(state.checks(&root).and_then(|c| c.last_run), Some(1_000));
+    }
+
+    #[test]
+    fn codex_replay_records_pnpm_failures_without_a_working_directory() {
+        let state = codex_state(
+            &engine(Vec::new()),
+            &json!({}),
+            vec![ran("pnpm test", 1), ran("pnpm test", 0)],
+        );
+        assert!(state.block("", |_| None, |_| false, |_| true).is_some());
+    }
+
+    #[test]
+    fn codex_replay_attributes_a_run_to_its_recorded_working_directory() {
+        let repo = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        let root = verify::root_of(repo.path());
+        let command = verify::Ran {
+            cwd: Some(root.clone()),
+            ..ran("pnpm test", 1)
+        };
+        let state = codex_state(&engine(Vec::new()), &json!({}), vec![command]);
+        assert!(state.block(&root, |_| None, |_| false, |_| true).is_some());
     }
 
     #[test]
