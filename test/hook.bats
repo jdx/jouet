@@ -186,29 +186,34 @@ stop_reason() {
 	assert_output ""
 }
 
-@test "a clean merge of another branch after a passing run needs no second run" {
+@test "a clean merge after a passing run requires a check of the combined tree" {
 	git init -q -b work repo
-	echo 'fn main() {}' >repo/main.rs
-	echo 'fn lib() {}' >repo/lib.rs
+	echo 1 >repo/main.rs
+	echo 1 >repo/lib.rs
 	g() { git -C repo -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 	g add main.rs lib.rs
 	g commit -qm base
 	g checkout -qb main
-	echo 'fn lib() { 1 }' >repo/lib.rs
+	echo 2 >repo/lib.rs
 	g commit -qam theirs
+	# Each branch passes separately, but their changes interact.
+	run bash -c 'test "$(cat repo/main.rs)$(cat repo/lib.rs)" != 22'
+	assert_success
 	g checkout -q work
-	echo 'fn main() { 1 }' >repo/main.rs
+	echo 2 >repo/main.rs
 	g commit -qam mine
-
+	run bash -c 'test "$(cat repo/main.rs)$(cat repo/lib.rs)" != 22'
+	assert_success
 	ran 'cargo test --workspace' 0
 	g merge -q --no-edit main
-	run stop_reason
-	assert_output ""
-	# An edit amended into the merge is still a change.
-	echo 'fn lib() { 2 }' >repo/lib.rs
-	g commit -qa --amend --no-edit
+	run bash -c 'test "$(cat repo/main.rs)$(cat repo/lib.rs)" != 22'
+	assert_failure
 	run stop_reason
 	assert_output --partial 'Files changed after the last test run passed ('
+	# A later passing check at the combined tree clears the gate.
+	ran 'cargo test --workspace' 0
+	run stop_reason
+	assert_output ""
 }
 
 @test "files a formatter rewrote after a passing run need no second run" {
