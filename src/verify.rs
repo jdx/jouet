@@ -322,27 +322,57 @@ fn without_name_filter(ran: &str, wanted: &str) -> bool {
         && !wanted[ran.len() + 1..].iter().any(a_path)
 }
 
-/// Whether `ran` is `wanted` with its last word, a cargo test-name filter,
-/// cut to part of it: cargo and nextest run every test whose name holds the
-/// filter, so `affected::` runs all that `affected::cargo` does. Not with
-/// `--exact`, which matches whole names.
+/// Whether `ran` is `wanted` with its cargo test-name filters widened:
+/// cargo and nextest run every test whose name holds any filter, so
+/// `affected::` runs all that `affected::cargo` does, and `a b` all that
+/// `ab` does. The checks rule records a selector as its packages and picks
+/// without the `--` (`-p mise --lib name other`), so the filters are the
+/// plain words at its end, less one that is the value of the option before
+/// them (`--bin jouet`, `-p mise`). Not with `--exact`, which matches whole
+/// names.
 fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
     if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
         return false;
     }
-    let ran: Vec<&str> = ran.split_whitespace().collect();
-    let wanted: Vec<&str> = wanted.split_whitespace().collect();
-    let (Some((r, ran_rest)), Some((w, wanted_rest))) = (ran.split_last(), wanted.split_last())
-    else {
+    // The picks the checks rule records that take no value.
+    const FLAGS: [&str; 7] = [
+        "--lib",
+        "--bins",
+        "--tests",
+        "--examples",
+        "--benches",
+        "--doc",
+        "--ignored",
+    ];
+    fn split(selector: &str) -> Option<(Vec<&str>, Vec<&str>)> {
+        let words: Vec<&str> = selector.split_whitespace().collect();
+        // A nextest filter expression is not a name filter, and its words
+        // may hold spaces.
+        if words.iter().any(|w| {
+            *w == "--exact"
+                || ["-E", "--filter-expr", "--filterset"]
+                    .iter()
+                    .any(|o| w.starts_with(o))
+        }) {
+            return None;
+        }
+        let mut at = words.len()
+            - words
+                .iter()
+                .rev()
+                .take_while(|w| !w.starts_with('-'))
+                .count();
+        // `--bin=jouet` holds its own value.
+        if at > 0 && !FLAGS.contains(&words[at - 1]) && !words[at - 1].contains('=') {
+            at += 1;
+        }
+        let (head, filters) = words.split_at(at.min(words.len()));
+        (!filters.is_empty()).then(|| (head.to_vec(), filters.to_vec()))
+    }
+    let (Some((ran_head, ran)), Some((wanted_head, wanted))) = (split(ran), split(wanted)) else {
         return false;
     };
-    let option = |w: &&str| w.starts_with('-');
-    ran_rest == wanted_rest
-        && !option(r)
-        && !option(w)
-        && !ran_rest.last().is_some_and(option)
-        && !ran_rest.contains(&"--exact")
-        && w.contains(r)
+    ran_head == wanted_head && wanted.iter().all(|w| ran.iter().any(|r| w.contains(r)))
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -2075,6 +2105,49 @@ mod tests {
             "--bin jouet affected::cargo"
         ));
         assert!(!wider_filter(c, "-- --exact a", "-- --exact ab"));
+        // Several filters widen one by one: a run of several, one of them
+        // the failed test's name or part of it, covers that test. The
+        // selectors are as the checks rule records them, without `--`.
+        let c = "cargo test -p mise --lib -- test_ab";
+        assert!(wider_filter(
+            c,
+            "-p mise --lib test_b test_ab cutoff",
+            "-p mise --lib test_ab"
+        ));
+        assert!(wider_filter(
+            c,
+            "-p mise --lib cutoff latest",
+            "-p mise --lib test_cutoff_x"
+        ));
+        assert!(wider_filter(
+            c,
+            "-p mise cutoff latest",
+            "-p mise test_cutoff_x"
+        ));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib latest",
+            "-p mise --lib test_cutoff_x test_other"
+        ));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib cutoff",
+            "-p mise --bins test_cutoff_x"
+        ));
+        assert!(!wider_filter(
+            "cargo nextest run -E x",
+            "-p mise -E test(a) | b",
+            "-p mise -E test(a) | bc"
+        ));
+        assert!(wider_filter(c, "--bin=jouet a", "--bin=jouet ab"));
+        assert!(!wider_filter(c, "--filter-expr=x a", "--filter-expr=x ab"));
+        // A package name is not a filter.
+        assert!(!wider_filter(c, "-p mi", "-p mise"));
+        assert!(!wider_filter(
+            c,
+            "-p mise --lib cutoff --exact",
+            "-p mise --lib cutoff"
+        ));
         assert!(!wider_filter(
             "mise run test:e2e test_ab",
             "test:e2e test_a",
