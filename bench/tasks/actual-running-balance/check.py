@@ -101,7 +101,7 @@ def check():
                     'node', 'node_modules/@playwright/test/cli.js', 'test',
                     '--config', 'packages/desktop-client/playwright.config.ts',
                     spec.name, '--retries=0', '--reporter=json',
-                ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_NAME': str(report)},
+                ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
                     capture_output=True, text=True, timeout=240)
             except subprocess.TimeoutExpired as error:
                 print_timeout_output(error)

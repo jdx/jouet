@@ -61,18 +61,19 @@ class ActualCheckerTest(unittest.TestCase):
             node.write_text('''#!/bin/sh
 mkdir -p blob-report
 touch blob-report/report.zip
-if [ -n "$PLAYWRIGHT_JSON_OUTPUT_NAME" ]; then
+if [ "$1" != "--input-type=module" ] && [ -n "$PLAYWRIGHT_JSON_OUTPUT_FILE" ]; then
   if [ -n "$BROWSER_MISSING" ]; then
-    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"failed","error":{"message":"browserType.launch: Executable does not exist"}}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_NAME"
+    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"failed","error":{"message":"browserType.launch: Executable does not exist"}}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
     exit 1
   else
-    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"passed"}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_NAME"
+    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"passed"}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
   fi
 fi
 exit 0
 ''')
             node.chmod(0o755)
-            env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_BASE_SHA": base})
+            env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_BASE_SHA": base,
+                        "PLAYWRIGHT_JSON_OUTPUT_FILE": str(root / 'unrelated.json')})
 
             def check():
                 return subprocess.run(["python3", str(CHECKER)], cwd=work, env=env,
@@ -84,6 +85,7 @@ exit 0
             git("commit", "-qm", "include source")
             result = check()
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / 'unrelated.json').exists())
             self.assertTrue((work / "blob-report/report.zip").exists())
             shutil.rmtree(work / 'blob-report')
 
