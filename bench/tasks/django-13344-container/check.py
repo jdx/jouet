@@ -99,6 +99,8 @@ def run_check():
             log = ''.join(part.decode(errors='replace') if isinstance(part, bytes) else part or ''
                           for part in (error.stdout, error.stderr))
             save_log(spec, log)
+            print('container test output before timeout:')
+            print(log, end='' if log.endswith('\n') else '\n')
             failed = [name for name, status in parse_django(log).items() if status == FAIL]
             expect(not failed, 'tests failed before timeout: ' + ', '.join(failed))
             UNVERIFIED.append('containerized tests timed out')
@@ -112,6 +114,8 @@ def run_check():
         failed = [name for name, status in statuses.items() if status == FAIL]
         expect(not failed, 'tests reported failures: ' + ', '.join(failed))
         if not statuses:
+            print('container test output:')
+            print(log, end='' if log.endswith('\n') else '\n')
             UNVERIFIED.append('container produced no named test results')
             return
         problems, unverified = verdict(spec, statuses)
@@ -122,6 +126,9 @@ def run_check():
                 UNVERIFIED.append(f'cache backend was not verified: {witness}')
         if proc.returncode and not failed and not problems:
             UNVERIFIED.append(f'container exited {proc.returncode} without a named failure')
+        if failed or problems or UNVERIFIED or proc.returncode:
+            print('container test output:')
+            print(log, end='' if log.endswith('\n') else '\n')
         print(f'checker image: {image_id}; {sum(s == PASS for s in statuses.values())} '
               f'of {len(statuses)} named results passed')
         print(f'full log: {Path(os.environ.get("TMPDIR", "/tmp")) / (spec["instance_id"] + ".test.log")}')

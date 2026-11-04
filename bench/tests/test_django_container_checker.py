@@ -1,10 +1,14 @@
+import contextlib
+import io
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 TASKS = Path(__file__).resolve().parents[1] / 'tasks'
@@ -91,12 +95,44 @@ class DjangoContainerCheckerTest(unittest.TestCase):
         self.assertIn('cache backend was not verified', result.stdout)
 
     def test_named_failure_wins_over_incomplete_results(self):
-        self.log.write_text('test_coroutine (deprecation.test_middleware_mixin.MiddlewareMixinTests) ... FAIL\n')
+        self.log.write_text('test_coroutine (deprecation.test_middleware_mixin.MiddlewareMixinTests) ... FAIL\nAssertionError: expected a fresh tier\n')
         self.env['FAKE_STATUS'] = '1'
         result = self.check()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('test_coroutine', result.stdout)
+        self.assertIn('AssertionError: expected a fresh tier', result.stdout)
         self.assertEqual(self.original.read_text(), 'agent test content\n')
+
+    def test_unnamed_failure_preserves_diagnostics(self):
+        self.log.write_text('container could not start the test runner\n')
+        self.env['FAKE_STATUS'] = '1'
+        result = self.check()
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('container could not start the test runner', result.stdout)
+        self.assertEqual(result.stdout.splitlines()[-1], 'JOUET_BENCH_UNVERIFIED_V1')
+
+    def test_timeout_preserves_partial_output(self):
+        self.log.write_text('')
+        real_run = subprocess.run
+
+        def run(command, *args, **kwargs):
+            if command[:2] == [self.env['BENCH_DOCKER'], 'run']:
+                raise subprocess.TimeoutExpired(command, 600, output=b'partial test output\n')
+            return real_run(command, *args, **kwargs)
+
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(self.work)
+            with mock.patch.dict(os.environ, self.env, clear=True), mock.patch.object(subprocess, 'run', side_effect=run):
+                checker = runpy.run_path(str(CHECKER))
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    checker['run_check']()
+                self.assertIn('partial test output', output.getvalue())
+                self.assertIn('containerized tests timed out', checker['UNVERIFIED'])
+                checker['UNVERIFIED'].clear()
+        finally:
+            os.chdir(old_cwd)
 
     def test_symlink_in_hidden_path_is_not_followed(self):
         self.original.unlink()
