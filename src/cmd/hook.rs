@@ -1367,6 +1367,19 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
             jouet_rules::tree::work_tree(Some(Path::new(root)), TREE_TIMEOUT).ok()
         }
     };
+    // A clean merge of another branch after a pass (`git merge origin/main`
+    // with nothing to resolve) brings code its own branch tested, not a
+    // change of the agent's: what passed before it counts as passing after,
+    // as across a formatting.
+    let roots: Vec<String> = state.trees.keys().cloned().collect();
+    for root in roots.iter().filter(|root| !root.is_empty()) {
+        let merge = jouet_rules::tree::clean_merge(Some(Path::new(root)), TREE_TIMEOUT);
+        if let Ok(Some((before, after))) = merge
+            && tree_of(root).as_deref() == Some(after.as_str())
+        {
+            state.checks_mut(root).reformatted(&before, &after);
+        }
+    }
     let hk_repo =
         |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
     let affected =
