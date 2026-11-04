@@ -19,12 +19,14 @@ class MemosCheckerTest(unittest.TestCase):
         self.bin.mkdir()
         git = self.bin / 'git'
         git.write_text('''#!/usr/bin/env python3
-import pathlib, sys
+import os, pathlib, sys
 args = sys.argv[1:]
 if args[:2] == ['rev-parse', 'HEAD']:
     print('new-commit')
 elif args[:2] == ['diff', '--name-only']:
     print('web/tests/new.test.tsx')
+elif args[:2] == ['diff', '--quiet'] and os.environ.get('CHANGED_DEPS'):
+    sys.exit(1)
 elif args and args[0] == 'clone':
     (pathlib.Path(args[-1]) / 'web' / 'tests').mkdir(parents=True)
 ''')
@@ -74,6 +76,11 @@ sys.exit(1 if not browser and os.environ.get('FAIL_DOM') else 0)
         result = self.check(MISSING_BROWSER='1')
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[-1], 'JOUET_BENCH_UNVERIFIED_V1')
+
+    def test_changed_dependencies_are_unverified(self):
+        result = self.check(CHANGED_DEPS='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('frontend dependency files changed', result.stdout)
 
     def test_known_failure_wins_over_missing_browser(self):
         result = self.check(FAIL_DOM='1', MISSING_BROWSER='1')

@@ -19,7 +19,7 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/jouet-memos-prepare.XXXXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 git clone --quiet --local --no-hardlinks --no-checkout "$source_repo" "$scratch/work"
 git -C "$scratch/work" checkout --quiet --detach "$revision"
-git -C "$scratch/work" apply "$root/checker-tools.patch"
+git -C "$scratch/work" apply --unidiff-zero "$root/checker-tools.patch"
 CI=1 "$pnpm" --dir "$scratch/work/web" --store-dir "$store" install --frozen-lockfile
 PLAYWRIGHT_BROWSERS_PATH="$browsers" node "$scratch/work/web/node_modules/playwright/cli.js" install --only-shell chromium
 printf 'Memos benchmark dependencies prepared in %s\n' "$cache"

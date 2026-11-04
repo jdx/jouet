@@ -36,6 +36,11 @@ def check():
                              capture_output=True, text=True, check=True).stdout.splitlines()
     expect(any('test' in name.lower() or 'spec' in name.lower() for name in changed),
            'no committed frontend regression test')
+    dependencies = subprocess.run(['git', 'diff', '--quiet', os.environ['BENCH_HEAD_SHA'], 'HEAD', '--',
+                                   'web/package.json', 'web/pnpm-lock.yaml'], check=False)
+    if dependencies.returncode:
+        UNVERIFIED.append('frontend dependency files changed; checker tooling cannot be applied safely')
+        return
     with tempfile.TemporaryDirectory(prefix='memos-check-') as directory:
         checkout = Path(directory) / 'work'
         clone = subprocess.run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', str(Path.cwd()), str(checkout)],
@@ -43,7 +48,7 @@ def check():
         if clone.returncode:
             UNVERIFIED.append('cannot create checker checkout: ' + clone.stderr.strip())
             return
-        patch = subprocess.run(['git', 'apply', str(root / 'checker-tools.patch')], cwd=checkout,
+        patch = subprocess.run(['git', 'apply', '--unidiff-zero', str(root / 'checker-tools.patch')], cwd=checkout,
                                capture_output=True, text=True, timeout=30)
         if patch.returncode:
             UNVERIFIED.append('cannot apply isolated browser tools: ' + patch.stderr.strip())

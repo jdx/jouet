@@ -76,7 +76,7 @@ MISE_ENV=bench mise x -- sh bench/tasks/memos-sidebar-position/prepare.sh
 MISE_ENV=bench mise x -- python3 bench/agents.py check-tasks --tasks memos-sidebar-position
 ```
 
-Preparation uses the network. Each trial installs its own frontend dependencies offline before timing. The checker makes a separate local checkout and installs the additional browser-test dependencies offline there; it leaves the agent's checkout and dependencies alone. A missing browser, unavailable checker dependencies or missing named tests leaves the result unverified. The upstream test fixtures and reference patch are MIT-licensed; their license is included with the task.
+Preparation uses the network. Each trial installs its own frontend dependencies offline before timing. The checker makes a separate local checkout and installs the additional browser-test dependencies offline there; it leaves the agent's checkout and dependencies alone. A missing browser, unavailable checker dependencies, changed frontend dependency files or missing named tests leaves the result unverified. The upstream test fixtures and reference patch are MIT-licensed; their license is included with the task.
 
 The opt-in Actual Budget task checks a running balance after two edits in a local browser, and requires a committed regression test and release note. The reference fix is adapted from [actualbudget/actual#8490](https://github.com/actualbudget/actual/pull/8490). It retains repository history, uses port 3001 for its local server, and refuses to reuse a server already on that port. Before running, prepare the pinned dependencies and Chromium once from the jouet checkout:
 
