@@ -703,7 +703,9 @@ local function script_commands(command: JouetCommand, dir: string?): { JouetComm
 			if inner.program == "cd" or inner.program == "pushd" then
 				return nil
 			end
-			if not classify(inner, dir) then
+			-- Each check must be known to have passed: not negated with `!`,
+			-- nor piped into another command without pipefail.
+			if not classify(inner, dir) or inner.status ~= 0 then
 				return nil
 			end
 			table.insert(ran, inner)
