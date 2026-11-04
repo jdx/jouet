@@ -245,7 +245,7 @@ fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
             summary = Some((start + offset + 2, c[1].parse::<usize>().ok()?));
             break;
         }
-        if line.ends_with(".md") && !line.contains(char::is_whitespace) && !line.contains(':') {
+        if line.ends_with(".md") && !line.contains(':') {
             if file.is_some() && !file_has_warning {
                 return None;
             }
@@ -1239,6 +1239,7 @@ docs/README.md\n\
         assert!(evidence(&format!("3 passed, 0 failed, 0 failures\n{output}")).is_some());
         assert!(evidence(&format!("0 failed, 1 error\n{output}")).is_none());
         assert!(evidence(&format!("Checked docs/error-handling.md\n{output}")).is_some());
+        assert!(evidence(&output.replace("docs/README.md", "docs/Release Notes.md")).is_some());
         assert!(evidence(&output.replace("[ELIFECYCLE]", "ELIFECYCLE ")).is_some());
         assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
     }
