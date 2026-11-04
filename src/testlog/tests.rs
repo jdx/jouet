@@ -165,6 +165,44 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 }
 
 #[test]
+fn a_cargo_test_a_test_runs_and_means_to_fail_is_not_counted() {
+    // The inner cargo's lines are the outer's, `error: test failed`
+    // included; only libtest's counts tell the runs apart.
+    let log = "     Running tests/wrapper.rs (target/debug/deps/wrapper-0123)
+
+running 3 tests
+     Running unittests src/lib.rs (target/debug/deps/inner-0123)
+
+running 1 test
+test inner_fails ... FAILED
+
+failures:
+
+---- inner_fails stdout ----
+thread 'inner_fails' panicked at src/lib.rs:1:1:
+boom
+
+failures:
+    inner_fails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+test runs_a_failing_cargo_test ... ok
+running 2 tests
+test inner_crashes ... FAILED
+     Summary [   0.005s] 1 test run: 0 passed, 1 failed, 0 skipped
+test runs_a_crashing_binary_and_nextest ... ok
+test passes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [3, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
 fn a_nested_nextest_run_is_not_counted_without_cargo_lines() {
     // `cargo test -q` prints none of cargo's lines.
     let log = "
