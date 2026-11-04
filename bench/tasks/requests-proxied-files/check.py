@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import dirty, expect, finish, new_commit  # noqa: E402
+from _check import committed_files, dirty, expect, finish, new_commit  # noqa: E402
 
 # Exercise the public API without making a network request or replacing tests.
 program = r'''
@@ -36,5 +36,9 @@ run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
                      env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60)
 expect(run.returncode == 0, f"multipart cases failed:\n{run.stdout}\n{run.stderr}")
 expect(new_commit(), "nothing was committed")
+test_files = [path for path in committed_files() if path.startswith("tests/") and path.endswith(".py")
+              and Path(path).is_file()
+              and (Path(path).name.startswith("test_") or Path(path).name.endswith("_test.py"))]
+expect(bool(test_files), "no committed test file was changed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
 finish()
