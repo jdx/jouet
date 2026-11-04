@@ -108,6 +108,7 @@ class Task:
     upstream: bool = False
     upstream_url: str | None = None
     check_timeout_s: int = 120
+    check_docker: bool = False
     tools: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     path: list[str] = field(default_factory=list)
@@ -200,6 +201,8 @@ def load(name: str) -> Task:
         for command in isolated_setup
     ):
         raise ValueError(f"task {name}: isolated_setup must be a list of nonempty argument lists")
+    if not isinstance(raw.get("check_docker", False), bool):
+        raise ValueError(f"task {name}: check_docker must be a boolean")
     source = raw.get("source")
     if source is not None:
         if not isinstance(source, dict) or any(not isinstance(source.get(key), str) or not source[key] for key in ("git", "commit")):
@@ -231,6 +234,7 @@ def load(name: str) -> Task:
         upstream=bool(raw.get("upstream", False)),
         upstream_url=raw.get("upstream_url"),
         check_timeout_s=int(raw.get("check_timeout_s", 120)),
+        check_docker=raw.get("check_docker", False),
         tools=dict(raw.get("tools", {})),
         env=dict(raw.get("env", {})),
         path=list(raw.get("path", [])),
@@ -562,8 +566,20 @@ def copy_history(source: dict[str, str | bool], workdir: Path) -> None:
         raise EnvironmentSetupError("history mode did not check out the pinned commit")
 
 
-def check_env(shas: dict[str, str], state: Path | None) -> dict[str, str]:
+def check_env(shas: dict[str, str], state: Path | None, check_docker: bool = False) -> dict[str, str]:
     env = {"BENCH_BASE_SHA": shas["base_sha"], "BENCH_HEAD_SHA": shas["head_sha"], **helpers_env()}
+    # Preserve the name: Docker installations such as OrbStack dispatch on argv[0].
+    # This path goes to the checker, not the agent.
+    docker = shutil.which("docker") if check_docker else None
+    if docker and Path(docker).resolve().name == "mise":
+        try:
+            found = subprocess.run([str(Path(docker).resolve()), "which", "docker"],
+                                   capture_output=True, text=True, timeout=15)
+            docker = found.stdout.strip() if found.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            docker = None
+    if docker:
+        env["BENCH_DOCKER"] = docker
     if state is not None:
         env["BENCH_GITHUB_STATE"] = str(state)
     return env

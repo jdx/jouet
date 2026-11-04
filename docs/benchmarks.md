@@ -124,7 +124,7 @@ MISE_ENV=bench mise x -- python3 bench/import_swebench.py prime bench/tasks/sweb
 python3 bench/agents.py check-tasks --tasks swebench-django-11400
 ```
 
-`prime` is the only step that uses the network. For each task it builds a Python environment under `~/src/swebench/envs/<instance_id>` with the benchmark's `uv`. It uses the instance's Python version, installs the repository at its base commit for its dependencies, adds the test extras, and makes the environment read-only. Packages are limited to those released within six months after the instance's `created_at`. The build tools are limited to those released before 2024, and atomicwrites, whose old releases were deleted from PyPI, is exempt. uv downloads the Python versions it lacks. A run links `python3` and `python` to that environment in both arms and puts the work tree first on `PYTHONPATH`, so the agent's edits are what is tested, with no install in the run.
+For native SWE-bench tasks, `prime` is the step that uses the network. For each task it builds a Python environment under `~/src/swebench/envs/<instance_id>` with the benchmark's `uv`. It uses the instance's Python version, installs the repository at its base commit for its dependencies, adds the test extras, and makes the environment read-only. Packages are limited to those released within six months after the instance's `created_at`. The build tools are limited to those released before 2024, and atomicwrites, whose old releases were deleted from PyPI, is exempt. uv downloads the Python versions it lacks. A run links `python3` and `python` to that environment in both arms and puts the work tree first on `PYTHONPATH`, so the agent's edits are what is tested, with no install in the run.
 
 The repositories the importer knows (`spec_for`) are Django, sympy, Sphinx, pylint and pytest, all pure Python. Python versions follow SWE-bench's harness, except that Django 3.x runs on 3.8, not 3.6, because uv's Python builds start at 3.8. A repository it does not know needs `--test-cmd` (and `--python` for a Python project), and its check then requires only that the command exits 0. That is how SWE-bench Multilingual's or Multi-SWE-bench's other languages import; their toolchains are not primed. Repositories with compiled extensions, such as astropy, scikit-learn and matplotlib, do not work with `PYTHONPATH`, since the work tree has no built extensions.
 
@@ -146,6 +146,18 @@ The first batch has ten SWE-bench Verified instances, chosen from the dataset's 
 SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
 
 The models under test may have seen these issues and fixes in training. Both arms use the same model, but jouet may change how an agent uses what it remembers, so pairing does not eliminate this confounder. Success and cost differences on these tasks may not generalize to unfamiliar work.
+
+### Optional Django container checker
+
+The opt-in `django-13344-container` task uses the same source, prompt, hidden tests and reference fix as `swebench-django-13344`, but checks the result in a Linux container with both historical Memcached backends. Prepare the native agent environment as above, then build the checker image once:
+
+```sh
+docker build -t jouet-bench-django-13344:1 -f bench/tasks/django-13344-container/Dockerfile bench/tasks/django-13344-container
+MISE_ENV=bench mise x -- python3 bench/agents.py check-tasks --tasks django-13344-container
+MISE_ENV=bench mise x -- python3 bench/agents.py run --harness codex --tasks django-13344-container
+```
+
+The image build uses the network; it pins the Python base image, Debian snapshot and Python dependency versions. Each check records the image ID and runs with networking disabled and the checkout mounted read-only. Docker and the image are needed only for the checker; the agent still runs in the native environment. A missing image, unavailable Docker, missing required test or timeout produces an unverified check. Named test failures still fail. Temporary hidden tests are restored after checking. Container results exercise Linux even when the agent runs on another OS, and do not establish native-platform coverage.
 
 ### Arms
 

@@ -169,6 +169,17 @@ class LogTest(unittest.TestCase):
         log = "test_interrupted (m.tests.T)\ntest_next (m.tests.T) ... ok\n"
         self.assertEqual(_swebench.parse_django(log), {"test_next (m.tests.T)": "pass"})
 
+    def test_django_subtest_summary_overrides_missing_or_passing_status(self):
+        log = '\n'.join([
+            'test_coroutine (m.tests.T) ... test_next (m.tests.T) ... ok',
+            'test_other (m.tests.T) ... ok',
+            "FAIL: test_coroutine (m.tests.T) (middleware='CacheMiddleware')",
+            "ERROR: test_other (m.tests.T) (middleware='SecurityMiddleware')",
+        ])
+        statuses = _swebench.parse_django(log)
+        self.assertEqual(statuses['test_coroutine (m.tests.T)'], 'fail')
+        self.assertEqual(statuses['test_other (m.tests.T)'], 'fail')
+
     def test_duplicate_names_keep_a_failure(self):
         log = "a/tests/test_x.py[1]\ntest_same F\nb/tests/test_y.py[1]\ntest_same ok\n"
         self.assertEqual(_swebench.parse_sympy(log), {"test_same": "fail"})

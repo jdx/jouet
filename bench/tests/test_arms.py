@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from jbench import arms
+from jbench import arms, tasks
 
 
 class ResolveTest(unittest.TestCase):
@@ -22,6 +22,21 @@ class ResolveTest(unittest.TestCase):
             for name in ("parallel", "uv", "uvx"):
                 self.assertEqual((root / "run/bin" / name).resolve(), (root / name).resolve())
             self.assertTrue(env["PATH"].startswith(str(root / "run/bin")))
+
+    def test_docker_path_is_passed_only_to_the_checker_environment(self):
+        with patch.object(tasks.shutil, "which") as lookup:
+            self.assertNotIn("BENCH_DOCKER", tasks.check_env({"base_sha": "base", "head_sha": "head"}, None))
+            lookup.assert_not_called()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docker-tools").write_text("#!/bin/sh\nexit 0\n")
+            (root / "docker-tools").chmod(0o755)
+            (root / "docker").symlink_to(root / "docker-tools")
+            with patch.dict(os.environ, {"PATH": tmp}):
+                check = tasks.check_env({"base_sha": "base", "head_sha": "head"}, None, True)
+            self.assertEqual(check["BENCH_DOCKER"], str(root / "docker"))
+        with patch.object(tasks.shutil, "which", return_value=None):
+            self.assertNotIn("BENCH_DOCKER", tasks.check_env({"base_sha": "base", "head_sha": "head"}, None, True))
 
     def test_resolve_mise_itself(self):
         with tempfile.TemporaryDirectory() as tmp:

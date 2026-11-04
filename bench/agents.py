@@ -430,7 +430,7 @@ def cmd_check_tasks(args: argparse.Namespace) -> int:
                 finally:
                     if fake:
                         fake.__exit__()
-                check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None))
+                check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None, task.check_docker))
                 runner.sweep(run_dir, None)
                 runner.sweep(workdir, None)
                 if check["passed"] is None:

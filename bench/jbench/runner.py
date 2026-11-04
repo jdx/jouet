@@ -536,7 +536,7 @@ def execute(
     elif missing_usage:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex reported no token usage."}
     else:
-        check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None))
+        check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None, task.check_docker))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
     # Ephemeral Codex sessions have no transcript for jouet audit to inspect.
     audit_report = None if harness.name == "codex" else audit(opts["jouet_bin"], harness, env)
