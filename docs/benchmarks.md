@@ -24,7 +24,7 @@ A task is a small fixture repository, a prompt and a success check, chosen from 
 
 Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), `repo/` (committed on `main`), an optional `pr/` (committed on the PR branch), an optional `github.json` (the fake GitHub's fixture), `check.py` (exit 0 means success) and `solve.py` (a reference solution). Commits use a fixed author and date, so a task's SHAs are the same everywhere.
 
-A checker can report incomplete evidence through `_check.UNVERIFIED` and `_check.finish()`. If no assertion failed, the helper prints the reasons and a `JOUET_BENCH_UNVERIFIED_V1` marker, then exits 3. Exit 3 without that marker remains a failure. A checker timeout is also unverified. `check-tasks` reports unverified results and does not claim the reference solution was validated; run details remain in `check.log`.
+A checker can report incomplete evidence through `_check.UNVERIFIED` and `_check.finish()`. If no assertion failed, the helper prints the reasons and a `JOUET_BENCH_UNVERIFIED_V1` marker, then exits 3. Exit 3 without that marker remains a failure. A checker timeout is also unverified. Runs with unverified checks are excluded from performance comparisons; an agent that fails or is stopped still counts as a failure in success rates and paired outcomes. `check-tasks` reports unverified results and does not claim the reference solution was validated; run details remain in `check.log`.
 
 Older SWE-bench results may have counted skipped or unnamed regression tests as passing. Re-run those tasks with this checker before relying on their accuracy or performance comparisons; rewriting an old report cannot recover missing coverage evidence.
 
