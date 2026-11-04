@@ -49,10 +49,10 @@ names = ([
     'preserves the default positioning for other popovers',
     'preserves the default positioning for other dropdown menus',
     'preserves the default positioning for other selects',
-    'keeps the actual sidebar Timeline menu fixed during document scrolling',
-    'keeps the actual memo-detail Share menu fixed during document scrolling',
-    'keeps the actual sidebar Tags menu fixed during document scrolling',
-    'keeps the actual sidebar Views menu fixed during document scrolling',
+    'keeps sidebar Timeline settings fixed while scrolling',
+    'keeps sidebar memo Share fixed while scrolling',
+    'keeps sidebar Tags fixed while scrolling',
+    'keeps sidebar Views fixed while scrolling',
 ] if browser else [
     'keeps the sidebar scope popup and its Space selector fixed after positioning',
     'keeps the /setting.preference.theme/ submenu fixed after positioning',
@@ -60,7 +60,7 @@ names = ([
 ])
 rows = [{'fullName': name, 'status': 'passed'} for name in names]
 if browser and os.environ.get('MISSING_TIMELINE'):
-    rows = [row for row in rows if 'Timeline menu' not in row['fullName']]
+    rows = [row for row in rows if 'Timeline settings' not in row['fullName']]
 if not browser and os.environ.get('FAIL_DOM'):
     rows[0].update(status='failed', failureMessages=['specific assertion'])
 pathlib.Path(args[args.index('--outputFile') + 1]).write_text(
@@ -90,7 +90,7 @@ sys.exit(1 if not browser and os.environ.get('FAIL_DOM') else 0)
     def test_missing_sidebar_browser_case_is_unverified(self):
         result = self.check(MISSING_TIMELINE='1')
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
-        self.assertIn('Timeline menu fixed', result.stdout)
+        self.assertIn('Timeline settings fixed', result.stdout)
 
     def test_timeout_keeps_partial_runner_output(self):
         real_run = subprocess.run

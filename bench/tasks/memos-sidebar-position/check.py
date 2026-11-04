@@ -20,10 +20,10 @@ browser_names = ('keeps a fixed sidebar popup in place when the page scrolls',
                  'preserves the default positioning for other popovers',
                  'preserves the default positioning for other dropdown menus',
                  'preserves the default positioning for other selects',
-                 'keeps the actual sidebar Timeline menu fixed during document scrolling',
-                 'keeps the actual memo-detail Share menu fixed during document scrolling',
-                 'keeps the actual sidebar Tags menu fixed during document scrolling',
-                 'keeps the actual sidebar Views menu fixed during document scrolling')
+                 'keeps sidebar Timeline settings fixed while scrolling',
+                 'keeps sidebar memo Share fixed while scrolling',
+                 'keeps sidebar Tags fixed while scrolling',
+                 'keeps sidebar Views fixed while scrolling')
 
 
 def check():
@@ -70,10 +70,7 @@ def check():
             'tests/jouet-hidden-sidebar-space.test.tsx': 'check-space.test.tsx',
             'tests/jouet-hidden-sidebar-menu.test.tsx': 'check-menu.test.tsx',
             'tests/jouet-hidden-sidebar-browser.test.tsx': 'check-browser.test.tsx',
-            'tests/jouet-hidden-timeline.test.tsx': 'check-timeline.test.tsx',
-            'tests/jouet-hidden-share.test.tsx': 'check-share.test.tsx',
-            'tests/jouet-hidden-tags.test.tsx': 'check-tags.test.tsx',
-            'tests/jouet-hidden-views.test.tsx': 'check-views.test.tsx',
+            'tests/jouet-hidden-sidebar-integration.test.tsx': 'check-sidebar-integration.test.tsx',
             'vitest.jouet-browser.config.mts': 'browser-config.mts',
         }
         for dest, src in files.items():
@@ -87,9 +84,8 @@ def check():
                      'tests/jouet-hidden-sidebar-space.test.tsx', 'tests/jouet-hidden-sidebar-menu.test.tsx',
                      '--reporter=json', '--outputFile', str(Path(directory) / 'dom.json')], expected, 'dom.json'),
             ('Chromium', ['node', 'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.jouet-browser.config.mts',
-                          'tests/jouet-hidden-sidebar-browser.test.tsx', 'tests/jouet-hidden-timeline.test.tsx',
-                          'tests/jouet-hidden-share.test.tsx', 'tests/jouet-hidden-tags.test.tsx',
-                          'tests/jouet-hidden-views.test.tsx', '--reporter=json', '--outputFile',
+                          'tests/jouet-hidden-sidebar-browser.test.tsx', 'tests/jouet-hidden-sidebar-integration.test.tsx',
+                          '--reporter=json', '--outputFile',
                           str(Path(directory) / 'browser.json')], browser_names, 'browser.json'),
         ]
         for label, command, names, result_file in commands:
