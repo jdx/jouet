@@ -324,33 +324,42 @@ fn without_name_filter(ran: &str, wanted: &str) -> bool {
 
 /// Whether `ran` is `wanted` with its cargo test-name filters widened:
 /// cargo and nextest run every test whose name holds any filter, so
-/// `affected::` runs all that `affected::cargo` does, and `-- a b` all that
-/// `-- ab` does. The filters are the words after `--`, or without one the
-/// last word. Not with `--exact`, which matches whole names, nor with any
-/// other option among the filters.
+/// `affected::` runs all that `affected::cargo` does, and `a b` all that
+/// `ab` does. The checks rule records a selector as its packages and picks
+/// without the `--` (`-p mise --lib name other`), so the filters are the
+/// plain words at its end, less one that is the value of the option before
+/// them (`--bin jouet`, `-p mise`). Not with `--exact`, which matches whole
+/// names.
 fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
     if !(command.starts_with("cargo test") || command.starts_with("cargo nextest")) {
         return false;
     }
-    fn option(w: &&str) -> bool {
-        w.starts_with('-')
-    }
-    fn split(s: &str) -> Option<(Vec<&str>, Vec<&str>)> {
-        let words: Vec<&str> = s.split_whitespace().collect();
-        let (head, filters) = match words.iter().position(|w| *w == "--") {
-            Some(i) => (words[..i].to_vec(), words[i + 1..].to_vec()),
-            // An option just before the last word may take it as its value.
-            None => {
-                let (last, head) = words.split_last()?;
-                if head.last().is_some_and(option) {
-                    return None;
-                }
-                (head.to_vec(), vec![*last])
-            }
-        };
-        let clean =
-            !filters.is_empty() && !filters.iter().any(option) && !head.contains(&"--exact");
-        clean.then_some((head, filters))
+    // The picks the checks rule records that take no value.
+    const FLAGS: [&str; 7] = [
+        "--lib",
+        "--bins",
+        "--tests",
+        "--examples",
+        "--benches",
+        "--doc",
+        "--ignored",
+    ];
+    fn split(selector: &str) -> Option<(Vec<&str>, Vec<&str>)> {
+        let words: Vec<&str> = selector.split_whitespace().collect();
+        if words.contains(&"--exact") {
+            return None;
+        }
+        let mut at = words.len()
+            - words
+                .iter()
+                .rev()
+                .take_while(|w| !w.starts_with('-'))
+                .count();
+        if at > 0 && !FLAGS.contains(&words[at - 1]) {
+            at += 1;
+        }
+        let (head, filters) = words.split_at(at.min(words.len()));
+        (!filters.is_empty()).then(|| (head.to_vec(), filters.to_vec()))
     }
     let (Some((ran_head, ran)), Some((wanted_head, wanted))) = (split(ran), split(wanted)) else {
         return false;
@@ -2088,32 +2097,41 @@ mod tests {
             "--bin jouet affected::cargo"
         ));
         assert!(!wider_filter(c, "-- --exact a", "-- --exact ab"));
-        // Filters after `--` widen one by one: a run of several, one of
-        // them the failed test's name or part of it, covers that test.
+        // Several filters widen one by one: a run of several, one of them
+        // the failed test's name or part of it, covers that test. The
+        // selectors are as the checks rule records them, without `--`.
+        let c = "cargo test -p mise --lib -- test_ab";
         assert!(wider_filter(
             c,
-            "-p mise --lib -- test_b test_ab cutoff",
-            "-p mise --lib -- test_ab"
+            "-p mise --lib test_b test_ab cutoff",
+            "-p mise --lib test_ab"
         ));
         assert!(wider_filter(
             c,
-            "-p mise --lib -- cutoff latest",
-            "-p mise --lib -- test_cutoff_x"
+            "-p mise --lib cutoff latest",
+            "-p mise --lib test_cutoff_x"
+        ));
+        assert!(wider_filter(
+            c,
+            "-p mise cutoff latest",
+            "-p mise test_cutoff_x"
         ));
         assert!(!wider_filter(
             c,
-            "-p mise --lib -- latest",
-            "-p mise --lib -- test_cutoff_x test_other"
+            "-p mise --lib latest",
+            "-p mise --lib test_cutoff_x test_other"
         ));
         assert!(!wider_filter(
             c,
-            "-p mise --lib -- cutoff",
-            "-p mise --bins -- test_cutoff_x"
+            "-p mise --lib cutoff",
+            "-p mise --bins test_cutoff_x"
         ));
+        // A package name is not a filter.
+        assert!(!wider_filter(c, "-p mi", "-p mise"));
         assert!(!wider_filter(
             c,
-            "-p mise --lib -- cutoff --exact",
-            "-p mise --lib -- cutoff"
+            "-p mise --lib cutoff --exact",
+            "-p mise --lib cutoff"
         ));
         assert!(!wider_filter(
             "mise run test:e2e test_ab",
