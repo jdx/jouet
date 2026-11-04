@@ -121,26 +121,20 @@ The opt-in `ruff-perf-iterable` task reproduces [astral-sh/ruff#29365](https://g
 ```sh
 python3 bench/import_swebench.py import verified.jsonl --dataset "SWE-bench Verified" --ids django__django-11400,sympy__sympy-16597
 MISE_ENV=bench mise x -- python3 bench/import_swebench.py prime bench/tasks/swebench-*
-python3 bench/agents.py check-tasks --tasks swebench-django-11400
+python3 bench/agents.py check-tasks --tasks swebench-django-14631
 ```
 
 For native SWE-bench tasks, `prime` is the step that uses the network. For each task it builds a Python environment under `~/src/swebench/envs/<instance_id>` with the benchmark's `uv`. It uses the instance's Python version, installs the repository at its base commit for its dependencies, adds the test extras, and makes the environment read-only. Packages are limited to those released within six months after the instance's `created_at`. The build tools are limited to those released before 2024, and atomicwrites, whose old releases were deleted from PyPI, is exempt. uv downloads the Python versions it lacks. A run links `python3` and `python` to that environment in both arms and puts the work tree first on `PYTHONPATH`, so the agent's edits are what is tested, with no install in the run.
 
 The repositories the importer knows (`spec_for`) are Django, sympy, Sphinx, pylint and pytest, all pure Python. Python versions follow SWE-bench's harness, except that Django 3.x runs on 3.8, not 3.6, because uv's Python builds start at 3.8. A repository it does not know needs `--test-cmd` (and `--python` for a Python project), and its check then requires only that the command exits 0. That is how SWE-bench Multilingual's or Multi-SWE-bench's other languages import; their toolchains are not primed. Repositories with compiled extensions, such as astropy, scikit-learn and matplotlib, do not work with `PYTHONPATH`, since the work tree has no built extensions.
 
-The first batch has ten SWE-bench Verified instances, chosen from the dataset's two longest difficulty labels (`1-4 hours`, `>4 hours`) for gold patches that span several files or need reading across modules:
+The first batch had ten SWE-bench Verified instances, chosen from the dataset's two longest difficulty labels (`1-4 hours`, `>4 hours`) for gold patches that span several files or need reading across modules. In a six-round pilot over all three arms, none reached a 30% cut in input tokens (the best was about 25%), and five failed in every arm. SWE-bench issues are mostly one fix in one repository with no PR, CI or review to work through, where jouet has little to cut. Four stay as guards, the ones plain solves reliably, to show jouet costs no correctness or time there; whole-PR and exploration tasks are the targets:
 
 | task | instance | gold patch | why |
 |---|---|---|---|
-| `swebench-django-11400` | Ordering of `RelatedFieldListFilter` choices | 3 files | admin filters, model fields and reverse relations |
 | `swebench-django-11885` | Combine fast-delete queries | 2 files, 213 lines | the deletion collector and the admin's use of it |
 | `swebench-django-13344` | A coroutine reaches the first middleware's `process_response()` | 3 files | the session, cache and security middlewares |
 | `swebench-django-14631` | `BaseForm` should read values through `BoundField` | 2 files | forms and bound fields |
-| `swebench-django-15629` | `db_collation` does not reach foreign keys | 4 files | the schema editors and related fields |
-| `swebench-django-16263` | Strip unused annotations from count queries | 4 files | expressions, `Q`, the SQL query and `WHERE` |
-| `swebench-sympy-16597` | `a.is_even` does not imply `a.is_finite` | 6 files | assumptions, core, printing and tensors |
-| `swebench-sympy-14248` | `MatrixSymbol` differences print as sums | 3 files | the str, pretty and LaTeX printers |
-| `swebench-sphinx-9461` | `@classmethod` `@property` methods go undocumented | 3 files | the Python domain, autodoc and `util.inspect` |
 | `swebench-pytest-5787` | Exception serialization loses chained exceptions | 1 file, 260 lines | report serialization, read against `_pytest._code` |
 
 SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
