@@ -662,6 +662,37 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 	return nil, unknown
 end
 
+-- The commands of the `sh -c` script `jouet test --cmd --` ran, when it has
+-- more than one and stays in the work tree it started in, each with its own
+-- status as if it ran directly: `sh -c 'cargo build && cargo test'` that
+-- passed ran both, and passed both. One command is classified as itself
+-- (see `classify`).
+local function script_commands(command: JouetCommand): { JouetCommand }?
+	if command.program ~= "jouet" then
+		return nil
+	end
+	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
+	local _, _, given = jouet_test(args)
+	if not given or #given == 0 then
+		return nil
+	end
+	local argv = jouet.unwrap(given)
+	local shell = if argv[1] then jouet.basename(argv[1]) else nil
+	if not ((shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3) then
+		return nil
+	end
+	local script = jouet.parse(argv[3], command.status)
+	if #script < 2 then
+		return nil
+	end
+	for _, inner in script do
+		if inner.program == "cd" or inner.program == "pushd" then
+			return nil
+		end
+	end
+	return script
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
 		local dirs = jouet.dirs(call.commands)
@@ -674,10 +705,12 @@ local rule: JouetRule = {
 					continue
 				end
 				local project_dir = if type(dir) == "string" then dir else nil
-				local kind, scope = classify(command, project_dir)
-				if kind then
-					-- Ignored when the command's own exit status is unknown.
-					jouet.record(kind, command, if scope.full then "full" else "partial", scope.selector, project_dir)
+				for _, ran in script_commands(command) or { command } do
+					local kind, scope = classify(ran, project_dir)
+					if kind then
+						-- Ignored when the command's own exit status is unknown.
+						jouet.record(kind, ran, if scope.full then "full" else "partial", scope.selector, project_dir)
+					end
 				end
 			end
 		end

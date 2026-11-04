@@ -138,6 +138,17 @@ stop_reason() {
 		jouet hook claude stop | jq -r '.reason // empty'
 }
 
+@test "a passing sh -c script of several checks clears their failures" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+
+	ran 'cargo test --workspace' 101
+	ran "jouet test --cmd -- bash -c 'cargo build && cargo test --workspace'" 0
+	run stop_reason
+	assert_output ""
+}
+
 @test "a partial pass does not clear a failed full run" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
