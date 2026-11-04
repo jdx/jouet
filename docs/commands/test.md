@@ -192,7 +192,7 @@ Without one, it runs the whole suite of each adapter found. Words after `--` are
 
 ### The same command on the same files: `--fresh`
 
-An agent often runs a check again on files that have not changed since it last ran: to compare a slow failure with `--baseline`, after a stop-gate block, or to read the result once more. `jouet test` answers such a run from the last one, without running the command:
+An agent often runs a check again on files that have not changed since it last ran: to compare a slow failure with `--baseline`, after a stop-gate block, or to read the result once more. By default `jouet test` runs the command each time. A project can opt in to reusing a result by setting `[test] reuse_s` or `JOUET_TEST_REUSE_S` to a positive number of seconds. With reuse enabled, a matching run is answered from the last one:
 
 ```output
 $ jouet test --baseline --cmd -- mise run check
@@ -201,9 +201,9 @@ reused: `mise run check` ran on these same files 3m ago (115s, exit 1); --fresh 
 
 The output, the log, the [baseline](#failures-that-were-there-before-baseline) comparison and what the stop gate records are those of the earlier run, and `--json` marks the suite `"reused": true`.
 
-A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. A run is kept for this only when it left the working tree as it found it, so a formatter, a code generator or a snapshot update always runs. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 3600 by default; 0 always runs).
+A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. A run is kept for this only when it left the working tree as it found it. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 0 by default).
 
-Ignored files are not part of the key: after changing one a test reads, such as a `.env` file, or for a test that is flaky or reaches the network, run with `--fresh`, which runs the command and keeps its result for the next run.
+Ignored files are not part of the key. A reused result can therefore be stale after an ignored input changes, and a reused command does not recreate deleted ignored outputs. Commands can also depend on network or service state or be flaky. Opt in only when those limits are acceptable; `--fresh` runs the command and keeps its result for the next run.
 
 ### Failures that were there before: `--baseline`
 

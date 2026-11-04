@@ -21,6 +21,10 @@ setup() {
 	init_repo
 }
 
+enable_result_reuse() {
+	export JOUET_TEST_REUSE_S=3600
+}
+
 @test "baseline uses a local submodule for the pinned commit without changing its remote" {
 	local source="$BATS_TEST_TMPDIR/source repo #1"
 	local parent_origin="$BATS_TEST_TMPDIR/parent-origin"
@@ -988,7 +992,39 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	assert_output '["jouet test --cmd -- pytest",0]'
 }
 
+@test "a repeated check sees changes in ignored inputs by default" {
+	printf '.state\n' >.gitignore
+	cat >check-state <<'SH'
+#!/bin/sh
+test "$(cat .state)" = ok
+SH
+	chmod +x check-state
+	git add .gitignore check-state
+	git commit -qm base
+	printf 'ok\n' >.state
+	run --separate-stderr env -u JOUET_TEST_REUSE_S JOUET_TEST_BASELINE=off jouet test --cmd -- ./check-state
+	assert_success
+	printf 'bad\n' >.state
+	run --separate-stderr env -u JOUET_TEST_REUSE_S JOUET_TEST_BASELINE=off jouet test --cmd -- ./check-state
+	assert_failure 1
+}
+
+@test "a repeated build recreates ignored outputs by default" {
+	printf 'dist/\n' >.gitignore
+	printf '#!/bin/sh\nmkdir -p dist\necho built >dist/result\n' >build-output
+	chmod +x build-output
+	git add .gitignore build-output
+	git commit -qm base
+	run --separate-stderr env -u JOUET_TEST_REUSE_S jouet test --cmd -- ./build-output
+	assert_success
+	rm dist/result
+	run --separate-stderr env -u JOUET_TEST_REUSE_S jouet test --cmd -- ./build-output
+	assert_success
+	assert [ -f dist/result ]
+}
+
 @test "--baseline runs an unnamed failure at the merge base without calling it a pass" {
+	enable_result_reuse
 	printf 'base\n' >tracked
 	export RUNS_FILE="$BATS_TEST_TMPDIR/unnamed-runs"
 	cat >fail-command <<'SH'
@@ -1190,6 +1226,7 @@ SH
 }
 
 @test "--baseline does not count Go subtest names as separate failed tests" {
+	enable_result_reuse
 	export GO_RUNS_FILE="$BATS_TEST_TMPDIR/go-runs"
 	cat >check-command <<'SH'
 #!/bin/sh
@@ -1664,6 +1701,7 @@ SCRIPT
 }
 
 @test "a failing full suite is compared with the merge base on its own, once per merge base" {
+	enable_result_reuse
 	mkdir -p tests
 	# Each run of the test, here or at the merge base, leaves a line.
 	printf 'import unittest\nclass T(unittest.TestCase):\n    def test_env(self):\n        open("%s/runs", "a").write("x\\n")\n        self.fail("needs brew")\n' "$BATS_TEST_TMPDIR" >tests/test_a.py
@@ -1731,6 +1769,7 @@ SCRIPT
 }
 
 @test "a failure that blames the machine is said, and not run at the merge base" {
+	enable_result_reuse
 	# In the base commit too, so the merge base can run it.
 	printf '#!/bin/sh\necho run >>"%s/runs"\nprintf "1..1\\nnot ok 1 keychain secrets\\n# Failed to initialize OS keyring store: Platform failure: DBus error: no session bus\\n"\nexit 1\n' "$BATS_TEST_TMPDIR" >keyring.sh
 	chmod +x keyring.sh
