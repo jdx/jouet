@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn cache_split_labels_incomplete_or_inconsistent_request_usage() {
+    use crate::event::Request;
+
+    let request = |input, cached| Request {
+        input_tokens: input,
+        cached_input_tokens: cached,
+        ..Default::default()
+    };
+    let make_digest = |requests| {
+        digest(
+            "codex",
+            &Transcript {
+                requests,
+                ..Default::default()
+            },
+            "session.jsonl",
+            &Options {
+                home: None,
+                redact: &crate::redact,
+            },
+        )
+    };
+    let complete = make_digest(vec![
+        request(Some(100), Some(70)),
+        request(Some(50), Some(20)),
+    ]);
+    assert_eq!(complete.totals.input_tokens, 150);
+    assert_eq!(complete.totals.cache_read_input_tokens, Some(90));
+    assert_eq!(complete.totals.other_input_tokens, Some(60));
+    assert!(render(&complete, 4000).contains("150 input tokens (90 cache reads, 60 other input)"));
+    let json = serde_json::to_value(&complete).unwrap();
+    assert_eq!(json["totals"]["cache_read_input_tokens"], 90);
+    assert_eq!(json["totals"]["other_input_tokens"], 60);
+    assert_eq!(json["totals"]["cache_split_requests"], 2);
+
+    let partial = make_digest(vec![
+        request(Some(100), Some(70)),
+        request(Some(50), None),
+        request(Some(10), Some(11)),
+    ]);
+    assert_eq!(partial.totals.input_tokens, 160);
+    assert_eq!(partial.totals.cache_read_input_tokens, Some(70));
+    assert_eq!(partial.totals.other_input_tokens, Some(30));
+    assert_eq!(partial.totals.cache_split_requests, Some(1));
+    assert!(render(&partial, 4000).contains("70 cache reads, 30 other input across 1/3 requests"));
+
+    for requests in [
+        vec![request(None, Some(20))],
+        vec![request(Some(10), Some(11))],
+        vec![],
+    ] {
+        let incomplete = make_digest(requests);
+        assert_eq!(incomplete.totals.cache_read_input_tokens, None);
+        assert_eq!(incomplete.totals.other_input_tokens, None);
+        let json = serde_json::to_value(&incomplete).unwrap();
+        assert!(json["totals"].get("cache_read_input_tokens").is_none());
+        assert!(json["totals"].get("other_input_tokens").is_none());
+        assert!(json["totals"].get("cache_split_requests").is_none());
+        if incomplete.totals.input_tokens > 0 {
+            assert!(render(&incomplete, 4000).contains("cache split unavailable"));
+        }
+    }
+}
+
+#[test]
 fn a_command_key_names_what_runs_and_drops_the_plumbing() {
     for (command, key) in [
         (

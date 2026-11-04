@@ -94,6 +94,8 @@ Which file is always the user's choice. A pending task's line at session start t
 
 ## Reviewing whole sessions
 
+A session digest splits observed input tokens into cache reads and other input when the transcript reports both counts. Other input includes cache creation as well as ordinary input; it is not a price estimate. When usage is missing or inconsistent, the digest labels the number of requests covered by the split, or says it is unavailable if none can be split.
+
 The ledger is deliberately myopic: it holds command shapes, for privacy and so it costs nothing to keep. It cannot see what matters most in a session that went badly:
 
 - the user correcting the agent ("no, use X", "don't do that"), or interrupting it;

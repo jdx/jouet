@@ -129,15 +129,35 @@ fn render_with(d: &Digest, l: Limits) -> String {
     }
     out.push('\n');
     let _ = write!(out, "{}", d.started_ms.map(date).unwrap_or_default());
+    let split = match (
+        t.cache_read_input_tokens,
+        t.other_input_tokens,
+        t.cache_split_requests,
+    ) {
+        (Some(cached), Some(other), Some(count)) if count == t.requests => format!(
+            " ({} cache reads, {} other input)",
+            tokens(cached),
+            tokens(other)
+        ),
+        (Some(cached), Some(other), Some(count)) => format!(
+            " ({} cache reads, {} other input across {count}/{} requests)",
+            tokens(cached),
+            tokens(other),
+            t.requests
+        ),
+        _ if t.input_tokens > 0 => " (cache split unavailable)".to_string(),
+        _ => String::new(),
+    };
     let _ = writeln!(
         out,
-        ", {} wall, {} prompts, {} requests, {} calls ({} failed), {} input tokens, {} output, {} in tools",
+        ", {} wall, {} prompts, {} requests, {} calls ({} failed), {} input tokens{}, {} output, {} in tools",
         duration(t.wall_ms),
         t.prompts,
         t.requests,
         t.calls,
         t.failed,
         tokens(t.input_tokens),
+        split,
         tokens(t.output_tokens),
         duration(t.tool_ms),
     );

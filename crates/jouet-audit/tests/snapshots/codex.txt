@@ -1,5 +1,5 @@
 # Session 01a00000-0000-7000-8000-00000000d1d1 (codex) in /work/app
-2026-10-30 10:00 UTC, 3m14s wall, 2 prompts, 6 requests, 6 calls (2 failed), 180k input tokens, 60 output, 2m43s in tools
+2026-10-30 10:00 UTC, 3m14s wall, 2 prompts, 6 requests, 6 calls (2 failed), 180k input tokens (cache split unavailable), 60 output, 2m43s in tools
 Transcript: <fixtures>/codex/sessions/2026/10/30/rollout-2026-10-30T10-00-00-01a00000-0000-7000-8000-00000000d1d1.jsonl (L = its line numbers)
 
 ## User corrections (2)

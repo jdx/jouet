@@ -1,5 +1,5 @@
 # Session d1d1d1d1-0000-4000-8000-000000000001 (claude) in /work/app
-2026-10-30 10:00 UTC, 7m20s wall, 4 prompts, 13 requests, 13 calls (3 failed), 260k input tokens, 520 output, 5m31s in tools
+2026-10-30 10:00 UTC, 7m20s wall, 4 prompts, 13 requests, 13 calls (3 failed), 260k input tokens (260k cache reads, 65 other input), 520 output, 5m31s in tools
 Transcript: <fixtures>/claude/projects/-work-app/d1d1d1d1-0000-4000-8000-000000000001.jsonl (L = its line numbers)
 
 ## User corrections (4)

@@ -64,6 +64,13 @@ pub struct Totals {
     pub calls: u64,
     pub failed: u64,
     pub input_tokens: u64,
+    /// The split covers only requests reporting consistent input counts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_split_requests: Option<u64>,
     pub output_tokens: u64,
     /// Time spent in tool calls.
     pub tool_ms: u64,
@@ -277,6 +284,25 @@ pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Opti
     let start = first_time(t);
     let call_name = |call: &Call| -> String { group_key(call, t.cwd.as_deref(), &clean) };
 
+    let split = t
+        .requests
+        .iter()
+        .filter_map(|request| {
+            let input = request.input_tokens?;
+            let read = request.cached_input_tokens?;
+            Some((read, input.checked_sub(read)?))
+        })
+        .try_fold(
+            (0_u64, 0_u64, 0_u64),
+            |(cached, other, count), (read, rest)| {
+                Some((
+                    cached.checked_add(read)?,
+                    other.checked_add(rest)?,
+                    count.checked_add(1)?,
+                ))
+            },
+        )
+        .filter(|(_, _, count)| *count > 0);
     let totals = Totals {
         prompts: t
             .messages
@@ -287,6 +313,9 @@ pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Opti
         calls: t.calls.len() as u64,
         failed: t.calls.iter().filter(|c| c.failed).count() as u64,
         input_tokens: t.requests.iter().filter_map(|r| r.input_tokens).sum(),
+        cache_read_input_tokens: split.map(|(cached, _, _)| cached),
+        other_input_tokens: split.map(|(_, other, _)| other),
+        cache_split_requests: split.map(|(_, _, count)| count),
         output_tokens: t.requests.iter().filter_map(|r| r.output_tokens).sum(),
         tool_ms: t.calls.iter().filter_map(|c| c.duration_ms).sum(),
         wall_ms: match (start, last_time(t)) {
