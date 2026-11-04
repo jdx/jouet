@@ -272,6 +272,8 @@ fn skip_options<'a>(mut w: &'a [String], with_value: &[&str], assignments: bool)
 fn is_assignment(word: &str) -> bool {
     match word.split_once('=') {
         Some((name, _)) => {
+            // `PATH+=:/x` appends.
+            let name = name.strip_suffix('+').unwrap_or(name);
             let mut chars = name.chars();
             chars
                 .next()
@@ -492,6 +494,16 @@ impl Parser {
                     b.word().push_str(&text);
                 }
                 ')' if in_subst => break,
+                // `ARGS=(git add -A)` assigns an array: its elements are
+                // words, not a command.
+                '(' if b
+                    .word
+                    .as_deref()
+                    .is_some_and(|w| w.ends_with('=') && is_assignment(w)) =>
+                {
+                    let text = self.array();
+                    b.word().push_str(&text);
+                }
                 '(' if self.peek() == Some(')') && b.names_function() => {
                     self.pos += 1;
                     b.word = None;
@@ -680,6 +692,64 @@ impl Parser {
         }
     }
 
+    /// After the `(` of an array assignment (`NAME=(`): returns the array's
+    /// text up to its closing `)`, which stays part of the word. Quotes keep
+    /// a `)` in, and a substitution in an element still runs.
+    fn array(&mut self) -> String {
+        let start = self.pos - 1;
+        // Parentheses of an extglob (`@(a|b)`) nest inside the array's.
+        let mut depth = 0;
+        // Whether the next character starts an element: only there does `#`
+        // start a comment, not in `@(#x)` or after an escaped space.
+        let mut word_start = true;
+        while let Some(c) = self.peek() {
+            self.pos += 1;
+            let at_start = std::mem::replace(&mut word_start, matches!(c, ' ' | '\t' | '\n'));
+            match c {
+                ')' if depth == 0 => break,
+                ')' => depth -= 1,
+                '(' => depth += 1,
+                // A comment runs to the end of its line, `)` and all.
+                '#' if at_start => {
+                    while self.peek().is_some_and(|c| c != '\n') {
+                        self.pos += 1;
+                    }
+                }
+                '<' | '>' if self.peek() == Some('(') => {
+                    self.substitution();
+                }
+                '\\' => self.pos = (self.pos + 1).min(self.chars.len()),
+                '\'' => {
+                    while self.peek().is_some_and(|c| c != '\'') {
+                        self.pos += 1;
+                    }
+                    self.pos = (self.pos + 1).min(self.chars.len());
+                }
+                '"' => {
+                    while let Some(c) = self.peek() {
+                        self.pos += 1;
+                        match c {
+                            '"' => break,
+                            '\\' => self.pos = (self.pos + 1).min(self.chars.len()),
+                            '$' if self.peek() == Some('(') => {
+                                self.substitution();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                '$' if self.peek() == Some('(') => {
+                    self.substitution();
+                }
+                '`' => {
+                    self.backquoted();
+                }
+                _ => {}
+            }
+        }
+        self.chars[start..self.pos].iter().collect()
+    }
+
     /// At the `(` of `$(`: parses the substitution's commands into `nested`
     /// and returns its source text, which stays part of the word.
     fn substitution(&mut self) -> String {
@@ -858,6 +928,38 @@ mod tests {
 
     fn status_of(script: &str, exit_code: i32) -> Vec<Option<i32>> {
         statuses(&parse(script).commands, exit_code)
+    }
+
+    #[test]
+    fn an_array_assignment_is_words_not_a_command() {
+        assert_eq!(
+            words(r#"ARGS=(git add -A); echo "${ARGS[@]}""#),
+            [["echo", "${ARGS[@]}"]]
+        );
+        assert_eq!(
+            words("local -a files=(git add -A) && cargo test"),
+            [
+                vec!["local", "-a", "files=(git add -A)"],
+                vec!["cargo", "test"]
+            ]
+        );
+        // A `)` in quotes stays in, and an element's substitution still runs.
+        let script = parse(r#"X=("a)" $(git ls-files)) PATH+=:/b; make"#);
+        assert_eq!(script.commands[0].words, ["make"]);
+        assert_eq!(script.nested[0].words, ["git", "ls-files"]);
+        // A process substitution's, an extglob's or a comment's `)` does
+        // not end the array, and the process substitution still runs.
+        let script = parse("X=(<(git ls-files) @(a|b) # c)\n d) && make");
+        assert_eq!(script.commands[0].words, ["make"]);
+        assert_eq!(script.nested[0].words, ["git", "ls-files"]);
+        // A `#` inside an element, an extglob or after an escaped space is
+        // a character, not a comment.
+        assert_eq!(words(r"X=(a#b @(#c) d\ #e) && make"), [["make"]]);
+        // An empty array, and a subshell after a command, are as before.
+        assert_eq!(
+            words("X=() && (cd a && make)"),
+            [vec!["cd", "a"], vec!["make"]]
+        );
     }
 
     #[test]

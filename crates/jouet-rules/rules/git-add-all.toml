@@ -31,6 +31,8 @@ quiet = [
   "git add src/main.rs",
   "git add ./src/main.rs",
   "git commit -m 'git add -A'",
+  # An array's elements are data until something runs them.
+  "ARGS=(git add -A); echo \"${ARGS[@]}\"",
   "git commit -m \"$(cat <<'EOF'\nnever git add -A\nEOF\n)\"",
   "echo git add .",
   "git add -u",
