@@ -57,10 +57,42 @@ the user review the command and the repository's jouet files before the person
 decides whether to run `jouet trust`. Do not treat an uncomparable baseline as a
 pass or configure setup merely because a project has a lockfile.
 
+## Put the environment and the checks in mise
+
+Set the project up in `mise.toml`, committed with it, so every session and
+every person starts from the same tools, environment and checks instead of
+working them out again. Do this whether or not the project uses mise yet: if
+it has no mise config, create `mise.toml`, and say so in the hand-off. Prefer
+what is already there; add to it rather than rewriting it.
+
+- `[tools]`: the tools the checks need, at the versions the project already
+  requires (its CI workflow, `go.mod`'s `toolchain`, `rust-toolchain.toml`,
+  `.nvmrc`, `packageManager`, `.python-version`), never just the newest. Skip a
+  tool the project expects from the system, such as a C compiler.
+- `[env]`: only what a check needs to run here, such as a variable CI sets,
+  and only once a run shows it is needed. Never secrets or tokens: those come
+  from the user's environment or fnox.
+- `[tasks]`: one task for each check you establish, so people and agents run
+  `mise run test:unit` rather than retyping commands. Name each by its kind
+  first, as jouet reads it: `test` for the whole suite, `test:<what>` for a
+  focused one, `lint`, `build`. Give each a `description` of what it covers,
+  the project's own command as `run` (an existing task through `depends` or
+  `mise run`, rather than a copy of it), and `sources` when the files it reads
+  are clear, so mise can skip it while they are unchanged. Arguments after
+  the task name are appended to its last command, so a focused task can take
+  the test or file to run: `mise run test:unit tests/parse.test.ts`.
+
+Keep tasks a person wrote as they are, and add new ones beside them. Do not
+change `[settings]`, add hooks, or loosen trust. Check the result with
+`mise tasks ls --json` and run each new task once through `jouet test --cmd
+-- mise run TASK` before recording it below. mise runs a new or changed
+config only once it is trusted: if it refuses, report the check as unverified
+and ask the person to review and trust `mise.toml`, as for jouet's own files.
+
 ## Record the checks
 
 Write the commands you established to `.jouet/project.toml`, to be committed
-with the project. The session-start primer shows them to every later session
+with the project, through the mise tasks above where there is one. The session-start primer shows them to every later session
 once a person trusts the repository's jouet files, so agents run the right
 check instead of looking for it:
 
@@ -167,8 +199,13 @@ use the smallest suitable tool:
 - Test configuration for a runner or partial-run options the project actually
   uses. Explain any tests a filter excludes; do not weaken the full suite or
   remove failing tests to produce a pass.
-- A mise task for fixed commands agents repeatedly type, or a routine when the
-  workflow needs decisions over structured state.
+- A mise task for a project-specific routine: commands agents repeatedly
+  type, steps that run in order (a list in `run`; `depends` for tasks that
+  must finish first, which mise may run at once), a step that
+  takes the test or file to run, or a longer script as a file task in
+  `mise-tasks/`. People can run it too. Write a jouet routine (Luau) only when
+  a step needs what jouet knows, such as a PR's status, CI results or the
+  ledger, or a decision over that structured state.
 - A warning rule for a demonstrated costly habit, with matching and near-miss
   examples. Use `jouet rule`'s current schema and help; avoid a rule that fires
   during legitimate focused iteration.
@@ -188,7 +225,8 @@ selection before running checks appropriate to the changes. A dry run verifies
 selection, not that tests pass. Keep failures visible; distinguish a baseline
 failure from a new one. Do not claim savings from a timing estimate.
 
-Report what changed and why, the checks recorded in `.jouet/project.toml`, what
+Report what changed and why, the tools, environment and tasks in `mise.toml`
+(and whether you created it), the checks recorded in `.jouet/project.toml`, what
 `.jouet/map.md` covers, any known
 slow checks, what was verified, and remaining ecosystem or trust requirements.
 Name the next useful action so the user can start normal work. Explain how

@@ -32,7 +32,9 @@ The agent reads the project's instructions, manifests, task definitions, CI and 
 
 The timings let it plan around slow builds and tests. A new project may have none yet, and the skill does not start a cold rebuild or the full suite just to get them: normal work run through `jouet test` builds the history.
 
-Where the project needs it, the agent adapts the test configuration, adds a task or a [routine](/routines), or writes a warning [rule](/rules) for a costly habit it has seen. It keeps existing settings, and changes only what the project supports and you asked for. Sometimes nothing needs to change, and the agent says so.
+It sets the project up in [mise](https://mise.jdx.dev): the tools the checks need, at the versions the project already requires, any environment a check needs to run, and a [task](https://mise.jdx.dev/tasks/) for each check, named by its kind (`test`, `test:unit`, `lint`), with what it covers and the files it reads. If the project has no mise config, the agent creates `mise.toml` and says so. You and every later session then run `mise run test:unit` rather than working out the command again, and mise can skip a task whose files have not changed. The agent does not change mise's `[settings]`, add hooks or put secrets in `[env]`, and mise runs a new or changed config only after you trust it.
+
+Where the project needs it, the agent adapts the test configuration, adds a mise task for a project-specific routine (or a jouet [routine](/routines) when a step needs what jouet knows, such as a PR's status or CI results), or writes a warning [rule](/rules) for a costly habit it has seen. It keeps existing settings, and changes only what the project supports and you asked for. Sometimes nothing needs to change, and the agent says so.
 
 It then checks what it changed, and reports the full and focused check commands, the slow checks it knows of, what passed, and what is still missing, whether that needs more configuration or a change to jouet. A dry run of test selection is reported as a dry run, not as tests passing. [Self-winding](/winding) carries on from there, proposing rules and tasks as sessions go by.
 
