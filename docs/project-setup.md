@@ -61,6 +61,10 @@ Once the repository's jouet files are trusted, the session-start primer names th
 
 The skill runs each check once before it records it. For a focused command with a test placeholder, it verifies representative tests for the packages and test types the command claims to cover; configurations can include one kind of test and exclude another. If a run selects no tests or affected projects, that does not establish coverage, and an unverified scope is reported instead of recorded as working. A check that is slow, or needs services or tools only CI has, goes in `ci`: the primer tells agents to push and [`jouet wait ci`](/commands/wait) instead of running it. A check that already fails before any change, for a reason outside the code, goes in `broken` with that reason. The primer tells agents it is not theirs to fix, and a failed run of it does not hold up finishing, as a failure that [blames the machine](/setup#what-clears-a-failure) does not. Remove the entry once the environment is fixed. An unknown key makes the file unreadable, so a typo is not silently dropped.
 
+## A map of the code
+
+The skill also writes `.jouet/map.md`, which you commit with the project: a short guide (under 80 lines) to where each subsystem and its tests live, the entry points where new commands or routes are registered, and the generated files not to edit by hand. Once the repository's jouet files are trusted, the primer points to it in one line, `jouet: .jouet/map.md maps where this project's code, tests and generated files live (N lines): read it before searching for where something is.`, without inlining it, so a session pays for it only when it reads it. Reads and searches are the largest share of agents' input tokens in jouet's session audits; the map replaces the searches a session would make to find its way around. Changing the map, like any of the repository's jouet files, needs trusting again.
+
 ## Trust and existing files
 
 Trusting a repository's rules stays with you. When something the agent added cannot run until the repository is trusted, it says which files need your review. It does not run `jouet trust` or work around a refusal.
