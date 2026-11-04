@@ -41,6 +41,7 @@ Projects beyond jdx's own:
 | `tornado-cancelled-handler` | tornado, a web framework | [tornadoweb/tornado#2990](https://github.com/tornadoweb/tornado/issues/2990) | Python, tornado's own unittest runner | Python 3 |
 | `actual-running-balance` | Actual Budget, a local-first finance webapp | [actualbudget/actual#8475](https://github.com/actualbudget/actual/issues/8475) | TypeScript, Playwright and Chromium | the benchmark's pinned Node, a local clone and prepared Yarn and browser caches, as described below |
 | `ghost-tier-refresh` | Ghost, a publishing webapp | [TryGhost/Ghost#32471](https://github.com/TryGhost/Ghost/pull/32471) | TypeScript, Vitest browser mode and Chromium | Node 24.22.2, pnpm 12.16.1, a local clone and prepared pnpm and browser caches, as described below |
+| `memos-sidebar-position` | Memos, a self-hosted notes webapp | [usememos/memos#6410](https://github.com/usememos/memos/issues/6410) | TypeScript, React, Vitest and Chromium | a complete local clone and prepared pnpm and browser caches, as described below |
 | `cobra-completion-args` | Cobra, a Go CLI library | [spf13/cobra#2257](https://github.com/spf13/cobra/issues/2257) | Go, `go test` | the benchmark's Go tools, cached modules, and a local clone at `~/src/cobra-bench-source` |
 | `rubocop-redundant-self` | RuboCop, a Ruby static analyzer | [rubocop/rubocop#16149](https://github.com/rubocop/rubocop/issues/16149) | Ruby, RSpec and RuboCop's CLI | Ruby 4.0.9, a clone at `~/src/rubocop-bench-source`, and a prepared bundle as described below |
 | `requests-proxied-files` | Requests, an HTTP library | [psf/requests#7502](https://github.com/psf/requests/pull/7502) | Python, pytest and pytest-httpbin | Python 3.13 and a local Requests clone at `~/src/requests-bench-source` |
@@ -66,6 +67,16 @@ MISE_ENV=bench mise x pnpm@12.16.1 -- python3 bench/agents.py check-tasks --task
 ```
 
 Use the same `MISE_ENV=bench mise x pnpm@12.16.1 --` prefix for the task's benchmark runs. Each trial installs its own dependencies offline from the prepared store and builds Ghost's local packages before timing. It fetches Ghost's pinned relative submodules during setup, so that step needs network access. Use a fresh clone for preparation: pnpm will refuse to switch stores in a checkout whose existing `node_modules` uses another store.
+
+The opt-in Memos task asks the agent to keep sidebar popups anchored while scrolling, using the positioning interface suggested in the issue, and to preserve other popups' defaults. It retains repository history. Its checker runs upstream component tests in a simulated DOM and a separate Chromium test of the shared popover wrapper during an actual scroll, with default-position checks for popovers, dropdowns and selects. It does not exercise the whole rendered sidebar in a browser. To prepare the pinned pnpm, dependencies and browser once:
+
+```sh
+git clone https://github.com/usememos/memos.git ~/src/memos-bench-history
+MISE_ENV=bench mise x -- sh bench/tasks/memos-sidebar-position/prepare.sh
+MISE_ENV=bench mise x -- python3 bench/agents.py check-tasks --tasks memos-sidebar-position
+```
+
+Preparation uses the network. Each trial installs its own frontend dependencies offline before timing. The checker makes a separate local checkout and installs the additional browser-test dependencies offline there; it leaves the agent's checkout and dependencies alone. A missing browser, unavailable checker dependencies, changed frontend dependency files or missing named tests leaves the result unverified. The upstream test fixtures and reference patch are MIT-licensed; their license is included with the task.
 
 The opt-in Actual Budget task checks a running balance after two edits in a local browser, and requires a committed regression test and release note. The reference fix is adapted from [actualbudget/actual#8490](https://github.com/actualbudget/actual/pull/8490). It retains repository history, uses port 3001 for its local server, and refuses to reuse a server already on that port. Before running, prepare the pinned dependencies and Chromium once from the jouet checkout:
 

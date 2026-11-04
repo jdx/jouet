@@ -1,0 +1,97 @@
+diff --git a/web/src/components/AppSidebar/SpaceSwitcher.tsx b/web/src/components/AppSidebar/SpaceSwitcher.tsx
+index 35f42e8f..25ef3d63 100644
+--- a/web/src/components/AppSidebar/SpaceSwitcher.tsx
++++ b/web/src/components/AppSidebar/SpaceSwitcher.tsx
+@@ -154,0 +155 @@ function SpaceSwitcher({ className, size = "md" }: { className?: string; size?:
++          positionMethod="fixed"
+@@ -241 +242,5 @@ function SpaceSwitcher({ className, size = "md" }: { className?: string; size?:
+-                    <SelectContent className="max-h-64 w-(--anchor-width) min-w-0 max-w-[calc(100vw-2rem)]" align="start">
++                    <SelectContent
++                      className="max-h-64 w-(--anchor-width) min-w-0 max-w-[calc(100vw-2rem)]"
++                      align="start"
++                      positionMethod="fixed"
++                    >
+diff --git a/web/src/components/UserMenu.tsx b/web/src/components/UserMenu.tsx
+index aa58230e..73fac29d 100644
+--- a/web/src/components/UserMenu.tsx
++++ b/web/src/components/UserMenu.tsx
+@@ -70,0 +71 @@ const PreferenceSubmenu = ({ icon: Icon, label, value, options, onChange, classN
++      positionMethod="fixed"
+diff --git a/web/src/components/ui/dropdown-menu.tsx b/web/src/components/ui/dropdown-menu.tsx
+index 77073ff1..bf19ec60 100644
+--- a/web/src/components/ui/dropdown-menu.tsx
++++ b/web/src/components/ui/dropdown-menu.tsx
+@@ -23 +23,4 @@ type DropdownMenuContentProps = DropdownMenuPrimitive.Popup.Props &
+-  Pick<DropdownMenuPrimitive.Positioner.Props, "align" | "alignOffset" | "collisionAvoidance" | "side" | "sideOffset"> & {
++  Pick<
++    DropdownMenuPrimitive.Positioner.Props,
++    "align" | "alignOffset" | "collisionAvoidance" | "positionMethod" | "side" | "sideOffset"
++  > & {
+@@ -28 +31 @@ const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenuContent
+-  ({ className, align, alignOffset, collisionAvoidance, side, sideOffset = 4, size = "default", ...props }, ref) => {
++  ({ className, align, alignOffset, collisionAvoidance, positionMethod, side, sideOffset = 4, size = "default", ...props }, ref) => {
+@@ -35,0 +39 @@ const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenuContent
++            positionMethod={positionMethod}
+diff --git a/web/src/components/ui/popover.tsx b/web/src/components/ui/popover.tsx
+index 42495ad8..1c23f8d3 100644
+--- a/web/src/components/ui/popover.tsx
++++ b/web/src/components/ui/popover.tsx
+@@ -17,2 +17,3 @@ const PopoverContent = React.forwardRef<
+-  PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "anchor" | "align" | "alignOffset" | "side" | "sideOffset">
+->(({ className, anchor, align = "center", alignOffset, side, sideOffset = 4, ...props }, ref) => {
++  PopoverPrimitive.Popup.Props &
++    Pick<PopoverPrimitive.Positioner.Props, "anchor" | "align" | "alignOffset" | "positionMethod" | "side" | "sideOffset">
++>(({ className, anchor, align = "center", alignOffset, positionMethod, side, sideOffset = 4, ...props }, ref) => {
+@@ -24,0 +26 @@ const PopoverContent = React.forwardRef<
++        positionMethod={positionMethod}
+diff --git a/web/src/components/ui/select.tsx b/web/src/components/ui/select.tsx
+index 4660ceb0..36bc9413 100644
+--- a/web/src/components/ui/select.tsx
++++ b/web/src/components/ui/select.tsx
+@@ -54 +54 @@ type SelectContentProps = SelectPrimitive.Popup.Props &
+-  Pick<SelectPrimitive.Positioner.Props, "align" | "alignItemWithTrigger" | "alignOffset" | "side" | "sideOffset">;
++  Pick<SelectPrimitive.Positioner.Props, "align" | "alignItemWithTrigger" | "alignOffset" | "positionMethod" | "side" | "sideOffset">;
+@@ -61,0 +62 @@ function SelectContent({
++  positionMethod,
+@@ -71,0 +73 @@ function SelectContent({
++        positionMethod={positionMethod}
+diff --git a/web/tests/space-switcher.test.tsx b/web/tests/space-switcher.test.tsx
+index 5ea5073c..7e632978 100644
+--- a/web/tests/space-switcher.test.tsx
++++ b/web/tests/space-switcher.test.tsx
+@@ -222,0 +223,19 @@ describe("SpaceSwitcher", () => {
++  it.each(["md", "header"] as const)("keeps the %s scope popup and its Space selector fixed after positioning", async (size) => {
++    renderAt("/", size);
++    openSwitcher();
++    const popup = await screen.findByRole("dialog");
++    const positioner = popup.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(positioner.style.opacity).not.toBe("0");
++      expect(positioner.style.position).toBe("fixed");
++    });
++
++    fireEvent.click(screen.getByRole("combobox", { name: "space.switch" }));
++    const option = await screen.findByRole("option", { name: "Product" });
++    const selectPositioner = option.closest('[data-slot="select-content"]')?.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(selectPositioner.style.opacity).not.toBe("0");
++      expect(selectPositioner.style.position).toBe("fixed");
++    });
++  });
++
+diff --git a/web/tests/user-menu.test.tsx b/web/tests/user-menu.test.tsx
+index 3006f815..33c620a9 100644
+--- a/web/tests/user-menu.test.tsx
++++ b/web/tests/user-menu.test.tsx
+@@ -131,0 +132,11 @@ describe("User menu panel", () => {
++  });
++
++  it.each([/setting.preference.theme/, /common.language/])("keeps the %s submenu fixed after positioning", async (row) => {
++    renderMenu();
++    fireEvent.click(screen.getByRole("button", { name: row }));
++    const menu = await screen.findByRole("menu");
++    const positioner = menu.parentElement as HTMLElement;
++    await waitFor(() => {
++      expect(positioner.style.opacity).not.toBe("0");
++      expect(positioner.style.position).toBe("fixed");
++    });
