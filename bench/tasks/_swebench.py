@@ -35,6 +35,11 @@ def parse_django(log: str) -> dict[str, str]:
     pending = None
     header = None
     for line in log.splitlines():
+        failure = re.fullmatch(r"(?:FAIL|ERROR): (test\S+ \([^)]+\))(?: \(.+\))?", line)
+        if failure:
+            record(statuses, failure.group(1), FAIL)
+            pending = header = None
+            continue
         if re.match(r"^test\S+ \([^)]+\)$", line):
             header = line
             pending = None

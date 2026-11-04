@@ -103,6 +103,20 @@ class DjangoContainerCheckerTest(unittest.TestCase):
         self.assertIn('AssertionError: expected a fresh tier', result.stdout)
         self.assertEqual(self.original.read_text(), 'agent test content\n')
 
+    def test_subtest_failure_is_not_unverified(self):
+        self.log.write_text(
+            'test_coroutine (deprecation.test_middleware_mixin.MiddlewareMixinTests) ... '
+            'test_deprecation (deprecation.test_middleware_mixin.MiddlewareMixinTests) ... ok\n'
+            "FAIL: test_coroutine (deprecation.test_middleware_mixin.MiddlewareMixinTests) (middleware='CacheMiddleware')\n"
+            'AssertionError: False is not True\n'
+        )
+        self.env['FAKE_STATUS'] = '1'
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('tests reported failures: test_coroutine', result.stdout)
+        self.assertIn('AssertionError: False is not True', result.stdout)
+        self.assertNotIn('JOUET_BENCH_UNVERIFIED_V1', result.stdout)
+
     def test_unnamed_failure_preserves_diagnostics(self):
         self.log.write_text('container could not start the test runner\n')
         self.env['FAKE_STATUS'] = '1'
