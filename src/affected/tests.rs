@@ -88,6 +88,62 @@ fn plan_in(dir: &Path) -> Result<Plan, Error> {
     plan(dir, Some("main"), None, &[])
 }
 
+#[test]
+fn root_graph_refuses_to_miss_changed_nested_vitest_project() {
+    let dir = repo("vitest", "web");
+    let root = dir.path();
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.20\n",
+    );
+    write(
+        &root.join("web/src/sum.js"),
+        "export const sum = () => 42;\n",
+    );
+    let error = match plan_in(root) {
+        Ok(_) => panic!("the root suite cannot cover web tests"),
+        Err(error) => error,
+    };
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(error.message.contains("web (vitest)"), "{}", error.message);
+    assert!(error.hint.unwrap().contains("each relevant project"));
+}
+
+#[test]
+fn nested_documentation_does_not_refuse_root_selection() {
+    let dir = repo("vitest", "web");
+    let root = dir.path();
+    let project = Project {
+        root: root.into(),
+        dir: root.into(),
+        rel: String::new(),
+    };
+    let changes = vec![Change {
+        path: "web/README.md".into(),
+        status: Status::Modified,
+    }];
+    assert!(check_nested_projects(&project, &changes).is_ok());
+}
+
+#[test]
+fn root_graph_does_not_refuse_a_nested_maven_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(&root.join("pom.xml"), "<project/>\n");
+    write(&root.join("service/pom.xml"), "<project/>\n");
+    let project = Project {
+        root: root.into(),
+        dir: root.into(),
+        rel: String::new(),
+    };
+    let changes = vec![Change {
+        path: "service/src/Main.java".into(),
+        status: Status::Modified,
+    }];
+    assert!(detect(&root.join("service")).contains(&"graph"));
+    assert!(check_nested_projects(&project, &changes).is_ok());
+}
+
 fn tests_of(suite: &Suite) -> Vec<(&str, Vec<&str>)> {
     suite
         .tests
