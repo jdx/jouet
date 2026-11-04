@@ -65,6 +65,10 @@ pub(crate) struct Entry {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// For a `post-tool-use`: how many bytes of output the call gave the
+    /// agent, when the harness says (Claude Code's `tool_response`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_bytes: Option<u64>,
     /// For a `slow-hook` entry: the budget the hook ran over, in
     /// milliseconds; `duration_ms` is how long it took.
     #[serde(default, skip_serializing_if = "Option::is_none")]

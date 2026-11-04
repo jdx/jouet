@@ -15,8 +15,81 @@ fn kind(kind: Kind, runs: u64, requests: u64, input_tokens: u64) -> KindBaseline
         input_tokens,
         calls: requests,
         failed: 0,
+        output_bytes: 0,
         linked_waits: false,
     }
+}
+
+#[test]
+fn jouet_test_saves_the_output_it_cut_counted_once() {
+    let with = |shape: &str, bytes: u64| LedgerEntry {
+        output_bytes: Some(bytes),
+        ..post(shape, 0)
+    };
+    let entries = [
+        with("jouet test --affected", 1_000),
+        with("jouet test --cmd -- <arg>", 3_000),
+        // Output a call shares with another command is not jouet test's.
+        with(
+            "jouet test --affected && jouet commit <arg> --message <arg>",
+            90_000,
+        ),
+        with("cargo test && jouet test --affected", 90_000),
+        // No size recorded.
+        post("jouet test --affected", 0),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let test = m
+        .commands
+        .iter()
+        .find(|c| c.command == "jouet test")
+        .unwrap();
+    assert_eq!(
+        (test.runs, test.output_calls, test.output_bytes),
+        (5, 2, 4_000)
+    );
+    let baseline = |output_bytes: u64| Baseline {
+        harness: "claude".into(),
+        requests_with_tokens: 1000,
+        input_tokens: 100_000_000,
+        kinds: vec![KindBaseline {
+            output_bytes,
+            ..kind(Kind::Test, 100, 100, 10_000_000)
+        }],
+        ..Baseline::default()
+    };
+    // 100 calls printed 2 MB before: 20,000 bytes each, against 2,000.
+    let e = estimate(&m, &[baseline(2_000_000)]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert_eq!(e.input_tokens, Some(9_000));
+    assert!(
+        e.basis
+            .contains("20,000 bytes of output on average; jouet test gave 2,000 over the 2 calls"),
+        "{}",
+        e.basis
+    );
+    // A baseline saved before output sizes were kept asks for a rescan.
+    let e = estimate(&m, &[baseline(0)]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert!(e.refused.as_deref().unwrap().contains("--rescan"));
+    // So does one saved before test runs were a kind, which has no entry
+    // for them: a baseline made now always has one.
+    let stale = Baseline {
+        kinds: Vec::new(),
+        ..baseline(0)
+    };
+    let e = estimate(&m, &[stale]);
+    let e = e.iter().find(|e| e.kind == Kind::Test).unwrap();
+    assert!(e.refused.as_deref().unwrap().contains("--rescan"));
+    // Printing more than before saves nothing.
+    let e = estimate(&m, &[baseline(100_000)]);
+    assert_eq!(
+        e.iter()
+            .find(|e| e.kind == Kind::Test)
+            .unwrap()
+            .input_tokens,
+        Some(0)
+    );
 }
 
 #[test]
@@ -333,6 +406,81 @@ fn post(shape: &str, exit_code: i32) -> LedgerEntry {
 }
 
 #[test]
+fn a_stop_block_a_passing_check_followed_is_held_not_wasted() {
+    let stop = |block: bool| LedgerEntry {
+        harness: "claude".into(),
+        session: Some("s".into()),
+        event: "stop".into(),
+        decisions: if block {
+            vec![LedgerDecision {
+                rule: "verify".into(),
+                action: "block".into(),
+                revision: None,
+            }]
+        } else {
+            Vec::new()
+        },
+        ..LedgerEntry::default()
+    };
+    let recorded = |exit_code: i32| LedgerEntry {
+        decisions: vec![LedgerDecision {
+            rule: "checks".into(),
+            action: "record:test".into(),
+            revision: None,
+        }],
+        ..post("cargo test", exit_code)
+    };
+    let own = |exit_code: i32| LedgerEntry {
+        event: "jouet-run".into(),
+        ..post("jouet test --affected", exit_code)
+    };
+    let entries = [
+        // Held: the test passed after it.
+        stop(true),
+        recorded(1),
+        recorded(0),
+        stop(false),
+        // Held: jouet test passed, recording its own exit code.
+        stop(true),
+        own(0),
+        stop(false),
+        // Wasted: the session stopped again with nothing passing.
+        stop(true),
+        recorded(1),
+        stop(false),
+        // Wasted: a pass after the next stop does not count.
+        stop(true),
+        stop(false),
+        recorded(0),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    assert_eq!(
+        (
+            m.overhead[0].stop_blocks,
+            m.overhead[0].stop_blocks_resolved
+        ),
+        (4, 2)
+    );
+    let baseline = Baseline {
+        harness: "claude".into(),
+        requests_with_tokens: 1000,
+        input_tokens: 100_000_000,
+        ..Baseline::default()
+    };
+    let costs = costs(&m, &[baseline], &[]);
+    let wasted = costs
+        .iter()
+        .find(|c| c.kind == CostKind::StopBlocks)
+        .unwrap();
+    assert_eq!((wasted.count, wasted.input_tokens), (2, Some(200_000)));
+    let held = costs
+        .iter()
+        .find(|c| c.kind == CostKind::HeldBlocks)
+        .unwrap();
+    assert_eq!((held.count, held.input_tokens), (2, None));
+}
+
+#[test]
 fn counts_what_jouet_added_per_harness() {
     let m = measure(&ledger().entries, &StatsFilter::default());
     assert_eq!(
@@ -425,7 +573,7 @@ fn costs_are_priced_like_savings_and_the_net_may_be_negative() {
     );
     assert_eq!(
         c[0].basis,
-        "each is at least one more request, at 100k tokens per request (the average before setup)"
+        "each is at least one more request, and no test, lint or build passed after it before the session next stopped, at 100k tokens per request (the average before setup)"
     );
     assert_eq!(
         c[2].basis,

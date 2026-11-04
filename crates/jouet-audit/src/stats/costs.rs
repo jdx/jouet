@@ -12,9 +12,12 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CostKind {
-    /// Finishing blocked after a failed check: the agent makes at least one
-    /// more request.
+    /// Finishing blocked after a failed check, and finished with no check
+    /// passing after it: the agent made at least one more request for it.
     StopBlocks,
+    /// Finishing blocked until a check passed: counted, not priced, since a
+    /// correct change needs that check to pass anyway.
+    HeldBlocks,
     /// A denied call: the agent makes at least one more request.
     Denials,
     /// A failed jouet run that was not a check's answer.
@@ -31,7 +34,8 @@ impl CostKind {
     /// What was counted, for text.
     pub fn label(self) -> &'static str {
         match self {
-            Self::StopBlocks => "finishing blocked after a failed check",
+            Self::StopBlocks => "finishing blocked, then finished with no check passing",
+            Self::HeldBlocks => "finishing held until a check passed",
             Self::Denials => "calls a rule denied",
             Self::FailedRuns => "failed jouet runs",
             Self::EditFailures => "jouet edit failures beyond the rate before setup",
@@ -43,7 +47,7 @@ impl CostKind {
     /// Whether the net needs this cost priced. An edit cost is refused
     /// exactly when the edit saving is, and a warning is never priced.
     fn needed(self) -> bool {
-        !matches!(self, Self::EditFailures | Self::Warnings)
+        !matches!(self, Self::EditFailures | Self::Warnings | Self::HeldBlocks)
     }
 }
 
@@ -144,12 +148,24 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
             }
         };
         if let Some(o) = measured.overhead.iter().find(|o| o.harness == harness) {
-            if o.stop_blocks > 0 {
+            let wasted = o.stop_blocks.saturating_sub(o.stop_blocks_resolved);
+            if wasted > 0 {
                 out.push(priced(
                     CostKind::StopBlocks,
-                    o.stop_blocks as f64,
-                    "each is at least one more request",
+                    wasted as f64,
+                    "each is at least one more request, and no test, lint or build passed after it before the session next stopped",
                 ));
+            }
+            if o.stop_blocks_resolved > 0 {
+                out.push(Cost {
+                    harness: harness.to_string(),
+                    kind: CostKind::HeldBlocks,
+                    count: o.stop_blocks_resolved,
+                    input_tokens: None,
+                    basis: String::new(),
+                    refused: Some("a check passed after each before the session next stopped; a correct change needs that anyway, so not priced".into()),
+                    outside_net: false,
+                });
             }
             if o.denials > 0 {
                 out.push(priced(

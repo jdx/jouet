@@ -36,10 +36,13 @@ A request re-reads the whole context, so a request avoided saves its whole input
 | `jouet pr status` | runs of PR status reads |
 | `jouet pr threads` | runs of review-thread calls |
 | `jouet edit` | the share of edits that failed and were redone, less `jouet edit`'s own failure rate |
+| `jouet test` | the output a test, lint or build call gave the agent before setup, less what `jouet test` gave |
 
 Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis, such as "6,450 CI waits before setup, averaging 1.7 requests each at 305k tokens per request". A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
 
 `jouet edit` is credited only for failing less often than edits did before setup: its runs times the difference in failure rate, at that history's tokens per request, assuming each failed edit before setup was redone once. When it failed as often or more, it is credited nothing, and the extra failures are a cost. Its own failure rate comes from the runs that recorded their own exit code (see [own exit codes](#own-exit-codes)); without any, it is not estimated.
+
+`jouet test` is credited for the output it keeps out of the context. Before setup, test, lint and build calls gave the agent some number of bytes of output on average. The credit is that average less what `jouet test` gave, over the calls that recorded their output size, at four bytes a token. The hooks record the size from Claude Code's `tool_response`, and only for a call that ran nothing but `jouet test`, since output shared with another command is not its alone. The credit counts that output once, though it stays in the context of every later request in the session, so it is a lower bound. A baseline saved before output sizes were kept asks for `jouet stats --rescan`.
 
 ### Own exit codes
 
@@ -53,7 +56,8 @@ Each cost is priced the way the savings are, at the harness's average request be
 
 | Cost | Counted from | Priced as |
 |---|---|---|
-| finishing blocked after a failed check | `verify` blocks in the ledger | one more request each |
+| finishing blocked, then finished with no check passing | `verify` blocks in the ledger after which no test, lint or build passed before the session next stopped | one more request each |
+| finishing held until a check passed | `verify` blocks a passing check followed before the session next stopped | not priced: a correct change needs that check to pass anyway |
 | calls a rule denied | denials in the ledger | one more request each, for the call again or another |
 | failed jouet runs | jouet commands that failed by their own exit code; in a session from before jouet recorded it, calls that ran nothing but jouet and failed | one more request each |
 | `jouet edit` failures beyond the rate before setup | `jouet edit`'s own failure rate, over all its runs, against edits before setup | one more request for each failure past the old rate |
@@ -104,7 +108,7 @@ estimated savings: what these runs would have cost at your rates before setup (a
 
 estimated costs, priced the same way:
   Claude Code:
-  - finishing blocked after a failed check: 1, not estimated: only 8 requests with token counts before setup, and a price needs 20
+  - finishing blocked, then finished with no check passing: 1, not estimated: only 8 requests with token counts before setup, and a price needs 20
   - calls a rule denied: 2, not estimated: only 8 requests with token counts before setup, and a price needs 20
   - requests carrying the session-start primer: 0, about 0 input tokens
       basis: 0 requests in the history after setup, subagents' included, each reading the primer's ~500 tokens

@@ -484,6 +484,23 @@ fn with_notes(mut primer: Value, notes: &[String]) -> Value {
     primer
 }
 
+/// How many bytes of output a tool call gave the agent: Claude Code's
+/// `tool_response`, a shell's `stdout` and `stderr` or a tool's text. None
+/// when the payload carries none.
+fn output_bytes(payload: &Value) -> Option<u64> {
+    let len = |v: &Value| v.as_str().map(|s| s.len() as u64);
+    match payload.get("tool_response")? {
+        Value::String(s) => Some(s.len() as u64),
+        Value::Object(o) if o.contains_key("stdout") || o.contains_key("stderr") => Some(
+            ["stdout", "stderr"]
+                .iter()
+                .filter_map(|k| o.get(*k).and_then(len))
+                .sum(),
+        ),
+        _ => None,
+    }
+}
+
 /// Where this hook's ledger entries go, and whose they are.
 struct Log<'a> {
     dir: Option<PathBuf>,
@@ -566,6 +583,7 @@ impl Log<'_> {
         entry.shape = call.command.as_deref().map(ledger::shape);
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
+        entry.output_bytes = output_bytes(payload);
         entry.tree = tree;
         entry.decisions = records.iter().map(decision).collect();
         entry
@@ -1566,6 +1584,17 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_bytes_are_what_the_tool_gave_the_agent() {
+        let bash =
+            json!({"tool_response": {"stdout": "abc", "stderr": "de", "interrupted": false}});
+        assert_eq!(output_bytes(&bash), Some(5));
+        assert_eq!(output_bytes(&json!({"tool_response": "four"})), Some(4));
+        // A Read or Edit result is not a shell's output, and none is none.
+        assert_eq!(output_bytes(&json!({"tool_response": {"file": {}}})), None);
+        assert_eq!(output_bytes(&json!({})), None);
+    }
     use jouet_rules::{Budget, Options, Origin, Source};
 
     fn engine(extra: Vec<Source>) -> Engine {
