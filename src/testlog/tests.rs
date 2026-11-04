@@ -140,6 +140,54 @@ fn a_nextest_run_inside_a_passing_cargo_test_is_not_counted() {
 }
 
 #[test]
+fn a_nested_no_capture_or_verbose_nextest_run_is_not_counted_either() {
+    // The nested run's unindented libtest result and cargo's verbose rustc
+    // line come before its failure, and end neither the outer binary.
+    let log = "     Running tests/nested.rs (target/debug/deps/nested-0123)
+
+running 1 test
+     Running `rustc --crate-name inner --edition=2021 src/lib.rs`
+    Starting 2 tests across 1 binary
+running 1 test
+test passes ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+        PASS [   0.004s] (1/2) inner passes
+        FAIL [   0.004s] (2/2) inner fails
+     Summary [   0.005s] 2 tests run: 1 passed, 1 failed, 0 skipped
+error: test run failed
+test runs_nextest ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+";
+    let d = digest(log, false, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 0, 0]);
+    assert!(d.failures.is_empty());
+}
+
+#[test]
+fn nextest_alone_is_counted_even_after_a_crash_or_a_cargo_test_run() {
+    // cargo test first, then a nextest run whose test crashed before
+    // libtest's result, with --no-capture.
+    let log = "     Running unittests src/lib.rs (target/debug/deps/demo-0123)
+
+running 1 test
+test ok ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Starting 2 tests across 1 binary
+running 1 test
+    SIGSEGV [   0.004s] (1/2) demo crashes
+        PASS [   0.004s] (2/2) demo passes
+     Summary [   0.005s] 2 tests run: 1 passed, 1 failed, 0 skipped
+error: test run failed
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [2, 1, 0]);
+    assert_eq!(names(&d), ["demo crashes"]);
+}
+
+#[test]
 fn rustc_errors_are_named_by_location_and_warnings_counted() {
     let d = digest(&fixture("cargo-build"), true, DEFAULT_BUDGET);
     assert_eq!(

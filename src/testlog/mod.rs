@@ -10,6 +10,7 @@ pub(crate) use format::Format;
 use jouet_wait::trim_excerpt;
 use regex::Regex;
 use serde::Serialize;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 /// The bytes of failure text shown when --budget does not say.
@@ -267,9 +268,9 @@ regexes! {
     GO_PACKAGE_NO_TESTS = r"^\?\s+\S+\s+\[no test files\]\s*$";
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
-    // Where cargo moves to the next test binary, which ends a binary's run
-    // that stopped before its result line.
-    CARGO_NEXT_BINARY = r"^\s+(Running|Doc-tests) \S";
+    // cargo starting a crate's doctests, and giving up after a binary failed.
+    CARGO_DOC_TESTS = r"^\s+Doc-tests \S+$";
+    CARGO_TEST_FAILED = r"^error: test failed, to rerun pass ";
     // Lines of libtest's that say nothing about a failure.
     // mbx's build cache and savings lines too, which a cargo build through
     // it prints last.
@@ -621,6 +622,7 @@ fn until(lines: &[String], from: usize, end: &Regex) -> Vec<String> {
 }
 
 fn libtest(lines: &[String], out: &mut Parsed) {
+    let binaries = cargo_test_binaries(lines);
     for (i, line) in lines.iter().enumerate() {
         if let Some(c) = LIBTEST_OK.captures(line) {
             out.passed_names.push(c[1].to_string());
@@ -629,36 +631,47 @@ fn libtest(lines: &[String], out: &mut Parsed) {
         } else if let Some(c) = LIBTEST_BLOCK.captures(line) {
             out.push(i, &c[1], until(lines, i + 1, &LIBTEST_END));
         } else if let Some(c) = LIBTEST_RESULT.captures(line) {
+            // Only a binary's last result is its own.
+            if binaries.iter().any(|b| b.contains(&i) && b.end != i + 1) {
+                continue;
+            }
             let n = |k: usize| c[k].parse().unwrap_or(0);
             out.count(n(1), n(2), n(3));
         }
     }
 }
 
-/// Which lines are inside a libtest binary's run, from `running N tests` to
-/// its `test result:`. What a test prints there is its own, and libtest's
-/// result already says whether the test passed: a test that runs nextest
-/// itself must not add the nested run's failures. nextest's own captured
-/// streams are indented, so they never start such a run.
-fn in_libtest_run(lines: &[String]) -> Vec<bool> {
-    let mut inside = false;
-    lines
-        .iter()
-        .map(|line| {
-            if LIBTEST_RUNNING.is_match(line) {
-                inside = true;
-            } else if LIBTEST_RESULT.is_match(line) || CARGO_NEXT_BINARY.is_match(line) {
-                inside = false;
-            }
-            inside
-        })
-        .collect()
+/// The lines of each test binary cargo test ran: from cargo's
+/// `Running` or `Doc-tests` line to the binary's last `test result:` before
+/// the next one, or, for a binary that crashed, to the next one. What a test
+/// prints there is its own, and libtest's result already says whether the
+/// test passed: a test that runs nextest itself must not add the nested
+/// run's failures. The last result is the binary's, since a nested
+/// `--no-capture` run prints its tests' results unindented first. nextest
+/// alone prints neither of cargo's lines, so none of its output is in one.
+fn cargo_test_binaries(lines: &[String]) -> Vec<Range<usize>> {
+    let starts = |l: &String| CARGO_TEST_BINARY.is_match(l) || CARGO_DOC_TESTS.is_match(l);
+    let mut binaries = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if !starts(&lines[i]) {
+            i += 1;
+            continue;
+        }
+        let end = (i + 1..lines.len())
+            .find(|&j| starts(&lines[j]) || CARGO_TEST_FAILED.is_match(&lines[j]))
+            .unwrap_or(lines.len());
+        let last = (i..end).rev().find(|&j| LIBTEST_RESULT.is_match(&lines[j]));
+        binaries.push(i..last.map_or(end, |r| r + 1));
+        i = end;
+    }
+    binaries
 }
 
 fn nextest(lines: &[String], out: &mut Parsed) {
-    let nested = in_libtest_run(lines);
+    let binaries = cargo_test_binaries(lines);
     for (i, line) in lines.iter().enumerate() {
-        if nested[i] {
+        if binaries.iter().any(|b| b.contains(&i)) {
             continue;
         }
         if let Some(c) = NEXTEST_FAIL.captures(line) {
