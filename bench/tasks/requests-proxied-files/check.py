@@ -37,7 +37,9 @@ run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
 expect(run.returncode == 0, f"multipart cases failed:\n{run.stdout}\n{run.stderr}")
 expect(new_commit(), "nothing was committed")
 test_files = [path for path in committed_files() if path.startswith("tests/") and path.endswith(".py")
-              and Path(path).is_file()
+              and Path(path).is_file() and not Path(path).is_symlink()
+              and subprocess.run(["git", "cat-file", "-t", f"HEAD:{path}"],
+                                 capture_output=True, text=True).stdout.strip() == "blob"
               and (Path(path).name.startswith("test_") or Path(path).name.endswith("_test.py"))]
 expect(bool(test_files), "no committed test file was changed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")

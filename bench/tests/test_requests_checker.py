@@ -50,6 +50,15 @@ class RequestsCheckerTest(unittest.TestCase):
             result = check()
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("no committed test file was changed", result.stdout)
+            existing = work / "tests/test_existing.py"
+            existing.unlink()
+            git("add", "tests/test_existing.py")
+            git("commit", "-qm", "delete test")
+            existing.write_text("def test_existing(): pass\n")
+            self.assertNotEqual(check().returncode, 0, "an untracked replacement is not committed")
+            existing.unlink()
+            git("checkout", base, "--", "tests/test_existing.py")
+            git("commit", "-qm", "restore test")
             added = work / "tests/test_upload.py"
             added.write_text("def test_upload(): pass\n")
             self.assertNotEqual(check().returncode, 0, "an untracked test is not committed")
