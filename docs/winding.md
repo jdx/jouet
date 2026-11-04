@@ -112,10 +112,13 @@ with your agent, then create the schedule in that interface. jouet does not
 create a schedule itself. The scheduler reads local Codex session metadata,
 including plain and compressed archives, to find sessions; reviews read the selected transcripts and may send their digests
 to the agent's model provider. Only sessions whose original worktree is under
-an opted-in root and whose recorded turns stay in that worktree are eligible.
-Sessions that span worktrees or cannot be inspected are reported, not reviewed.
-Blank lines are ignored; malformed records are left unavailable because they
-may conceal a change of project.
+an opted-in root and whose recorded turn directories stay in that worktree are eligible.
+The planner also checks explicit `exec_command` working directories: another
+worktree makes a session mixed-project, and a missing directory leaves it
+inspection-limited. Blank lines are ignored; malformed records are unavailable.
+This cannot detect every project mentioned in shell commands, file paths or other
+tools. Review the digest for cross-project work and leave a session unreviewed
+if its evidence cannot be attributed to one project.
 
 Give the scheduled agent these instructions, substituting the agreed roots and
 limit. Use JSON output to pass paths as arguments, not by shell interpolation:

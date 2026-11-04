@@ -81,7 +81,7 @@ fn plan(paths: &Paths, args: &WindPlanArgs, out: &Output) -> Exit {
         for item in &report.candidates {
             let _ = writeln!(text, "{}  {}  {}\n  transcript: {}\n  snapshot: {}", item.session, item.project.display(), item.modified_ms, item.transcript.display(), item.snapshot);
         }
-        let _ = writeln!(text, "{} eligible; {} left out; {} idle too recently or current; {} unavailable; {} span projects; {} exceeded inspection limits; {} already reviewed; {} claimed. Read-only plan: no sessions were reviewed or marked.", report.eligible, report.left_out, report.idle_or_current, report.unavailable, report.mixed_project, report.inspection_limited, report.reviewed, report.claimed);
+        let _ = writeln!(text, "{} eligible; {} left out; {} idle too recently or current; {} unavailable; {} span projects; {} could not be fully inspected; {} already reviewed; {} claimed. Read-only plan: no sessions were reviewed or marked.", report.eligible, report.left_out, report.idle_or_current, report.unavailable, report.mixed_project, report.inspection_limited, report.reviewed, report.claimed);
         text
     });
     Exit::Ok
