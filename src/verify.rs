@@ -348,10 +348,12 @@ fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
         let words: Vec<&str> = selector.split_whitespace().collect();
         // A nextest filter expression is not a name filter, and its words
         // may hold spaces.
-        if words
-            .iter()
-            .any(|w| matches!(*w, "--exact" | "-E" | "--filter-expr" | "--filterset"))
-        {
+        if words.iter().any(|w| {
+            *w == "--exact"
+                || ["-E", "--filter-expr", "--filterset"]
+                    .iter()
+                    .any(|o| w.starts_with(o))
+        }) {
             return None;
         }
         let mut at = words.len()
@@ -360,7 +362,8 @@ fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
                 .rev()
                 .take_while(|w| !w.starts_with('-'))
                 .count();
-        if at > 0 && !FLAGS.contains(&words[at - 1]) {
+        // `--bin=jouet` holds its own value.
+        if at > 0 && !FLAGS.contains(&words[at - 1]) && !words[at - 1].contains('=') {
             at += 1;
         }
         let (head, filters) = words.split_at(at.min(words.len()));
@@ -2136,6 +2139,8 @@ mod tests {
             "-p mise -E test(a) | b",
             "-p mise -E test(a) | bc"
         ));
+        assert!(wider_filter(c, "--bin=jouet a", "--bin=jouet ab"));
+        assert!(!wider_filter(c, "--filter-expr=x a", "--filter-expr=x ab"));
         // A package name is not a filter.
         assert!(!wider_filter(c, "-p mi", "-p mise"));
         assert!(!wider_filter(
