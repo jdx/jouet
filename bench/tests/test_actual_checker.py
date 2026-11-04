@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 from pathlib import Path
 import runpy
@@ -5,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/actual-running-balance/check.py"
@@ -82,6 +85,28 @@ exit 0
             result = check()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((work / "blob-report/report.zip").exists())
+            shutil.rmtree(work / 'blob-report')
+
+            checker = runpy.run_path(str(CHECKER))
+            real_run = subprocess.run
+            def timeout_note(command, *args, **kwargs):
+                if command[0] == 'node' and '--input-type=module' in command:
+                    raise subprocess.TimeoutExpired(command, 30, output=b'note started\n', stderr=b'note stalled\n')
+                return real_run(command, *args, **kwargs)
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(work)
+                with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(subprocess, 'run', side_effect=timeout_note):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        checker['check']()
+                    self.assertIn('note started', output.getvalue())
+                    self.assertIn('note stalled', output.getvalue())
+                    self.assertIn('release note validation timed out', checker['UNVERIFIED'])
+                    checker['UNVERIFIED'].clear()
+            finally:
+                os.chdir(old_cwd)
             shutil.rmtree(work / 'blob-report')
 
             env['BROWSER_MISSING'] = '1'

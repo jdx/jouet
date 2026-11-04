@@ -13,6 +13,12 @@ from _check import UNVERIFIED, expect, finish  # noqa: E402
 TEST_NAME = 'running balances refresh after repeated edits'
 
 
+def print_timeout_output(error):
+    for output in (error.stdout, error.stderr):
+        if output:
+            print(output.decode(errors='replace') if isinstance(output, bytes) else output)
+
+
 def specs(suites):
     for suite in suites:
         yield from suite.get('specs', [])
@@ -73,8 +79,11 @@ def check():
                     expect(False, 'no valid committed release note crediting the supplied contributor')
                 else:
                     UNVERIFIED.append('release note validation could not be completed')
-        except (OSError, subprocess.TimeoutExpired) as error:
-            UNVERIFIED.append(f'release note validation could not start or finish: {error}')
+        except subprocess.TimeoutExpired as error:
+            print_timeout_output(error)
+            UNVERIFIED.append('release note validation timed out')
+        except OSError as error:
+            UNVERIFIED.append(f'release note validation could not start: {error}')
 
     spec = Path('packages/desktop-client/e2e/jouet-running-balance.test.ts')
     created = False
@@ -95,9 +104,7 @@ def check():
                 ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_NAME': str(report)},
                     capture_output=True, text=True, timeout=240)
             except subprocess.TimeoutExpired as error:
-                for output in (error.stdout, error.stderr):
-                    if output:
-                        print(output.decode(errors='replace') if isinstance(output, bytes) else output)
+                print_timeout_output(error)
                 UNVERIFIED.append('Playwright check timed out')
                 return
             except OSError as error:
