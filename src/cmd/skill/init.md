@@ -88,15 +88,20 @@ and checked where you can (a dry-run selection, `--help`, or a run the task
 already called for). Write focused checks as `jouet test --affected` or
 `jouet test --cmd -- …`, so their results are recorded. Where a command takes
 the test, file or step to run, write `NAME` in its place, whatever the project
-calls it. Set `lint` only to a command that works in this project: the example
+calls it. For a file argument, let `NAME` represent the complete path relative
+to the command's working directory; do not hardcode a directory or extension
+unless the check is explicitly scoped to that subset. Set `lint` only to a
+command that works in this project: the example
 needs an `hk.pkl`; otherwise use the project's own lint command.
 
 Run each check you record once, at the current commit, before recording it:
 the focused checks, `lint` and `before_push`, and `full` when its recorded
 time is short or the user agrees. For a parameterized focused command, verify
 it against a representative test in each package or test type it claims to
-cover; record separate commands where runner configurations differ. A run that
-selects no tests or no affected projects does not establish coverage. If a
+cover; record separate commands where runner configurations differ. If a test
+needs an environment setting for correctness, carry it into every recorded check
+that might run that test unless you verified that check does not need it. A run
+that selects no tests or no affected projects does not establish coverage. If a
 representative run is unavailable or too costly, report that scope as
 unverified instead of recording it as a working focused check. A check that
 cannot run because mise or
