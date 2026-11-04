@@ -183,6 +183,8 @@ quiet = [
   # ran.
   { command = "jouet test --cmd -- sh -c 'go test ./a && rm -rf out'", exit_code = 0 },
   # `!` turns a failing test run into a script that exits 0.
+  { command = "jouet test --cmd -- sh -c '! cargo test --workspace'", exit_code = 0 },
+  { command = "jouet test --cmd -- sh -c 'cargo test --workspace | tail'", exit_code = 0 },
   { command = "jouet test --cmd -- sh -c '! cargo test --workspace && cargo build'", exit_code = 0 },
   { command = "jouet test --cmd -- sh -c \"cargo test --workspace && sed -i s/a/b/ src/lib.rs\"", exit_code = 0 },
   # `diag check` refused (no hk config) or misused: no lint ran.

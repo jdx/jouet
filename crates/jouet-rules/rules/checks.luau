@@ -627,6 +627,12 @@ local function classify(command: JouetCommand, dir: string | false | nil): (Kind
 			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
 				local top = top_level(jouet.parse(argv[3], command.status))
 				if #top == 1 then
+					-- Its own status is unknown when the script says nothing
+					-- of it: negated with `!`, or piped into another command
+					-- without pipefail.
+					if command.status ~= nil and top[1].status == nil then
+						return nil, unknown
+					end
 					return classify(top[1], dir)
 				end
 			end
