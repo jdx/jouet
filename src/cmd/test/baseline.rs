@@ -38,6 +38,18 @@ static REMARK_WARNING: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 static REMARK_SUMMARY: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^⚠\s+(\d+) warnings?$").expect("remark summary pattern"));
+static EARLIER_FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)\b(?:error|errors|fail|failed|failure|failures|fatal|panic|panicked|broke|broken|crash|crashed|exception|traceback)\b|\bnot\s+ok\b",
+    )
+    .expect("earlier failure pattern")
+});
+static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)^(?:error|fail|failed|failure|fatal|panic|exception|traceback)\b")
+        .expect("failure prefix pattern")
+});
+static ZERO_ERRORS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\b0 errors?\b").expect("zero errors pattern"));
 const DETAILS_VERSION: u32 = 3;
 
 /// What a failing run's failures were at the merge base.
@@ -207,6 +219,18 @@ fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
                 "--quiet",
             ])
     })?;
+    // Unknown earlier failures cannot be attributed to the final remark
+    // command. Ignore path tokens, which can contain names such as error.rs.
+    if lines[..start].iter().any(|line| {
+        let words = line
+            .split_whitespace()
+            .filter(|word| !word.contains(['/', '\\']) || FAILURE_PREFIX.is_match(word))
+            .collect::<Vec<_>>()
+            .join(" ");
+        EARLIER_FAILURE.is_match(&ZERO_ERRORS.replace_all(&words, ""))
+    }) {
+        return None;
+    }
     let mut file = None;
     let mut file_has_warning = false;
     let mut details = BTreeMap::new();
@@ -247,9 +271,13 @@ fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
         || count == 0
         || count != details.len()
         || trailer.is_empty()
-        || trailer
-            .iter()
-            .any(|line| line.trim() != "[ELIFECYCLE] Command failed with exit code 1.")
+        || trailer.iter().any(|line| {
+            !matches!(
+                line.trim(),
+                "[ELIFECYCLE] Command failed with exit code 1."
+                    | "ELIFECYCLE  Command failed with exit code 1."
+            )
+        })
     {
         return None;
     }
@@ -1203,6 +1231,12 @@ docs/README.md\n\
                 .is_none()
         );
         assert!(evidence(&format!("{output}another error\n")).is_none());
+        assert!(evidence(&format!("Earlier task failed unexpectedly\n{output}")).is_none());
+        assert!(evidence(&format!("ERROR:/src/other.rs\n{output}")).is_none());
+        assert!(evidence(&format!("not ok 1 unnamed\n{output}")).is_none());
+        assert!(evidence(&format!("Earlier task: 0 errors\n{output}")).is_some());
+        assert!(evidence(&format!("Checked docs/error-handling.md\n{output}")).is_some());
+        assert!(evidence(&output.replace("[ELIFECYCLE]", "ELIFECYCLE ")).is_some());
         assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
     }
 

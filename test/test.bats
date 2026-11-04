@@ -1156,6 +1156,7 @@ SH
 	printf 'missing heading\n' >reason
 	cat >check-command <<'SH'
 #!/bin/sh
+test ! -f earlier || cat earlier
 printf '%s\n' '$ xargs -0 remark --use remark-validate-links --frail --quiet' \
   'docs/README.md' \
   "1:1-1:2 warning $(cat reason) missing-heading-in-file remark-validate-links:missing-heading-in-file" \
@@ -1175,6 +1176,11 @@ SH
 	assert_success
 	assert_output --partial 'remark docs/README.md:1:1-1:2'
 	printf 'different heading\n' >reason
+	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	printf 'missing heading\n' >reason
+	printf 'Earlier task failed unexpectedly\n' >earlier
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
 	assert_failure 1
 	assert_output --partial 'could not be compared'
