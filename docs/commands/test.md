@@ -205,6 +205,7 @@ When the run fails, jouet runs each failed suite again in a temporary worktree o
 
 - If every failure also fails at the merge base with matching, unambiguous details, the run passes (exit `0`) and names them. The stop gate counts the coverage actually run; an affected run remains partial.
 - Matching names with missing, ambiguous or different details remain unresolved (exit `1`).
+- A complete, explicitly echoed `remark --use remark-validate-links --frail --quiet` failure ending in pnpm's `ELIFECYCLE` trailer can also be compared by file, location, and full warning details. Incomplete or mixed output remains unresolved.
 - A failure the merge base does not have still fails the run (exit `1`), and is listed as new.
 - When the run at the merge base fails without naming any failing test, as when a tool it needs is missing from that checkout, nothing is compared and the run still fails.
 - When pnpm reports missing `node_modules`, or a project-local executable in it cannot be found in the merge-base checkout, jouet points to the optional baseline setup below; it does not install dependencies automatically.
