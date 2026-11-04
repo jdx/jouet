@@ -16,6 +16,7 @@
     "{python}",
     "-m",
     "pytest",
+    "-v",
     "-rA",
     "--tb=short",
     "-p",

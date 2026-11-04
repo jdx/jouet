@@ -219,7 +219,7 @@ def test_command(spec: Spec, record: dict, test_files: list[str]) -> list[str]:
     if spec.runner == "pytest":
         # The files the instance's tests are in, as their node ids name them.
         files = sorted({t.split("::", 1)[0] for t in record["FAIL_TO_PASS"] + record["PASS_TO_PASS"] if "::" in t})
-        return ["{python}", "-m", "pytest", "-rA", "--tb=short", "-p", "no:cacheprovider", *files]
+        return ["{python}", "-m", "pytest", "-v", "-rA", "--tb=short", "-p", "no:cacheprovider", *files]
     if spec.runner == "command":
         return spec.command
     raise ValueError(f"unknown runner {spec.runner}")

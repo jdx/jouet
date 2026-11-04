@@ -87,9 +87,11 @@ def parse_sympy(log: str) -> dict[str, str]:
 
 
 def parse_pytest(log: str) -> dict[str, str]:
-    """pytest's `-rA` summary: `PASSED nodeid`, `FAILED nodeid - reason`.
-    A node id is cut at its first space, as SWE-bench names tests."""
+    """Read verbose progress and the `-rA` summary, including partial runs."""
     statuses = {}
+    for m in re.finditer(r"^(\S+) (PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)(?:\s|$)", log, re.M):
+        status = {"PASSED": PASS, "XFAIL": XFAIL, "SKIPPED": SKIP}.get(m.group(2), FAIL)
+        record(statuses, m.group(1), status)
     for m in re.finditer(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED) (\S+)", log, re.M):
         if m.group(1) == "SKIPPED":
             continue  # `SKIPPED [1] path:line: reason` names no test.

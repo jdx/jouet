@@ -139,7 +139,9 @@ class CommandTest(unittest.TestCase):
     def test_pytest_files_from_node_ids(self):
         spec = imp.spec_for("pylint-dev/pylint", "2.9")
         rec = {"FAIL_TO_PASS": ["tests/a.py::test_x[1]"], "PASS_TO_PASS": ["tests/b.py::T::test_y", "tests/a.py::z"]}
-        self.assertEqual(imp.test_command(spec, rec, [])[-2:], ["tests/a.py", "tests/b.py"])
+        command = imp.test_command(spec, rec, [])
+        self.assertEqual(command[-2:], ["tests/a.py", "tests/b.py"])
+        self.assertIn("-v", command)
 
     def test_python_versions(self):
         self.assertEqual(imp.spec_for("django/django", "3.0").python, "3.8")
@@ -179,6 +181,8 @@ class LogTest(unittest.TestCase):
 
     def test_pytest(self):
         log = "\n".join([
+            "tests/a.py::test_early FAILED [ 10%]",
+            "tests/a.py::test_skip SKIPPED [ 20%]",
             "PASSED tests/a.py::test_x[1]",
             "FAILED tests/a.py::test_y - AssertionError: no",
             "SKIPPED [1] tests/a.py:9: needs docutils",
@@ -187,7 +191,7 @@ class LogTest(unittest.TestCase):
         ])
         self.assertEqual(_swebench.parse_pytest(log), {
             "tests/a.py::test_x[1]": "pass", "tests/a.py::test_y": "fail", "tests/a.py::test_z": "xfail",
-            "tests/a.py::test_w[a:": "pass",
+            "tests/a.py::test_w[a:": "pass", "tests/a.py::test_early": "fail", "tests/a.py::test_skip": "skip",
         })
 
     def test_verdict(self):
@@ -398,6 +402,21 @@ class ImportTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("test_add (test_calc.CalcTest)", proc.stdout)
         self.assertIn("exception details", proc.stdout)
+
+    def test_pytest_verbose_failure_before_timeout_is_a_failure(self):
+        meta_path = self.task / "swebench.json"
+        meta = json.loads(meta_path.read_text())
+        meta["log_format"] = "pytest"
+        meta["test_command"] = ["{python}", "-c", "import time; print('tests/test_calc.py::test_add FAILED [ 50%]', flush=True); time.sleep(30)"]
+        meta["test_timeout_s"] = 2
+        meta_path.write_text(json.dumps(meta))
+        work = self.tmp / "work"
+        git(self.tmp, "clone", "-q", str(self.tmp / "clones" / "acme__calc"), str(work))
+        proc = subprocess.run([sys.executable, "-I", str(self.task / "check.py")], cwd=work,
+                              env={**GIT_ENV, "BENCH_HEAD_SHA": self.base, "TMPDIR": str(self.tmp)},
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("tests/test_calc.py::test_add", proc.stdout)
 
     def test_custom_exit_only_checker_and_unknown_format(self):
         meta_path = self.task / "swebench.json"
