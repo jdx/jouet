@@ -77,6 +77,13 @@ fn repo(fixture_name: &str, at: &str) -> tempfile::TempDir {
     dir
 }
 
+fn go_available() -> bool {
+    Command::new("go")
+        .arg("version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
 fn plan_in(dir: &Path) -> Result<Plan, Error> {
     plan(dir, Some("main"), None, &[])
 }
@@ -104,7 +111,52 @@ fn nothing_reason(suite: &Suite) -> &str {
 }
 
 #[test]
+fn go_selection_stops_for_inactive_packages_and_accepts_their_build_tag() {
+    if !go_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        &root.join("go.mod"),
+        "module example.test/project\n\ngo 1.20\n",
+    );
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 1 }\n",
+    );
+    write(
+        &root.join("lib/lib_test.go"),
+        "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = Value() }\n",
+    );
+    write(
+        &root.join("tagged/tagged_test.go"),
+        "//go:build optional\n\npackage tagged\nimport (\"testing\"; \"example.test/project/lib\")\nfunc TestValue(t *testing.T) { _ = lib.Value() }\n",
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    write(
+        &root.join("lib/lib.go"),
+        "package lib\nfunc Value() int { return 2 }\n",
+    );
+    let error = match plan_in(root) {
+        Ok(_) => panic!("the inactive package must stop the plan"),
+        Err(error) => error,
+    };
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(error.message.contains("./tagged:"), "{}", error.message);
+    let enabled = plan(root, Some("main"), None, &["-tags=optional".into()]).unwrap();
+    let command = enabled.suites[0].command.as_ref().unwrap();
+    assert!(command.contains(&"./tagged".into()), "{command:?}");
+    assert!(command.contains(&"-tags=optional".into()), "{command:?}");
+}
+#[test]
 fn go_selection_ignores_fixture_sources_but_keeps_actual_tests_in_testdata() {
+    if !go_available() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(
@@ -149,6 +201,9 @@ fn go_selection_ignores_fixture_sources_but_keeps_actual_tests_in_testdata() {
 
 #[test]
 fn go_selection_includes_tests_in_the_changed_files_package() {
+    if !go_available() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(&root.join(".gitignore"), "lib/local_test.go\n");
@@ -195,6 +250,9 @@ fn go_selection_includes_tests_in_the_changed_files_package() {
 
 #[test]
 fn go_selection_finds_a_packages_only_test_even_when_git_ignores_it() {
+    if !go_available() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(
@@ -277,6 +335,23 @@ fn go_selection_falls_back_when_an_unchanged_test_cannot_be_parsed() {
     assert!(reason.contains("lib/lib_test.go"));
     assert!(suite.tests.is_empty());
 
+    // The second half asks Go to load a module requiring Go 1.26.
+    let version = Command::new("go").args(["env", "GOVERSION"]).output();
+    let supports_module = version
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .and_then(|version| {
+            version
+                .trim()
+                .strip_prefix("go1.")
+                .and_then(|v| v.split('.').next())
+                .and_then(|v| v.parse::<u32>().ok())
+        })
+        .is_some_and(|minor| minor >= 26);
+    if !supports_module {
+        return;
+    }
     write(
         &root.join("lib/lib_test.go"),
         "package lib\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = Value() }\n",
