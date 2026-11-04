@@ -1445,6 +1445,28 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_spend_per_solved_task_counts_failed_runs_and_weights_cache_reads(self):
+        def record(arm, number, success, tokens, cached):
+            return {"task": "web", "harness": "codex", "arm": arm, "round": number, "success": success,
+                    "wall_s": 10, "usage": {"input_tokens": tokens, "cached_input_tokens": cached}}
+
+        records = [record("plain", 1, True, 1000, 900), record("plain", 2, True, 1000, 900),
+                   record("jouet", 1, True, 600, 500), record("jouet", 2, False, 600, 500)]
+        cell = report.summarize(records, {})["cells"][0]
+        plain, jouet = cell["arms"]["plain"]["per_solved"], cell["arms"]["jouet"]["per_solved"]
+        self.assertEqual(plain["input_tokens"], 1000)
+        # The failed run's spend counts against the one that passed.
+        self.assertEqual(jouet["input_tokens"], 1200)
+        self.assertAlmostEqual(plain["weighted_input_tokens"], 190)
+        self.assertAlmostEqual(jouet["weighted_input_tokens"], 300)
+        self.assertIsNone(plain["cost_usd"])
+        text = report.markdown({"meta": {}, "cells": [cell]})
+        self.assertIn("Per solved task (all scored runs' spend over the runs that passed): input: plain 1.0k, jouet 1.2k (+20%)", text)
+        self.assertNotIn("cost: ", text)
+
+        nothing = [record("plain", 1, False, 1000, 0)]
+        self.assertIsNone(report.summarize(nothing, {})["cells"][0]["arms"]["plain"]["per_solved"]["input_tokens"])
+
     def test_primary_comparison_prefers_initialized_jouet(self):
         def record(arm, tokens, success=True):
             return {"task": "web", "harness": "codex", "arm": arm, "round": 1,

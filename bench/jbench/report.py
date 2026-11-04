@@ -14,6 +14,7 @@ from . import stats
 METRICS: list[tuple[str, str, Callable[[dict[str, Any]], float | None], str]] = [
     ("input_tokens", "input tokens (all context read)", lambda r: _u(r, "input_tokens"), "tokens"),
     ("uncached_input_tokens", "input tokens not from cache", lambda r: _uncached(r), "tokens"),
+    ("weighted_input_tokens", "input tokens, cache reads at 1/10", lambda r: _weighted(r), "tokens"),
     ("output_tokens", "output tokens", lambda r: _u(r, "output_tokens"), "tokens"),
     ("cost_usd", "cost (USD, as the harness reports it)", lambda r: _u(r, "cost_usd"), "usd"),
     ("requests", "model requests", lambda r: _a(r, "requests"), "count"),
@@ -44,6 +45,41 @@ def _uncached(r: dict[str, Any]) -> float | None:
     if not u:
         return None
     return u["input_tokens"] - u["cached_input_tokens"]
+
+
+# What a cached input token costs next to an uncached one: a tenth, for both
+# Anthropic's cache reads and OpenAI's cached input.
+CACHE_READ_WEIGHT = 0.1
+
+
+def _weighted(r: dict[str, Any]) -> float | None:
+    """Input tokens as they are priced: uncached ones whole, cache reads at a
+    tenth. Raw input tokens count a cache read like any other token."""
+    u = r.get("usage")
+    if not u:
+        return None
+    cached = u.get("cached_input_tokens") or 0
+    return u["input_tokens"] - cached + CACHE_READ_WEIGHT * cached
+
+
+# Spent per solved task: everything the scored runs spent, failed ones
+# included, over the runs that passed. The comparison the goal uses when the
+# arms' pass rates differ.
+PER_SOLVED = [
+    ("input_tokens", lambda r: _u(r, "input_tokens")),
+    ("weighted_input_tokens", _weighted),
+    ("cost_usd", lambda r: _u(r, "cost_usd")),
+]
+
+
+def per_solved(runs: list[dict[str, Any]]) -> dict[str, float | None]:
+    solved = sum(1 for r in runs if r.get("success"))
+    out: dict[str, float | None] = {}
+    for key, get in PER_SOLVED:
+        spent = [get(r) for r in runs]
+        # A run that reports nothing for it leaves the sum unknown.
+        out[key] = sum(spent) / solved if solved and spent and None not in spent else None
+    return out
 
 
 def group(records: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, list[dict[str, Any]]]]:
@@ -89,6 +125,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in outcomes if r.get("stopped")],
                 "successes": sum(1 for r in outcomes if r.get("success")),
+                "per_solved": per_solved(outcomes),
                 "metrics": {key: stats.summarize(get(r) for r in finished) for key, _, get, _ in METRICS},
                 "rule_decisions": dict(sorted(decisions.items())),
                 "github_unanswered": sorted(unanswered),
@@ -152,6 +189,33 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 )
         cells.append(cell)
     return {"schema": 1, "meta": meta, "cells": cells}
+
+
+def per_solved_line(cell: dict[str, Any]) -> str | None:
+    """Each arm's spend per solved task, with the treatment's change from
+    plain: what matters when the arms' pass rates differ."""
+    arms = cell["arms"]
+    names = [a for a in ("plain", "jouet", "jouet-init") if a in arms]
+    parts = []
+    for key, label, kind in (("input_tokens", "input", "tokens"),
+                             ("weighted_input_tokens", "cache-weighted input", "tokens"),
+                             ("cost_usd", "cost", "usd")):
+        values = {a: (arms[a].get("per_solved") or {}).get(key) for a in names}
+        if all(v is None for v in values.values()):
+            continue
+        each = []
+        for a in names:
+            v = values[a]
+            text = "–" if v is None else fmt(v, kind)
+            base = values.get("plain")
+            if a != "plain" and v is not None and base:
+                text += f" ({(v / base - 1) * 100:+.0f}%)"
+            each.append(f"{a} {text}")
+        parts.append(f"{label}: " + ", ".join(each))
+    if not parts:
+        return None
+    return ("Per solved task (all scored runs' spend over the runs that passed): "
+            + "; ".join(parts) + ".")
 
 
 def init_line(cell: dict[str, Any], init: dict[str, Any]) -> str:
@@ -296,6 +360,8 @@ def markdown(summary: dict[str, Any]) -> str:
             count = cell["paired_outcomes"]["both_passed"]
             detail = "; ".join(parts) if parts else "no comparable metrics"
             lines += ["", f"Both-pass pairs ({count}): median jouet minus plain: {detail}."]
+        if line := per_solved_line(cell):
+            lines += ["", line]
         if init := cell.get("init"):
             lines += ["", init_line(cell, init)]
         if comparison := cell.get("init_comparison"):
