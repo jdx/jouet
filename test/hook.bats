@@ -186,6 +186,31 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "a clean merge of another branch after a passing run needs no second run" {
+	git init -q -b work repo
+	echo 'fn main() {}' >repo/main.rs
+	echo 'fn lib() {}' >repo/lib.rs
+	g() { git -C repo -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+	g add main.rs lib.rs
+	g commit -qm base
+	g checkout -qb main
+	echo 'fn lib() { 1 }' >repo/lib.rs
+	g commit -qam theirs
+	g checkout -q work
+	echo 'fn main() { 1 }' >repo/main.rs
+	g commit -qam mine
+
+	ran 'cargo test --workspace' 0
+	g merge -q --no-edit main
+	run stop_reason
+	assert_output ""
+	# An edit amended into the merge is still a change.
+	echo 'fn lib() { 2 }' >repo/lib.rs
+	g commit -qa --amend --no-edit
+	run stop_reason
+	assert_output --partial 'Files changed after the last test run passed ('
+}
+
 @test "files a formatter rewrote after a passing run need no second run" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs

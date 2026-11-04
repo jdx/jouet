@@ -217,6 +217,68 @@ pub fn commit_tree(dir: Option<&Path>, rev: &str, timeout: Duration) -> Result<S
     Ok(digest(&files))
 }
 
+/// When HEAD in the repository containing `dir` is a merge commit that
+/// changed nothing beyond what the merged branch brought, the trees of its
+/// first parent and of HEAD, hashed as [`commit_tree`] hashes them. Every
+/// file the merged branch changed must be one the first parent left as the
+/// merge base had it, and HEAD must differ from the first parent by exactly
+/// those files' new content: no conflict resolved (kept as ours or not), no
+/// file merged from two sides, no edit amended in, nothing of theirs dropped. None for any
+/// other HEAD, a merge of more than two branches included. Only reads, as
+/// `git merge-tree --write-tree` would not.
+pub fn clean_merge(
+    dir: Option<&Path>,
+    timeout: Duration,
+) -> Result<Option<(String, String)>, String> {
+    let started = Instant::now();
+    let left = || timeout.saturating_sub(started.elapsed());
+    let commits = git(dir, &["rev-list", "--parents", "-n", "1", "HEAD"], left())?;
+    let [head, ours, theirs] = commits.split_whitespace().collect::<Vec<_>>()[..] else {
+        return Ok(None);
+    };
+    let base = git(dir, &["merge-base", ours, theirs], left())?;
+    let base = base.trim();
+    // `:MODE MODE OID OID STATUS\0PATH\0`, each path with what it became.
+    let changes = |from: &str, to: &str| -> Result<BTreeMap<String, String>, String> {
+        let raw = git(
+            dir,
+            &[
+                "diff",
+                "--raw",
+                "-z",
+                "--no-renames",
+                "--no-abbrev",
+                from,
+                to,
+            ],
+            left(),
+        )?;
+        let mut fields = raw.split('\0');
+        let mut changed = BTreeMap::new();
+        while let (Some(meta), Some(path)) = (fields.next(), fields.next()) {
+            let meta: Vec<&str> = meta.split(' ').collect();
+            if let [_, mode, _, oid, ..] = meta[..] {
+                changed.insert(path.to_string(), format!("{mode} {oid}"));
+            }
+        }
+        Ok(changed)
+    };
+    let merged = changes(ours, head)?;
+    let mine = changes(base, ours)?;
+    let brought = changes(base, theirs)?;
+    // With no file changed on both sides, HEAD differs from the first
+    // parent by exactly what the other branch brought; a conflict kept as
+    // ours is a file both changed, though HEAD does not differ there.
+    let clean = !brought.keys().any(|path| mine.contains_key(path)) && merged == brought;
+    if !clean {
+        return Ok(None);
+    }
+    Ok(Some((
+        commit_tree(dir, ours, left())?,
+        commit_tree(dir, head, left())?,
+    )))
+}
+
 /// The first 16 bytes of the SHA-256 of `MODE OID PATH\0` for each file, in
 /// path order, as hex; then a `.` and the same over the files that are not
 /// [`prose`], which [`code_part`] reads, so a check can tell a change to the
@@ -461,5 +523,67 @@ mod tests {
         assert!(commit_tree(Some(dir), "nope", T).is_err());
         let outside = tempfile::tempdir().unwrap();
         assert!(work_tree(Some(outside.path()), T).is_err());
+    }
+
+    #[test]
+    fn a_merge_is_clean_only_when_it_brings_the_other_branch_and_nothing_else() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path();
+        let write = |path: &str, text: &str| std::fs::write(dir.join(path), text).unwrap();
+        run(dir, &["init", "-q", "-b", "main"]);
+        write("a.rs", "a");
+        write("b.rs", "b");
+        run(dir, &["add", "."]);
+        run(dir, &["commit", "-qm", "base"]);
+        run(dir, &["checkout", "-qb", "work"]);
+        write("a.rs", "mine");
+        run(dir, &["commit", "-qam", "mine"]);
+        let ours = work_tree(Some(dir), T).unwrap();
+        assert_eq!(clean_merge(Some(dir), T), Ok(None), "not a merge");
+        run(dir, &["checkout", "-q", "main"]);
+        write("b.rs", "theirs");
+        write("c.rs", "new");
+        run(dir, &["add", "."]);
+        run(dir, &["commit", "-qm", "theirs"]);
+        run(dir, &["checkout", "-q", "work"]);
+        run(dir, &["merge", "-q", "--no-edit", "main"]);
+        let head = work_tree(Some(dir), T).unwrap();
+        assert_eq!(clean_merge(Some(dir), T), Ok(Some((ours.clone(), head))));
+
+        // A change of the agent's amended into the merge is not the merge's.
+        write("b.rs", "edited");
+        run(dir, &["commit", "-qa", "--amend", "--no-edit"]);
+        assert_eq!(clean_merge(Some(dir), T), Ok(None), "amended");
+
+        // Nor is a file both sides changed, merged by hand or by git.
+        run(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+        run(dir, &["checkout", "-q", "main"]);
+        write("a.rs", "theirs too");
+        run(dir, &["commit", "-qam", "both"]);
+        run(dir, &["checkout", "-q", "work"]);
+        // It conflicts, so it stops for the resolution.
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["merge", "-q", "--no-edit", "main"])
+            .output();
+        write("a.rs", "resolved");
+        run(dir, &["commit", "-qam", "resolved"]);
+        assert_eq!(clean_merge(Some(dir), T), Ok(None), "resolved");
+
+        // A conflict kept as ours leaves HEAD as ours there, but it is still
+        // a file both sides changed.
+        run(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["merge", "-q", "--no-edit", "main"])
+            .output();
+        run(dir, &["checkout", "-q", "--ours", "a.rs"]);
+        run(dir, &["add", "a.rs"]);
+        run(dir, &["commit", "-qm", "kept ours"]);
+        assert_eq!(clean_merge(Some(dir), T), Ok(None), "kept ours");
     }
 }
