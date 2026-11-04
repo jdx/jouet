@@ -697,10 +697,27 @@ impl Parser {
     /// a `)` in, and a substitution in an element still runs.
     fn array(&mut self) -> String {
         let start = self.pos - 1;
+        // Parentheses of an extglob (`@(a|b)`) nest inside the array's.
+        let mut depth = 0;
         while let Some(c) = self.peek() {
             self.pos += 1;
             match c {
-                ')' => break,
+                ')' if depth == 0 => break,
+                ')' => depth -= 1,
+                '(' => depth += 1,
+                // A comment runs to the end of its line, `)` and all.
+                '#' if matches!(
+                    self.chars.get(self.pos.wrapping_sub(2)),
+                    Some(' ' | '\t' | '\n' | '(')
+                ) =>
+                {
+                    while self.peek().is_some_and(|c| c != '\n') {
+                        self.pos += 1;
+                    }
+                }
+                '<' | '>' if self.peek() == Some('(') => {
+                    self.substitution();
+                }
                 '\\' => self.pos = (self.pos + 1).min(self.chars.len()),
                 '\'' => {
                     while self.peek().is_some_and(|c| c != '\'') {
@@ -928,6 +945,11 @@ mod tests {
         );
         // A `)` in quotes stays in, and an element's substitution still runs.
         let script = parse(r#"X=("a)" $(git ls-files)) PATH+=:/b; make"#);
+        assert_eq!(script.commands[0].words, ["make"]);
+        assert_eq!(script.nested[0].words, ["git", "ls-files"]);
+        // A process substitution's, an extglob's or a comment's `)` does
+        // not end the array, and the process substitution still runs.
+        let script = parse("X=(<(git ls-files) @(a|b) # c)\n d) && make");
         assert_eq!(script.commands[0].words, ["make"]);
         assert_eq!(script.nested[0].words, ["git", "ls-files"]);
         // An empty array, and a subshell after a command, are as before.
