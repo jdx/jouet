@@ -8,7 +8,7 @@
 
 use super::{Adapter, Base, Change, Ecosystem, Error, Project, Selection, Test, executable};
 use jouet_output::exit::Exit;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The runner a project's manifest names.
@@ -90,6 +90,180 @@ fn class_name(path: &str) -> &str {
     file.strip_suffix(".java").unwrap_or(file)
 }
 
+/// Keep only go-test options that affect which source files or module are loaded.
+fn go_list_flags(extra: &[String]) -> Result<Vec<String>, Error> {
+    let mut flags = Vec::new();
+    let mut words = extra.iter();
+    while let Some(arg) = words.next() {
+        if arg == "-args" || arg == "--args" {
+            break;
+        }
+        let normalized = arg
+            .strip_prefix("--")
+            .map_or_else(|| arg.clone(), |rest| format!("-{rest}"));
+        let name = normalized.split('=').next().unwrap_or(&normalized);
+        if matches!(
+            name,
+            "-tags" | "-mod" | "-modfile" | "-overlay" | "-compiler"
+        ) {
+            let value = if let Some((_, value)) = normalized.split_once('=') {
+                value.to_string()
+            } else {
+                words.next().cloned().ok_or_else(|| {
+                    Error::new(Exit::Precondition, format!("{name} needs a value"))
+                })?
+            };
+            if name == "-mod" && value == "mod" {
+                return Err(Error::new(
+                    Exit::Precondition,
+                    "cannot safely validate Go packages with -mod=mod: go list may change module files",
+                ));
+            }
+            flags.push(format!("{name}={value}"));
+        } else if matches!(name, "-race" | "-msan" | "-asan") {
+            flags.push(normalized);
+        }
+    }
+    Ok(flags)
+}
+
+/// Ask Go about each selected package before producing a command. Do not fetch
+/// modules or a toolchain during planning, and do not rewrite module files.
+fn validate_go_packages(
+    project: &Project,
+    packages: &BTreeSet<String>,
+    extra: &[String],
+) -> Result<(), Error> {
+    if packages.is_empty() {
+        return Ok(());
+    }
+    let flags = go_list_flags(extra)?;
+    let has_vendor = project
+        .dir
+        .ancestors()
+        .any(|dir| dir.join("vendor/modules.txt").is_file());
+    let vendor_flag = flags.iter().any(|flag| flag == "-mod=vendor")
+        || std::env::var("GOFLAGS").is_ok_and(|value| value.contains("-mod=vendor"));
+    let force_readonly = !has_vendor && !vendor_flag
+        || std::env::var("GOFLAGS").is_ok_and(|value| value.contains("-mod=mod"));
+    let mut argv: Vec<String> = ["go", "list", "-e", "-json"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    if force_readonly {
+        argv.push("-mod=readonly".into());
+    }
+    argv.extend(flags);
+    argv.extend(packages.iter().cloned());
+    let result = crate::diag::process::run_with_env(
+        &argv,
+        &project.dir,
+        b"",
+        std::time::Duration::from_secs(30),
+        &[("GOPROXY", "off"), ("GOTOOLCHAIN", "local")],
+    )
+    .map_err(|e| {
+        Error::new(
+            Exit::Precondition,
+            format!("cannot validate selected Go packages: {e}"),
+        )
+    })?;
+    if result.timed_out || result.code != Some(0) {
+        let why = if result.timed_out {
+            "timed out".into()
+        } else {
+            String::from_utf8_lossy(&result.stderr).trim().to_string()
+        };
+        return Err(Error::new(
+            Exit::Precondition,
+            format!("cannot validate selected Go packages: {why}"),
+        ));
+    }
+    let by_dir: BTreeMap<_, _> = packages
+        .iter()
+        .filter_map(|package| {
+            project
+                .dir
+                .join(package)
+                .canonicalize()
+                .ok()
+                .map(|dir| (dir, package))
+        })
+        .collect();
+    let mut seen = BTreeSet::new();
+    let mut invalid = Vec::new();
+    let mut uncertain = Vec::new();
+    let values =
+        serde_json::Deserializer::from_slice(&result.stdout).into_iter::<serde_json::Value>();
+    for value in values {
+        let value = value.map_err(|e| {
+            Error::new(
+                Exit::Precondition,
+                format!("cannot read Go package metadata: {e}"),
+            )
+        })?;
+        let import = value
+            .get("ImportPath")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let dir = value
+            .get("Dir")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|d| Path::new(d).canonicalize().ok());
+        let package = packages
+            .get(import)
+            .or_else(|| dir.as_ref().and_then(|dir| by_dir.get(dir).copied()));
+        let Some(package) = package else {
+            return Err(Error::new(
+                Exit::Precondition,
+                format!("Go returned an unexpected package while validating {import}"),
+            ));
+        };
+        seen.insert(package.clone());
+        if let Some(error) = value
+            .get("Error")
+            .and_then(|e| e.get("Err"))
+            .and_then(serde_json::Value::as_str)
+        {
+            invalid.push(format!("{package}: {error}"));
+        } else if value
+            .get("DepsErrors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|errors| !errors.is_empty())
+            || value.get("Incomplete").and_then(serde_json::Value::as_bool) == Some(true)
+        {
+            uncertain.push(package.clone());
+        }
+    }
+    uncertain.extend(packages.difference(&seen).cloned());
+    if !invalid.is_empty() {
+        if !uncertain.is_empty() {
+            invalid.push(format!(
+                "could not validate dependencies for: {}",
+                uncertain.join(", ")
+            ));
+        }
+        return Err(Error::new(
+            Exit::Precondition,
+            format!(
+                "selected Go packages cannot be loaded:\n{}",
+                invalid.join("\n")
+            ),
+        )
+        .hint("check build tags and module boundaries, then run the relevant tests"));
+    }
+    if !uncertain.is_empty() {
+        return Err(Error::new(
+            Exit::Precondition,
+            format!(
+                "could not validate dependencies for selected Go packages: {}",
+                uncertain.join(", ")
+            ),
+        )
+        .hint("inspect the package dependencies and ensure they and the Go toolchain are installed, then retry"));
+    }
+    Ok(())
+}
 impl Adapter for Graph {
     fn name(&self) -> &'static str {
         "graph"
@@ -270,6 +444,7 @@ impl Adapter for Graph {
                         dir.map_or(".".into(), |d| format!("./{d}"))
                     })
                     .collect();
+                validate_go_packages(project, &packages, extra)?;
                 ["go", "test"]
                     .iter()
                     .map(|w| w.to_string())
@@ -326,6 +501,174 @@ impl Adapter for Graph {
 mod tests {
     use super::*;
 
+    #[test]
+    fn go_package_validation_uses_build_flags_and_stops_at_test_args() {
+        let args = [
+            "-tags",
+            "optional",
+            "-race",
+            "-run",
+            "TestX",
+            "-args",
+            "-tags=ignored",
+        ]
+        .map(String::from);
+        assert_eq!(go_list_flags(&args).unwrap(), ["-tags=optional", "-race"]);
+        assert_eq!(
+            go_list_flags(&["--tags=optional".into(), "-race=false".into()]).unwrap(),
+            ["-tags=optional", "-race=false"]
+        );
+        assert!(
+            go_list_flags(&["--args".into(), "-tags=ignored".into()])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(go_list_flags(&["-tags".into()]).is_err());
+        assert!(go_list_flags(&["-mod=mod".into()]).is_err());
+    }
+
+    #[test]
+    fn go_package_validation_names_inactive_and_nested_packages() {
+        if std::process::Command::new("go")
+            .arg("version")
+            .output()
+            .is_err()
+        {
+            return; // Go is not required to build or test jouet itself.
+        }
+        let root = tempfile::tempdir().unwrap();
+        for dir in ["lib", "tagged", "nested", "missing"] {
+            std::fs::create_dir(root.path().join(dir)).unwrap();
+        }
+        std::fs::write(
+            root.path().join("go.mod"),
+            "module example.test/root\n\ngo 1.20\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("lib/lib.go"), "package lib\n").unwrap();
+        std::fs::write(
+            root.path().join("tagged/tagged_test.go"),
+            "//go:build optional\n\npackage tagged\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("nested/go.mod"),
+            "module example.test/nested\n\ngo 1.20\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("nested/nested.go"), "package nested\n").unwrap();
+        std::fs::write(
+            root.path().join("missing/missing.go"),
+            "package missing\nimport _ \"example.invalid/absent\"\n",
+        )
+        .unwrap();
+        let project = Project {
+            root: root.path().into(),
+            dir: root.path().into(),
+            rel: String::new(),
+        };
+        let packages = ["./lib", "./tagged", "./nested"]
+            .map(String::from)
+            .into_iter()
+            .collect();
+        let error = validate_go_packages(&project, &packages, &[]).unwrap_err();
+        assert_eq!(error.exit, Exit::Precondition);
+        assert!(error.message.contains("./tagged:"), "{}", error.message);
+        assert!(error.message.contains("./nested:"), "{}", error.message);
+        let missing = ["./missing".to_string()].into_iter().collect();
+        let error = validate_go_packages(&project, &missing, &[]).unwrap_err();
+        assert!(error.message.contains("./missing"), "{}", error.message);
+        assert!(
+            error.message.contains("could not validate"),
+            "{}",
+            error.message
+        );
+        let tagged = ["./tagged".to_string()].into_iter().collect();
+        validate_go_packages(&project, &tagged, &["-tags=optional".into()]).unwrap();
+        assert!(!root.path().join("go.sum").exists());
+    }
+    #[test]
+    fn go_package_validation_respects_automatic_vendor_mode() {
+        if std::process::Command::new("go")
+            .arg("version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        std::fs::create_dir_all(root.path().join("vendor/example.test/dep")).unwrap();
+        std::fs::write(
+            root.path().join("go.mod"),
+            "module example.test/root\n\ngo 1.20\n\nrequire example.test/dep v1.0.0\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("lib/lib.go"),
+            "package lib\nimport _ \"example.test/dep\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("vendor/modules.txt"),
+            "# example.test/dep v1.0.0\n## explicit; go 1.20\nexample.test/dep\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("vendor/example.test/dep/dep.go"),
+            "package dep\n",
+        )
+        .unwrap();
+        let project = Project {
+            root: root.path().into(),
+            dir: root.path().into(),
+            rel: String::new(),
+        };
+        let packages = ["./lib".to_string()].into_iter().collect();
+        validate_go_packages(&project, &packages, &[]).unwrap();
+        assert!(!root.path().join("go.sum").exists());
+    }
+    #[test]
+    fn go_package_validation_accepts_external_test_only_packages() {
+        if std::process::Command::new("go")
+            .arg("version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("external")).unwrap();
+        std::fs::write(
+            root.path().join("go.mod"),
+            "module example.test/root\n\ngo 1.20\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("external/external_test.go"),
+            "package external_test\nimport \"testing\"\nfunc TestExternal(t *testing.T) {}\n",
+        )
+        .unwrap();
+        let project = Project {
+            root: root.path().into(),
+            dir: root.path().into(),
+            rel: String::new(),
+        };
+        let packages = ["./external".to_string()].into_iter().collect();
+        validate_go_packages(&project, &packages, &[]).unwrap();
+        let run = std::process::Command::new("go")
+            .args(["test", "./external"])
+            .current_dir(root.path())
+            .env("GOPROXY", "off")
+            .env("GOTOOLCHAIN", "local")
+            .output()
+            .unwrap();
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
     #[test]
     fn java_classes_are_named_by_their_files() {
         assert_eq!(class_name("src/test/java/com/x/FooTest.java"), "FooTest");

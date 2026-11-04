@@ -20,9 +20,21 @@ pub(crate) fn run(
     input: &[u8],
     timeout: Duration,
 ) -> std::io::Result<Ran> {
+    run_with_env(argv, dir, input, timeout, &[])
+}
+
+/// Like `run`, with selected environment variables overridden for the child.
+pub(crate) fn run_with_env(
+    argv: &[String],
+    dir: &Path,
+    input: &[u8],
+    timeout: Duration,
+    env: &[(&str, &str)],
+) -> std::io::Result<Ran> {
     let (program, args) = argv.split_first().expect("a program to run");
     let mut command = Command::new(program);
     command
+        .envs(env.iter().copied())
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::piped())
