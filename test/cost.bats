@@ -9,7 +9,8 @@ setup() {
 	printf '#!/bin/sh\nexit 0\n' >"$BATS_TEST_TMPDIR/tools/cargo"
 	chmod +x "$BATS_TEST_TMPDIR/tools/cargo"
 	export PATH="$BATS_TEST_TMPDIR/tools:$PATH"
-	export JOUET_COST_RECORD=0 JOUET_TEST_BASELINE=off JOUET_SESSION_ID=private-session
+	# The tests time repeated runs of a check, which must each run.
+	export JOUET_COST_RECORD=0 JOUET_TEST_BASELINE=off JOUET_TEST_REUSE_S=0 JOUET_SESSION_ID=private-session
 }
 
 @test "records the duration of Tornado's test runner" {
