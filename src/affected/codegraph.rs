@@ -629,6 +629,47 @@ mod tests {
         assert!(!root.path().join("go.sum").exists());
     }
     #[test]
+    fn go_package_validation_accepts_external_test_only_packages() {
+        if std::process::Command::new("go")
+            .arg("version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("external")).unwrap();
+        std::fs::write(
+            root.path().join("go.mod"),
+            "module example.test/root\n\ngo 1.20\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("external/external_test.go"),
+            "package external_test\nimport \"testing\"\nfunc TestExternal(t *testing.T) {}\n",
+        )
+        .unwrap();
+        let project = Project {
+            root: root.path().into(),
+            dir: root.path().into(),
+            rel: String::new(),
+        };
+        let packages = ["./external".to_string()].into_iter().collect();
+        validate_go_packages(&project, &packages, &[]).unwrap();
+        let run = std::process::Command::new("go")
+            .args(["test", "./external"])
+            .current_dir(root.path())
+            .env("GOPROXY", "off")
+            .env("GOTOOLCHAIN", "local")
+            .output()
+            .unwrap();
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+    #[test]
     fn java_classes_are_named_by_their_files() {
         assert_eq!(class_name("src/test/java/com/x/FooTest.java"), "FooTest");
     }
