@@ -392,7 +392,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     failing.push(failing_tests(&output, &formats, &root));
                 }
                 failed_tests = failed_tests
-                    .zip(baseline::failure_names(&output, &formats, &root, false))
+                    .zip(failed_test_names(&output, &formats, &root))
                     .map(|(mut all, names)| {
                         all.extend(names);
                         all
@@ -570,6 +570,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
 /// Whether a failing run is compared with the merge base without
 /// --baseline: not an affected run, whose tests depend on the changes, nor
 /// a dry run, and not with `[test] baseline = "off"`.
+/// The failing tests a failed run's output names, as its runner printed
+/// them, for the stop gate; `None` when it names none.
+pub(crate) fn failed_test_names(
+    output: &str,
+    formats: &[testlog::Format],
+    root: &Path,
+) -> Option<Vec<String>> {
+    baseline::failure_names(output, formats, root, false).map(|names| names.into_iter().collect())
+}
+
 /// The tests a failed suite's output names, a Go test with the packages it
 /// failed in; `None` when it does not name every failure, or names a Go
 /// failure without its package.

@@ -1156,6 +1156,13 @@ impl State {
                 failed.tests = tests.to_vec();
             }
         }
+        // The newest run is the failure itself, and the stop says so only
+        // while the two are equal.
+        for run in checks.runs.values_mut() {
+            if run.command == command && !run.passed() {
+                run.tests = tests.to_vec();
+            }
+        }
     }
 
     /// Marks the newest failure of `command` in the work tree at `root` as
@@ -2738,6 +2745,11 @@ mod tests {
         };
         let block =
             |state: &State| state.block("/home", |_| Some("t2".into()), |_| false, |_| true);
+        let at_failure = |state: &State| {
+            state
+                .block("/home", |_| Some("t1".into()), |_| false, |_| true)
+                .map(|b| b.reason)
+        };
         let failed = |tests: &[&str]| {
             let mut state = State::default();
             run(&mut state, "a_summary", 101, "t1");
@@ -2749,6 +2761,13 @@ mod tests {
             );
             state
         };
+        // Until another run, the failure is still the last run.
+        let last = at_failure(&failed(&["testlog::tests::a_summary"]));
+        assert!(
+            last.as_deref()
+                .is_some_and(|r| r.starts_with("The last test run failed")),
+            "{last:?}"
+        );
         let mut state = failed(&["testlog::tests::a_summary"]);
         run(&mut state, "testlog", 0, "t2");
         assert_eq!(block(&state), None);
