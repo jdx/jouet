@@ -690,6 +690,7 @@ const FIRST: &[(&str, &[&str])] = &[
             "hook",
             "pr",
             "rule",
+            "search",
             "setup",
             "skill",
             "stats",
@@ -993,6 +994,18 @@ mod tests {
         ] {
             assert_eq!(shape(script), expected, "{script}");
         }
+    }
+
+    #[test]
+    fn search_no_matches_is_an_answer_in_stats_from_a_hook_record() {
+        let mut entry = Entry::new("codex", Some("s"), "post-tool-use");
+        entry.shape = Some(shape("jouet search confidential src/lib.rs"));
+        entry.exit_code = Some(1);
+        assert_eq!(entry.shape.as_deref(), Some("jouet search <arg> <arg>"));
+        let entry: jouet_audit::stats::LedgerEntry =
+            serde_json::from_value(serde_json::to_value(entry).unwrap()).unwrap();
+        let measured = jouet_audit::stats::measure(&[entry], &Default::default());
+        assert!(measured.overhead.is_empty(), "{:#?}", measured.overhead);
     }
 
     #[test]

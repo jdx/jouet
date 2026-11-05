@@ -125,7 +125,8 @@ pub struct Overhead {
 
 /// The commands whose exit code 1 (or `pr next`'s 10 and 20, or a timeout's
 /// 124) is the answer to what they checked, not a failure of jouet: a test
-/// that fails fails without jouet too.
+/// that fails fails without jouet too. Search exit 1 means no matches and is
+/// handled separately because its other nonzero exits are not search results.
 const ANSWERS: &[&str] = &[
     "jouet test",
     "jouet wait",
@@ -139,6 +140,10 @@ const ANSWERS: &[&str] = &[
 /// Whether a command line that ran `commands` and exited with `code` only
 /// reported a check's answer.
 fn is_answer(commands: &[String], code: i32) -> bool {
+    if code == 1 && !commands.is_empty() && commands.iter().all(|command| command == "jouet search")
+    {
+        return true;
+    }
     matches!(code, 1 | 10 | 20 | 124)
         && commands.iter().any(|c| {
             ANSWERS

@@ -689,6 +689,38 @@ fn jouet_edit_is_credited_only_where_it_fails_less_than_edits_did() {
 }
 
 #[test]
+fn search_without_matches_is_an_answer_but_errors_are_overhead() {
+    let run = |code| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        ..post("jouet search", code)
+    };
+    let entries = [
+        post("jouet search <arg>", 1),
+        run(1),
+        post("jouet search <arg>", 2),
+        run(2),
+        post("jouet search <arg>", 124),
+        run(124),
+    ];
+    let measured = measure(&entries, &StatsFilter::default());
+    assert_eq!(measured.overhead[0].failed_runs, 2);
+
+    let legacy = measure(
+        &[post("jouet search <arg>", 1), post("jouet search <arg>", 2)],
+        &StatsFilter::default(),
+    );
+    assert_eq!(legacy.overhead[0].failed_runs, 1);
+
+    // The search may have succeeded and the later command failed.
+    let chained = measure(
+        &[post("jouet search <arg> && jouet commit <arg>", 1)],
+        &StatsFilter::default(),
+    );
+    assert_eq!(chained.overhead[0].failed_runs, 1);
+}
+
+#[test]
 fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
     let run = |shape: &str, code| LedgerEntry {
         harness: "jouet".into(),
