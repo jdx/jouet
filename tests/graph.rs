@@ -385,6 +385,39 @@ fn continuation_commands_keep_the_original_query_options() {
 }
 
 #[test]
+fn continuation_keeps_a_hyphenated_query_after_the_options() {
+    let env = Env::new();
+    many_callers(&env);
+    for command in ["symbols", "explore"] {
+        let args = ["graph", command, "--budget", "200", "--", "-caller"];
+        let first = env.run(&args);
+        assert!(
+            first.status.success(),
+            "{}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        let text = String::from_utf8(first.stdout).unwrap();
+        let marker = text.lines().last().unwrap();
+        let suggested = marker
+            .rsplit_once(" (jouet ")
+            .unwrap()
+            .1
+            .trim_end_matches(')');
+        let suggested: Vec<&str> = suggested.split_whitespace().collect();
+        let next = env.run(&suggested);
+        let expected = env.run(&[
+            "graph", command, "--budget", "200", "--page", "2", "--", "-caller",
+        ]);
+        assert!(
+            next.status.success(),
+            "{}",
+            String::from_utf8_lossy(&next.stderr)
+        );
+        assert_eq!(next.stdout, expected.stdout, "{marker}");
+    }
+}
+
+#[test]
 fn symbol_continuation_keeps_a_hyphenated_path_attached() {
     let env = Env::new();
     let mut source = String::new();

@@ -91,13 +91,14 @@ fn paginate(sizes: &[usize], budget: usize, page: usize) -> Paged {
 }
 
 /// The line after a page that was cut: how much is left and how to see it.
-fn more_marker(paged: &Paged, rerun: &str, noun: &str) -> String {
+fn more_marker(paged: &Paged, rerun: &str, noun: &str, query: Option<&str>) -> String {
     if paged.page >= paged.pages {
         return String::new();
     }
     let left = paged.total - paged.range.end;
+    let query = query.map_or_else(String::new, |q| format!(" -- {}", quoted(q)));
     format!(
-        "... {left} more {noun} on {} more {} ({rerun} --page {})\n",
+        "... {left} more {noun} on {} more {} ({rerun} --page {}{query})\n",
         paged.pages - paged.page,
         if paged.pages - paged.page == 1 {
             "page"
@@ -169,9 +170,6 @@ fn symbols(
         capped: found.len() >= MAX_RESULTS,
     };
     let mut rerun = String::from("jouet graph symbols");
-    if let Some(q) = &args.query {
-        let _ = write!(rerun, " {}", quoted(q));
-    }
     if let Some(kind) = &args.kind {
         let _ = write!(rerun, " --kind={}", quoted(kind));
     }
@@ -186,7 +184,12 @@ fn symbols(
             return "no symbols found\n".to_string();
         }
         let mut s: String = lines[paged.range.clone()].concat();
-        s.push_str(&more_marker(&paged, &rerun, "symbols"));
+        s.push_str(&more_marker(
+            &paged,
+            &rerun,
+            "symbols",
+            args.query.as_deref(),
+        ));
         s
     });
     Ok(if found.is_empty() {
@@ -323,7 +326,7 @@ fn traverse(
                 direction.name(),
                 quoted(&symbol.id)
             );
-            text.push_str(&more_marker(&paged, &rerun, direction.name()));
+            text.push_str(&more_marker(&paged, &rerun, direction.name(), None));
         }
         docs.push(Traversal {
             symbol,
@@ -450,7 +453,7 @@ fn explore(
         pages: paged.pages,
         capped: found.len() >= MAX_RESULTS,
     };
-    let mut rerun = format!("jouet graph explore {}", quoted(&query));
+    let mut rerun = String::from("jouet graph explore");
     if let Some(budget) = args.budget {
         let _ = write!(rerun, " --budget {budget}");
     }
@@ -462,7 +465,7 @@ fn explore(
             return format!("nothing in the graph matches {query}\n");
         }
         let mut s = texts[paged.range.clone()].join("\n");
-        s.push_str(&more_marker(&paged, &rerun, "symbols"));
+        s.push_str(&more_marker(&paged, &rerun, "symbols", Some(&query)));
         s
     });
     Ok(if found.is_empty() {
