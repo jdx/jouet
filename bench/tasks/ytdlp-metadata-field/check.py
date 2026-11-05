@@ -17,6 +17,8 @@ ydl = YoutubeDL({"quiet": True, "ignoreconfig": True})
 cases = [
     ("playlist_autonumber:track", {"playlist_autonumber": 3}, "track"),
     ("title:description", {"title": "first\nsecond"}, "description"),
+    ("title:track2", {"title": "value"}, "track2"),
+    ("title:é", {"title": "value"}, "é"),
     ("title:%(artist)s - %(track)s", {"title": "Name - Song"}, "artist"),
     (r"title:(?P<artist>.+) - (?P<track>.+)", {"title": "Name - Song"}, "track"),
 ]
@@ -32,7 +34,7 @@ try:
     values = json.loads(run.stdout)
 except json.JSONDecodeError:
     values = None
-expect(run.returncode == 0 and values == ["3", "first\nsecond", "Name", "Song"],
+expect(run.returncode == 0 and values == ["3", "first\nsecond", "value", "value", "Name", "Song"],
        f"metadata parsing did not preserve all cases: {run.stdout}\n{run.stderr}")
 expect(new_commit(), "nothing was committed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")

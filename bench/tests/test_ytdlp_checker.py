@@ -32,7 +32,7 @@ class YtdlpCheckerTest(unittest.TestCase):
             bin_dir = root / "bin"
             bin_dir.mkdir()
             python = bin_dir / "python3"
-            python.write_text('#!/bin/sh\nprintf \'["3", "first\\\\nsecond", "Name", "Song"]\\n\'\n')
+            python.write_text('#!/bin/sh\nprintf \'["3", "first\\\\nsecond", "value", "value", "Name", "Song"]\\n\'\n')
             python.chmod(0o755)
             env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
 
