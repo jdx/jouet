@@ -850,7 +850,7 @@ fn describe(out: &mut String, name: &str, meta: &CommandMeta<'_>) {
 const PRIMED: &[(&[&str], &[&str])] = &[
     (&["commit"], &["--message"]),
     (&["edit", "replace"], &["--old", "--new"]),
-    (&["pr", "threads", "reply"], &["--body", "--resolve"]),
+    (&["pr", "threads", "reply"], &["--body"]),
 ];
 
 /// The short primer printed when a session starts: the command families by
@@ -911,7 +911,7 @@ pub(crate) fn summary(
         };
         let _ = writeln!(
             out,
-            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Use {edit} when each pair applies to every file; otherwise use a `jouet edit` spec, never Python. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read with `jouet read PATH --symbol NAME` or `--range A:B` (repeat; avoid overlap) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads, searches and edits in one. List a PR's open review threads with `jouet pr threads [PR]`; reply with {reply} (resolve fixes, not questions), not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Use {edit} when each pair applies to every file; otherwise use a `jouet edit` spec, never Python. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read with `jouet read PATH --symbol NAME` or `--range A:B` (repeat; avoid overlap) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads, searches and edits in one. List a PR's open review threads with `jouet pr threads [PR]`; reply with {reply} (`--resolve` for fixes, not questions), not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1152,7 +1152,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("`jouet pr threads reply <ID> [PR] --body TEXT --resolve`"),
+            text.contains("`jouet pr threads reply <ID> [PR] --body TEXT` (`--resolve` for fixes"),
             "{text}"
         );
         assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
