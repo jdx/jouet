@@ -2,18 +2,29 @@ import contextlib
 import importlib.util
 import io
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
-
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/tornado-cancelled-handler/check.py"
 
 
 class TornadoCheckerTest(unittest.TestCase):
+    def test_expired_budget_does_not_start_another_test(self):
+        spec = importlib.util.spec_from_file_location("tornado_budget_checker", CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        checker.DEADLINE = 100
+        with mock.patch.object(checker.time, "monotonic", return_value=101), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run") as process:
+            checker.run_tests(Path("."), "tornado.test.web_test")
+            self.assertIn("time budget exhausted", checker.UNVERIFIED[0])
+            process.assert_not_called()
+
     def test_timeout_keeps_captured_output_and_is_unverified(self):
         spec = importlib.util.spec_from_file_location("tornado_checker", CHECKER)
         checker = importlib.util.module_from_spec(spec)
@@ -69,7 +80,7 @@ class TornadoCheckerTest(unittest.TestCase):
 
             def check():
                 return subprocess.run([sys.executable, str(CHECKER)], cwd=work, env=env,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, check=False)
 
             source.write_text("fixed\n")
             self.assertIn("nothing was committed", check().stdout)
@@ -112,6 +123,12 @@ class TornadoCheckerTest(unittest.TestCase):
             source.write_text("uncommitted\n")
             self.assertIn("tracked changes were left uncommitted", check().stdout)
             self.assertEqual(test.read_text(), "agent test\n")
+            source.write_text("fixed\n")
+            test.unlink()
+            (work / "tornado/test/other_test.py").write_text("another test\n")
+            git("add", "tornado/test")
+            git("commit", "-qm", "replace test")
+            self.assertIn("hidden-test target was removed", check().stdout)
 
 
 if __name__ == "__main__":
