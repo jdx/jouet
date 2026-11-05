@@ -71,6 +71,10 @@ pub(crate) struct Run {
     /// Like a machine failure, it is a note at the stop, not a block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unrelated: Option<String>,
+    /// For a failed `jouet test` run, the failing tests as its runner named
+    /// them, when it named each one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<String>,
 }
 
 impl Run {
@@ -83,6 +87,7 @@ impl Run {
             tree: tree.map(str::to_string),
             environment: None,
             unrelated: None,
+            tests: Vec::new(),
         }
     }
 
@@ -173,6 +178,7 @@ impl Run {
         if same_runner(&self.command, &failed.command)
             && (without_names(ran, wanted)
                 || wider_filter(&failed.command, ran, wanted)
+                || reran_failures(&failed.command, ran, wanted, &failed.tests)
                 || without_name_filter(ran, wanted)
                 || wider_name_filter(ran, wanted)
                 || (runner_argv(&self.command).first().map(String::as_str) == Some("go")
@@ -523,12 +529,42 @@ fn go_covers(ran: &str, wanted: &str) -> bool {
 /// them (`--bin jouet`, `-p mise`). Not with `--exact`, which matches whole
 /// names.
 fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
-    let runner = runner_argv(command);
-    if !(runner.first().map(String::as_str) == Some("cargo")
-        && matches!(runner.get(1).map(String::as_str), Some("test" | "nextest")))
-    {
+    if !cargo_test(command) {
         return false;
     }
+    let (Some((ran_head, ran)), Some((wanted_head, wanted))) =
+        (cargo_filters(ran), cargo_filters(wanted))
+    else {
+        return false;
+    };
+    ran_head == wanted_head && wanted.iter().all(|w| ran.iter().any(|r| w.contains(r)))
+}
+
+/// Whether `ran`, a cargo test run of the same targets as `wanted`, has a
+/// name filter that picks each of `tests`, the tests that failed in
+/// `wanted`. cargo matches a filter against a test's whole path, so
+/// `testlog` reruns `testlog::tests::a` that the failed run named `a`.
+fn reran_failures(command: &str, ran: &str, wanted: &str, tests: &[String]) -> bool {
+    if tests.is_empty() || !cargo_test(command) {
+        return false;
+    }
+    let (Some((ran_head, ran)), Some((wanted_head, _))) =
+        (cargo_filters(ran), cargo_filters(wanted))
+    else {
+        return false;
+    };
+    ran_head == wanted_head && tests.iter().all(|t| ran.iter().any(|r| t.contains(r)))
+}
+
+fn cargo_test(command: &str) -> bool {
+    let runner = runner_argv(command);
+    runner.first().map(String::as_str) == Some("cargo")
+        && matches!(runner.get(1).map(String::as_str), Some("test" | "nextest"))
+}
+
+/// A cargo test selection's targets and its name filters, or None when it
+/// has no name filter or one that is not a substring match.
+fn cargo_filters(selector: &str) -> Option<(Vec<&str>, Vec<&str>)> {
     // The picks the checks rule records that take no value.
     const FLAGS: [&str; 7] = [
         "--lib",
@@ -539,35 +575,29 @@ fn wider_filter(command: &str, ran: &str, wanted: &str) -> bool {
         "--doc",
         "--ignored",
     ];
-    fn split(selector: &str) -> Option<(Vec<&str>, Vec<&str>)> {
-        let words: Vec<&str> = selector.split_whitespace().collect();
-        // A nextest filter expression is not a name filter, and its words
-        // may hold spaces.
-        if words.iter().any(|w| {
-            *w == "--exact"
-                || ["-E", "--filter-expr", "--filterset"]
-                    .iter()
-                    .any(|o| w.starts_with(o))
-        }) {
-            return None;
-        }
-        let mut at = words.len()
-            - words
+    let words: Vec<&str> = selector.split_whitespace().collect();
+    // A nextest filter expression is not a name filter, and its words
+    // may hold spaces.
+    if words.iter().any(|w| {
+        *w == "--exact"
+            || ["-E", "--filter-expr", "--filterset"]
                 .iter()
-                .rev()
-                .take_while(|w| !w.starts_with('-'))
-                .count();
-        // `--bin=jouet` holds its own value.
-        if at > 0 && !FLAGS.contains(&words[at - 1]) && !words[at - 1].contains('=') {
-            at += 1;
-        }
-        let (head, filters) = words.split_at(at.min(words.len()));
-        (!filters.is_empty()).then(|| (head.to_vec(), filters.to_vec()))
+                .any(|o| w.starts_with(o))
+    }) {
+        return None;
     }
-    let (Some((ran_head, ran)), Some((wanted_head, wanted))) = (split(ran), split(wanted)) else {
-        return false;
-    };
-    ran_head == wanted_head && wanted.iter().all(|w| ran.iter().any(|r| w.contains(r)))
+    let mut at = words.len()
+        - words
+            .iter()
+            .rev()
+            .take_while(|w| !w.starts_with('-'))
+            .count();
+    // `--bin=jouet` holds its own value.
+    if at > 0 && !FLAGS.contains(&words[at - 1]) && !words[at - 1].contains('=') {
+        at += 1;
+    }
+    let (head, filters) = words.split_at(at.min(words.len()));
+    (!filters.is_empty()).then(|| (head.to_vec(), filters.to_vec()))
 }
 
 /// A session's checks, kept by work tree: a run counts for the repository
@@ -1115,6 +1145,19 @@ impl State {
         }
     }
 
+    /// Records `tests` as the failing tests of the newest failure of
+    /// `command` in the work tree at `root`.
+    pub(crate) fn mark_failed_tests(&mut self, root: &str, command: &str, tests: &[String]) {
+        let Some(checks) = self.trees.get_mut(root) else {
+            return;
+        };
+        for failures in checks.failures.values_mut() {
+            if let Some(failed) = failures.iter_mut().rev().find(|f| f.command == command) {
+                failed.tests = tests.to_vec();
+            }
+        }
+    }
+
     /// Marks the newest failure of `command` in the work tree at `root` as
     /// one in tests the change does not reach, which `tests` names.
     pub(crate) fn mark_unrelated(&mut self, root: &str, command: &str, tests: &str) {
@@ -1241,6 +1284,7 @@ impl Checks {
                 })
             {
                 run.unrelated = earlier.unrelated.clone();
+                run.tests = earlier.tests.clone();
             }
             if run.passed() && run.full {
                 // A full runner or task can cover a different package than a
@@ -2674,6 +2718,48 @@ mod tests {
         );
         assert!(reason(&state, "t2").is_some());
         assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn a_cargo_filter_on_the_failed_tests_paths_covers_their_failure() {
+        // cargo matches a filter against the whole path, so `testlog` reran
+        // the test the failed run named `a_summary`, which only the failing
+        // test's name as the runner printed it shows.
+        let run = |state: &mut State, filter: &str, code, tree| {
+            state.record(
+                "/home",
+                [test(
+                    &format!("jouet test --cmd -- cargo test --bin jouet {filter}"),
+                    code,
+                    &format!("--bin jouet {filter}"),
+                )],
+                Some(tree),
+            );
+        };
+        let block =
+            |state: &State| state.block("/home", |_| Some("t2".into()), |_| false, |_| true);
+        let failed = |tests: &[&str]| {
+            let mut state = State::default();
+            run(&mut state, "a_summary", 101, "t1");
+            let tests: Vec<String> = tests.iter().map(|t| t.to_string()).collect();
+            state.mark_failed_tests(
+                "/home",
+                "jouet test --cmd -- cargo test --bin jouet a_summary",
+                &tests,
+            );
+            state
+        };
+        let mut state = failed(&["testlog::tests::a_summary"]);
+        run(&mut state, "testlog", 0, "t2");
+        assert_eq!(block(&state), None);
+        // A filter that misses one failing test, or a run whose failures were
+        // not named, still holds it up.
+        let mut state = failed(&["testlog::tests::a_summary", "verify::tests::a_summary"]);
+        run(&mut state, "testlog", 0, "t2");
+        assert!(block(&state).is_some());
+        let mut state = failed(&[]);
+        run(&mut state, "testlog", 0, "t2");
+        assert!(block(&state).is_some());
     }
 
     #[test]

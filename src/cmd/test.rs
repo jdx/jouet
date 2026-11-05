@@ -271,6 +271,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // The tests each failed suite names, for telling whether the change
     // reaches them; `None` for a suite whose failures are not all named.
     let mut failing: Vec<Option<Vec<crate::affected::Failing>>> = Vec::new();
+    // The failing tests every failed suite named, for the stop gate; empty
+    // when one named none.
+    let mut failed_tests: Option<Vec<String>> = Some(Vec::new());
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
     let sequences = crate::settings::Settings::load().cost.sequences;
@@ -388,6 +391,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 if !args.affected {
                     failing.push(failing_tests(&output, &formats, &root));
                 }
+                failed_tests = failed_tests
+                    .zip(baseline::failure_names(&output, &formats, &root, false))
+                    .map(|(mut all, names)| {
+                        all.extend(names);
+                        all
+                    });
             }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
@@ -543,6 +552,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             i32::from(exit.code()),
             blamed.as_deref(),
             unrelated.as_deref(),
+            &failed_tests.unwrap_or_default(),
             ran_tests,
         );
     }
