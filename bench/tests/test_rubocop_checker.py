@@ -70,10 +70,16 @@ class RubocopCheckerTest(unittest.TestCase):
                 'if [ "${REQUIRE_HELPER:-}" = 1 ] && [ ! -f helper.rb ]; then exit 1; fi\n'
                 'if [ "${FAIL_SPEC:-}" = 1 ]; then echo "1 example, 1 failure"; exit 1; fi\n'
                 'echo "${SPEC_SUMMARY:-1 example, 0 failures}"; exit 0;;\n'
-                '*) printf "%s\\n" "$PWD" >> "$TRACE"; read -r input\n'
+                '*--stdin*) printf "%s\\n" "$PWD" >> "$TRACE"; read -r input\n'
                 'case "$input" in "a, b = *self.c"|"self.c") '
                 'echo \'{"files":[{"offenses":[{"cop_name":"Style/RedundantSelf"}]}]}\'; exit 1;;\n'
-                '*) echo \'{"files":[{"offenses":[]}]}\'; exit 0;; esac;; esac\n'
+                '*) echo \'{"files":[{"offenses":[]}]}\'; exit 0;; esac;;\n'
+                '*) printf "%s\\n" "$PWD" >> "$TRACE"\n'
+                'if [ "${MISSING_LINT:-}" = 1 ]; then echo \'{"files":[],"summary":{"offense_count":0}}\'; exit 0; fi\n'
+                'if [ "${FAIL_LINT:-}" = 1 ]; then count=1; code=1; else count=0; code=0; fi\n'
+                'printf "{\\"files\\":[{\\"path\\":\\"lib/rubocop/cop/style/redundant_self.rb\\"},'
+                '{\\"path\\":\\"spec/rubocop/cop/style/redundant_self_spec.rb\\"}],'
+                '\\"summary\\":{\\"offense_count\\":%s}}\\n" "$count"; exit "$code";; esac\n'
             )
             bundle.chmod(0o755)
             trace = root / "trace"
@@ -100,16 +106,22 @@ class RubocopCheckerTest(unittest.TestCase):
                               "GIT_INDEX_FILE": str(root / "missing-index")}
             redirected_result = check(redirected_env)
             self.assertEqual(redirected_result.returncode, 0, redirected_result.stdout + redirected_result.stderr)
-            locations = trace.read_text().splitlines()[:6]
-            self.assertEqual(len(locations), 6)
-            self.assertNotEqual(locations[0], locations[1])
-            self.assertEqual(len(set(locations[1:])), 1)
+            locations = trace.read_text().splitlines()[:7]
+            self.assertEqual(len(locations), 7)
+            self.assertEqual(len(set(locations[:3])), 3)
+            self.assertEqual(len(set(locations[2:])), 1)
             self.assertTrue(all(not Path(path).exists() for path in locations))
             self.assertEqual(spec.read_text(), "agent spec\n")
             self.assertEqual(len(git("worktree", "list", "--porcelain").split("worktree ")) - 1, 1)
             env["FAIL_SPEC"] = "1"
             self.assertIn("committed spec failed", check().stdout)
             del env["FAIL_SPEC"]
+            env["FAIL_LINT"] = "1"
+            self.assertIn("project lint found offenses", check().stdout)
+            del env["FAIL_LINT"]
+            env["MISSING_LINT"] = "1"
+            self.assertEqual(check().returncode, 3)
+            del env["MISSING_LINT"]
             (work / "helper.rb").write_text("untracked\n")
             env["REQUIRE_HELPER"] = "1"
             self.assertNotEqual(check().returncode, 0)
