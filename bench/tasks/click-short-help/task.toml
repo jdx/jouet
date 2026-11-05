@@ -7,7 +7,10 @@ upstream = true
 timeout_s = 900
 check_timeout_s = 180
 python_requirements = "requirements.lock"
-isolated_setup = [["python3", "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", "{workdir}"]]
+isolated_setup = [
+    ["python3", "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", "{workdir}"],
+    ["python3", "-m", "ruff", "--version"],
+]
 prompt = """
 Click's automatically shortened command help treats abbreviations such as
 `vs.` and `e.g.` as the end of a sentence, so text after them disappears.
