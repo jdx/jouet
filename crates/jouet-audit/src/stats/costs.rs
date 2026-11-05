@@ -13,12 +13,12 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case")]
 pub enum CostKind {
     /// Finishing blocked after a failed check, and finished with no check
-    /// passing after it: the agent made at least one more request for it.
+    /// passing after it: priced assuming one more request for it.
     StopBlocks,
     /// Finishing blocked until a check passed: counted, not priced, since a
     /// correct change needs that check to pass anyway.
     HeldBlocks,
-    /// A denied call: the agent makes at least one more request.
+    /// A denied call: priced assuming one more request.
     Denials,
     /// A failed jouet run that was not a check's answer.
     FailedRuns,
@@ -82,7 +82,7 @@ pub struct AfterSetup {
     pub primer_tokens: u64,
 }
 
-/// Prices what jouet added: the requests the ledger shows it caused (stop
+/// Estimates what jouet added: one assumed request per event (stop
 /// blocks, denials, failed runs, and `jouet edit` failures beyond the old
 /// rate) at each harness's average request before setup, and the primer
 /// on every request in `after`. A harness missing from `after` has its
@@ -153,7 +153,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                 out.push(priced(
                     CostKind::StopBlocks,
                     wasted as f64,
-                    "each is at least one more request, and no test, lint or build passed after it before the session next stopped",
+                    "assuming one more request per block; no test, lint or build passed after it before the session next stopped",
                 ));
             }
             if o.stop_blocks_resolved > 0 {
@@ -171,14 +171,14 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
                 out.push(priced(
                     CostKind::Denials,
                     o.denials as f64,
-                    "each is at least one more request, for the call again or another",
+                    "assuming one more request per denial, for the call again or another",
                 ));
             }
             if o.failed_runs > 0 {
                 out.push(priced(
                     CostKind::FailedRuns,
                     o.failed_runs as f64,
-                    "jouet commands that failed by their own exit code (before jouet recorded it, calls that ran only jouet and failed), each at least one more request; a check's answer, such as a failing test, is not counted",
+                    "jouet commands that failed by their own exit code (before jouet recorded it, calls that ran only jouet and failed), assuming one more request per failure; a check's answer, such as a failing test, is not counted",
                 ));
             }
             if o.warnings > 0 {
@@ -275,7 +275,7 @@ fn edit_cost(
             CostKind::EditFailures,
             extra,
             &format!(
-                "jouet edit failed {:.1}% of the {} runs that recorded their own exit code ({failed}), edits before setup {:.1}%, over its {} runs; each extra failure is one more request",
+                "jouet edit failed {:.1}% of the {} runs that recorded their own exit code ({failed}), edits before setup {:.1}%, over its {} runs; assuming one more request per extra failure",
                 own * 100.0,
                 count_text(own_runs),
                 rate * 100.0,
