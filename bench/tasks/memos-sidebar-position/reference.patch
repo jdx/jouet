@@ -95,3 +95,56 @@ index 3006f815..33c620a9 100644
 +      expect(positioner.style.opacity).not.toBe("0");
 +      expect(positioner.style.position).toBe("fixed");
 +    });
+diff --git a/web/src/components/AppSidebar/TagsSection.tsx b/web/src/components/AppSidebar/TagsSection.tsx
+index 044a3c23a..fc401709d 100644
+--- a/web/src/components/AppSidebar/TagsSection.tsx
++++ b/web/src/components/AppSidebar/TagsSection.tsx
+@@ -120 +120 @@ const TagsSection = ({ tagCount, onSelect, scope }: Props) => {
+-          <DropdownMenuContent align="end" sideOffset={4} size="sm" className="w-44">
++          <DropdownMenuContent positionMethod="fixed" align="end" sideOffset={4} size="sm" className="w-44">
+diff --git a/web/src/components/AppSidebar/ViewsSection.tsx b/web/src/components/AppSidebar/ViewsSection.tsx
+index f365eec77..02a54c09d 100644
+--- a/web/src/components/AppSidebar/ViewsSection.tsx
++++ b/web/src/components/AppSidebar/ViewsSection.tsx
+@@ -119 +119 @@ const ViewsSection = ({ manageActive = false }: { manageActive?: boolean }) => {
+-              <DropdownMenuContent align="end" sideOffset={2} size="sm">
++              <DropdownMenuContent positionMethod="fixed" align="end" sideOffset={2} size="sm">
+diff --git a/web/src/components/MemoDetailSidebar/MemoDetailSidebar.tsx b/web/src/components/MemoDetailSidebar/MemoDetailSidebar.tsx
+index c1cf37a74..ec1bad8aa 100644
+--- a/web/src/components/MemoDetailSidebar/MemoDetailSidebar.tsx
++++ b/web/src/components/MemoDetailSidebar/MemoDetailSidebar.tsx
+@@ -220 +220 @@ const MemoDetailSidebar = ({
+-          <DropdownMenuContent align="start" sideOffset={4} className="w-48">
++          <DropdownMenuContent positionMethod="fixed" align="start" sideOffset={4} className="w-48">
+diff --git a/web/src/components/MemoDisplaySettingMenu.tsx b/web/src/components/MemoDisplaySettingMenu.tsx
+index 08414388c..62181d8ac 100644
+--- a/web/src/components/MemoDisplaySettingMenu.tsx
++++ b/web/src/components/MemoDisplaySettingMenu.tsx
+@@ -142 +142 @@ function MemoDisplaySettingsContent() {
+-            <SelectContent>
++            <SelectContent positionMethod="fixed">
+@@ -160 +160 @@ function MemoDisplaySettingsContent() {
+-            <SelectContent>
++            <SelectContent positionMethod="fixed">
+@@ -210 +210 @@ function MemoDisplaySettingMenu({ anchor }: Props) {
+-      <PopoverContent anchor={anchor} align="start" sideOffset={6} aria-label={label} className="w-56 p-0">
++      <PopoverContent positionMethod="fixed" anchor={anchor} align="start" sideOffset={6} aria-label={label} className="w-56 p-0">
+diff --git a/web/tests/memo-detail-sidebar.test.tsx b/web/tests/memo-detail-sidebar.test.tsx
+index 5fabc54a6..f17dfb085 100644
+--- a/web/tests/memo-detail-sidebar.test.tsx
++++ b/web/tests/memo-detail-sidebar.test.tsx
+@@ -158 +158 @@ describe("MemoDetailSidebar", () => {
+-  it("keeps a simple memo useful without rendering empty navigation or connections", () => {
++  it("keeps a simple memo useful without rendering empty navigation or connections", async () => {
+@@ -172,0 +173,2 @@ describe("MemoDetailSidebar", () => {
++    fireEvent.click(screen.getByRole("button", { name: "common.share" }));
++    expect((await screen.findByRole("menu")).parentElement).toHaveStyle({ position: "fixed" });
+diff --git a/web/tests/memo-display-setting-menu.test.tsx b/web/tests/memo-display-setting-menu.test.tsx
+index 64ade8726..06a6cda23 100644
+--- a/web/tests/memo-display-setting-menu.test.tsx
++++ b/web/tests/memo-display-setting-menu.test.tsx
+@@ -52,0 +53,4 @@ describe("MemoDisplaySettingMenu", () => {
++    expect(document.querySelector('[data-slot="popover-content"]')?.parentElement).toHaveStyle({ position: "fixed" });
++
++    fireEvent.click(screen.getByRole("combobox", { name: "Order by" }));
++    expect(document.querySelector('[data-slot="select-content"]')?.parentElement).toHaveStyle({ position: "fixed" });
