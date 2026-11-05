@@ -122,7 +122,7 @@ impl Baseline {
                     (n, total) => format!("{n} of {total} failures are new"),
                 };
                 let mut text = format!(
-                    "baseline: {new}, not failing at {at}: {}\n",
+                    "baseline: NEW FAILURE: {new} in the current run; no matching failure was reported at {at}: {}\n",
                     list(&self.new)
                 );
                 if !self.unknown.is_empty() {
