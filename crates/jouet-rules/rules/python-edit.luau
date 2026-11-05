@@ -188,7 +188,7 @@ end
 -- since then what it matches cannot be told. Each keeps its new text too
 -- when that is a literal, since a later replacement can match what it inserts.
 local function replace_olds(code: string): { { text: string, new: string? } }?
-	local olds = {}
+	local olds: { { text: string, new: string? } } = {}
 	local python = blanked(code)
 	local from = 1
 	while true do
@@ -200,7 +200,7 @@ local function replace_olds(code: string): { { text: string, new: string? } }?
 		if not text then
 			local name, past = string.match(code, "^([%a_][%w_]*)()", e + 1)
 			local values = if name then values_of(code, name) else nil
-			for _, value in values or {} do
+			for _, value in ipairs(values or {}) do
 				if value.at < s then
 					text = value.text
 				end
@@ -211,6 +211,9 @@ local function replace_olds(code: string): { { text: string, new: string? } }?
 			after = past
 		end
 		if not after or not string.match(code, "^%s*,", after) then
+			return nil
+		end
+		if not text then
 			return nil
 		end
 		local start = string.match(code, "^%s*,%s*()", after)

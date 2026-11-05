@@ -96,6 +96,12 @@ impl Run {
         self.exit_code == 0
     }
 
+    fn pnpm_scoped(&self) -> bool {
+        self.selection()
+            .split_whitespace()
+            .any(|word| word.starts_with("@jouet:pnpm:"))
+    }
+
     /// Whether this pass ran what `failed` selected: the same selection,
     /// the same command over more names (`test:e2e a b` covers `test:e2e
     /// a`), or the same selection without the names after it (`-p a`
@@ -142,6 +148,23 @@ impl Run {
             }
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
+        }
+        let pnpm = |selection: &str| {
+            selection
+                .split_whitespace()
+                .any(|word| word.starts_with("@jouet:pnpm:"))
+        };
+        match (pnpm(ran), pnpm(wanted)) {
+            (true, true) => {
+                if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
+                    return false;
+                }
+                return ran == wanted
+                    || (same_runner(&self.command, &failed.command)
+                        && pnpm_vitest_covers(ran, wanted));
+            }
+            (true, false) | (false, true) => return false,
+            (false, false) => {}
         }
         if ran == wanted {
             return true;
@@ -259,6 +282,54 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
         && (ran.names.is_empty()
             || (!wanted.names.is_empty()
                 && wanted.names.iter().all(|name| ran.names.contains(name))))
+}
+
+/// An unfiltered package run covers its own excluded suite, but not a
+/// different configuration, root, or unknown filter.
+fn pnpm_vitest_covers(ran: &str, wanted: &str) -> bool {
+    let ran: Vec<_> = ran.split_whitespace().collect();
+    let wanted: Vec<_> = wanted.split_whitespace().collect();
+    let prefix_len = if ran
+        .first()
+        .is_some_and(|word| word.starts_with("@jouet:cwd="))
+    {
+        2
+    } else {
+        1
+    };
+    if ran.len() != prefix_len
+        || !ran[prefix_len - 1].starts_with("@jouet:pnpm:")
+        || !ran[prefix_len - 1].ends_with(":vitest")
+        || !wanted.starts_with(&ran)
+    {
+        return false;
+    }
+    let mut rest = &wanted[prefix_len..];
+    let mut selected = false;
+    while let Some((flag, next)) = rest.split_first() {
+        if let Some(value) = flag
+            .strip_prefix("--exclude=")
+            .or_else(|| flag.strip_prefix("--testNamePattern="))
+            .or_else(|| flag.strip_prefix("-t="))
+        {
+            if value.is_empty() {
+                return false;
+            }
+            selected = true;
+            rest = next;
+        } else if matches!(*flag, "--exclude" | "--testNamePattern" | "-t")
+            && next.first().is_some_and(|value| !value.starts_with('-'))
+        {
+            selected = true;
+            rest = &next[1..];
+        } else if !flag.starts_with('-') {
+            selected = true;
+            rest = next;
+        } else {
+            return false;
+        }
+    }
+    selected
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -1082,7 +1153,9 @@ impl Checks {
                 run.unrelated = earlier.unrelated.clone();
             }
             if run.passed() && run.full {
-                failures.clear();
+                // A full runner or task can cover a different package than a
+                // scoped pnpm run. Keep that failure unless coverage is known.
+                failures.retain(|f| f.pnpm_scoped() && !run.covers(f));
                 self.full_passes.insert(kind, run.clone());
             } else if run.passed() {
                 failures.retain(|f| f.full || !run.covers(f));
@@ -1373,7 +1446,8 @@ impl Checks {
                         && self.passes.get(kind).is_some_and(|passes| {
                             passes.iter().any(|p| {
                                 p.tree.as_deref() == Some(now.as_str())
-                                    && (p.full || (!failed.full && p.covers(failed)))
+                                    && ((p.full && !failed.pnpm_scoped())
+                                        || (!failed.full && p.covers(failed)))
                             })
                         })
                 })
@@ -1434,7 +1508,11 @@ impl Checks {
             );
         }
         let since = last.map_or(String::new(), |l| format!(" (`{}`)", shown(&l.command)));
-        let clear = if failed.full {
+        let clear = if failed.pnpm_scoped() && failed.selection().contains("@jouet:cwd=unknown:") {
+            "its original working directory is unknown, so jouet cannot safely match it to another pnpm run".to_string()
+        } else if failed.pnpm_scoped() {
+            "a passing run of the same supported pnpm selection, or a covering unfiltered Vitest run in the same scope, clears it".to_string()
+        } else if failed.full {
             format!("only a full {} run clears it", kind.name())
         } else {
             format!(
@@ -1513,6 +1591,8 @@ const TRANSCRIPT_TAIL: u64 = 8 * 1024 * 1024;
 pub(crate) struct Ran {
     pub command: String,
     pub exit_code: i32,
+    /// The command's own working directory, when recorded by Codex.
+    pub cwd: Option<String>,
     /// When, from the line's `timestamp`, in seconds since the Unix epoch.
     pub at: Option<i64>,
     /// A failed command's output, as Codex recorded it, so a failure that
@@ -1550,6 +1630,74 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
 
 /// A finished command from one transcript line: `item_completed` events for
 /// a `CommandExecution` item, or older `exec_command_end` events.
+fn normalize_cwd_separators(path: &str, windows: bool) -> String {
+    if windows {
+        // Git reports worktree roots with forward slashes on Windows.
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    }
+}
+
+fn absolute_cwd(path: &str) -> Option<String> {
+    let normalized = normalize_cwd_separators(path, cfg!(windows));
+    std::path::Path::new(&normalized)
+        .is_absolute()
+        .then_some(normalized)
+}
+
+/// Codex records working directories as absolute paths or local file URIs.
+/// Reject remote, malformed, and non-UTF-8 URIs rather than guessing a scope.
+fn codex_cwd(cwd: &str) -> Option<String> {
+    if !cwd.starts_with("file:") {
+        return absolute_cwd(cwd);
+    }
+    let rest = cwd.strip_prefix("file://")?;
+    let path = if rest.starts_with('/') {
+        rest
+    } else {
+        rest.strip_prefix("localhost")?
+    };
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit()
+            {
+                return None;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .ok()?;
+    if decoded.contains('\0') {
+        return None;
+    }
+    let decoded: &str = &decoded;
+    #[cfg(windows)]
+    let decoded = if decoded
+        .as_bytes()
+        .get(1)
+        .is_some_and(u8::is_ascii_alphabetic)
+        && decoded.as_bytes().get(2) == Some(&b':')
+        && decoded.as_bytes().get(3) == Some(&b'/')
+    {
+        &decoded[1..]
+    } else {
+        return None;
+    };
+    absolute_cwd(decoded)
+}
+
 fn codex_command(line: &str) -> Option<Ran> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let payload = value.get("payload")?;
@@ -1580,6 +1728,10 @@ fn codex_command(line: &str) -> Option<Ran> {
         command: script,
         exit_code,
         output,
+        cwd: event
+            .get("cwd")
+            .and_then(|cwd| cwd.as_str())
+            .and_then(codex_cwd),
         at: value
             .get("timestamp")
             .and_then(|t| t.as_str())
@@ -1689,6 +1841,196 @@ mod tests {
         assert!(why.contains("only a full test run clears it"), "{why}");
         state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn scoped_pnpm_exclusions_do_not_clear_other_checks() {
+        let mut state = Checks::default();
+        state.record(
+            [test("pnpm --dir web test", 1, "@jouet:pnpm:dir=web:test")],
+            Some("t1"),
+        );
+        for (command, scope) in [
+            (
+                "pnpm --dir web exec vitest run --exclude tests/b.test.ts",
+                "@jouet:pnpm:dir=web:vitest --exclude tests/b.test.ts",
+            ),
+            ("pnpm --dir admin test", "@jouet:pnpm:dir=admin:test"),
+        ] {
+            state.record([test(command, 0, scope)], Some("t1"));
+            assert!(
+                reason(&state, "t1")
+                    .unwrap()
+                    .contains("pnpm --dir web test")
+            );
+        }
+        state.record(
+            [test("pnpm --dir web test", 0, "@jouet:pnpm:dir=web:test")],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut vitest = Checks::default();
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run tests/b.test.ts",
+                1,
+                "@jouet:pnpm:dir=web:vitest tests/b.test.ts",
+            )],
+            Some("t1"),
+        );
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run --exclude tests/b.test.ts",
+                0,
+                "@jouet:pnpm:dir=web:vitest --exclude tests/b.test.ts",
+            )],
+            Some("t1"),
+        );
+        assert!(reason(&vitest, "t1").unwrap().contains("tests/b.test.ts"));
+        vitest.record(
+            [test(
+                "pnpm --dir web exec vitest run",
+                0,
+                "@jouet:pnpm:dir=web:vitest",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&vitest, "t1"), None);
+
+        let mut different_cwd = Checks::default();
+        different_cwd.record(
+            [test(
+                "pnpm --dir web test",
+                1,
+                "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:test",
+            )],
+            Some("t1"),
+        );
+        different_cwd.record(
+            [test(
+                "pnpm --dir web test",
+                0,
+                "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:test",
+            )],
+            Some("t1"),
+        );
+        assert!(
+            reason(&different_cwd, "t1")
+                .unwrap()
+                .contains("pnpm --dir web test")
+        );
+    }
+
+    #[test]
+    fn an_unfiltered_pnpm_vitest_run_clears_only_its_excluded_suite() {
+        let mut state = Checks::default();
+        let prefix = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:vitest";
+        state.record(
+            [test(
+                "pnpm --dir web exec vitest run --exclude=tests/b",
+                1,
+                &format!("{prefix} --exclude=tests/b"),
+            )],
+            Some("t1"),
+        );
+        state.record(
+            [test("pnpm --dir web exec vitest run", 0, prefix)],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
+
+        for filter in [
+            "--root=other",
+            "--config=other",
+            "--typecheck.only",
+            "--unknown",
+        ] {
+            let mut state = Checks::default();
+            state.record(
+                [test(
+                    "pnpm --dir web exec vitest run filtered",
+                    1,
+                    &format!("{prefix} {filter}"),
+                )],
+                Some("t1"),
+            );
+            state.record(
+                [test("pnpm --dir web exec vitest run", 0, prefix)],
+                Some("t1"),
+            );
+            assert!(reason(&state, "t1").is_some(), "must retain {filter}");
+        }
+        assert!(!pnpm_vitest_covers(
+            "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:vitest",
+            "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:vitest --exclude tests/b"
+        ));
+    }
+
+    #[test]
+    fn selected_pnpm_runs_do_not_clear_unfiltered_failures() {
+        for runner in ["vitest", "test"] {
+            let prefix = format!("@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:{runner}");
+            let mut checks = Checks::default();
+            checks.record([test("pnpm test", 1, &prefix)], Some("t1"));
+            checks.record(
+                [test(
+                    "pnpm test a.test.ts",
+                    0,
+                    &format!("{prefix} a.test.ts"),
+                )],
+                Some("t1"),
+            );
+            assert!(reason(&checks, "t1").is_some(), "{runner}");
+        }
+        let mut checks = Checks::default();
+        let unknown = "@jouet:cwd=unknown:cd=. @jouet:pnpm:dir=web:test";
+        checks.record([test("pnpm test", 1, unknown)], Some("t1"));
+        checks.record([test("pnpm test", 0, unknown)], Some("t1"));
+        assert!(reason(&checks, "t1").is_some());
+    }
+
+    #[test]
+    fn unfiltered_pnpm_vitest_clears_name_filtered_failures() {
+        let prefix = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:vitest";
+        for filter in [
+            "-t case",
+            "--testNamePattern case",
+            "--testNamePattern=case",
+        ] {
+            let mut checks = Checks::default();
+            checks.record(
+                [test(
+                    "pnpm exec vitest run -t case",
+                    1,
+                    &format!("{prefix} {filter}"),
+                )],
+                Some("t1"),
+            );
+            checks.record([test("pnpm exec vitest run", 0, prefix)], Some("t1"));
+            assert_eq!(reason(&checks, "t1"), None, "{filter}");
+        }
+    }
+
+    #[test]
+    fn a_full_unrelated_run_cannot_clear_a_scoped_pnpm_failure() {
+        let selection = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:test";
+        for (failure_tree, pass_tree) in [("same", "same"), ("old", "new")] {
+            let mut checks = Checks::default();
+            checks.record(
+                [test("pnpm --dir web test", 1, selection)],
+                Some(failure_tree),
+            );
+            checks.record([test("vitest run", 0, "full")], Some(pass_tree));
+            let why = reason(&checks, pass_tree).expect("scoped failure must remain");
+            assert!(why.contains("same supported pnpm selection"), "{why}");
+            checks.record([test("pnpm --dir web test", 0, selection)], Some(pass_tree));
+            assert_eq!(reason(&checks, pass_tree), None);
+        }
+        let mut checks = Checks::default();
+        checks.record([test("cargo test -p app", 1, "-p app")], Some("t1"));
+        checks.record([test("cargo test", 0, "full")], Some("t1"));
+        assert_eq!(reason(&checks, "t1"), None);
     }
 
     #[test]
@@ -2911,6 +3253,7 @@ mod tests {
             exit_code,
             at,
             output: None,
+            cwd: None,
         };
         assert_eq!(
             codex_commands(&path),
@@ -2924,6 +3267,85 @@ mod tests {
             ]
         );
         assert!(codex_commands(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn codex_command_uses_only_an_absolute_recorded_cwd() {
+        let line = |cwd: &str| {
+            serde_json::json!({"payload": {"type": "exec_command_end", "command": ["pnpm", "test"], "exit_code": 1, "cwd": cwd}}).to_string()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let expected = normalize_cwd_separators(path, cfg!(windows));
+        assert_eq!(
+            codex_command(&line(path)).unwrap().cwd.as_deref(),
+            Some(expected.as_str())
+        );
+        assert_eq!(codex_command(&line("relative")).unwrap().cwd, None);
+    }
+
+    #[test]
+    fn codex_replay_decodes_local_file_uris_conservatively() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("work space#%é");
+        let path_str = path.to_str().unwrap();
+        let encoded = path_str
+            .replace('\\', "/")
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('#', "%23")
+            .replace('é', "%C3%A9");
+        let prefix = if cfg!(windows) { "file:///" } else { "file://" };
+        let uri = format!("{prefix}{encoded}");
+        let line = serde_json::json!({"payload": {"type": "item_completed", "item": {
+            "type": "CommandExecution", "command": ["pnpm", "test"], "exit_code": 1, "cwd": uri
+        }}})
+        .to_string();
+        let expected = normalize_cwd_separators(path_str, cfg!(windows));
+        assert_eq!(
+            codex_command(&line).unwrap().cwd.as_deref(),
+            Some(expected.as_str())
+        );
+        let localhost = format!("file://localhost/{}", encoded.trim_start_matches('/'));
+        assert_eq!(codex_cwd(&localhost).as_deref(), Some(expected.as_str()));
+        for bad in [
+            "file://remote/path",
+            "file:///tmp/%ZZ",
+            "file:///tmp/%2",
+            "file:///tmp/%00",
+            "file:///tmp/a?query",
+            "file:///tmp/a#fragment",
+            "file:///tmp/%FF",
+        ] {
+            assert_eq!(codex_cwd(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn windows_native_and_uri_separators_share_a_scope() {
+        let git_root = "C:/work/project name";
+        assert_eq!(
+            normalize_cwd_separators("C:/work/project name", true),
+            git_root
+        );
+        assert_eq!(
+            normalize_cwd_separators(r"C:\work\project name", true),
+            git_root
+        );
+        assert_eq!(
+            normalize_cwd_separators("/work/project", false),
+            "/work/project"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_windows_uri_and_native_paths_match() {
+        assert_eq!(
+            codex_cwd("file:///C:/work/project%20name"),
+            codex_cwd(r"C:\work\project name")
+        );
+        assert_eq!(codex_cwd("file:////server/share"), None);
     }
 }
 

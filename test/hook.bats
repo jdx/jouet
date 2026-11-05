@@ -138,6 +138,39 @@ stop_reason() {
 		jouet hook claude stop | jq -r '.reason // empty'
 }
 
+@test "an excluded pnpm Vitest run does not clear a failed package test" {
+	git init -q repo
+	mkdir -p repo/admin
+	echo 'export {}' >repo/index.ts
+	git -C repo add index.ts
+
+	ran 'pnpm --dir web test' 1
+	ran 'cd admin && pnpm test' 0
+	ran 'jouet test --cmd -- pnpm --dir web exec vitest run --exclude tests/b.test.ts' 0
+	run stop_reason
+	assert_output --partial 'pnpm --dir web test'
+
+	ran 'pnpm --dir web test' 0
+	run stop_reason
+	assert_output ""
+}
+
+@test "an ordinary pnpm Vitest run does not clear failures in other modes" {
+	git init -q repo
+	echo 'export {}' >repo/index.ts
+	git -C repo add index.ts
+
+	for mode in typecheck bench watch dev; do
+		ran "pnpm --dir web exec vitest $mode" 1
+		ran 'pnpm --dir web exec vitest run' 0
+		run stop_reason
+		assert_output --partial "vitest $mode"
+		ran "pnpm --dir web exec vitest $mode" 0
+		run stop_reason
+		assert_output ""
+	done
+}
+
 @test "a passing sh -c script of several checks clears their failures" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
