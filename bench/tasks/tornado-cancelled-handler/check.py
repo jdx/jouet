@@ -31,7 +31,6 @@ def run_tests(workdir: Path, module: str) -> None:
                 UNVERIFIED.append(f"{module} skipped all its tests")
 
 
-root = Path.cwd()
 expect(new_commit(), "nothing was committed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
 tests = sorted(path for path in committed_files()
@@ -40,28 +39,36 @@ tests = sorted(path for path in committed_files()
                and subprocess.run(["git", "cat-file", "-t", f"HEAD:{path}"],
                                   capture_output=True, text=True).stdout.strip() == "blob")
 expect(bool(tests), "no committed Tornado test file was changed")
-for path in tests:
-    run_tests(root, path.removesuffix(".py").replace("/", "."))
 
-# Install the independent fixture in an isolated checkout of the committed
-# solution, never over the agent's test file in its retained worktree.
-with tempfile.TemporaryDirectory(prefix="tornado-check-") as directory:
-    checkout = Path(directory)
-    created = subprocess.run(["git", "worktree", "add", "--detach", "--quiet", str(checkout), "HEAD"],
-                             capture_output=True, text=True)
-    if created.returncode:
-        UNVERIFIED.append(f"could not create hidden-test checkout: {created.stderr.strip()}")
-    else:
+
+def check_committed(hidden: bool) -> None:
+    """Run each phase in a fresh checkout, isolated from untracked helpers."""
+    with tempfile.TemporaryDirectory(prefix="tornado-check-") as directory:
+        checkout = Path(directory)
+        created = subprocess.run(["git", "worktree", "add", "--detach", "--quiet", str(checkout), "HEAD"],
+                                 capture_output=True, text=True)
+        if created.returncode:
+            UNVERIFIED.append(f"could not create test checkout: {created.stderr.strip()}")
+            return
         try:
-            target = checkout / "tornado/test/web_test.py"
-            if not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(checkout.resolve()):
-                UNVERIFIED.append("hidden-test target is not a regular file in the checkout")
+            if hidden:
+                target = checkout / "tornado/test/web_test.py"
+                if not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(checkout.resolve()):
+                    UNVERIFIED.append("hidden-test target is not a regular file in the checkout")
+                else:
+                    shutil.copyfile(Path(__file__).parent / "hidden" / "web_test.py", target)
+                    run_tests(checkout, "tornado.test.web_test")
             else:
-                shutil.copyfile(Path(__file__).parent / "hidden" / "web_test.py", target)
-                run_tests(checkout, "tornado.test.web_test")
+                for path in tests:
+                    run_tests(checkout, path.removesuffix(".py").replace("/", "."))
         finally:
             removed = subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
                                      capture_output=True, text=True)
             if removed.returncode:
-                UNVERIFIED.append(f"could not remove hidden-test checkout: {removed.stderr.strip()}")
+                UNVERIFIED.append(f"could not remove test checkout: {removed.stderr.strip()}")
+
+
+if tests:
+    check_committed(hidden=False)
+check_committed(hidden=True)
 finish()
