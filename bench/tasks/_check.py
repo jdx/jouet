@@ -77,7 +77,10 @@ def new_commit() -> bool:
 
 def dirty(*paths: str) -> list[str]:
     """Tracked files with changes that were not committed."""
-    out = git("status", "--porcelain", "--untracked-files=no", "--", *paths)
+    out = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no", "--", *paths],
+        capture_output=True, text=True, check=True,
+    ).stdout
     return [line[3:] for line in out.splitlines()]
 
 
