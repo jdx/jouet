@@ -310,6 +310,8 @@ mod imp {
 (function_declaration name: (identifier) @name) @definition.function
 (function_declaration name: (dot_index_expression) @name) @definition.function
 (function_declaration name: (method_index_expression) @name) @definition.function
+(variable_declaration (assignment_statement (variable_list name: (identifier) @name) (expression_list value: (function_definition)))) @definition.function
+(field name: (identifier) @name value: (function_definition)) @definition.function
 (type_definition name: (identifier) @name) @definition.type
 (type_definition name: (generic_type (identifier) @name)) @definition.type
 ";
@@ -462,6 +464,14 @@ mod imp {
             let (Some((node, kind)), Some(name)) = (def, name) else {
                 continue;
             };
+            // A multiple assignment may pair a name with a different value;
+            // the query cannot prove their positions correspond.
+            if lang == Lang::Luau
+                && node.kind() == "variable_declaration"
+                && !luau_single_assignment(node)
+            {
+                continue;
+            }
             let Ok(text) = name.utf8_text(source) else {
                 continue;
             };
@@ -478,6 +488,10 @@ mod imp {
             let end = range.end.saturating_sub(1).max(range.start);
             let mut enclosing = scope(node, source);
             let text = if lang == Lang::Luau {
+                enclosing = enclosing
+                    .iter()
+                    .flat_map(|part| part.split(['.', ':']).map(str::to_string))
+                    .collect();
                 if let Some((prefix, name)) = text.rsplit_once(['.', ':']) {
                     enclosing.extend(prefix.split(['.', ':']).map(str::to_string));
                     name
@@ -511,6 +525,35 @@ mod imp {
         let mut all: Vec<Located> = found.into_values().map(|(_, l)| l).collect();
         all.sort_by_key(|l| (l.def.start, l.def.line));
         Some(all)
+    }
+
+    fn luau_single_assignment(node: Node<'_>) -> bool {
+        let Some(assignment) = node.named_child(0) else {
+            return false;
+        };
+        let mut cursor = assignment.walk();
+        let children: Vec<_> = assignment.named_children(&mut cursor).collect();
+        let Some(vars) = children
+            .iter()
+            .find(|child| child.kind() == "variable_list")
+        else {
+            return false;
+        };
+        let Some(values) = children
+            .iter()
+            .find(|child| child.kind() == "expression_list")
+        else {
+            return false;
+        };
+        let mut vars_cursor = vars.walk();
+        let mut values_cursor = values.walk();
+        vars.children_by_field_name("name", &mut vars_cursor)
+            .count()
+            == 1
+            && values
+                .children_by_field_name("value", &mut values_cursor)
+                .count()
+                == 1
     }
 
     /// The names a definition is nested in, outermost first: each enclosing

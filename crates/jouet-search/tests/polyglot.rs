@@ -89,6 +89,32 @@ fn luau_structural_search_matches_calls() {
 }
 
 #[test]
+fn luau_finds_assigned_functions_without_mislabeling_multiple_assignments() {
+    let source = b"local run = function(value: string)\n  return value\nend\nlocal wrong, other = 1, function() return 2 end\nlocal rule = {\n  check = function(command)\n    return command\n  end,\n}\nlocal typed: (string) -> string = function(value: string) return value end\n";
+    let path = Path::new("rule.luau");
+    let found = symbols::outline(path, source).unwrap();
+    let names: Vec<_> = found.iter().map(|item| item.def.name.as_str()).collect();
+    assert_eq!(names, ["run", "check", "typed"]);
+    assert_eq!((found[0].def.start, found[0].def.end), (1, 3));
+    assert_eq!((found[1].def.start, found[1].def.end), (6, 8));
+}
+
+#[test]
+fn luau_nested_functions_in_qualified_scopes_are_selectable() {
+    let source = b"function checks.run()\n  local function helper()\n    return true\n  end\nend\n";
+    let path = Path::new("rule.luau");
+    let found = symbols::outline(path, source).unwrap();
+    assert_eq!(found[1].qualified(), "checks.run.helper");
+    let selected = symbols::select(
+        path,
+        source,
+        &symbols::Selector::parse("checks.run.helper").unwrap(),
+    )
+    .unwrap();
+    assert_eq!((selected[0].def.start, selected[0].def.end), (2, 4));
+}
+
+#[test]
 fn every_language_yields_its_definitions() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         (

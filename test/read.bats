@@ -94,6 +94,28 @@ LUAU
 	assert_line --partial 'local function runner_scope'
 }
 
+@test "read selects Luau table-field functions and nested qualified names" {
+	cat >src/rules.luau <<'LUAU'
+local rule = {
+    check = function(command)
+        return command
+    end,
+}
+
+function checks.run()
+    local function helper()
+        return true
+    end
+end
+LUAU
+	run --separate-stderr jouet read src/rules.luau --symbol rule.check
+	assert_success
+	assert_line --partial 'function rule.check (2-4)'
+	run --separate-stderr jouet read src/rules.luau --symbol checks.run.helper
+	assert_success
+	assert_line --partial 'function checks.run.helper (8-10)'
+}
+
 @test "read exits 3 for a missing symbol, naming what the file defines, and 2 for a file it cannot outline" {
 	run --separate-stderr jouet read src/lib.rs --symbol upload
 	assert_failure 3
