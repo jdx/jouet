@@ -482,6 +482,11 @@ pub(crate) struct Checks {
     /// lead to it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub subagents_only: bool,
+    /// Whether the newest run here was a subagent's, as when the lead
+    /// checked a subagent's work once and the subagent went on working: the
+    /// tree is the subagent's to finish, as one only subagents ran in is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub last_by_subagent: bool,
 }
 
 /// How many rewrites [`Checks::formatted`] keeps.
@@ -786,6 +791,7 @@ impl State {
     pub(crate) fn by(&mut self, root: &str, lead: bool) {
         let new = !self.trees.contains_key(root);
         let checks = self.checks_mut(root);
+        checks.last_by_subagent = !lead;
         if lead {
             checks.subagents_only = false;
         } else if new {
@@ -819,10 +825,9 @@ impl State {
         affected: impl Fn(&str) -> bool,
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
-        let others = self
-            .trees
-            .iter()
-            .filter(|(root, checks)| root.as_str() != home && !checks.subagents_only);
+        let others = self.trees.iter().filter(|(root, checks)| {
+            root.as_str() != home && !checks.subagents_only && !checks.last_by_subagent
+        });
         // Every tree's at once: a tree left for a later stop would be raised
         // at the end of a turn that never touched it.
         let found: Vec<(String, String, Raised)> = own
@@ -2519,9 +2524,18 @@ mod tests {
         state.by("/scratch", true);
         let why = block(&state).unwrap();
         assert!(why.starts_with("In /scratch: Files changed"), "{why}");
-        // A subagent's later run there does not hand it back.
+        // A subagent's later run there hands it back, as when the lead
+        // checked a subagent's work once and the subagent went on working.
         state.by("/scratch", false);
         assert!(!state.checks("/scratch").unwrap().subagents_only);
+        assert_eq!(block(&state), None);
+        // Until the lead runs something there again.
+        state.by("/scratch", true);
+        assert!(
+            block(&state)
+                .unwrap()
+                .starts_with("In /scratch: Files changed")
+        );
     }
 
     #[test]
