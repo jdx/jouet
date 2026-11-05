@@ -1572,6 +1572,21 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(cell["paired"]["input_tokens"]["median_diff"], -50)
         self.assertEqual(cell["paired_when_both_pass"]["input_tokens"]["median_diff"], -200)
 
+    def test_codex_jouet_reports_unverified_stop_gate(self):
+        def record(harness, arm):
+            return {"task": "smoke", "harness": harness, "arm": arm,
+                    "round": 1, "success": True, "wall_s": 1.0}
+
+        for arm in ("jouet", "jouet-init"):
+            summary = report.summarize([record("codex", "plain"), record("codex", arm)], {})
+            self.assertIn("codex_stop_gate_unverified", summary["cells"][0]["limitations"])
+            self.assertIn("Codex stop-gate coverage is not independently verified", report.markdown(summary))
+
+        for records in ([record("codex", "plain")], [record("claude", "jouet")]):
+            summary = report.summarize(records, {})
+            self.assertNotIn("limitations", summary["cells"][0])
+            self.assertNotIn("Codex stop-gate coverage", report.markdown(summary))
+
     def test_markdown_shows_change_evidence_without_silent_truncation(self):
         paths = ["name`with\nnewline"] + [f"file-{i}.txt" for i in range(11)]
         records = [

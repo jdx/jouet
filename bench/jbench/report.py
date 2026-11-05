@@ -108,6 +108,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
     cells = []
     for (task, harness), by_arm in sorted(group(records).items()):
         cell: dict[str, Any] = {"task": task, "harness": harness, "arms": {}, "paired": {}}
+        if harness == "codex" and {"jouet", "jouet-init"}.intersection(by_arm):
+            cell["limitations"] = ["codex_stop_gate_unverified"]
         for arm, runs in sorted(by_arm.items()):
             finished = [r for r in runs if not r.get("error") and not unverified(r)
                         and isinstance(r.get("success"), bool)]
@@ -317,6 +319,13 @@ def markdown(summary: dict[str, Any]) -> str:
 
     for cell in summary["cells"]:
         lines += ["", f"## {cell['task']} · {cell['harness']}", ""]
+        if "codex_stop_gate_unverified" in cell.get("limitations", []):
+            lines += [
+                ("Codex stop-gate coverage is not independently verified by this report. "
+                 "An installed, trusted hook or a recorded stop event does not establish that the gate "
+                 "could read the session's checks and block on a failure."),
+                "",
+            ]
         if outcomes := cell.get("paired_outcomes"):
             lines += [
                 f"Paired outcomes: {outcomes['both_passed']} both passed; {outcomes['plain_only']} plain only; "

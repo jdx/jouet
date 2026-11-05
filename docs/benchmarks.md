@@ -192,6 +192,8 @@ Codex records a hook's trust under the path of its `hooks.json`, with the hash o
 
 Codex runs use ephemeral sessions. The harness records live cumulative token counts and selected agent events, but not every tool call or output. It reports completed shell commands and their failures only for complete event streams whose command starts and completions can be linked. A missing exit code leaves the failure count unavailable. These shell counts do not include other tool calls or native edits. `jouet audit` cannot inspect a session transcript, so audit-derived request and tool metrics are unavailable for these runs. Re-running `bench/agents.py report` also derives shell counts from saved complete event streams when available.
 
+The report does not verify that the Codex stop gate can inspect a run's checks or block on a failure. A trusted hook and a recorded stop event show that the hook ran, not that its inputs were available. In an observed ephemeral Codex session, the stop payload had no transcript path; the current jouet Codex stop gate needs that path to reconstruct checks. Keep this limitation in mind when comparing these runs with sessions that provide transcripts.
+
 The prompt is the same in both arms. `--jouet-env KEY=VALUE` sets a variable in the jouet arm's agent environment after `jouet setup`. For example, `--jouet-env JOUET_HOOKS_PRIME=0` measures sessions without the primer, and without the skill that setup would install in its place. Adding an arm for rtk, or for jouet with only some rules, means adding an entry to `ARMS` in `bench/jbench/arms.py` with its setup step.
 
 ### The jouet-init arm
