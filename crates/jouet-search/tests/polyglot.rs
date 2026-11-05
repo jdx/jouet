@@ -26,6 +26,95 @@ fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[test]
+fn luau_outlines_local_functions_and_types() {
+    let source = b"local function runner_scope(cmd: string): boolean\n  return cmd ~= ''\nend\n\nexport type Check = { name: string }\nexport type Box<T> = { value: T }\n\nfunction checks.run(cmd: string)\n  return runner_scope(cmd)\nend\n\nfunction checks:stop()\nend\n";
+    let path = Path::new("checks.luau");
+    let found = symbols::outline(path, source).unwrap();
+    assert_eq!(
+        found
+            .iter()
+            .map(|item| (item.def.kind.as_str(), item.def.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("function", "runner_scope"),
+            ("type", "Check"),
+            ("type", "Box"),
+            ("function", "run"),
+            ("function", "stop")
+        ]
+    );
+    let selected = symbols::select(
+        path,
+        source,
+        &symbols::Selector::parse("runner_scope").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!((selected[0].def.start, selected[0].def.end), (1, 3));
+    assert_eq!(
+        symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("checks.run").unwrap()
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+    assert_eq!(
+        symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("checks.stop").unwrap()
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn luau_structural_search_matches_calls() {
+    let pattern = jouet_search::structural::Structural::new(
+        "runner_scope($ARG)",
+        "luau",
+        Some("other_scope($ARG)"),
+    )
+    .unwrap();
+    assert!(pattern.applies_to(Path::new("checks.luau")));
+    let matches = pattern.find("return runner_scope(cmd)\n");
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].text, "runner_scope(cmd)");
+    assert_eq!(matches[0].replacement.as_deref(), Some("other_scope(cmd)"));
+}
+
+#[test]
+fn luau_finds_assigned_functions_without_mislabeling_multiple_assignments() {
+    let source = b"local run = function(value: string)\n  return value\nend\nlocal wrong, other = 1, function() return 2 end\nlocal rule = {\n  check = function(command)\n    return command\n  end,\n}\nlocal typed: (string) -> string = function(value: string) return value end\n";
+    let path = Path::new("rule.luau");
+    let found = symbols::outline(path, source).unwrap();
+    let names: Vec<_> = found.iter().map(|item| item.def.name.as_str()).collect();
+    assert_eq!(names, ["run", "check", "typed"]);
+    assert_eq!((found[0].def.start, found[0].def.end), (1, 3));
+    assert_eq!((found[1].def.start, found[1].def.end), (6, 8));
+}
+
+#[test]
+fn luau_nested_functions_in_qualified_scopes_are_selectable() {
+    let source = b"function checks.run()\n  local function helper()\n    return true\n  end\nend\n";
+    let path = Path::new("rule.luau");
+    let found = symbols::outline(path, source).unwrap();
+    assert_eq!(found[1].qualified(), "checks.run.helper");
+    let selected = symbols::select(
+        path,
+        source,
+        &symbols::Selector::parse("checks.run.helper").unwrap(),
+    )
+    .unwrap();
+    assert_eq!((selected[0].def.start, selected[0].def.end), (2, 4));
+}
+
+#[test]
 fn every_language_yields_its_definitions() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         (

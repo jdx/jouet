@@ -25,7 +25,7 @@ use usage_rs::Args;
 /// rest. Inside an agent session, lines this session was already shown, from
 /// a file unchanged since, collapse to one line; --again prints them.
 /// Definitions come from tree-sitter, for Rust, Python, JavaScript,
-/// TypeScript, Go, Ruby, Java, C and C++.
+/// TypeScript, Go, Ruby, Java, C, C++ and Luau.
 ///
 /// `--map` prints, for the files that matter most, the line of each of
 /// their most important definitions, sized to a token budget, so an agent

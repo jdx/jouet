@@ -249,6 +249,7 @@ mod imp {
         "go",
         "java",
         "javascript",
+        "luau",
         "python",
         "ruby",
         "rust",
@@ -262,6 +263,7 @@ mod imp {
         Go,
         Java,
         JavaScript,
+        Luau,
         Python,
         Ruby,
         Rust,
@@ -277,6 +279,7 @@ mod imp {
             "go" => Lang::Go,
             "java" => Lang::Java,
             "js" | "mjs" | "cjs" | "jsx" => Lang::JavaScript,
+            "luau" => Lang::Luau,
             "py" | "pyi" => Lang::Python,
             "rb" | "rake" | "gemspec" => Lang::Ruby,
             "rs" => Lang::Rust,
@@ -301,6 +304,16 @@ mod imp {
     const TS_EXTRA: &str = r"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.type
+";
+
+    const LUAU_TAGS: &str = r"
+(function_declaration name: (identifier) @name) @definition.function
+(function_declaration name: (dot_index_expression) @name) @definition.function
+(function_declaration name: (method_index_expression) @name) @definition.function
+(variable_declaration (assignment_statement (variable_list name: (identifier) @name) (expression_list value: (function_definition)))) @definition.function
+(field name: (identifier) @name value: (function_definition)) @definition.function
+(type_definition name: (identifier) @name) @definition.type
+(type_definition name: (generic_type (identifier) @name)) @definition.type
 ";
 
     /// A language's grammar, tags query and locals query.
@@ -333,6 +346,7 @@ mod imp {
                 tree_sitter_javascript::LANGUAGE.into(),
                 format!("{}\n{JS_EXTRA}", tree_sitter_javascript::TAGS_QUERY),
             ),
+            Lang::Luau => (tree_sitter_luau::LANGUAGE.into(), LUAU_TAGS.to_string()),
             Lang::Python => (
                 tree_sitter_python::LANGUAGE.into(),
                 tree_sitter_python::TAGS_QUERY.to_string(),
@@ -360,6 +374,7 @@ mod imp {
             Lang::Go => tree_sitter_go::LANGUAGE.into(),
             Lang::Java => tree_sitter_java::LANGUAGE.into(),
             Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Lang::Luau => tree_sitter_luau::LANGUAGE.into(),
             Lang::Python => tree_sitter_python::LANGUAGE.into(),
             Lang::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -371,7 +386,7 @@ mod imp {
     /// The tags query with only its definition patterns enabled: what
     /// finding definitions runs, without the cost of every reference.
     fn definitions_query(lang: Lang) -> Option<&'static Query> {
-        static QUERIES: [OnceLock<Option<Query>>; 10] = [const { OnceLock::new() }; 10];
+        static QUERIES: [OnceLock<Option<Query>>; 11] = [const { OnceLock::new() }; 11];
         QUERIES[lang as usize]
             .get_or_init(|| {
                 let (language, tags) = source(lang);
@@ -401,6 +416,7 @@ mod imp {
             tree_sitter_typescript::TAGS_QUERY,
             JS_EXTRA,
             TS_EXTRA,
+            LUAU_TAGS,
         ]
     }
 
@@ -448,6 +464,14 @@ mod imp {
             let (Some((node, kind)), Some(name)) = (def, name) else {
                 continue;
             };
+            // A multiple assignment may pair a name with a different value;
+            // the query cannot prove their positions correspond.
+            if lang == Lang::Luau
+                && node.kind() == "variable_declaration"
+                && !luau_single_assignment(node)
+            {
+                continue;
+            }
             let Ok(text) = name.utf8_text(source) else {
                 continue;
             };
@@ -462,6 +486,21 @@ mod imp {
             }
             let line = line_of(&starts, name.start_byte());
             let end = range.end.saturating_sub(1).max(range.start);
+            let mut enclosing = scope(node, source);
+            let text = if lang == Lang::Luau {
+                enclosing = enclosing
+                    .iter()
+                    .flat_map(|part| part.split(['.', ':']).map(str::to_string))
+                    .collect();
+                if let Some((prefix, name)) = text.rsplit_once(['.', ':']) {
+                    enclosing.extend(prefix.split(['.', ':']).map(str::to_string));
+                    name
+                } else {
+                    text
+                }
+            } else {
+                text
+            };
             found.insert(
                 key,
                 (
@@ -477,7 +516,7 @@ mod imp {
                         },
                         start_byte: range.start,
                         end_byte: range.end,
-                        scope: scope(node, source),
+                        scope: enclosing,
                         separator,
                     },
                 ),
@@ -486,6 +525,35 @@ mod imp {
         let mut all: Vec<Located> = found.into_values().map(|(_, l)| l).collect();
         all.sort_by_key(|l| (l.def.start, l.def.line));
         Some(all)
+    }
+
+    fn luau_single_assignment(node: Node<'_>) -> bool {
+        let Some(assignment) = node.named_child(0) else {
+            return false;
+        };
+        let mut cursor = assignment.walk();
+        let children: Vec<_> = assignment.named_children(&mut cursor).collect();
+        let Some(vars) = children
+            .iter()
+            .find(|child| child.kind() == "variable_list")
+        else {
+            return false;
+        };
+        let Some(values) = children
+            .iter()
+            .find(|child| child.kind() == "expression_list")
+        else {
+            return false;
+        };
+        let mut vars_cursor = vars.walk();
+        let mut values_cursor = values.walk();
+        vars.children_by_field_name("name", &mut vars_cursor)
+            .count()
+            == 1
+            && values
+                .children_by_field_name("value", &mut values_cursor)
+                .count()
+                == 1
     }
 
     /// The names a definition is nested in, outermost first: each enclosing

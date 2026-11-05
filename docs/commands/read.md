@@ -40,7 +40,7 @@ Code is printed with line numbers, at most `--max-lines` lines across all select
 
 Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line, as in [`jouet search`](/commands/search#sessions); `--again` prints them. The hooks remember what Claude Code's Read tool showed too. Each of Claude Code's subagents has a memory of its own, apart from the lead's and from each other's ([sessions](/commands/search#sessions)).
 
-Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file exits 3, as does a call whose every symbol is missing; that error lists what the file defines.
+Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C, C++ and Luau. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file exits 3, as does a call whose every symbol is missing; that error lists what the file defines.
 
 When a graph caller lookup fails, the definition is still printed and a note says callers are unavailable; JSON includes the note in `notes`.
 

@@ -24,6 +24,7 @@ grammars = [
   "dep:tree-sitter-go",
   "dep:tree-sitter-java",
   "dep:tree-sitter-javascript",
+  "dep:tree-sitter-luau",
   "dep:tree-sitter-python",
   "dep:tree-sitter-ruby",
   "dep:tree-sitter-rust",
@@ -45,6 +46,7 @@ tree-sitter-cpp = { workspace = true, optional = true }
 tree-sitter-go = { workspace = true, optional = true }
 tree-sitter-java = { workspace = true, optional = true }
 tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-luau = { workspace = true, optional = true }
 tree-sitter-python = { workspace = true, optional = true }
 tree-sitter-ruby = { workspace = true, optional = true }
 tree-sitter-rust = { workspace = true, optional = true }

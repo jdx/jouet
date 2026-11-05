@@ -99,7 +99,7 @@ pub(crate) struct EditArgs {
     #[usage(long, value_name = "REPL")]
     pub(crate) rewrite: Option<String>,
     /// The language of --pattern: rust, python, javascript, typescript, tsx,
-    /// go, ruby, java, c or cpp
+    /// go, ruby, java, c, cpp or luau
     #[usage(long, value_name = "LANG")]
     pub(crate) lang: Option<String>,
     /// With --pattern, rewrite only the calls the code graph attributes to
