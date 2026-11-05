@@ -1632,7 +1632,8 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
 /// a `CommandExecution` item, or older `exec_command_end` events.
 fn normalize_cwd_separators(path: &str, windows: bool) -> String {
     if windows {
-        path.replace('/', "\\")
+        // Git reports worktree roots with forward slashes on Windows.
+        path.replace('\\', "/")
     } else {
         path.to_string()
     }
@@ -3321,9 +3322,14 @@ mod tests {
 
     #[test]
     fn windows_native_and_uri_separators_share_a_scope() {
+        let git_root = "C:/work/project name";
         assert_eq!(
             normalize_cwd_separators("C:/work/project name", true),
-            normalize_cwd_separators(r"C:\work\project name", true)
+            git_root
+        );
+        assert_eq!(
+            normalize_cwd_separators(r"C:\work\project name", true),
+            git_root
         );
         assert_eq!(
             normalize_cwd_separators("/work/project", false),
