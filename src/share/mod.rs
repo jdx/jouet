@@ -700,12 +700,24 @@ pub(crate) fn signal_proposal(
     if let (Kind::SlowHook, [budget, slowest, ..]) = (signal.kind(), &signal.numbers[..]) {
         let _ = writeln!(body, "Budget {budget} ms; slowest {slowest} ms.\n");
     }
-    let _ = writeln!(
-        body,
-        "Seen in {sessions} sessions. jouet {} on {}.",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS
-    );
+    if signal.kind() == Kind::Overridden {
+        if sessions > 0 {
+            let _ = write!(body, "Seen in at least {sessions} sessions. ");
+        }
+        let _ = writeln!(
+            body,
+            "jouet {} on {}.",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS
+        );
+    } else {
+        let _ = writeln!(
+            body,
+            "Seen in {sessions} sessions. jouet {} on {}.",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS
+        );
+    }
     let kind = match signal.destination() {
         signals::Destination::Issue => "bug",
         signals::Destination::Discussion => "idea",

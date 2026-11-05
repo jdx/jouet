@@ -139,6 +139,19 @@ fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
     assert_eq!(s.numbers, [10, 3]);
     assert_eq!(s.destination(), Destination::Discussion);
     assert_eq!(s.examples, ["git stash"]);
+    assert_eq!(s.sessions.len(), 3);
+    let proposal = super::super::signal_proposal(s, &[], "");
+    assert!(proposal.body.contains("Seen in at least 3 sessions."));
+
+    let mut unidentified = entries.clone();
+    for entry in &mut unidentified {
+        entry.session = None;
+    }
+    let found = from_ledger(&unidentified, Some(&engine));
+    let s = signal(&found, Kind::Overridden, &rule);
+    assert!(s.sessions.is_empty());
+    let proposal = super::super::signal_proposal(s, &[], "");
+    assert!(!proposal.body.contains("Seen in 0 sessions"));
 
     entries.extend((3..6).map(|i| overridden(&format!("s{i}"))));
     let found = from_ledger(&entries, Some(&engine));
