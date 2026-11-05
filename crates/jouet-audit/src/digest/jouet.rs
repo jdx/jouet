@@ -141,12 +141,14 @@ pub fn scan(runs: &[Run<'_>]) -> Vec<Found> {
             detail,
         };
         let output = run.output.unwrap_or_default();
-        if run.exit_code == Some(101) || output.contains("panicked at ") {
+        let alone = crate::structure::simple_words(run.command).len() == 1;
+        if alone && (run.exit_code == Some(101) || output.contains("panicked at ")) {
             let site = panic_site(output).unwrap_or_else(|| "exit 101".into());
             out.push(found(Kind::Crash, site));
             continue;
         }
-        if let Some(code) = run.exit_code
+        if alone
+            && let Some(code) = run.exit_code
             && !expected(&subject, code)
         {
             out.push(found(Kind::ExitCode, format!("exit {code}")));
@@ -166,7 +168,7 @@ pub fn scan(runs: &[Run<'_>]) -> Vec<Found> {
         let next = runs
             .get(index + 1..(index + 4).min(runs.len()))
             .unwrap_or_default();
-        if run.exit_code == Some(2) {
+        if alone && run.exit_code == Some(2) {
             let retried = next.iter().any(|n| {
                 subject_of(n).as_deref() == Some(subject.as_str()) && n.command != run.command
             });
@@ -180,7 +182,8 @@ pub fn scan(runs: &[Run<'_>]) -> Vec<Found> {
             ));
             continue;
         }
-        if run.exit_code == Some(0)
+        if alone
+            && run.exit_code == Some(0)
             && let Some(raw) = abandoned_for(&subject, &next[..next.len().min(2)])
         {
             out.push(found(Kind::Abandoned, format!("then `{raw}`")));
@@ -228,6 +231,19 @@ mod tests {
             .into_iter()
             .map(|f| (f.kind, f.subject, f.detail))
             .collect()
+    }
+
+    #[test]
+    fn compound_scripts_do_not_attribute_another_commands_failure_to_jouet() {
+        for code in [2, 7, 101] {
+            let mut ambiguous = run("cargo test && jouet pr threads 42", code);
+            ambiguous.output = Some("panicked at tests/pr_land.rs:448:5");
+            assert!(scan(&[ambiguous]).is_empty(), "exit {code}");
+        }
+        assert_eq!(
+            scan(&[run("jouet pr threads 42", 101)])[0].kind,
+            Kind::Crash
+        );
     }
 
     #[test]

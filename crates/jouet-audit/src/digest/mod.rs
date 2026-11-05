@@ -984,7 +984,13 @@ fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
         .iter()
         .map(|c| jouet::Run {
             command: c.command.as_deref().unwrap_or_default(),
-            exit_code: exit_code(c),
+            // An exec cell may combine a command with unrelated tool calls;
+            // a status in its aggregate output does not identify that command.
+            exit_code: if c.name.as_deref() == Some("exec") && !c.exit_code_exact {
+                None
+            } else {
+                exit_code(c)
+            },
             // Codex tool responses contain envelopes; exec cells can also
             // combine or transform results. Neither proves a command's stdout.
             output: if matches!(

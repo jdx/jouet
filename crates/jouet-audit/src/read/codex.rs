@@ -323,6 +323,7 @@ impl State {
         if let Some(code) = item.exit_code.0 {
             call.failed = code != 0.0;
             call.exit_code = Some(code as i32);
+            call.exit_code_exact = true;
         }
         if let Some(d) = item.duration.0 {
             call.duration_ms =

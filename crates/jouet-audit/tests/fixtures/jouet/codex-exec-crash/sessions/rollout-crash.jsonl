@@ -1,0 +1,4 @@
+{"type":"session_meta","payload":{"id":"codex-crash","cwd":"/work"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"one","input":"const r = await tools.exec_command({cmd: 'jouet pr threads 42'}); text(r.output)"}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["/bin/zsh","-lc","jouet pr threads 42"],"exit_code":101,"duration":{"secs":1,"nanos":0}}}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"one","output":[{"type":"input_text","text":"Script completed\nWall time 1 second\nOutput:\n"}]}}
