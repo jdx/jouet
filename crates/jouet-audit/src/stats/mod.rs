@@ -140,7 +140,8 @@ const ANSWERS: &[&str] = &[
 /// Whether a command line that ran `commands` and exited with `code` only
 /// reported a check's answer.
 fn is_answer(commands: &[String], code: i32) -> bool {
-    if code == 1 && commands.iter().any(|command| command == "jouet search") {
+    if code == 1 && !commands.is_empty() && commands.iter().all(|command| command == "jouet search")
+    {
         return true;
     }
     matches!(code, 1 | 10 | 20 | 124)

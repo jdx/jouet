@@ -711,6 +711,13 @@ fn search_without_matches_is_an_answer_but_errors_are_overhead() {
         &StatsFilter::default(),
     );
     assert_eq!(legacy.overhead[0].failed_runs, 1);
+
+    // The search may have succeeded and the later command failed.
+    let chained = measure(
+        &[post("jouet search <arg> && jouet commit <arg>", 1)],
+        &StatsFilter::default(),
+    );
+    assert_eq!(chained.overhead[0].failed_runs, 1);
 }
 
 #[test]
