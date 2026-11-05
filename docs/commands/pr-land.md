@@ -32,7 +32,7 @@ merged jdx/demo#7 (squash) as ccccccc3333333333333333333333333333333333
 
 ## Tests before landing
 
-The pull request's checks on GitHub are its tests: `ready_to_merge` needs them to have passed at the head, so the full suite has run on CI before anything merges. jouet does not ask for a local full run as well; the [stop hook](/setup#finishing-on-a-failing-check) asks only for the tests a change affects.
+`ready_to_merge` considers the pull request's reported checks and branch protection. Those checks may cover only part of the suite, and a repository may have none. jouet does not require a local full run before landing; the [stop hook](/setup#finishing-on-a-failing-check) accepts a passing partial test run.
 
 ## Asking first
 
