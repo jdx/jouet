@@ -72,6 +72,14 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         Err(e @ Error::Usage(_)) => return out.error(Exit::Usage, &e.to_string()),
         Err(e @ Error::NotFound(_)) => return out.error(Exit::NotFound, &e.to_string()),
     };
+    if !out.json {
+        for path in &report.unsearched {
+            eprintln!("jouet: {path}: not searched (path unavailable)");
+        }
+        for error in &report.walk_errors {
+            eprintln!("jouet: search incomplete: {error}");
+        }
+    }
     memory.save();
     drop(options);
     let scope = scope.and_then(Arc::into_inner).map(Scope::finish);
@@ -104,7 +112,9 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         }
         text
     });
-    if report.matches == 0 {
+    if !report.unsearched.is_empty() || !report.walk_errors.is_empty() {
+        Exit::NotFound
+    } else if report.matches == 0 {
         Exit::Failed
     } else {
         Exit::Ok
