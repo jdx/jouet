@@ -506,10 +506,9 @@ fn go_covers(ran: &str, wanted: &str) -> bool {
                     || ran.strip_suffix("/...").is_some_and(|base| {
                         let base = normal(base);
                         want == base
-                            || want
-                                .strip_prefix(base)
-                                .is_some_and(|rest| rest.starts_with('/'))
-                            || (base == "." && !want.starts_with("../") && !want.starts_with('/'))
+                            || want.strip_prefix(base).is_some_and(|rest| {
+                                rest.starts_with('/') && !rest.split('/').any(|c| c == "..")
+                            })
                     })
             })
         })
@@ -2248,6 +2247,17 @@ mod tests {
             )
         ));
         assert!(cleared(narrow, ("go test -count=1 ./...", "./...")));
+        // `./...` holds only the packages under `.`, not import paths,
+        // `all` or `std`, or a package above it.
+        for outside in ["..", "./../x", "all", "std", "github.com/a/b"] {
+            assert!(!cleared(
+                (
+                    &format!("go test -run TestA {outside}"),
+                    &format!("{outside} -run TestA")
+                ),
+                ("go test -run TestA ./...", "./... -run TestA"),
+            ));
+        }
         // But not a sibling of it, or a package left out.
         assert!(!cleared(
             narrow,
