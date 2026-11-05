@@ -1,15 +1,33 @@
+import contextlib
+import importlib.util
+import io
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/tornado-cancelled-handler/check.py"
 
 
 class TornadoCheckerTest(unittest.TestCase):
+    def test_timeout_keeps_captured_output_and_is_unverified(self):
+        spec = importlib.util.spec_from_file_location("tornado_checker", CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        error = subprocess.TimeoutExpired("python3", 240, output=b"stdout\xff", stderr=b"stderr\n")
+        output = io.StringIO()
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=error), \
+                contextlib.redirect_stdout(output):
+            checker.run_tests(Path("."), "tornado.test.web_test")
+            self.assertEqual(output.getvalue(), "stdout\ufffd\nstderr\n")
+            self.assertEqual(len(checker.UNVERIFIED), 1)
+            self.assertIn("timed out", checker.UNVERIFIED[0])
+
     def test_preserves_agent_tests_and_requires_committed_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

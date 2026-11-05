@@ -15,7 +15,14 @@ def run_tests(workdir: Path, module: str) -> None:
             ["python3", "-m", "tornado.test.runtests", module], cwd=workdir,
             capture_output=True, text=True, timeout=240,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        for stream in (error.stdout, error.stderr):
+            if stream:
+                text = stream.decode(errors="replace") if isinstance(stream, bytes) else stream
+                print(text, end="" if text.endswith("\n") else "\n")
+        UNVERIFIED.append(f"could not run {module}: {error}")
+        return
+    except OSError as error:
         UNVERIFIED.append(f"could not run {module}: {error}")
         return
     expect(proc.returncode == 0, f"{module} failed:\n{proc.stdout}{proc.stderr}")
@@ -31,17 +38,7 @@ def run_tests(workdir: Path, module: str) -> None:
                 UNVERIFIED.append(f"{module} skipped all its tests")
 
 
-expect(new_commit(), "nothing was committed")
-expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
-tests = sorted(path for path in committed_files()
-               if path.startswith("tornado/test/") and path.endswith("_test.py")
-               and Path(path).is_file() and not Path(path).is_symlink()
-               and subprocess.run(["git", "cat-file", "-t", f"HEAD:{path}"],
-                                  capture_output=True, text=True).stdout.strip() == "blob")
-expect(bool(tests), "no committed Tornado test file was changed")
-
-
-def check_committed(hidden: bool) -> None:
+def check_committed(hidden: bool, tests: list[str]) -> None:
     """Run each phase in a fresh checkout, isolated from untracked helpers."""
     with tempfile.TemporaryDirectory(prefix="tornado-check-") as directory:
         checkout = Path(directory)
@@ -68,7 +65,20 @@ def check_committed(hidden: bool) -> None:
                 UNVERIFIED.append(f"could not remove test checkout: {removed.stderr.strip()}")
 
 
-if tests:
-    check_committed(hidden=False)
-check_committed(hidden=True)
-finish()
+def main() -> None:
+    expect(new_commit(), "nothing was committed")
+    expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
+    tests = sorted(path for path in committed_files()
+                   if path.startswith("tornado/test/") and path.endswith("_test.py")
+                   and Path(path).is_file() and not Path(path).is_symlink()
+                   and subprocess.run(["git", "cat-file", "-t", f"HEAD:{path}"],
+                                      capture_output=True, text=True).stdout.strip() == "blob")
+    expect(bool(tests), "no committed Tornado test file was changed")
+    if tests:
+        check_committed(hidden=False, tests=tests)
+    check_committed(hidden=True, tests=tests)
+    finish()
+
+
+if __name__ == "__main__":
+    main()
