@@ -1630,13 +1630,26 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
 
 /// A finished command from one transcript line: `item_completed` events for
 /// a `CommandExecution` item, or older `exec_command_end` events.
+fn normalize_cwd_separators(path: &str, windows: bool) -> String {
+    if windows {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
+fn absolute_cwd(path: &str) -> Option<String> {
+    let normalized = normalize_cwd_separators(path, cfg!(windows));
+    std::path::Path::new(&normalized)
+        .is_absolute()
+        .then_some(normalized)
+}
+
 /// Codex records working directories as absolute paths or local file URIs.
 /// Reject remote, malformed, and non-UTF-8 URIs rather than guessing a scope.
 fn codex_cwd(cwd: &str) -> Option<String> {
     if !cwd.starts_with("file:") {
-        return std::path::Path::new(cwd)
-            .is_absolute()
-            .then(|| cwd.to_string());
+        return absolute_cwd(cwd);
     }
     let rest = cwd.strip_prefix("file://")?;
     let path = if rest.starts_with('/') {
@@ -1675,14 +1688,13 @@ fn codex_cwd(cwd: &str) -> Option<String> {
         .get(1)
         .is_some_and(u8::is_ascii_alphabetic)
         && decoded.as_bytes().get(2) == Some(&b':')
+        && decoded.as_bytes().get(3) == Some(&b'/')
     {
         &decoded[1..]
     } else {
-        decoded
+        return None;
     };
-    std::path::Path::new(decoded)
-        .is_absolute()
-        .then(|| decoded.to_string())
+    absolute_cwd(decoded)
 }
 
 fn codex_command(line: &str) -> Option<Ran> {
@@ -3287,11 +3299,7 @@ mod tests {
             "type": "CommandExecution", "command": ["pnpm", "test"], "exit_code": 1, "cwd": uri
         }}})
         .to_string();
-        let expected = if cfg!(windows) {
-            path_str.replace('\\', "/")
-        } else {
-            path_str.to_string()
-        };
+        let expected = normalize_cwd_separators(path_str, cfg!(windows));
         assert_eq!(
             codex_command(&line).unwrap().cwd.as_deref(),
             Some(expected.as_str())
@@ -3309,6 +3317,28 @@ mod tests {
         ] {
             assert_eq!(codex_cwd(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn windows_native_and_uri_separators_share_a_scope() {
+        assert_eq!(
+            normalize_cwd_separators("C:/work/project name", true),
+            normalize_cwd_separators(r"C:\work\project name", true)
+        );
+        assert_eq!(
+            normalize_cwd_separators("/work/project", false),
+            "/work/project"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_windows_uri_and_native_paths_match() {
+        assert_eq!(
+            codex_cwd("file:///C:/work/project%20name"),
+            codex_cwd(r"C:\work\project name")
+        );
+        assert_eq!(codex_cwd("file:////server/share"), None);
     }
 }
 
