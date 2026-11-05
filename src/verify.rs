@@ -179,6 +179,7 @@ impl Run {
             && (without_names(ran, wanted)
                 || wider_filter(&failed.command, ran, wanted)
                 || reran_failures(&failed.command, ran, wanted, &failed.tests)
+                || whole_package(&failed.command, ran, wanted)
                 || without_name_filter(ran, wanted)
                 || wider_name_filter(ran, wanted)
                 || (runner_argv(&self.command).first().map(String::as_str) == Some("go")
@@ -554,6 +555,37 @@ fn reran_failures(command: &str, ran: &str, wanted: &str, tests: &[String]) -> b
         return false;
     };
     ran_head == wanted_head && tests.iter().all(|t| ran.iter().any(|r| t.contains(r)))
+}
+
+/// Whether `ran`, a cargo test run of whole packages (`-p jouet`, which a
+/// bare `cargo test` in that package records), covers `wanted`: the same
+/// packages narrowed to test targets (`--bin jouet`, `--lib`) or names.
+/// Ignored tests, examples, benches and other picks run what `ran` did not.
+fn whole_package(command: &str, ran: &str, wanted: &str) -> bool {
+    if !cargo_test(command) {
+        return false;
+    }
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    if ran.is_empty() || !ran.len().is_multiple_of(2) || !ran.chunks(2).all(|p| p[0] == "-p") {
+        return false;
+    }
+    let Some(rest) = wanted.strip_prefix(ran.as_slice()) else {
+        return false;
+    };
+    let mut rest = rest.iter();
+    while let Some(word) = rest.next() {
+        let target = ["--bin", "--test"].contains(word);
+        let ok = ["--lib", "--bins", "--tests", "--doc"].contains(word)
+            || word.starts_with("--bin=")
+            || word.starts_with("--test=")
+            || (target && rest.next().is_some_and(|v| !v.starts_with('-')))
+            || !word.starts_with('-');
+        if !ok {
+            return false;
+        }
+    }
+    true
 }
 
 fn cargo_test(command: &str) -> bool {
@@ -2725,6 +2757,39 @@ mod tests {
         );
         assert!(reason(&state, "t2").is_some());
         assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn a_whole_package_run_covers_its_targets_and_filters() {
+        let run = |state: &mut State, args: &str, code, selector: &str, tree| {
+            state.record(
+                "/home",
+                [test(
+                    &format!("jouet test --cmd -- cargo test{args}"),
+                    code,
+                    selector,
+                )],
+                Some(tree),
+            );
+        };
+        let block =
+            |state: &State| state.block("/home", |_| Some("t2".into()), |_| false, |_| true);
+        let covered = |failed: &str, ran: &str| {
+            let mut state = State::default();
+            run(&mut state, " --bin jouet x", 101, failed, "t1");
+            run(&mut state, "", 0, ran, "t2");
+            block(&state).is_none()
+        };
+        assert!(covered(
+            "-p jouet --bin jouet a_cargo codex_replay",
+            "-p jouet"
+        ));
+        assert!(covered("-p jouet --lib --test cli a", "-p jouet"));
+        // Another package, ignored tests and examples are not in the run.
+        assert!(!covered("-p other --bin other a", "-p jouet"));
+        assert!(!covered("-p jouet --ignored a", "-p jouet"));
+        assert!(!covered("-p jouet --example demo", "-p jouet"));
+        assert!(!covered("--bin jouet a", "-p jouet"));
     }
 
     #[test]
