@@ -573,7 +573,7 @@ fn costs_are_priced_like_savings_and_the_net_may_be_negative() {
     );
     assert_eq!(
         c[0].basis,
-        "each is at least one more request, and no test, lint or build passed after it before the session next stopped, at 100k tokens per request (the average before setup)"
+        "assuming one more request per block; no test, lint or build passed after it before the session next stopped, at 100k tokens per request (the average before setup)"
     );
     assert_eq!(
         c[2].basis,
