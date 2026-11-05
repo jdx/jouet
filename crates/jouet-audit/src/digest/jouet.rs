@@ -64,7 +64,9 @@ const TABLE: &[i32] = &[0, 1, 2, 3, 4, 5, 124, 130];
 /// What an agent runs instead of a jouet command, when its answer fell
 /// short.
 const REPLACES: &[(&str, &[&str])] = &[
-    ("jouet pr", &["gh pr", "gh api"]),
+    // A subsequent gh PR command may inspect checks, edit a description or
+    // perform another operation. Its name alone does not establish that it
+    // replaces the particular jouet pr answer.
     ("jouet wait", &["gh run", "gh pr checks", "gh api", "sleep"]),
     ("jouet commit", &["git commit", "git add"]),
     ("jouet review-package", &["git diff", "git log", "git show"]),
@@ -332,8 +334,8 @@ mod tests {
     fn a_raw_command_right_after_an_answer_is_an_abandonment() {
         assert_eq!(
             kinds(&[
-                run("jouet pr status 12", 0),
-                run("env -u GH_TOKEN gh pr view 12 --json mergeable", 0),
+                run("jouet wait ci 12", 0),
+                run("env -u GH_TOKEN gh pr checks 12", 0),
                 run("jouet commit src/a.rs -m x", 0),
                 run("cargo test", 0),
                 run("ls", 0),
@@ -341,9 +343,21 @@ mod tests {
             ]),
             [(
                 Kind::Abandoned,
-                "jouet pr status".into(),
-                "then `gh pr view`".into()
+                "jouet wait ci".into(),
+                "then `gh pr checks`".into()
             )]
         );
+    }
+
+    #[test]
+    fn pr_followups_do_not_prove_an_answer_was_abandoned() {
+        for followup in [
+            "gh pr checks 12",
+            "gh pr view 12",
+            "gh api graphql",
+            "gh pr edit 12",
+        ] {
+            assert!(kinds(&[run("jouet pr threads 12", 0), run(followup, 0)]).is_empty());
+        }
     }
 }

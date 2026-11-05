@@ -195,7 +195,7 @@ JSON
 	cp -r "$PROJECT_ROOT/crates/jouet-audit/tests/fixtures/jouet/claude/projects/-work-app/." "$HOME/.claude/projects/-work-app/"
 	run --separate-stderr jouet wind digest e2e2
 	assert_success
-	assert_line '## jouet itself (4)'
+	assert_line '## jouet itself (3)'
 	assert_line --regexp '^- L2 .jouet pr threads. crash: panicked at src/cmd/threads.rs:41:9$'
 	refute_output --partial 'index out of bounds'
 

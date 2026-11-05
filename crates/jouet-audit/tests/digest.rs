@@ -259,11 +259,10 @@ fn jouet_itself_is_checked_in_its_own_sessions() {
                 "jouet wait ci",
                 "exit 2, then retried with other flags"
             ),
-            ("abandoned", "jouet pr status", "then `gh pr view`"),
         ]
     );
     let text = digest::render(&d, 4000);
-    assert!(text.contains("## jouet itself (4)"), "{text}");
+    assert!(text.contains("## jouet itself (3)"), "{text}");
     // The panic's message, which holds a value, is never shown.
     assert!(!text.contains("index out of bounds"), "{text}");
 }
