@@ -413,12 +413,20 @@ pub(crate) fn from_ledger(entries: &[Entry], engine: Option<&Engine>) -> Vec<Sig
                     .filter(|e| e.decisions.iter().any(|d| d.rule == rule.name))
                     .filter_map(|e| e.shape.clone())
                     .collect();
+                let sessions = entries
+                    .iter()
+                    .filter(|e| e.event == "override")
+                    .filter(|e| e.decisions.iter().any(|d| d.rule == rule.name))
+                    .filter_map(|e| e.session.clone())
+                    .filter(|session| !session.is_empty())
+                    .collect();
                 out.insert(
                     (Kind::Overridden, rule.name.clone()),
                     Signal {
                         kind: Some(Kind::Overridden),
                         subject: rule.name.clone(),
                         count: s.overridden,
+                        sessions,
                         numbers: vec![s.fired, s.overridden],
                         examples: dedup(fired_on, 5),
                         ..Signal::default()
