@@ -271,6 +271,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // The tests each failed suite names, for telling whether the change
     // reaches them; `None` for a suite whose failures are not all named.
     let mut failing: Vec<Option<Vec<crate::affected::Failing>>> = Vec::new();
+    // The failing tests every failed suite named, for the stop gate; empty
+    // when one named none.
+    let mut failed_tests: Option<Vec<String>> = Some(Vec::new());
     let runs = !args.dry_run && jobs.iter().any(Option::is_some);
     let mut timed = Vec::new();
     let sequences = crate::settings::Settings::load().cost.sequences;
@@ -388,6 +391,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 if !args.affected {
                     failing.push(failing_tests(&output, &formats, &root));
                 }
+                failed_tests = failed_tests
+                    .zip(failed_test_names(&output, &formats, &root))
+                    .map(|(mut all, names)| {
+                        all.extend(names);
+                        all
+                    });
             }
             if base.is_some() && code != 0 {
                 let ran = digest.passed + digest.failed + digest.skipped;
@@ -543,6 +552,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             i32::from(exit.code()),
             blamed.as_deref(),
             unrelated.as_deref(),
+            &failed_tests.unwrap_or_default(),
             ran_tests,
         );
     }
@@ -560,6 +570,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
 /// Whether a failing run is compared with the merge base without
 /// --baseline: not an affected run, whose tests depend on the changes, nor
 /// a dry run, and not with `[test] baseline = "off"`.
+/// The failing tests a failed run's output names, as its runner printed
+/// them, for the stop gate; `None` when it names none.
+pub(crate) fn failed_test_names(
+    output: &str,
+    formats: &[testlog::Format],
+    root: &Path,
+) -> Option<Vec<String>> {
+    baseline::failure_names(output, formats, root, false).map(|names| names.into_iter().collect())
+}
+
 /// The tests a failed suite's output names, a Go test with the packages it
 /// failed in; `None` when it does not name every failure, or names a Go
 /// failure without its package.

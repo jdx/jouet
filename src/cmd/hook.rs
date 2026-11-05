@@ -1117,14 +1117,16 @@ pub(crate) fn record_own_formatting(cwd: &Path, before: Option<&str>, after: Opt
 
 /// Records a `jouet test` run as the checks see it; `environment` is what
 /// its output blames on the machine, when every failure does, `unrelated`
-/// the failing tests when the change reaches none of them, and `ran_tests`
-/// that it was a `--cmd` run that may have tested something.
+/// the failing tests when the change reaches none of them, `tests` the
+/// failing tests its runner named, and `ran_tests` that it was a `--cmd`
+/// run that may have tested something.
 pub(crate) fn record_own_run(
     cwd: &Path,
     command: &str,
     exit_code: i32,
     environment: Option<&str>,
     unrelated: Option<&str>,
+    tests: &[String],
     ran_tests: bool,
 ) {
     let settings = Settings::load();
@@ -1178,6 +1180,11 @@ pub(crate) fn record_own_run(
             if let Some(tests) = unrelated {
                 for record in &records {
                     state.mark_unrelated(&root, &record.command, tests);
+                }
+            }
+            if !tests.is_empty() {
+                for record in records.iter().filter(|r| r.exit_code != 0) {
+                    state.mark_failed_tests(&root, &record.command, tests);
                 }
             }
             let failed: Vec<String> = records
@@ -1553,13 +1560,24 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
             // A failure whose output blames the machine is marked so, as the
             // other harnesses' failures are, judged with the formats of the
             // work tree it ran in.
-            let cause = output.as_deref().and_then(|text| {
-                let formats = at
-                    .as_deref()
+            let formats = || {
+                at.as_deref()
                     .map(|dir| testlog::format::load(dir).0)
-                    .unwrap_or_default();
-                testlog::environment_cause(text, &formats)
-            });
+                    .unwrap_or_default()
+            };
+            let cause = output
+                .as_deref()
+                .and_then(|text| testlog::environment_cause(text, &formats()));
+            // The failing tests it named, so a later filter that picks
+            // their paths can clear it, as with the other harnesses.
+            let tests = output
+                .as_deref()
+                .filter(|_| record.exit_code != 0)
+                .and_then(|text| {
+                    let dir = at.as_deref().unwrap_or(Path::new(&root));
+                    super::test::failed_test_names(text, &formats(), dir)
+                })
+                .unwrap_or_default();
             let recorded = record.command.clone();
             if record.exit_code != 0 {
                 failed
@@ -1570,6 +1588,9 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
             state.record(&root, [record], None);
             if let Some(cause) = &cause {
                 state.mark_environment(&root, &recorded, cause);
+            }
+            if !tests.is_empty() {
+                state.mark_failed_tests(&root, &recorded, &tests);
             }
             // Read again at every stop: dated now, a run in another work
             // tree would never be left behind (see `set_aside_settled`).
@@ -1782,6 +1803,45 @@ mod tests {
             }],
         );
         assert_eq!(state.checks(&root).and_then(|c| c.last_run), Some(1_000));
+    }
+
+    #[test]
+    fn codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it() {
+        // `testlog` reruns `testlog::tests::a_summary`, which only the failed
+        // run's output names.
+        let repo = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        let root = verify::root_of(repo.path());
+        let output = "running 1 test\ntest testlog::tests::a_summary ... FAILED\n\nfailures:\n\n---- testlog::tests::a_summary stdout ----\nboom\n\nfailures:\n    testlog::tests::a_summary\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        let at = |command: &str, exit_code, output: Option<&str>| verify::Ran {
+            cwd: Some(root.clone()),
+            output: output.map(str::to_string),
+            ..ran(command, exit_code)
+        };
+        let replay = |output| {
+            codex_state(
+                &engine(Vec::new()),
+                &json!({}),
+                vec![
+                    at("cargo test a_summary", 101, output),
+                    at("cargo test testlog", 0, None),
+                ],
+            )
+        };
+        assert!(
+            replay(Some(output))
+                .block(&root, |_| None, |_| false, |_| true)
+                .is_none()
+        );
+        assert!(
+            replay(None)
+                .block(&root, |_| None, |_| false, |_| true)
+                .is_some()
+        );
     }
 
     #[test]
