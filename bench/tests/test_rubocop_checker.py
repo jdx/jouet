@@ -79,8 +79,8 @@ class RubocopCheckerTest(unittest.TestCase):
             trace = root / "trace"
             env.update({"PATH": f"{binary}{os.pathsep}{env['PATH']}", "TRACE": str(trace)})
 
-            def check():
-                return subprocess.run([sys.executable, str(task / "check.py")], cwd=work, env=env,
+            def check(extra=None):
+                return subprocess.run([sys.executable, str(task / "check.py")], cwd=work, env={**env, **(extra or {})},
                                       capture_output=True, text=True, check=False)
 
             self.assertIn("nothing was committed", check().stdout)
@@ -96,7 +96,11 @@ class RubocopCheckerTest(unittest.TestCase):
             trace.write_text("")
             result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            locations = trace.read_text().splitlines()
+            redirected_env = {"GIT_DIR": str(root / "missing"), "GIT_WORK_TREE": str(root),
+                              "GIT_INDEX_FILE": str(root / "missing-index")}
+            redirected_result = check(redirected_env)
+            self.assertEqual(redirected_result.returncode, 0, redirected_result.stdout + redirected_result.stderr)
+            locations = trace.read_text().splitlines()[:6]
             self.assertEqual(len(locations), 6)
             self.assertNotEqual(locations[0], locations[1])
             self.assertEqual(len(set(locations[1:])), 1)

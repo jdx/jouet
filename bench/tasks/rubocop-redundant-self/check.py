@@ -126,6 +126,9 @@ def phase(spec):
 
 
 def main():
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"):
+        os.environ.pop(key, None)
     files = committed_files()
     expect(new_commit(), "nothing was committed")
     expect(SPEC in files and Path(SPEC).is_file() and not Path(SPEC).is_symlink(), "no regression spec was committed")
