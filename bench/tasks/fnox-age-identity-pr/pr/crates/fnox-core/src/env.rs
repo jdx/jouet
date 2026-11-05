@@ -1,0 +1,230 @@
+pub use std::env::*;
+use std::ffi::OsStr;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{path::PathBuf, sync::LazyLock};
+
+/// Whether we're running in a non-interactive context (e.g. TUI) where
+/// providers must not prompt or write to stderr.
+static NON_INTERACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_non_interactive(value: bool) {
+    NON_INTERACTIVE.store(value, Ordering::Release);
+}
+
+pub fn is_non_interactive() -> bool {
+    NON_INTERACTIVE.load(Ordering::Acquire)
+}
+
+/// Mutex to serialize access to std::env::set_var, which is unsafe in Rust 2024 edition.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Set an environment variable, serializing access via ENV_MUTEX.
+///
+/// Values set here become visible to child processes spawned after this point.
+pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, val: V) {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: set_var is unsafe in Rust 2024 edition. Access is serialized via ENV_MUTEX.
+    unsafe {
+        std::env::set_var(key, val);
+    }
+}
+
+/// Remove an environment variable, serializing access via ENV_MUTEX.
+pub fn remove_var<K: AsRef<OsStr>>(key: K) {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: remove_var is unsafe in Rust 2024 edition. Access is serialized via ENV_MUTEX.
+    unsafe {
+        std::env::remove_var(key);
+    }
+}
+
+// Directory configuration
+pub static HOME_DIR: LazyLock<PathBuf> = LazyLock::new(|| dirs::home_dir().unwrap_or_default());
+pub static FNOX_CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    var_path("FNOX_CONFIG_DIR").unwrap_or_else(|| {
+        var_path("XDG_CONFIG_HOME")
+            .unwrap_or_else(|| {
+                #[cfg(unix)]
+                return HOME_DIR.join(".config");
+                #[cfg(windows)]
+                return HOME_DIR.join("AppData").join("Local");
+            })
+            .join("fnox")
+    })
+});
+
+pub static FNOX_STATE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    var_path("FNOX_STATE_DIR").unwrap_or_else(|| {
+        var_path("XDG_STATE_HOME")
+            .unwrap_or_else(|| {
+                #[cfg(unix)]
+                return HOME_DIR.join(".local").join("state");
+                #[cfg(windows)]
+                return HOME_DIR.join("AppData").join("Local");
+            })
+            .join("fnox")
+    })
+});
+
+pub static FNOX_DATA_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    var_path("FNOX_DATA_DIR").unwrap_or_else(|| {
+        var_path("XDG_DATA_HOME")
+            .unwrap_or_else(|| {
+                #[cfg(unix)]
+                return HOME_DIR.join(".local").join("share");
+                #[cfg(windows)]
+                return HOME_DIR.join("AppData").join("Local");
+            })
+            .join("fnox")
+    })
+});
+
+/// Directory holding installed Lua provider plugins, one subdirectory per plugin.
+pub static FNOX_PLUGINS_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| var_path("FNOX_PLUGINS_DIR").unwrap_or_else(|| FNOX_DATA_DIR.join("plugins")));
+
+// Profile configuration
+pub static FNOX_PROFILE: LazyLock<Vec<String>> = LazyLock::new(|| {
+    var("FNOX_PROFILE")
+        .ok()
+        .map(|profiles| parse_profile_list(&profiles))
+        .filter(|profiles| !profiles.is_empty())
+        .unwrap_or_default()
+});
+
+// Age encryption key configuration
+pub static FNOX_AGE_KEY: LazyLock<Option<String>> = LazyLock::new(|| var("FNOX_AGE_KEY").ok());
+
+// Selects a named age identity from the provider's `identities` table
+pub static FNOX_AGE_IDENTITY: LazyLock<Option<String>> =
+    LazyLock::new(|| var("FNOX_AGE_IDENTITY").ok().filter(|v| !v.is_empty()));
+
+// Auth prompt configuration (defaults to true if not set)
+pub static FNOX_PROMPT_AUTH: LazyLock<Option<bool>> = LazyLock::new(|| {
+    var("FNOX_PROMPT_AUTH")
+        .ok()
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+});
+
+// Redact secrets from piped `fnox exec` output (unset defers to the config)
+pub static FNOX_EXEC_REDACT: LazyLock<Option<bool>> = LazyLock::new(|| {
+    var("FNOX_EXEC_REDACT")
+        .ok()
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+});
+
+// Helper functions for parsing environment variables
+fn var_path(name: &str) -> Option<PathBuf> {
+    var(name)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+}
+
+/// Parse a comma-separated profile list, skipping invalid/empty entries.
+/// Warns on stderr when an entry is rejected so misconfigured environments
+/// are not silently ignored.
+pub fn parse_profile_list(profiles: &str) -> Vec<String> {
+    profiles
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| {
+            if s.is_empty() {
+                return false;
+            }
+            if !is_valid_profile_name(s) {
+                eprintln!(
+                    "Warning: Invalid profile name '{}' in FNOX_PROFILE ignored (contains path separators or invalid characters)",
+                    s
+                );
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+/// Validates that a profile name is safe to use in file paths.
+/// Rejects names containing path separators or other dangerous characters.
+pub fn is_valid_profile_name(name: &str) -> bool {
+    fnox_client::profile::is_valid_name(name)
+}
+
+/// `FNOX_AUDIT` overrides `[audit] enabled`: `on`/`true`/`1`/`yes` or `off`/`false`/`0`/`no`.
+/// Read at call time so a daemon request's environment overlay applies.
+pub fn audit_override() -> Option<bool> {
+    match var("FNOX_AUDIT").ok()?.to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// `FNOX_AUDIT_PATH` overrides `[audit] path`.
+pub fn audit_path_override() -> Option<PathBuf> {
+    var_path("FNOX_AUDIT_PATH")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_var_path() {
+        set_var("FNOX_TEST_PATH", "/foo/bar");
+        assert_eq!(
+            var_path("FNOX_TEST_PATH").unwrap(),
+            PathBuf::from("/foo/bar")
+        );
+        // Empty values are treated as unset per XDG spec
+        set_var("FNOX_TEST_PATH", "");
+        assert_eq!(var_path("FNOX_TEST_PATH"), None);
+        // Relative paths are rejected per XDG spec
+        set_var("FNOX_TEST_PATH", "relative/path");
+        assert_eq!(var_path("FNOX_TEST_PATH"), None);
+        remove_var("FNOX_TEST_PATH");
+    }
+
+    #[test]
+    fn test_valid_profile_names() {
+        // Valid profile names
+        assert!(is_valid_profile_name("production"));
+        assert!(is_valid_profile_name("staging"));
+        assert!(is_valid_profile_name("dev"));
+        assert!(is_valid_profile_name("test-env"));
+        assert!(is_valid_profile_name("test_env"));
+        assert!(is_valid_profile_name("prod-v2.0"));
+        assert!(is_valid_profile_name("env123"));
+    }
+
+    #[test]
+    fn test_invalid_profile_names() {
+        // Path traversal attempts
+        assert!(!is_valid_profile_name("../../../etc/passwd"));
+        assert!(!is_valid_profile_name(".."));
+        assert!(!is_valid_profile_name("."));
+        assert!(!is_valid_profile_name("../production"));
+        assert!(!is_valid_profile_name("production/../../etc/passwd"));
+
+        // Absolute paths
+        assert!(!is_valid_profile_name("/etc/passwd"));
+        assert!(!is_valid_profile_name("/tmp/evil"));
+
+        // Windows paths
+        assert!(!is_valid_profile_name("C:\\Windows\\System32"));
+        assert!(!is_valid_profile_name("..\\..\\evil"));
+
+        // Empty and special characters
+        assert!(!is_valid_profile_name(""));
+        assert!(!is_valid_profile_name("prod\0uction")); // null byte
+        assert!(!is_valid_profile_name("prod\ntest")); // newline
+        assert!(!is_valid_profile_name("prod\rtest")); // carriage return
+
+        // Comma — used as multi-profile delimiter, must be rejected
+        // to prevent cache-key/socket-path collisions.
+        assert!(!is_valid_profile_name("a,b"));
+        assert!(!is_valid_profile_name("prod,"));
+        assert!(!is_valid_profile_name(",prod"));
+    }
+}

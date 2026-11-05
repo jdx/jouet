@@ -1,0 +1,671 @@
+use crate::error::Result;
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+// Provider implementation modules
+pub mod age;
+pub mod aws_kms;
+pub mod aws_ps;
+mod aws_shared;
+pub mod aws_sm;
+pub mod azure_ac;
+pub mod azure_kms;
+pub(crate) mod azure_shared;
+pub mod azure_sm;
+pub mod bitwarden;
+pub mod bitwarden_sm;
+pub mod doppler;
+pub mod enpass;
+#[cfg(not(target_env = "musl"))]
+pub mod fido2;
+pub mod foks;
+pub mod gcp_kms;
+pub mod gcp_sm;
+pub mod gopass;
+pub mod hw_encrypt;
+pub mod infisical;
+pub mod keepass;
+pub mod keeper_sm;
+pub mod keychain;
+pub mod kubernetes;
+pub mod lua;
+pub mod onepassword;
+pub mod password_store;
+pub mod passwordstate;
+pub mod plain;
+pub mod proton_pass;
+pub mod resolved;
+pub mod resolver;
+pub mod secret_ref;
+pub mod vault;
+pub mod yubikey;
+pub mod yubikey_usb;
+
+pub use bitwarden::BitwardenBackend;
+pub use resolver::resolve_provider_config;
+pub use secret_ref::{OptionProviderSecretRef, OptionStringOrSecretRef, StringOrSecretRef};
+
+/// Provider capabilities - what a provider can do
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderCapability {
+    /// Provider can encrypt/decrypt values locally (stores ciphertext in config)
+    Encryption,
+    /// Provider stores values remotely (stores only references in config)
+    RemoteStorage,
+    /// Provider fetches values from a remote source (like 1Password, read-only)
+    RemoteRead,
+}
+
+/// Category for grouping providers in the wizard
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WizardCategory {
+    Local,
+    PasswordManager,
+    CloudKms,
+    CloudSecretsManager,
+    OsKeychain,
+    Plugin,
+}
+
+impl WizardCategory {
+    /// Display name for the category
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Local => "Local (easy to start)",
+            Self::PasswordManager => "Password Manager",
+            Self::CloudKms => "Cloud KMS",
+            Self::CloudSecretsManager => "Cloud Secrets Manager",
+            Self::OsKeychain => "OS Keychain",
+            Self::Plugin => "Plugin",
+        }
+    }
+
+    /// Description for the category
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Local => "Plain text or local encryption - no external dependencies",
+            Self::PasswordManager => {
+                "1Password, Bitwarden, Infisical - use your existing password manager"
+            }
+            Self::CloudKms => "AWS KMS, Azure Key Vault, GCP KMS - encrypt with cloud keys",
+            Self::CloudSecretsManager => {
+                "AWS, Azure, GCP, HashiCorp Vault - store secrets remotely"
+            }
+            Self::OsKeychain => "Use your operating system's secure keychain",
+            Self::Plugin => "Custom providers implemented as Lua plugins",
+        }
+    }
+
+    /// All categories in display order
+    pub fn all() -> &'static [WizardCategory] {
+        &[
+            Self::Local,
+            Self::PasswordManager,
+            Self::CloudKms,
+            Self::CloudSecretsManager,
+            Self::OsKeychain,
+            Self::Plugin,
+        ]
+    }
+}
+
+/// A field that the wizard needs to collect
+#[derive(Debug, Clone)]
+pub struct WizardField {
+    /// Internal field name (e.g., "region")
+    pub name: &'static str,
+    /// Prompt shown to user (e.g., "AWS Region:")
+    pub label: &'static str,
+    /// Placeholder value (e.g., "us-east-1")
+    pub placeholder: &'static str,
+    /// Whether field must have a value
+    pub required: bool,
+}
+
+/// Complete wizard metadata for a provider type
+#[derive(Debug, Clone)]
+pub struct WizardInfo {
+    /// Provider type identifier (e.g., "aws-sm")
+    pub provider_type: &'static str,
+    /// Display name (e.g., "AWS Secrets Manager")
+    pub display_name: &'static str,
+    /// Short description for selection menu
+    pub description: &'static str,
+    /// Category for grouping
+    pub category: WizardCategory,
+    /// Multi-line setup instructions
+    pub setup_instructions: &'static str,
+    /// Default provider name (e.g., "sm")
+    pub default_name: &'static str,
+    /// Fields to collect from user
+    pub fields: &'static [WizardField],
+}
+
+// Include generated code for ProviderConfig and ResolvedProviderConfig enums
+mod generated {
+    pub(super) mod providers_config {
+        include!(concat!(env!("OUT_DIR"), "/generated/providers_config.rs"));
+    }
+    pub(super) mod providers_methods {
+        include!(concat!(env!("OUT_DIR"), "/generated/providers_methods.rs"));
+    }
+    pub(super) mod providers_instantiate {
+        // Need to import provider modules for instantiation
+        #[cfg(not(target_env = "musl"))]
+        use super::super::fido2;
+        use super::super::{
+            age, aws_kms, aws_ps, aws_sm, azure_ac, azure_kms, azure_sm, bitwarden, bitwarden_sm,
+            doppler, enpass, foks, gcp_kms, gcp_sm, gopass, infisical, keepass, keeper_sm,
+            keychain, kubernetes, lua, onepassword, password_store, passwordstate, plain,
+            proton_pass, vault, yubikey,
+        };
+        include!(concat!(
+            env!("OUT_DIR"),
+            "/generated/providers_instantiate.rs"
+        ));
+    }
+    pub(super) mod providers_wizard {
+        include!(concat!(env!("OUT_DIR"), "/generated/providers_wizard.rs"));
+    }
+    pub(super) mod providers_resolver {
+        include!(concat!(env!("OUT_DIR"), "/generated/providers_resolver.rs"));
+    }
+}
+
+// Re-export generated types
+pub use generated::providers_config::{ProviderConfig, ResolvedProviderConfig};
+pub use generated::providers_instantiate::get_provider_from_resolved;
+pub use generated::providers_wizard::ALL_WIZARD_INFO;
+
+#[async_trait]
+pub trait Provider: Send + Sync {
+    /// Get a secret value from the provider (decrypt if needed)
+    async fn get_secret(&self, value: &str) -> Result<String>;
+
+    /// Get multiple secrets in a batch (more efficient for some providers)
+    ///
+    /// Takes a slice of (key, value) tuples where:
+    /// - key: the environment variable name (e.g., "MY_SECRET")
+    /// - value: the provider-specific reference (e.g., "op://vault/item/field")
+    ///
+    /// Returns a HashMap of successfully resolved secrets. Failures are logged but don't
+    /// stop other secrets from being resolved.
+    ///
+    /// Default implementation fetches secrets in parallel using tokio tasks.
+    /// Providers can override this for true batch operations (e.g., single API call)
+    /// or different concurrency using `get_secrets_concurrent`.
+    async fn get_secrets_batch(
+        &self,
+        secrets: &[(String, String)],
+    ) -> HashMap<String, Result<String>> {
+        get_secrets_concurrent(self, secrets, 10).await
+    }
+
+    /// Encrypt a value with this provider (for encryption providers)
+    async fn encrypt(&self, _value: &str) -> Result<String> {
+        // Default implementation for non-encryption providers
+        Err(crate::error::FnoxError::Provider(
+            "This provider does not support encryption".to_string(),
+        ))
+    }
+
+    /// Encrypt multiple values in a batch.
+    ///
+    /// Providers that need user interaction can override this to perform that
+    /// interaction once for the entire batch.
+    async fn encrypt_secrets_batch(
+        &self,
+        secrets: &[(String, String)],
+    ) -> HashMap<String, Result<String>> {
+        let mut encrypted = HashMap::with_capacity(secrets.len());
+        for (key, value) in secrets {
+            encrypted.insert(key.clone(), self.encrypt(value).await);
+        }
+        encrypted
+    }
+
+    /// Store a secret and return the value to save in config
+    ///
+    /// This is a unified method for both encryption and remote storage:
+    /// - Encryption providers (age, aws-kms): encrypt the value and return ciphertext
+    /// - Remote storage providers (aws-sm, keychain): store remotely and return the key name
+    /// - Read-only providers: return an error
+    ///
+    /// Returns the value that should be stored in the config file.
+    async fn put_secret(&self, _key: &str, value: &str) -> Result<String> {
+        let capabilities = self.capabilities();
+
+        if capabilities.contains(&ProviderCapability::Encryption) {
+            // Encryption provider - encrypt and return ciphertext
+            self.encrypt(value).await
+        } else if capabilities.contains(&ProviderCapability::RemoteStorage) {
+            // Remote storage provider - should override this method
+            Err(crate::error::FnoxError::Provider(
+                "Remote storage provider must implement put_secret".to_string(),
+            ))
+        } else {
+            // Read-only provider
+            Err(crate::error::FnoxError::Provider(
+                "This provider does not support storing secrets".to_string(),
+            ))
+        }
+    }
+
+    /// Get the capabilities of this provider
+    fn capabilities(&self) -> Vec<ProviderCapability> {
+        // Default: read-only remote provider (like 1Password, Bitwarden)
+        vec![ProviderCapability::RemoteRead]
+    }
+
+    /// The auth command to offer when this instance fails to authenticate, built from its
+    /// resolved fields. A config `auth_command` override takes precedence. `None` falls back
+    /// to the provider type's static default.
+    fn auth_command(&self) -> Option<String> {
+        None
+    }
+
+    /// Finish setup that can fail before the provider is used.
+    ///
+    /// Called when a provider is created from config, so a broken provider
+    /// fails there instead of reporting misleading capabilities.
+    async fn prepare(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Test if the provider is accessible and properly configured
+    async fn test_connection(&self) -> Result<()> {
+        // Default implementation does a basic check
+        Ok(())
+    }
+}
+
+/// Fetch secrets concurrently with configurable concurrency limit.
+///
+/// Helper for providers that want to use the default parallel fetch behavior
+/// but with a different concurrency level.
+pub async fn get_secrets_concurrent(
+    provider: &(impl Provider + ?Sized),
+    secrets: &[(String, String)],
+    concurrency: usize,
+) -> HashMap<String, Result<String>> {
+    use futures::stream::{self, StreamExt};
+
+    // Clone the secrets to avoid lifetime issues with async closures
+    let secrets_vec: Vec<_> = secrets.to_vec();
+
+    // Fetch all secrets in parallel (up to `concurrency` concurrent)
+    let results: Vec<_> = stream::iter(secrets_vec)
+        .map(|(key, value)| async move {
+            let result = provider.get_secret(&value).await;
+            (key, result)
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    results.into_iter().collect()
+}
+
+impl ProviderConfig {
+    /// Get wizard info for providers in a specific category
+    pub fn wizard_info_by_category(category: WizardCategory) -> Vec<&'static WizardInfo> {
+        ALL_WIZARD_INFO
+            .iter()
+            .filter(|info| info.category == category)
+            .collect()
+    }
+}
+
+/// Create a provider from an unresolved provider configuration.
+///
+/// This is a convenience wrapper that first resolves any secret references in the
+/// configuration (using the provided config and profile), then creates the provider.
+///
+/// For providers that don't have any secret references, this is equivalent to calling
+/// `get_provider_from_resolved` directly with a resolved config.
+pub async fn get_provider_resolved(
+    config: &crate::config::Config,
+    profile: &[String],
+    provider_name: &str,
+    provider_config: &ProviderConfig,
+) -> Result<Box<dyn Provider>> {
+    let resolved = resolve_provider_config(config, profile, provider_name, provider_config).await?;
+    let provider =
+        get_provider_from_resolved_with_context(config, profile, provider_name, &resolved)?;
+    provider.prepare().await?;
+    Ok(provider)
+}
+
+pub(crate) fn get_provider_from_resolved_with_context(
+    config: &crate::config::Config,
+    profile: &[String],
+    provider_name: &str,
+    resolved: &ResolvedProviderConfig,
+) -> Result<Box<dyn Provider>> {
+    get_provider_from_resolved_with_context_and_identity_cycle_guard(
+        config,
+        profile,
+        provider_name,
+        resolved,
+        None,
+    )
+}
+
+pub(crate) fn get_provider_from_resolved_with_context_and_identity_cycle_guard(
+    config: &crate::config::Config,
+    profile: &[String],
+    provider_name: &str,
+    resolved: &ResolvedProviderConfig,
+    identity_cycle_guard: Option<age::AgeIdentityCycleGuard>,
+) -> Result<Box<dyn Provider>> {
+    if let ResolvedProviderConfig::AgeEncryption {
+        recipients,
+        key_file,
+        identity,
+        identities,
+        default_identity,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        // A selected named identity (FNOX_AGE_IDENTITY, else default_identity) replaces `key_file`.
+        let key_file = age::select_key_file(
+            provider_name,
+            key_file.clone(),
+            identities,
+            default_identity.as_deref(),
+        )?;
+        return Ok(Box::new(age::AgeEncryptionProvider::new_with_config(
+            recipients.clone(),
+            crate::config_path::resolve_optional_string_relative_to_file(
+                key_file,
+                provider_source.as_deref(),
+            ),
+            identity.clone(),
+            std::sync::Arc::new(config.clone()),
+            profile.to_vec(),
+            provider_name.to_string(),
+            identity_cycle_guard,
+        )?));
+    }
+    if let ResolvedProviderConfig::KeePass {
+        database,
+        keyfile,
+        password,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::KeePass {
+            database: crate::config_path::resolve_string_relative_to_file(
+                database.clone(),
+                provider_source.as_deref(),
+            ),
+            keyfile: crate::config_path::resolve_optional_string_relative_to_file(
+                keyfile.clone(),
+                provider_source.as_deref(),
+            ),
+            password: password.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::Enpass {
+        vault,
+        keyfile,
+        password,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::Enpass {
+            vault: crate::config_path::resolve_string_relative_to_file(
+                vault.clone(),
+                provider_source.as_deref(),
+            ),
+            keyfile: crate::config_path::resolve_optional_string_relative_to_file(
+                keyfile.clone(),
+                provider_source.as_deref(),
+            ),
+            password: password.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::PasswordStore {
+        prefix,
+        store_dir,
+        gpg_opts,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::PasswordStore {
+            prefix: prefix.clone(),
+            store_dir: crate::config_path::resolve_optional_string_relative_to_file(
+                store_dir.clone(),
+                provider_source.as_deref(),
+            ),
+            gpg_opts: gpg_opts.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::Foks {
+        prefix,
+        team,
+        home,
+        host,
+        bot_token,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::Foks {
+            prefix: prefix.clone(),
+            team: team.clone(),
+            home: crate::config_path::resolve_optional_string_relative_to_file(
+                home.clone(),
+                provider_source.as_deref(),
+            ),
+            host: host.clone(),
+            bot_token: bot_token.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::Plain {
+        file: Some(file),
+        format,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::Plain {
+            file: Some(crate::config_path::resolve_string_relative_to_file(
+                file.clone(),
+                provider_source.as_deref(),
+            )),
+            format: format.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::KeeperSecretsManager { config_file, token } = resolved {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::KeeperSecretsManager {
+            config_file: crate::config_path::resolve_optional_string_relative_to_file(
+                config_file.clone(),
+                provider_source.as_deref(),
+            ),
+            token: token.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::Kubernetes {
+        context,
+        namespace,
+        kubeconfig,
+        prefix,
+    } = resolved
+    {
+        let provider_source = provider_source_path(config, profile, provider_name);
+        let resolved = ResolvedProviderConfig::Kubernetes {
+            context: context.clone(),
+            namespace: namespace.clone(),
+            kubeconfig: crate::config_path::resolve_optional_string_relative_to_file(
+                kubeconfig.clone(),
+                provider_source.as_deref(),
+            ),
+            prefix: prefix.clone(),
+        };
+        return get_provider_from_resolved(provider_name, &resolved);
+    }
+    if let ResolvedProviderConfig::Lua { plugin, options } = resolved {
+        let plugin = if lua::plugin_is_path(plugin) {
+            let provider_source = provider_source_path(config, profile, provider_name);
+            crate::config_path::resolve_string_relative_to_file(
+                plugin.clone(),
+                provider_source.as_deref(),
+            )
+        } else {
+            plugin.clone()
+        };
+        let declared = config.plugins.get(&plugin).cloned();
+        return Ok(Box::new(
+            lua::LuaProvider::new(provider_name.to_string(), plugin, options.clone())?
+                .with_declared_source(declared),
+        ));
+    }
+    get_provider_from_resolved(provider_name, resolved)
+}
+
+fn provider_source_path(
+    config: &crate::config::Config,
+    profiles: &[String],
+    provider_name: &str,
+) -> Option<PathBuf> {
+    let profiles = config
+        .resolve_profiles(profiles)
+        .unwrap_or_else(|_| profiles.to_vec());
+    for profile in profiles.iter().filter(|p| *p != "default").rev() {
+        if let Some(profile_config) = config.profiles.get(profile)
+            && profile_config.providers.contains_key(provider_name)
+        {
+            return profile_config.provider_sources.get(provider_name).cloned();
+        }
+    }
+
+    config.provider_sources.get(provider_name).cloned()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, ProfileConfig, ProviderConfig};
+
+    #[test]
+    fn provider_source_path_prefers_profile_provider_source() {
+        let mut config = Config::new();
+        config.provider_sources.insert(
+            "pass".to_string(),
+            PathBuf::from("/home/user/project/fnox.toml"),
+        );
+
+        let mut profile = ProfileConfig::new();
+        profile.providers.insert(
+            "pass".to_string(),
+            ProviderConfig::Plain {
+                file: OptionStringOrSecretRef::none(),
+                format: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+        );
+        profile.provider_sources.insert(
+            "pass".to_string(),
+            PathBuf::from("/home/user/project/fnox.prod.toml"),
+        );
+        config.profiles.insert("prod".to_string(), profile);
+
+        assert_eq!(
+            provider_source_path(&config, &["prod".to_string()], "pass"),
+            Some(PathBuf::from("/home/user/project/fnox.prod.toml")),
+        );
+    }
+
+    #[test]
+    fn provider_source_path_does_not_fall_back_for_profile_provider_override() {
+        let mut config = Config::new();
+        config.provider_sources.insert(
+            "pass".to_string(),
+            PathBuf::from("/home/user/project/fnox.toml"),
+        );
+
+        let mut profile = ProfileConfig::new();
+        profile.providers.insert(
+            "pass".to_string(),
+            ProviderConfig::Plain {
+                file: OptionStringOrSecretRef::none(),
+                format: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+        );
+        config.profiles.insert("prod".to_string(), profile);
+
+        assert_eq!(
+            provider_source_path(&config, &["prod".to_string()], "pass"),
+            None
+        );
+    }
+
+    #[test]
+    fn provider_source_path_falls_back_to_top_level_provider_source() {
+        let mut config = Config::new();
+        config.provider_sources.insert(
+            "pass".to_string(),
+            PathBuf::from("/home/user/project/fnox.toml"),
+        );
+        config
+            .profiles
+            .insert("prod".to_string(), ProfileConfig::new());
+
+        assert_eq!(
+            provider_source_path(&config, &["prod".to_string()], "pass"),
+            Some(PathBuf::from("/home/user/project/fnox.toml")),
+        );
+    }
+
+    #[test]
+    fn kubernetes_provider_never_enables_daemon_cache() {
+        let provider = ProviderConfig::Kubernetes {
+            context: OptionStringOrSecretRef::none(),
+            namespace: OptionStringOrSecretRef::none(),
+            kubeconfig: OptionStringOrSecretRef::none(),
+            prefix: OptionStringOrSecretRef::none(),
+            auth_command: None,
+            daemon_cache: Some(true),
+        };
+
+        assert!(!provider.daemon_cache_enabled());
+    }
+
+    #[test]
+    fn keeper_config_file_resolves_relative_to_provider_source() {
+        let mut config = Config::new();
+        config.provider_sources.insert(
+            "keeper".to_string(),
+            PathBuf::from("/home/user/project/fnox.toml"),
+        );
+        let resolved = ResolvedProviderConfig::KeeperSecretsManager {
+            config_file: Some("./keeper/ksm-config.json".to_string()),
+            token: None,
+        };
+
+        let error = match get_provider_from_resolved_with_context(
+            &config,
+            &["default".to_string()],
+            "keeper",
+            &resolved,
+        ) {
+            Ok(_) => panic!("missing Keeper configuration unexpectedly initialized"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .to_string()
+                .contains("/home/user/project/./keeper/ksm-config.json")
+        );
+    }
+}
