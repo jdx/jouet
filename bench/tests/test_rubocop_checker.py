@@ -112,7 +112,7 @@ class RubocopCheckerTest(unittest.TestCase):
             del env["REQUIRE_HELPER"]
             env["SPEC_SUMMARY"] = "0 examples, 0 failures"
             self.assertIn("ran no examples", check().stdout)
-            env["SPEC_SUMMARY"] = "1 example, 0 failures, 1 pending"
+            env["SPEC_SUMMARY"] = "2 examples, 0 failures, 1 pending"
             self.assertEqual(check().returncode, 3)
             env["SPEC_SUMMARY"] = "missing summary"
             self.assertEqual(check().returncode, 3)

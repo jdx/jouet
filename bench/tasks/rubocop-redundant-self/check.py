@@ -95,10 +95,10 @@ def phase(spec):
                     UNVERIFIED.append("the committed spec did not report its test count")
                 elif int(counts.group(1)) == 0:
                     expect(False, "the committed spec ran no examples")
-                elif int(counts.group(1)) == int(counts.group(3) or 0):
-                    UNVERIFIED.append("the committed spec marked every example pending")
                 elif int(counts.group(2)):
                     expect(False, f"the committed spec reported failures:\n{output}")
+                elif int(counts.group(3) or 0):
+                    UNVERIFIED.append("the committed spec has pending examples")
             else:
                 for source, expected in [("self.a, *self.b = c", 0), ("*self.a, self.b = c", 0),
                                          ("a, (self.b, *self.c) = d", 0), ("a, b = *self.c", 1), ("self.c", 1)]:
