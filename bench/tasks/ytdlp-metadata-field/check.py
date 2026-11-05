@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import expect, finish, new_commit  # noqa: E402
+from _check import committed_files, dirty, expect, finish, new_commit  # noqa: E402
 
 # Exercise the public postprocessor with synthetic metadata and no network.
 program = r'''
@@ -34,5 +34,12 @@ except json.JSONDecodeError:
     values = None
 expect(run.returncode == 0 and values == ["3", "first\nsecond", "Name", "Song"],
        f"metadata parsing did not preserve all cases: {run.stdout}\n{run.stderr}")
-print(f"committed: {new_commit()}")
+expect(new_commit(), "nothing was committed")
+expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
+test_files = [path for path in committed_files() if path.startswith("test/") and path.endswith(".py")
+              and Path(path).is_file() and not Path(path).is_symlink()
+              and Path(path).name.startswith("test_")
+              and subprocess.run(["git", "cat-file", "-t", f"HEAD:{path}"],
+                                 capture_output=True, text=True).stdout.strip() == "blob"]
+expect(bool(test_files), "no committed test file was changed")
 finish()
