@@ -1361,8 +1361,23 @@ fn pnpm_vitest_is_recorded_only_when_no_project_script_shadows_it() {
     std::fs::write(&manifest, r#"{"scripts":{"test":"vitest run"}}"#).unwrap();
     let selected = records("pnpm vitest run test.ts");
     assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0].scope(), "partial test.ts");
-    assert_eq!(records("pnpm vitest run")[0].scope(), "partial");
+    assert_eq!(
+        selected[0].scope(),
+        records("pnpm exec vitest run test.ts")[0].scope()
+    );
+    assert_eq!(
+        records("pnpm vitest run")[0].scope(),
+        "partial @jouet:pnpm:dir=.:vitest"
+    );
+    assert_eq!(
+        records("pnpm vitest run --config=unit.ts")[0].scope(),
+        records("pnpm exec vitest run --config=unit.ts")[0].scope()
+    );
+    assert_ne!(
+        records("pnpm vitest run --config=unit.ts")[0].scope(),
+        records("pnpm vitest run --config=integration.ts")[0].scope()
+    );
+    assert!(records("pnpm vitest run -t 'two words'").is_empty());
     assert!(records("pnpm vitest run --help").is_empty());
     let child = tmp.path().join("child");
     std::fs::create_dir(&child).unwrap();

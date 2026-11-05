@@ -659,8 +659,11 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 		if program == "pnpm" and first == "vitest" and args[2] == "run" and dir ~= false then
 			local scripts = jouet.node.scripts(dir or nil)
 			if scripts and not jouet.contains(scripts, "vitest") then
-				local scope = runner_scope(args, 3)
-				return "test", partial(scope.selector)
+				local explicit = { "exec" }
+				for _, arg in args do
+					table.insert(explicit, arg)
+				end
+				return pnpm_scope(explicit, false)
 			end
 		end
 		if first == "run" or first == "run-script" then
