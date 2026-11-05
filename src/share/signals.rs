@@ -153,16 +153,16 @@ impl Signal {
     /// crash or a malformed document is worth it at once; a usage error or
     /// an abandoned answer only once it repeats across sessions.
     pub(crate) fn ready(&self) -> bool {
+        // Old ledgers may contain PR follow-ups classified only by their
+        // command name, which does not prove they replaced a jouet answer.
+        if self.kind() == Kind::Abandoned
+            && (self.subject == "jouet pr" || self.subject.starts_with("jouet pr "))
+        {
+            return false;
+        }
         match self.kind() {
             Kind::Crash | Kind::ExitCode => self.count >= 1,
             Kind::BadJson => self.count >= 1 && self.json_evidence_v2,
-            // Old ledgers may contain PR follow-ups classified only by their
-            // command name, which does not prove they replaced a jouet answer.
-            Kind::Abandoned
-                if self.subject == "jouet pr" || self.subject.starts_with("jouet pr ") =>
-            {
-                false
-            }
             Kind::Usage | Kind::Abandoned => self.count >= 3 && self.sessions.len() >= 2,
             Kind::SlowHook => self.count >= 3,
             Kind::Overridden | Kind::Routine => true,
