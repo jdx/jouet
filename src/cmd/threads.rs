@@ -347,7 +347,7 @@ fn render_list(l: &Listing, now: i64) -> String {
     {
         let _ = writeln!(
             s,
-            "\nReply with `{reply}`, ID being the number in brackets; add --resolve to resolve it too, or `jouet pr threads apply` takes many at once."
+            "\nReply with `{reply}`, ID being the number in brackets; add --resolve for a thread you fixed, but leave one that only asks a question open for the reviewer, or `jouet pr threads apply` takes many at once."
         );
     }
     entire::render(&mut s, &l.entire, now);
