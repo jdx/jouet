@@ -104,31 +104,34 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
         setup_log.parent.mkdir(parents=True, exist_ok=True)
     try:
         tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", setup_log)
-    except tasks_mod.EnvironmentSetupError:
+        note = note_at_head(workdir, env)
+        incomplete = False
+        for command in task.cost_seed:
+            try:
+                proc = subprocess.run(
+                    ["jouet", "test", "--cmd", "--", *shlex.split(command)],
+                    cwd=workdir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=task.check_timeout_s,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                log(f"    {command} could not be timed: {error}; the cost seed is incomplete and will not be cached")
+                incomplete = True
+                break
+            log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
+            if proc.returncode != 0:
+                log(f"    {command} failed; the cost seed is incomplete and will not be cached")
+                incomplete = True
+            updated = note_at_head(workdir, env)
+            if not (Counter(updated.splitlines()) - Counter(note.splitlines())):
+                log(f"    no timing was recorded for {command}; the cost seed is incomplete and will not be cached")
+                incomplete = True
+            note = updated
+    finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        raise
-    note = note_at_head(workdir, env)
-    incomplete = False
-    for command in task.cost_seed:
-        proc = subprocess.run(
-            ["jouet", "test", "--cmd", "--", *shlex.split(command)],
-            cwd=workdir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=task.check_timeout_s,
-            check=False,
-        )
-        log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
-        if proc.returncode != 0:
-            log(f"    {command} failed; the cost seed is incomplete and will not be cached")
-            incomplete = True
-        updated = note_at_head(workdir, env)
-        if not (Counter(updated.splitlines()) - Counter(note.splitlines())):
-            log(f"    no timing was recorded for {command}; the cost seed is incomplete and will not be cached")
-            incomplete = True
-        note = updated
-    shutil.rmtree(tmp, ignore_errors=True)
     if incomplete:
         log(f"    {task.name}: runs start without a cost note because the seed is incomplete")
         return None

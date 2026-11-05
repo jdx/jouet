@@ -1881,6 +1881,31 @@ class CostSeedTest(unittest.TestCase):
                 self.assertFalse(costs.cache_path(failed, stand_in).exists())
             self.assertTrue(any("cargo build failed" in m for m in messages))
 
+    def test_timed_out_cost_seed_does_not_block_trials_or_leave_temp_files(self):
+        import os
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a.txt").write_text("a\n")
+            task = tasks.Task(name="t", dir=task_dir, description="", prompt="", chore="", rules=[],
+                              timeout_s=60, check_timeout_s=1, cost_seed=["cargo build"])
+            tmp_record = root / "tmp-path"
+            stand_in = root / "jouet"
+            stand_in.write_text(f'#!/bin/sh\nprintf "%s" "$TMPDIR" > "{tmp_record}"\nsleep 2\n')
+            stand_in.chmod(0o755)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                self.assertIsNone(costs.seed(task, stand_in, root / "work", messages.append))
+                self.assertFalse(costs.cache_path(task, stand_in).exists())
+            self.assertTrue(any("could not be timed" in message for message in messages))
+            self.assertTrue(any("runs start without a cost note" in message for message in messages))
+            self.assertFalse(Path(tmp_record.read_text()).exists())
+
     def test_cost_cache_changes_with_setup_tools_and_jouet(self):
         import dataclasses
         import os
