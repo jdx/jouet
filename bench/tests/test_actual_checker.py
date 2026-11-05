@@ -1,14 +1,33 @@
+import contextlib
+import io
 import os
 from pathlib import Path
+import runpy
+import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/actual-running-balance/check.py"
 
 
 class ActualCheckerTest(unittest.TestCase):
+    def test_playwright_requires_a_completed_relevant_assertion(self):
+        verdict = runpy.run_path(str(CHECKER))['browser_verdict']
+        def report(status, message=''):
+            return {'suites': [{'specs': [{'title': 'running balances refresh after repeated edits',
+                    'tests': [{'results': [{'status': status, 'error': {'message': message}}]}]}]}], 'errors': []}
+
+        self.assertEqual(verdict(report('passed'), 0), 'passed')
+        self.assertEqual(verdict(report('failed', "Error: expect(locator).toHaveText(expected) failed\nLocator: getByTestId('balance')"), 1), 'failed')
+        self.assertEqual(verdict(report('failed', "browserType.launch: Executable doesn't exist"), 1), 'unverified')
+        self.assertEqual(verdict(report('failed', 'expect(received).toBe(expected) failed'), 1), 'unverified')
+        self.assertEqual(verdict(report('skipped'), 0), 'unverified')
+        self.assertEqual(verdict({'suites': []}, 0), 'unverified')
+        self.assertEqual(verdict(report('passed'), 1), 'unverified')
+
     def test_requires_the_working_tree_used_by_the_check_to_be_committed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -39,9 +58,22 @@ class ActualCheckerTest(unittest.TestCase):
             bin_dir = root / "bin"
             bin_dir.mkdir()
             node = bin_dir / "node"
-            node.write_text("#!/bin/sh\nmkdir -p blob-report\ntouch blob-report/report.zip\nexit 0\n")
+            node.write_text('''#!/bin/sh
+mkdir -p blob-report
+touch blob-report/report.zip
+if [ "$1" != "--input-type=module" ] && [ -n "$PLAYWRIGHT_JSON_OUTPUT_FILE" ]; then
+  if [ -n "$BROWSER_MISSING" ]; then
+    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"failed","error":{"message":"browserType.launch: Executable does not exist"}}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+    exit 1
+  else
+    printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"passed"}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+  fi
+fi
+exit 0
+''')
             node.chmod(0o755)
-            env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_BASE_SHA": base})
+            env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_BASE_SHA": base,
+                        "PLAYWRIGHT_JSON_OUTPUT_FILE": str(root / 'unrelated.json')})
 
             def check():
                 return subprocess.run(["python3", str(CHECKER)], cwd=work, env=env,
@@ -53,4 +85,41 @@ class ActualCheckerTest(unittest.TestCase):
             git("commit", "-qm", "include source")
             result = check()
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / 'unrelated.json').exists())
             self.assertTrue((work / "blob-report/report.zip").exists())
+            shutil.rmtree(work / 'blob-report')
+
+            checker = runpy.run_path(str(CHECKER))
+            real_run = subprocess.run
+            def timeout_note(command, *args, **kwargs):
+                if command[0] == 'node' and '--input-type=module' in command:
+                    raise subprocess.TimeoutExpired(command, 30, output=b'note started\n', stderr=b'note stalled\n')
+                return real_run(command, *args, **kwargs)
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(work)
+                with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(subprocess, 'run', side_effect=timeout_note):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        checker['check']()
+                    self.assertIn('note started', output.getvalue())
+                    self.assertIn('note stalled', output.getvalue())
+                    self.assertIn('release note validation timed out', checker['UNVERIFIED'])
+                    checker['UNVERIFIED'].clear()
+            finally:
+                os.chdir(old_cwd)
+            shutil.rmtree(work / 'blob-report')
+
+            env['BROWSER_MISSING'] = '1'
+            result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertTrue(result.stdout.rstrip().endswith('JOUET_BENCH_UNVERIFIED_V1'))
+            self.assertFalse((work / 'packages/desktop-client/e2e/jouet-running-balance.test.ts').exists())
+            shutil.rmtree(work / 'blob-report')
+
+            git('rm', '-q', 'upcoming-release-notes/fix.md')
+            git('commit', '-qm', 'remove the required release note')
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertNotIn('JOUET_BENCH_UNVERIFIED_V1', result.stdout)
