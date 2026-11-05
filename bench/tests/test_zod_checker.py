@@ -13,6 +13,21 @@ CHECKER = Path(__file__).resolve().parents[1] / "tasks/zod-int-bounds/check.py"
 
 
 class ZodCheckerTest(unittest.TestCase):
+    def test_exhausted_budget_preserves_cleanup_time(self):
+        spec = importlib.util.spec_from_file_location("zod_budget_checker", CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        checker.DEADLINE = 100
+        result = subprocess.CompletedProcess(["git"], 0, stdout="", stderr="")
+        with mock.patch.object(checker.time, "monotonic", return_value=101), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", return_value=result) as process:
+            self.assertIsNone(checker.run(["pnpm", "build"], Path("."), 180))
+            self.assertIn("time budget exhausted", checker.UNVERIFIED[0])
+            process.assert_not_called()
+            self.assertIs(checker.run(["git", "worktree", "remove"], Path("."), 30, cleanup=True), result)
+            self.assertEqual(process.call_args.kwargs["timeout"], 30)
+
     def test_bigint_timeout_is_only_diagnostic(self):
         spec = importlib.util.spec_from_file_location("zod_checker", CHECKER)
         checker = importlib.util.module_from_spec(spec)

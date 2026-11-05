@@ -4,13 +4,21 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _check import UNVERIFIED, committed_files, dirty, expect, finish, new_commit
 
+DEADLINE = time.monotonic() + 1050
 
-def run(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess | None:
+
+def run(command: list[str], cwd: Path, timeout: int, *, cleanup: bool = False) -> subprocess.CompletedProcess | None:
+    if not cleanup:
+        timeout = min(timeout, DEADLINE - time.monotonic())
+        if timeout <= 0:
+            UNVERIFIED.append(f"time budget exhausted before {command[0]}")
+            return None
     try:
         env = os.environ.copy()
         if Path("/tmp").is_dir():
@@ -27,9 +35,13 @@ def run(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProc
 
 
 def diagnose_bigint(checkout: Path, related: Path) -> None:
+    timeout = min(20, DEADLINE - time.monotonic())
+    if timeout <= 0:
+        print("related pre-existing bigint case: time budget exhausted")
+        return
     try:
         diagnostic = subprocess.run(["node_modules/.bin/vitest", "run", str(related)],
-                                    cwd=checkout, capture_output=True, text=True, timeout=20, check=False)
+                                    cwd=checkout, capture_output=True, text=True, timeout=timeout, check=False)
         print(f"related pre-existing bigint case: {'passed' if diagnostic.returncode == 0 else 'failed'}")
     except (OSError, subprocess.TimeoutExpired) as error:
         print(f"related pre-existing bigint case: could not check ({error})")
@@ -103,7 +115,7 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                     shutil.copyfile(Path(__file__).parent / "hidden/bigint.test.ts", related)
                     diagnose_bigint(checkout, related)
         finally:
-            removed = run(["git", "worktree", "remove", "--force", str(checkout)], Path.cwd(), 30)
+            removed = run(["git", "worktree", "remove", "--force", str(checkout)], Path.cwd(), 30, cleanup=True)
             if removed is not None and removed.returncode:
                 UNVERIFIED.append(f"could not remove test checkout: {removed.stderr}")
 
