@@ -90,7 +90,8 @@ def phase(spec):
                     return
                 output = result.stdout + result.stderr
                 expect(result.returncode == 0, f"committed spec failed:\n{output}")
-                counts = re.search(r"(\d+) examples?, (\d+) failures?(?:, (\d+) pending)?", output)
+                summaries = list(re.finditer(r"(?m)^(\d+) examples?, (\d+) failures?(?:, (\d+) pending)?$", result.stdout))
+                counts = summaries[-1] if summaries else None
                 if not counts:
                     UNVERIFIED.append("the committed spec did not report its test count")
                 elif int(counts.group(1)) == 0:
