@@ -347,6 +347,9 @@ start = ['^>>> E2E (\S+)$']
 excerpt = ['^ERROR: E2E assertion failed: ']
 # Lines left out of the excerpt.
 drop = ['^\S+: \d+s$']
+# The runner's own count of the tests it ran: its first group, else the whole
+# line, is read for `3 passed`, `1 failed` and `2 skipped`.
+summary = ['^E2E: ran \d+ tests \((.+)\)']
 
 [[examples]]
 output = """
@@ -365,6 +368,8 @@ cmd: failed (exit 1) in 0.0s: 1 failed
 FAIL cli/test_a
   ERROR: E2E assertion failed: [mise ls] expected 'x'
 ```
+
+With `summary`, a run that passed says how many tests it ran (`cmd: passed in 12.0s: 3 passed`) rather than only that it passed, so there is no need to read the log to see that the tests you meant to run did. Without it, a format counts only the tests it names as failed.
 
 Each pattern key takes a list of regular expressions ([Rust's syntax](https://docs.rs/regex/latest/regex/#syntax)), matched against each line once colour and mise's `[task]` prefixes are taken off.
 

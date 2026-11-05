@@ -15,6 +15,9 @@
 //! excerpt = ['^E2E assertion failed: ']
 //! # Lines left out of the excerpt.
 //! drop = ['^\S+: \d+s$']
+//! # The runner's own count of the tests it ran: its first group, else the
+//! # whole line, is read for `3 passed`, `1 failed` and `2 skipped`.
+//! summary = ['^E2E: ran \d+ tests \((.+)\)']
 //!
 //! [[examples]]
 //! output = """
@@ -47,6 +50,8 @@ struct Decl {
     #[serde(default)]
     drop: Vec<String>,
     #[serde(default)]
+    summary: Vec<String>,
+    #[serde(default)]
     examples: Vec<Example>,
 }
 
@@ -65,6 +70,7 @@ pub(crate) struct Format {
     start: Vec<Regex>,
     excerpt: Vec<Regex>,
     drop: Vec<Regex>,
+    summary: Vec<Regex>,
 }
 
 fn compile(key: &str, patterns: &[String]) -> Result<Vec<Regex>, String> {
@@ -97,6 +103,7 @@ impl Format {
             start: compile("start", &decl.start)?,
             excerpt: compile("excerpt", &decl.excerpt)?,
             drop: compile("drop", &decl.drop)?,
+            summary: compile("summary", &decl.summary)?,
         };
         for (i, example) in decl.examples.iter().enumerate() {
             let mut parsed = Parsed::default();
@@ -113,13 +120,20 @@ impl Format {
         Ok(format)
     }
 
-    /// Adds each failed test `lines` have by this format, with its excerpt.
+    /// Adds each failed test `lines` have by this format, with its excerpt,
+    /// and the counts its summary lines give, or else one failure for each.
     pub(super) fn apply(&self, lines: &[String], out: &mut Parsed) {
         let mut start = 0;
         let mut failed = 0;
+        let mut counted = false;
         for (i, line) in lines.iter().enumerate() {
             if any(&self.start, line) {
                 start = i + 1;
+                continue;
+            }
+            if let Some(c) = self.summary.iter().find_map(|p| p.captures(line)) {
+                out.count_words(c.get(1).unwrap_or_else(|| c.get(0).unwrap()).as_str());
+                counted = true;
                 continue;
             }
             let Some(c) = self.failed.iter().find_map(|p| p.captures(line)) else {
@@ -149,7 +163,10 @@ impl Format {
             out.push(i, name.as_str(), block);
             start = i + 1;
         }
-        out.count(0, failed, 0);
+        // The runner's summary already counts the tests that failed.
+        if !counted {
+            out.count(0, failed, 0);
+        }
     }
 }
 
