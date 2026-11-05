@@ -7,6 +7,10 @@ upstream = true
 timeout_s = 1200
 check_timeout_s = 900
 path = ["~/.cargo/bin"]
+# On macOS, /tmp can give new directories a different group from the user's
+# primary group. fd's owner tests expect temporary files to use that group.
+# This changes only the benchmark run's own temporary directory.
+isolated_setup = [["sh", "-c", "chgrp \"$(id -g)\" \"$TMPDIR\""]]
 prompt = """
 `-u`/`--unrestricted` should be equivalent to `--no-ignore --hidden`.
 However, when followed by `--ignore` or `--no-hidden`, both effects of `-u`
