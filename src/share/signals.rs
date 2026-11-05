@@ -101,6 +101,9 @@ pub(crate) struct Signal {
     /// digested twice counts once.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub seen: BTreeSet<String>,
+    /// JSON findings before exec-cell attribution was fixed cannot be trusted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub json_evidence_v2: bool,
     /// For an overridden rule: fired, overridden; for a slow hook: the
     /// budget and the slowest run, in milliseconds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -151,7 +154,8 @@ impl Signal {
     /// an abandoned answer only once it repeats across sessions.
     pub(crate) fn ready(&self) -> bool {
         match self.kind() {
-            Kind::Crash | Kind::ExitCode | Kind::BadJson => self.count >= 1,
+            Kind::Crash | Kind::ExitCode => self.count >= 1,
+            Kind::BadJson => self.count >= 1 && self.json_evidence_v2,
             Kind::Usage | Kind::Abandoned => self.count >= 3 && self.sessions.len() >= 2,
             Kind::SlowHook => self.count >= 3,
             Kind::Overridden | Kind::Routine => true,
@@ -226,6 +230,14 @@ pub(crate) fn add_digest(gaps: &mut Gaps, session: &str, found: &[(jouet::Found,
         let kind = Kind::from_digest(f.kind);
         let entry = entry_for(gaps, kind, &f.subject);
         let signal = entry.signal.as_mut().expect("entry_for makes a signal");
+        if kind == Kind::BadJson && !signal.json_evidence_v2 {
+            *signal = Signal {
+                kind: Some(kind),
+                subject: f.subject.clone(),
+                json_evidence_v2: true,
+                ..Signal::default()
+            };
+        }
         if !signal.seen.insert(format!("{session}:{line}")) {
             continue;
         }

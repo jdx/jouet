@@ -152,6 +152,30 @@ fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
 }
 
 #[test]
+fn old_json_signals_are_hidden_and_recounted_from_new_evidence() {
+    let mut gaps = Gaps::default();
+    let entry = entry_for(&mut gaps, Kind::BadJson, "jouet pr threads");
+    let old = entry.signal.as_mut().unwrap();
+    old.count = 3;
+    old.seen.insert("s1:12".into());
+    assert!(!old.ready());
+    let found = jouet_audit::digest::jouet::Found {
+        kind: jouet_audit::digest::jouet::Kind::BadJson,
+        subject: "jouet pr threads".into(),
+        index: 0,
+        detail: "invalid JSON".into(),
+    };
+    add_digest(
+        &mut gaps,
+        "s1",
+        &[(found, "jouet pr threads 7 --json".into(), 12)],
+    );
+    let refreshed = gaps.gaps[0].signal.as_ref().unwrap();
+    assert!(refreshed.ready());
+    assert_eq!(refreshed.count, 1);
+}
+
+#[test]
 fn a_session_digested_twice_counts_once_and_sharing_survives_a_refresh() {
     let found = jouet_audit::digest::jouet::Found {
         kind: jouet_audit::digest::jouet::Kind::Crash,

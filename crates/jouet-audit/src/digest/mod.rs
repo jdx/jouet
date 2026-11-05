@@ -985,7 +985,16 @@ fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
         .map(|c| jouet::Run {
             command: c.command.as_deref().unwrap_or_default(),
             exit_code: exit_code(c),
-            output: c.output.as_deref().or(c.error.as_deref()),
+            // Codex tool responses contain envelopes; exec cells can also
+            // combine or transform results. Neither proves a command's stdout.
+            output: if matches!(
+                c.name.as_deref(),
+                Some("exec" | "exec_command" | "shell" | "shell_command" | "local_shell")
+            ) {
+                None
+            } else {
+                c.output.as_deref().or(c.error.as_deref())
+            },
         })
         .collect();
     jouet::scan(&runs)

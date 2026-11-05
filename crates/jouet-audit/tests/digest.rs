@@ -203,6 +203,15 @@ fn what_sessions_share_is_listed_across_them() {
 }
 
 #[test]
+fn codex_exec_tool_envelope_does_not_create_a_bad_json_finding() {
+    let reader = Codex {
+        root: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jouet/codex-exec"),
+    };
+    let digest = read(&reader);
+    assert!(digest.jouet.is_empty(), "{:?}", digest.jouet);
+}
+
+#[test]
 fn jouet_itself_is_checked_in_its_own_sessions() {
     let reader = ClaudeCode {
         root: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jouet/claude"),

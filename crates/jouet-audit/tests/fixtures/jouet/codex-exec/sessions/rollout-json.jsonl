@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"codex-json","cwd":"/work"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"one","input":"const r = await tools.exec_command({cmd: 'jouet pr threads 42 --json'}); text(r.output)"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"one","output":[{"type":"input_text","text":"Script completed\nWall time 1 second\nOutput:\n{\"repo\":\"example\"}"}]}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"two","arguments":"{\"cmd\":\"jouet pr threads 42 --json\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"two","output":"Chunk ID: abc\nWall time: 1 second\nProcess exited with code 0\nFinal output:\n{\"repo\":\"example\"}"}}
