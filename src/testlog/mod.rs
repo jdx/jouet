@@ -391,23 +391,34 @@ fn panic_blames_machine(name: &str) -> bool {
 /// before failures of one name are merged.
 fn parse(lines: &[String], formats: &[Format]) -> Parsed {
     let mut parsed = Parsed::default();
-    libtest(lines, &mut parsed);
-    nextest(lines, &mut parsed);
-    rustc(lines, &mut parsed);
-    rustfmt(lines, &mut parsed);
-    tsc(lines, &mut parsed);
-    go(lines, &mut parsed);
-    pytest(lines, &mut parsed);
-    unittest(lines, &mut parsed);
-    rspec(lines, &mut parsed);
-    jest(lines, &mut parsed);
-    vitest(lines, &mut parsed);
-    playwright(lines, &mut parsed);
-    tap(lines, &mut parsed);
+    known_runners(lines, &mut parsed);
     for format in formats {
         format.apply(lines, &mut parsed);
     }
     parsed
+}
+
+/// Whether a runner jouet knows already counts the tests on `line`.
+fn known_runners_count(line: &str) -> bool {
+    let mut parsed = Parsed::default();
+    known_runners(&[line.to_string()], &mut parsed);
+    parsed.passed + parsed.failed + parsed.skipped > 0
+}
+
+fn known_runners(lines: &[String], parsed: &mut Parsed) {
+    libtest(lines, parsed);
+    nextest(lines, parsed);
+    rustc(lines, parsed);
+    rustfmt(lines, parsed);
+    tsc(lines, parsed);
+    go(lines, parsed);
+    pytest(lines, parsed);
+    unittest(lines, parsed);
+    rspec(lines, parsed);
+    jest(lines, parsed);
+    vitest(lines, parsed);
+    playwright(lines, parsed);
+    tap(lines, parsed);
 }
 
 pub(crate) struct FailureDetail {

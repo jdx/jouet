@@ -668,6 +668,76 @@ fn a_format_that_cannot_work_does_not_load() {
 }
 
 #[test]
+fn a_declared_summary_counts_a_passing_run() {
+    let format = Format::parse(
+        "e2e",
+        &format!("summary = ['^E2E: ran \\d+ tests \\((.+)\\)']\n{E2E_FORMAT}"),
+    )
+    .unwrap();
+    let passing = ">>> E2E cli/test_a\nPASS: cli/test_a (3s, 22 assertions)\n>>> E2E cli/test_b\nPASS: cli/test_b (1s, 4 assertions)\nE2E: ran 2 tests (2 passed, 0 failed), skipped 1 tests\n";
+    let d = digest_with(
+        passing,
+        false,
+        DEFAULT_BUDGET,
+        std::slice::from_ref(&format),
+    );
+    assert_eq!(counts(&d), [2, 0, 0]);
+
+    // A failure the summary counts is not counted again.
+    let failing = format!(
+        "{}E2E: ran 2 tests (1 passed, 1 failed), skipped 0 tests\n",
+        fixture("e2e-script")
+    );
+    let d = digest_with(&failing, true, DEFAULT_BUDGET, &[format]);
+    assert_eq!(counts(&d), [1, 1, 0]);
+    assert_eq!(names(&d), ["backend/test_vfox_exec_env_cache"]);
+}
+
+#[test]
+fn a_summary_without_a_group_reads_its_whole_line_and_can_name_a_failure() {
+    let format = Format::parse(
+        "oneline",
+        "failed = ['^FAIL (\\S+):']\nsummary = ['^FAIL ']\n",
+    )
+    .unwrap();
+    let d = digest_with(
+        "FAIL case_a: 0 passed, 1 failed\n",
+        true,
+        DEFAULT_BUDGET,
+        &[format],
+    );
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["case_a"]);
+}
+
+#[test]
+fn a_summary_line_is_counted_once_and_late_failures_still_count() {
+    let parse = |decl: &str, text: &str| {
+        let format = Format::parse("e2e", decl).unwrap();
+        digest_with(text, true, DEFAULT_BUDGET, &[format])
+    };
+    // A summary line that also starts a test is counted.
+    let d = parse(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^E2E:']\nsummary = ['^E2E: ran']\n",
+        "E2E: ran 2 tests (2 passed)\n",
+    );
+    assert_eq!(counts(&d), [2, 0, 0]);
+    // One that pytest's summary already counted is not counted again.
+    let d = parse(
+        "failed = ['^FAIL (\\S+)']\nsummary = [' passed in ']\n",
+        "============ 2 passed in 0.20s ============\n",
+    );
+    assert_eq!(counts(&d), [2, 0, 0]);
+    // A failure after the last summary is one the summary did not count.
+    let d = parse(
+        "failed = ['^FAIL (\\S+)']\nsummary = ['^E2E: ran']\n",
+        "FAIL a\nE2E: ran 1 tests (0 passed, 1 failed)\nFAIL b\n",
+    );
+    assert_eq!(counts(&d), [0, 2, 0]);
+    assert_eq!(names(&d), ["a", "b"]);
+}
+
+#[test]
 fn a_one_line_failure_keeps_its_line() {
     let format = Format::parse("one", "failed = ['^FAIL (?<name>\\w+):']").unwrap();
     let d = digest_with(

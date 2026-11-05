@@ -15,6 +15,9 @@
 //! excerpt = ['^E2E assertion failed: ']
 //! # Lines left out of the excerpt.
 //! drop = ['^\S+: \d+s$']
+//! # The runner's own count of the tests it ran: its first group, else the
+//! # whole line, is read for `3 passed`, `1 failed` and `2 skipped`.
+//! summary = ['^E2E: ran \d+ tests \((.+)\)']
 //!
 //! [[examples]]
 //! output = """
@@ -47,6 +50,8 @@ struct Decl {
     #[serde(default)]
     drop: Vec<String>,
     #[serde(default)]
+    summary: Vec<String>,
+    #[serde(default)]
     examples: Vec<Example>,
 }
 
@@ -65,6 +70,7 @@ pub(crate) struct Format {
     start: Vec<Regex>,
     excerpt: Vec<Regex>,
     drop: Vec<Regex>,
+    summary: Vec<Regex>,
 }
 
 fn compile(key: &str, patterns: &[String]) -> Result<Vec<Regex>, String> {
@@ -97,6 +103,7 @@ impl Format {
             start: compile("start", &decl.start)?,
             excerpt: compile("excerpt", &decl.excerpt)?,
             drop: compile("drop", &decl.drop)?,
+            summary: compile("summary", &decl.summary)?,
         };
         for (i, example) in decl.examples.iter().enumerate() {
             let mut parsed = Parsed::default();
@@ -113,11 +120,24 @@ impl Format {
         Ok(format)
     }
 
-    /// Adds each failed test `lines` have by this format, with its excerpt.
+    /// Adds each failed test `lines` have by this format, with its excerpt,
+    /// and the counts its summary lines give, or else one failure for each
+    /// failure no summary line after it counts.
     pub(super) fn apply(&self, lines: &[String], out: &mut Parsed) {
         let mut start = 0;
-        let mut failed = 0;
+        // The failures since the last summary line, which it did not count.
+        let mut uncounted = 0;
         for (i, line) in lines.iter().enumerate() {
+            // A summary line can also start a test or name a failure, so it
+            // is read for those too. One that a runner jouet knows has
+            // counted is not counted again.
+            let summary = self.summary.iter().find_map(|p| p.captures(line));
+            if let Some(c) = &summary {
+                if !super::known_runners_count(line) {
+                    out.count_words(c.get(1).map_or(line.as_str(), |g| g.as_str()));
+                }
+                uncounted = 0;
+            }
             if any(&self.start, line) {
                 start = i + 1;
                 continue;
@@ -128,7 +148,9 @@ impl Format {
             let Some(name) = c.name("name").or_else(|| c.get(1)) else {
                 continue;
             };
-            failed += 1;
+            if summary.is_none() {
+                uncounted += 1;
+            }
             let body = &lines[start.min(i)..i];
             // Without a start, the lines before a failure may be another
             // test's: only an excerpt line marks where this one's begin.
@@ -149,7 +171,7 @@ impl Format {
             out.push(i, name.as_str(), block);
             start = i + 1;
         }
-        out.count(0, failed, 0);
+        out.count(0, uncounted, 0);
     }
 }
 
