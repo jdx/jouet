@@ -1,0 +1,1514 @@
+{
+  "repo": "jdx/demo",
+  "rest": {
+    "/repos/jdx/demo/pulls/1705": {
+      "number": 1705,
+      "id": 3007,
+      "node_id": "PR_1705",
+      "state": "open",
+      "draft": false,
+      "locked": false,
+      "title": "fix(config): keep output.log, hk.log and patches in the repository's git dir",
+      "body": "Fixes #1703.\n\nhk kept `output.log`, `hk.log` and stash backup `patches/` in one per-user directory (`~/.local/state/hk`), so every repository and worktree shared them. A failure in repo A could print `See ~/.local/state/hk/output.log` while the file held another repo's output, and patch rotation could delete another repo's backups.\n\n## Behavior\n\nInside a repository, state now defaults to the git directory:\n\n| State | Default | Scope |\n|---|---|---|\n| `patches/` | `<common-git-dir>/hk/patches` | repository, shared by linked worktrees |\n| `output.log` | `<git-dir>/hk/output.log` | one checkout |\n| `hk.log` | `<git-dir>/hk/hk.log` | one checkout |\n\n- Explicit `HK_STATE_DIR`, `HK_OUTPUT_FILE` and `HK_LOG_FILE` still win; with `HK_STATE_DIR` set everything lives there as before. Outside a repository the platform state dir remains the fallback.\n- Git never tracks files under its git dir, so no `.gitignore` change is needed. The `hk` directories are still created `0700`.\n- In a shared `HK_STATE_DIR`, patch files are named after the repository root (not the current subdirectory) and rotation only matches `<name>-YYYYMMDD-HHMMSS-...`, so `app` no longer claims `app-web`'s patches.\n\n## Validation\n\nNew bats tests cover per-checkout `output.log` across a linked worktree, patches shared via the common git dir, and rotation not touching a sibling repo's patches in a shared `HK_STATE_DIR`.",
+      "user": {
+        "login": "jdx"
+      },
+      "html_url": "https://github.com/jdx/demo/pull/1705",
+      "url": "http://api.github.localhost/repos/jdx/demo/pulls/1705",
+      "head": {
+        "ref": "state-in-git-dir",
+        "sha": "{{head_sha}}",
+        "label": "jdx:state-in-git-dir",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "base": {
+        "ref": "main",
+        "sha": "{{base_sha}}",
+        "label": "jdx:main",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "merged": false,
+      "created_at": "2026-10-15T10:00:00Z",
+      "updated_at": "2026-10-15T10:00:00Z"
+    },
+    "/repos/jdx/demo/pulls": [
+      {
+        "number": 1705,
+        "id": 3007,
+        "node_id": "PR_1705",
+        "state": "open",
+        "draft": false,
+        "locked": false,
+        "title": "fix(config): keep output.log, hk.log and patches in the repository's git dir",
+        "body": "Fixes #1703.\n\nhk kept `output.log`, `hk.log` and stash backup `patches/` in one per-user directory (`~/.local/state/hk`), so every repository and worktree shared them. A failure in repo A could print `See ~/.local/state/hk/output.log` while the file held another repo's output, and patch rotation could delete another repo's backups.\n\n## Behavior\n\nInside a repository, state now defaults to the git directory:\n\n| State | Default | Scope |\n|---|---|---|\n| `patches/` | `<common-git-dir>/hk/patches` | repository, shared by linked worktrees |\n| `output.log` | `<git-dir>/hk/output.log` | one checkout |\n| `hk.log` | `<git-dir>/hk/hk.log` | one checkout |\n\n- Explicit `HK_STATE_DIR`, `HK_OUTPUT_FILE` and `HK_LOG_FILE` still win; with `HK_STATE_DIR` set everything lives there as before. Outside a repository the platform state dir remains the fallback.\n- Git never tracks files under its git dir, so no `.gitignore` change is needed. The `hk` directories are still created `0700`.\n- In a shared `HK_STATE_DIR`, patch files are named after the repository root (not the current subdirectory) and rotation only matches `<name>-YYYYMMDD-HHMMSS-...`, so `app` no longer claims `app-web`'s patches.\n\n## Validation\n\nNew bats tests cover per-checkout `output.log` across a linked worktree, patches shared via the common git dir, and rotation not touching a sibling repo's patches in a shared `HK_STATE_DIR`.",
+        "user": {
+          "login": "jdx"
+        },
+        "html_url": "https://github.com/jdx/demo/pull/1705",
+        "url": "http://api.github.localhost/repos/jdx/demo/pulls/1705",
+        "head": {
+          "ref": "state-in-git-dir",
+          "sha": "{{head_sha}}",
+          "label": "jdx:state-in-git-dir",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "{{base_sha}}",
+          "label": "jdx:main",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "mergeable": true,
+        "mergeable_state": "unstable",
+        "merged": false,
+        "created_at": "2026-10-15T10:00:00Z",
+        "updated_at": "2026-10-15T10:00:00Z"
+      }
+    ],
+    "/repos/jdx/demo/commits/{{head_sha}}/check-runs": {
+      "total_count": 2,
+      "check_runs": [
+        {
+          "id": 7101,
+          "node_id": "CR_7101",
+          "name": "ci-other (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-15T10:00:00Z",
+          "completed_at": "2026-10-15T10:00:40Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 40,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7102,
+          "node_id": "CR_7102",
+          "name": "ci-hosted-bats (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-15T10:00:00Z",
+          "completed_at": "2026-10-15T10:01:30Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/status": {
+      "state": "pending",
+      "statuses": [],
+      "total_count": 0,
+      "sha": "{{head_sha}}"
+    },
+    "/repos/jdx/demo/branches/main": {
+      "name": "main",
+      "commit": {
+        "sha": "{{base_sha}}"
+      },
+      "protected": false
+    },
+    "/repos/jdx/demo/actions/runs": {
+      "total_count": 1,
+      "workflow_runs": [
+        {
+          "id": 9001,
+          "node_id": "WFR_9001",
+          "name": "ci",
+          "display_title": "fix(config): keep output.log, hk.log and patches in the repository's git dir",
+          "head_branch": "state-in-git-dir",
+          "head_sha": "{{head_sha}}",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure",
+          "workflow_id": 501,
+          "run_number": 41,
+          "run_attempt": 1,
+          "created_at": "2026-10-15T10:00:00Z",
+          "updated_at": "2026-10-15T10:00:50Z",
+          "run_started_at": "2026-10-15T10:00:00Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+          "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+          "path": ".github/workflows/ci.yml",
+          "repository": {
+            "full_name": "jdx/demo"
+          },
+          "pull_requests": [
+            {
+              "number": 1705,
+              "head": {
+                "ref": "state-in-git-dir",
+                "sha": "{{head_sha}}"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "{{base_sha}}"
+              }
+            }
+          ],
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001": {
+      "id": 9001,
+      "node_id": "WFR_9001",
+      "name": "ci",
+      "display_title": "fix(config): keep output.log, hk.log and patches in the repository's git dir",
+      "head_branch": "state-in-git-dir",
+      "head_sha": "{{head_sha}}",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "workflow_id": 501,
+      "run_number": 41,
+      "run_attempt": 1,
+      "created_at": "2026-10-15T10:00:00Z",
+      "updated_at": "2026-10-15T10:00:50Z",
+      "run_started_at": "2026-10-15T10:00:00Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+      "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+      "path": ".github/workflows/ci.yml",
+      "repository": {
+        "full_name": "jdx/demo"
+      },
+      "pull_requests": [
+        {
+          "number": 1705,
+          "head": {
+            "ref": "state-in-git-dir",
+            "sha": "{{head_sha}}"
+          },
+          "base": {
+            "ref": "main",
+            "sha": "{{base_sha}}"
+          }
+        }
+      ],
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null
+      }
+    },
+    "/repos/jdx/demo/actions/runs/9001/jobs": {
+      "total_count": 2,
+      "jobs": [
+        {
+          "id": 7101,
+          "run_id": 9001,
+          "node_id": "J_7101",
+          "name": "ci-other (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "state-in-git-dir",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-15T10:00:00Z",
+          "completed_at": "2026-10-15T10:00:40Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@v3",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "mise run lint",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 4
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 40,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v5",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@v3",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 3
+              },
+              {
+                "name": "mise run lint",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              }
+            ]
+          }
+        },
+        {
+          "id": 7102,
+          "run_id": 9001,
+          "node_id": "J_7102",
+          "name": "ci-hosted-bats (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "state-in-git-dir",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-15T10:00:00Z",
+          "completed_at": "2026-10-15T10:00:50Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@v3",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "mise run test:bats:nogit",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 4
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 90,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@v5",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@v3",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 3
+              },
+              {
+                "name": "mise run test:bats:nogit",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/jobs/7101": {
+      "id": 7101,
+      "run_id": 9001,
+      "node_id": "J_7101",
+      "name": "ci-other (ubuntu-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "state-in-git-dir",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-15T10:00:00Z",
+      "completed_at": "2026-10-15T10:00:40Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@v3",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "mise run lint",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 40,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@v3",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "mise run lint",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102": {
+      "id": 7102,
+      "run_id": 9001,
+      "node_id": "J_7102",
+      "name": "ci-hosted-bats (ubuntu-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "state-in-git-dir",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-15T10:00:00Z",
+      "completed_at": "2026-10-15T10:00:50Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@v3",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "mise run test:bats:nogit",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 90,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@v3",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "mise run test:bats:nogit",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7101/logs": {
+      "$text": "2026-10-15T10:31:43.3390056Z ##[group]Run mise run lint\n2026-10-15T10:31:43.3390414Z mise run lint\n2026-10-15T10:31:43.3414648Z shell: /usr/bin/bash -e {0}\n2026-10-15T10:31:43.3414877Z env:\n2026-10-15T10:31:43.3415156Z   MISE_EXPERIMENTAL: true\n2026-10-15T10:31:43.3948911Z [pkl:gen] $ ~/work/hk/hk/mise-tasks/pkl/gen\n2026-10-15T10:31:43.4941143Z pkl/Builtins.pkl\n2026-10-15T10:31:48.2235758Z pkl/builtins_meta.json\n2026-10-15T10:31:48.9057108Z [build] $ ~/work/hk/hk/mise-tasks/build\n2026-10-15T10:31:49.1779981Z    Compiling hk v2.6.0 (/home/runner/work/hk/hk)\n2026-10-15T10:31:49.3506572Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s\n2026-10-15T10:31:49.3981955Z mbx[cache]: object cache: 3 hits, 0 misses; 0 B downloaded, 0 B uploaded, 0 B stored locally\n2026-10-15T10:31:49.3982430Z mbx[cache]: 454.6ms session; 17.29s estimated compiler time avoided (summed across compilations)\n2026-10-15T10:32:56.5359189Z ❯ prettier  [==================] 2/2\n2026-10-15T10:32:56.5361858Z ❯ prettier\n2026-10-15T10:32:56.5362442Z ✔ prettier\n2026-10-15T10:33:07.4622145Z   cargo-clippy – error: items after a test module\n2026-10-15T10:33:07.4622544Z   cargo-clippy –     --> src/git.rs:4266:1\n2026-10-15T10:33:07.4622792Z   cargo-clippy –      |\n2026-10-15T10:33:07.4623051Z   cargo-clippy – 4266 | mod tests {\n2026-10-15T10:33:07.4626498Z   cargo-clippy –      | ^^^^^^^^^\n2026-10-15T10:33:07.4626843Z   cargo-clippy – ...\n2026-10-15T10:33:07.4627270Z   cargo-clippy – 4806 | fn is_patch_of(file_name: &str, prefix: &str) -> bool {\n2026-10-15T10:33:07.4627678Z   cargo-clippy –      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n2026-10-15T10:33:07.4628001Z   cargo-clippy –      |\n2026-10-15T10:33:07.4628578Z   cargo-clippy –      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#items_after_test_module\n2026-10-15T10:33:07.4629676Z   cargo-clippy –      = note: `-D clippy::items-after-test-module` implied by `-D warnings`\n2026-10-15T10:33:07.4630128Z   cargo-clippy –      = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`\n2026-10-15T10:33:07.4630615Z   cargo-clippy –      = help: move the items to before the test module was defined\n2026-10-15T10:33:07.4631036Z   cargo-clippy – 125 files – **/*.rs – cargo clippy --manifest-path Cargo.toml --quiet --all-targets -- -D warnings\n2026-10-15T10:33:08.9487491Z   cargo-clippy – error: could not compile `hk` (bin \"hk\" test) due to 1 previous error\n2026-10-15T10:33:09.2800518Z   cargo-clippy – mbx[savings]: 586 cache hits and counting. rustc thinks it has been busy.\n2026-10-15T10:33:09.3012116Z ✗ cargo-clippy\n2026-10-15T10:33:09.3013911Z ✗ cargo-clippy – ERROR\n2026-10-15T10:33:09.3023824Z \n2026-10-15T10:33:09.3024112Z cargo-clippy stderr:\n2026-10-15T10:33:09.3024539Z error: items after a test module\n2026-10-15T10:33:09.3025719Z     --> src/git.rs:4266:1\n2026-10-15T10:33:09.3025946Z      |\n2026-10-15T10:33:09.3026164Z 4266 | mod tests {\n2026-10-15T10:33:09.3026662Z      | ^^^^^^^^^\n2026-10-15T10:33:09.3026887Z ...\n2026-10-15T10:33:09.3027207Z 4806 | fn is_patch_of(file_name: &str, prefix: &str) -> bool {\n2026-10-15T10:33:09.3027629Z      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n2026-10-15T10:33:09.3027907Z      |\n2026-10-15T10:33:09.3028641Z      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#items_after_test_module\n2026-10-15T10:33:09.3030504Z      = note: `-D clippy::items-after-test-module` implied by `-D warnings`\n2026-10-15T10:33:09.3031079Z      = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`\n2026-10-15T10:33:09.3031568Z      = help: move the items to before the test module was defined\n2026-10-15T10:33:09.3031813Z \n2026-10-15T10:33:09.3032015Z error: could not compile `hk` (bin \"hk\" test) due to 1 previous error\n2026-10-15T10:33:09.3032413Z mbx[savings]: 586 cache hits and counting. rustc thinks it has been busy.\n2026-10-15T10:33:09.3039239Z \n2026-10-15T10:33:09.3039471Z See /home/runner/work/hk/hk/.git/hk/output.log for full command output\n2026-10-15T10:33:09.3089860Z Finished in 85.92s\n2026-10-15T10:33:09.3090198Z [lint] ERROR task failed\n2026-10-15T10:33:09.3169615Z ##[error]Process completed with exit code 101.\n",
+      "$until": 40,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102/logs": {
+      "$text": "2026-10-15T10:33:56.3806281Z ##[group]Run nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60\n2026-10-15T10:33:56.3806605Z with:\n2026-10-15T10:33:56.3806716Z   timeout_minutes: 10\n2026-10-15T10:33:56.3806833Z   max_attempts: 2\n2026-10-15T10:33:56.3810365Z   MISE_YES: 1\n2026-10-15T10:33:56.3816980Z ##[endgroup]\n2026-10-15T10:33:56.4189845Z ##[group]Attempt 1\n2026-10-15T10:33:56.4509375Z [test:bats:nogit] $ ~/work/hk/hk/mise-tasks/test/bats/nogit\n2026-10-15T10:33:57.8168260Z 1..345\n2026-10-15T10:34:26.4133455Z ok 1 agent instruction generators match snapshots\n2026-10-15T10:34:26.4133827Z ok 2 agent hook generators match snapshots\n2026-10-15T10:34:26.4134101Z ok 3 agent MCP generators match snapshots\n2026-10-15T10:34:26.4134413Z not ok 4 agent generators do not edit host configuration\n2026-10-15T10:34:26.4134944Z # (from function `assert_equal' in file test/test_helper/../../test/test_helper/bats-assert/src/assert_equal.bash, line 40,\n2026-10-15T10:34:26.4135458Z #  in test file test/agent_generators.bats, line 49)\n2026-10-15T10:34:26.4135751Z #   `assert_equal \"$after\" \"$before\"' failed\n2026-10-15T10:34:26.4136179Z # Initialized empty Git repository in /tmp/agent_generators.bats-4-jQJjPe/src/proj/.git/\n2026-10-15T10:34:26.4136578Z # \n2026-10-15T10:34:26.4136800Z # -- values do not equal --\n2026-10-15T10:34:26.4137017Z # expected (18 lines):\n2026-10-15T10:34:26.4137209Z #   ./.git/HEAD\n2026-10-15T10:34:26.4137385Z #   ./.git/config\n2026-10-15T10:34:26.4137567Z #   ./.git/description\n2026-10-15T10:34:26.4137789Z #   ./.git/hooks/applypatch-msg.sample\n2026-10-15T10:34:26.4138042Z #   ./.git/hooks/commit-msg.sample\n2026-10-15T10:34:26.4138289Z #   ./.git/hooks/fsmonitor-watchman.sample\n2026-10-15T10:34:26.4138551Z #   ./.git/hooks/post-update.sample\n2026-10-15T10:34:26.4138794Z #   ./.git/hooks/pre-applypatch.sample\n2026-10-15T10:34:26.4139035Z #   ./.git/hooks/pre-commit.sample\n2026-10-15T10:34:26.4139284Z #   ./.git/hooks/pre-merge-commit.sample\n2026-10-15T10:34:26.4139535Z #   ./.git/hooks/pre-push.sample\n2026-10-15T10:34:26.4139767Z #   ./.git/hooks/pre-rebase.sample\n2026-10-15T10:34:26.4140007Z #   ./.git/hooks/pre-receive.sample\n2026-10-15T10:34:26.4140259Z #   ./.git/hooks/prepare-commit-msg.sample\n2026-10-15T10:34:26.4140676Z #   ./.git/hooks/push-to-checkout.sample\n2026-10-15T10:34:26.4140933Z #   ./.git/hooks/sendemail-validate.sample\n2026-10-15T10:34:26.4141181Z #   ./.git/hooks/update.sample\n2026-10-15T10:34:26.4141397Z #   ./.git/info/exclude\n2026-10-15T10:34:26.4141591Z # actual (19 lines):\n2026-10-15T10:34:26.4141775Z #   ./.git/HEAD\n2026-10-15T10:34:26.4141947Z #   ./.git/config\n2026-10-15T10:34:26.4142127Z #   ./.git/description\n2026-10-15T10:34:26.4142320Z #   ./.git/hk/hk.log\n2026-10-15T10:34:26.4142522Z #   ./.git/hooks/applypatch-msg.sample\n2026-10-15T10:34:26.4142770Z #   ./.git/hooks/commit-msg.sample\n2026-10-15T10:34:26.4143015Z #   ./.git/hooks/fsmonitor-watchman.sample\n2026-10-15T10:34:26.4143271Z #   ./.git/hooks/post-update.sample\n2026-10-15T10:34:26.4143519Z #   ./.git/hooks/pre-applypatch.sample\n2026-10-15T10:34:26.4143966Z #   ./.git/hooks/pre-commit.sample\n2026-10-15T10:34:26.4144756Z #   ./.git/hooks/pre-merge-commit.sample\n2026-10-15T10:34:26.4145349Z #   ./.git/hooks/pre-push.sample\n2026-10-15T10:34:26.4145961Z #   ./.git/hooks/pre-rebase.sample\n2026-10-15T10:34:26.4146319Z #   ./.git/hooks/pre-receive.sample\n2026-10-15T10:34:26.4147547Z #   ./.git/hooks/prepare-commit-msg.sample\n2026-10-15T10:34:26.4147942Z #   ./.git/hooks/push-to-checkout.sample\n2026-10-15T10:34:26.4148332Z #   ./.git/hooks/sendemail-validate.sample\n2026-10-15T10:34:26.4148713Z #   ./.git/hooks/update.sample\n2026-10-15T10:34:26.4149053Z #   ./.git/info/exclude\n2026-10-15T10:34:26.4149366Z # --\n2026-10-15T10:34:26.4149650Z # \n2026-10-15T10:34:26.4150037Z ok 5 agent hooks do not print hk run_result JSON\n2026-10-15T10:34:26.4151162Z ok 6 agent stop-hook is silent and exits 0 when the check passes\n2026-10-15T10:34:26.4151684Z ok 7 agent stop-hook --target codex prints {} when the check passes\n2026-10-15T10:34:39.0732307Z        from function `run' in file test/bats/lib/bats-core/test_functions.bash, line 356,\n2026-10-15T10:34:39.0732632Z        in test file test/check_fix_suggestion.bats, line 265)\n2026-10-15T10:34:39.1928264Z [test:bats:nogit] ERROR task failed\n2026-10-15T10:34:39.1981455Z ##[warning]bats (nogit) exited with status 1; a retry may follow. not ok 4 agent generators do not edit host configuration\n2026-10-15T10:34:49.5056172Z ##[warning]Attempt 1 failed. Reason: Child_process exited with error code 1\n2026-10-15T10:34:49.5059007Z ##[endgroup]\n2026-10-15T10:35:31.0880121Z ##[warning]bats (nogit) exited with status 1; a retry may follow. not ok 4 agent generators do not edit host configuration\n2026-10-15T10:35:41.5804875Z ##[endgroup]\n2026-10-15T10:35:41.5811140Z ##[error]Final attempt failed. Child_process exited with error code 1\n",
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/workflows/501": {
+      "id": 501,
+      "node_id": "W_501",
+      "name": "ci",
+      "path": ".github/workflows/ci.yml",
+      "state": "active",
+      "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+    },
+    "/repos/jdx/demo/actions/workflows": {
+      "total_count": 1,
+      "workflows": [
+        {
+          "id": 501,
+          "node_id": "W_501",
+          "name": "ci",
+          "path": ".github/workflows/ci.yml",
+          "state": "active",
+          "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001/logs": {
+      "$zip": {
+        "0_ci-other (ubuntu-latest).txt": "2026-10-15T10:31:43.3390056Z ##[group]Run mise run lint\n2026-10-15T10:31:43.3390414Z mise run lint\n2026-10-15T10:31:43.3414648Z shell: /usr/bin/bash -e {0}\n2026-10-15T10:31:43.3414877Z env:\n2026-10-15T10:31:43.3415156Z   MISE_EXPERIMENTAL: true\n2026-10-15T10:31:43.3948911Z [pkl:gen] $ ~/work/hk/hk/mise-tasks/pkl/gen\n2026-10-15T10:31:43.4941143Z pkl/Builtins.pkl\n2026-10-15T10:31:48.2235758Z pkl/builtins_meta.json\n2026-10-15T10:31:48.9057108Z [build] $ ~/work/hk/hk/mise-tasks/build\n2026-10-15T10:31:49.1779981Z    Compiling hk v2.6.0 (/home/runner/work/hk/hk)\n2026-10-15T10:31:49.3506572Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s\n2026-10-15T10:31:49.3981955Z mbx[cache]: object cache: 3 hits, 0 misses; 0 B downloaded, 0 B uploaded, 0 B stored locally\n2026-10-15T10:31:49.3982430Z mbx[cache]: 454.6ms session; 17.29s estimated compiler time avoided (summed across compilations)\n2026-10-15T10:32:56.5359189Z ❯ prettier  [==================] 2/2\n2026-10-15T10:32:56.5361858Z ❯ prettier\n2026-10-15T10:32:56.5362442Z ✔ prettier\n2026-10-15T10:33:07.4622145Z   cargo-clippy – error: items after a test module\n2026-10-15T10:33:07.4622544Z   cargo-clippy –     --> src/git.rs:4266:1\n2026-10-15T10:33:07.4622792Z   cargo-clippy –      |\n2026-10-15T10:33:07.4623051Z   cargo-clippy – 4266 | mod tests {\n2026-10-15T10:33:07.4626498Z   cargo-clippy –      | ^^^^^^^^^\n2026-10-15T10:33:07.4626843Z   cargo-clippy – ...\n2026-10-15T10:33:07.4627270Z   cargo-clippy – 4806 | fn is_patch_of(file_name: &str, prefix: &str) -> bool {\n2026-10-15T10:33:07.4627678Z   cargo-clippy –      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n2026-10-15T10:33:07.4628001Z   cargo-clippy –      |\n2026-10-15T10:33:07.4628578Z   cargo-clippy –      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#items_after_test_module\n2026-10-15T10:33:07.4629676Z   cargo-clippy –      = note: `-D clippy::items-after-test-module` implied by `-D warnings`\n2026-10-15T10:33:07.4630128Z   cargo-clippy –      = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`\n2026-10-15T10:33:07.4630615Z   cargo-clippy –      = help: move the items to before the test module was defined\n2026-10-15T10:33:07.4631036Z   cargo-clippy – 125 files – **/*.rs – cargo clippy --manifest-path Cargo.toml --quiet --all-targets -- -D warnings\n2026-10-15T10:33:08.9487491Z   cargo-clippy – error: could not compile `hk` (bin \"hk\" test) due to 1 previous error\n2026-10-15T10:33:09.2800518Z   cargo-clippy – mbx[savings]: 586 cache hits and counting. rustc thinks it has been busy.\n2026-10-15T10:33:09.3012116Z ✗ cargo-clippy\n2026-10-15T10:33:09.3013911Z ✗ cargo-clippy – ERROR\n2026-10-15T10:33:09.3023824Z \n2026-10-15T10:33:09.3024112Z cargo-clippy stderr:\n2026-10-15T10:33:09.3024539Z error: items after a test module\n2026-10-15T10:33:09.3025719Z     --> src/git.rs:4266:1\n2026-10-15T10:33:09.3025946Z      |\n2026-10-15T10:33:09.3026164Z 4266 | mod tests {\n2026-10-15T10:33:09.3026662Z      | ^^^^^^^^^\n2026-10-15T10:33:09.3026887Z ...\n2026-10-15T10:33:09.3027207Z 4806 | fn is_patch_of(file_name: &str, prefix: &str) -> bool {\n2026-10-15T10:33:09.3027629Z      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n2026-10-15T10:33:09.3027907Z      |\n2026-10-15T10:33:09.3028641Z      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#items_after_test_module\n2026-10-15T10:33:09.3030504Z      = note: `-D clippy::items-after-test-module` implied by `-D warnings`\n2026-10-15T10:33:09.3031079Z      = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`\n2026-10-15T10:33:09.3031568Z      = help: move the items to before the test module was defined\n2026-10-15T10:33:09.3031813Z \n2026-10-15T10:33:09.3032015Z error: could not compile `hk` (bin \"hk\" test) due to 1 previous error\n2026-10-15T10:33:09.3032413Z mbx[savings]: 586 cache hits and counting. rustc thinks it has been busy.\n2026-10-15T10:33:09.3039239Z \n2026-10-15T10:33:09.3039471Z See /home/runner/work/hk/hk/.git/hk/output.log for full command output\n2026-10-15T10:33:09.3089860Z Finished in 85.92s\n2026-10-15T10:33:09.3090198Z [lint] ERROR task failed\n2026-10-15T10:33:09.3169615Z ##[error]Process completed with exit code 101.\n",
+        "1_ci-hosted-bats (ubuntu-latest).txt": "2026-10-15T10:33:56.3806281Z ##[group]Run nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60\n2026-10-15T10:33:56.3806605Z with:\n2026-10-15T10:33:56.3806716Z   timeout_minutes: 10\n2026-10-15T10:33:56.3806833Z   max_attempts: 2\n2026-10-15T10:33:56.3810365Z   MISE_YES: 1\n2026-10-15T10:33:56.3816980Z ##[endgroup]\n2026-10-15T10:33:56.4189845Z ##[group]Attempt 1\n2026-10-15T10:33:56.4509375Z [test:bats:nogit] $ ~/work/hk/hk/mise-tasks/test/bats/nogit\n2026-10-15T10:33:57.8168260Z 1..345\n2026-10-15T10:34:26.4133455Z ok 1 agent instruction generators match snapshots\n2026-10-15T10:34:26.4133827Z ok 2 agent hook generators match snapshots\n2026-10-15T10:34:26.4134101Z ok 3 agent MCP generators match snapshots\n2026-10-15T10:34:26.4134413Z not ok 4 agent generators do not edit host configuration\n2026-10-15T10:34:26.4134944Z # (from function `assert_equal' in file test/test_helper/../../test/test_helper/bats-assert/src/assert_equal.bash, line 40,\n2026-10-15T10:34:26.4135458Z #  in test file test/agent_generators.bats, line 49)\n2026-10-15T10:34:26.4135751Z #   `assert_equal \"$after\" \"$before\"' failed\n2026-10-15T10:34:26.4136179Z # Initialized empty Git repository in /tmp/agent_generators.bats-4-jQJjPe/src/proj/.git/\n2026-10-15T10:34:26.4136578Z # \n2026-10-15T10:34:26.4136800Z # -- values do not equal --\n2026-10-15T10:34:26.4137017Z # expected (18 lines):\n2026-10-15T10:34:26.4137209Z #   ./.git/HEAD\n2026-10-15T10:34:26.4137385Z #   ./.git/config\n2026-10-15T10:34:26.4137567Z #   ./.git/description\n2026-10-15T10:34:26.4137789Z #   ./.git/hooks/applypatch-msg.sample\n2026-10-15T10:34:26.4138042Z #   ./.git/hooks/commit-msg.sample\n2026-10-15T10:34:26.4138289Z #   ./.git/hooks/fsmonitor-watchman.sample\n2026-10-15T10:34:26.4138551Z #   ./.git/hooks/post-update.sample\n2026-10-15T10:34:26.4138794Z #   ./.git/hooks/pre-applypatch.sample\n2026-10-15T10:34:26.4139035Z #   ./.git/hooks/pre-commit.sample\n2026-10-15T10:34:26.4139284Z #   ./.git/hooks/pre-merge-commit.sample\n2026-10-15T10:34:26.4139535Z #   ./.git/hooks/pre-push.sample\n2026-10-15T10:34:26.4139767Z #   ./.git/hooks/pre-rebase.sample\n2026-10-15T10:34:26.4140007Z #   ./.git/hooks/pre-receive.sample\n2026-10-15T10:34:26.4140259Z #   ./.git/hooks/prepare-commit-msg.sample\n2026-10-15T10:34:26.4140676Z #   ./.git/hooks/push-to-checkout.sample\n2026-10-15T10:34:26.4140933Z #   ./.git/hooks/sendemail-validate.sample\n2026-10-15T10:34:26.4141181Z #   ./.git/hooks/update.sample\n2026-10-15T10:34:26.4141397Z #   ./.git/info/exclude\n2026-10-15T10:34:26.4141591Z # actual (19 lines):\n2026-10-15T10:34:26.4141775Z #   ./.git/HEAD\n2026-10-15T10:34:26.4141947Z #   ./.git/config\n2026-10-15T10:34:26.4142127Z #   ./.git/description\n2026-10-15T10:34:26.4142320Z #   ./.git/hk/hk.log\n2026-10-15T10:34:26.4142522Z #   ./.git/hooks/applypatch-msg.sample\n2026-10-15T10:34:26.4142770Z #   ./.git/hooks/commit-msg.sample\n2026-10-15T10:34:26.4143015Z #   ./.git/hooks/fsmonitor-watchman.sample\n2026-10-15T10:34:26.4143271Z #   ./.git/hooks/post-update.sample\n2026-10-15T10:34:26.4143519Z #   ./.git/hooks/pre-applypatch.sample\n2026-10-15T10:34:26.4143966Z #   ./.git/hooks/pre-commit.sample\n2026-10-15T10:34:26.4144756Z #   ./.git/hooks/pre-merge-commit.sample\n2026-10-15T10:34:26.4145349Z #   ./.git/hooks/pre-push.sample\n2026-10-15T10:34:26.4145961Z #   ./.git/hooks/pre-rebase.sample\n2026-10-15T10:34:26.4146319Z #   ./.git/hooks/pre-receive.sample\n2026-10-15T10:34:26.4147547Z #   ./.git/hooks/prepare-commit-msg.sample\n2026-10-15T10:34:26.4147942Z #   ./.git/hooks/push-to-checkout.sample\n2026-10-15T10:34:26.4148332Z #   ./.git/hooks/sendemail-validate.sample\n2026-10-15T10:34:26.4148713Z #   ./.git/hooks/update.sample\n2026-10-15T10:34:26.4149053Z #   ./.git/info/exclude\n2026-10-15T10:34:26.4149366Z # --\n2026-10-15T10:34:26.4149650Z # \n2026-10-15T10:34:26.4150037Z ok 5 agent hooks do not print hk run_result JSON\n2026-10-15T10:34:26.4151162Z ok 6 agent stop-hook is silent and exits 0 when the check passes\n2026-10-15T10:34:26.4151684Z ok 7 agent stop-hook --target codex prints {} when the check passes\n2026-10-15T10:34:39.0732307Z        from function `run' in file test/bats/lib/bats-core/test_functions.bash, line 356,\n2026-10-15T10:34:39.0732632Z        in test file test/check_fix_suggestion.bats, line 265)\n2026-10-15T10:34:39.1928264Z [test:bats:nogit] ERROR task failed\n2026-10-15T10:34:39.1981455Z ##[warning]bats (nogit) exited with status 1; a retry may follow. not ok 4 agent generators do not edit host configuration\n2026-10-15T10:34:49.5056172Z ##[warning]Attempt 1 failed. Reason: Child_process exited with error code 1\n2026-10-15T10:34:49.5059007Z ##[endgroup]\n2026-10-15T10:35:31.0880121Z ##[warning]bats (nogit) exited with status 1; a retry may follow. not ok 4 agent generators do not edit host configuration\n2026-10-15T10:35:41.5804875Z ##[endgroup]\n2026-10-15T10:35:41.5811140Z ##[error]Final attempt failed. Child_process exited with error code 1\n"
+      },
+      "$until": 90,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/pulls/1705/reviews": [
+      {
+        "id": 4401,
+        "node_id": "PRR_1",
+        "user": {
+          "login": "greptile-apps[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-15T10:33:17Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/1705#pullrequestreview-4401"
+      },
+      {
+        "id": 4402,
+        "node_id": "PRR_2",
+        "user": {
+          "login": "cursor[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-15T10:34:43Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/1705#pullrequestreview-4402"
+      },
+      {
+        "id": 4403,
+        "node_id": "PRR_3",
+        "user": {
+          "login": "coderabbitai[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-15T10:35:52Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/1705#pullrequestreview-4403"
+      }
+    ],
+    "/repos/jdx/demo/issues/1705/comments": [],
+    "/repos/jdx/demo/activity": []
+  },
+  "graphql": {
+    "viewer": {
+      "__typename": "User",
+      "login": "jdx",
+      "id": "U_jdx",
+      "name": "jdx"
+    },
+    "repository": {
+      "__typename": "Repository",
+      "id": "R_demo",
+      "name": "demo",
+      "nameWithOwner": "jdx/demo",
+      "url": "https://github.com/jdx/demo",
+      "owner": {
+        "__typename": "User",
+        "login": "jdx",
+        "id": "U_jdx",
+        "name": "jdx"
+      },
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "viewerPermission": "ADMIN",
+      "isPrivate": false,
+      "pullRequests": {
+        "nodes": [
+          {
+            "__typename": "PullRequest",
+            "id": "PR_1705",
+            "number": 1705,
+            "databaseId": 301705,
+            "title": "fix(config): keep output.log, hk.log and patches in the repository's git dir",
+            "body": "Fixes #1703.\n\nhk kept `output.log`, `hk.log` and stash backup `patches/` in one per-user directory (`~/.local/state/hk`), so every repository and worktree shared them. A failure in repo A could print `See ~/.local/state/hk/output.log` while the file held another repo's output, and patch rotation could delete another repo's backups.\n\n## Behavior\n\nInside a repository, state now defaults to the git directory:\n\n| State | Default | Scope |\n|---|---|---|\n| `patches/` | `<common-git-dir>/hk/patches` | repository, shared by linked worktrees |\n| `output.log` | `<git-dir>/hk/output.log` | one checkout |\n| `hk.log` | `<git-dir>/hk/hk.log` | one checkout |\n\n- Explicit `HK_STATE_DIR`, `HK_OUTPUT_FILE` and `HK_LOG_FILE` still win; with `HK_STATE_DIR` set everything lives there as before. Outside a repository the platform state dir remains the fallback.\n- Git never tracks files under its git dir, so no `.gitignore` change is needed. The `hk` directories are still created `0700`.\n- In a shared `HK_STATE_DIR`, patch files are named after the repository root (not the current subdirectory) and rotation only matches `<name>-YYYYMMDD-HHMMSS-...`, so `app` no longer claims `app-web`'s patches.\n\n## Validation\n\nNew bats tests cover per-checkout `output.log` across a linked worktree, patches shared via the common git dir, and rotation not touching a sibling repo's patches in a shared `HK_STATE_DIR`.",
+            "state": "OPEN",
+            "isDraft": false,
+            "closed": false,
+            "merged": false,
+            "url": "https://github.com/jdx/demo/pull/1705",
+            "author": {
+              "__typename": "User",
+              "login": "jdx",
+              "id": "U_jdx",
+              "name": "jdx"
+            },
+            "headRefName": "state-in-git-dir",
+            "headRefOid": "{{head_sha}}",
+            "baseRefName": "main",
+            "baseRefOid": "{{base_sha}}",
+            "headRepository": {
+              "__typename": "Repository",
+              "name": "demo",
+              "nameWithOwner": "jdx/demo",
+              "id": "R_demo"
+            },
+            "headRepositoryOwner": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "isCrossRepository": false,
+            "maintainerCanModify": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "UNSTABLE",
+            "reviewDecision": null,
+            "additions": 204,
+            "deletions": 39,
+            "changedFiles": 8,
+            "createdAt": "2026-10-15T10:00:00Z",
+            "updatedAt": "2026-10-15T10:00:00Z",
+            "closedAt": null,
+            "mergedAt": null,
+            "commits": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "__typename": "PullRequestCommit",
+                  "id": "PRC_1",
+                  "commit": {
+                    "__typename": "Commit",
+                    "id": "COMMIT_head",
+                    "oid": "{{head_sha}}",
+                    "abbreviatedOid": "{{head_short}}",
+                    "statusCheckRollup": {
+                      "__typename": "StatusCheckRollup",
+                      "state": "FAILURE",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7101",
+                            "databaseId": 7101,
+                            "name": "ci-other (ubuntu-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-10-15T10:00:00Z",
+                            "completedAt": "2026-10-15T10:00:40Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 40,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7102",
+                            "databaseId": 7102,
+                            "name": "ci-hosted-bats (ubuntu-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-10-15T10:00:00Z",
+                            "completedAt": "2026-10-15T10:00:50Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 90,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          }
+                        ]
+                      },
+                      "$until": 50,
+                      "$before": {
+                        "state": "PENDING"
+                      },
+                      "id": "SCR_1"
+                    },
+                    "messageHeadline": "fix(config): keep state in the repository's git dir instead of a global dir",
+                    "committedDate": "2026-10-15T10:00:00Z",
+                    "authors": {
+                      "nodes": [
+                        {
+                          "name": "jdx",
+                          "email": "jdx@example.invalid",
+                          "user": {
+                            "login": "jdx"
+                          }
+                        }
+                      ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
+                    }
+                  }
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "__typename": "StatusCheckRollup",
+              "state": "FAILURE",
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7101",
+                    "databaseId": 7101,
+                    "name": "ci-other (ubuntu-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-10-15T10:00:00Z",
+                    "completedAt": "2026-10-15T10:00:40Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 40,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7102",
+                    "databaseId": 7102,
+                    "name": "ci-hosted-bats (ubuntu-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-10-15T10:00:00Z",
+                    "completedAt": "2026-10-15T10:00:50Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 90,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  }
+                ]
+              },
+              "$until": 50,
+              "$before": {
+                "state": "PENDING"
+              },
+              "id": "SCR_2"
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "reviews": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "comments": {
+              "nodes": []
+            },
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/env.rs",
+                  "line": 22,
+                  "startLine": null,
+                  "originalLine": 22,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_4281898264",
+                        "databaseId": 4281898264,
+                        "fullDatabaseId": "4281898264",
+                        "url": "https://github.com/jdx/demo/pull/1705#discussion_r4281898264",
+                        "createdAt": "2026-10-15T10:33:17Z",
+                        "updatedAt": "2026-10-15T10:33:17Z",
+                        "body": "[P1] **State uses the wrong repository**\n\n`REPO_DIRS` ignores `GIT_DIR` and `GIT_WORK_TREE`, unlike `Git::new()`. In supported YADM-style setups without a `.git` directory, logs and backups still fall back to the shared platform directory, leaving this fix incomplete. If the current directory belongs to another repository, hk instead writes and rotates backups in that repository's git directory. Resolve the same repository as `Git::new()`, including Git environment variables.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_greptile",
+                          "login": "greptile-apps"
+                        },
+                        "path": "src/env.rs",
+                        "line": 22,
+                        "originalLine": 22,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo2",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/env.rs",
+                  "line": 67,
+                  "startLine": 65,
+                  "originalLine": 67,
+                  "originalStartLine": 65,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_4281898275",
+                        "databaseId": 4281898275,
+                        "fullDatabaseId": "4281898275",
+                        "url": "https://github.com/jdx/demo/pull/1705#discussion_r4281898275",
+                        "createdAt": "2026-10-15T10:33:17Z",
+                        "updatedAt": "2026-10-15T10:33:17Z",
+                        "body": "[P1] **Other accounts cannot save backups**\n\nMoving state into the shared git directory makes the private `0700` directory belong to the first account that runs hk. In a repository with `core.sharedRepository=group`, another group member cannot enter that directory, so hk cannot save their logs, failed-command output, or patch backups. Previously each account had its own writable state directory. Keep private state writable for each account, for example with separate account-owned directories.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_greptile",
+                          "login": "greptile-apps"
+                        },
+                        "path": "src/env.rs",
+                        "line": 67,
+                        "originalLine": 67,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo3",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/env.rs",
+                  "line": 22,
+                  "startLine": null,
+                  "originalLine": 22,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_4281910480",
+                        "databaseId": 4281910480,
+                        "fullDatabaseId": "4281910480",
+                        "url": "https://github.com/jdx/demo/pull/1705#discussion_r4281910480",
+                        "createdAt": "2026-10-15T10:34:43Z",
+                        "updatedAt": "2026-10-15T10:34:43Z",
+                        "body": "### State discovery ignores GIT_DIR\n\n**Medium Severity**\n\n`REPO_DIRS` finds the repository with `git2::Repository::discover` from the current directory and never reads `GIT_DIR` or `GIT_WORK_TREE`. `Git::new` and `find_git_path` already honor those variables, so checkout logs and stash patches can be written under a different repository than the one hk is operating on.\n\n<sup>Reviewed by [Cursor Bugbot](https://cursor.com/bugbot) for commit a7e539f88c349edd89d346aa9b54dcc6fb40d7c6. Configure [here](https://www.cursor.com/dashboard/bugbot).</sup>",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_cursor",
+                          "login": "cursor"
+                        },
+                        "path": "src/env.rs",
+                        "line": 22,
+                        "originalLine": 22,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_2"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo4",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/env.rs",
+                  "line": 80,
+                  "startLine": null,
+                  "originalLine": 80,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_4281910492",
+                        "databaseId": 4281910492,
+                        "fullDatabaseId": "4281910492",
+                        "url": "https://github.com/jdx/demo/pull/1705#discussion_r4281910492",
+                        "createdAt": "2026-10-15T10:34:43Z",
+                        "updatedAt": "2026-10-15T10:34:43Z",
+                        "body": "### Shared repos cannot write state\n\n**Medium Severity**\n\n`create_state_dir_all` still creates `.git/hk` and `.git/hk/patches` as `0700`. Those paths now live in a git directory that `core.sharedRepository` shares across accounts, so the first user to create them blocks every other account from writing `output.log`, `hk.log`, or stash backups.\n\n<sup>Reviewed by [Cursor Bugbot](https://cursor.com/bugbot) for commit a7e539f88c349edd89d346aa9b54dcc6fb40d7c6. Configure [here](https://www.cursor.com/dashboard/bugbot).</sup>",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_cursor",
+                          "login": "cursor"
+                        },
+                        "path": "src/env.rs",
+                        "line": 80,
+                        "originalLine": 80,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_2"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo5",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "src/env.rs",
+                  "line": 22,
+                  "startLine": null,
+                  "originalLine": 22,
+                  "originalStartLine": null,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": null,
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_4281981486",
+                        "databaseId": 4281981486,
+                        "fullDatabaseId": "4281981486",
+                        "url": "https://github.com/jdx/demo/pull/1705#discussion_r4281981486",
+                        "createdAt": "2026-10-15T10:35:52Z",
+                        "updatedAt": "2026-10-15T10:35:52Z",
+                        "body": "**🎯 Functional Correctness** | **🟡 Minor**\n\n`REPO_DIRS` converts any error from opening the repository into `None`, so hk falls back to the platform state directory instead of reporting the failure. Is that fallback intentional? If so, no change is needed here.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_coderabbit",
+                          "login": "coderabbitai"
+                        },
+                        "path": "src/env.rs",
+                        "line": 22,
+                        "originalLine": 22,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_3"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "projectCards": {
+              "nodes": []
+            },
+            "projectItems": {
+              "nodes": []
+            },
+            "milestone": null,
+            "autoMergeRequest": null,
+            "reactionGroups": [],
+            "files": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "docs/environment_variables.md",
+                  "additions": 5,
+                  "deletions": 5
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "docs/hooks.md",
+                  "additions": 1,
+                  "deletions": 1
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "docs/logging.md",
+                  "additions": 1,
+                  "deletions": 1
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "settings.toml",
+                  "additions": 8,
+                  "deletions": 5
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "src/env.rs",
+                  "additions": 57,
+                  "deletions": 14
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "src/git.rs",
+                  "additions": 35,
+                  "deletions": 13
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "test/output_file.bats",
+                  "additions": 34,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "test/patch_backup.bats",
+                  "additions": 63,
+                  "deletions": 0
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "object": {
+        "__typename": "Commit",
+        "id": "COMMIT_head",
+        "oid": "{{head_sha}}",
+        "abbreviatedOid": "{{head_short}}",
+        "statusCheckRollup": {
+          "__typename": "StatusCheckRollup",
+          "state": "FAILURE",
+          "contexts": {
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7101",
+                "databaseId": 7101,
+                "name": "ci-other (ubuntu-latest)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-10-15T10:00:00Z",
+                "completedAt": "2026-10-15T10:00:40Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 40,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7102",
+                "databaseId": 7102,
+                "name": "ci-hosted-bats (ubuntu-latest)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-10-15T10:00:00Z",
+                "completedAt": "2026-10-15T10:00:50Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 90,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              }
+            ]
+          },
+          "$until": 50,
+          "$before": {
+            "state": "PENDING"
+          },
+          "id": "SCR_3"
+        },
+        "messageHeadline": "fix(config): keep state in the repository's git dir instead of a global dir",
+        "committedDate": "2026-10-15T10:00:00Z",
+        "authors": {
+          "nodes": [
+            {
+              "name": "jdx",
+              "email": "jdx@example.invalid",
+              "user": {
+                "login": "jdx"
+              }
+            }
+          ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
+        }
+      }
+    }
+  }
+}

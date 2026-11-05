@@ -1,0 +1,104 @@
+diff --git a/docs/environment_variables.md b/docs/environment_variables.md
+index d13f664a..eaec9290 100644
+--- a/docs/environment_variables.md
++++ b/docs/environment_variables.md
+@@ -254,7 +254,7 @@ Include untracked files when stashing. Setting this to `false` also skips untrac
+ 
+ **Type:** path · **Default:** the repository's git directory; outside a repository, the platform state directory plus `hk`
+ 
+-Directory for logs, command output and stash backup patches. Without it, hk keeps `output.log` and `hk.log` in `<git-dir>/hk/` (one per checkout) and `patches/` in `<common-git-dir>/hk/` (shared by linked worktrees). Outside a repository it falls back to `~/.local/state/hk` on Linux. Setting `HK_STATE_DIR` puts all of it in that one directory, and `HK_OUTPUT_FILE` / `HK_LOG_FILE` still override individual files.
++Directory for logs, command output and stash backup patches. Without it, hk keeps `output.log` and `hk.log` in `<git-dir>/hk/` (one per checkout) and `patches/` in `<common-git-dir>/hk/` (shared by linked worktrees). Outside a repository, or in one with `core.sharedRepository` set (which accounts share), it falls back to `~/.local/state/hk` on Linux. `GIT_DIR` / `GIT_WORK_TREE` select the repository as they do for hk itself. Setting `HK_STATE_DIR` puts all of it in that one directory, and `HK_OUTPUT_FILE` / `HK_LOG_FILE` still override individual files.
+ 
+ ## `HK_SUMMARY_TEXT` {#hk-summary-text}
+ 
+diff --git a/src/env.rs b/src/env.rs
+index e73693f5..4a8bf898 100644
+--- a/src/env.rs
++++ b/src/env.rs
+@@ -19,7 +19,22 @@ pub struct RepoDirs {
+     pub workdir: Option<PathBuf>,
+ }
+ pub static REPO_DIRS: LazyLock<Option<RepoDirs>> = LazyLock::new(|| {
+-    let repo = git2::Repository::discover(".").ok()?;
++    // Resolve the repository like `Git::new()`: `GIT_DIR` / `GIT_WORK_TREE`
++    // (bare-repo dotfile managers such as YADM) take precedence.
++    let repo = if var("GIT_DIR").is_ok() || var("GIT_WORK_TREE").is_ok() {
++        git2::Repository::open_from_env().ok()?
++    } else {
++        git2::Repository::discover(".").ok()?
++    };
++    // A repository shared between accounts (`core.sharedRepository`) cannot
++    // hold private per-account state, so keep the per-user state directory.
++    let shared = repo
++        .config()
++        .and_then(|c| c.get_string("core.sharedrepository"))
++        .ok();
++    if crate::stash_lock::shared_repository_mode(shared.as_deref()).is_some() {
++        return None;
++    }
+     Some(RepoDirs {
+         git_dir: repo.path().to_path_buf(),
+         common_dir: repo.commondir().to_path_buf(),
+diff --git a/src/git.rs b/src/git.rs
+index 0e6df010..37c71d1d 100644
+--- a/src/git.rs
++++ b/src/git.rs
+@@ -4262,6 +4262,21 @@ fn note_running_owner(journal: &stash_journal::Journal) {
+     }
+ }
+ 
++/// Whether `file_name` is a patch saved for the repository named by `prefix`
++/// (`"{repo}-"`): `{repo}-YYYYMMDD-HHMMSS-{haiku}.patch`. Requiring the
++/// timestamp keeps repository `app` from claiming the patches of `app-web`.
++fn is_patch_of(file_name: &str, prefix: &str) -> bool {
++    let Some(rest) = file_name.strip_prefix(prefix) else {
++        return false;
++    };
++    let b = rest.as_bytes();
++    b.len() > 16
++        && b[..8].iter().all(u8::is_ascii_digit)
++        && b[8] == b'-'
++        && b[9..15].iter().all(u8::is_ascii_digit)
++        && b[15] == b'-'
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -4799,18 +4814,3 @@ mod tests {
+         assert_eq!(parse_dropped_commit("(not hex)"), None);
+     }
+ }
+-
+-/// Whether `file_name` is a patch saved for the repository named by `prefix`
+-/// (`"{repo}-"`): `{repo}-YYYYMMDD-HHMMSS-{haiku}.patch`. Requiring the
+-/// timestamp keeps repository `app` from claiming the patches of `app-web`.
+-fn is_patch_of(file_name: &str, prefix: &str) -> bool {
+-    let Some(rest) = file_name.strip_prefix(prefix) else {
+-        return false;
+-    };
+-    let b = rest.as_bytes();
+-    b.len() > 16
+-        && b[..8].iter().all(u8::is_ascii_digit)
+-        && b[8] == b'-'
+-        && b[9..15].iter().all(u8::is_ascii_digit)
+-        && b[15] == b'-'
+-}
+diff --git a/test/agent_generators.bats b/test/agent_generators.bats
+index c775c690..6193cd7c 100644
+--- a/test/agent_generators.bats
++++ b/test/agent_generators.bats
+@@ -41,11 +41,11 @@ assert_generator_snapshot() {
+ }
+ 
+ @test "agent generators do not edit host configuration" {
+-    before="$(find . -type f -print | LC_ALL=C sort)"
++    before="$(find . -path ./.git -prune -o -type f -print | LC_ALL=C sort)"
+     hk agent instructions --target codex >/dev/null
+     hk agent hooks --target claude-code >/dev/null
+     hk agent mcp --target vscode >/dev/null
+-    after="$(find . -type f -print | LC_ALL=C sort)"
++    after="$(find . -path ./.git -prune -o -type f -print | LC_ALL=C sort)"
+     assert_equal "$after" "$before"
+ }
+ 
