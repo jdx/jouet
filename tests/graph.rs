@@ -331,6 +331,162 @@ fn queries_refresh_first_and_page_within_their_budget() {
 }
 
 #[test]
+fn continuation_commands_keep_the_original_query_options() {
+    let env = Env::new();
+    many_callers(&env);
+    let mut outer = String::from("from use import caller_number_0\n\n");
+    for i in 0..12 {
+        outer.push_str(&format!(
+            "def outer_{i}():\n    return caller_number_0()\n\n"
+        ));
+    }
+    env.write("outer.py", &outer);
+
+    for args in [
+        vec![
+            "graph", "callers", "target", "--depth", "2", "--budget", "250",
+        ],
+        vec![
+            "graph", "symbols", "caller", "--kind", "function", "--path", "use.py", "--budget",
+            "250",
+        ],
+        vec![
+            "graph",
+            "explore",
+            "caller",
+            "--budget",
+            "250",
+            "--source-budget",
+            "0",
+        ],
+    ] {
+        let first = env.run(&args);
+        assert!(first.status.success());
+        let text = String::from_utf8(first.stdout).unwrap();
+        let marker = text.lines().last().unwrap();
+        let suggested = marker
+            .rsplit_once(" (jouet ")
+            .unwrap()
+            .1
+            .trim_end_matches(')');
+        let suggested: Vec<&str> = suggested.split_whitespace().collect();
+        let next = env.run(&suggested);
+        assert!(
+            next.status.success(),
+            "{}",
+            String::from_utf8_lossy(&next.stderr)
+        );
+        let mut explicit = args.clone();
+        explicit.extend(["--page", "2"]);
+        let expected = env.run(&explicit);
+        assert!(expected.status.success());
+        assert_eq!(next.stdout, expected.stdout, "{marker}");
+    }
+}
+
+#[test]
+fn continuation_keeps_a_hyphenated_query_after_the_options() {
+    let env = Env::new();
+    many_callers(&env);
+    for command in ["symbols", "explore"] {
+        let args = ["graph", command, "--budget", "200", "--", "-caller"];
+        let first = env.run(&args);
+        assert!(
+            first.status.success(),
+            "{}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        let text = String::from_utf8(first.stdout).unwrap();
+        let marker = text.lines().last().unwrap();
+        let suggested = marker
+            .rsplit_once(" (jouet ")
+            .unwrap()
+            .1
+            .trim_end_matches(')');
+        let suggested: Vec<&str> = suggested.split_whitespace().collect();
+        let next = env.run(&suggested);
+        let expected = env.run(&[
+            "graph", command, "--budget", "200", "--page", "2", "--", "-caller",
+        ]);
+        assert!(
+            next.status.success(),
+            "{}",
+            String::from_utf8_lossy(&next.stderr)
+        );
+        assert_eq!(next.stdout, expected.stdout, "{marker}");
+    }
+}
+
+#[test]
+fn symbol_continuation_keeps_a_hyphenated_path_attached() {
+    let env = Env::new();
+    let mut source = String::new();
+    for i in 0..20 {
+        source.push_str(&format!("def entry_{i}():\n    return 1\n\n"));
+    }
+    env.write("-src/code.py", &source);
+    let first = env.run(&["graph", "symbols", "--path=-src", "--budget", "200"]);
+    assert!(first.status.success());
+    let text = String::from_utf8(first.stdout).unwrap();
+    let marker = text.lines().last().unwrap();
+    let suggested = marker
+        .rsplit_once(" (jouet ")
+        .unwrap()
+        .1
+        .trim_end_matches(')');
+    assert!(suggested.contains("--path=-src"), "{marker}");
+    let suggested: Vec<&str> = suggested.split_whitespace().collect();
+    let next = env.run(&suggested);
+    let expected = env.run(&[
+        "graph",
+        "symbols",
+        "--path=-src",
+        "--budget",
+        "200",
+        "--page",
+        "2",
+    ]);
+    assert!(next.status.success());
+    assert_eq!(next.stdout, expected.stdout);
+}
+
+#[test]
+fn continuation_for_one_of_several_targets_keeps_its_budget_share() {
+    let env = Env::new();
+    for file in ["a.py", "b.py"] {
+        let mut source = String::from("def target():\n    return 1\n\n");
+        for i in 0..20 {
+            source.push_str(&format!("def caller_{i}():\n    return target()\n\n"));
+        }
+        env.write(file, &source);
+    }
+    let first = env.run(&["graph", "callers", "target", "--budget", "400"]);
+    assert!(first.status.success());
+    let text = String::from_utf8(first.stdout).unwrap();
+    let marker = text.lines().find(|line| line.starts_with("... ")).unwrap();
+    let suggested = marker
+        .rsplit_once(" (jouet ")
+        .unwrap()
+        .1
+        .trim_end_matches(')');
+    assert!(suggested.contains("--budget 200"), "{marker}");
+    let suggested: Vec<&str> = suggested.split_whitespace().collect();
+    let next = env.run(&suggested);
+    assert!(next.status.success());
+    let expected = env.run(&[
+        "graph",
+        "callers",
+        "a.py#target",
+        "--budget",
+        "200",
+        "--page",
+        "2",
+    ]);
+    assert!(expected.status.success());
+    assert_eq!(next.stdout, expected.stdout);
+}
+
+#[test]
 fn symbols_explore_and_impact_answer_and_say_what_they_left_out() {
     let env = Env::new();
     many_callers(&env);
