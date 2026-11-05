@@ -1,0 +1,90 @@
+description = "A whole PR session on real pitchfork code (jdx/pitchfork#737): wait for CI, fix the test it fails, address the review threads (two changes, one suggestion to answer), commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real Rust project: it runs only when named.
+opt_in = true
+branch = "feat/worktree-discovery"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 3600
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+# jouet levels: out of the box, `jouet wait ci`, `jouet pr threads` and
+# `jouet pr next` read the PR from the fake, and `jouet test` digests
+# `cargo test` (the CI log is nextest's, which the task does not provide). A
+# Luau rule could name the TMPDIR trap: a test that compares a canonicalized
+# path with a temp path fails wherever the temp dir is behind a symlink.
+#
+# The PR at its first push (958bad7): CI's Windows rust-tests job fails
+# `test_discover_git_worktrees_single_checkout_no_spawn`, which compares the
+# fast path's canonicalized checkout with the raw temp path; Windows'
+# canonical path has a `\\?\` prefix and no 8.3 short names. Linux CI passes,
+# so the agent's TMPDIR is a symlink, as macOS's is: the same test fails here,
+# and so does each test the review's fix (canonicalizing `find_project_root`'s
+# start dir) touches, as they did upstream. Upstream fixed them in 0a5e3b3,
+# 8fa212b and 0fab67f; a later merge from main, and the review threads on it,
+# are left out.
+prompt = """
+PR #737 (branch feat/worktree-discovery, checked out here) makes pitchfork discover daemons in git
+worktrees and jj workspaces. CI is running on it, and reviewers have left comments. Get it ready:
+wait for CI and fix what fails, and address the open review threads: make the requested changes,
+reply on each thread saying what you did, and resolve the ones you fixed. A suggestion you decide
+not to take gets a reply saying why, and stays open. Commit your changes; don't push.
+"""
+
+# The binary embeds ui/dist (ignored by Git), which only `mise run build:ui`
+# builds, from npm; CI's Windows jobs build with a placeholder, and so does
+# this. TMPDIR is a symlink outside the work tree.
+setup = [
+    "mkdir -p ui/dist {workdir}/../tmp-real",
+    "sh -c 'echo \"<html><body>placeholder</body></html>\" > ui/dist/index.html'",
+    "ln -sfn tmp-real {workdir}/../tmp",
+]
+
+# The PR's base, 18b12be on main; `pr/` holds its files at 958bad7. The clone
+# is the user's own checkout of jdx/pitchfork, and the build is offline from
+# the cargo registry it has already fetched.
+[source]
+git = "~/src/pitchfork"
+commit = "18b12be08835e0865dace583f22e726eac9ace87"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+CARGO_NET_OFFLINE = "true"
+TMPDIR = "{workdir}/../tmp"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py):
+# a cold build of the lib tests, then the tests CI failed.
+[cost]
+seed = [
+    "cargo test --lib --no-run",
+    "cargo test --lib",
+    "cargo test --lib worktree",
+]
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "737", "--json"]
+exit = 1
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "737", "--json"]
+stdout_contains = "Canonicalize the start directory"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "55501", "737", "--body", "find_project_root canonicalizes its start dir now.", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "737"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "test_discover_git_worktrees_single_checkout_no_spawn"

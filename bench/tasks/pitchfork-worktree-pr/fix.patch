@@ -1,0 +1,85 @@
+diff --git a/docs/concepts/namespaces.md b/docs/concepts/namespaces.md
+index c11c6ee..455a12b 100644
+--- a/docs/concepts/namespaces.md
++++ b/docs/concepts/namespaces.md
+@@ -94,7 +94,7 @@ pitchfork status api          # myapp/api, unaffected by the worktree
+ 
+ Daemons started in a worktree run with the worktree directory as their working directory, and supervisor background tasks (cron scheduling, boot_start, file watching) automatically discover daemons defined in every worktree of a repository.
+ 
+-The only requirement is that worktree directories have distinct names — which is the default when you create worktrees per branch.
++Automatic worktree isolation applies when namespaces are derived from project directories — so worktree directories need distinct names (the default when you create worktrees per branch). If a config sets an explicit top-level `namespace`, it overrides the directory-derived namespace, so give each worktree a distinct explicit namespace to keep same-named daemons from colliding.
+ 
+ ## Display Behavior
+ 
+diff --git a/src/pitchfork_toml.rs b/src/pitchfork_toml.rs
+index 7f42aee..16f464d 100644
+--- a/src/pitchfork_toml.rs
++++ b/src/pitchfork_toml.rs
+@@ -447,7 +447,11 @@ pub fn namespace_from_path(path: &Path) -> Result<String> {
+ /// *file* (not a directory) pointing at the common gitdir, so we check
+ /// existence rather than `is_dir()`.
+ fn find_project_root(dir: &Path) -> Option<PathBuf> {
+-    let mut current = dir;
++    // Canonicalize the start dir so a symlinked path resolves into the
++    // repository hierarchy before traversing parents; otherwise `parent()`
++    // walks outside the repo and misses `.git`/`.jj`.
++    let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
++    let mut current = canonical_dir.as_path();
+     loop {
+         if current.join(".git").exists() || current.join(".jj").exists() {
+             return Some(current.to_path_buf());
+@@ -2203,7 +2207,9 @@ dir = "~/projects/web"
+         let sub = repo.join("sub/dir");
+         std::fs::create_dir_all(&sub).unwrap();
+ 
+-        assert_eq!(find_project_root(&sub), Some(repo));
++        // `find_project_root` canonicalizes, so compare against the canonical
++        // path (on Windows this differs by the `\\?\` verbatim prefix).
++        assert_eq!(find_project_root(&sub), Some(repo.canonicalize().unwrap()));
+     }
+ 
+     #[test]
+@@ -2215,7 +2221,27 @@ dir = "~/projects/web"
+         std::fs::create_dir(&wt).unwrap();
+         std::fs::write(wt.join(".git"), "gitdir: /tmp/some-common-gitdir\n").unwrap();
+ 
+-        assert_eq!(find_project_root(&wt), Some(wt));
++        assert_eq!(find_project_root(&wt), Some(wt.canonicalize().unwrap()));
++    }
++
++    /// A symlinked start dir must resolve into the repository hierarchy so
++    /// `parent()` traversal does not walk out of the repo.
++    #[cfg(unix)]
++    #[test]
++    fn test_find_project_root_resolves_symlinked_start_dir() {
++        use std::os::unix::fs::symlink;
++
++        let temp = tempfile::tempdir().unwrap();
++        let repo = temp.path().join("real-repo");
++        std::fs::create_dir(&repo).unwrap();
++        std::fs::create_dir(repo.join(".git")).unwrap();
++
++        let sub = repo.join("sub/dir");
++        std::fs::create_dir_all(&sub).unwrap();
++        let link = temp.path().join("link-to-sub");
++        symlink(&sub, &link).unwrap();
++
++        assert_eq!(find_project_root(&link), Some(repo.canonicalize().unwrap()));
+     }
+ 
+     /// Build a real git repository with a linked worktree and assert that
+diff --git a/src/proxy/worktree.rs b/src/proxy/worktree.rs
+index 08371ac..c710a11 100644
+--- a/src/proxy/worktree.rs
++++ b/src/proxy/worktree.rs
+@@ -437,7 +437,9 @@ mod tests {
+ 
+         let entries = discover_git_worktrees(&repo);
+         assert_eq!(entries.len(), 1);
+-        assert_eq!(entries[0].path, repo);
++        // Fast path canonicalizes, so compare against the canonical path
++        // (on Windows this differs by the `\\?\` verbatim prefix).
++        assert_eq!(entries[0].path, repo.canonicalize().unwrap());
+         assert_eq!(entries[0].branch, "main");
+         assert_eq!(entries[0].sanitized_branch, "main");
+     }
