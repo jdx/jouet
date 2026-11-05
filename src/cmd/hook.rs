@@ -1812,6 +1812,47 @@ mod tests {
     }
 
     #[test]
+    fn codex_file_uri_replay_records_and_clears_the_right_pnpm_failure() {
+        let parent = tempfile::tempdir().unwrap();
+        let repo = parent.path().join("project space");
+        std::fs::create_dir(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        let root = verify::root_of(&repo);
+        let encoded = repo
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace(' ', "%20");
+        let uri = format!(
+            "{}{encoded}",
+            if cfg!(windows) { "file:///" } else { "file://" }
+        );
+        let event = |exit_code| {
+            json!({"payload": {"type": "item_completed", "item": {
+            "type": "CommandExecution", "command": ["pnpm", "test"], "exit_code": exit_code, "cwd": uri
+        }}}).to_string()
+        };
+        let transcript = parent.path().join("rollout.jsonl");
+        std::fs::write(&transcript, event(1)).unwrap();
+        let state = codex_state(
+            &engine(Vec::new()),
+            &json!({}),
+            verify::codex_commands(&transcript),
+        );
+        assert!(state.block(&root, |_| None, |_| false, |_| true).is_some());
+        std::fs::write(&transcript, format!("{}\n{}", event(1), event(0))).unwrap();
+        let state = codex_state(
+            &engine(Vec::new()),
+            &json!({}),
+            verify::codex_commands(&transcript),
+        );
+        assert!(state.block(&root, |_| None, |_| false, |_| true).is_none());
+    }
+
+    #[test]
     fn codex_commands_replay_through_the_post_tool_use_rules() {
         let engine = engine(Vec::new());
         let failing = codex_state(

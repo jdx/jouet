@@ -40,6 +40,7 @@ mlua = { version = "0.12", features = ["luau"] }
 # `jouet db`: a synchronous Postgres client, with TLS through rustls (ring
 # and the system's root certificates, as below), never webpki-roots.
 postgres = "0.19"
+percent-encoding = "2"
 regex = "1"
 # TLS trusts the system's root certificates, with ring for crypto. ureq's
 # default bundles webpki-roots, and its platform verifier pulls in
@@ -122,6 +123,7 @@ jouet-secrets.workspace = true
 jouet-wait.workspace = true
 mise-agent-env.workspace = true
 postgres.workspace = true
+percent-encoding.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 rustls.workspace = true

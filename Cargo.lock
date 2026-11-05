@@ -671,6 +671,7 @@ dependencies = [
  "jouet-wait",
  "libc",
  "mise-agent-env",
+ "percent-encoding",
  "postgres",
  "regex",
  "rusqlite",

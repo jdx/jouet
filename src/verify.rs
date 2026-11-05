@@ -96,6 +96,12 @@ impl Run {
         self.exit_code == 0
     }
 
+    fn pnpm_scoped(&self) -> bool {
+        self.selection()
+            .split_whitespace()
+            .any(|word| word.starts_with("@jouet:pnpm:"))
+    }
+
     /// Whether this pass ran what `failed` selected: the same selection,
     /// the same command over more names (`test:e2e a b` covers `test:e2e
     /// a`), or the same selection without the names after it (`-p a`
@@ -1147,7 +1153,9 @@ impl Checks {
                 run.unrelated = earlier.unrelated.clone();
             }
             if run.passed() && run.full {
-                failures.clear();
+                // A full runner or task can cover a different package than a
+                // scoped pnpm run. Keep that failure unless coverage is known.
+                failures.retain(|f| f.pnpm_scoped() && !run.covers(f));
                 self.full_passes.insert(kind, run.clone());
             } else if run.passed() {
                 failures.retain(|f| f.full || !run.covers(f));
@@ -1438,7 +1446,8 @@ impl Checks {
                         && self.passes.get(kind).is_some_and(|passes| {
                             passes.iter().any(|p| {
                                 p.tree.as_deref() == Some(now.as_str())
-                                    && (p.full || (!failed.full && p.covers(failed)))
+                                    && ((p.full && !failed.pnpm_scoped())
+                                        || (!failed.full && p.covers(failed)))
                             })
                         })
                 })
@@ -1499,7 +1508,11 @@ impl Checks {
             );
         }
         let since = last.map_or(String::new(), |l| format!(" (`{}`)", shown(&l.command)));
-        let clear = if failed.full {
+        let clear = if failed.pnpm_scoped() && failed.selection().contains("@jouet:cwd=unknown:") {
+            "its original working directory is unknown, so jouet cannot safely match it to another pnpm run".to_string()
+        } else if failed.pnpm_scoped() {
+            "a passing run of the same supported pnpm selection, or a covering unfiltered Vitest run in the same scope, clears it".to_string()
+        } else if failed.full {
             format!("only a full {} run clears it", kind.name())
         } else {
             format!(
@@ -1617,6 +1630,61 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
 
 /// A finished command from one transcript line: `item_completed` events for
 /// a `CommandExecution` item, or older `exec_command_end` events.
+/// Codex records working directories as absolute paths or local file URIs.
+/// Reject remote, malformed, and non-UTF-8 URIs rather than guessing a scope.
+fn codex_cwd(cwd: &str) -> Option<String> {
+    if !cwd.starts_with("file:") {
+        return std::path::Path::new(cwd)
+            .is_absolute()
+            .then(|| cwd.to_string());
+    }
+    let rest = cwd.strip_prefix("file://")?;
+    let path = if rest.starts_with('/') {
+        rest
+    } else {
+        rest.strip_prefix("localhost")?
+    };
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit()
+            {
+                return None;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .ok()?;
+    if decoded.contains('\0') {
+        return None;
+    }
+    let decoded: &str = &decoded;
+    #[cfg(windows)]
+    let decoded = if decoded
+        .as_bytes()
+        .get(1)
+        .is_some_and(u8::is_ascii_alphabetic)
+        && decoded.as_bytes().get(2) == Some(&b':')
+    {
+        &decoded[1..]
+    } else {
+        decoded
+    };
+    std::path::Path::new(decoded)
+        .is_absolute()
+        .then(|| decoded.to_string())
+}
+
 fn codex_command(line: &str) -> Option<Ran> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let payload = value.get("payload")?;
@@ -1650,8 +1718,7 @@ fn codex_command(line: &str) -> Option<Ran> {
         cwd: event
             .get("cwd")
             .and_then(|cwd| cwd.as_str())
-            .filter(|cwd| std::path::Path::new(cwd).is_absolute())
-            .map(str::to_string),
+            .and_then(codex_cwd),
         at: value
             .get("timestamp")
             .and_then(|t| t.as_str())
@@ -1930,6 +1997,27 @@ mod tests {
             checks.record([test("pnpm exec vitest run", 0, prefix)], Some("t1"));
             assert_eq!(reason(&checks, "t1"), None, "{filter}");
         }
+    }
+
+    #[test]
+    fn a_full_unrelated_run_cannot_clear_a_scoped_pnpm_failure() {
+        let selection = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=web:test";
+        for (failure_tree, pass_tree) in [("same", "same"), ("old", "new")] {
+            let mut checks = Checks::default();
+            checks.record(
+                [test("pnpm --dir web test", 1, selection)],
+                Some(failure_tree),
+            );
+            checks.record([test("vitest run", 0, "full")], Some(pass_tree));
+            let why = reason(&checks, pass_tree).expect("scoped failure must remain");
+            assert!(why.contains("same supported pnpm selection"), "{why}");
+            checks.record([test("pnpm --dir web test", 0, selection)], Some(pass_tree));
+            assert_eq!(reason(&checks, pass_tree), None);
+        }
+        let mut checks = Checks::default();
+        checks.record([test("cargo test -p app", 1, "-p app")], Some("t1"));
+        checks.record([test("cargo test", 0, "full")], Some("t1"));
+        assert_eq!(reason(&checks, "t1"), None);
     }
 
     #[test]
@@ -3180,6 +3268,47 @@ mod tests {
             Some(path)
         );
         assert_eq!(codex_command(&line("relative")).unwrap().cwd, None);
+    }
+
+    #[test]
+    fn codex_replay_decodes_local_file_uris_conservatively() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("work space#%é");
+        let path_str = path.to_str().unwrap();
+        let encoded = path_str
+            .replace('\\', "/")
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('#', "%23")
+            .replace('é', "%C3%A9");
+        let prefix = if cfg!(windows) { "file:///" } else { "file://" };
+        let uri = format!("{prefix}{encoded}");
+        let line = serde_json::json!({"payload": {"type": "item_completed", "item": {
+            "type": "CommandExecution", "command": ["pnpm", "test"], "exit_code": 1, "cwd": uri
+        }}})
+        .to_string();
+        let expected = if cfg!(windows) {
+            path_str.replace('\\', "/")
+        } else {
+            path_str.to_string()
+        };
+        assert_eq!(
+            codex_command(&line).unwrap().cwd.as_deref(),
+            Some(expected.as_str())
+        );
+        let localhost = format!("file://localhost/{}", encoded.trim_start_matches('/'));
+        assert_eq!(codex_cwd(&localhost).as_deref(), Some(expected.as_str()));
+        for bad in [
+            "file://remote/path",
+            "file:///tmp/%ZZ",
+            "file:///tmp/%2",
+            "file:///tmp/%00",
+            "file:///tmp/a?query",
+            "file:///tmp/a#fragment",
+            "file:///tmp/%FF",
+        ] {
+            assert_eq!(codex_cwd(bad), None, "{bad}");
+        }
     }
 }
 
