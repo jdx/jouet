@@ -68,6 +68,9 @@ pub struct Report {
     /// Files with matches left out whole because the total budget ran out.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub omitted: Vec<Omitted>,
+    /// Explicit input paths that could not be searched.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unsearched: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -170,8 +173,11 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     } else {
         options.paths.clone()
     };
-    if let Some(missing) = paths.iter().find(|p| std::fs::metadata(p).is_err()) {
-        return Err(Error::NotFound(missing.clone()));
+    let (paths, unsearched): (Vec<_>, Vec<_>) = paths
+        .into_iter()
+        .partition(|p| std::fs::metadata(p).is_ok());
+    if paths.is_empty() {
+        return Err(Error::NotFound(unsearched[0].clone()));
     }
     let mut walk = ignore::WalkBuilder::new(&paths[0]);
     for path in &paths[1..] {
@@ -275,6 +281,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
         matches: found.iter().map(|c| c.matches).sum(),
         files_matched: found.len(),
         files_searched: searched.into_inner(),
+        unsearched: unsearched.iter().map(|p| display(p)).collect(),
         ..Report::default()
     };
     if options.files_only {

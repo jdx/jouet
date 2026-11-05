@@ -65,6 +65,25 @@ RS
 	assert_failure 3
 }
 
+@test "search returns available matches and identifies unavailable paths" {
+	run --separate-stderr jouet search download missing1 src/main.rs missing2
+	assert_failure 3
+	assert_output --partial 'client.download("index.html");'
+	assert_stderr --partial 'missing1: not searched (path unavailable)'
+	assert_stderr --partial 'missing2: not searched (path unavailable)'
+
+	run --separate-stderr jouet search --json download missing1 src/main.rs missing2
+	assert_failure 3
+	assert_equal "$(jq -r '.files[0].path' <<<"$output")" 'src/main.rs'
+	assert_equal "$(jq -c '.unsearched' <<<"$output")" '["missing1","missing2"]'
+	assert_stderr ''
+
+	run --separate-stderr jouet search no_match src/main.rs missing1
+	assert_failure 3
+	assert_output --partial 'no matches'
+	assert_stderr --partial 'missing1: not searched'
+}
+
 @test "search accepts rg's context flags and says it shows no context lines" {
 	run --separate-stderr jouet search -A0 'fn fetch' src/lib.rs
 	assert_success
