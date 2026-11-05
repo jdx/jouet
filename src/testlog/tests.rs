@@ -694,6 +694,23 @@ fn a_declared_summary_counts_a_passing_run() {
 }
 
 #[test]
+fn a_summary_without_a_group_reads_its_whole_line_and_can_name_a_failure() {
+    let format = Format::parse(
+        "oneline",
+        "failed = ['^FAIL (\\S+):']\nsummary = ['^FAIL ']\n",
+    )
+    .unwrap();
+    let d = digest_with(
+        "FAIL case_a: 0 passed, 1 failed\n",
+        true,
+        DEFAULT_BUDGET,
+        &[format],
+    );
+    assert_eq!(counts(&d), [0, 1, 0]);
+    assert_eq!(names(&d), ["case_a"]);
+}
+
+#[test]
 fn a_one_line_failure_keeps_its_line() {
     let format = Format::parse("one", "failed = ['^FAIL (?<name>\\w+):']").unwrap();
     let d = digest_with(

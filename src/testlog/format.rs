@@ -131,10 +131,10 @@ impl Format {
                 start = i + 1;
                 continue;
             }
+            // A summary line can also name a failure, so it is read for both.
             if let Some(c) = self.summary.iter().find_map(|p| p.captures(line)) {
-                out.count_words(c.get(1).unwrap_or_else(|| c.get(0).unwrap()).as_str());
+                out.count_words(c.get(1).map_or(line.as_str(), |g| g.as_str()));
                 counted = true;
-                continue;
             }
             let Some(c) = self.failed.iter().find_map(|p| p.captures(line)) else {
                 continue;
