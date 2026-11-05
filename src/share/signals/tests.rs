@@ -176,6 +176,56 @@ fn old_json_signals_are_hidden_and_recounted_from_new_evidence() {
 }
 
 #[test]
+fn old_execution_signals_are_hidden_and_recounted_from_new_evidence() {
+    for (kind, digest_kind) in [
+        (Kind::Crash, jouet_audit::digest::jouet::Kind::Crash),
+        (Kind::ExitCode, jouet_audit::digest::jouet::Kind::ExitCode),
+        (Kind::Usage, jouet_audit::digest::jouet::Kind::Usage),
+        (Kind::Abandoned, jouet_audit::digest::jouet::Kind::Abandoned),
+    ] {
+        let mut gaps = Gaps::default();
+        let entry = entry_for(&mut gaps, kind, "jouet pr threads");
+        let old = entry.signal.as_mut().unwrap();
+        old.count = 9;
+        old.sessions.extend(["s1".into(), "s2".into()]);
+        old.seen.insert("s1:12".into());
+        assert!(!old.ready());
+        let found = jouet_audit::digest::jouet::Found {
+            kind: digest_kind,
+            subject: "jouet pr threads".into(),
+            index: 0,
+            detail: "exit 101".into(),
+        };
+        add_digest(&mut gaps, "s1", &[(found, "jouet pr threads 7".into(), 12)]);
+        let refreshed = gaps.gaps[0].signal.as_ref().unwrap();
+        assert_eq!(refreshed.count, 1);
+        assert!(refreshed.execution_evidence_v2);
+    }
+}
+
+#[test]
+fn ledger_refresh_does_not_retain_older_ambiguous_execution_counts() {
+    let mut gaps = Gaps::default();
+    let entry = entry_for(&mut gaps, Kind::Crash, "jouet pr threads");
+    let old = entry.signal.as_mut().unwrap();
+    old.count = 9;
+    old.details.insert("old ambiguous panic".into(), 9);
+    old.sessions.insert("old-session".into());
+    let fresh = Signal {
+        kind: Some(Kind::Crash),
+        subject: "jouet pr threads".into(),
+        count: 1,
+        execution_evidence_v2: true,
+        ..Signal::default()
+    };
+    replace_ledger(&mut gaps, vec![fresh]);
+    let refreshed = gaps.gaps[0].signal.as_ref().unwrap();
+    assert_eq!(refreshed.count, 1);
+    assert!(refreshed.details.is_empty());
+    assert!(refreshed.sessions.is_empty());
+}
+
+#[test]
 fn a_session_digested_twice_counts_once_and_sharing_survives_a_refresh() {
     let found = jouet_audit::digest::jouet::Found {
         kind: jouet_audit::digest::jouet::Kind::Crash,

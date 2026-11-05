@@ -212,6 +212,19 @@ fn codex_exec_tool_envelope_does_not_create_a_bad_json_finding() {
 }
 
 #[test]
+fn codex_exec_exact_command_crash_is_reported() {
+    let reader = Codex {
+        root: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jouet/codex-exec-crash"),
+    };
+    let digest = read(&reader);
+    assert_eq!(digest.jouet.len(), 1, "{:?}", digest.jouet);
+    assert_eq!(
+        digest.jouet[0].found.kind,
+        jouet_audit::digest::jouet::Kind::Crash
+    );
+}
+
+#[test]
 fn jouet_itself_is_checked_in_its_own_sessions() {
     let reader = ClaudeCode {
         root: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jouet/claude"),

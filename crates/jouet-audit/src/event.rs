@@ -90,6 +90,8 @@ pub struct Call {
     pub failed: bool,
     /// Its exit code, when the source recorded one.
     pub exit_code: Option<i32>,
+    /// The exit code came from a command-specific event, not a tool envelope.
+    pub exit_code_exact: bool,
     /// Its output reported a GitHub rate limit.
     pub rate_limited: bool,
     /// The transcript line that issued it, from 1. Read only with
@@ -132,6 +134,7 @@ impl Call {
             output_bytes: 0,
             failed: false,
             exit_code: None,
+            exit_code_exact: false,
             rate_limited: false,
             line: 0,
             name: None,

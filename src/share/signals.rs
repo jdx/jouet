@@ -46,6 +46,13 @@ pub(crate) enum Destination {
 }
 
 impl Kind {
+    fn needs_execution_evidence(self) -> bool {
+        matches!(
+            self,
+            Self::Crash | Self::ExitCode | Self::Usage | Self::Abandoned
+        )
+    }
+
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Crash => "crash",
@@ -104,6 +111,10 @@ pub(crate) struct Signal {
     /// JSON findings before exec-cell attribution was fixed cannot be trusted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub json_evidence_v2: bool,
+    /// Older command-status findings could attribute a cell or script's
+    /// unrelated failure to jouet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub execution_evidence_v2: bool,
     /// For an overridden rule: fired, overridden; for a slow hook: the
     /// budget and the slowest run, in milliseconds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -154,9 +165,11 @@ impl Signal {
     /// an abandoned answer only once it repeats across sessions.
     pub(crate) fn ready(&self) -> bool {
         match self.kind() {
-            Kind::Crash | Kind::ExitCode => self.count >= 1,
+            Kind::Crash | Kind::ExitCode => self.count >= 1 && self.execution_evidence_v2,
             Kind::BadJson => self.count >= 1 && self.json_evidence_v2,
-            Kind::Usage | Kind::Abandoned => self.count >= 3 && self.sessions.len() >= 2,
+            Kind::Usage | Kind::Abandoned => {
+                self.count >= 3 && self.sessions.len() >= 2 && self.execution_evidence_v2
+            }
             Kind::SlowHook => self.count >= 3,
             Kind::Overridden | Kind::Routine => true,
         }
@@ -238,6 +251,14 @@ pub(crate) fn add_digest(gaps: &mut Gaps, session: &str, found: &[(jouet::Found,
                 ..Signal::default()
             };
         }
+        if kind.needs_execution_evidence() && !signal.execution_evidence_v2 {
+            *signal = Signal {
+                kind: Some(kind),
+                subject: f.subject.clone(),
+                execution_evidence_v2: true,
+                ..Signal::default()
+            };
+        }
         if !signal.seen.insert(format!("{session}:{line}")) {
             continue;
         }
@@ -307,6 +328,7 @@ pub(crate) fn from_ledger(entries: &[Entry], engine: Option<&Engine>) -> Vec<Sig
             .or_insert_with(|| Signal {
                 kind: Some(kind),
                 subject: subject.to_string(),
+                execution_evidence_v2: kind.needs_execution_evidence(),
                 ..Signal::default()
             });
         s.count += 1;
@@ -467,20 +489,23 @@ pub(crate) fn replace_ledger(gaps: &mut Gaps, fresh: Vec<Signal>) {
         let kind = signal.kind();
         let entry = entry_for(gaps, kind, &signal.subject);
         let old = entry.signal.take().unwrap_or_default();
+        let old_is_trusted = !kind.needs_execution_evidence() || old.execution_evidence_v2;
         // A digest may have seen more of the same: keep the larger count.
         let mut merged = signal;
-        if old.count > merged.count {
+        if old_is_trusted && old.count > merged.count {
             merged.count = old.count;
         }
-        merged.sessions.extend(old.sessions);
-        merged.seen = old.seen;
-        for (detail, n) in old.details {
-            let slot = merged.details.entry(detail).or_default();
-            *slot = (*slot).max(n);
-        }
-        for example in old.examples {
-            if merged.examples.len() < 3 && !merged.examples.contains(&example) {
-                merged.examples.push(example);
+        if old_is_trusted {
+            merged.sessions.extend(old.sessions);
+            merged.seen = old.seen;
+            for (detail, n) in old.details {
+                let slot = merged.details.entry(detail).or_default();
+                *slot = (*slot).max(n);
+            }
+            for example in old.examples {
+                if merged.examples.len() < 3 && !merged.examples.contains(&example) {
+                    merged.examples.push(example);
+                }
             }
         }
         trim(&mut merged);

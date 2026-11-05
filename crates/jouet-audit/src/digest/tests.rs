@@ -11,7 +11,7 @@ fn codex_exec_envelopes_are_not_reported_as_jouet_output() {
     ] {
         let mut call = Call::shell("jouet pr threads 42 --json");
         call.name = Some(name.into());
-        call.exit_code = Some(0);
+        call.exit_code = Some(if name == "exec" { 101 } else { 0 });
         call.output =
             Some("Script completed\nWall time 1 second\nOutput:\n{\"repo\":\"example\"}".into());
         let transcript = Transcript {
@@ -20,6 +20,22 @@ fn codex_exec_envelopes_are_not_reported_as_jouet_output() {
         };
         assert!(jouet_findings(&transcript).is_empty(), "{name}");
     }
+}
+
+#[test]
+fn codex_exec_command_specific_failure_is_still_reported() {
+    let mut call = Call::shell("jouet pr threads 42");
+    call.name = Some("exec".into());
+    call.exit_code = Some(101);
+    call.exit_code_exact = true;
+    let transcript = Transcript {
+        calls: vec![call],
+        ..Default::default()
+    };
+    assert_eq!(
+        jouet_findings(&transcript)[0].found.kind,
+        jouet::Kind::Crash
+    );
 }
 
 #[test]
