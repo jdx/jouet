@@ -68,7 +68,7 @@ pub struct Report {
     /// Files with matches left out whole because the total budget ran out.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub omitted: Vec<Omitted>,
-    /// Explicit input paths that could not be searched.
+    /// Input paths or encountered files and directories that could not be searched.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unsearched: Vec<String>,
 }
@@ -114,6 +114,22 @@ pub struct Omitted {
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
+}
+
+fn walk_error_paths(error: &ignore::Error, paths: &mut Vec<PathBuf>) {
+    match error {
+        ignore::Error::Partial(errors) => {
+            for error in errors {
+                walk_error_paths(error, paths);
+            }
+        }
+        ignore::Error::WithPath { path, .. } => paths.push(path.clone()),
+        ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
+            walk_error_paths(err, paths);
+        }
+        ignore::Error::Loop { child, .. } => paths.push(child.clone()),
+        _ => {}
+    }
 }
 
 /// A file's matches as the walker collected them.
@@ -173,7 +189,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     } else {
         options.paths.clone()
     };
-    let (paths, unsearched): (Vec<_>, Vec<_>) = paths
+    let (paths, mut unsearched): (Vec<_>, Vec<_>) = paths
         .into_iter()
         .partition(|p| std::fs::metadata(p).is_ok());
     if paths.is_empty() {
@@ -206,6 +222,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     };
     let memory_ref: &Memory = memory;
     let found: Mutex<Vec<Collected>> = Mutex::new(Vec::new());
+    let unreadable: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
     let searched = AtomicUsize::new(0);
     walk.build_parallel().run(|| {
         let matcher = matcher.clone();
@@ -214,21 +231,27 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
             .line_number(true)
             .build();
         let found = &found;
+        let unreadable = &unreadable;
         let searched = &searched;
         let note = Note {
             keep,
             memory: memory_ref,
         };
         Box::new(move |entry| {
-            let Ok(entry) = entry else {
-                return WalkState::Continue;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    if let Ok(mut unreadable) = unreadable.lock() {
+                        walk_error_paths(&error, &mut unreadable);
+                    }
+                    return WalkState::Continue;
+                }
             };
             if !entry.file_type().is_some_and(|t| t.is_file())
                 || structural.is_some_and(|s| !s.applies_to(entry.path()))
             {
                 return WalkState::Continue;
             }
-            searched.fetch_add(1, Ordering::Relaxed);
             let path = entry.path();
             let stamp = entry
                 .metadata()
@@ -266,10 +289,24 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                     .map(|_| ()),
                 (None, None) => Ok(()),
             };
-            if result.is_ok() && collected.matches > 0 {
-                collected.key = key.unwrap_or_default();
-                if let Ok(mut found) = found.lock() {
-                    found.push(collected);
+            match result {
+                Ok(()) => {
+                    searched.fetch_add(1, Ordering::Relaxed);
+                    if collected.matches > 0 {
+                        collected.key = key.unwrap_or_default();
+                        if let Ok(mut found) = found.lock() {
+                            found.push(collected);
+                        }
+                    }
+                }
+                // Structural search skips non-UTF-8 files, as text search
+                // skips binary files; they are not unreadable input paths.
+                Err(error)
+                    if structural.is_some() && error.kind() == std::io::ErrorKind::InvalidData => {}
+                Err(_) => {
+                    if let Ok(mut unreadable) = unreadable.lock() {
+                        unreadable.push(path.to_path_buf());
+                    }
                 }
             }
             WalkState::Continue
@@ -277,6 +314,10 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     });
     let mut found = found.into_inner().unwrap_or_default();
     found.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut unreadable = unreadable.into_inner().unwrap_or_default();
+    unreadable.sort();
+    unreadable.dedup();
+    unsearched.extend(unreadable);
     let mut report = Report {
         matches: found.iter().map(|c| c.matches).sum(),
         files_matched: found.len(),

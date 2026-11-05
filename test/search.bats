@@ -84,6 +84,39 @@ RS
 	assert_stderr --partial 'missing1: not searched'
 }
 
+@test "search reports an unreadable file without discarding other matches" {
+	printf 'download\n' >unreadable.rs
+	chmod 000 unreadable.rs
+	if [ -r unreadable.rs ]; then
+		chmod 600 unreadable.rs
+		skip 'the test user can read files without permissions'
+	fi
+	run --separate-stderr jouet search --json download unreadable.rs src/main.rs
+	chmod 600 unreadable.rs
+	assert_failure 3
+	assert_equal "$(jq -r '.files[0].path' <<<"$output")" 'src/main.rs'
+	assert_equal "$(jq -c '.unsearched' <<<"$output")" '["unreadable.rs"]'
+	assert_equal "$(jq -r '.files_searched' <<<"$output")" '1'
+	assert_stderr ''
+}
+
+@test "search reports an unreadable directory without discarding other matches" {
+	mkdir unreadable
+	printf 'download\n' >unreadable/hidden.rs
+	chmod 000 unreadable
+	if [ -r unreadable ]; then
+		chmod 700 unreadable
+		skip 'the test user can read directories without permissions'
+	fi
+	run --separate-stderr jouet search --json download unreadable src/main.rs
+	chmod 700 unreadable
+	assert_failure 3
+	assert_equal "$(jq -r '.files[0].path' <<<"$output")" 'src/main.rs'
+	assert_equal "$(jq -c '.unsearched' <<<"$output")" '["unreadable"]'
+	assert_equal "$(jq -r '.files_searched' <<<"$output")" '1'
+	assert_stderr ''
+}
+
 @test "search accepts rg's context flags and says it shows no context lines" {
 	run --separate-stderr jouet search -A0 'fn fetch' src/lib.rs
 	assert_success
