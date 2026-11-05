@@ -44,7 +44,7 @@ jouet search PATTERN [PATH]... [-F] [-i] [-w] [-g GLOB]... [--hidden] [-l]
              [--structural --lang LANG [--callers-of PATH#SYMBOL | --impact PATH#SYMBOL]]
 ```
 
-The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. `-m NUM` (`--max-count`) shows at most NUM matches from each file, as rg's does, counting the rest as left out, and `-n` is accepted for rg's sake, since line numbers are always shown: agents reach for both by habit. If a requested path or a file or directory encountered during the walk is unavailable, jouet searches what it can, names the unsearched paths on stderr, and exits 3; JSON includes them in `unsearched`. Every flag is listed in the [CLI reference](/cli/search).
+The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`. `-m NUM` (`--max-count`) shows at most NUM matches from each file, as rg's does, counting the rest as left out, and `-n` is accepted for rg's sake, since line numbers are always shown: agents reach for both by habit. If a requested path or a file or directory encountered during the walk is unavailable, jouet searches what it can, names the unsearched paths on stderr, and exits 3; JSON includes them in `unsearched`; walk errors without a path appear in `walk_errors`. Every flag is listed in the [CLI reference](/cli/search).
 
 ## Searching like rg
 

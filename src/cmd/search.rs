@@ -76,6 +76,9 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         for path in &report.unsearched {
             eprintln!("jouet: {path}: not searched (path unavailable)");
         }
+        for error in &report.walk_errors {
+            eprintln!("jouet: search incomplete: {error}");
+        }
     }
     memory.save();
     drop(options);
@@ -109,7 +112,7 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         }
         text
     });
-    if !report.unsearched.is_empty() {
+    if !report.unsearched.is_empty() || !report.walk_errors.is_empty() {
         Exit::NotFound
     } else if report.matches == 0 {
         Exit::Failed

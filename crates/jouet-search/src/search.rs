@@ -71,6 +71,9 @@ pub struct Report {
     /// Input paths or encountered files and directories that could not be searched.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unsearched: Vec<String>,
+    /// Walk errors that did not identify a path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub walk_errors: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -116,19 +119,25 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-fn walk_error_paths(error: &ignore::Error, paths: &mut Vec<PathBuf>) {
+#[derive(Default)]
+struct WalkFailures {
+    paths: Vec<PathBuf>,
+    errors: Vec<String>,
+}
+
+fn collect_walk_errors(error: &ignore::Error, failures: &mut WalkFailures) {
     match error {
         ignore::Error::Partial(errors) => {
             for error in errors {
-                walk_error_paths(error, paths);
+                collect_walk_errors(error, failures);
             }
         }
-        ignore::Error::WithPath { path, .. } => paths.push(path.clone()),
+        ignore::Error::WithPath { path, .. } => failures.paths.push(path.clone()),
         ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
-            walk_error_paths(err, paths);
+            collect_walk_errors(err, failures);
         }
-        ignore::Error::Loop { child, .. } => paths.push(child.clone()),
-        _ => {}
+        ignore::Error::Loop { child, .. } => failures.paths.push(child.clone()),
+        _ => failures.errors.push(error.to_string()),
     }
 }
 
@@ -222,7 +231,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     };
     let memory_ref: &Memory = memory;
     let found: Mutex<Vec<Collected>> = Mutex::new(Vec::new());
-    let unreadable: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    let unreadable = Mutex::new(WalkFailures::default());
     let searched = AtomicUsize::new(0);
     walk.build_parallel().run(|| {
         let matcher = matcher.clone();
@@ -242,7 +251,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                 Ok(entry) => entry,
                 Err(error) => {
                     if let Ok(mut unreadable) = unreadable.lock() {
-                        walk_error_paths(&error, &mut unreadable);
+                        collect_walk_errors(&error, &mut unreadable);
                     }
                     return WalkState::Continue;
                 }
@@ -305,7 +314,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                     if structural.is_some() && error.kind() == std::io::ErrorKind::InvalidData => {}
                 Err(_) => {
                     if let Ok(mut unreadable) = unreadable.lock() {
-                        unreadable.push(path.to_path_buf());
+                        unreadable.paths.push(path.to_path_buf());
                     }
                 }
             }
@@ -315,14 +324,17 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     let mut found = found.into_inner().unwrap_or_default();
     found.sort_by(|a, b| a.path.cmp(&b.path));
     let mut unreadable = unreadable.into_inner().unwrap_or_default();
-    unreadable.sort();
-    unreadable.dedup();
-    unsearched.extend(unreadable);
+    unreadable.paths.sort();
+    unreadable.paths.dedup();
+    unreadable.errors.sort();
+    unreadable.errors.dedup();
+    unsearched.extend(unreadable.paths);
     let mut report = Report {
         matches: found.iter().map(|c| c.matches).sum(),
         files_matched: found.len(),
         files_searched: searched.into_inner(),
         unsearched: unsearched.iter().map(|p| display(p)).collect(),
+        walk_errors: unreadable.errors,
         ..Report::default()
     };
     if options.files_only {
@@ -694,4 +706,27 @@ pub fn render(report: &Report, files_only: bool) -> String {
         text.push_str(" (narrow the search, or raise --budget)\n");
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn walker_errors_without_paths_are_not_silently_dropped() {
+        let error = ignore::Error::Partial(vec![
+            ignore::Error::WithDepth {
+                depth: 1,
+                err: Box::new(ignore::Error::WithPath {
+                    path: PathBuf::from("unreadable"),
+                    err: Box::new(ignore::Error::Io(std::io::Error::other("denied"))),
+                }),
+            },
+            ignore::Error::Io(std::io::Error::other("unknown walk failure")),
+        ]);
+        let mut failures = WalkFailures::default();
+        collect_walk_errors(&error, &mut failures);
+        assert_eq!(failures.paths, [PathBuf::from("unreadable")]);
+        assert_eq!(failures.errors, ["unknown walk failure"]);
+    }
 }
