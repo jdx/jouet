@@ -61,6 +61,9 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                 return
             if hidden:
                 target = checkout / "packages/zod/src/v4/classic/tests/to-json-schema.test.ts"
+                if not target.exists() and not target.is_symlink():
+                    expect(False, "the hidden-test target was removed from the committed tree")
+                    return
                 if not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(checkout.resolve()):
                     UNVERIFIED.append("hidden-test target is not a regular file in the checkout")
                     return
@@ -72,7 +75,7 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
             if result is None:
                 return
             label = "hidden tests" if hidden else "committed tests"
-            expect(result.returncode == 0, f"{label} failed:\n{result.stdout}{result.stderr}")
+            details = []
             try:
                 counts = json.loads(report.read_text())
                 passed = counts["numPassedTests"]
@@ -80,14 +83,20 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                 failed = counts["numFailedTests"]
                 if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in (passed, total, failed)):
                     raise TypeError("test counts are not integers")
-            except (OSError, ValueError, KeyError, TypeError) as error:
+                for suite in counts.get("testResults", []):
+                    for assertion in suite.get("assertionResults", []):
+                        if assertion.get("status") == "failed":
+                            details.append(f"{assertion.get('fullName', '(unnamed test)')}:\n"
+                                           + "\n".join(assertion.get("failureMessages") or []))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
                 UNVERIFIED.append(f"{label} did not report test counts: {error}")
             else:
-                expect(failed == 0, f"{label} reported {failed} failing tests")
+                expect(failed == 0, f"{label} reported {failed} failing tests:\n" + "\n".join(details))
                 if total == 0:
                     expect(False, f"{label} ran no tests")
                 elif passed == 0 and result.returncode == 0:
                     UNVERIFIED.append(f"{label} did not pass any tests")
+            expect(result.returncode == 0, f"{label} failed:\n{result.stdout}{result.stderr}\n" + "\n".join(details))
             if hidden:
                 related = checkout / "packages/zod/src/v4/classic/tests/bigint.test.ts"
                 if related.is_file() and not related.is_symlink() and related.resolve().is_relative_to(checkout.resolve()):

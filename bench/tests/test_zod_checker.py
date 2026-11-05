@@ -111,12 +111,24 @@ class ZodCheckerTest(unittest.TestCase):
             self.assertIn("ran no tests", check().stdout)
             env["TEST_REPORT"] = '{"numPassedTests":0,"numTotalTests":1,"numFailedTests":0}'
             self.assertEqual(check().returncode, 3)
-            env["TEST_REPORT"] = '{"numPassedTests":1,"numTotalTests":2,"numFailedTests":1}'
-            self.assertIn("reported 1 failing tests", check().stdout)
+            env["TEST_REPORT"] = ('{"numPassedTests":1,"numTotalTests":2,"numFailedTests":1,'
+                                  '"testResults":[{"assertionResults":[{"status":"failed",'
+                                  '"fullName":"broken assertion","failureMessages":["expected 3"]}]}]}')
+            report = check()
+            self.assertIn("reported 1 failing tests", report.stdout)
+            self.assertIn("broken assertion", report.stdout)
+            self.assertIn("expected 3", report.stdout)
             del env["TEST_REPORT"]
             source.write_text("uncommitted\n")
             self.assertIn("tracked changes were left uncommitted", check().stdout)
             self.assertEqual(target.read_text(), "agent test\n")
+            source.write_text("fixed source\n")
+            target.unlink()
+            other = tests / "other.test.ts"
+            other.write_text("another test\n")
+            git("add", "packages/zod/src/v4/classic/tests")
+            git("commit", "-qm", "replace test")
+            self.assertIn("hidden-test target was removed", check().stdout)
 
 
 if __name__ == "__main__":
