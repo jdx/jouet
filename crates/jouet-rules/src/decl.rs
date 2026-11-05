@@ -433,7 +433,7 @@ pub(crate) struct CaseTable {
     /// What `jouet.secrets.scan()` finds, for any scope; omitted, it has no
     /// answer.
     pub secrets: Option<Vec<SecretCase>>,
-    /// What `jouet.node.scripts()` reports; omitted, it has no answer.
+    /// What `jouet.node.scripts()` reports for any directory; omitted, it has no answer.
     pub node_scripts: Option<Vec<String>>,
     /// The text of files `jouet.file.contains` reads, by the path the
     /// script passes it; omitted, it has no answer for any file.

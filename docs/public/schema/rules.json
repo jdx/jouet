@@ -489,7 +489,7 @@
           }
         },
         "node_scripts": {
-          "description": "What `jouet.node.scripts()` reports; omitted, it has no answer.",
+          "description": "What `jouet.node.scripts()` reports for any directory; omitted, it has no answer.",
           "type": "array",
           "items": {
             "type": "string"

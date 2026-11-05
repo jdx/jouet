@@ -393,13 +393,20 @@ pub(crate) fn install(
     node_table.set(
         "scripts",
         lua.create_function(move |lua, dir: Option<String>| {
+            // An example answers for any directory.
+            let stubbed = s.cache.borrow().get("node:scripts:*").cloned();
+            if let Some(answer_) = stubbed {
+                return answer(lua, answer_);
+            }
             let key = format!("node:scripts:{}", dir.as_deref().unwrap_or(""));
-            let found = cached(&s, &key, |p, _| {
+            let found = cached(&s, &key, |p, left| {
                 let base = match &p.dir {
                     Some(dir) => dir.clone(),
                     None => std::env::current_dir().map_err(|e| e.to_string())?,
                 };
-                node::scripts(&crate::resolve_dir(&base, dir.as_deref().unwrap_or(".")))
+                let at = crate::resolve_dir(&base, dir.as_deref().unwrap_or("."));
+                bounded(left, move || node::scripts(&at))
+                    .ok_or("package scripts did not answer within the budget")?
             })?;
             answer(lua, found)
         })?,

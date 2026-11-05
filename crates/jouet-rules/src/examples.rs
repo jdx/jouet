@@ -108,7 +108,7 @@ pub struct Case {
     pub stack: Option<serde_json::Value>,
     /// What `jouet.secrets.scan()` answers, for any scope.
     pub secrets: Option<serde_json::Value>,
-    /// What `jouet.node.scripts()` answers for the call's directory.
+    /// What `jouet.node.scripts()` answers for any directory.
     pub node_scripts: Option<Vec<String>>,
     /// The text of each file `jouet.file.contains()` reads, by its path.
     pub files: Option<std::collections::BTreeMap<String, String>>,
@@ -591,7 +591,7 @@ impl Engine {
                 self.stub("secrets:*", secrets.clone());
             }
             if let Some(scripts) = &case.node_scripts {
-                self.stub("node:scripts:", serde_json::json!(scripts));
+                self.stub("node:scripts:*", serde_json::json!(scripts));
             }
             for (path, text) in case.files.iter().flatten() {
                 self.stub(&format!("file:{path}"), text.clone().into());
