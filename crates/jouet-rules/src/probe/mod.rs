@@ -25,6 +25,7 @@ mod claims;
 pub(crate) mod git;
 mod github;
 mod ledger;
+mod node;
 mod pitchfork;
 mod secrets;
 mod stack;
@@ -386,6 +387,24 @@ pub(crate) fn install(
         })?,
     )?;
     jouet.set("cargo", cargo_table)?;
+
+    let node_table = lua.create_table()?;
+    let s = shared.clone();
+    node_table.set(
+        "scripts",
+        lua.create_function(move |lua, dir: Option<String>| {
+            let key = format!("node:scripts:{}", dir.as_deref().unwrap_or(""));
+            let found = cached(&s, &key, |p, _| {
+                let base = match &p.dir {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_dir().map_err(|e| e.to_string())?,
+                };
+                node::scripts(&crate::resolve_dir(&base, dir.as_deref().unwrap_or(".")))
+            })?;
+            answer(lua, found)
+        })?,
+    )?;
+    jouet.set("node", node_table)?;
 
     let test_table = lua.create_table()?;
     let s = shared.clone();

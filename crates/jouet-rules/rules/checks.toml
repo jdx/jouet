@@ -31,6 +31,7 @@ fires = [
   { command = "mise run lint", exit_code = 1, kind = "lint" },
   { command = "npm run build", exit_code = 0, kind = "build" },
   { command = "pnpm test", exit_code = 0, kind = "test" },
+  { command = "pnpm vitest run a.test.ts", exit_code = 1, kind = "test", scope = "partial a.test.ts", node_scripts = ["test"] },
   { command = "python3 -m pytest -x", exit_code = 1, kind = "test" },
   { command = "playwright test e2e/account.spec.ts", exit_code = 1, kind = "test", scope = "partial @jouet:playwright e2e/account.spec.ts" },
   { command = "npx playwright test", exit_code = 0, kind = "test", scope = "partial @jouet:playwright" },
@@ -146,6 +147,8 @@ fires = [
   { command = "jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test", exit_code = 1, kind = "test", scope = "partial" },
 ]
 quiet = [
+  { command = "pnpm vitest run a.test.ts", exit_code = 1, node_scripts = ["vitest"] },
+  { command = "pnpm vitest run --help", exit_code = 0, node_scripts = [] },
   # The verifier cannot safely compare dynamic directories or multiword selectors.
   { command = "pnpm --dir \"$PROJECT\" test", exit_code = 1 },
   { command = "pnpm --dir web exec vitest run -t 'some name'", exit_code = 1 },

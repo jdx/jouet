@@ -147,6 +147,7 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "harness",
             "input",
             "kind",
+            "node_scripts",
             "path",
             "read_lines",
             "scope",
