@@ -296,9 +296,14 @@ local function pnpm_scope(args: { string }, scoped_test: boolean?): (Kind?, Scop
 				return nil, unknown
 			end
 		end
-		local from = if args[at + 2] == "run" then at + 3 else at + 2
+		-- A Vitest mode is not a file filter: a passing ordinary run does not
+		-- cover a failed benchmark, type check, or watch-mode invocation.
+		local subcommand = args[at + 2]
+		local modes = set({ "bench", "typecheck", "watch", "dev", "related", "list", "init" })
+		local mode = if subcommand and modes[subcommand] then `:{subcommand}` else ""
+		local from = if subcommand == "run" or mode ~= "" then at + 3 else at + 2
 		local scope = runner_scope(args, from, true)
-		return "test", partial(prefix .. "vitest" .. (if scope.selector then " " .. scope.selector else ""))
+		return "test", partial(prefix .. "vitest" .. mode .. (if scope.selector then " " .. scope.selector else ""))
 	elseif (at > 1 or scoped_test) and (args[at] == "test" or args[at] == "t" or ((args[at] == "run" or args[at] == "run-script") and (args[at + 1] == "test" or args[at + 1] == "t"))) then
 		local test_at = if args[at] == "run" or args[at] == "run-script" then at + 1 else at
 		for i = test_at + 1, #args do

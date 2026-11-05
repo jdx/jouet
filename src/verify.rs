@@ -3276,9 +3276,10 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_str().unwrap();
+        let expected = normalize_cwd_separators(path, cfg!(windows));
         assert_eq!(
             codex_command(&line(path)).unwrap().cwd.as_deref(),
-            Some(path)
+            Some(expected.as_str())
         );
         assert_eq!(codex_command(&line("relative")).unwrap().cwd, None);
     }

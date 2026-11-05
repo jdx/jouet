@@ -155,6 +155,22 @@ stop_reason() {
 	assert_output ""
 }
 
+@test "an ordinary pnpm Vitest run does not clear failures in other modes" {
+	git init -q repo
+	echo 'export {}' >repo/index.ts
+	git -C repo add index.ts
+
+	for mode in typecheck bench watch dev; do
+		ran "pnpm --dir web exec vitest $mode" 1
+		ran 'pnpm --dir web exec vitest run' 0
+		run stop_reason
+		assert_output --partial "vitest $mode"
+		ran "pnpm --dir web exec vitest $mode" 0
+		run stop_reason
+		assert_output ""
+	done
+}
+
 @test "a passing sh -c script of several checks clears their failures" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
