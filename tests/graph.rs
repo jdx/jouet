@@ -385,6 +385,39 @@ fn continuation_commands_keep_the_original_query_options() {
 }
 
 #[test]
+fn symbol_continuation_keeps_a_hyphenated_path_attached() {
+    let env = Env::new();
+    let mut source = String::new();
+    for i in 0..20 {
+        source.push_str(&format!("def entry_{i}():\n    return 1\n\n"));
+    }
+    env.write("-src/code.py", &source);
+    let first = env.run(&["graph", "symbols", "--path=-src", "--budget", "200"]);
+    assert!(first.status.success());
+    let text = String::from_utf8(first.stdout).unwrap();
+    let marker = text.lines().last().unwrap();
+    let suggested = marker
+        .rsplit_once(" (jouet ")
+        .unwrap()
+        .1
+        .trim_end_matches(')');
+    assert!(suggested.contains("--path=-src"), "{marker}");
+    let suggested: Vec<&str> = suggested.split_whitespace().collect();
+    let next = env.run(&suggested);
+    let expected = env.run(&[
+        "graph",
+        "symbols",
+        "--path=-src",
+        "--budget",
+        "200",
+        "--page",
+        "2",
+    ]);
+    assert!(next.status.success());
+    assert_eq!(next.stdout, expected.stdout);
+}
+
+#[test]
 fn continuation_for_one_of_several_targets_keeps_its_budget_share() {
     let env = Env::new();
     for file in ["a.py", "b.py"] {

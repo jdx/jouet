@@ -173,10 +173,10 @@ fn symbols(
         let _ = write!(rerun, " {}", quoted(q));
     }
     if let Some(kind) = &args.kind {
-        let _ = write!(rerun, " --kind {}", quoted(kind));
+        let _ = write!(rerun, " --kind={}", quoted(kind));
     }
     if let Some(path) = &args.path {
-        let _ = write!(rerun, " --path {}", quoted(path));
+        let _ = write!(rerun, " --path={}", quoted(path));
     }
     if let Some(budget) = args.budget {
         let _ = write!(rerun, " --budget {budget}");
