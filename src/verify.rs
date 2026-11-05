@@ -1,8 +1,8 @@
 //! The check before an agent stops: if a test, lint or build run in this
 //! session failed and nothing since has covered it, or files changed after
 //! the last test run passed with none passing since, the stop hook blocks
-//! once and says which. The tests a change affects are enough: the full
-//! suite runs on CI.
+//! once and says which. A passing partial test run satisfies this gate; it
+//! does not establish that the full suite passed.
 //!
 //! What counts as a check is decided by post-tool-use rules (the built-in
 //! `checks` rule, or a user's replacement), which `jouet.record` the runs

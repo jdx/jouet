@@ -4,7 +4,7 @@ description: Run the full test suite, only the tests a change affects, or any te
 
 # jouet test
 
-`jouet test --affected` runs only the tests your changes affect, so an agent iterating on a change waits seconds instead of minutes. It works the same way in every ecosystem it supports. An adapter hands the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data, cargo's crate graph), or to jouet's code graph where the runner has none. jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
+`jouet test --affected` selects tests related to your changes, which can reduce the work needed while iterating. It works the same way in every ecosystem it supports. An adapter hands the selection to the test runner's own machinery (vitest's and jest's module graphs, pytest-testmon's coverage data, cargo's crate graph), or to jouet's code graph where the runner has none. jouet adds the same things everywhere: the changed set, the cases where only the whole suite is safe, an explanation of each pick, and a record that the run was partial.
 
 ```sh
 $ jouet test --affected

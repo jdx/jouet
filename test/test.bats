@@ -614,7 +614,7 @@ ran() {
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "\`jouet test --affected\` (pytest) runs only the tests your changes affect"
-	assert_output --partial 'The full suite runs on CI after you push.'
+	assert_output --partial 'An affected run does not verify the full suite.'
 
 	# After an affected run, a full run is the one that has to happen.
 	ran 'jouet test --affected' 0
