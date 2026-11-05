@@ -491,6 +491,22 @@ class StopTest(unittest.TestCase):
         self.assertEqual(result["stopped"], "timeout")
         self.assertLess(result["wall_s"], 15)
 
+    def test_stream_receipt_times_stay_aligned_without_copying_content(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            script = "print('private-first'); print('private-second')"
+            result = runner.run_agent(HARNESSES["codex"], [sys.executable, "-c", script],
+                                      {"PATH": "/usr/bin:/bin"}, root, root, 5, None,
+                                      root / "agent.jsonl")
+            self.assertEqual(result["lines"], ["private-first\n", "private-second\n"])
+            raw = (root / "agent-timing.json").read_text()
+            self.assertNotIn("private", raw)
+            timing = json.loads(raw)
+            self.assertTrue(timing["stream_complete"])
+            self.assertEqual(len(timing["elapsed_s"]), 2)
+            self.assertEqual(timing["elapsed_s"], sorted(timing["elapsed_s"]))
+            self.assertEqual(timing["elapsed_s"], result["elapsed"])
+
 
 class HarnessOutputTest(unittest.TestCase):
     def test_claude_stream(self):

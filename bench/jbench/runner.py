@@ -27,6 +27,7 @@ from . import costs as costs_mod
 from . import credentials
 from . import init as init_mod
 from . import tasks as tasks_mod
+from . import timing
 from .fake_github import FakeGitHub
 from .harness import HARNESSES, Harness, codex_shell_metrics
 
@@ -218,6 +219,7 @@ def run_agent(
 ) -> dict[str, Any]:
     """Runs the agent, stopping it at the timeout or the token cap."""
     lines: list[str] = []
+    elapsed: list[float] = []
     stopped: list[str] = []
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
         proc = subprocess.Popen(
@@ -235,6 +237,7 @@ def run_agent(
         def read() -> None:
             assert proc.stdout is not None
             for line in proc.stdout:
+                elapsed.append(round(time.perf_counter() - started, 6))
                 lines.append(line)
                 stream.write(line)
                 stream.flush()
@@ -262,11 +265,18 @@ def run_agent(
         proc.wait()
         wall_s = time.perf_counter() - started
         reader.join(timeout=10)
+        complete = not reader.is_alive()
+        # One timestamp per line; no transcript content or project paths.
+        (stream_path.parent / "agent-timing.json").write_text(json.dumps({
+            "elapsed_s": elapsed, "stream_complete": complete,
+        }))
     return {
         "wall_s": round(wall_s, 3),
         "exit_code": proc.returncode,
         "stopped": stopped[0] if stopped else None,
         "lines": lines,
+        "elapsed": elapsed,
+        "stream_complete": complete,
         # The agent leads a session of its own; what it started and left
         # running is still in it, unless it started a session too.
         "session": proc.pid,
@@ -561,6 +571,9 @@ def execute(
         "shell": (codex_shell_metrics(agent["lines"])
                   if harness.name == "codex" and not agent["stopped"] and agent["exit_code"] == 0
                   else None),
+        "command_activity": (timing.codex_commands(agent["lines"], agent.get("elapsed", []),
+                                                   agent.get("stream_complete", False))
+                             if harness.name == "codex" else None),
         "ledger": ledger(env) if arm.jouet else None,
         "github": github,
         "setup": ran["setup"],
