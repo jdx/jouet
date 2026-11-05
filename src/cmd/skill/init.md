@@ -174,7 +174,12 @@ when an agent reads it. Cover, in this order and only what holds here:
 - generated or vendored files and what generates them, so they are not edited
   by hand;
 - the places a change usually has to touch together (a schema and its
-  generated code, a setting and its docs).
+  generated code, a setting and its docs);
+- when the project has a formatter, the existing command to apply it to
+  selected files, including the complete file argument. Verify the command and
+  its scope from the project configuration and tool help; do not run a
+  whole-project rewrite or change source files just to verify it. Omit the
+  command if its scope or availability cannot be established.
 
 ```markdown
 # Map
