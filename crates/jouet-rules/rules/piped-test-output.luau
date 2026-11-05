@@ -246,7 +246,7 @@ local function speak(call: JouetCall, message: string): JouetDecision
 	if call.session then
 		local fired = jouet.session.fired("piped-test-output", call.session)
 		if fired and fired > 0 then
-			return jouet.deny(`This session was already warned about cutting a run's output. {message}`)
+			return jouet.deny(`This session was already warned about cutting a run's output. {message} Nothing in this call ran, so run its other commands again too.`)
 		end
 	end
 	return jouet.warn(message)

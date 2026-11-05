@@ -959,6 +959,7 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
 	assert_line --index 0 deny
 	assert_output --partial "already warned about cutting a run's output. Run \`RUST_LOG=debug jouet test --cmd -- cargo test --manifest-path \$DIR/Cargo.toml \"a b\"\` instead"
+	assert_output --partial "Nothing in this call ran, so run its other commands again too."
 
 	# Another session is only warned.
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.session_id = "s2"')"
