@@ -121,20 +121,26 @@ impl Format {
     }
 
     /// Adds each failed test `lines` have by this format, with its excerpt,
-    /// and the counts its summary lines give, or else one failure for each.
+    /// and the counts its summary lines give, or else one failure for each
+    /// failure no summary line after it counts.
     pub(super) fn apply(&self, lines: &[String], out: &mut Parsed) {
         let mut start = 0;
-        let mut failed = 0;
-        let mut counted = false;
+        // The failures since the last summary line, which it did not count.
+        let mut uncounted = 0;
         for (i, line) in lines.iter().enumerate() {
+            // A summary line can also start a test or name a failure, so it
+            // is read for those too. One that a runner jouet knows has
+            // counted is not counted again.
+            let summary = self.summary.iter().find_map(|p| p.captures(line));
+            if let Some(c) = &summary {
+                if !super::known_runners_count(line) {
+                    out.count_words(c.get(1).map_or(line.as_str(), |g| g.as_str()));
+                }
+                uncounted = 0;
+            }
             if any(&self.start, line) {
                 start = i + 1;
                 continue;
-            }
-            // A summary line can also name a failure, so it is read for both.
-            if let Some(c) = self.summary.iter().find_map(|p| p.captures(line)) {
-                out.count_words(c.get(1).map_or(line.as_str(), |g| g.as_str()));
-                counted = true;
             }
             let Some(c) = self.failed.iter().find_map(|p| p.captures(line)) else {
                 continue;
@@ -142,7 +148,9 @@ impl Format {
             let Some(name) = c.name("name").or_else(|| c.get(1)) else {
                 continue;
             };
-            failed += 1;
+            if summary.is_none() {
+                uncounted += 1;
+            }
             let body = &lines[start.min(i)..i];
             // Without a start, the lines before a failure may be another
             // test's: only an excerpt line marks where this one's begin.
@@ -163,10 +171,7 @@ impl Format {
             out.push(i, name.as_str(), block);
             start = i + 1;
         }
-        // The runner's summary already counts the tests that failed.
-        if !counted {
-            out.count(0, failed, 0);
-        }
+        out.count(0, uncounted, 0);
     }
 }
 
