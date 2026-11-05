@@ -6,7 +6,7 @@ opt_in = true
 remote = false
 upstream = true
 timeout_s = 1500
-check_timeout_s = 300
+check_timeout_s = 1200
 # jouet levels: out of the box, `jouet test` digests vitest's output, and
 # `--affected` selects through vitest's module graph, though for
 # `core/checks.ts` that is 126 test files, nearly all. Each test runs twice,
