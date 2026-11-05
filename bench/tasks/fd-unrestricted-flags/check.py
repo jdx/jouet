@@ -113,9 +113,9 @@ def main():
                 removed = subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
                                          capture_output=True, text=True, timeout=60, check=False)
                 if removed.returncode and created is not None and created.returncode == 0:
-                    UNVERIFIED.append(f"could not remove committed checkout: {removed.stderr}")
+                    print(f"warning: could not remove committed checkout: {removed.stderr}", file=sys.stderr)
             except (OSError, subprocess.TimeoutExpired) as error:
-                UNVERIFIED.append(f"could not remove committed checkout: {error}")
+                print(f"warning: could not remove committed checkout: {error}", file=sys.stderr)
     finish()
 
 

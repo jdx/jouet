@@ -59,6 +59,16 @@ class FdCheckerTest(unittest.TestCase):
             env["BENCH_HEAD_SHA"] = git("rev-parse", "HEAD")
             binary = root / "bin"
             binary.mkdir()
+            real_git = shutil.which("git", path=env["PATH"])
+            git_wrapper = binary / "git"
+            git_wrapper.write_text(
+                '#!/bin/sh\n'
+                'if [ "${FAIL_CLEANUP:-}" = 1 ] && [ "$1" = worktree ] && [ "$2" = remove ]; then\n'
+                '  echo "simulated cleanup failure" >&2; exit 1\n'
+                'fi\n'
+                'exec "$REAL_GIT" "$@"\n'
+            )
+            git_wrapper.chmod(0o755)
             stub = root / "fd"
             stub.write_text(
                 '#!/bin/sh\n'
@@ -85,7 +95,7 @@ class FdCheckerTest(unittest.TestCase):
                 '*) echo "test result: ok. 2 passed; 0 failed; 0 ignored";; esac\n'
             )
             cargo.chmod(0o755)
-            env.update({"PATH": f"{binary}{os.pathsep}{env['PATH']}", "FD_STUB": str(stub)})
+            env.update({"PATH": f"{binary}{os.pathsep}{env['PATH']}", "FD_STUB": str(stub), "REAL_GIT": real_git})
 
             def check(extra=None):
                 return subprocess.run([sys.executable, str(task / "check.py")], cwd=work, env={**env, **(extra or {})},
@@ -103,6 +113,10 @@ class FdCheckerTest(unittest.TestCase):
             result = check({"GIT_DIR": str(root / "missing"), "GIT_WORK_TREE": str(root)})
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(len(git("worktree", "list", "--porcelain").split("worktree ")) - 1, 1)
+            cleanup_result = check({"FAIL_CLEANUP": "1"})
+            self.assertEqual(cleanup_result.returncode, 0, cleanup_result.stdout + cleanup_result.stderr)
+            self.assertIn("could not remove committed checkout", cleanup_result.stderr)
+            git("worktree", "prune")
             self.assertEqual(check({"TEST_MODE": "zero"}).returncode, 1)
             self.assertEqual(check({"TEST_MODE": "ignored"}).returncode, 3)
             self.assertEqual(check({"TEST_MODE": "missing"}).returncode, 3)
