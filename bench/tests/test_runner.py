@@ -1840,6 +1840,42 @@ class CostSeedTest(unittest.TestCase):
             costs.apply(run, note, shas["head_sha"])
             self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)
 
+    def test_incomplete_cost_seed_is_reported_and_not_cached(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a.txt").write_text("a\n")
+            task = tasks.Task(name="t", dir=task_dir, description="", prompt="", chore="", rules=[],
+                              timeout_s=60, cost_seed=["cargo build", "pnpm vitest run test.ts"])
+            stand_in = root / "jouet"
+            stand_in.write_text(
+                '#!/bin/sh\n'
+                'case "$*" in *"pnpm vitest"*) exit 0;; esac\n'
+                'git notes --ref jouet-cost add -f -m \'{"cmd":"cargo build"}\' HEAD\n'
+                'exit "${FAIL_RECORDED:-0}"\n'
+            )
+            stand_in.chmod(0o755)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                note = costs.seed(task, stand_in, root / "work", messages.append)
+                self.assertFalse(costs.cache_path(task, stand_in).exists())
+            self.assertIsNone(note)
+            self.assertTrue(any("no timing was recorded for pnpm vitest run test.ts" in m for m in messages))
+            self.assertTrue(any("runs start without a cost note" in m for m in messages))
+            failed = dataclasses.replace(task, cost_seed=["cargo build"], env={"FAIL_RECORDED": "1"})
+            messages.clear()
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                self.assertIsNone(costs.seed(failed, stand_in, root / "second-work", messages.append))
+                self.assertFalse(costs.cache_path(failed, stand_in).exists())
+            self.assertTrue(any("cargo build failed" in m for m in messages))
+
     def test_cost_cache_changes_with_setup_tools_and_jouet(self):
         import dataclasses
         import os

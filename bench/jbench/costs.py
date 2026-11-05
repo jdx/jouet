@@ -19,13 +19,21 @@ import shutil
 import socket
 import subprocess
 import tempfile
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import arms as arms_mod
 from . import tasks as tasks_mod
 
 NOTES_REF = "jouet-cost"
+
+
+def note_at_head(workdir: Path, env: dict[str, str]) -> str:
+    proc = subprocess.run(["git", "notes", "--ref", NOTES_REF, "show", "HEAD"],
+                          cwd=workdir, env=env, capture_output=True, text=True, check=False)
+    return proc.stdout if proc.returncode == 0 else ""
 
 
 def harness_hashes() -> list[str]:
@@ -99,6 +107,8 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
     except tasks_mod.EnvironmentSetupError:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
+    note = note_at_head(workdir, env)
+    incomplete = False
     for command in task.cost_seed:
         proc = subprocess.run(
             ["jouet", "test", "--cmd", "--", *shlex.split(command)],
@@ -107,18 +117,27 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
             capture_output=True,
             text=True,
             timeout=task.check_timeout_s,
+            check=False,
         )
         log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
+        if proc.returncode != 0:
+            log(f"    {command} failed; the cost seed is incomplete and will not be cached")
+            incomplete = True
+        updated = note_at_head(workdir, env)
+        if not (Counter(updated.splitlines()) - Counter(note.splitlines())):
+            log(f"    no timing was recorded for {command}; the cost seed is incomplete and will not be cached")
+            incomplete = True
+        note = updated
     shutil.rmtree(tmp, ignore_errors=True)
-    proc = subprocess.run(
-        ["git", "notes", "--ref", NOTES_REF, "show", "HEAD"], cwd=workdir, env=env, capture_output=True, text=True
-    )
-    if proc.returncode != 0 or not proc.stdout.strip():
+    if incomplete:
+        log(f"    {task.name}: runs start without a cost note because the seed is incomplete")
+        return None
+    if not note.strip():
         log(f"    no timings were kept for {task.name}; its runs start without a cost note")
         return None
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(proc.stdout)
-    return proc.stdout
+    cache.write_text(note)
+    return note
 
 
 def apply(workdir: Path, note: str, commit: str) -> None:

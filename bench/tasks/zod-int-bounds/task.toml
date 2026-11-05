@@ -103,6 +103,6 @@ npm = "npm"
 # Timed once, for the cost note every run starts with (bench/jbench/costs.py).
 [cost]
 seed = [
-    "pnpm vitest run packages/zod/src/v4/classic/tests/to-json-schema.test.ts",
+    "pnpm exec vitest run packages/zod/src/v4/classic/tests/to-json-schema.test.ts",
     "pnpm test",
 ]
