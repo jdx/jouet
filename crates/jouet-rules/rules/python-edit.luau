@@ -326,11 +326,11 @@ local rule: JouetRule = {
 						local found, missing, path = olds_found(code, edited, dirs[i])
 						if found == false and missing then
 							return jouet.deny(
-								`The \`.replace(\` text \`{shown(missing)}\` is not in {path}, so this script would change nothing there. Fix the text, or run \`jouet edit\`, which reports any replacement that does not match.`
+								`The \`.replace(\` text \`{shown(missing)}\` is not in {path}, so this script would change nothing there. Fix the text, or run \`jouet edit replace {path} --old TEXT --new TEXT\`, which reports any replacement that does not match.`
 							)
 						elseif found ~= true then
 							return jouet.deny(
-								"Run `jouet edit` instead. It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`). To add code, replace a line next to where it goes with that line plus the new code."
+								"Run `jouet edit replace PATH... --old TEXT --new TEXT` instead (repeat the pair for more). It applies exact replacements across files all-or-nothing and reports any that do not match. To add code, replace a line next to where it goes with that line plus the new code."
 							)
 						end
 					end
