@@ -36,12 +36,12 @@ fn the_ledger_shows_crashes_codes_usage_errors_and_abandoned_answers() {
         post("a", "jouet wait ci <arg>", 7),
         post("a", "jouet wind digest --session <arg>", 2),
         post("a", "jouet wind digest <arg>", 0),
-        post("a", "jouet pr status <arg>", 0),
-        post("a", "gh pr view <arg> --json <arg>", 0),
-        post("b", "jouet pr status <arg>", 0),
-        post("b", "gh api <arg>", 0),
-        post("c", "jouet pr status <arg>", 0),
-        post("c", "gh pr view <arg>", 0),
+        post("a", "jouet wait ci <arg>", 0),
+        post("a", "gh pr checks <arg>", 0),
+        post("b", "jouet wait ci <arg>", 0),
+        post("b", "gh pr checks <arg>", 0),
+        post("c", "jouet wait ci <arg>", 0),
+        post("c", "gh pr checks <arg>", 0),
     ];
     let found = from_ledger(&entries, None);
     let crash = signal(&found, Kind::Crash, "jouet pr threads");
@@ -56,12 +56,12 @@ fn the_ledger_shows_crashes_codes_usage_errors_and_abandoned_answers() {
     assert_eq!(usage.destination(), Destination::Discussion);
     // Once, in one session: not yet worth a maintainer's time.
     assert!(!usage.ready());
-    let dropped = signal(&found, Kind::Abandoned, "jouet pr status");
+    let dropped = signal(&found, Kind::Abandoned, "jouet wait ci");
     assert_eq!((dropped.count, dropped.sessions.len()), (3, 3));
     assert!(dropped.ready());
     assert_eq!(
         dropped.summary(),
-        "agents dropped `jouet pr status` for raw commands right after it answered, 3 times in 3 sessions (then `gh pr view`)"
+        "agents dropped `jouet wait ci` for raw commands right after it answered, 3 times in 3 sessions (then `gh pr checks`)"
     );
 }
 
@@ -149,6 +149,18 @@ fn an_overridden_built_in_rule_is_an_idea_and_mostly_overridden_a_bug() {
     // Too few overrides is not a signal.
     let few: Vec<Entry> = (0..10).map(|i| denied(&format!("s{i}"))).collect();
     assert!(from_ledger(&few, Some(&engine)).is_empty());
+}
+
+#[test]
+fn old_pr_abandonment_claims_are_not_ready_to_share() {
+    let mut gaps = Gaps::default();
+    let old = entry_for(&mut gaps, Kind::Abandoned, "jouet pr threads")
+        .signal
+        .as_mut()
+        .unwrap();
+    old.count = 559;
+    old.sessions.extend(["first".into(), "second".into()]);
+    assert!(!old.ready());
 }
 
 #[test]

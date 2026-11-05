@@ -156,6 +156,13 @@ impl Signal {
         match self.kind() {
             Kind::Crash | Kind::ExitCode => self.count >= 1,
             Kind::BadJson => self.count >= 1 && self.json_evidence_v2,
+            // Old ledgers may contain PR follow-ups classified only by their
+            // command name, which does not prove they replaced a jouet answer.
+            Kind::Abandoned
+                if self.subject == "jouet pr" || self.subject.starts_with("jouet pr ") =>
+            {
+                false
+            }
             Kind::Usage | Kind::Abandoned => self.count >= 3 && self.sessions.len() >= 2,
             Kind::SlowHook => self.count >= 3,
             Kind::Overridden | Kind::Routine => true,
