@@ -173,7 +173,10 @@ impl Run {
         if same_runner(&self.command, &failed.command)
             && (without_names(ran, wanted)
                 || wider_filter(&failed.command, ran, wanted)
-                || without_name_filter(ran, wanted))
+                || without_name_filter(ran, wanted)
+                || wider_name_filter(ran, wanted)
+                || (runner_argv(&self.command).first().map(String::as_str) == Some("go")
+                    && go_covers(ran, wanted)))
         {
             return true;
         }
@@ -422,6 +425,94 @@ fn without_name_filter(ran: &str, wanted: &str) -> bool {
         && wanted.starts_with(&ran)
         && NAME_FILTERS.contains(&wanted[ran.len()])
         && !wanted[ran.len() + 1..].iter().any(a_path)
+}
+
+/// Whether `ran` is `wanted` with its name filter widened to an alternation
+/// that holds part of it (`-run 'TestA|TestPush'` covers `-run
+/// TestPusher_Token`). These filters are unanchored regular expressions, so
+/// a test whose name holds `wanted`'s plain name holds the branch too.
+fn wider_name_filter(ran: &str, wanted: &str) -> bool {
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    let [prefix @ .., flag, pattern] = ran.as_slice() else {
+        return false;
+    };
+    let [wanted_prefix @ .., wanted_flag, name] = wanted.as_slice() else {
+        return false;
+    };
+    prefix == wanted_prefix
+        && flag == wanted_flag
+        && NAME_FILTERS.contains(flag)
+        && filter_holds(pattern, name)
+}
+
+/// Whether every test an unanchored name filter `name` picks is one that
+/// `pattern` picks: `name` is a plain name (letters, digits and `_`), and
+/// one of `pattern`'s `|` branches, also plain, is part of it.
+fn filter_holds(pattern: &str, name: &str) -> bool {
+    let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    plain(name) && pattern.split('|').all(plain) && pattern.split('|').any(|b| name.contains(b))
+}
+
+/// Whether a `go test` selection `ran` (its packages, then its name
+/// filters, as the checks rule records them) ran all that `wanted` did:
+/// each of `wanted`'s packages is one of `ran`'s or under a `dir/...` of
+/// them, and `ran` filtered no more than `wanted` (no filter, the same, or
+/// a `-run` alternation that holds `wanted`'s name). `-bench` runs what a
+/// plain run does not, so a selection with it must match the filters.
+fn go_covers(ran: &str, wanted: &str) -> bool {
+    fn split(selection: &str) -> (Vec<&str>, Vec<&str>) {
+        let words: Vec<&str> = selection.split_whitespace().collect();
+        let at = words
+            .iter()
+            .position(|w| w.starts_with('-'))
+            .unwrap_or(words.len());
+        let mut packages = words[..at].to_vec();
+        if packages.is_empty() {
+            packages.push(".");
+        }
+        (packages, words[at..].to_vec())
+    }
+    fn normal(p: &str) -> &str {
+        match p.trim_end_matches('/') {
+            "" | "./" => ".",
+            p => p,
+        }
+    }
+    let ((ran_packages, ran_filters), (wanted_packages, wanted_filters)) =
+        (split(ran), split(wanted));
+    let filters = if ran_filters == wanted_filters {
+        true
+    } else if ran_filters.is_empty() {
+        !wanted_filters
+            .iter()
+            .any(|w| w.starts_with("-bench") || w.starts_with("--bench"))
+    } else {
+        match (ran_filters.as_slice(), wanted_filters.as_slice()) {
+            ([flag, pattern], [wanted_flag, name]) => {
+                flag == wanted_flag
+                    && matches!(*flag, "-run" | "--run")
+                    && filter_holds(pattern, name)
+            }
+            _ => false,
+        }
+    };
+    filters
+        && wanted_packages.iter().all(|want| {
+            let want = normal(want);
+            ran_packages.iter().any(|ran| {
+                let ran = normal(ran);
+                ran == want
+                    || ran.strip_suffix("/...").is_some_and(|base| {
+                        let base = normal(base);
+                        want == base
+                            || want
+                                .strip_prefix(base)
+                                .is_some_and(|rest| rest.starts_with('/'))
+                            || (base == "." && !want.starts_with("../") && !want.starts_with('/'))
+                    })
+            })
+        })
 }
 
 /// Whether `ran` is `wanted` with its cargo test-name filters widened:
@@ -2134,6 +2225,75 @@ mod tests {
                 .block("/home", |_| None, |_| false, |_| true)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_wider_go_run_clears_a_narrower_failure() {
+        let cleared = |failed: (&str, &str), passed: (&str, &str)| {
+            let mut state = Checks::default();
+            state.record([test(failed.0, 1, failed.1)], Some("t1"));
+            state.record([test(passed.0, 0, passed.1)], Some("t1"));
+            reason(&state, "t1").is_none()
+        };
+        let narrow = (
+            "go test ./forge/entire ./internaldomain",
+            "./forge/entire ./internaldomain",
+        );
+        // A `dir/...` pattern runs every package under it.
+        assert!(cleared(
+            narrow,
+            (
+                "go test ./forge/... ./internaldomain",
+                "./forge/... ./internaldomain"
+            )
+        ));
+        assert!(cleared(narrow, ("go test -count=1 ./...", "./...")));
+        // But not a sibling of it, or a package left out.
+        assert!(!cleared(
+            narrow,
+            (
+                "go test ./forge/entirex/... ./internaldomain",
+                "./forge/entirex/... ./internaldomain"
+            )
+        ));
+        assert!(!cleared(narrow, ("go test ./forge/...", "./forge/...")));
+        // No filter covers a `-run`; a `-run` alternation that holds the name does.
+        let one = (
+            "go test --run TestPusher_ForwardsToken ./forge",
+            "./forge --run TestPusher_ForwardsToken",
+        );
+        assert!(cleared(one, ("go test ./forge/...", "./forge/...")));
+        assert!(cleared(
+            one,
+            (
+                "go test --run TestPolicy|TestPusher ./forge",
+                "./forge --run TestPolicy|TestPusher"
+            )
+        ));
+        assert!(!cleared(
+            one,
+            (
+                "go test --run TestPolicy|TestPull ./forge",
+                "./forge --run TestPolicy|TestPull"
+            )
+        ));
+        // A regular expression in the name is not read as a plain one.
+        let anchored = (
+            "go test --run ^TestPusher$ ./forge",
+            "./forge --run ^TestPusher$",
+        );
+        assert!(!cleared(
+            anchored,
+            (
+                "go test --run TestPolicy|TestPusher ./forge",
+                "./forge --run TestPolicy|TestPusher"
+            )
+        ));
+        // The same holds for other runners' unanchored name filters.
+        assert!(cleared(
+            ("bats t.bats -f install_a", "t.bats -f install_a"),
+            ("bats t.bats -f install|remove", "t.bats -f install|remove"),
+        ));
     }
 
     #[test]
