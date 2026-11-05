@@ -221,6 +221,9 @@ def run_agent(
     lines: list[str] = []
     elapsed: list[float] = []
     stopped: list[str] = []
+    reader_lock = threading.Lock()
+    reader_closed = threading.Event()
+    reader_eof = threading.Event()
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
         proc = subprocess.Popen(
             cmd,
@@ -237,10 +240,15 @@ def run_agent(
         def read() -> None:
             assert proc.stdout is not None
             for line in proc.stdout:
-                elapsed.append(round(time.perf_counter() - started, 6))
-                lines.append(line)
-                stream.write(line)
-                stream.flush()
+                at = round(time.perf_counter() - started, 6)
+                with reader_lock:
+                    if reader_closed.is_set():
+                        return
+                    stream.write(line)
+                    stream.flush()
+                    lines.append(line)
+                    elapsed.append(at)
+            reader_eof.set()
 
         reader = threading.Thread(target=read, daemon=True)
         reader.start()
@@ -265,17 +273,24 @@ def run_agent(
         proc.wait()
         wall_s = time.perf_counter() - started
         reader.join(timeout=10)
-        complete = not reader.is_alive()
+        # A descendant can keep stdout open after the agent exits. Freeze the
+        # transcript and timestamps together before closing the stream; a
+        # late reader must neither append nor write to the closed file.
+        with reader_lock:
+            reader_closed.set()
+            complete = reader_eof.is_set()
+            captured_lines = list(lines)
+            captured_elapsed = list(elapsed)
         # One timestamp per line; no transcript content or project paths.
         (stream_path.parent / "agent-timing.json").write_text(json.dumps({
-            "elapsed_s": elapsed, "stream_complete": complete,
+            "elapsed_s": captured_elapsed, "stream_complete": complete,
         }))
     return {
         "wall_s": round(wall_s, 3),
         "exit_code": proc.returncode,
         "stopped": stopped[0] if stopped else None,
-        "lines": lines,
-        "elapsed": elapsed,
+        "lines": captured_lines,
+        "elapsed": captured_elapsed,
         "stream_complete": complete,
         # The agent leads a session of its own; what it started and left
         # running is still in it, unless it started a session too.

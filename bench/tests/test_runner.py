@@ -507,6 +507,32 @@ class StopTest(unittest.TestCase):
             self.assertEqual(timing["elapsed_s"], sorted(timing["elapsed_s"]))
             self.assertEqual(timing["elapsed_s"], result["elapsed"])
 
+    def test_late_descendant_cannot_change_a_finalized_stream(self):
+        import threading
+        import time
+        from unittest.mock import patch
+
+        original_join = threading.Thread.join
+
+        def short_join(thread, timeout=None):
+            return original_join(thread, timeout=0.05)
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            child = "import time; time.sleep(0.5); print('late', flush=True)"
+            script = f"import subprocess, sys; subprocess.Popen([sys.executable, '-c', {child!r}]); print('early', flush=True)"
+            with patch.object(threading.Thread, "join", short_join):
+                result = runner.run_agent(HARNESSES["codex"], [sys.executable, "-c", script],
+                                          {"PATH": "/usr/bin:/bin"}, root, root, 5, None,
+                                          root / "agent.jsonl")
+            self.assertFalse(result["stream_complete"])
+            self.assertEqual(result["lines"], ["early\n"])
+            time.sleep(0.7)
+            self.assertEqual((root / "agent.jsonl").read_text(), "early\n")
+            timing = json.loads((root / "agent-timing.json").read_text())
+            self.assertEqual(len(timing["elapsed_s"]), 1)
+            self.assertFalse(timing["stream_complete"])
+
 
 class HarnessOutputTest(unittest.TestCase):
     def test_claude_stream(self):

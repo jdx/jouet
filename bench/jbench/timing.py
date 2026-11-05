@@ -28,7 +28,8 @@ def codex_commands(lines: list[str], elapsed: list[float], complete: bool) -> di
         if event.get("type") == "item.started":
             if item_id in starts:
                 duplicate_starts += 1
-            starts[item_id] = at
+            else:
+                starts[item_id] = at
         elif event.get("type") == "item.completed":
             start = starts.pop(item_id, None)
             if start is None or start > at:

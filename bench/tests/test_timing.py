@@ -29,3 +29,10 @@ class TimingTest(unittest.TestCase):
         lines = [event("item.started", "a"), event("item.completed", "a")]
         result = timing.codex_commands(lines, [1, 1.00001], True)
         self.assertEqual(result["coalesced_intervals"], 1)
+
+    def test_duplicate_start_does_not_shorten_the_interval(self):
+        lines = [event("item.started", "a"), event("item.started", "a"),
+                 event("item.completed", "a")]
+        result = timing.codex_commands(lines, [1, 4, 5], True)
+        self.assertEqual(result["observed_command_active_s"], 4)
+        self.assertEqual(result["duplicate_starts"], 1)
