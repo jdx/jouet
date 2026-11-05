@@ -190,7 +190,7 @@ use crate::http::HTTP_FETCH;
 - An edit that would leave the file with more syntax errors than it has is refused (`does_not_parse`). This also catches new text cut short.
 - When the edit changes the definition's first line, its signature in most languages, its callers may need changing too. If the work tree has a [code graph](/commands/graph), the report lists up to 10 of the definition's callers in files the edit does not change (`callers` in JSON). If that lookup fails, it warns that callers are unavailable. Otherwise, or when the graph does not know the definition, it notes the change (`signature` in JSON).
 
-Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
+Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C, C++ and Luau. In JSON, give `symbol` instead of `old`: `{ "path": "src/a.rs", "symbol": "fn download", "new": "..." }`.
 
 ### Codex-style patch
 
@@ -246,7 +246,7 @@ ok          app/main.py  1 edit  +2 -2
 
 - **Same checks as any edit.** The rewrites are written all or nothing, and `--dry-run`, `--diff`, `--check` and `--revert-on-fail` work as with a spec. A rewrite that would add syntax errors to a file is refused, and so is a file that changed after the pattern matched it.
 - **No match.** A pattern that matches nothing writes nothing, exits 4, and says how many files of the language it read.
-- **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c` and `cpp`. Only files in that language are read.
+- **Languages:** `rust`, `python`, `javascript`, `typescript`, `tsx`, `go`, `ruby`, `java`, `c`, `cpp` and `luau`. Only files in that language are read.
 
 Paths, `--rewrite`, `--lang`, `--callers-of` and `--impact` go only with `--pattern` (exit 2 otherwise), since a spec names its own files.
 

@@ -249,6 +249,7 @@ mod imp {
         "go",
         "java",
         "javascript",
+        "luau",
         "python",
         "ruby",
         "rust",
@@ -262,6 +263,7 @@ mod imp {
         Go,
         Java,
         JavaScript,
+        Luau,
         Python,
         Ruby,
         Rust,
@@ -277,6 +279,7 @@ mod imp {
             "go" => Lang::Go,
             "java" => Lang::Java,
             "js" | "mjs" | "cjs" | "jsx" => Lang::JavaScript,
+            "luau" => Lang::Luau,
             "py" | "pyi" => Lang::Python,
             "rb" | "rake" | "gemspec" => Lang::Ruby,
             "rs" => Lang::Rust,
@@ -301,6 +304,14 @@ mod imp {
     const TS_EXTRA: &str = r"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.type
+";
+
+    const LUAU_TAGS: &str = r"
+(function_declaration name: (identifier) @name) @definition.function
+(function_declaration name: (dot_index_expression) @name) @definition.function
+(function_declaration name: (method_index_expression) @name) @definition.function
+(type_definition name: (identifier) @name) @definition.type
+(type_definition name: (generic_type (identifier) @name)) @definition.type
 ";
 
     /// A language's grammar, tags query and locals query.
@@ -333,6 +344,7 @@ mod imp {
                 tree_sitter_javascript::LANGUAGE.into(),
                 format!("{}\n{JS_EXTRA}", tree_sitter_javascript::TAGS_QUERY),
             ),
+            Lang::Luau => (tree_sitter_luau::LANGUAGE.into(), LUAU_TAGS.to_string()),
             Lang::Python => (
                 tree_sitter_python::LANGUAGE.into(),
                 tree_sitter_python::TAGS_QUERY.to_string(),
@@ -360,6 +372,7 @@ mod imp {
             Lang::Go => tree_sitter_go::LANGUAGE.into(),
             Lang::Java => tree_sitter_java::LANGUAGE.into(),
             Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Lang::Luau => tree_sitter_luau::LANGUAGE.into(),
             Lang::Python => tree_sitter_python::LANGUAGE.into(),
             Lang::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -371,7 +384,7 @@ mod imp {
     /// The tags query with only its definition patterns enabled: what
     /// finding definitions runs, without the cost of every reference.
     fn definitions_query(lang: Lang) -> Option<&'static Query> {
-        static QUERIES: [OnceLock<Option<Query>>; 10] = [const { OnceLock::new() }; 10];
+        static QUERIES: [OnceLock<Option<Query>>; 11] = [const { OnceLock::new() }; 11];
         QUERIES[lang as usize]
             .get_or_init(|| {
                 let (language, tags) = source(lang);
@@ -401,6 +414,7 @@ mod imp {
             tree_sitter_typescript::TAGS_QUERY,
             JS_EXTRA,
             TS_EXTRA,
+            LUAU_TAGS,
         ]
     }
 
@@ -462,6 +476,17 @@ mod imp {
             }
             let line = line_of(&starts, name.start_byte());
             let end = range.end.saturating_sub(1).max(range.start);
+            let mut enclosing = scope(node, source);
+            let text = if lang == Lang::Luau {
+                if let Some((prefix, name)) = text.rsplit_once(['.', ':']) {
+                    enclosing.extend(prefix.split(['.', ':']).map(str::to_string));
+                    name
+                } else {
+                    text
+                }
+            } else {
+                text
+            };
             found.insert(
                 key,
                 (
@@ -477,7 +502,7 @@ mod imp {
                         },
                         start_byte: range.start,
                         end_byte: range.end,
-                        scope: scope(node, source),
+                        scope: enclosing,
                         separator,
                     },
                 ),

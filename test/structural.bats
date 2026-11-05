@@ -42,6 +42,25 @@ PY
 	assert_output '[1,2]'
 }
 
+@test "Luau structural search and rewrite use the same grammar" {
+	cat >src/rule.luau <<'LUAU'
+local function check(value: string): boolean
+    return old(value)
+end
+LUAU
+	run --separate-stderr jouet search --structural --lang luau 'old($ARG)' src/rule.luau
+	assert_success
+	assert_line --partial 'function check (1-3)'
+	assert_line --partial 'old(value)'
+
+	run --separate-stderr jouet edit --pattern 'old($ARG)' --rewrite 'new($ARG)' --lang luau src/rule.luau
+	assert_success
+	assert_content src/rule.luau 'local function check(value: string): boolean
+    return new(value)
+end
+'
+}
+
 @test "search --structural refuses an unbalanced pattern, an unknown language and a missing --lang" {
 	run --separate-stderr jouet search --structural --lang rust 'read_to_string($P'
 	assert_failure 2

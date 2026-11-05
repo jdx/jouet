@@ -685,7 +685,7 @@ Rewrite code matching this ast\-grep pattern, instead of reading a spec
 What \-\-pattern's matches become; its `$X` are the pattern's
 .TP
 \fB\-\-lang\fR \fI<LANG>\fR
-The language of \-\-pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+The language of \-\-pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c, cpp or luau
 .TP
 \fB\-\-callers\-of\fR \fI<PATH#SYMBOL>\fR
 With \-\-pattern, rewrite only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
@@ -1398,7 +1398,7 @@ Reading a large file whole to find one thing fills the context with code that is
 
 `\-\-symbol` and `\-\-range` repeat, and go together: one call reads several definitions and ranges of a file, each symbol then each range, which costs one request where a read each costs one each. A name that matches nothing is noted, and fails the call only when nothing else was found.
 
-With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. `\-\-outline` prints a file of up to 100 lines whole too (with its outline in \-\-json), since reading it after its outline would cost another call. Code is printed with line numbers, at most \-\-max\-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; \-\-again prints them. Definitions come from tree\-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C and C++.
+With none of them, a file of up to 300 lines is printed whole, and a longer one as its outline. `\-\-outline` prints a file of up to 100 lines whole too (with its outline in \-\-json), since reading it after its outline would cost another call. Code is printed with line numbers, at most \-\-max\-lines lines (default 400; 0 is no limit) with a marker for the rest. Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line; \-\-again prints them. Definitions come from tree\-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C, C++ and Luau.
 
 `\-\-map` prints, for the files that matter most, the line of each of their most important definitions, sized to a token budget, so an agent can find its way around a repository without reading whole files. It is Aider's repo map on the code graph (`jouet graph`): files are ranked by personalised PageRank over which file uses which definition, as the graph resolved them, and as many top\-ranked definitions are shown as fit the budget. \-\-focus names a file you are working on, or an identifier you care about: what it uses ranks higher, and a focused file's own definitions are left out, as you already have it open. The budget defaults to 1024 tokens with \-\-focus and 8192 without. With a PATH, only files under that directory are listed.
 
@@ -1744,7 +1744,7 @@ Embeds ripgrep's walker and searcher, so it respects .gitignore, skips hidden an
 
 \- Matches are grouped by file, then by the function, method, class or
   module they are in (for Rust, Python, JavaScript, TypeScript, Go,
-  Ruby, Java, C and C++).
+  Ruby, Java, C, C++ and Luau).
 \- Output stops at a byte budget, in total and per file, and says what it
   left out: `... 4 more in src/x.rs`, and a closing line naming the files
   it never reached. Nothing is cut silently; \-\-budget 0 removes a limit.
@@ -1818,7 +1818,7 @@ Show matches this session was already shown, too
 Match PATTERN as code, with ast\-grep: `$X` is one node, `$$$X` any number. Needs \-\-lang
 .TP
 \fB\-\-lang\fR \fI<LANG>\fR
-The language of a \-\-structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+The language of a \-\-structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c, cpp or luau
 .TP
 \fB\-\-callers\-of\fR \fI<PATH#SYMBOL>\fR
 With \-\-structural, only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)

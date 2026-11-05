@@ -8,7 +8,7 @@ use usage_rs::Args;
 ///
 /// - Matches are grouped by file, then by the function, method, class or
 ///   module they are in (for Rust, Python, JavaScript, TypeScript, Go,
-///   Ruby, Java, C and C++).
+///   Ruby, Java, C, C++ and Luau).
 /// - Output stops at a byte budget, in total and per file, and says what it
 ///   left out: `... 4 more in src/x.rs`, and a closing line naming the files
 ///   it never reached. Nothing is cut silently; --budget 0 removes a limit.
@@ -92,7 +92,7 @@ pub(crate) struct SearchArgs {
     #[usage(long)]
     pub(crate) structural: bool,
     /// The language of a --structural pattern: rust, python, javascript,
-    /// typescript, tsx, go, ruby, java, c or cpp
+    /// typescript, tsx, go, ruby, java, c, cpp or luau
     #[usage(long, value_name = "LANG")]
     pub(crate) lang: Option<String>,
     /// With --structural, only the calls the code graph attributes to this

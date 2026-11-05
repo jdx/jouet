@@ -54,7 +54,7 @@ Try a pattern with `jouet search --structural --lang LANG 'PAT'` first.
 - **`--format <FORMAT>`** — Spec format: blocks, patch or json. Detected from the first line
 - **`--pattern <PAT>`** — Rewrite code matching this ast-grep pattern, instead of reading a spec
 - **`--rewrite <REPL>`** — What --pattern's matches become; its `$X` are the pattern's
-- **`--lang <LANG>`** — The language of --pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+- **`--lang <LANG>`** — The language of --pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c, cpp or luau
 - **`--callers-of <PATH#SYMBOL>`** — With --pattern, rewrite only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
 - **`--impact <PATH#SYMBOL>`** — With --pattern, rewrite only inside this symbol and the code the graph says depends on it, three hops back
 - **`-h --help`** — Print help

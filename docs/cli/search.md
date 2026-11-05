@@ -9,7 +9,7 @@ Embeds ripgrep's walker and searcher, so it respects .gitignore, skips hidden an
 
 - Matches are grouped by file, then by the function, method, class or
   module they are in (for Rust, Python, JavaScript, TypeScript, Go,
-  Ruby, Java, C and C++).
+  Ruby, Java, C, C++ and Luau).
 - Output stops at a byte budget, in total and per file, and says what it
   left out: `... 4 more in src/x.rs`, and a closing line naming the files
   it never reached. Nothing is cut silently; --budget 0 removes a limit.
@@ -52,7 +52,7 @@ Examples:
 - **`--file-budget <BYTES>`** — The most bytes to print from one file (default 1500; 0 is no limit)
 - **`--again`** — Show matches this session was already shown, too
 - **`--structural`** — Match PATTERN as code, with ast-grep: `$X` is one node, `$$$X` any number. Needs --lang
-- **`--lang <LANG>`** — The language of a --structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c or cpp
+- **`--lang <LANG>`** — The language of a --structural pattern: rust, python, javascript, typescript, tsx, go, ruby, java, c, cpp or luau
 - **`--callers-of <PATH#SYMBOL>`** — With --structural, only the calls the code graph attributes to this symbol, given as PATH#NAME (or #ID from `jouet graph symbols`)
 - **`--impact <PATH#SYMBOL>`** — With --structural, only matches inside this symbol and the code the graph says depends on it, three hops back
 - **`-h --help`** — Print help

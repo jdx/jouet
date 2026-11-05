@@ -54,6 +54,7 @@ pub const LANGUAGES: &[&str] = &[
     "java",
     "c",
     "cpp",
+    "luau",
 ];
 
 pub use imp::Structural;
@@ -158,7 +159,7 @@ mod imp {
         fn expando(&self) -> char {
             match self.lang {
                 Lang::C | Lang::Cpp => '𐀀',
-                Lang::Go | Lang::Python | Lang::Ruby | Lang::Rust => 'µ',
+                Lang::Go | Lang::Luau | Lang::Python | Lang::Ruby | Lang::Rust => 'µ',
                 Lang::Java | Lang::JavaScript | Lang::TypeScript | Lang::Tsx => '$',
             }
         }
@@ -237,6 +238,7 @@ mod imp {
                 "java" => Lang::Java,
                 "c" => Lang::C,
                 "cpp" | "c++" | "cc" | "cxx" => Lang::Cpp,
+                "luau" => Lang::Luau,
                 other => return Err(Error::UnknownLanguage(other.to_string())),
             };
             let grammar = Grammar {
@@ -379,6 +381,7 @@ mod imp {
             Lang::Java => 7,
             Lang::C => 8,
             Lang::Cpp => 9,
+            Lang::Luau => 10,
         }
     }
 

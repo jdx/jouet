@@ -82,6 +82,18 @@ RS
 13	    format!(\"{base}/{path}\")"
 }
 
+@test "read finds Luau rule functions by symbol" {
+	cat >src/checks.luau <<'LUAU'
+local function runner_scope(args: { string }): boolean
+    return #args > 0
+end
+LUAU
+	run --separate-stderr jouet read src/checks.luau --symbol runner_scope
+	assert_success
+	assert_line --index 0 'src/checks.luau: function runner_scope (1-3)'
+	assert_line --partial 'local function runner_scope'
+}
+
 @test "read exits 3 for a missing symbol, naming what the file defines, and 2 for a file it cannot outline" {
 	run --separate-stderr jouet read src/lib.rs --symbol upload
 	assert_failure 3
