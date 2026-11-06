@@ -1,15 +1,54 @@
 import os
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/requests-proxied-files/check.py"
+spec = importlib.util.spec_from_file_location("requests_checker", CHECKER)
+checker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(checker)
 
 
 class RequestsCheckerTest(unittest.TestCase):
+    def check_report(self, xml, exit_code=0):
+        def run(command, **kwargs):
+            report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml="))
+            if xml is not None:
+                Path(report).write_text(xml)
+            self.assertEqual(command[-2:], ["--", "tests/test_added.py"])
+            return subprocess.CompletedProcess(command, exit_code, stdout="output", stderr="")
+
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker, "expect") as expect, \
+                mock.patch.object(checker.subprocess, "run", side_effect=run):
+            checker.check_tests(["tests/test_added.py"])
+            return list(checker.UNVERIFIED), expect.call_args_list
+
+    def test_pass_requires_a_complete_report(self):
+        self.assertEqual(self.check_report("<testsuites><testsuite><testcase/></testsuite></testsuites>"), ([], []))
+        for report in (None, "<testsuites>", "<testsuites/>",
+                       "<testsuites><testsuite><testcase><skipped/></testcase></testsuite></testsuites>"):
+            with self.subTest(report=report):
+                unverified, failures = self.check_report(report)
+                self.assertTrue(unverified)
+                self.assertFalse(failures)
+
+    def test_failure_and_runner_error_are_distinct(self):
+        for report, code in ((None, 1),
+                             ("<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>", 0)):
+            with self.subTest(code=code):
+                unverified, failures = self.check_report(report, code)
+                self.assertFalse(unverified)
+                self.assertEqual(failures[0].args[0], False)
+        unverified, failures = self.check_report(None, 2)
+        self.assertTrue(unverified)
+        self.assertFalse(failures)
+
     def test_requires_a_committed_test_file_that_still_exists(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -39,7 +78,9 @@ class RequestsCheckerTest(unittest.TestCase):
             bin_dir = root / "bin"
             bin_dir.mkdir()
             fake_python = bin_dir / "python3"
-            fake_python.write_text("#!/bin/sh\nexit 0\n")
+            fake_python.write_text("#!/bin/sh\nfor arg do\ncase \"$arg\" in --junitxml=*) "
+                                   "printf '<testsuite><testcase/></testsuite>' > \"${arg#*=}\";; esac\n"
+                                   "done\nexit 0\n")
             fake_python.chmod(0o755)
             env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_HEAD_SHA": base})
 
