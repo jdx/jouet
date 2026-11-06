@@ -681,6 +681,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "similar",
+ "socket2",
  "tempfile",
  "tokio-postgres-rustls",
  "toml",
