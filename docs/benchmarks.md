@@ -290,6 +290,8 @@ Every metric comes from one run's isolated files:
 
 The headline token and time differences use only pairs where both arms passed, and show the number of those pairs alongside each arm's success rate. The detailed diagnostic metrics also include failed and stopped runs; they are useful for investigating failures but do not compare completed tasks. The report counts paired outcomes (both pass, only plain passes, only jouet passes, or both fail). Harness errors are excluded from success rates and paired outcomes; unpaired runs are also excluded from paired outcomes. For example, a Codex model-capacity error before a run starts is a harness error, not a failed task. For each task, harness and arm, the detailed report gives the median and quartiles of each metric. For each pair of arms, it gives the median difference (jouet minus plain), its range, how many rounds jouet used less, and an exact two-sided sign test. With five pairs, the smallest p-value that test can give is 0.0625, which is the honest answer for five pairs. Both-pass comparisons are conditional on success and do not measure the cost of failures.
 
+Run records are written atomically. If the results filesystem fills or a record cannot be saved, the suite stops with exit 4 and identifies the unsaved run; earlier records in `runs.jsonl` remain intact. The work and temporary directories are kept and named in the error so they can be inspected and removed. After freeing space, `python3 bench/agents.py report RESULTS_DIR` can summarize the records that were saved. The unsaved run is not included.
+
 ## Running it
 
 It needs Python 3.11 or newer, a built `jouet`, and the `claude` or `codex` CLI, logged in or with an API key in the environment.

@@ -330,7 +330,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
             print(f"Codex hook preflight failed: {error}", file=sys.stderr)
             return 4
-    records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
+    try:
+        records = runner.run_suite(planned, opts, out, log, on_snapshot=record_snapshot)
+    except runner.ResultsWriteError as error:
+        print(f"benchmark stopped: {error}", file=sys.stderr)
+        return 4
     write_summary(out, records, meta)
     print(f"results: {out}")
     return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable")
