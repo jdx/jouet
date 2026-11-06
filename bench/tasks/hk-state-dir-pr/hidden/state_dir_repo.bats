@@ -44,8 +44,13 @@ EOF
 
     run hk check --all
     assert_failure
-    assert_file_contains "$other/hk/output.log" "STATE_MARKER"
-    assert_file_not_exist "$PWD/.git/hk/output.log"
+    # Anywhere under its hk/ counts: the review lets each account keep its
+    # own directory there.
+    grep -rqs STATE_MARKER "$other/hk"
+    if grep -rqs STATE_MARKER "$PWD/.git/hk"; then
+        echo "hk saved the output in the repository around the current directory" >&2
+        return 1
+    fi
 }
 
 @test "a repository shared between accounts gets no hk state directory private to one account" {

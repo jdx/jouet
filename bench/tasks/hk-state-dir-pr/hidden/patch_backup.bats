@@ -334,6 +334,8 @@ PKL
             git reset -q --hard
         )
     done
-    run bash -c "ls -1 .git/hk/patches/*.patch | wc -l | xargs"
+    # Anywhere under the common dir's hk/ counts: the review lets each
+    # account keep its own directory there.
+    run bash -c "find .git/hk -name '*.patch' | wc -l | xargs"
     assert_output "2"
 }
