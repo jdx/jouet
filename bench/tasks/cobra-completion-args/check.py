@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, committed_files, dirty, expect, finish, head_sha, new_commit  # noqa: E402
+from _check import UNVERIFIED, dirty, expect, finish, head_sha, new_commit  # noqa: E402
 
 
 def check_format(path: str, added: bool) -> None:
@@ -47,10 +47,12 @@ try:
 finally:
     if created:
         hidden.unlink(missing_ok=True)
-added_result = subprocess.run(["git", "diff", "--name-only", "--diff-filter=A", head_sha(), "HEAD"],
+added_result = subprocess.run(["git", "diff", "--name-only", "-z", "--diff-filter=A", head_sha(), "HEAD"],
                               capture_output=True, text=True, check=True)
-added = set(added_result.stdout.splitlines())
-for path in sorted(committed_files()):
+added = set(added_result.stdout.split("\0"))
+changed_result = subprocess.run(["git", "diff", "--name-only", "-z", head_sha(), "HEAD"],
+                                capture_output=True, text=True, check=True)
+for path in sorted(filter(None, changed_result.stdout.split("\0"))):
     if path.endswith(".go") and Path(path).is_file():
         check_format(path, path in added)
 finish()

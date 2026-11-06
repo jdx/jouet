@@ -26,7 +26,7 @@ class CobraCheckerTest(unittest.TestCase):
                                       capture_output=True, text=True).stdout.strip()
 
             git("init", "-q")
-            source = work / "file with spaces.go"
+            source = work / "café\nfile.go"
             source.write_text("package main\n\nvar x = 1\n")
             git("add", source.name)
             git("commit", "-qm", "base")
@@ -53,7 +53,7 @@ class CobraCheckerTest(unittest.TestCase):
             git("commit", "-qm", "unformatted")
             result = check()
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertIn("gofmt fails on file with spaces.go", result.stdout)
+            self.assertIn("gofmt fails on café\nfile.go", result.stdout)
             env["BENCH_HEAD_SHA"] = git("rev-parse", "HEAD")
             source.write_text("package main\nvar x=3\n")
             git("add", source.name)
@@ -62,13 +62,13 @@ class CobraCheckerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
             self.assertIn("JOUET_BENCH_UNVERIFIED_V1", result.stdout)
             source.write_text("package main\n\nvar x = 3\n")
-            added = work / "new.go"
+            added = work / "new café.go"
             added.write_text("package main\nvar y=1\n")
             git("add", source.name, added.name)
             git("commit", "-qm", "add file")
             result = check()
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertIn("gofmt fails on new file new.go", result.stdout)
+            self.assertIn("gofmt fails on new file new café.go", result.stdout)
             (bindir / "gofmt").unlink()
             result = check()
             self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
