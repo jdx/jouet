@@ -542,9 +542,27 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         && failed_tests.as_ref().is_some_and(|names| !names.is_empty())
         && crate::settings::Settings::load().test.baseline != "off"
     {
+        let local_runner = report.suites.iter().zip(&jobs).any(|(suite, job)| {
+            if suite.exit_code.is_none_or(|code| code == 0) {
+                return false;
+            }
+            let Some(job) = job else { return false };
+            job.argv.first().is_some_and(|program| {
+                Path::new(program)
+                    .components()
+                    .any(|part| part.as_os_str() == "node_modules")
+            })
+        });
+        let setup_hint = if local_runner
+            && !affected::project_config::baseline_setup(&root).is_ok_and(|setup| !setup.is_empty())
+        {
+            "; the isolated checkout may need dependencies: review [baseline].setup in .jouet/test.toml before retrying"
+        } else {
+            ""
+        };
         emit(&format!(
-            "baseline: if these failures may predate the change, `{}` retries the selected tests and compares failures at the merge base\n",
-            with_baseline()
+            "baseline: if these failures may predate the change, `{}` retries the selected tests and compares failures at the merge base{setup_hint}\n",
+            with_baseline(),
         ));
     }
     // Kept by the run itself, since a pipe hides its exit status from the
