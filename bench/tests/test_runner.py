@@ -332,6 +332,8 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(execute.call_count, 1)
             self.assertEqual(json.loads((root / "runs.jsonl").read_text())["error_kind"], "disk_guard")
             self.assertTrue(any("disk reserve reached" in message for message in messages))
+            self.assertTrue(any("error" in message for message in messages))
+            self.assertFalse(any("FAILED" in message for message in messages))
 
     def test_missing_codex_usage_stops_the_suite(self):
         import os

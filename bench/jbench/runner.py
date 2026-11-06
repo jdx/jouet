@@ -815,7 +815,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 ) from error
             u = record.get("usage") or {}
             log(
-                f"    {'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
+                f"    {'error' if record.get('error') else 'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
                 f"  {record.get('wall_s', '-')}s"
                 f"  in {u.get('input_tokens', '-')} out {u.get('output_tokens', '-')}"
                 + (f"  stopped: {record['stopped']}" if record.get("stopped") else "")
