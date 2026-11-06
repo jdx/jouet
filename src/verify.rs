@@ -787,6 +787,17 @@ fn writes_or_substitutes(command: &str) -> bool {
             '\'' if !double => single = !single,
             '"' if !single => double = !double,
             '`' if !single => return true,
+            // A comment runs to the end of its line, apostrophes and all.
+            '#' if !single
+                && !double
+                && (i == 1
+                    || chars[i - 2].is_whitespace()
+                    || matches!(chars[i - 2], ';' | '&' | '|' | '(')) =>
+            {
+                while chars.get(i).is_some_and(|c| *c != '\n') {
+                    i += 1;
+                }
+            }
             '>' if !single && !double => {
                 while chars.get(i).is_some_and(|c| matches!(c, '>' | '|')) {
                     i += 1;
@@ -2552,6 +2563,7 @@ mod tests {
             "cargo fmt -p a 2>&1 | tail -3; git status --short; jouet test --cmd -- cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -4",
             "git checkout -q -b fix/a 2>&1; jouet commit src/a.rs --message m | tail -2; git push -u origin HEAD 2>&1 | tail -2",
             "git commit -q -m m > /dev/null 2>&1",
+            "cargo fmt # keep a#b and 'c'\ngit status",
             "git log --oneline -3 2>/dev/null; cargo fmt >&2",
             "jouet commit a --message \"keep > and 'b' as words\"",
         ] {
@@ -2576,6 +2588,7 @@ mod tests {
             "git log -p --output=src/a.rs",
             "git status 2> src/a.rs",
             "cargo fmt 2>>src/a.rs",
+            "cargo fmt # it's formatting\ngit status 2> src/a.rs",
             "jouet commit a --message \"it's `sed -i s/a/b/ src/main.rs`\"",
             "",
         ] {
