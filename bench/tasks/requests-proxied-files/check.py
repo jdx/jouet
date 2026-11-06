@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -11,35 +12,51 @@ from _check import UNVERIFIED, committed_files, dirty, expect, finish, new_commi
 
 def check_tests(paths):
     """Run the agent's committed test files and require complete coverage."""
+    deadline = time.monotonic() + 120
+    for path in paths:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            UNVERIFIED.append(f"committed test budget exhausted before {path}")
+            return
+        check_test_file(path, remaining)
+
+
+def check_test_file(path, timeout):
     with tempfile.TemporaryDirectory(prefix="requests-bench-check-") as tmp:
         report = Path(tmp) / "pytest.xml"
         try:
             proc = subprocess.run(
-                ["python3", "-m", "pytest", "-o", "addopts=", f"--junitxml={report}", "--", *paths],
-                capture_output=True, text=True, timeout=120,
+                ["python3", "-m", "pytest", "-o", "addopts=", f"--junitxml={report}", "--", path],
+                capture_output=True, text=True, timeout=timeout,
                 env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")},
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            UNVERIFIED.append(f"committed tests could not complete: {error}")
+        except subprocess.TimeoutExpired as error:
+            def as_text(value):
+                return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+            output = (as_text(error.stdout) + as_text(error.stderr))[-3000:]
+            UNVERIFIED.append(f"committed tests timed out for {path}:\n{output}")
+            return
+        except OSError as error:
+            UNVERIFIED.append(f"committed tests could not run for {path}: {error}")
             return
         output = (proc.stdout + proc.stderr)[-3000:]
         if proc.returncode == 1:
-            expect(False, f"committed tests failed:\n{output}")
+            expect(False, f"committed tests failed for {path}:\n{output}")
             return
         if proc.returncode != 0:
-            UNVERIFIED.append(f"committed tests could not run (exit {proc.returncode}):\n{output}")
+            UNVERIFIED.append(f"committed tests could not run for {path} (exit {proc.returncode}):\n{output}")
             return
         try:
             root = ET.parse(report).getroot()
             cases = root.findall(".//testcase")
             if not cases:
-                UNVERIFIED.append("committed tests reported no test cases")
+                UNVERIFIED.append(f"committed tests reported no test cases for {path}")
             elif any(case.find("failure") is not None or case.find("error") is not None for case in cases):
-                expect(False, f"committed tests reported failures despite a successful exit:\n{output}")
+                expect(False, f"committed tests reported failures for {path} despite a successful exit:\n{output}")
             elif any(case.find("skipped") is not None for case in cases):
-                UNVERIFIED.append("committed tests included skipped or expected-failure cases")
+                UNVERIFIED.append(f"committed tests included skipped or expected-failure cases for {path}")
         except (OSError, ET.ParseError) as error:
-            UNVERIFIED.append(f"committed tests did not produce a readable report: {error}")
+            UNVERIFIED.append(f"committed tests did not produce a readable report for {path}: {error}")
 
 # Exercise the public API without making a network request or replacing tests.
 program = r'''

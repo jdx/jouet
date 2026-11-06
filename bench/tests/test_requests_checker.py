@@ -49,6 +49,27 @@ class RequestsCheckerTest(unittest.TestCase):
         self.assertTrue(unverified)
         self.assertFalse(failures)
 
+    def test_each_file_must_collect_tests(self):
+        def run(command, **kwargs):
+            report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml="))
+            case = "<testcase/>" if command[-1] == "tests/test_one.py" else ""
+            Path(report).write_text(f"<testsuite>{case}</testsuite>")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=run):
+            checker.check_tests(["tests/test_one.py", "tests/test_empty.py"])
+            self.assertEqual(len(checker.UNVERIFIED), 1)
+            self.assertIn("tests/test_empty.py", checker.UNVERIFIED[0])
+
+    def test_timeout_preserves_partial_output(self):
+        error = subprocess.TimeoutExpired("pytest", 1, output=b"some output\xff", stderr=b"some error")
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=error):
+            checker.check_tests(["tests/test_slow.py"])
+            self.assertIn("some output\ufffd", checker.UNVERIFIED[0])
+            self.assertIn("some error", checker.UNVERIFIED[0])
+
     def test_requires_a_committed_test_file_that_still_exists(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
