@@ -258,6 +258,46 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(execute.call_count, 1)
                 self.assertTrue(any("hooks could not be verified" in message for message in messages))
 
+    def test_result_write_failure_preserves_previous_records_and_stops(self):
+        import errno
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain"),
+                   runner.Planned(1, "second", "codex", "plain"),
+                   runner.Planned(1, "third", "codex", "plain")]
+        first = {"id": planned[0].id, "task": "first", "success": True, "usage": {}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            replace = runner.os.replace
+            work_root, tmp_root = root / "work-root", root / "tmp-root"
+            work_root.mkdir()
+            tmp_root.mkdir()
+
+            def fail_second(source, target):
+                if (root / "runs.jsonl").exists():
+                    raise OSError(errno.ENOSPC, "No space left on device")
+                replace(source, target)
+
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner.tempfile, "mkdtemp", side_effect=[str(work_root), str(tmp_root)]), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner.os, "replace", side_effect=fail_second), \
+                    patch.object(runner, "execute", side_effect=[first, OSError(errno.ENOSPC, "setup failed")]) as execute:
+                with self.assertRaises(runner.ResultsWriteError) as raised:
+                    runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+            self.assertIn(planned[1].id, str(raised.exception))
+            self.assertIn("setup failed", str(raised.exception))
+            self.assertIn("No space left on device", str(raised.exception))
+            self.assertIn(str(work_root), str(raised.exception))
+            self.assertIn(str(tmp_root), str(raised.exception))
+            self.assertTrue(work_root.is_dir())
+            self.assertTrue(tmp_root.is_dir())
+            self.assertEqual(execute.call_count, 2)
+            self.assertEqual([json.loads(line) for line in (root / "runs.jsonl").read_text().splitlines()], [first])
+            self.assertEqual(list(root.glob(".runs-*")), [])
+
     def test_missing_codex_usage_stops_the_suite(self):
         import os
         from unittest.mock import patch

@@ -35,6 +35,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
 
 
+class ResultsWriteError(Exception):
+    """The latest run could not be saved; earlier records remain intact."""
+
+
+def append_result(path: Path, record: dict[str, Any]) -> None:
+    """Replace the JSONL only after its old contents and new record are complete."""
+    try:
+        previous = path.read_bytes()
+    except FileNotFoundError:
+        previous = b""
+    fd, name = tempfile.mkstemp(prefix=".runs-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(previous)
+            out.write((json.dumps(record) + "\n").encode())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
 def snapshot_git_env() -> dict[str, str]:
     """Use benchmark Git identity without inherited command-scope overrides."""
     env = {k: v for k, v in os.environ.items() if k not in {"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"}
@@ -723,6 +743,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     records = []
     results_path = out_dir / "runs.jsonl"
     failed_environments = set()
+    preserve_work = False
     try:
         if on_snapshot is not None:
             on_snapshot(opts["jouet_bin"])
@@ -760,8 +781,15 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             budget.spent += (record.get("usage") or {}).get("input_tokens", 0) + (record.get("usage") or {}).get(
                 "output_tokens", 0
             )
-            with results_path.open("a") as f:
-                f.write(json.dumps(record) + "\n")
+            try:
+                append_result(results_path, record)
+            except OSError as error:
+                preserve_work = True
+                cause = f"; run error: {record['error']}" if record.get("error") else ""
+                raise ResultsWriteError(
+                    f"could not save {p.id} to {results_path}: {error}{cause}; "
+                    f"earlier saved records were preserved; work: {work_root}; temp: {tmp_root}"
+                ) from error
             u = record.get("usage") or {}
             log(
                 f"    {'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
@@ -784,7 +812,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 log(f"stopping: {p.harness} could not authenticate ({u.get('result')}); log in again and rerun")
                 break
     finally:
-        if not opts.get("keep_work"):
+        if not opts.get("keep_work") and not preserve_work:
             remove(work_root)
             remove(tmp_root)
     return records
