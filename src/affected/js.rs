@@ -225,11 +225,74 @@ impl Js {
     }
 }
 
+#[cfg(unix)]
+static DISCOVERY_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+#[cfg(unix)]
+static DISCOVERY_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(unix)]
+static DISCOVERY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Signal handlers stay installed: signal-hook does not restore defaults on unregister.
+#[cfg(unix)]
+struct DiscoverySignals {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(unix)]
+impl DiscoverySignals {
+    fn install() -> std::io::Result<Self> {
+        use std::sync::atomic::Ordering::SeqCst;
+        static INIT: std::sync::OnceLock<Result<(), i32>> = std::sync::OnceLock::new();
+        let lock = DISCOVERY_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let installed = INIT.get_or_init(|| {
+            for signal in [libc::SIGINT, libc::SIGTERM] {
+                // SAFETY: the handler only accesses atomics and invokes the signal-safe default handler.
+                unsafe {
+                    signal_hook::low_level::register(signal, move || {
+                        DISCOVERY_SIGNAL.store(signal, SeqCst);
+                        if !DISCOVERY_ACTIVE.load(SeqCst) {
+                            let _ = signal_hook::low_level::emulate_default_handler(signal);
+                        }
+                    })
+                }
+                .map_err(|error| error.raw_os_error().unwrap_or(libc::EINVAL))?;
+            }
+            Ok(())
+        });
+        if let Err(code) = installed {
+            return Err(std::io::Error::from_raw_os_error(*code));
+        }
+        DISCOVERY_ACTIVE.store(true, SeqCst);
+        Ok(Self { _lock: lock })
+    }
+
+    fn received(&self) -> Option<i32> {
+        use std::sync::atomic::Ordering::SeqCst;
+        Some(DISCOVERY_SIGNAL.load(SeqCst)).filter(|signal| *signal != 0)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for DiscoverySignals {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        DISCOVERY_ACTIVE.store(false, SeqCst);
+        let signal = DISCOVERY_SIGNAL.swap(0, SeqCst);
+        if signal != 0 {
+            let _ = signal_hook::low_level::emulate_default_handler(signal);
+        }
+    }
+}
+
 /// Bound runner discovery without blocking on descendants holding output pipes.
 fn listing_output(
     command: &mut Command,
     timeout: std::time::Duration,
 ) -> std::io::Result<std::process::Output> {
+    #[cfg(unix)]
+    let signals = DiscoverySignals::install()?;
     let stdout = tempfile::NamedTempFile::new()?;
     let stderr = tempfile::NamedTempFile::new()?;
     command.stdout(stdout.reopen()?).stderr(stderr.reopen()?);
@@ -241,6 +304,19 @@ fn listing_output(
     let mut child = command.spawn()?;
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
+        #[cfg(unix)]
+        if signals.received().is_some() {
+            if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+                // SAFETY: discovery started in its own process group.
+                unsafe {
+                    libc::killpg(pid, libc::SIGKILL);
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(signals);
+            unreachable!("interrupt signals terminate the process");
+        }
         if let Some(status) = child.try_wait()? {
             break status;
         }
@@ -604,6 +680,107 @@ mod tests {
         let error = listing_output(&mut command, std::time::Duration::from_millis(50)).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_discovery_stops_its_process_group() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::time::{Duration, Instant};
+
+        if let Some(path) = std::env::var_os("JOUET_DISCOVERY_SIGNAL_TEST") {
+            let mut command = Command::new("sh");
+            command.args([
+                "-c",
+                "sleep 30 & echo $! > \"$1\"; wait",
+                "_",
+                &path.to_string_lossy(),
+            ]);
+            let _ = listing_output(&mut command, Duration::from_secs(30));
+            panic!("discovery should be interrupted");
+        }
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            let dir = tempfile::tempdir().unwrap();
+            let pid_file = dir.path().join("child-pid");
+            let mut process = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "affected::js::tests::interrupted_discovery_stops_its_process_group",
+                ])
+                .env("JOUET_DISCOVERY_SIGNAL_TEST", &pid_file)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !pid_file.exists() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(pid_file.exists(), "runner did not start");
+            let worker: libc::pid_t = std::fs::read_to_string(pid_file)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            // SAFETY: process is our live child and signal is a constant above.
+            assert_eq!(
+                unsafe { libc::kill(process.id().try_into().unwrap(), signal) },
+                0
+            );
+            let status = process.wait().unwrap();
+            assert_eq!(status.signal(), Some(signal));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            // SAFETY: signal 0 only checks whether the recorded process exists.
+            while unsafe { libc::kill(worker, 0) } == 0 && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // SAFETY: signal 0 only checks whether the recorded process exists.
+            assert_eq!(
+                unsafe { libc::kill(worker, 0) },
+                -1,
+                "worker survived interrupt"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signals_still_terminate_after_discovery() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::time::{Duration, Instant};
+
+        if let Some(path) = std::env::var_os("JOUET_DISCOVERY_AFTER_SIGNAL_TEST") {
+            let mut command = Command::new("true");
+            listing_output(&mut command, Duration::from_secs(5)).unwrap();
+            std::fs::write(path, "ready").unwrap();
+            std::thread::sleep(Duration::from_secs(30));
+            panic!("process should be interrupted");
+        }
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            let dir = tempfile::tempdir().unwrap();
+            let ready = dir.path().join("ready");
+            let mut process = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "affected::js::tests::signals_still_terminate_after_discovery",
+                ])
+                .env("JOUET_DISCOVERY_AFTER_SIGNAL_TEST", &ready)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready.exists() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(ready.exists(), "discovery did not finish");
+            // SAFETY: process is our live child and signal is a constant above.
+            assert_eq!(
+                unsafe { libc::kill(process.id().try_into().unwrap(), signal) },
+                0
+            );
+            assert_eq!(process.wait().unwrap().signal(), Some(signal));
+        }
     }
 
     #[test]
