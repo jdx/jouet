@@ -28,5 +28,6 @@
     "tokio/src/task/mod.rs"
   ],
   "fail_to_pass": [],
-  "pass_to_pass": []
+  "pass_to_pass": [],
+  "test_timeout_s": 800
 }

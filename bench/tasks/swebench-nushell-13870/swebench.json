@@ -1409,5 +1409,6 @@
     "shell::run_script_that_looks_like_module",
     "shell::run_with_no_newline",
     "shell::source_empty_file"
-  ]
+  ],
+  "test_timeout_s": 1500
 }

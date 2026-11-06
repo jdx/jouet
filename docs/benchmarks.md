@@ -156,7 +156,7 @@ The first batch had ten SWE-bench Verified instances, chosen from the dataset's 
 | `swebench-django-14631` | `BaseForm` should read values through `BoundField` | 2 files | forms and bound fields |
 | `swebench-pytest-5787` | Exception serialization loses chained exceptions | 1 file, 260 lines | report serialization, read against `_pytest._code` |
 
-The second batch targets exploration in large Rust workspaces, where the agent has to find the code an issue is about before it can fix it. The four come from Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`, the `rust/` files), and their gold patches cross crates or modules. They run with the host's Rust (`~/.cargo/bin`), and their checks need the network for crates, since nothing is primed. Each one's `--test-cmd` runs the whole test module or file the hidden tests are in, so the existing tests there guard against regressions:
+The second batch targets exploration in large Rust workspaces, where the agent has to find the code an issue is about before it can fix it. The four come from Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`, the `rust/` files), and their gold patches cross crates or modules. They run with the host's rustup Rust, which `[tools]` links ahead of any distro `cargo`, and their checks need the network for crates, since nothing is primed. `test_timeout_s` in `swebench.json` gives the tests room for a cold workspace build (1500s for nushell, 800s for tokio), inside the check's own `check_timeout_s`. Each one's `--test-cmd` runs the whole test module or file the hidden tests are in, so the existing tests there guard against regressions:
 
 | task | instance | gold patch | test command |
 |---|---|---|---|

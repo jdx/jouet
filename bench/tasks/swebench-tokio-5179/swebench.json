@@ -698,5 +698,6 @@
     "write_vectored_odd_on_vectored",
     "yes_block_in_threaded_block_on",
     "zero_does_not_block"
-  ]
+  ],
+  "test_timeout_s": 800
 }

@@ -9,7 +9,7 @@ remote = false
 upstream = true
 timeout_s = 1800
 check_timeout_s = 900
-# Rust from the host: the instance is checked with cargo, which is not primed.
+# The rest of rustup's and cargo's programs (clippy, rustfmt, subcommands).
 path = ["~/.cargo/bin"]
 # The instance's problem statement as its author wrote it, and one line.
 prompt = """
@@ -64,6 +64,13 @@ Received 127
 
 Fix this in tokio, with a test, and commit.
 """
+
+# Rust from the host's rustup, ahead of any distro cargo on PATH: the instance
+# is checked with cargo, which is not primed. The check gives its tests
+# test_timeout_s (swebench.json), inside check_timeout_s, for a cold build.
+[tools]
+cargo = "~/.cargo/bin/cargo"
+rustc = "~/.cargo/bin/rustc"
 
 [source]
 git = "~/src/swebench/tokio-rs__tokio"
