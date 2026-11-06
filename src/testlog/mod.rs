@@ -30,8 +30,9 @@ const OUTPUT_TAIL: usize = 20;
 const MARKED_MAX: usize = 10;
 /// The name of an unrecognised failure's lines marked as failures.
 const MARKED: &str = "no failure recognised; lines marked as failures";
-/// Bytes past the budget that the names of failures not shown may take.
-const NAMES_SLACK: usize = 200;
+/// Bytes past the budget that the names of failures not shown may take. A
+/// name left out sends an agent to the log, which costs a whole request.
+const NAMES_SLACK: usize = 1000;
 
 /// Counts are summed over every summary line the output has, such as one
 /// per test binary for cargo; 0 when none says.
@@ -338,6 +339,8 @@ regexes! {
     VITEST_HEAD = r"^\s*FAIL\s+(.+ > .+|.+ \[ .+ \])$";
     VITEST_END = r"^\s*(⎯|FAIL\s|Test Files\s|Tests\s)";
     VITEST_TESTS = r"^\s*Tests\s+(\d+ .*)$";
+    // A failure's name in a vitest workspace: the project, the file, the rest.
+    VITEST_PROJECT = r"^\|([^|]+)\| (\S+)( .+)$";
     // TAP, as bats prints it.
     TAP_PLAN = r"^1\.\.(\d+)$";
     TAP_OK = r"^ok \d+ ";
@@ -530,7 +533,7 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
     let lines = clean(text);
     let parsed = parse(&lines, formats);
-    let mut found = merge(parsed.found);
+    let mut found = one_per_project(merge(parsed.found));
     // cargo reports a warning once for each target that builds it.
     let mut warnings_all = parsed.warning_names.clone();
     warnings_all.sort();
@@ -1275,6 +1278,50 @@ fn merge(mut found: Vec<Found>) -> Vec<Found> {
         let parent = format!("{}/", f.name);
         !names.iter().any(|n| n.starts_with(&parent))
     });
+    out
+}
+
+/// A vitest workspace runs a file once for each project that includes it,
+/// so one broken test fails as `|a| src/t.test.ts > x` and again as
+/// `|b| packages/p/src/t.test.ts > x`. Shown once, as `|a, b| …`, with the
+/// longer path. Baseline comparison reads each project's failure on its own.
+fn one_per_project(found: Vec<Found>) -> Vec<Found> {
+    let split = |name: &str| -> Option<(String, String, String)> {
+        let c = VITEST_PROJECT.captures(name)?;
+        Some((c[1].to_string(), c[2].to_string(), c[3].to_string()))
+    };
+    let mut out: Vec<Found> = Vec::new();
+    let mut projects: Vec<Vec<String>> = Vec::new();
+    for f in found {
+        let Some((project, path, rest)) = split(&f.name) else {
+            out.push(f);
+            projects.push(Vec::new());
+            continue;
+        };
+        let twin = out.iter().position(|o| {
+            split(&o.name).is_some_and(|(_, p, r)| {
+                r == rest
+                    && (p == path
+                        || p.ends_with(&format!("/{path}"))
+                        || path.ends_with(&format!("/{p}")))
+            })
+        });
+        match twin {
+            Some(i) if !projects[i].contains(&project) => {
+                let (_, p, _) = split(&out[i].name).expect("a workspace name");
+                projects[i].push(project);
+                let path = if path.len() > p.len() { path } else { p };
+                out[i].name = format!("|{}| {path}{rest}", projects[i].join(", "));
+                if f.lines.len() > out[i].lines.len() {
+                    out[i].lines = f.lines;
+                }
+            }
+            _ => {
+                out.push(f);
+                projects.push(vec![project]);
+            }
+        }
+    }
     out
 }
 
