@@ -31,7 +31,9 @@
 //! has left it: nothing there is uncommitted, and the session has run no
 //! check there for [`SETTLED_AFTER`]. Its runs judged work that has been
 //! committed and left, such as a branch since merged, whose tree moved on
-//! without the session.
+//! without the session. It is set aside at once when it is its base exactly
+//! (HEAD is the merge base with its default branch and nothing differs):
+//! the session left no change there to test.
 
 use jouet_rules::{Kind, Record};
 use serde::{Deserialize, Serialize};
@@ -1205,20 +1207,25 @@ impl State {
     }
 
     /// Sets aside the checks of work trees the session has left: any but
-    /// `home`, the session's own, where it ran nothing in the
-    /// [`SETTLED_AFTER`] before `now` and `uncommitted` says nothing is
-    /// uncommitted (`Some(false)`; None when it cannot tell).
+    /// `home`, the session's own, where `uncommitted` says nothing is
+    /// uncommitted (`Some(false)`; None when it cannot tell) and the session
+    /// ran nothing in the [`SETTLED_AFTER`] before `now`, or `at_base` says
+    /// the tree is its base exactly, so no change of the session's is left.
     pub(crate) fn set_aside_settled(
         &mut self,
         home: &str,
         now: i64,
         uncommitted: impl Fn(&str) -> Option<bool>,
+        at_base: impl Fn(&str) -> bool,
     ) {
         self.trees.retain(|root, checks| {
+            if root == home || root.is_empty() || uncommitted(root) != Some(false) {
+                return true;
+            }
             let recent = checks
                 .last_run
                 .is_some_and(|at| now.saturating_sub(at) < SETTLED_AFTER);
-            root == home || root.is_empty() || recent || uncommitted(root) != Some(false)
+            recent && !at_base(root)
         });
     }
 
@@ -3233,28 +3240,36 @@ mod tests {
 
         // Within the hour, it is still asked about, clean or not.
         let mut soon = State::load_from(&state);
-        soon.set_aside_settled("/home", ran + SETTLED_AFTER - 1, |_| Some(false));
+        soon.set_aside_settled("/home", ran + SETTLED_AFTER - 1, |_| Some(false), |_| false);
         assert!(ask(&soon).is_some());
+        // Unless it is its base exactly: nothing of the session's is left there.
+        let mut reset = State::load_from(&state);
+        reset.set_aside_settled("/home", ran, |_| Some(false), |root| root == "/old");
+        assert_eq!(ask(&reset), None);
+        // Something uncommitted keeps it, whatever HEAD is.
+        let mut dirty = State::load_from(&state);
+        dirty.set_aside_settled("/home", ran, |_| Some(true), |_| true);
+        assert!(ask(&dirty).is_some());
         // Later, with something uncommitted there, or no telling, it is too.
         let later = ran + SETTLED_AFTER;
         for uncommitted in [Some(true), None] {
             let mut left = State::load_from(&state);
-            left.set_aside_settled("/home", later, |_| uncommitted);
+            left.set_aside_settled("/home", later, |_| uncommitted, |_| false);
             assert!(ask(&left).is_some());
         }
         // Later and clean, it is set aside; the session's own tree never is.
         let mut left = State::load_from(&state);
-        left.set_aside_settled("/home", later, |_| Some(false));
+        left.set_aside_settled("/home", later, |_| Some(false), |_| false);
         assert_eq!(ask(&left), None);
         assert!(left.trees.contains_key("/home"));
         left.record("/home", [test("cargo test -p b", 1, "-p b")], Some("h1"));
-        left.set_aside_settled("/home", later + SETTLED_AFTER, |_| Some(false));
+        left.set_aside_settled("/home", later + SETTLED_AFTER, |_| Some(false), |_| true);
         assert!(ask(&left).unwrap().starts_with("The last test run failed"));
 
         // A state written before jouet kept the time reads as long ago.
         let mut old = State::load_from(&state);
         old.trees.get_mut("/old").unwrap().last_run = None;
-        old.set_aside_settled("/home", ran, |_| Some(false));
+        old.set_aside_settled("/home", ran, |_| Some(false), |_| false);
         assert_eq!(ask(&old), None);
     }
 
