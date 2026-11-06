@@ -1338,8 +1338,19 @@ PY
 	git checkout -qb work
 	printf '\n# a change\n' >>tests/test_a.py
 
+	# A named failure in a partial run suggests the same selection with an
+	# explicit baseline, preserving the base and runner arguments.
+	run --separate-stderr env -u JOUET_TEST_BASELINE JOUET_SESSION_ID=hint PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main -- -v
+	assert_failure 1
+	assert_output --partial 'jouet test --baseline --affected --since main -- -v'
+	run --separate-stderr env -u JOUET_TEST_BASELINE JOUET_SESSION_ID=hint PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main --json -- -v
+	assert_failure 1
+	run jq -e '.affected and (.ok | not)' <<<"$output"
+	assert_success
+
 	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main
 	assert_failure 1
+	refute_output --partial 'retries the selected tests'
 	run --separate-stderr env PYTHONDONTWRITEBYTECODE=1 jouet test --baseline --affected --since main --json
 	assert_success
 	run jq -r '[.affected, .baseline.pre_existing[]] | @tsv' <<<"$output"
