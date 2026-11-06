@@ -131,7 +131,7 @@ pub(crate) struct LandArgs {
     /// How long to wait for checks after --update (default 30m)
     #[usage(long, value_name = "DUR")]
     pub(crate) timeout: Option<String>,
-    /// Time between the first checks of that wait; backs off to 60s
+    /// Time between the first checks of that wait; backs off to 15s
     /// (default 10s)
     #[usage(long, value_name = "DUR")]
     pub(crate) interval: Option<String>,
