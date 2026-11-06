@@ -9,12 +9,13 @@ remote = false
 upstream = true
 timeout_s = 1800
 check_timeout_s = 900
+# A pnpm monorepo, installed offline in the run's own environment from a
+# store of its own with the pnpm its packageManager names (pnpm@8.15.0, installed
+# with `npm install --prefix ~/.cache/jouet-bench/vue-pnpm-8 pnpm@8.15.0`). Fill
+# the store once with that pnpm's `--store-dir ~/.cache/jouet-bench/vue-pnpm-store
+# install --frozen-lockfile` in ~/src/swebench/vuejs__core at this commit.
+isolated_setup = [["pnpm", "--store-dir", "~/.cache/jouet-bench/vue-pnpm-store", "install", "--offline", "--frozen-lockfile", "--ignore-scripts"]]
 # The instance's problem statement as its author wrote it, and one line.
-# A pnpm monorepo: the install is offline from the user's pnpm store, filled by
-# one `pnpm install` in ~/src/swebench/vuejs__core at this commit, with the
-# pnpm its packageManager names (pnpm keeps a store per filesystem, so fill it
-# from a checkout under the home directory).
-setup = ["mise x pnpm@8.15.0 -- pnpm install --offline --frozen-lockfile --ignore-scripts"]
 
 prompt = """
 Hydration style mismatch
@@ -58,5 +59,9 @@ git = "~/src/swebench/vuejs__core"
 commit = "d276a4f3e914aaccc291f7b2513e5d978919d0f9"
 
 [tools]
-pnpm = "pnpm"
 node = "node"
+pnpm = "~/.cache/jouet-bench/vue-pnpm-8/node_modules/.bin/pnpm"
+
+[env]
+# pnpm 8 and 9 read the npm_config_ spelling.
+npm_config_store_dir = "~/.cache/jouet-bench/vue-pnpm-store"

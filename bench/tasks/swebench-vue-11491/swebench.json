@@ -10,10 +10,6 @@
   "extras": [],
   "pythonpath": null,
   "test_command": [
-    "mise",
-    "x",
-    "pnpm@9.6.0",
-    "--",
     "pnpm",
     "vitest",
     "run",
