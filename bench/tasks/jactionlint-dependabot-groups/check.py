@@ -22,6 +22,18 @@ def timeout_output(error):
     return (text(error.stdout) + text(error.stderr))[-3000:]
 
 
+def check_untracked():
+    try:
+        run = subprocess.run(['git', 'ls-files', '--others', '-z'], capture_output=True, text=True,
+                             timeout=30, check=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        UNVERIFIED.append(f'could not check untracked files: {error}')
+        return
+    files = [path for path in run.stdout.split('\0') if path]
+    if files:
+        UNVERIFIED.append(f'{len(files)} untracked or ignored files may affect the checks')
+
+
 def check_dependabot_fixtures(files):
     """Recognize the pinned repository's fixture test without guessing other tests."""
     fixtures = []
@@ -30,14 +42,9 @@ def check_dependabot_fixtures(files):
         if match and Path(path).is_file() and not any(part.is_symlink() for part in (Path(path), *Path(path).parents)):
             fixtures.append(f'TestDependabotFixtures/{match[1]}/{match[2]}')
     test_files = {p for p in files if p.endswith('_test.go')}
-    if not fixtures or test_files != {'dependabot_test.go'}:
+    if not fixtures or test_files:
         return False
-    diff = subprocess.run(['git', 'diff', '--unified=0', head_sha(), 'HEAD', '--', 'dependabot_test.go'],
-                          capture_output=True, text=True, check=True).stdout
-    headers = re.findall(r'^@@ .*? @@(.*)$', diff, re.MULTILINE)
-    if not headers or any(not re.match(r'\s*func TestParseDependabotMultiEcosystemGroups\s*\(', h) for h in headers):
-        return False
-    names = ['TestDependabotFixtures', 'TestParseDependabotMultiEcosystemGroups']
+    names = ['TestDependabotFixtures']
     try:
         run = subprocess.run(['go', 'test', '-json', '-count=1', '-run', '^(' + '|'.join(names) + ')$', '.'],
                              capture_output=True, text=True, timeout=300, check=False)
@@ -50,7 +57,7 @@ def check_dependabot_fixtures(files):
         return True
     outcomes = {event.get('Test'): event.get('Action') for event in events
                 if event.get('Action') in ('pass', 'fail', 'skip') and isinstance(event.get('Test'), str)}
-    targets = [*fixtures, 'TestParseDependabotMultiEcosystemGroups']
+    targets = fixtures
     failures = [name for name, outcome in outcomes.items() if outcome == 'fail'
                 and any(name == target or name.startswith(target + '/') for target in targets)]
     if failures:
@@ -116,6 +123,7 @@ def check_committed_tests():
 
 # Exercise the public parser without replacing any of the agent's tests.
 def main():
+    check_untracked()
     try:
         run = subprocess.run(["go", "run", str(Path(__file__).parent / "check.go")],
                              capture_output=True, text=True, timeout=540, check=False)

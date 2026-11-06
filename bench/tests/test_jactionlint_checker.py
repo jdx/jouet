@@ -116,10 +116,17 @@ class JactionlintCheckerTest(unittest.TestCase):
         self.assertEqual(checker.timeout_output(error), 'partial\ufffderror')
 
 
+    def test_untracked_files_are_unverified(self):
+        for output in ('', 'testdata/ignored.yaml\0', 'helper.go\0'):
+            result = subprocess.CompletedProcess(['git'], 0, stdout=output, stderr='')
+            with self.subTest(output=output), mock.patch.object(checker, 'UNVERIFIED', []), \
+                    mock.patch.object(checker.subprocess, 'run', return_value=result) as run:
+                checker.check_untracked()
+                self.assertEqual(bool(checker.UNVERIFIED), bool(output))
+                self.assertNotIn('--exclude-standard', run.call_args.args[0])
+
     def test_fixture_tests_require_each_changed_fixture_to_run(self):
-        header = '@@ -239,1 +239,2 @@ func TestParseDependabotMultiEcosystemGroups(t *testing.T) {\n'
-        names = ['TestDependabotFixtures', 'TestParseDependabotMultiEcosystemGroups',
-                 'TestDependabotFixtures/ok/dependabot_grouped']
+        names = ['TestDependabotFixtures', 'TestDependabotFixtures/ok/dependabot_grouped']
         with tempfile.TemporaryDirectory() as directory:
             old = Path.cwd()
             try:
@@ -128,7 +135,8 @@ class JactionlintCheckerTest(unittest.TestCase):
                 fixture.parent.mkdir(parents=True)
                 fixture.write_text('version: 2\n')
                 Path('dependabot_test.go').write_text('package example\n')
-                files = {str(fixture), 'dependabot_test.go'}
+                files = {str(fixture)}
+                self.assertFalse(checker.check_dependabot_fixtures(files | {'dependabot_test.go'}))
                 for outcome in ('pass', 'missing', 'skip', 'fail', 'unrelated failure'):
                     events = [{'Action': 'pass', 'Test': name} for name in names]
                     if outcome == 'missing':
@@ -137,20 +145,14 @@ class JactionlintCheckerTest(unittest.TestCase):
                         events[-1]['Action'] = outcome
                     elif outcome == 'unrelated failure':
                         events.append({'Action': 'fail', 'Test': 'TestDependabotFixtures/ok/dependabot_other'})
-                    results = [subprocess.CompletedProcess(['git'], 0, stdout=header, stderr=''),
-                               subprocess.CompletedProcess(['go'], int(outcome in ('fail', 'unrelated failure')),
-                                                           stdout='\n'.join(map(json.dumps, events)), stderr='')]
-                    with self.subTest(outcome=outcome), mock.patch.object(checker, 'head_sha', return_value='base'), \
-                            mock.patch.object(checker, 'UNVERIFIED', []), \
+                    result = subprocess.CompletedProcess(['go'], int(outcome in ('fail', 'unrelated failure')),
+                                                         stdout='\n'.join(map(json.dumps, events)), stderr='')
+                    with self.subTest(outcome=outcome), mock.patch.object(checker, 'UNVERIFIED', []), \
                             mock.patch.object(checker, 'expect') as expect, \
-                            mock.patch.object(checker.subprocess, 'run', side_effect=results):
+                            mock.patch.object(checker.subprocess, 'run', return_value=result):
                         self.assertTrue(checker.check_dependabot_fixtures(files))
                         self.assertEqual(bool(checker.UNVERIFIED), outcome in ('missing', 'skip', 'unrelated failure'))
                         self.assertEqual(expect.called, outcome == 'fail')
-                with mock.patch.object(checker, 'head_sha', return_value='base'), \
-                        mock.patch.object(checker.subprocess, 'run', return_value=subprocess.CompletedProcess(
-                            ['git'], 0, stdout='@@ -1,1 +1,1 @@ func TestOther(t *testing.T) {\n', stderr='')):
-                    self.assertFalse(checker.check_dependabot_fixtures(files))
             finally:
                 os.chdir(old)
 
