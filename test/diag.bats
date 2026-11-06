@@ -324,6 +324,66 @@ fake_hk_stop() {
 	assert_output --partial 'diagnostics unavailable: no hk config (hk.pkl) here, and no fallback checker for notes.txt'
 }
 
+@test "fallback rejects malformed successful checker output" {
+	git rm -q hk.pkl
+	printf '%s\n' '#!/bin/sh' 'printf "not json\\n"' >"$BATS_TEST_TMPDIR/tools/shellcheck"
+
+	run --separate-stderr jouet diag check run.sh --json
+	assert_failure 4
+	run jq -c '{status, reason, steps: [.steps[] | {name, status}]}' <<<"$output"
+	assert_output '{"status":"unavailable","reason":"invalid JSON from shellcheck","steps":[{"name":"shellcheck","status":"failed"}]}'
+
+	run --separate-stderr jouet diag check run.sh
+	assert_failure 4
+	assert_output --partial "invalid JSON from shellcheck"
+
+	run --separate-stderr jouet diag delta run.sh --json
+	assert_failure 4
+	run jq -r .status <<<"$output"
+	assert_output unavailable
+}
+
+@test "mixed fallback coverage is unavailable even when the supported file is clean" {
+	git rm -q hk.pkl
+	printf '%s\n' '#!/bin/sh' "echo \"\$1\"" >run.sh
+
+	run --separate-stderr jouet diag check run.sh notes.txt --json
+	assert_failure 4
+	run jq -c '{status, source, reason, findings}' <<<"$output"
+	assert_output '{"status":"unavailable","source":"shellcheck","reason":"no hk config, and no fallback checker for notes.txt","findings":[]}'
+
+	run --separate-stderr jouet diag check run.sh notes.txt
+	assert_failure 4
+	assert_output --partial "diagnostics incomplete: no hk config, and no fallback checker for notes.txt"
+	refute_output --partial "clean:"
+
+	run --separate-stderr jouet diag delta run.sh notes.txt --json
+	assert_failure 4
+	run jq -r .status <<<"$output"
+	assert_output unavailable
+
+	printf '%s\n' '#!/bin/sh' "printf '%s\\n' \"\$1\"" >run.sh
+	run --separate-stderr jouet diag delta run.sh --json
+	assert_success
+	run jq -c .no_baseline <<<"$output"
+	assert_output '["run.sh"]'
+}
+
+@test "mixed fallback coverage preserves findings while reporting unavailable" {
+	git rm -q hk.pkl
+	printf '#!/bin/sh\necho %s\n' "\$1" >run.sh
+
+	run --separate-stderr jouet diag check run.sh notes.txt --json
+	assert_failure 4
+	run jq -c '{status, rules: [.findings[].rule], reason}' <<<"$output"
+	assert_output '{"status":"unavailable","rules":["SC2086"],"reason":"no hk config, and no fallback checker for notes.txt"}'
+
+	run --separate-stderr jouet diag check run.sh notes.txt
+	assert_failure 4
+	assert_output --partial "SC2086"
+	assert_output --partial "diagnostics incomplete: no hk config, and no fallback checker for notes.txt"
+}
+
 @test "edit --diag that cannot check the files it wrote exits 4, and --revert-on-fail removes them" {
 	git rm -q hk.pkl
 	git commit -qm 'no hk'

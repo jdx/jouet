@@ -483,7 +483,7 @@ pub(crate) fn render(report: &Report, max: usize) -> String {
             );
             return s;
         }
-        Status::Unavailable => {
+        Status::Unavailable if report.steps.is_empty() => {
             let _ = writeln!(
                 s,
                 "diagnostics unavailable: {}",
@@ -491,7 +491,7 @@ pub(crate) fn render(report: &Report, max: usize) -> String {
             );
             return s;
         }
-        Status::Clean | Status::Findings => {}
+        Status::Clean | Status::Findings | Status::Unavailable => {}
     }
     for f in report.findings.iter().take(max) {
         let _ = writeln!(s, "{}", finding_line(f));
@@ -512,7 +512,14 @@ pub(crate) fn render(report: &Report, max: usize) -> String {
             let _ = writeln!(s, "  {line}");
         }
     }
-    // Files no checker covered: never part of a pass.
+    if report.status == Status::Unavailable {
+        let _ = writeln!(
+            s,
+            "diagnostics incomplete: {}",
+            report.reason.as_deref().unwrap_or("")
+        );
+        return s;
+    }
     if let Some(reason) = report.reason.as_deref() {
         let _ = writeln!(s, "note: {reason}");
     }

@@ -40,7 +40,7 @@ At most 50 findings are printed unless `--max` says otherwise; the rest are coun
 
 ### Without an hk config
 
-A small fallback runs the language's own checker in its JSON mode when it is on `PATH`: `cargo clippy --message-format=json` for Rust files (it checks the crate, since Clippy cannot check one file), `ruff check --output-format=json` for Python and `shellcheck --format=json1` for shell scripts. For any other file, `jouet diag` says diagnostics are unavailable and exits `4`, rather than reporting a pass.
+A small fallback runs the language's own checker in its JSON mode when it is on `PATH`: `cargo clippy --message-format=json` for Rust files (it checks the crate, since Clippy cannot check one file), `ruff check --output-format=json` for Python and `shellcheck --format=json1` for shell scripts. If any requested file has no available fallback checker, `jouet diag check` reports diagnostics as unavailable and exits `4`, even when another file was checked successfully. If a fallback checker returns malformed JSON after a successful exit, the result is unavailable. Findings and failed steps from the checks that did run remain visible. `jouet diag delta` also exits `4` rather than comparing an incomplete result.
 
 ## Only what an edit introduced
 
