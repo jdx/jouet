@@ -39,7 +39,7 @@ MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
 # one family.
 [cost]
 seed = [
-    "cargo test --lib uninstall",
+    "cargo test --bin mise uninstall",
     "mise run build",
     "mise run test:e2e test_uninstall",
     "mise run test:e2e test_use",
