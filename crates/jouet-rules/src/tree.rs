@@ -127,13 +127,15 @@ pub fn work_tree(dir: Option<&Path>, timeout: Duration) -> Result<String, String
     Ok(digest(&files))
 }
 
-/// The mode git would commit a regular file at `path` with, or None for
-/// anything else (a symbolic link, a file gone since it was listed).
 /// Whether `path` is an ELF core dump, which a crashing test leaves in its
 /// directory (`core`, `core.1234`): it is output, not source, so creating or
-/// deleting one changes nothing a check ran against.
+/// deleting one changes nothing a check ran against. Only a regular file is
+/// opened: opening a FIFO would wait for a writer.
 fn core_dump(path: &Path) -> bool {
     use std::io::Read;
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+        return false;
+    }
     let mut head = [0u8; 18];
     let read = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut head));
     // `e_type` is ET_CORE (4), in either byte order (`EI_DATA`: 1 little, 2 big).
@@ -146,6 +148,8 @@ fn core_dump(path: &Path) -> bool {
         }
 }
 
+/// The mode git would commit a regular file at `path` with, or None for
+/// anything else (a symbolic link, a file gone since it was listed).
 fn file_mode(path: &Path) -> Option<&'static str> {
     let meta = std::fs::symlink_metadata(path).ok()?;
     if !meta.is_file() {
@@ -209,8 +213,8 @@ pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, Strin
             let path = entry.get(3..)?;
             let file = top.join(path);
             let meta = std::fs::symlink_metadata(&file).ok()?;
-            (!meta.is_dir() && !(entry.starts_with("??") && core_dump(&file)))
-                .then(|| path.to_string())
+            let dump = entry.starts_with("??") && core_dump(&file);
+            (!meta.is_dir() && !dump).then(|| path.to_string())
         })
         .collect())
 }
