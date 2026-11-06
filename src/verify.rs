@@ -175,15 +175,23 @@ impl Run {
             return true;
         }
         // Selections leave out the runner, which these two read words by.
-        if same_runner(&self.command, &failed.command)
-            && (without_names(ran, wanted)
+        let widens = |wanted: &str| {
+            without_names(ran, wanted)
                 || wider_filter(&failed.command, ran, wanted)
                 || reran_failures(&failed.command, ran, wanted, &failed.tests)
                 || whole_package(&failed.command, ran, wanted)
                 || without_name_filter(ran, wanted)
                 || wider_name_filter(ran, wanted)
                 || (runner_argv(&self.command).first().map(String::as_str) == Some("go")
-                    && go_covers(ran, wanted)))
+                    && go_covers(ran, wanted))
+        };
+        // A `--workspace` run records its picks without packages and runs
+        // them in every package, so it covers them narrowed to some.
+        if same_runner(&self.command, &failed.command)
+            && (widens(wanted)
+                || (cargo_workspace(&self.command)
+                    && !ran.starts_with("-p ")
+                    && without_packages(wanted).is_some_and(|w| ran == w || widens(&w))))
         {
             return true;
         }
@@ -586,6 +594,25 @@ fn whole_package(command: &str, ran: &str, wanted: &str) -> bool {
         }
     }
     true
+}
+
+/// Whether `command` is a cargo test run of the whole workspace.
+fn cargo_workspace(command: &str) -> bool {
+    cargo_test(command)
+        && runner_argv(command)
+            .iter()
+            .take_while(|word| *word != "--")
+            .any(|word| word == "--workspace" || word == "--all")
+}
+
+/// `selector` without its leading `-p NAME` pairs, or None when it has none.
+fn without_packages(selector: &str) -> Option<String> {
+    let words: Vec<&str> = selector.split_whitespace().collect();
+    let pairs = words
+        .chunks(2)
+        .take_while(|p| p.len() == 2 && p[0] == "-p")
+        .count();
+    (pairs > 0).then(|| words[pairs * 2..].join(" "))
 }
 
 fn cargo_test(command: &str) -> bool {
@@ -2790,6 +2817,40 @@ mod tests {
         assert!(!covered("-p jouet --ignored a", "-p jouet"));
         assert!(!covered("-p jouet --example demo", "-p jouet"));
         assert!(!covered("--bin jouet a", "-p jouet"));
+    }
+
+    #[test]
+    fn a_workspace_run_covers_its_picks_in_one_package() {
+        let run = |state: &mut State, args: &str, code, selector: &str, tree| {
+            state.record(
+                "/home",
+                [test(
+                    &format!("jouet test --cmd -- cargo test{args}"),
+                    code,
+                    selector,
+                )],
+                Some(tree),
+            );
+        };
+        let covered = |args: &str, ran: &str| {
+            let mut state = State::default();
+            run(
+                &mut state,
+                " --bin jouet a",
+                101,
+                "-p jouet --bin jouet a",
+                "t1",
+            );
+            run(&mut state, args, 0, ran, "t2");
+            state
+                .block("/home", |_| Some("t2".into()), |_| false, |_| true)
+                .is_none()
+        };
+        assert!(covered(" --workspace --bin jouet a", "--bin jouet a"));
+        assert!(covered(" --all --bin jouet a", "--bin jouet a"));
+        // Without `--workspace` the same picks run in the current package only.
+        assert!(!covered(" --bin jouet a", "--bin jouet a"));
+        assert!(!covered(" --workspace --bin jouet b", "--bin jouet b"));
     }
 
     #[test]
