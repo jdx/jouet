@@ -1295,6 +1295,55 @@ fn vitest_files_that_failed_to_load_show_their_shared_error_once() {
 }
 
 #[test]
+fn a_vitest_test_failing_in_two_workspace_projects_is_shown_once() {
+    let mut text = String::new();
+    for (project, root) in [("compile-mode", "packages/zod/"), ("zod", "")] {
+        for t in ["a", "b"] {
+            text.push_str(&format!(
+                " FAIL  |{project}| {root}src/t.test.ts > {t}\nAssertionError: expected 1 to be 2\n ❯ {root}src/t.test.ts:3:1\n\n⎯⎯⎯[1/4]⎯\n\n"
+            ));
+        }
+    }
+    text.push_str(" Test Files  2 failed (2)\n      Tests  4 failed (4)\n");
+    let d = digest(&text, true, DEFAULT_BUDGET);
+    let names: Vec<&str> = d.failures.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "|compile-mode, zod| packages/zod/src/t.test.ts > a",
+            "|compile-mode, zod| packages/zod/src/t.test.ts > b",
+        ]
+    );
+    assert_eq!(d.failed, 4);
+    // Other tests in other projects stay apart.
+    let d = digest(
+        " FAIL  |x| src/t.test.ts > a\nboom\n\n FAIL  |y| src/u.test.ts > a\nboom\n\n Tests  2 failed (2)\n",
+        true,
+        DEFAULT_BUDGET,
+    );
+    assert_eq!(d.failures.len(), 2);
+    // A baseline compares each project's failure on its own.
+    let names = failure_names(&text, &[]);
+    assert_eq!(names.len(), 4);
+    assert!(names.contains(&"|zod| src/t.test.ts > a".to_string()));
+    // Different failures under one title stay apart; a root with a space
+    // still matches.
+    let d = digest(
+        " FAIL  |x| src/t.test.ts > a\nboom\n\n FAIL  |y| my app/src/t.test.ts > a\nbang\n\n FAIL  |z| my app/src/t.test.ts > a\nboom\n\n Tests  3 failed (3)\n",
+        true,
+        DEFAULT_BUDGET,
+    );
+    let names: Vec<&str> = d.failures.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "|x, z| my app/src/t.test.ts > a",
+            "|y| my app/src/t.test.ts > a"
+        ]
+    );
+}
+
+#[test]
 fn a_few_warnings_are_named_with_their_place_once_each() {
     let warning = "warning: unused variable: `x`\n --> src/a.rs:1:5\n  |\n1 | let x = 1;\n";
     // cargo prints a warning once for each target that builds it.
