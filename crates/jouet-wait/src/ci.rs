@@ -345,6 +345,9 @@ impl Watch for CiWait {
         }
         out.push_str(&checks::failure_blocks(&doc.checks));
         out.push_str(&entire_lines(doc));
+        if doc.result == "failure" {
+            out.push_str(&checks::still_running(&doc.checks));
+        }
         out
     }
 

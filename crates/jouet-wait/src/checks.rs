@@ -308,6 +308,24 @@ pub(crate) fn verdict(checks: &[Check], all: bool) -> Verdict {
     }
 }
 
+/// The checks still running when a wait stopped at the first failure. It
+/// goes last, so an agent reading the tail of the output still learns that
+/// more may fail.
+pub(crate) fn still_running(checks: &[Check]) -> String {
+    let names: Vec<&str> = checks
+        .iter()
+        .filter(|c| !c.state.finished())
+        .map(|c| c.name.as_str())
+        .collect();
+    if names.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nstill running: {}; this stopped at the first failure (`jouet wait ci --all` waits for every check)\n",
+        names.join(", ")
+    )
+}
+
 /// The block of text for each failed check: its name, step, URL and log
 /// excerpt.
 pub(crate) fn failure_blocks(checks: &[Check]) -> String {
@@ -533,5 +551,19 @@ mod tests {
         assert_eq!(checks[2].local, None, "not an Actions job");
         assert_eq!(checks[3].local, None, "it passed");
         assert!(failure_blocks(&checks).contains("  locally: jouet ci run CI --check lint\n"));
+    }
+
+    #[test]
+    fn a_failure_with_checks_still_running_names_them() {
+        let checks = vec![
+            Check::new("lint".into(), State::Fail),
+            Check::new("bats".into(), State::Pending),
+            Check::new("build".into(), State::Pass),
+        ];
+        assert_eq!(
+            still_running(&checks),
+            "\nstill running: bats; this stopped at the first failure (`jouet wait ci --all` waits for every check)\n"
+        );
+        assert_eq!(still_running(&checks[..1]), "");
     }
 }
