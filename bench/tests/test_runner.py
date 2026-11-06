@@ -80,7 +80,7 @@ class InitCacheTest(unittest.TestCase):
                     patch.object(init.credentials, "give_back") as restore:
                 with self.assertRaises(init.DiskGuard):
                     init.prepared(task, harness, {"head_sha": "base"}, opts, root, agent)
-            self.assertEqual(agent.call_args.args[-1], 1234)
+            self.assertEqual(agent.call_args.args[-2], 1234)
             restore.assert_called_once()
             self.assertFalse((root / "cache" / "key").exists())
 
@@ -372,6 +372,29 @@ class PlanTest(unittest.TestCase):
             self.assertTrue(any("error" in message for message in messages))
             self.assertFalse(any("FAILED" in message for message in messages))
 
+    def test_artifact_failure_after_disk_stop_still_stops_the_suite(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain"),
+                   runner.Planned(1, "second", "codex", "jouet")]
+        def fail_after_stop(_planned, opts, *_args):
+            opts["disk_guard_event"].set()
+            raise OSError("no space writing optional artifact")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=fail_after_stop) as execute:
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+            self.assertEqual(execute.call_count, 1)
+            self.assertEqual(records[0]["error_kind"], "disk_guard")
+            self.assertIn("no space writing optional artifact", records[0]["error"])
+            self.assertEqual(records[0]["stopped"], "disk_guard")
+            self.assertFalse(report.scored(records[0]))
+            self.assertEqual(json.loads((root / "runs.jsonl").read_text())["error_kind"], "disk_guard")
+
     def test_init_disk_guard_stops_the_suite(self):
         import os
         from unittest.mock import patch
@@ -559,6 +582,11 @@ class PlanTest(unittest.TestCase):
             home.mkdir()
             env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude"), "PATH": "/usr/bin:/bin"}
             agent = {"lines": [], "session": None, "stopped": "disk_guard", "exit_code": None, "wall_s": 0}
+            write_text = Path.write_text
+            def fail_optional(path, *args, **kwargs):
+                if path.name == "check.log":
+                    raise OSError("no space for optional log")
+                return write_text(path, *args, **kwargs)
             opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"claude": "claude"},
                     "claude_model": "test", "tmp_root": str(root), "keep_work": True}
             with patch.object(runner.arms_mod, "build", return_value=env), \
@@ -569,6 +597,7 @@ class PlanTest(unittest.TestCase):
                     patch.object(runner, "worktree_snapshot", return_value=None) as snapshot, \
                     patch.object(runner, "audit") as audit, \
                     patch.object(runner, "copy_transcripts") as transcripts, \
+                    patch.object(Path, "write_text", autospec=True, side_effect=fail_optional), \
                     patch.object(runner.tasks_mod, "run_check") as check:
                 record = runner.execute(runner.Planned(1, "smoke", "claude", "plain"), opts, root, root)
             self.assertEqual(snapshot.call_count, 1)

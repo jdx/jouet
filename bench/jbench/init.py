@@ -158,6 +158,7 @@ def prepared(
             opts.get("max_tokens_per_run"),
             run_dir / "agent.jsonl",
             opts.get("min_free_bytes", 0),
+            opts.get("disk_guard_event"),
         )
     finally:
         if harness.name == "codex":

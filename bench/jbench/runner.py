@@ -271,6 +271,7 @@ def run_agent(
     max_tokens: int | None,
     stream_path: Path,
     min_free_bytes: int = 0,
+    disk_guard_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Runs the agent, stopping at the timeout, token cap or disk reserve."""
     lines: list[str] = []
@@ -285,9 +286,8 @@ def run_agent(
     disk = DiskSamples({"work": workdir, "tmp": tmp, "results": stream_path.parent})
     disk.sample()
     if disk.below(min_free_bytes):
-        stream_path.write_text("")
-        (stream_path.parent / "agent.stderr").write_text("")
-        (stream_path.parent / "agent-timing.json").write_text(json.dumps({"elapsed_s": [], "stream_complete": True}))
+        if disk_guard_event is not None:
+            disk_guard_event.set()
         return {"wall_s": 0, "exit_code": None, "stopped": "disk_guard", "lines": [], "elapsed": [],
                 "stream_complete": True, "disk_free": disk.values, "session": None}
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
@@ -327,6 +327,8 @@ def run_agent(
                     pass
                 disk.sample()
                 if disk.below(min_free_bytes):
+                    if disk_guard_event is not None:
+                        disk_guard_event.set()
                     stopped.append("disk_guard")
                 elif time.perf_counter() - started > timeout_s:
                     stopped.append("timeout")
@@ -343,6 +345,8 @@ def run_agent(
         wall_s = time.perf_counter() - started
         disk.sample()
         if disk.below(min_free_bytes):
+            if disk_guard_event is not None:
+                disk_guard_event.set()
             stopped[:] = ["disk_guard"]
         reader.join(timeout=10)
         # A descendant can keep stdout open after the agent exits. Freeze the
@@ -354,9 +358,10 @@ def run_agent(
             captured_lines = list(lines)
             captured_elapsed = list(elapsed)
         # One timestamp per line; no transcript content or project paths.
-        (stream_path.parent / "agent-timing.json").write_text(json.dumps({
-            "elapsed_s": captured_elapsed, "stream_complete": complete,
-        }))
+        if not stopped or stopped[0] != "disk_guard":
+            (stream_path.parent / "agent-timing.json").write_text(json.dumps({
+                "elapsed_s": captured_elapsed, "stream_complete": complete,
+            }))
     return {
         "wall_s": round(wall_s, 3),
         "exit_code": proc.returncode,
@@ -591,7 +596,7 @@ def execute(
         try:
             agent = run_agent(
                 harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"),
-                keep / "agent.jsonl", opts.get("min_free_bytes", 0)
+                keep / "agent.jsonl", opts.get("min_free_bytes", 0), opts.get("disk_guard_event")
             )
         finally:
             # Before anything else can fail: a refresh the run made is the
@@ -694,8 +699,12 @@ def execute(
     if opts.get("keep_work"):
         record["workdir"] = str(workdir)
         record["tmp_dir"] = str(tmp_dir)
-    (keep / "check.log").write_text(check["output"] + "\n")
-    (keep / "result.json").write_text(json.dumps(record, indent=2))
+    try:
+        (keep / "check.log").write_text(check["output"] + "\n")
+        (keep / "result.json").write_text(json.dumps(record, indent=2))
+    except OSError:
+        if not disk_stopped:
+            raise
     if harness.name != "codex" and not disk_stopped:
         copy_transcripts(ran["config_dir"], keep / "transcripts")
     if not opts.get("keep_work"):
@@ -782,6 +791,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 log(f"budget: {budget.spent} tokens spent of {budget.max_total_tokens}; skipping the rest")
                 break
             log(f"[{n}/{len(planned)}] {p.id}")
+            guard = threading.Event()
+            opts["disk_guard_event"] = guard
             try:
                 record = execute(p, opts, work_root, out_dir)
             except Exception as e:  # one broken run must not lose the others
@@ -796,7 +807,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
-                if isinstance(e, init_mod.DiskGuard):
+                if guard.is_set() or isinstance(e, init_mod.DiskGuard):
                     record["error_kind"] = "disk_guard"
                     record["stopped"] = "disk_guard"
                     record["check"] = {"passed": None, "exit_code": None}
