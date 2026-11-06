@@ -488,7 +488,7 @@ pub(crate) fn plan(
             Ok(suite)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    check_changed_js_tests(&suites, &changes)?;
+    check_changed_js_tests(&suites, &changes, extra)?;
     Ok(Plan {
         base,
         changes,
@@ -498,38 +498,71 @@ pub(crate) fn plan(
 
 /// A runner's graph can omit a changed test when a different configuration
 /// owns it. Never present such a selection without naming the omission.
-fn check_changed_js_tests(suites: &[Suite], changes: &[Change]) -> Result<(), Error> {
+fn check_changed_js_tests(
+    suites: &[Suite],
+    changes: &[Change],
+    extra: &[String],
+) -> Result<(), Error> {
     let javascript: Vec<_> = suites
         .iter()
         .filter(|suite| matches!(suite.adapter.name(), "vitest" | "jest"))
         .collect();
-    if javascript.is_empty()
-        || javascript
-            .iter()
-            .any(|suite| matches!(suite.decision, Decision::Full(_)))
-    {
+    if javascript.is_empty() {
         return Ok(());
     }
-    let missing: Vec<_> = changes
+    let candidates: Vec<_> = changes
         .iter()
         .filter(|change| change.status != Status::Deleted && js::named_test(&change.path))
         .filter(|change| {
             javascript.iter().any(|suite| {
-                suite
-                    .files
-                    .iter()
-                    .any(|file| file.path == change.path && matches!(file.effect, Effect::Source))
+                suite.files.iter().any(|file| {
+                    file.path == change.path
+                        && matches!(file.effect, Effect::Source | Effect::Full(_))
+                })
             })
         })
-        .filter(|change| {
-            !javascript
+        .collect();
+    let mut selected: std::collections::BTreeSet<String> = javascript
+        .iter()
+        .flat_map(|suite| suite.tests.iter().map(|test| test.path.clone()))
+        .collect();
+    let mut list_error = None;
+    if candidates
+        .iter()
+        .any(|change| !selected.contains(&change.path))
+    {
+        for suite in javascript
+            .iter()
+            .filter(|suite| matches!(suite.decision, Decision::Full(_)))
+        {
+            if candidates
                 .iter()
-                .any(|suite| suite.tests.iter().any(|test| test.path == change.path))
-        })
+                .all(|change| selected.contains(&change.path))
+            {
+                break;
+            }
+            let adapter = match suite.adapter.name() {
+                "vitest" => js::Js::vitest(&suite.project),
+                "jest" => js::Js::jest(&suite.project),
+                _ => unreachable!(),
+            };
+            match adapter.list_full(&suite.project, extra) {
+                Ok(tests) => selected.extend(tests),
+                Err(error) if list_error.is_none() => list_error = Some(error),
+                Err(_) => {}
+            }
+        }
+    }
+    let missing: Vec<_> = candidates
+        .into_iter()
+        .filter(|change| !selected.contains(&change.path))
         .map(|change| change.path.as_str())
         .collect();
     if missing.is_empty() {
         return Ok(());
+    }
+    if let Some(error) = list_error {
+        return Err(error);
     }
     Err(Error::new(
         Exit::Precondition,

@@ -511,6 +511,169 @@ fn a_module_no_test_imports_runs_nothing() {
 }
 
 #[test]
+fn full_vitest_does_not_hide_a_changed_test_it_does_not_select() {
+    let dir = repo("vitest", "");
+    let root = dir.path();
+    write(&root.join("vitest.config.js"), "export default {}\n");
+    write(
+        &root.join("test/browser.test.js"),
+        "test('browser', () => {})\n",
+    );
+    let runner = root.join("node_modules/.bin/vitest");
+    write(
+        &runner,
+        r##"#!/bin/sh
+for arg in "$@"; do case "$arg" in --json=*) printf '[]' > "${arg#--json=}";; esac; done
+"##,
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = match plan_in(root) {
+        Ok(_) => panic!("a full Vitest suite cannot cover a test it does not select"),
+        Err(error) => error,
+    };
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(
+        error.message.contains("test/browser.test.js"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn full_vitest_checks_a_changed_test_that_is_itself_a_full_trigger() {
+    let dir = repo("vitest", "");
+    let root = dir.path();
+    write(
+        &root.join("test/setup.browser.test.js"),
+        "test('browser', () => {})\n",
+    );
+    let runner = root.join("node_modules/.bin/vitest");
+    write(
+        &runner,
+        r##"#!/bin/sh
+for arg in "$@"; do case "$arg" in --json=*) printf '[]' > "${arg#--json=}";; esac; done
+"##,
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = match plan_in(root) {
+        Ok(_) => panic!("a full-triggering test still needs to be selected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(
+        error.message.contains("test/setup.browser.test.js"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn full_vitest_refuses_when_its_test_list_fails() {
+    let dir = repo("vitest", "");
+    let root = dir.path();
+    write(&root.join("vitest.config.js"), "export default {}\n");
+    write(&root.join("test/new.test.js"), "test('new', () => {})\n");
+    let runner = root.join("node_modules/.bin/vitest");
+    write(
+        &runner,
+        "#!/bin/sh\nprintf 'config failed\\n' >&2\nexit 1\n",
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = match plan_in(root) {
+        Ok(_) => panic!("a failed list cannot establish test coverage"),
+        Err(error) => error,
+    };
+    assert!(error.message.contains("config failed"), "{}", error.message);
+}
+
+#[test]
+fn full_vitest_accepts_a_changed_test_the_runner_lists() {
+    let dir = repo("vitest", "");
+    let root = dir.path();
+    write(&root.join("vitest.config.js"), "export default {}\n");
+    write(&root.join("test/new.test.js"), "test('new', () => {})\n");
+    let runner = root.join("node_modules/.bin/vitest");
+    write(
+        &runner,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > .git/vitest-list-args
+for arg in "$@"; do case "$arg" in --json=*) printf '["%s/test/new.test.js"]' "$PWD" > "${arg#--json=}";; esac; done
+"##,
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let extra = vec!["--project=desktop".to_string()];
+    let plan = plan(root, Some("main"), None, &extra).unwrap();
+    assert!(matches!(plan.suites[0].decision, Decision::Full(_)));
+    let args = std::fs::read_to_string(root.join(".git/vitest-list-args")).unwrap();
+    assert!(args.lines().any(|arg| arg == "--project=desktop"));
+}
+
+#[test]
+fn full_jest_does_not_hide_a_changed_test_it_does_not_select() {
+    let dir = repo("jest", "");
+    let root = dir.path();
+    write(&root.join("jest.config.js"), "module.exports = {}\n");
+    write(
+        &root.join("test/browser.test.js"),
+        "test('browser', () => {})\n",
+    );
+    let runner = root.join("node_modules/.bin/jest");
+    write(&runner, "#!/bin/sh\nexit 0\n");
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = match plan_in(root) {
+        Ok(_) => panic!("a full Jest suite cannot cover a test it does not select"),
+        Err(error) => error,
+    };
+    assert_eq!(error.exit, Exit::Precondition);
+    assert!(
+        error.message.contains("test/browser.test.js"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn full_jest_accepts_a_changed_test_the_runner_lists() {
+    let dir = repo("jest", "");
+    let root = dir.path();
+    write(&root.join("jest.config.js"), "module.exports = {}\n");
+    write(&root.join("test/new.test.js"), "test('new', () => {})\n");
+    let runner = root.join("node_modules/.bin/jest");
+    write(
+        &runner,
+        "#!/bin/sh\nprintf '%s/test/new.test.js\\n' \"$PWD\"\n",
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let plan = plan_in(root).unwrap();
+    assert!(matches!(plan.suites[0].decision, Decision::Full(_)));
+}
+
+#[test]
+fn full_jest_listing_keeps_selection_but_not_output_options() {
+    let dir = repo("jest", "");
+    let root = dir.path();
+    write(&root.join("jest.config.js"), "module.exports = {}\n");
+    write(&root.join("test/new.test.js"), "test('new', () => {})\n");
+    let runner = root.join("node_modules/.bin/jest");
+    write(
+        &runner,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > .git/jest-list-args
+printf '%s/test/new.test.js\n' "$PWD"
+"##,
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let extra = ["--json", "--outputFile", "report.json", "--shard=1/2"].map(str::to_string);
+    let plan = plan(root, Some("main"), None, &extra).unwrap();
+    let args = std::fs::read_to_string(root.join(".git/jest-list-args")).unwrap();
+    assert!(args.lines().any(|arg| arg == "--shard=1/2"));
+    assert!(!args.contains("--json") && !args.contains("report.json"));
+    let command = plan.suites[0].command.as_ref().unwrap();
+    assert!(command.iter().any(|arg| arg == "--json"));
+    assert!(command.iter().any(|arg| arg == "report.json"));
+}
+
+#[test]
 fn a_changed_js_test_omitted_by_the_runner_is_not_silently_skipped() {
     let dir = repo("vitest", "");
     let root = dir.path();
@@ -569,7 +732,7 @@ fn a_changed_js_test_selected_by_another_runner_is_not_rejected() {
         command: None,
         note: None,
     };
-    let suites = vec![
+    let mut suites = vec![
         suite(Box::new(js::Js::vitest(&project)), Vec::new()),
         suite(
             Box::new(js::Js::jest(&project)),
@@ -579,7 +742,55 @@ fn a_changed_js_test_selected_by_another_runner_is_not_rejected() {
             }],
         ),
     ];
-    assert!(check_changed_js_tests(&suites, &[change]).is_ok());
+    assert!(check_changed_js_tests(&suites, std::slice::from_ref(&change), &[]).is_ok());
+    suites[0].decision = Decision::Full("configuration changed".into());
+    assert!(check_changed_js_tests(&suites, &[change], &[]).is_ok());
+}
+
+#[test]
+fn a_full_runner_can_cover_a_test_when_another_runner_cannot_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = Project {
+        root: dir.path().into(),
+        dir: dir.path().into(),
+        rel: String::new(),
+    };
+    write(
+        &dir.path().join("src/new.test.ts"),
+        "test('new', () => {})\n",
+    );
+    let vitest = dir.path().join("node_modules/.bin/vitest");
+    let jest = dir.path().join("node_modules/.bin/jest");
+    write(&vitest, "#!/bin/sh\nexit 1\n");
+    write(
+        &jest,
+        "#!/bin/sh\nprintf '%s/src/new.test.ts\\n' \"$PWD\"\n",
+    );
+    for runner in [&vitest, &jest] {
+        std::fs::set_permissions(runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let change = Change {
+        path: "src/new.test.ts".into(),
+        status: Status::Modified,
+    };
+    let suite = |adapter: Box<dyn Adapter>| Suite {
+        adapter,
+        project: project.clone(),
+        files: vec![FileEffect {
+            path: change.path.clone(),
+            status: change.status,
+            effect: Effect::Source,
+        }],
+        decision: Decision::Full("configuration changed".into()),
+        tests: Vec::new(),
+        command: None,
+        note: None,
+    };
+    let suites = vec![
+        suite(Box::new(js::Js::vitest(&project))),
+        suite(Box::new(js::Js::jest(&project))),
+    ];
+    assert!(check_changed_js_tests(&suites, &[change], &[]).is_ok());
 }
 
 #[test]
