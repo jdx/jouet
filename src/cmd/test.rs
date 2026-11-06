@@ -574,6 +574,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         // no test, nor one that only listed, explained or formatted.
         let ran_tests = args.cmd
             && !args.extra.iter().any(|w| NOT_A_TEST.contains(&w.as_str()))
+            && !ruff_preview_only(&args.extra)
             && report
                 .suites
                 .iter()
@@ -701,6 +702,44 @@ const NOT_A_TEST: &[&str] = &[
     "--write",
     "--fix",
 ];
+
+/// A Ruff preview is not a test, even when wrapped in `sh -c`. Limit this
+/// to a single command so an unrelated test script with the same flags, or a
+/// shell script that also runs tests, can still count through the fallback.
+fn ruff_preview_only(argv: &[String]) -> bool {
+    fn inspect(script: &jouet_rules::shell::Script, depth: usize) -> bool {
+        if depth > 8 || script.commands.len() != 1 || !script.nested.is_empty() {
+            return false;
+        }
+        let command = &script.commands[0];
+        let words = command.argv();
+        if command.program() == Some("ruff") {
+            let mut args = words.iter().skip(1);
+            while let Some(word) = args.next() {
+                match word.as_str() {
+                    "check" => {
+                        return args
+                            .take_while(|word| word.as_str() != "--")
+                            .any(|word| matches!(word.as_str(), "--diff" | "--fix-only"));
+                    }
+                    "--config" | "--color" => {
+                        if args.next().is_none() {
+                            return false;
+                        }
+                    }
+                    "--isolated" | "--verbose" | "--quiet" | "--silent" | "-v" | "-q" | "-s" => {}
+                    option if option.starts_with("--config=") || option.starts_with("--color=") => {
+                    }
+                    _ => return false,
+                }
+            }
+            return false;
+        }
+        let inner = script.inner_scripts();
+        matches!(inner.as_slice(), [one] if inspect(one, depth + 1))
+    }
+    inspect(&jouet_rules::shell::parse(&command_line(argv)), 0)
+}
 
 fn own_command() -> String {
     let words: Vec<String> = std::env::args().skip(1).collect();

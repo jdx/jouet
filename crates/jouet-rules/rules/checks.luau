@@ -762,8 +762,31 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 		-- unknown rather than treating a selected run as the full suite.
 		return "test", unknown
 	elseif program == "ruff" then
-		local kind: Kind? = if first == "check" then "lint" else nil
-		return kind, if #args == 1 or (#args == 2 and args[2] == ".") then FULL else unknown
+		local subcommand = 1
+		while subcommand <= #args do
+			local option = args[subcommand]
+			if option == "--config" or option == "--color" then
+				subcommand += 2
+			elseif option == "--isolated" or option == "--verbose" or option == "--quiet" or option == "--silent"
+				or option == "-v" or option == "-q" or option == "-s" or string.match(option, "^%-%-config=") or string.match(option, "^%-%-color=") then
+				subcommand += 1
+			else
+				break
+			end
+		end
+		-- Preview and fix-only modes do not report the complete lint result.
+		-- A preview exits 1 for a diff, while fix-only can exit 0 with
+		-- unfixable violations still present. Do not count either as a check.
+		for i = subcommand + 1, #args do
+			if args[i] == "--" then
+				break
+			end
+			if args[i] == "--diff" or args[i] == "--fix-only" then
+				return nil, unknown
+			end
+		end
+		local kind: Kind? = if args[subcommand] == "check" then "lint" else nil
+		return kind, if #args == subcommand or (#args == subcommand + 1 and args[subcommand + 1] == ".") then FULL else unknown
 	elseif program == "eslint" or program == "mypy" or program == "shellcheck" then
 		return "lint", unknown
 	elseif program == "actionlint" then
