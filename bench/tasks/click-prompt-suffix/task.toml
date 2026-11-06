@@ -1,0 +1,27 @@
+description = "Preserve empty prompt suffixes in pallets/click#3019"
+chore = "bug-fix"
+rules = ["checks", "git-add-all"]
+opt_in = true
+remote = false
+upstream = true
+timeout_s = 900
+check_timeout_s = 180
+python_requirements = "requirements.lock"
+isolated_setup = [
+    ["python3", "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", "{workdir}"],
+    ["python3", "-m", "ruff", "--version"],
+]
+prompt = """
+Passing `prompt_suffix=""` to `click.prompt` or `click.confirm` still prints
+a trailing space. Preserve the specified suffix, including an empty suffix,
+without regressing the readline workaround or normal prompt behavior.
+
+Fix the prompt behavior, add tests, and commit your change.
+"""
+
+[source]
+git = "~/src/click-bench-source"
+commit = "5f86603a84e12bdec1584c15c9f982740e613c45"
+
+[env]
+PYTHONPATH = "{workdir}/src"
