@@ -1322,6 +1322,25 @@ fn a_vitest_test_failing_in_two_workspace_projects_is_shown_once() {
         DEFAULT_BUDGET,
     );
     assert_eq!(d.failures.len(), 2);
+    // A baseline compares each project's failure on its own.
+    let names = failure_names(&text, &[]);
+    assert_eq!(names.len(), 4);
+    assert!(names.contains(&"|zod| src/t.test.ts > a".to_string()));
+    // Different failures under one title stay apart; a root with a space
+    // still matches.
+    let d = digest(
+        " FAIL  |x| src/t.test.ts > a\nboom\n\n FAIL  |y| my app/src/t.test.ts > a\nbang\n\n FAIL  |z| my app/src/t.test.ts > a\nboom\n\n Tests  3 failed (3)\n",
+        true,
+        DEFAULT_BUDGET,
+    );
+    let names: Vec<&str> = d.failures.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "|x, z| my app/src/t.test.ts > a",
+            "|y| my app/src/t.test.ts > a"
+        ]
+    );
 }
 
 #[test]

@@ -340,7 +340,7 @@ regexes! {
     VITEST_END = r"^\s*(⎯|FAIL\s|Test Files\s|Tests\s)";
     VITEST_TESTS = r"^\s*Tests\s+(\d+ .*)$";
     // A failure's name in a vitest workspace: the project, the file, the rest.
-    VITEST_PROJECT = r"^\|([^|]+)\| (\S+)( .+)$";
+    VITEST_PROJECT = r"^\|([^|]+)\| (.+?)( > .+| \[ .+ \])$";
     // TAP, as bats prints it.
     TAP_PLAN = r"^1\.\.(\d+)$";
     TAP_OK = r"^ok \d+ ";
@@ -517,6 +517,17 @@ pub(crate) fn usage_error(text: &str, formats: &[Format]) -> Option<String> {
         .into_iter()
         .find(|l| USAGE.is_match(l))
         .map(|l| l.trim().chars().take(120).collect())
+}
+
+/// Every failure jouet recognises in `text`, by name, each vitest workspace
+/// project's on its own: what a baseline compares, where a digest shows a
+/// test that failed in several projects once.
+pub(crate) fn failure_names(text: &str, formats: &[Format]) -> Vec<String> {
+    let lines = clean(text);
+    merge(parse(&lines, formats).found)
+        .into_iter()
+        .map(|f| f.name)
+        .collect()
 }
 
 /// [`digest_with`] jouet's own formats alone.
@@ -1275,8 +1286,9 @@ fn merge(mut found: Vec<Found>) -> Vec<Found> {
     }
     let names: Vec<String> = out.iter().map(|f| f.name.clone()).collect();
     out.retain(|f| {
+        // A Go subtest's parent; a vitest title may hold a slash of its own.
         let parent = format!("{}/", f.name);
-        !names.iter().any(|n| n.starts_with(&parent))
+        f.name.contains(" > ") || !names.iter().any(|n| n.starts_with(&parent))
     });
     out
 }
@@ -1285,40 +1297,72 @@ fn merge(mut found: Vec<Found>) -> Vec<Found> {
 /// so one broken test fails as `|a| src/t.test.ts > x` and again as
 /// `|b| packages/p/src/t.test.ts > x`. Shown once, as `|a, b| …`, with the
 /// longer path. Baseline comparison reads each project's failure on its own.
+/// A vitest workspace runs a file once for each project that includes it,
+/// so one broken test fails as `|a| src/t.test.ts > x` and again as
+/// `|b| packages/p/src/t.test.ts > x`. Shown once, as `|a, b| …`, with the
+/// longer path, when the test, the file (one path ending in the other) and
+/// the first line of the failure all agree; a different failure stays apart.
+/// Only for display: baseline comparison reads [`failure_names`], one per
+/// project.
 fn one_per_project(found: Vec<Found>) -> Vec<Found> {
-    let split = |name: &str| -> Option<(String, String, String)> {
-        let c = VITEST_PROJECT.captures(name)?;
-        Some((c[1].to_string(), c[2].to_string(), c[3].to_string()))
+    struct Entry {
+        projects: Vec<String>,
+        path: String,
+        rest: String,
+        first: String,
+    }
+    let first_line = |lines: &[String]| {
+        lines
+            .iter()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or_default()
+            .to_string()
     };
     let mut out: Vec<Found> = Vec::new();
-    let mut projects: Vec<Vec<String>> = Vec::new();
+    let mut entries: Vec<Option<Entry>> = Vec::new();
     for f in found {
-        let Some((project, path, rest)) = split(&f.name) else {
+        let Some(c) = VITEST_PROJECT.captures(&f.name) else {
             out.push(f);
-            projects.push(Vec::new());
+            entries.push(None);
             continue;
         };
-        let twin = out.iter().position(|o| {
-            split(&o.name).is_some_and(|(_, p, r)| {
-                r == rest
-                    && (p == path
-                        || p.ends_with(&format!("/{path}"))
-                        || path.ends_with(&format!("/{p}")))
+        let (project, path, rest) = (c[1].to_string(), c[2].to_string(), c[3].to_string());
+        let first = first_line(&f.lines);
+        let eligible =
+            |e: &Entry| e.rest == rest && e.first == first && !e.projects.contains(&project);
+        let exact = entries
+            .iter()
+            .position(|e| e.as_ref().is_some_and(|e| eligible(e) && e.path == path));
+        let twin = exact.or_else(|| {
+            entries.iter().position(|e| {
+                e.as_ref().is_some_and(|e| {
+                    eligible(e)
+                        && (e.path.ends_with(&format!("/{path}"))
+                            || path.ends_with(&format!("/{}", e.path)))
+                })
             })
         });
         match twin {
-            Some(i) if !projects[i].contains(&project) => {
-                let (_, p, _) = split(&out[i].name).expect("a workspace name");
-                projects[i].push(project);
-                let path = if path.len() > p.len() { path } else { p };
-                out[i].name = format!("|{}| {path}{rest}", projects[i].join(", "));
+            Some(i) => {
+                let e = entries[i].as_mut().expect("a workspace entry");
+                e.projects.push(project);
+                if path.len() > e.path.len() {
+                    e.path = path;
+                }
+                out[i].name = format!("|{}| {}{}", e.projects.join(", "), e.path, e.rest);
                 if f.lines.len() > out[i].lines.len() {
                     out[i].lines = f.lines;
                 }
             }
-            _ => {
+            None => {
                 out.push(f);
-                projects.push(vec![project]);
+                entries.push(Some(Entry {
+                    projects: vec![project],
+                    path,
+                    rest,
+                    first,
+                }));
             }
         }
     }

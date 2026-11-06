@@ -154,14 +154,11 @@ pub(super) fn failure_names(
     checkout: &Path,
     scoped: bool,
 ) -> Option<BTreeSet<String>> {
-    // Not as a failed run, which names an output it recognises nothing in by
-    // a stand-in that would match the merge base's.
-    let digest = testlog::digest_with(output, false, 0, formats);
-    let names: BTreeSet<String> = digest
-        .failures
+    // Not a digest: it names an output it recognises nothing in by a
+    // stand-in that would match the merge base's, and shows a vitest test
+    // that failed in several projects once.
+    let names: BTreeSet<String> = testlog::failure_names(output, formats)
         .into_iter()
-        .map(|f| f.name)
-        .chain(digest.more_failures)
         .map(|name| from_root(&name, checkout))
         .collect();
     if names.is_empty() {
