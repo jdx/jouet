@@ -50,6 +50,8 @@ def append_result(path: Path, record: dict[str, Any]) -> None:
         with os.fdopen(fd, "wb") as out:
             out.write(previous)
             out.write((json.dumps(record) + "\n").encode())
+            out.flush()
+            os.fsync(out.fileno())
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)

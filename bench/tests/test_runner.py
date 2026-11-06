@@ -298,6 +298,20 @@ class PlanTest(unittest.TestCase):
             self.assertEqual([json.loads(line) for line in (root / "runs.jsonl").read_text().splitlines()], [first])
             self.assertEqual(list(root.glob(".runs-*")), [])
 
+    def test_result_sync_failure_keeps_the_previous_file(self):
+        import errno
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            path = root / "runs.jsonl"
+            path.write_text('{"id":"earlier"}\n')
+            with patch.object(runner.os, "fsync", side_effect=OSError(errno.ENOSPC, "sync failed")):
+                with self.assertRaises(OSError):
+                    runner.append_result(path, {"id": "new"})
+            self.assertEqual(path.read_text(), '{"id":"earlier"}\n')
+            self.assertEqual(list(root.glob(".runs-*")), [])
+
     def test_missing_codex_usage_stops_the_suite(self):
         import os
         from unittest.mock import patch
