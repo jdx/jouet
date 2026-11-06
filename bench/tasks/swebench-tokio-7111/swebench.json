@@ -1,0 +1,32 @@
+{
+  "instance_id": "tokio-rs__tokio-7111",
+  "dataset": "Multi-SWE-bench",
+  "repo": "tokio-rs/tokio",
+  "base_commit": "a82bdeebe9560d22a0179ae7ff8ce3986202e24d",
+  "version": "",
+  "created_at": "",
+  "difficulty": "",
+  "python": null,
+  "extras": [],
+  "pythonpath": null,
+  "test_command": [
+    "sh",
+    "-c",
+    "cargo test --manifest-path tokio/Cargo.toml --features full --test macros_select --no-run && timeout 120 cargo test --manifest-path tokio/Cargo.toml --features full --test macros_select"
+  ],
+  "log_format": "exit",
+  "test_files": [
+    "tokio/tests/coop_budget.rs",
+    "tokio/tests/macros_select.rs"
+  ],
+  "deleted_test_files": [],
+  "patch_files": [
+    "tokio/src/macros/select.rs",
+    "tokio/src/macros/support.rs",
+    "tokio/src/task/budget.rs",
+    "tokio/src/task/consume_budget.rs",
+    "tokio/src/task/mod.rs"
+  ],
+  "fail_to_pass": [],
+  "pass_to_pass": []
+}
