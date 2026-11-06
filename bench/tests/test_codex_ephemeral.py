@@ -29,7 +29,8 @@ class CodexEphemeralTest(unittest.TestCase):
         events = prefix + [event("item.started", "1"), event("item.completed", "1", 0),
                            {"type": "item.completed", "item": {"type": "fileChange"}},
                            event("item.started", "2"), event("item.completed", "2", 1)] + suffix
-        encode = lambda rows: [json.dumps(row) for row in rows]
+        def encode(rows):
+            return [json.dumps(row) for row in rows]
         self.assertEqual(codex_shell_metrics(encode(events)), {"completed": 2, "failed": 1})
         unknown = prefix + [event("item.started", "1"), event("item.completed", "1")] + suffix
         self.assertEqual(codex_shell_metrics(encode(unknown)), {"completed": 1, "failed": None})
