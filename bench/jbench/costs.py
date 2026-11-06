@@ -16,16 +16,50 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import arms as arms_mod
 from . import tasks as tasks_mod
 
 NOTES_REF = "jouet-cost"
+
+
+def note_at_head(workdir: Path, env: dict[str, str]) -> str:
+    proc = subprocess.run(["git", "notes", "--ref", NOTES_REF, "show", "HEAD"],
+                          cwd=workdir, env=env, capture_output=True, text=True, check=False)
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def timed_check(argv: list[str], workdir: Path, env: dict[str, str], timeout: int) -> subprocess.CompletedProcess:
+    """Stop the check and its children before reporting a timed-out seed."""
+    proc = subprocess.Popen(argv, cwd=workdir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=os.name == "posix")
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except BaseException:
+        if os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            try:
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                               capture_output=True, timeout=10, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            if proc.poll() is None:
+                proc.kill()
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 
 
 def harness_hashes() -> list[str]:
@@ -96,29 +130,38 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
         setup_log.parent.mkdir(parents=True, exist_ok=True)
     try:
         tasks_mod.setup_environment(task, env, workdir, work_root / "python-cache", setup_log)
-    except tasks_mod.EnvironmentSetupError:
+        note = note_at_head(workdir, env)
+        incomplete = False
+        for command in task.cost_seed:
+            try:
+                proc = timed_check(
+                    ["jouet", "test", "--cmd", "--", *shlex.split(command)],
+                    workdir, env, task.check_timeout_s,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                log(f"    {command} could not be timed: {error}; the cost seed is incomplete and will not be cached")
+                incomplete = True
+                break
+            log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
+            if proc.returncode != 0:
+                log(f"    {command} failed; the cost seed is incomplete and will not be cached")
+                incomplete = True
+            updated = note_at_head(workdir, env)
+            if not (Counter(updated.splitlines()) - Counter(note.splitlines())):
+                log(f"    no timing was recorded for {command}; the cost seed is incomplete and will not be cached")
+                incomplete = True
+            note = updated
+    finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        raise
-    for command in task.cost_seed:
-        proc = subprocess.run(
-            ["jouet", "test", "--cmd", "--", *shlex.split(command)],
-            cwd=workdir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=task.check_timeout_s,
-        )
-        log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
-    shutil.rmtree(tmp, ignore_errors=True)
-    proc = subprocess.run(
-        ["git", "notes", "--ref", NOTES_REF, "show", "HEAD"], cwd=workdir, env=env, capture_output=True, text=True
-    )
-    if proc.returncode != 0 or not proc.stdout.strip():
+    if incomplete:
+        log(f"    {task.name}: runs start without a cost note because the seed is incomplete")
+        return None
+    if not note.strip():
         log(f"    no timings were kept for {task.name}; its runs start without a cost note")
         return None
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(proc.stdout)
-    return proc.stdout
+    cache.write_text(note)
+    return note
 
 
 def apply(workdir: Path, note: str, commit: str) -> None:

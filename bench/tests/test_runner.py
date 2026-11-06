@@ -734,7 +734,7 @@ class TasksTest(unittest.TestCase):
 
         command = tasks.load("rubocop-redundant-self").isolated_setup[0]
         def check(path):
-            return subprocess.run([sys.executable, *command[1:-1], path], capture_output=True, text=True)
+            return subprocess.run([sys.executable, *command[1:-1], path], capture_output=True, text=True, check=False)
 
         self.assertEqual(check("/work/benchmark/repo").returncode, 0)
         hidden = check("/work/.cache/benchmark/repo")
@@ -853,13 +853,13 @@ class TasksTest(unittest.TestCase):
                 shas = tasks.prepare(task, work)
             self.assertEqual(shas["base_sha"], pinned)
             self.assertEqual(tasks.git(work, "log", "--format=%s"), "pinned\nfirst")
-            missing = subprocess.run(["git", "cat-file", "-e", f"{later}^{{commit}}"], cwd=work, capture_output=True)
+            missing = subprocess.run(["git", "cat-file", "-e", f"{later}^{{commit}}"], cwd=work, capture_output=True, check=False)
             self.assertNotEqual(missing.returncode, 0)
             self.assertEqual((work / "file").read_text(), "pinned")
             self.assertEqual(tasks.git(work, "remote", "get-url", "origin"), str(root / "origin.git"))
             self.assertNotIn(str(source.resolve()), (work / ".git" / "FETCH_HEAD").read_text())
             self.assertEqual(tasks.git(work, "remote", "get-url", "--push", "origin"), os.devnull)
-            pushed = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/other"], cwd=work, capture_output=True)
+            pushed = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/other"], cwd=work, capture_output=True, check=False)
             self.assertNotEqual(pushed.returncode, 0)
             self.assertEqual(tasks.git(source, "log", "-1", "--format=%s"), "later")
             no_upstream = dataclasses.replace(task, upstream=False)
@@ -920,6 +920,7 @@ class TasksTest(unittest.TestCase):
         import io
         import os
         from unittest.mock import patch
+
         import agents
 
         with tempfile.TemporaryDirectory() as d, patch.object(tasks, "TASKS_DIR", tasks.TASKS_DIR):
@@ -984,7 +985,7 @@ class TasksTest(unittest.TestCase):
 
             def check():
                 return subprocess.run([sys.executable, str(checker)], cwd=root, env=env,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, check=False)
 
             deleted = check()
             self.assertNotEqual(deleted.returncode, 0)
@@ -1000,8 +1001,9 @@ class TasksTest(unittest.TestCase):
         self.assertIn(runner.REPO_ROOT, tasks.checkout_roots(runner.REPO_ROOT))
 
     def test_report_does_not_inspect_external_task_directories(self):
-        import agents
         from unittest.mock import patch
+
+        import agents
 
         with patch.dict("os.environ", {"JOUET_BENCH_TASKS": "/missing-tasks"}), \
              patch.object(tasks, "checkout_roots", side_effect=AssertionError("not needed")), \
@@ -1023,7 +1025,7 @@ class TasksTest(unittest.TestCase):
             (task / "check.py").touch()
             (task / "solve.py").touch()
             result = subprocess.run([sys.executable, str(runner.REPO_ROOT / "bench/agents.py"),
-                                     "check-tasks", "--tasks", "task", "--tasks-dir", str(root)], capture_output=True, text=True)
+                                     "check-tasks", "--tasks", "task", "--tasks-dir", str(root)], capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 1)
             self.assertIn("preparation failed", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
@@ -1076,6 +1078,7 @@ class TasksTest(unittest.TestCase):
         import hashlib
         import io
         from unittest.mock import patch
+
         import agents
 
         with tempfile.TemporaryDirectory() as d:
@@ -1401,7 +1404,6 @@ class ExternalTasksTest(unittest.TestCase):
         self.assertIn("unknown task: other", err.getvalue())
 
     def test_run_records_the_task_directory(self):
-        import argparse
         import contextlib
         import io
         import json
@@ -1679,6 +1681,7 @@ class CostSeedTest(unittest.TestCase):
     def test_unreadable_requirements_do_not_abort_other_tasks(self):
         import dataclasses
         from unittest.mock import patch
+
         from jbench import costs
 
         with tempfile.TemporaryDirectory() as d:
@@ -1699,6 +1702,7 @@ class CostSeedTest(unittest.TestCase):
 
     def test_seed_setup_failure_leaves_trials_to_retry(self):
         from unittest.mock import patch
+
         from jbench import costs
 
         planned = [runner.Planned(1, "broken", "codex", "plain")]
@@ -1713,6 +1717,7 @@ class CostSeedTest(unittest.TestCase):
         import dataclasses
         import os
         from unittest.mock import patch
+
         from jbench import costs
 
         with tempfile.TemporaryDirectory() as d:
@@ -1729,9 +1734,9 @@ class CostSeedTest(unittest.TestCase):
                 raise tasks.EnvironmentSetupError(f"setup failed (log: {log})")
 
             with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
-                    patch.object(tasks, "setup_environment", side_effect=fail_setup):
-                with self.assertRaises(tasks.EnvironmentSetupError):
-                    costs.seed(task, Path(sys.executable), root / "work", lambda _: None, root / "results")
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup), \
+                    self.assertRaises(tasks.EnvironmentSetupError):
+                costs.seed(task, Path(sys.executable), root / "work", lambda _: None, root / "results")
             self.assertEqual((root / "results" / "smoke.environment.log").read_text(), "setup details\n")
 
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
@@ -1784,6 +1789,72 @@ class CostSeedTest(unittest.TestCase):
             costs.apply(run, note, shas["head_sha"])
             self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)
 
+    def test_incomplete_cost_seed_is_reported_and_not_cached(self):
+        import dataclasses
+        import os
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a.txt").write_text("a\n")
+            task = tasks.Task(name="t", dir=task_dir, description="", prompt="", chore="", rules=[],
+                              timeout_s=60, cost_seed=["cargo build", "pnpm vitest run test.ts"])
+            stand_in = root / "jouet"
+            stand_in.write_text(
+                '#!/bin/sh\n'
+                'case "$*" in *"pnpm vitest"*) exit 0;; esac\n'
+                'git notes --ref jouet-cost add -f -m \'{"cmd":"cargo build"}\' HEAD\n'
+                'exit "${FAIL_RECORDED:-0}"\n'
+            )
+            stand_in.chmod(0o755)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                note = costs.seed(task, stand_in, root / "work", messages.append)
+                self.assertFalse(costs.cache_path(task, stand_in).exists())
+            self.assertIsNone(note)
+            self.assertTrue(any("no timing was recorded for pnpm vitest run test.ts" in m for m in messages))
+            self.assertTrue(any("runs start without a cost note" in m for m in messages))
+            failed = dataclasses.replace(task, cost_seed=["cargo build"], env={"FAIL_RECORDED": "1"})
+            messages.clear()
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                self.assertIsNone(costs.seed(failed, stand_in, root / "second-work", messages.append))
+                self.assertFalse(costs.cache_path(failed, stand_in).exists())
+            self.assertTrue(any("cargo build failed" in m for m in messages))
+
+    def test_timed_out_cost_seed_does_not_block_trials_or_leave_temp_files(self):
+        import os
+        import subprocess
+        from unittest.mock import patch
+
+        from jbench import costs
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            task_dir = root / "task"
+            (task_dir / "repo").mkdir(parents=True)
+            (task_dir / "repo" / "a.txt").write_text("a\n")
+            task = tasks.Task(name="t", dir=task_dir, description="", prompt="", chore="", rules=[],
+                              timeout_s=60, check_timeout_s=1, cost_seed=["cargo build"])
+            tmp_record = root / "tmp-path"
+            marker = root / "child-survived"
+            stand_in = root / "jouet"
+            stand_in.write_text(f'#!/bin/sh\nprintf "%s" "$TMPDIR" > "{tmp_record}"\n'
+                                f'(sleep 2; touch "{marker}") &\nwait\n')
+            stand_in.chmod(0o755)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                self.assertIsNone(costs.seed(task, stand_in, root / "work", messages.append))
+                self.assertFalse(costs.cache_path(task, stand_in).exists())
+            self.assertTrue(any("could not be timed" in message for message in messages))
+            self.assertTrue(any("runs start without a cost note" in message for message in messages))
+            self.assertFalse(Path(tmp_record.read_text()).exists())
+            subprocess.run(["sleep", "2"], check=True)
+            self.assertFalse(marker.exists(), "the timed-out check's child kept running")
+
     def test_cost_cache_changes_with_setup_tools_and_jouet(self):
         import dataclasses
         import os
@@ -1819,6 +1890,7 @@ class CostSeedTest(unittest.TestCase):
         import dataclasses
         import os
         from unittest.mock import patch
+
         from jbench import costs
 
         with tempfile.TemporaryDirectory() as d:
@@ -1842,6 +1914,7 @@ class CostSeedTest(unittest.TestCase):
         import dataclasses
         import os
         from unittest.mock import patch
+
         from jbench import costs
 
         with tempfile.TemporaryDirectory() as d:
