@@ -5,7 +5,7 @@ opt_in = true
 remote = false
 upstream = true
 timeout_s = 1800
-check_timeout_s = 300
+check_timeout_s = 900
 # Prepare the shared, pinned Yarn and browser caches before running; each
 # trial installs its own node_modules before the agent's clock starts.
 isolated_setup = [["node", ".yarn/releases/yarn-4.13.0.cjs", "install", "--immutable", "--immutable-cache"]]

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import runpy
@@ -28,6 +29,59 @@ class ActualCheckerTest(unittest.TestCase):
         self.assertEqual(verdict({'suites': []}, 0), 'unverified')
         self.assertEqual(verdict(report('passed'), 1), 'unverified')
 
+    def test_agent_test_file_must_be_selected_and_complete_without_skips(self):
+        verdict = runpy.run_path(str(CHECKER))['agent_browser_passed']
+        test = {'expectedStatus': 'passed', 'results': [{'status': 'passed'}]}
+        spec = {'title': 'regression', 'ok': True, 'tests': [test]}
+        report = {'suites': [{'file': 'accounts.test.ts', 'specs': [spec]}], 'errors': [],
+                  'stats': {'expected': 1, 'skipped': 0, 'unexpected': 0, 'flaky': 0}}
+        self.assertTrue(verdict(report, 0, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 1, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 0, ['different.test.ts']))
+        self.assertFalse(verdict({'suites': [], 'errors': []}, 0, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'].append({'file': 'other.test.ts', 'specs': [spec]})
+        self.assertTrue(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'][1]['specs'] = []
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'].pop()
+        report['stats']['skipped'] = 1
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
+        report['stats']['skipped'] = 0
+        test['results'][0]['status'] = 'timedOut'
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
+        test['results'][0]['status'] = 'skipped'
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
+
+    def test_changed_browser_files_share_one_run_and_timeout(self):
+        checker = runpy.run_path(str(CHECKER))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'packages/desktop-client/e2e'
+            tests.mkdir(parents=True)
+            names = ['one.test.ts', 'two.test.ts']
+            for name in names:
+                (tests / name).write_text('test')
+            spec = {'title': 'test', 'ok': True,
+                    'tests': [{'expectedStatus': 'passed', 'results': [{'status': 'passed'}]}]}
+            report = {'suites': [{'file': name, 'specs': [spec]} for name in names],
+                      'errors': [], 'stats': {'expected': 2, 'skipped': 0, 'unexpected': 0, 'flaky': 0}}
+
+            def run(_command, **kwargs):
+                Path(kwargs['env']['PLAYWRIGHT_JSON_OUTPUT_FILE']).write_text(json.dumps(report))
+                return subprocess.CompletedProcess([], 0, '', '')
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with mock.patch.object(subprocess, 'run', side_effect=run) as command:
+                    checker['check_agent_browser_tests']([f'packages/desktop-client/e2e/{name}' for name in names])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(command.call_args.kwargs['timeout'], 600)
+                self.assertEqual(checker['UNVERIFIED'], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_requires_the_working_tree_used_by_the_check_to_be_committed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -47,10 +101,10 @@ class ActualCheckerTest(unittest.TestCase):
             git("commit", "-qm", "base")
             base = git("rev-parse", "HEAD")
             (work / "packages/desktop-client/e2e").mkdir(parents=True)
-            (work / "regression.test.js").write_text("test\n")
+            (work / "packages/desktop-client/e2e/regression.test.ts").write_text("test\n")
             (work / "upcoming-release-notes").mkdir()
             (work / "upcoming-release-notes/fix.md").write_text("note\n")
-            git("add", "regression.test.js", "upcoming-release-notes/fix.md")
+            git("add", "packages/desktop-client/e2e/regression.test.ts", "upcoming-release-notes/fix.md")
             git("commit", "-qm", "fix")
 
             # Stand in for Playwright and release-note validation: this test
@@ -62,7 +116,14 @@ class ActualCheckerTest(unittest.TestCase):
 mkdir -p blob-report
 touch blob-report/report.zip
 if [ "$1" != "--input-type=module" ] && [ -n "$PLAYWRIGHT_JSON_OUTPUT_FILE" ]; then
-  if [ -n "$BROWSER_MISSING" ]; then
+  if echo "$*" | grep -q regression; then
+    if [ -n "$AGENT_BROWSER_FAILED" ]; then
+      printf '%s' '{"suites":[{"file":"regression.test.ts","specs":[{"title":"regression","ok":false,"tests":[{"expectedStatus":"passed","results":[{"status":"timedOut"}]}]}]}],"errors":[],"stats":{"expected":0,"skipped":0,"unexpected":1,"flaky":0}}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+      exit 1
+    else
+      printf '%s' '{"suites":[{"file":"regression.test.ts","specs":[{"title":"regression","ok":true,"tests":[{"expectedStatus":"passed","results":[{"status":"passed"}]}]}]}],"errors":[],"stats":{"expected":1,"skipped":0,"unexpected":0,"flaky":0}}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+    fi
+  elif [ -n "$BROWSER_MISSING" ]; then
     printf '%s' '{"suites":[{"specs":[{"title":"running balances refresh after repeated edits","tests":[{"results":[{"status":"failed","error":{"message":"browserType.launch: Executable does not exist"}}]}]}]}],"errors":[]}' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
     exit 1
   else
@@ -87,6 +148,14 @@ exit 0
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((root / 'unrelated.json').exists())
             self.assertTrue((work / "blob-report/report.zip").exists())
+            shutil.rmtree(work / 'blob-report')
+
+            env['AGENT_BROWSER_FAILED'] = '1'
+            result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn('changed Playwright test files did not all complete successfully', result.stdout)
+            self.assertIn('JOUET_BENCH_UNVERIFIED_V1', result.stdout)
+            del env['AGENT_BROWSER_FAILED']
             shutil.rmtree(work / 'blob-report')
 
             checker = runpy.run_path(str(CHECKER))

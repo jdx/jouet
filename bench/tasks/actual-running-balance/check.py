@@ -47,6 +47,73 @@ def browser_verdict(report, exit_code):
     return 'unverified'
 
 
+def agent_browser_passed(report, exit_code, filenames):
+    """Require each selected file and every reported test to complete once."""
+    try:
+        if exit_code != 0 or report.get('errors'):
+            return False
+        stats = report['stats']
+        if (type(stats['expected']) is not int or stats['expected'] < 1
+                or any(type(stats[key]) is not int or stats[key] != 0
+                       for key in ('skipped', 'unexpected', 'flaky'))):
+            return False
+        suites = report['suites']
+        if len(suites) != len(filenames) or {suite['file'] for suite in suites} != set(filenames):
+            return False
+        if any(not list(specs([suite])) for suite in suites):
+            return False
+        for spec in specs(suites):
+            tests = spec['tests']
+            if not tests or spec.get('ok') is not True:
+                return False
+            for test in tests:
+                results = test['results']
+                if (test.get('expectedStatus') != 'passed' or len(results) != 1
+                        or results[0]['status'] != 'passed'):
+                    return False
+        return True
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def check_agent_browser_tests(changed):
+    """Run changed browser tests together under one shared time budget."""
+    root = Path('packages/desktop-client/e2e')
+    files = [Path(path) for path in changed if path.startswith(f'{root}/')
+             and path.endswith(('.test.ts', '.spec.ts')) and Path(path).is_file()]
+    if not files:
+        UNVERIFIED.append('no runnable changed Playwright test file')
+        return
+    for path in files:
+        if any(parent.is_symlink() for parent in (path, *path.parents)):
+            UNVERIFIED.append(f'changed Playwright test path contains a symlink: {path}')
+            return
+    names = [path.relative_to(root).as_posix() for path in files]
+    with tempfile.TemporaryDirectory(prefix='actual-agent-test-') as directory:
+        report = Path(directory) / 'playwright.json'
+        try:
+            result = subprocess.run([
+                'node', 'node_modules/@playwright/test/cli.js', 'test',
+                '--config', 'packages/desktop-client/playwright.config.ts',
+                '--retries=0', '--reporter=json', '--', *[re.escape(name) + '$' for name in names],
+            ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
+                capture_output=True, text=True, timeout=600)
+            verdict = agent_browser_passed(json.loads(report.read_text()), result.returncode, names)
+            if not verdict:
+                print(result.stdout, end="")
+                print(result.stderr, end="")
+                print(report.read_text())
+        except subprocess.TimeoutExpired as error:
+            print_timeout_output(error)
+            verdict = False
+        except (OSError, ValueError) as error:
+            print(f"could not read changed Playwright test result: {error}")
+            verdict = False
+        if not verdict:
+            UNVERIFIED.append('changed Playwright test files did not all complete successfully: '
+                              + ', '.join(str(path) for path in files))
+
+
 def check():
     # Check before Playwright creates reports or other untracked artifacts.
     if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], text=True):
@@ -58,12 +125,12 @@ def check():
     if head == base:
         expect(False, 'no committed change')
         return
-    changed = subprocess.check_output(['git', 'diff', '--name-only', base, head], text=True).splitlines()
+    changed = subprocess.check_output(['git', 'diff', '--name-only', '-z', base, head], text=True).split('\0')
     expect(any('test' in path.lower() or 'spec' in path.lower() for path in changed),
            'no committed regression test')
     notes = subprocess.check_output([
-        'git', 'diff', '--name-only', '--diff-filter=A', base, head, '--', 'upcoming-release-notes/',
-    ], text=True).splitlines()
+        'git', 'diff', '--name-only', '-z', '--diff-filter=A', base, head, '--', 'upcoming-release-notes/',
+    ], text=True).split('\0')
     notes = [path for path in notes if path.endswith('.md') and path != 'upcoming-release-notes/README.md']
     script = Path(__file__).with_name('check-note.mjs').read_text()
     if not notes:
@@ -128,6 +195,7 @@ def check():
     finally:
         if created:
             spec.unlink(missing_ok=True)
+    check_agent_browser_tests(changed)
 
 
 if __name__ == '__main__':
