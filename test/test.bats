@@ -1596,7 +1596,7 @@ PY
 }
 
 @test "ruff fix previews and fix-only runs do not count as checks" {
-	printf '#!/bin/sh\ncase "$*" in *--diff*) echo "would fix"; exit 1;; esac\nexit 0\n' >ruff
+	printf '#!/bin/sh\ncase "$*" in *--diff*clean.py*) exit 0;; *--diff*) echo "would fix"; exit 1;; esac\nexit 0\n' >ruff
 	chmod +x ruff
 
 	run env CLAUDE_CODE_SESSION_ID=ruff_preview jouet test --cmd -- ./ruff check --diff .
@@ -1609,9 +1609,36 @@ PY
 	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_fix_only.json"
 	assert_output '[]'
 
+	run env CLAUDE_CODE_SESSION_ID=ruff_shell jouet test --cmd -- sh -c './ruff check --fix-only .'
+	assert_success
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_shell.json"
+	assert_output '[]'
+
+	run env CLAUDE_CODE_SESSION_ID=ruff_shell_diff jouet test --cmd -- sh -c './ruff check --diff clean.py'
+	assert_success
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_shell_diff.json"
+	assert_output '[]'
+
 	run env CLAUDE_CODE_SESSION_ID=ruff_check jouet test --cmd -- ./ruff check .
 	assert_success
 	run --separate-stderr jq -r '.trees[].runs.lint.exit_code' "$XDG_STATE_HOME/jouet/sessions/ruff_check.json"
+	assert_output '0'
+}
+
+@test "unknown tests with Ruff-like flags still count as tests" {
+	printf '#!/bin/sh\necho "1 passed"\n' >custom-test
+	printf '#!/bin/sh\nexit 0\n' >ruff
+	chmod +x custom-test ruff
+	for flag in --diff --fix-only; do
+		local session="custom_${flag#--}"
+		run env CLAUDE_CODE_SESSION_ID="$session" jouet test --cmd -- ./custom-test "$flag"
+		assert_success
+		run --separate-stderr jq -r '.trees[].runs.test.exit_code' "$XDG_STATE_HOME/jouet/sessions/$session.json"
+		assert_output '0'
+	done
+	run env CLAUDE_CODE_SESSION_ID=custom_chain jouet test --cmd -- sh -c './ruff check --fix-only . && ./custom-test --diff'
+	assert_success
+	run --separate-stderr jq -r '.trees[].runs.test.exit_code' "$XDG_STATE_HOME/jouet/sessions/custom_chain.json"
 	assert_output '0'
 }
 
