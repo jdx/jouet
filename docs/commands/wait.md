@@ -58,7 +58,7 @@ jouet wait cmd [--expect-exit N] -- CMD...
 jouet wait job ID       [--until exited|ready] [--port N | --http URL] [--log-lines N] [--no-logs]
 jouet wait daemon ID    [--until ready|stopped] [--port N | --http URL] [--log-lines N] [--no-logs]
 
-common: --timeout DUR (default 30m)  --interval DUR (default 10s, backs off to 60s)
+common: --timeout DUR (default 30m)  --interval DUR (default 10s, backs off to 15s)
         --json | --jsonl  --quiet
 ```
 
@@ -227,7 +227,7 @@ FAILED daemon api: errored (exit code 1) after 0s
 
 ## Timeouts and polling {#timing}
 
-The first check is immediate. After that, the time between checks starts at `--interval` and grows by half again after each check that saw no change, up to 60 seconds (or `--interval`, if that is longer): with the default `10s`, the gaps are 10, 15 and 22.5 seconds, then about 34 and 51, then 60. It drops back to `--interval` when the state changes.
+The first check is immediate. After that, the time between checks starts at `--interval` and grows by half again after each check that saw no change, up to 15 seconds (or `--interval`, if that is longer): with the default `10s`, the gaps are 10 seconds, then 15. A late check leaves the agent waiting on a result that is already in, and a GitHub poll that finds nothing new is a 304, which costs nothing against the rate limit. It drops back to `--interval` when the state changes.
 
 No wait runs past `--timeout`, and there is one last check at it, so `--timeout 0` checks exactly once. On timeout, jouet exits `124` and says how many checks ran:
 

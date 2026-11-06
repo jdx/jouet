@@ -19,6 +19,6 @@ The PR's checks on GitHub, which `pr next` reads, are its tests. Verify that the
 - **`--yes`** — Merge without asking
 - **`--dry-run`** — Print the plan and change nothing
 - **`--timeout <DUR>`** — How long to wait for checks after --update (default 30m)
-- **`--interval <DUR>`** — Time between the first checks of that wait; backs off to 60s (default 10s)
+- **`--interval <DUR>`** — Time between the first checks of that wait; backs off to 15s (default 10s)
 - **`--settle <DUR>`** — How long to wait for GitHub to compute an unknown mergeable state (default 20s; 0 disables)
 - **`-h --help`** — Print help

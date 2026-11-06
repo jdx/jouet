@@ -3,7 +3,7 @@ use usage_rs::{Args, Subcommands};
 /// Block until a condition holds, then print one summary
 ///
 /// Replaces `sleep N; check; repeat` loops. The first check is immediate;
-/// later ones back off from --interval to 60s and speed up again when the
+/// later ones back off from --interval to 15s and speed up again when the
 /// state changes. Exits 0 when the condition holds and 124 on timeout, where
 /// running the same command again keeps waiting. In human mode a live status
 /// line is shown on stderr; otherwise each change of state is one line on
@@ -13,7 +13,7 @@ pub(crate) struct WaitArgs {
     /// Give up after DUR, such as 90s, 10m or 1h30m (default 30m)
     #[usage(long, global, value_name = "DUR")]
     pub(crate) timeout: Option<String>,
-    /// Time between the first checks; backs off to 60s (default 10s)
+    /// Time between the first checks; backs off to 15s (default 10s)
     #[usage(long, global, value_name = "DUR")]
     pub(crate) interval: Option<String>,
     /// How long a conflict GitHub reports must persist before `wait ci` and

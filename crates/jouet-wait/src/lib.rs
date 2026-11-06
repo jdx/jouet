@@ -35,7 +35,10 @@ use serde::Serialize;
 use std::time::{Duration, Instant};
 
 /// Where the interval stops backing off, unless `--interval` is longer.
-pub(crate) const MAX_INTERVAL: Duration = Duration::from_secs(60);
+/// Short, because a wait that sees a result late leaves the agent idle for
+/// the difference; a CI poll whose answer did not change is a 304, which
+/// costs nothing against GitHub's rate limit.
+pub(crate) const MAX_INTERVAL: Duration = Duration::from_secs(15);
 
 /// One look at a subject.
 pub struct Observation {
@@ -212,7 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_interval_backs_off_to_a_minute() {
+    fn the_interval_backs_off_to_fifteen_seconds() {
         let timing = Timing {
             timeout: Duration::from_secs(600),
             interval: Duration::from_secs(10),
@@ -223,7 +226,7 @@ mod tests {
             seen.push(d.as_secs());
             d = timing.back_off(d);
         }
-        assert_eq!(seen, [10, 15, 22, 33, 50, 60]);
+        assert_eq!(seen, [10, 15, 15, 15, 15, 15]);
     }
 
     #[test]
