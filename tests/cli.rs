@@ -71,3 +71,85 @@ fn json_after_double_dash_is_not_a_global_option() {
     assert!(out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--no-such-flag"));
 }
+
+#[cfg(unix)]
+#[test]
+fn pnpm_vitest_cost_is_recorded_only_when_not_shadowed_by_a_script() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let bin = dir.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let pnpm = bin.join("pnpm");
+    std::fs::write(
+        &pnpm,
+        "#!/bin/sh\nprintf 'Test Files  1 passed (1)\\n     Tests  1 passed (1)\\n'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&pnpm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let manifest = dir.join("package.json");
+    std::fs::write(&manifest, r#"{"scripts":{"test":"vitest run"}}"#).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    };
+    git(&["init", "-q"]);
+    git(&["add", "package.json"]);
+    git(&["commit", "-qm", "base"]);
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let run = |file: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_jouet"))
+            .current_dir(dir)
+            .args(["test", "--cmd", "--", "pnpm", "vitest", "run", file])
+            .env("PATH", &path)
+            .env("HOME", dir)
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("XDG_STATE_HOME", dir.join("state"))
+            .env_remove("JOUET_COST_RECORD")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run("one.test.ts");
+    let note = git(&["notes", "--ref", "jouet-cost", "show", "HEAD"]);
+    assert!(String::from_utf8_lossy(&note).contains("pnpm vitest run one.test.ts"));
+    std::fs::write(&manifest, r#"{"scripts":{"vitest":"echo not a test"}}"#).unwrap();
+    run("two.test.ts");
+    assert_eq!(git(&["notes", "--ref", "jouet-cost", "show", "HEAD"]), note);
+}

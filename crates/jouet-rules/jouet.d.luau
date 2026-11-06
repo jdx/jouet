@@ -420,6 +420,10 @@ declare jouet: {
 		-- the call's directory when nil). nil outside a Cargo project.
 		workspace: (dir: string?) -> (JouetCargoWorkspace?, string?),
 	},
+	node: {
+		-- Script names from the nearest package.json; nil when unavailable.
+		scripts: (dir: string?) -> ({ string }?, string?),
+	},
 	test: {
 		-- The test runners `jouet test --affected` can select for, in the
 		-- nearest directory from the call's up to the work tree's root that

@@ -488,6 +488,13 @@
             "$ref": "#/$defs/ExampleSecret"
           }
         },
+        "node_scripts": {
+          "description": "What `jouet.node.scripts()` reports for any directory; omitted, it has no answer.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "files": {
           "description": "The text of files `jouet.file.contains` reads, by the path the\nscript passes it; omitted, it has no answer for any file.",
           "type": "object",

@@ -18,6 +18,8 @@ this machine takes 1.4× as long as the others, over 2 commands timed in both
 
 The commands are listed costliest first. Each line ends with what the estimate rests on: `N runs here` is this machine's own median, `N runs elsewhere, × 1.4` is other machines' timings scaled to this one, and `N runs elsewhere, unscaled` is other machines' timings as they are, when no command has been timed in both places (see [timings from other machines](#timings-from-other-machines)). A family such as `mise run test:e2e …` is one command with what it selected (a test name, a package) left out, once two of its commands have been timed. Before anything has been timed, `jouet cost` says so and names where timings come from.
 
+`pnpm vitest run` is recorded as a partial test when the nearest `package.json` has no `vitest` script. If that manifest is missing, unreadable, or defines the script, jouet cannot tell what pnpm ran and does not classify the command. `pnpm exec vitest run` explicitly invokes the executable.
+
 The session-start primer names up to four checks that take 20 seconds or more, so the agent sees the slowest without running `jouet cost`:
 
 ```text

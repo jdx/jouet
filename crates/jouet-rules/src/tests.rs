@@ -659,6 +659,7 @@ return {
             git_ahead: None,
             stack: None,
             secrets: None,
+            node_scripts: None,
             files: None,
             fired: None,
         }
@@ -1339,6 +1340,60 @@ fn a_plain_cargo_run_is_full_only_when_it_covers_every_package() {
         "full"
     );
     assert_eq!(scope(".", "cargo test"), "partial");
+}
+
+#[test]
+fn pnpm_vitest_is_recorded_only_when_no_project_script_shadows_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = tmp.path().join("package.json");
+    let engine = engine(builtin());
+    let records = |command: &str| {
+        engine.set_probes(Probes::new(Some(tmp.path().to_path_buf()), None, false));
+        engine
+            .evaluate(&Call {
+                event: Some(Event::PostToolUse),
+                exit_code: Some(0),
+                ..bash(command)
+            })
+            .records
+    };
+    assert!(records("pnpm vitest run test.ts").is_empty());
+    std::fs::write(&manifest, r#"{"scripts":{"test":"vitest run"}}"#).unwrap();
+    let selected = records("pnpm vitest run test.ts");
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected[0].scope(),
+        records("pnpm exec vitest run test.ts")[0].scope()
+    );
+    assert_eq!(
+        records("pnpm vitest run")[0].scope(),
+        "partial @jouet:pnpm:dir=.:vitest"
+    );
+    assert_eq!(
+        records("pnpm vitest run --config=unit.ts")[0].scope(),
+        records("pnpm exec vitest run --config=unit.ts")[0].scope()
+    );
+    assert_ne!(
+        records("pnpm vitest run --config=unit.ts")[0].scope(),
+        records("pnpm vitest run --config=integration.ts")[0].scope()
+    );
+    assert!(records("pnpm vitest run -t 'two words'").is_empty());
+    assert!(records("pnpm vitest run --help").is_empty());
+    let child = tmp.path().join("child");
+    std::fs::create_dir(&child).unwrap();
+    std::fs::write(
+        child.join("package.json"),
+        r#"{"scripts":{"vitest":"echo shadow"}}"#,
+    )
+    .unwrap();
+    assert!(records("cd child && pnpm vitest run test.ts").is_empty());
+    std::fs::write(&manifest, r#"{"scripts":{"vitest":"echo not a test"}}"#).unwrap();
+    assert!(records("pnpm vitest run test.ts").is_empty());
+    std::fs::write(child.join("package.json"), "{}").unwrap();
+    assert_eq!(records("cd child && pnpm vitest run test.ts").len(), 1);
+    assert_eq!(records("pnpm exec vitest run test.ts").len(), 1);
+    std::fs::write(&manifest, "invalid").unwrap();
+    assert!(records("pnpm vitest run test.ts").is_empty());
 }
 
 #[test]
