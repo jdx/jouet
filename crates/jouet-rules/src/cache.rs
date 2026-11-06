@@ -6,7 +6,11 @@
 //! repository.
 
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// The rule's bytecode, and whether it came from the cache: from the cache
 /// when it holds this exact source, otherwise compiled and, when there is a
@@ -58,8 +62,62 @@ fn store(path: &Path, bytes: &[u8]) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
+    // Threads compiling the same rule in one process must never share a
+    // temporary file: one could rename it while another is still writing.
+    for _ in 0..16 {
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_extension(format!("tmp{}-{sequence}", std::process::id()));
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return,
+        };
+        let written = file.write_all(bytes).is_ok();
+        drop(file);
+        if !written || std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        return;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn concurrent_stores_do_not_expose_partial_bytecode_or_clobber_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rule.luauc");
+        let stale = path.with_extension(format!("tmp{}", std::process::id()));
+        std::fs::write(&stale, b"another writer").unwrap();
+        let bytes = Arc::new(vec![42; 128 * 1024]);
+        store(&path, &bytes);
+        assert_eq!(std::fs::read(&stale).unwrap(), b"another writer");
+
+        let barrier = Arc::new(Barrier::new(5));
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let barrier = barrier.clone();
+                let bytes = bytes.clone();
+                let path = &path;
+                scope.spawn(move || {
+                    barrier.wait();
+                    for _ in 0..16 {
+                        store(path, &bytes);
+                    }
+                });
+            }
+            barrier.wait();
+            for _ in 0..128 {
+                assert_eq!(std::fs::read(&path).unwrap(), *bytes);
+            }
+        });
+        assert_eq!(std::fs::read(&path).unwrap(), *bytes);
     }
 }
