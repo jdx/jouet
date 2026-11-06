@@ -169,10 +169,12 @@ pub(super) fn failure_names(
         if !go.is_empty() {
             // Do not compare unqualified Go output, including panics or
             // build errors mixed with test failures.
-            return names
-                .iter()
-                .all(|name| go.contains_key(name))
-                .then(|| go.into_values().flatten().collect());
+            return names.iter().all(|name| go.contains_key(name)).then(|| {
+                go.into_iter()
+                    .filter(|(name, _)| !name.contains("::") || names.contains(name))
+                    .flat_map(|(_, qualified)| qualified)
+                    .collect()
+            });
         }
         let jest = testlog::jest_failure_files(output)?;
         if !jest.is_empty() {
@@ -360,7 +362,11 @@ pub(super) fn failure_evidence(
         }
     }
     let go = testlog::go_failure_packages(output)
-        .filter(|go| !go.is_empty() && names.iter().all(|name| go.contains_key(name)));
+        .filter(|go| !go.is_empty() && names.iter().all(|name| go.contains_key(name)))
+        .map(|mut go| {
+            go.retain(|name, _| !name.contains("::") || names.contains(name));
+            go
+        });
     Some(Evidence { names, details, go })
 }
 
@@ -1306,6 +1312,40 @@ docs/README.md\n\
         let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
         assert!(evidence.names.contains("package example/b"));
         assert!(!evidence.details.contains_key("package example/b"));
+    }
+
+    #[test]
+    fn go_json_interrupted_test_is_not_hidden_by_an_ordinary_failure() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestKnown"}
+{"Action":"output","Package":"example/a","Test":"TestKnown","Output":"known failure\n"}
+{"Action":"fail","Package":"example/a","Test":"TestKnown"}
+{"Action":"run","Package":"example/a","Test":"TestCrash"}
+{"Action":"output","Package":"example/a","Output":"panic: unexpected exit\n"}
+{"Action":"fail","Package":"example/a"}"#;
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.names.contains("package example/a"));
+        assert!(!evidence.details.contains_key("package example/a"));
+        assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
+        let digest = testlog::digest_with(output, true, 4096, &[]);
+        assert!(digest.failures.iter().any(|f| {
+            f.lines
+                .iter()
+                .any(|line| line.contains("panic: unexpected exit"))
+        }));
+    }
+
+    #[test]
+    fn go_json_scoped_baseline_does_not_require_parent_subtest_details() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestParent"}
+{"Action":"run","Package":"example/a","Test":"TestParent/child"}
+{"Action":"output","Package":"example/a","Test":"TestParent/child","Output":"expected 1, got 2\n"}
+{"Action":"fail","Package":"example/a","Test":"TestParent/child"}
+{"Action":"fail","Package":"example/a","Test":"TestParent"}
+{"Action":"fail","Package":"example/a"}"#;
+        let evidence = failure_evidence(output, &[], Path::new("/work"), true).unwrap();
+        assert_eq!(evidence.names.len(), 1);
+        assert!(evidence.names.contains("example/a::TestParent/child"));
+        assert_eq!(evidence.details.len(), 1);
     }
 
     #[test]

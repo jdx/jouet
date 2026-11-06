@@ -454,6 +454,12 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
                 || !f.lines.iter().any(|line| PLAYWRIGHT_TIMEOUT.is_match(line))
         })
         .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
+        // Package-level output is useful to diagnose a crash or build error,
+        // but cannot prove its cause is identical at the merge base.
+        .filter(|f| {
+            !serde_json::from_str::<GoOutput<'_>>(&lines[f.at])
+                .is_ok_and(|event| event.action.as_deref() == Some("fail") && event.test.is_none())
+        })
         .map(|f| {
             let binary = LIBTEST_BLOCK
                 .is_match(&lines[f.at])
@@ -479,7 +485,7 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
                 event
                     .package
                     .filter(|package| !package.is_empty())
-                    .map(|package| format!("{package}::{}", f.name))
+                    .and_then(|package| event.test.map(|name| format!("{package}::{name}")))
             } else if GO_RESULT.is_match(&lines[f.at]) {
                 lines[f.at + 1..]
                     .iter()
@@ -1032,8 +1038,14 @@ fn go_json(lines: &[String], out: &mut Parsed) {
         output: Vec<String>,
         result: Option<(usize, String)>,
     }
+    #[derive(Default)]
+    struct Package {
+        end: Option<(usize, String)>,
+        duplicate: bool,
+        output: Vec<String>,
+    }
     let mut tests = std::collections::BTreeMap::<(String, String), Test>::new();
-    let mut packages = std::collections::BTreeMap::<String, (usize, String, bool)>::new();
+    let mut packages = std::collections::BTreeMap::<String, Package>::new();
     for (at, line) in lines.iter().enumerate() {
         if !line.starts_with('{') || !line.contains("\"Action\"") {
             continue;
@@ -1048,10 +1060,16 @@ fn go_json(lines: &[String], out: &mut Parsed) {
             continue;
         }
         let Some(name) = event.test else {
-            if matches!(action.as_ref(), "pass" | "fail" | "skip") {
-                let key = package.into_owned();
-                let duplicate = packages.contains_key(&key);
-                packages.insert(key, (at, action.into_owned(), duplicate));
+            let package = packages.entry(package.into_owned()).or_default();
+            if action == "output" {
+                if let Some(output) = event.output {
+                    package
+                        .output
+                        .extend(clean(&output).into_iter().filter(|line| !line.is_empty()));
+                }
+            } else if matches!(action.as_ref(), "pass" | "fail" | "skip") {
+                package.duplicate |= package.end.is_some();
+                package.end = Some((at, action.into_owned()));
             }
             continue;
         };
@@ -1088,8 +1106,12 @@ fn go_json(lines: &[String], out: &mut Parsed) {
         }
     }
     let mut failed_packages = std::collections::BTreeSet::new();
+    let mut incomplete_packages = std::collections::BTreeSet::new();
     for ((package, name), test) in tests {
         let Some((at, result)) = test.result else {
+            if test.started {
+                incomplete_packages.insert(package);
+            }
             continue;
         };
         if !name.contains('/') {
@@ -1102,14 +1124,16 @@ fn go_json(lines: &[String], out: &mut Parsed) {
         }
         if result == "fail" {
             failed_packages.insert(package.clone());
-            let complete = packages
-                .get(&package)
-                .is_some_and(|(end, result, duplicate)| {
-                    *end > at && result == "fail" && !duplicate
-                });
+            let complete = packages.get(&package).is_some_and(|package| {
+                package
+                    .end
+                    .as_ref()
+                    .is_some_and(|(end, result)| *end > at && result == "fail")
+                    && !package.duplicate
+            });
             out.push(
                 at,
-                name,
+                format!("{package}::{name}"),
                 if test.ambiguous || !complete {
                     Vec::new()
                 } else {
@@ -1118,10 +1142,15 @@ fn go_json(lines: &[String], out: &mut Parsed) {
             );
         }
     }
-    for (package, (at, result, _)) in packages {
-        if result == "fail" && !failed_packages.contains(&package) {
+    for (package, data) in packages {
+        let Some((at, result)) = data.end else {
+            continue;
+        };
+        if result == "fail"
+            && (!failed_packages.contains(&package) || incomplete_packages.contains(&package))
+        {
             out.count(0, 1, 0);
-            out.push(at, format!("package {package}"), Vec::new());
+            out.push(at, format!("package {package}"), data.output);
         }
     }
 }
@@ -1144,7 +1173,7 @@ pub(crate) fn go_failure_packages(
             && !name.is_empty()
         {
             names
-                .entry(name.to_string())
+                .entry(format!("{package}::{name}"))
                 .or_default()
                 .insert(format!("{package}::{name}"));
         } else if let Some(c) = GO_RESULT.captures(&line) {

@@ -547,7 +547,9 @@ fn go_json_keeps_parallel_failures_with_their_own_package_and_output() {
                 && d.lines == ["    b_test.go:7: expected beta"])
     );
     let packages = go_failure_packages(output).unwrap();
-    assert_eq!(packages["TestSame"].len(), 2);
+    assert_eq!(packages["example/a::TestSame"].len(), 1);
+    assert_eq!(packages["example/b::TestSame"].len(), 1);
+    assert_eq!(names(&d), ["example/b::TestSame", "example/a::TestSame"]);
 }
 
 #[test]
@@ -556,7 +558,10 @@ fn go_json_refuses_ambiguous_failure_details() {
 {"Action":"output","Package":"example/a","Test":"TestOne","Output":"first\n"}
 {"Action":"fail","Package":"example/a","Test":"TestOne"}
 {"Action":"output","Package":"example/a","Test":"TestOne","Output":"late\n"}"#;
-    assert_eq!(names(&digest(late, true, DEFAULT_BUDGET)), ["TestOne"]);
+    assert_eq!(
+        names(&digest(late, true, DEFAULT_BUDGET)),
+        ["example/a::TestOne"]
+    );
     assert!(failure_details(late, &[]).is_empty());
     let missing_start = r#"{"Action":"output","Package":"example/a","Test":"TestOne","Output":"first\n"}
 {"Action":"fail","Package":"example/a","Test":"TestOne"}"#;
