@@ -225,6 +225,90 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 }
 
 #[test]
+fn a_test_binary_that_aborts_is_named_with_how_it_ended() {
+    // The abort lost libtest's own lines and every test's output.
+    let log = "warning: unused variable: `x`
+  --> tokio/src/a.rs:3:9
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.71s
+     Running tests/task_local_set.rs (target/debug/deps/task_local_set-46dfdd85eecd30a1)
+fatal runtime error: thread local panicked on drop, aborting
+error: test failed, to rerun pass `--test task_local_set`
+
+Caused by:
+  process didn't exit successfully: `target/debug/deps/task_local_set-46dfdd85eecd30a1 local_set_in_thread` (signal: 6, SIGABRT: process abort signal)
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        [
+            "tests/task_local_set.rs ended before its result (signal: 6, SIGABRT: process abort signal)"
+        ]
+    );
+    assert_eq!(
+        d.failures[0].lines[0],
+        "fatal runtime error: thread local panicked on drop, aborting"
+    );
+    assert!(
+        d.failures[0].lines[1].contains("--nocapture"),
+        "{:?}",
+        d.failures[0].lines
+    );
+}
+
+#[test]
+fn a_test_binary_that_failed_its_tests_is_not_also_a_crash() {
+    let log = "     Running tests/a.rs (target/debug/deps/a-0123456789abcdef)
+
+running 1 test
+test fails ... FAILED
+
+failures:
+
+---- fails stdout ----
+thread 'fails' panicked at tests/a.rs:3:5:
+boom
+
+failures:
+    fails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test a`
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(names(&d), ["fails"]);
+}
+
+#[test]
+fn a_test_binary_that_crashes_after_a_panic_keeps_the_panic() {
+    let log = "     Running unittests src/lib.rs (target/debug/deps/demo-0123456789abcdef)
+
+running 2 tests
+test ok_one ... ok
+thread 'two' panicked at src/lib.rs:9:5:
+boom
+thread panicked while processing panic. aborting.
+error: test failed, to rerun pass `--lib`
+
+Caused by:
+  process didn't exit successfully: `target/debug/deps/demo-0123456789abcdef` (signal: 6, SIGABRT: process abort signal)
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        ["src/lib.rs ended before its result (signal: 6, SIGABRT: process abort signal)"]
+    );
+    assert_eq!(
+        d.failures[0].lines,
+        [
+            "thread 'two' panicked at src/lib.rs:9:5:",
+            "boom",
+            "thread panicked while processing panic. aborting."
+        ]
+    );
+}
+
+#[test]
 fn a_nested_nextest_run_is_not_counted_without_cargo_lines() {
     // `cargo test -q` prints none of cargo's lines.
     let log = "
