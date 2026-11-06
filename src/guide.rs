@@ -434,6 +434,10 @@ const USAGE: &[Usage] = &[
                 "commit exactly these paths, with the configured trailers; hooks run",
             ),
             (
+                "jouet commit <PATHS>... --message MSG --no-trailers",
+                "omit all trailers when the project forbids AI attribution",
+            ),
+            (
                 "jouet commit <PATHS>... --dry-run",
                 "show what would be committed",
             ),
