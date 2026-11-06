@@ -2022,8 +2022,8 @@
                       },
                       "id": "SCR_1"
                     },
-                    "messageHeadline": "fix: keep the async rerun when a sync Standard Schema validate meets a promise",
-                    "committedDate": "2026-10-30T12:00:00Z",
+                    "messageHeadline": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+                    "committedDate": "2026-11-01T13:03:35Z",
                     "authors": {
                       "nodes": [
                         {
@@ -2873,8 +2873,8 @@
           },
           "id": "SCR_3"
         },
-        "messageHeadline": "fix: keep the async rerun when a sync Standard Schema validate meets a promise",
-        "committedDate": "2026-10-30T12:00:00Z",
+        "messageHeadline": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+        "committedDate": "2026-11-01T13:03:35Z",
         "authors": {
           "nodes": [
             {
