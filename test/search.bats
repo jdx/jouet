@@ -149,7 +149,9 @@ RS
 	run --separate-stderr jouet search download
 	assert_success
 	assert_output "src/lib.rs: 1 match already shown, unchanged
-src/main.rs: 1 match already shown, unchanged"
+    6: pub fn download(&self, path: &str) -> String {
+src/main.rs: 1 match already shown, unchanged
+    3: client.download(\"index.html\");"
 
 	run --separate-stderr jouet search --again download src/main.rs
 	assert_output --partial 'client.download("index.html");'

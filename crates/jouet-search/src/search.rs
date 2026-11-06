@@ -425,15 +425,6 @@ fn lay_out(report: &mut Report, found: Vec<Collected>, options: &Options, memory
             path,
             matches: c.matches,
             already_shown: c.already_shown,
-            already_shown_lines: c
-                .seen
-                .iter()
-                .map(|(line, text)| Hit {
-                    line: *line,
-                    text: text.clone(),
-                    symbol: None,
-                })
-                .collect(),
             ..FileReport::default()
         };
         let mut in_file = 0usize;
@@ -466,6 +457,26 @@ fn lay_out(report: &mut Report, found: Vec<Collected>, options: &Options, memory
             });
         }
         file.more = c.matches - c.already_shown - file.shown.len();
+        // Within the same budgets and count as new matches; those left out
+        // are counted by `seen_lines`.
+        for (line, text) in &c.seen {
+            let cost = text.len() + 8;
+            if options
+                .max_count
+                .is_some_and(|max| file.shown.len() + file.already_shown_lines.len() >= max)
+                || !fits(in_file, cost, budget.per_file)
+                || !fits(used, cost, budget.total)
+            {
+                break;
+            }
+            in_file += cost;
+            used += cost;
+            file.already_shown_lines.push(Hit {
+                line: *line,
+                text: text.clone(),
+                symbol: None,
+            });
+        }
         if memory.active() {
             let key = if c.key.is_empty() {
                 memory::key(&c.path)
