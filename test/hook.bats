@@ -640,6 +640,7 @@ fnox_payload() {
 	assert_output --partial 'text '
 	assert_output --partial 'missing();'
 	assert_output --partial 'is not in src/a.rs, so this script would change nothing there'
+	assert_output --partial 'jouet edit replace src/a.rs --old TEXT'
 	assert_output --partial '[jouet rule: python-edit]'
 
 	# After a cd, the path is from there.
@@ -696,6 +697,7 @@ open(p,'w').write(s)
 E"
 	assert_output --partial 'fn gone() {}'
 	assert_output --partial 'is not in src/a.rs or src/a_test.rs'
+	assert_output --partial 'jouet edit replace PATH --old TEXT --new TEXT'
 }
 
 @test "a check run in bypassPermissions gets a 10-minute timeout, so it ends in that call" {
