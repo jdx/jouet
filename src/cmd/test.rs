@@ -700,6 +700,8 @@ const NOT_A_TEST: &[&str] = &[
     "format",
     "--write",
     "--fix",
+    "--fix-only",
+    "--diff",
 ];
 
 fn own_command() -> String {

@@ -27,6 +27,9 @@ fires = [
   { command = "cargo +1.91 check --locked", exit_code = 0, kind = "build" },
   { command = "cargo clippy -- -D warnings", exit_code = 101, kind = "lint" },
   { command = "cargo fmt --check", exit_code = 1, kind = "lint" },
+  { command = "ruff check .", exit_code = 1, kind = "lint", scope = "full" },
+  { command = "ruff check --fix src/a.py", exit_code = 0, kind = "lint" },
+  { command = "ruff check -- --diff", exit_code = 1, kind = "lint" },
   { command = "mise run test:e2e edit", exit_code = 0, kind = "test" },
   { command = "mise run lint", exit_code = 1, kind = "lint" },
   { command = "npm run build", exit_code = 0, kind = "build" },
@@ -149,6 +152,12 @@ fires = [
   { command = "jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test", exit_code = 1, kind = "test", scope = "partial" },
 ]
 quiet = [
+  # Ruff's fix preview and fix-only modes do not report a complete check.
+  { command = "ruff check --diff src/a.py", exit_code = 1 },
+  { command = "ruff check --fix --diff src/a.py", exit_code = 1 },
+  { command = "ruff check --fix-only src/a.py", exit_code = 0 },
+  { command = "jouet test --cmd -- ruff check --diff src/a.py", exit_code = 1 },
+  { command = "jouet test --cmd -- ruff check --fix-only src/a.py", exit_code = 0 },
   { command = "pnpm vitest run a.test.ts", exit_code = 1, node_scripts = ["vitest"] },
   { command = "cd child && pnpm vitest run a.test.ts", exit_code = 1, node_scripts = ["vitest"] },
   { command = "pnpm vitest run --help", exit_code = 0, node_scripts = [] },

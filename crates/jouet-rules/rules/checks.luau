@@ -762,6 +762,17 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 		-- unknown rather than treating a selected run as the full suite.
 		return "test", unknown
 	elseif program == "ruff" then
+		-- Preview and fix-only modes do not report the complete lint result.
+		-- A preview exits 1 for a diff, while fix-only can exit 0 with
+		-- unfixable violations still present. Do not count either as a check.
+		for i = 2, #args do
+			if args[i] == "--" then
+				break
+			end
+			if args[i] == "--diff" or args[i] == "--fix-only" then
+				return nil, unknown
+			end
+		end
 		local kind: Kind? = if first == "check" then "lint" else nil
 		return kind, if #args == 1 or (#args == 2 and args[2] == ".") then FULL else unknown
 	elseif program == "eslint" or program == "mypy" or program == "shellcheck" then

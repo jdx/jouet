@@ -1595,6 +1595,26 @@ PY
 	assert_output '[]'
 }
 
+@test "ruff fix previews and fix-only runs do not count as checks" {
+	printf '#!/bin/sh\ncase "$*" in *--diff*) echo "would fix"; exit 1;; esac\nexit 0\n' >ruff
+	chmod +x ruff
+
+	run env CLAUDE_CODE_SESSION_ID=ruff_preview jouet test --cmd -- ./ruff check --diff .
+	assert_failure 1
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_preview.json"
+	assert_output '[]'
+
+	run env CLAUDE_CODE_SESSION_ID=ruff_fix_only jouet test --cmd -- ./ruff check --fix-only .
+	assert_success
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_fix_only.json"
+	assert_output '[]'
+
+	run env CLAUDE_CODE_SESSION_ID=ruff_check jouet test --cmd -- ./ruff check .
+	assert_success
+	run --separate-stderr jq -r '.trees[].runs.lint.exit_code' "$XDG_STATE_HOME/jouet/sessions/ruff_check.json"
+	assert_output '0'
+}
+
 @test "a run whose runner refused its arguments is no failed test run" {
 	printf '#!/bin/sh\necho "error: unexpected argument '"'"'guide'"'"' found"\nexit 1\n' >cargo-like
 	chmod +x cargo-like
