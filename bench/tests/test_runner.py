@@ -699,6 +699,7 @@ class StopTest(unittest.TestCase):
             )
 
     def test_disk_reserve_refuses_start_and_stops_an_active_agent(self):
+        import threading
         from types import SimpleNamespace
         from unittest.mock import patch
 
@@ -706,16 +707,20 @@ class StopTest(unittest.TestCase):
             root = Path(d)
             args = (HARNESSES["claude"], [sys.executable, "-c", "import time; time.sleep(30)"],
                     {"PATH": "/usr/bin:/bin"}, root, root, 20, None, root / "agent.jsonl")
+            guard = threading.Event()
             with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=99)), \
                     patch.object(runner.subprocess, "Popen") as spawn:
-                refused = runner.run_agent(*args, min_free_bytes=100)
+                refused = runner.run_agent(*args, min_free_bytes=100, disk_guard_event=guard)
             spawn.assert_not_called()
+            self.assertTrue(guard.is_set())
+            guard.clear()
             self.assertEqual(refused["stopped"], "disk_guard")
             self.assertIsNone(refused["exit_code"])
 
             readings = [SimpleNamespace(free=200)] * 3 + [SimpleNamespace(free=99)] * 6
             with patch.object(runner.shutil, "disk_usage", side_effect=readings):
-                stopped = runner.run_agent(*args, min_free_bytes=100)
+                stopped = runner.run_agent(*args, min_free_bytes=100, disk_guard_event=guard)
+            self.assertTrue(guard.is_set())
             self.assertEqual(stopped["stopped"], "disk_guard")
             self.assertLess(stopped["wall_s"], 15)
             self.assertNotEqual(stopped["exit_code"], 0)
