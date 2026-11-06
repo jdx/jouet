@@ -108,6 +108,8 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
     cells = []
     for (task, harness), by_arm in sorted(group(records).items()):
         cell: dict[str, Any] = {"task": task, "harness": harness, "arms": {}, "paired": {}}
+        if harness == "codex" and {"jouet", "jouet-init"}.intersection(by_arm):
+            cell["limitations"] = ["codex_stop_gate_unverified"]
         for arm, runs in sorted(by_arm.items()):
             finished = [r for r in runs if not r.get("error") and not unverified(r)
                         and isinstance(r.get("success"), bool)]
@@ -268,8 +270,8 @@ def markdown(summary: dict[str, Any]) -> str:
     lines += [
         f"- **When:** {meta.get('started')} ({meta.get('rounds')} round(s), seed {meta.get('seed')})",
         f"- **Benchmark checkout:** `{meta.get('commit') or 'unavailable'}`",
-        f"- **jouet:** {meta.get('jouet_version') or 'version unavailable'}; "
-        f"binary SHA-256 `{meta.get('jouet_sha256') or 'unavailable'}`",
+        (f"- **jouet:** {meta.get('jouet_version') or 'version unavailable'}; "
+        f"binary SHA-256 `{meta.get('jouet_sha256') or 'unavailable'}`"),
     ]
     for name, info in (meta.get("harnesses") or {}).items():
         lines.append(
@@ -287,8 +289,8 @@ def markdown(summary: dict[str, Any]) -> str:
         "Success means the agent exited normally and the task checker passed. Checkers vary:",
         "some verify behavior without requiring every requested deliverable, such as a commit.",
         "Inspect the task's checker and run evidence before treating success as complete accuracy.",
-        "Unverified checks exclude runs from performance metrics; agents that fail or stop still count as failures. "
-        "Deltas compare only pairs where both arms passed the task checker.",
+        ("Unverified checks exclude runs from performance metrics; agents that fail or stop still count as failures. "
+        "Deltas compare only pairs where both arms passed the task checker."),
         "",
         "| task | harness | success plain | success jouet | both passed | input tokens Δ | output tokens Δ | requests Δ | tool calls Δ | wall Δ |",
         "|---|---|---|---|---|---|---|---|---|---|",
@@ -317,11 +319,18 @@ def markdown(summary: dict[str, Any]) -> str:
 
     for cell in summary["cells"]:
         lines += ["", f"## {cell['task']} · {cell['harness']}", ""]
+        if "codex_stop_gate_unverified" in cell.get("limitations", []):
+            lines += [
+                ("Codex stop-gate coverage is not independently verified by this report. "
+                 "An installed, trusted hook or a recorded stop event does not establish that the gate "
+                 "could read the session's checks and block on a failure."),
+                "",
+            ]
         if outcomes := cell.get("paired_outcomes"):
             lines += [
-                f"Paired outcomes: {outcomes['both_passed']} both passed; {outcomes['plain_only']} plain only; "
+                (f"Paired outcomes: {outcomes['both_passed']} both passed; {outcomes['plain_only']} plain only; "
                 f"{outcomes['jouet_only']} jouet only; {outcomes['both_failed']} both failed. "
-                "Unpaired runs and harness errors are excluded.",
+                "Unpaired runs and harness errors are excluded."),
                 "",
             ]
         lines += [
@@ -366,8 +375,8 @@ def markdown(summary: dict[str, Any]) -> str:
             lines += ["", init_line(cell, init)]
         if comparison := cell.get("init_comparison"):
             lines += ["", "### Initialized versus ordinary jouet", "",
-                      f"Paired rounds: {comparison['pairs']}; passed in both arms: {comparison['both_passed']}. "
-                      "Medians include finished failures; deltas are initialized minus ordinary and include only both-pass pairs.", "",
+                      (f"Paired rounds: {comparison['pairs']}; passed in both arms: {comparison['both_passed']}. "
+                      "Medians include finished failures; deltas are initialized minus ordinary and include only both-pass pairs."), "",
                       "| metric | ordinary jouet median | initialized jouet median | both-pass paired Δ |",
                       "|---|---|---|---|"]
             for key, label, _, kind in METRICS:
