@@ -116,5 +116,44 @@ class JactionlintCheckerTest(unittest.TestCase):
         self.assertEqual(checker.timeout_output(error), 'partial\ufffderror')
 
 
+    def test_fixture_tests_require_each_changed_fixture_to_run(self):
+        header = '@@ -239,1 +239,2 @@ func TestParseDependabotMultiEcosystemGroups(t *testing.T) {\n'
+        names = ['TestDependabotFixtures', 'TestParseDependabotMultiEcosystemGroups',
+                 'TestDependabotFixtures/ok/dependabot_grouped']
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path.cwd()
+            try:
+                os.chdir(directory)
+                fixture = Path('testdata/ok/dependabot_grouped.yaml')
+                fixture.parent.mkdir(parents=True)
+                fixture.write_text('version: 2\n')
+                Path('dependabot_test.go').write_text('package example\n')
+                files = {str(fixture), 'dependabot_test.go'}
+                for outcome in ('pass', 'missing', 'skip', 'fail', 'unrelated failure'):
+                    events = [{'Action': 'pass', 'Test': name} for name in names]
+                    if outcome == 'missing':
+                        events.pop()
+                    elif outcome in ('skip', 'fail'):
+                        events[-1]['Action'] = outcome
+                    elif outcome == 'unrelated failure':
+                        events.append({'Action': 'fail', 'Test': 'TestDependabotFixtures/ok/dependabot_other'})
+                    results = [subprocess.CompletedProcess(['git'], 0, stdout=header, stderr=''),
+                               subprocess.CompletedProcess(['go'], int(outcome in ('fail', 'unrelated failure')),
+                                                           stdout='\n'.join(map(json.dumps, events)), stderr='')]
+                    with self.subTest(outcome=outcome), mock.patch.object(checker, 'head_sha', return_value='base'), \
+                            mock.patch.object(checker, 'UNVERIFIED', []), \
+                            mock.patch.object(checker, 'expect') as expect, \
+                            mock.patch.object(checker.subprocess, 'run', side_effect=results):
+                        self.assertTrue(checker.check_dependabot_fixtures(files))
+                        self.assertEqual(bool(checker.UNVERIFIED), outcome in ('missing', 'skip', 'unrelated failure'))
+                        self.assertEqual(expect.called, outcome == 'fail')
+                with mock.patch.object(checker, 'head_sha', return_value='base'), \
+                        mock.patch.object(checker.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                            ['git'], 0, stdout='@@ -1,1 +1,1 @@ func TestOther(t *testing.T) {\n', stderr='')):
+                    self.assertFalse(checker.check_dependabot_fixtures(files))
+            finally:
+                os.chdir(old)
+
+
 if __name__ == '__main__':
     unittest.main()
