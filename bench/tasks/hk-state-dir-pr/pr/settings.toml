@@ -1,0 +1,584 @@
+# HK Settings Registry
+# This is an internal options registry used for codegen (not user-edited config).
+# It defines all configuration options and their sources, merge policies, and documentation.
+
+[all]
+type = "bool"
+default = false
+sources.cli = ["--all"]
+docs = """
+Select all tracked and eligible untracked files, then apply step filters and exclusions.
+
+With stashing enabled, untracked files are not included. Use `hk check --all --plan` to inspect the selection.
+"""
+
+[cache_dir]
+type = "path"
+sources.env = ["HK_CACHE_DIR"]
+docs = """
+Directory for cached configuration and other cache files. The default is the platform cache directory plus `hk` (typically `~/.cache/hk` on Linux and `~/Library/Caches/hk` on macOS).
+"""
+
+[default_branch]
+type = "string"
+sources.pkl = ["default_branch"]
+docs = """
+Specifies the preferred default branch to compare against when hk needs a reference
+(e.g., suggestions in pre-commit warnings).
+If unset or empty, hk attempts to detect it via `origin/HEAD`, the current branch's remote,
+or falls back to `main`/`master` if they exist on the remote.
+
+Both local branch names (e.g., `main`) and remote-qualified refs (e.g., `origin/main`) are supported.
+"""
+
+[env]
+type = "map<string, string>"
+sources.pkl = ["env"]
+docs = """
+Environment variables to set when running linter commands.
+
+These variables are set before executing any step commands and are merged with step-level env settings.
+"""
+
+[check]
+type = "bool"
+default = false
+sources.cli = ["--check", "-c"]
+sources.env = ["HK_CHECK"]
+sources.git = ["hk.check"]
+docs = """
+Forces hooks to run their check commands instead of their fix commands.
+
+This is the opposite of the `fix` setting, and wins over it when both are enabled. The `--check` and `--fix` flags outrank both.
+
+Useful for CI environments where you want a report rather than fixes. By convention a check command only reports problems, but hk does not enforce that, so this selects which command runs rather than guaranteeing an unchanged worktree.
+"""
+
+[check_first]
+type = "bool"
+default = true
+sources.env = ["HK_CHECK_FIRST"]
+sources.git = ["hk.checkFirst"]
+docs = """
+Allows steps that set `check_first = true` to run their check command before fixing, when another step writes the same files. The fix runs only if the check fails, so files that already pass aren't rewritten.
+
+Steps don't check first unless they set `check_first = true`, because checking first runs the tool twice whenever files need fixing. A step whose `check` and `fix` are the same command, as in steps migrated from pre-commit, always checks first. Set this to `false` to turn it off for both kinds of step.
+"""
+
+[display_skip_reasons]
+type = "list<string>"
+default = ["profile-not-enabled"]
+sources.pkl = ["display_skip_reasons"]
+sources.env = ["HK_DISPLAY_SKIP_REASONS"]
+sources.git = ["hk.displaySkipReasons"]
+docs = """
+Controls which skip reasons are displayed when steps are skipped.
+
+Available options:
+- `all`: Show all skip reasons
+- `none`: Hide all skip reasons
+- `disabled-by-config`: Show when steps are skipped due to configuration
+- `profile-not-enabled`: Show when steps are skipped due to missing profiles (default)
+
+Example: `HK_DISPLAY_SKIP_REASONS=all` to see all skip reasons.
+"""
+
+[exclude]
+type = "list<string>"
+merge = "union"
+sources.cli = ["--exclude", "-e"]
+sources.env = ["HK_EXCLUDE"]
+sources.git = ["hk.exclude"]
+sources.pkl = ["exclude", "defaults.exclude"]
+docs = """
+Glob patterns to exclude from processing. These patterns are **unioned** with exclude patterns from other configuration sources (git config, user config, project config). Supports both directory names and glob patterns.
+
+Examples:
+- Exclude specific directories: `node_modules,dist`
+- Exclude using glob patterns: `**/*.min.js,**/*.map`
+
+All exclude patterns from different sources are combined. The Pkl `exclude` setting also accepts a `Regex`; regexes apply alongside these glob patterns but are not listed by `hk config get exclude`.
+"""
+
+[fail_fast]
+type = "bool"
+default = true
+sources.cli = ["--fail-fast", "--no-fail-fast"]
+sources.env = ["HK_FAIL_FAST"]
+sources.git = ["hk.failFast"]
+sources.pkl = ["fail_fast", "defaults.fail_fast"]
+docs = """
+Controls whether hk aborts running steps after the first one fails.
+
+When enabled (default), hk will stop execution immediately when a step fails, providing quicker feedback.
+When disabled, hk will continue running all steps even if some fail, useful for seeing all issues at once.
+
+Can be toggled with `--fail-fast` / `--no-fail-fast` CLI flags.
+"""
+
+[fix]
+type = "bool"
+default = true
+sources.cli = ["--fix", "-f"]
+sources.env = ["HK_FIX"]
+sources.git = ["hk.fix"]
+docs = """
+Permit fix mode when the hook requests it. `HK_FIX=0` disables configured fixes unless an explicit fix flag overrides it. A value of `true` does not make a normal `hk check` run fixes.
+
+Use `--fix` or `--check` to select the mode for an invocation. The `check` setting, including `HK_CHECK=1`, wins over `fix` when both are enabled; explicit CLI flags take precedence.
+"""
+
+[hide_warnings]
+type = "list<string>"
+merge = "union"
+sources.pkl = ["hide_warnings"]
+sources.env = ["HK_HIDE_WARNINGS"]
+sources.git = ["hk.hideWarnings"]
+docs = """
+Warning tags to suppress. Allows hiding specific warning messages that you don't want to see.
+
+Available warning tags:
+- `missing-profiles`: Suppresses warnings about steps being skipped due to missing profiles
+- `local-config-replaces-shared`: Suppresses the warning that `hk.local.pkl` does not amend the shared `hk.pkl`, so it replaces it
+
+Example: `HK_HIDE_WARNINGS=missing-profiles`
+
+All hide configurations from different sources are **unioned** together.
+"""
+
+[hide_when_done]
+type = "bool"
+default = false
+sources.env = ["HK_HIDE_WHEN_DONE"]
+docs = """
+Controls whether hk hides the progress output when the hook finishes successfully.
+
+When enabled, successful runs will clear their output to reduce visual clutter.
+Failed runs will always show their output regardless of this setting.
+"""
+
+[hkrc]
+type = "path"
+default = ".hkrc.pkl"
+sources.cli = ["--hkrc"]
+docs = """
+**Deprecated:** Use `~/.config/hk/config.pkl` for user defaults or `hk.local.pkl` for project overrides.
+
+Legacy discovery checks `.hkrc.pkl` in the current directory, then `~/.hkrc.pkl`, before the user configuration directory. The project wins when a user and project definition collide.
+
+This setting and the `--hkrc` flag will be removed in hk v2.
+"""
+
+[pkl_http_rewrite]
+type = "string"
+env_only = true
+sources.env = ["HK_PKL_HTTP_REWRITE"]
+docs = """
+URL rewrite rules for the built-in pklr evaluator, in the form
+`http(s)://<FROM>/=http(s)://<TO>/`. Separate several rules with commas; the longest
+matching source prefix wins. Package downloads are rewritten as their
+`https://<host>/<path>/<name>@<version>.zip` URL.
+
+This setting is read directly from the environment variable before the configuration \
+is evaluated, so it cannot be configured in `hk.pkl`.
+"""
+
+[pkl_ca_certificates]
+type = "path"
+env_only = true
+sources.env = ["HK_PKL_CA_CERTIFICATES"]
+docs = """
+A path to a PEM bundle of CA certificates that the built-in pklr evaluator trusts, in addition to the system roots,
+when it downloads packages and modules.
+
+This setting is read directly from the environment variable before the configuration \
+is evaluated, so it cannot be configured in `hk.pkl`.
+
+This is useful in corporate environments with SSL-intercepting proxies, and for
+package hosts whose certificate comes from a private certificate authority.
+"""
+
+[jobs]
+type = "usize"
+default = 0 # 0 means auto-detect from environment or CPU count
+sources.cli = ["--jobs", "-j"]
+sources.env = ["HK_JOBS", "HK_JOB"]
+sources.git = ["hk.jobs"]
+sources.pkl = ["jobs", "defaults.jobs"]
+docs = """
+The number of parallel processes that hk will use to execute steps concurrently. This affects performance by controlling how many linting/formatting tasks can run simultaneously.
+
+Set to `0` (default) to auto-detect based on CPU cores.
+
+Example usage:
+- `hk check --jobs 4` - Run with 4 parallel jobs
+- `HK_JOBS=8 hk fix` - Set via environment variable
+"""
+examples = ["hk check --jobs 4", "HK_JOBS=1 hk fix", "hk check -j 8"]
+since = "1.0.0"
+
+[json]
+type = "bool"
+default = false
+sources.cli = ["--json"]
+sources.env = ["HK_JSON"]
+sources.git = ["hk.json"]
+docs = """
+Request JSON output for commands that support it. For a plan, use `hk check --plan --json`. For trace events, use `HK_TRACE=json hk check`. This does not structure arbitrary linter output.
+"""
+
+[libgit2]
+type = "bool"
+default = true
+sources.env = ["HK_LIBGIT2"]
+docs = """
+Controls whether hk uses libgit2 (a Git library) or shells out to git CLI commands.
+
+When enabled (default), uses libgit2 for better performance in most cases.
+When disabled, uses git CLI commands which may provide better performance in some cases such as when using `fsmonitor` to watch for changes.
+"""
+
+[log_file]
+type = "path"
+sources.env = ["HK_LOG_FILE"]
+docs = """
+Path to the execution log. Defaults to `<git-dir>/hk/hk.log` in a repository (one per checkout), else `$HK_STATE_DIR/hk.log`, typically `~/.local/state/hk/hk.log` on Linux. Set a separate file verbosity with `HK_LOG_FILE_LEVEL`.
+"""
+
+[log_file_level]
+type = "enum"
+default = "info"
+validate.enum = ["off", "error", "warn", "info", "debug", "trace"]
+sources.env = ["HK_LOG_FILE_LEVEL"]
+docs = """
+Controls the verbosity of file logging output.
+
+Uses the same levels as `log_level` but specifically for the log file.
+Defaults to the same level as `log_level` if not specified.
+
+This allows you to have different verbosity levels for console and file output.
+"""
+
+[output_file]
+type = "path"
+sources.env = ["HK_OUTPUT_FILE"]
+docs = """
+Path to the file where hk writes the complete output of a failed command.
+
+Default location: `<git-dir>/hk/output.log` in a repository (one per checkout), else `$HK_STATE_DIR/output.log`
+
+An empty value uses the default location.
+
+Useful for preserving full command output when hook summaries are abbreviated.
+"""
+
+[log_level]
+type = "enum"
+default = "info"
+validate.enum = ["off", "error", "warn", "info", "debug", "trace"]
+sources.env = ["HK_LOG", "HK_LOG_LEVEL"]
+docs = """
+Controls the verbosity of console output.
+
+Available levels (from least to most verbose):
+- `off`: No logging
+- `error`: Only errors
+- `warn`: Errors and warnings
+- `info`: Normal output (default)
+- `debug`: Detailed debugging information
+- `trace`: Very detailed trace information
+
+Example: `HK_LOG_LEVEL=debug hk check`
+"""
+
+[mise]
+type = "bool"
+default = false
+sources.env = ["HK_MISE"]
+docs = """
+Make `hk install` launch hooks through `mise x`, and make `hk init` create a starter `mise.toml` when absent.
+
+Git must be able to find mise. Reinstall existing hooks to update their launcher. Steps also receive the mise environment for their working directory, with explicit step environment values taking precedence.
+"""
+
+[no_progress]
+type = "bool"
+default = false
+sources.cli = ["--no-progress"]
+docs = """
+Disables progress bars and real-time status updates.
+
+When enabled, hk will use simpler text output instead of dynamic progress indicators.
+Useful for CI environments or when output is being logged to a file.
+"""
+
+[profiles]
+type = "list<string>"
+sources.cli = ["--profile", "-p"]
+sources.env = ["HK_PROFILE", "HK_PROFILES"]
+sources.git = ["hk.profile"]
+sources.pkl = ["profiles", "defaults.profiles"]
+docs = """
+Enable profile names, or prefix a name with `!` to disable it. A step requires all of its positive profiles to be enabled.
+
+Example: `HK_PROFILE=ci,slow hk check --all` enables both profiles. A profile named `ci` is not activated simply because the command runs in CI.
+"""
+
+[quiet]
+type = "bool"
+default = false
+sources.cli = ["--quiet", "-q"]
+docs = """
+Suppresses non-essential output (info messages, progress indicators).
+
+When enabled, only warnings and errors will be displayed.
+Useful for scripting or when you only care about the exit code.
+"""
+
+[silent]
+type = "bool"
+default = false
+sources.cli = ["--silent"]
+docs = """
+Suppresses all output including warnings. Only errors are shown.
+
+More extreme than `quiet` - progress indicators, info messages, and
+warnings are all hidden. Useful when only the exit code matters.
+"""
+
+[skip_hooks]
+type = "list<string>"
+merge = "union"
+sources.pkl = ["skip_hooks", "defaults.skip_hooks"]
+sources.env = ["HK_SKIP_HOOK", "HK_SKIP_HOOKS"]
+sources.git = ["hk.skipHooks", "hk.skipHook"]
+docs = """
+A list of hook names to skip entirely. This allows you to disable specific git hooks from running.
+
+For example: `HK_SKIP_HOOK=pre-commit,pre-push` would skip running those hooks completely.
+
+This is useful when you want to temporarily disable certain hooks while still keeping them configured in your `hk.pkl` file.
+Unlike `skip_steps` which skips individual steps, this skips the entire hook and all its steps.
+
+This setting can also be configured via:
+- Git config: `git config hk.skipHook "pre-commit"`
+- User config (`~/.config/hk/config.pkl`): `skip_hooks = List("pre-commit")`
+
+**All skip configurations from different sources are unioned together.**
+"""
+
+[skip_steps]
+type = "list<string>"
+merge = "union"
+sources.cli = ["--skip-step"]
+sources.env = ["HK_SKIP_STEPS", "HK_SKIP_STEP"]
+sources.git = ["hk.skipSteps", "hk.skipStep"]
+sources.pkl = ["skip_steps", "defaults.skip_steps"]
+docs = """
+A list of step names to skip when running hooks. This allows you to bypass specific linting or formatting tasks.
+
+For example: `HK_SKIP_STEPS=lint,test` would skip any steps named "lint" or "test".
+
+This setting can also be configured via:
+- Git config: `git config hk.skipSteps "step1,step2"`
+- User config (`~/.config/hk/config.pkl`): `skip_steps = List("step1", "step2")`
+
+**All skip configurations from different sources are unioned together.**
+"""
+
+[slow]
+type = "bool"
+default = false
+sources.cli = ["--slow", "-s"]
+docs = """
+Enables the "slow" profile for running additional checks that may take longer.
+
+This is a convenience flag equivalent to `--profile=slow`.
+
+Useful for thorough checking in CI or before major releases.
+"""
+
+[stage]
+type = "bool"
+sources.cli = ["--stage", "--no-stage"]
+sources.env = ["HK_STAGE"]
+sources.git = ["hk.stage"]
+sources.pkl = ["stage"]
+docs = """
+When specified, overrides the [hook's `stage` key](https://hk.jdx.dev/configuration#hook-stage-boolean).
+
+Without an override, staging is enabled only for `pre-commit`. Manual `hk fix`
+and every other hook leave changes unstaged.
+
+This is useful when you want to manually review changes made by auto-fixers before including them in your commit.
+"""
+
+[stash]
+type = "enum"
+validate.enum = ["git", "patch-file", "none"]
+sources.cli = ["--stash"]
+sources.env = ["HK_STASH"]
+sources.git = ["hk.stash"]
+docs = """
+Override the hook's strategy for saving unstaged work.
+
+- `git`: Save unstaged changes using Git stashing.
+- `patch-file`: Currently an alias for the Git stash implementation.
+- `none`: Leave unstaged work in place; fixes may then include unstaged edits in a staged file.
+
+Without an override, use the hook's `stash` value, which defaults to `none`. The `pre-commit` hook that hk builds from top-level `steps` (the setup `hk init` creates) uses `git`.
+"""
+
+[stash_untracked]
+type = "bool"
+default = true
+sources.env = ["HK_STASH_UNTRACKED"]
+sources.git = ["hk.stashUntracked"]
+docs = """
+Include untracked files when stashing. Disabling `HK_STASH_UNTRACKED` also skips untracked-file discovery, so those files are absent from status-based reports and normal `--all` selection.
+"""
+
+[stash_backup_count]
+type = "usize"
+default = 20
+sources.env = ["HK_STASH_BACKUP_COUNT"]
+sources.git = ["hk.stashBackupCount"]
+sources.pkl = ["stash_backup_count"]
+docs = """
+Number of backup patch files to keep per repository when using git stash.
+
+Each time git stash is used, hk creates a backup patch file in
+`<common-git-dir>/hk/patches/` (or `$HK_STATE_DIR/patches/` when set). This setting controls how many of these
+backups are retained per repository (oldest are automatically deleted).
+
+Set to 0 to disable patch backup creation entirely.
+
+Default: 20
+"""
+
+[stash_lock_timeout]
+type = "usize"
+default = 300
+sources.env = ["HK_STASH_LOCK_TIMEOUT"]
+sources.git = ["hk.stashLockTimeout"]
+docs = """
+Seconds to wait for another hk process to finish stashing in the same repository.
+
+While hk holds unstaged changes aside, it keeps a lock in the repository's common
+git directory (`hk-stash.lock`), which linked worktrees share. A second hk process
+that needs to stash waits for the first to restore its changes, printing a message
+while it waits, and fails naming the lock file if the wait passes this limit.
+
+Set to 0 to fail at once instead of waiting.
+
+Default: 300
+"""
+
+[state_dir]
+type = "path"
+sources.env = ["HK_STATE_DIR"]
+docs = """
+Directory where hk stores persistent state files.
+
+Default: inside a repository, hk keeps its state in the git directory instead
+(`<git-dir>/hk/output.log` and `hk.log` per checkout, `<common-git-dir>/hk/patches/`
+shared by a repository's linked worktrees). Outside a repository it uses
+`~/.local/state/hk`. Setting this variable puts everything under that directory.
+
+Includes logs, command output, backup patches for stashing, and other state information.
+"""
+
+[summary_text]
+type = "bool"
+default = false
+sources.env = ["HK_SUMMARY_TEXT"]
+docs = """
+In plain-text mode, summaries are shown for failed steps by default. Set `HK_SUMMARY_TEXT=1` to include summaries for successful steps too; their output normally streams during execution.
+"""
+
+[terminal_progress]
+type = "bool"
+default = true
+sources.env = ["HK_TERMINAL_PROGRESS"]
+sources.git = ["hk.terminalProgress"]
+sources.pkl = ["terminal_progress"]
+docs = """
+Enables or disables reporting progress via OSC sequences to compatible terminals.
+"""
+
+[timing_json]
+type = "path"
+sources.env = ["HK_TIMING_JSON"]
+docs = """
+Path to write a JSON timing report after a hook finishes. The report includes total wall time and per-step wall time, with overlapping intervals merged so time isn't double-counted across parallel step parts.
+
+The `steps` field maps step names to objects containing:
+- `wall_time_ms`: merged wall time in milliseconds
+- `profiles` (optional): list of profiles required for that step
+
+Example usage: `HK_TIMING_JSON=/tmp/hk-timing.json hk check`
+
+Example output:
+```json
+{
+  "total": { "wall_time_ms": 12456 },
+  "steps": {
+    "lint": { "wall_time_ms": 4321, "profiles": ["ci", "fast"] },
+    "fmt": { "wall_time_ms": 2100 }
+  }
+}
+```
+
+When a hook-level `report` command is configured in `hk.pkl`, hk will set `HK_REPORT_JSON` to the same timing JSON content and execute the command after the hook finishes.
+"""
+
+[trace]
+type = "enum"
+default = "off"
+validate.enum = ["off", "json", "1", "true"]
+sources.cli = ["--trace"]
+sources.env = ["HK_TRACE"]
+sources.git = ["hk.trace"]
+docs = """
+Enables tracing spans and performance diagnostics for detailed execution analysis.
+
+Available formats:
+- `off`: No tracing (default)
+- `json`: Machine-readable JSON trace output
+- `1` or `true`: Human-readable trace output
+
+Useful for debugging performance issues or understanding execution flow.
+
+Example: `HK_TRACE=1 hk check` to enable text tracing with the environment variable.
+"""
+
+[walk_ignore]
+type = "bool"
+default = true
+sources.env = ["HK_WALK_IGNORE"]
+sources.git = ["hk.walkIgnore"]
+sources.pkl = ["walk_ignore"]
+docs = """
+Respect `.gitignore` and other ignore files while walking directories. This controls discovery; step patterns and exclusions still apply.
+
+Set `HK_WALK_IGNORE=0` to disable ignore rules for directory walks.
+"""
+
+[verbose]
+type = "u8"
+default = 0
+sources.cli = ["--verbose", "-v"]
+docs = """
+Increase log verbosity: `-v` enables debug logging, and `-vv` enables trace logging.
+
+Example: `hk check -v`.
+"""
+
+[warnings]
+type = "list<string>"
+sources.pkl = ["warnings"]
+sources.env = ["HK_WARNINGS"]
+sources.git = ["hk.warnings"]
+docs = """
+Warning tags to enable or show. Controls which warning messages are displayed during execution.
+"""

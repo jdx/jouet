@@ -40,8 +40,9 @@ local linters = new Mapping<String, Step> {
     // jactionlint below.
     ["shfmt"] {
         glob = List("**/*.bats", "**/*.bash", "**/*.sh")
-        // A benchmark task's hidden tests are another project's files, byte for byte.
-        exclude = List("bench/tasks/*/hidden/**")
+        // A benchmark task's hidden tests and PR files are another project's
+        // files, byte for byte.
+        exclude = List("bench/tasks/*/hidden/**", "bench/tasks/*/pr/**")
         batch = true
         check = new CommandSpec {
             command = "mise x shfmt -- shfmt -d {{ files }}"
@@ -54,7 +55,7 @@ local linters = new Mapping<String, Step> {
     }
     ["shellcheck"] {
         glob = List("**/*.bats", "**/*.bash", "**/*.sh")
-        exclude = List("bench/tasks/*/hidden/**")
+        exclude = List("bench/tasks/*/hidden/**", "bench/tasks/*/pr/**")
         batch = true
         check = new CommandSpec {
             command = "mise x shellcheck -- shellcheck {{ files }}"

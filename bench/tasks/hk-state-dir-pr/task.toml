@@ -1,0 +1,86 @@
+description = "A whole PR session on real hk code (jdx/hk#1705): wait for CI on the PR, fix the clippy and bats failures, address the review threads (four changes, one question), commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real Rust CLI with a bats suite: it runs only when named.
+opt_in = true
+branch = "state-in-git-dir"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 3600
+check_timeout_s = 1200
+path = ["~/.cargo/bin"]
+# jouet levels: out of the box, `jouet wait ci`, `jouet pr threads` and
+# `jouet pr next` read the PR from the fake, and `jouet test` digests cargo's
+# and bats' output. The two CI failures are in different jobs: `mise run lint`
+# (clippy's items_after_test_module in src/git.rs) and the nogit bats run (an
+# existing test that snapshots the whole checkout, .git included, now sees
+# .git/hk/hk.log). The review asks for repository discovery that honors
+# GIT_DIR / GIT_WORK_TREE as `Git::new()` does and for state that other
+# accounts of a core.sharedRepository repository can write; the two bots
+# report each twice. A Luau rule could steer agents from `mise run test:bats`,
+# which first installs every builtin's tool, to `test/bats/bin/bats FILE`.
+# The PR at its first push (a7e539f8): upstream fixed the review in 8bd97dfc
+# and the bats test in aa32cf67. The question thread is CodeRabbit's
+# follow-up from later in the PR, asked here about the first push's code.
+prompt = """
+PR #1705 (branch state-in-git-dir, checked out here) fixes jdx/hk#1703: hk kept `output.log`,
+`hk.log` and stash backup patches in one per-user directory that every repository shared, and now
+keeps them in the repository's git directory. CI is running on it, and reviewers have left
+comments. Get it ready: wait for CI and fix what fails, and address the open review threads: make
+the requested changes, reply on each thread saying what you did, and resolve the ones you fixed. A
+thread that only asks a question gets an answer and stays open. Commit your changes; don't push.
+"""
+
+# pkl/Builtins.pkl is generated (and ignored by git); hk's config and the bats
+# tests import it. The generator runs `pkl`, from the host's mise.
+setup = ["python3 scripts/gen_builtins.py"]
+
+# The PR's base, eb9a1496 on main; `pr/` holds its files at a7e539f8.
+[source]
+git = "~/src/hk"
+commit = "eb9a14961bd96909919a58c7c8010bb0684c7af9"
+
+# Resolve mise from the benchmark environment, as mise-uninstall-pr does.
+# `mise run` installs the repository's own tools into the run's home.
+[tools]
+mise = "mise"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py).
+[cost]
+seed = [
+    "cargo build",
+    "cargo clippy --quiet --all-targets -- -D warnings",
+    "test/bats/bin/bats test/agent_generators.bats",
+    "test/bats/bin/bats test/output_file.bats test/patch_backup.bats",
+]
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "1705", "--json"]
+exit = 1
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "1705", "--json"]
+stdout_contains = "sharedRepository"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "4281898264", "1705", "--body", "REPO_DIRS now opens GIT_DIR like Git::new().", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "1705"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "items after a test module"

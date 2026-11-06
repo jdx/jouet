@@ -1,0 +1,2896 @@
+{
+  "repo": "jdx/demo",
+  "rest": {
+    "/repos/jdx/demo/pulls/1099": {
+      "number": 1099,
+      "id": 3099,
+      "node_id": "PR_1099",
+      "state": "open",
+      "draft": false,
+      "locked": false,
+      "title": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+      "body": "Shared configs often need a different age identity per machine, for example a separate YubiKey plugged into each computer. Until now the age provider had a single `key_file`, so that meant per-machine config files or wrapper scripts. Requested in [discussion #1095](https://github.com/jdx/fnox/discussions/1095).\n\nThe age provider now accepts named identity files and a way to choose one:\n\n```toml\n[providers.age]\ntype = \"age\"\nrecipients = [\"age1yubikey1...\", \"age1yubikey1...\", \"age1...\"]\ndefault_identity = \"yk1\"\n\n[providers.age.identities]\nyk1 = \"~/.config/fnox/yk1-identity.txt\"\nyk2 = \"~/.config/fnox/yk2-identity.txt\"\nrecovery = \"~/.config/fnox/recovery.txt\"\n```\n\nOn a machine with the second YubiKey, `export FNOX_AGE_IDENTITY=yk2` overrides `default_identity`, so one shared `fnox.toml` works everywhere.\n\n- The selected identity replaces `key_file`; paths resolve the same way as `key_file`.\n- `FNOX_AGE_KEY` still takes precedence over everything.\n- Naming an identity that is not in `identities` is an error that lists the available names.\n- Without `identities`, `default_identity` or `FNOX_AGE_IDENTITY`, behavior is unchanged.\n- Passphrase-protected identities are not part of this change.\n\nValidation: `mise run test:cargo` passes, including a new unit test for the selection logic. The `FNOX_AGE_IDENTITY` env override is not covered by a test.",
+      "user": {
+        "login": "jdx"
+      },
+      "html_url": "https://github.com/jdx/demo/pull/1099",
+      "url": "http://api.github.localhost/repos/jdx/demo/pulls/1099",
+      "head": {
+        "ref": "age-named-identity",
+        "sha": "{{head_sha}}",
+        "label": "jdx:age-named-identity",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "base": {
+        "ref": "main",
+        "sha": "{{base_sha}}",
+        "label": "jdx:main",
+        "repo": {
+          "full_name": "jdx/demo",
+          "name": "demo",
+          "owner": {
+            "login": "jdx"
+          }
+        }
+      },
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "merged": false,
+      "created_at": "2026-11-01T13:03:40Z",
+      "updated_at": "2026-11-01T13:04:17Z"
+    },
+    "/repos/jdx/demo/pulls": [
+      {
+        "number": 1099,
+        "id": 3099,
+        "node_id": "PR_1099",
+        "state": "open",
+        "draft": false,
+        "locked": false,
+        "title": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+        "body": "Shared configs often need a different age identity per machine, for example a separate YubiKey plugged into each computer. Until now the age provider had a single `key_file`, so that meant per-machine config files or wrapper scripts. Requested in [discussion #1095](https://github.com/jdx/fnox/discussions/1095).\n\nThe age provider now accepts named identity files and a way to choose one:\n\n```toml\n[providers.age]\ntype = \"age\"\nrecipients = [\"age1yubikey1...\", \"age1yubikey1...\", \"age1...\"]\ndefault_identity = \"yk1\"\n\n[providers.age.identities]\nyk1 = \"~/.config/fnox/yk1-identity.txt\"\nyk2 = \"~/.config/fnox/yk2-identity.txt\"\nrecovery = \"~/.config/fnox/recovery.txt\"\n```\n\nOn a machine with the second YubiKey, `export FNOX_AGE_IDENTITY=yk2` overrides `default_identity`, so one shared `fnox.toml` works everywhere.\n\n- The selected identity replaces `key_file`; paths resolve the same way as `key_file`.\n- `FNOX_AGE_KEY` still takes precedence over everything.\n- Naming an identity that is not in `identities` is an error that lists the available names.\n- Without `identities`, `default_identity` or `FNOX_AGE_IDENTITY`, behavior is unchanged.\n- Passphrase-protected identities are not part of this change.\n\nValidation: `mise run test:cargo` passes, including a new unit test for the selection logic. The `FNOX_AGE_IDENTITY` env override is not covered by a test.",
+        "user": {
+          "login": "jdx"
+        },
+        "html_url": "https://github.com/jdx/demo/pull/1099",
+        "url": "http://api.github.localhost/repos/jdx/demo/pulls/1099",
+        "head": {
+          "ref": "age-named-identity",
+          "sha": "{{head_sha}}",
+          "label": "jdx:age-named-identity",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "{{base_sha}}",
+          "label": "jdx:main",
+          "repo": {
+            "full_name": "jdx/demo",
+            "name": "demo",
+            "owner": {
+              "login": "jdx"
+            }
+          }
+        },
+        "mergeable": true,
+        "mergeable_state": "unstable",
+        "merged": false,
+        "created_at": "2026-11-01T13:03:40Z",
+        "updated_at": "2026-11-01T13:04:17Z"
+      }
+    ],
+    "/repos/jdx/demo/actions/jobs/7101": {
+      "id": 7101,
+      "run_id": 9001,
+      "node_id": "J_7101",
+      "name": "trusted / build (ubuntu-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "age-named-identity",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-11-01T13:04:17Z",
+      "completed_at": "2026-11-01T13:04:47Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Run",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 1",
+      "$until": 30,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Run",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7101/logs": {
+      "$text": "2026-11-01T13:04:30.1000000Z ##[group]Run cargo build --all-features\n2026-11-01T13:05:05.2000000Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.07s\n",
+      "$until": 30,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102": {
+      "id": 7102,
+      "run_id": 9001,
+      "node_id": "J_7102",
+      "name": "trusted / ci-other (ubuntu-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "age-named-identity",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-11-01T13:04:17Z",
+      "completed_at": "2026-11-01T13:05:17Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Install Rust components",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Add fnox to PATH",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Setup age key for fnox",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Run tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "mise run render",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "assert render produces no diff",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 9
+        },
+        {
+          "name": "Check formatting",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 10
+        },
+        {
+          "name": "Run clippy",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 11
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 2",
+      "$until": 60,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Install Rust components",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Add fnox to PATH",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          },
+          {
+            "name": "Setup age key for fnox",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 6
+          },
+          {
+            "name": "Run tests",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 7
+          },
+          {
+            "name": "mise run render",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 8
+          },
+          {
+            "name": "assert render produces no diff",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 9
+          },
+          {
+            "name": "Check formatting",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 10
+          },
+          {
+            "name": "Run clippy",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 11
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 12
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7102/logs": {
+      "$text": "2026-11-01T13:05:43.2855393Z ##[group]Run cargo test --workspace\n2026-11-01T13:05:43.2855568Z cargo test --workspace\n2026-11-01T13:05:43.2864384Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:05:43.2864520Z env:\n2026-11-01T13:05:43.2864632Z   MBX_DISABLE: 1\n2026-11-01T13:05:43.2864763Z   CARGO_TERM_COLOR: always\n2026-11-01T13:05:43.2866049Z   GITHUB_TOKEN: ***\n2026-11-01T13:05:43.2866358Z   MISE_LOG_LEVEL: info\n2026-11-01T13:05:43.2866515Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:05:43.2866679Z   MISE_YES: 1\n2026-11-01T13:05:43.2866805Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:05:43.2867016Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:06:50.9693089Z \n2026-11-01T13:06:50.9719893Z    Doc-tests fnox_client\n2026-11-01T13:06:51.1249449Z \n2026-11-01T13:06:51.1249812Z running 1 test\n2026-11-01T13:06:51.1250461Z test crates/fnox-client/src/lib.rs - (line 12) - compile ... ok\n2026-11-01T13:06:51.1250647Z \n2026-11-01T13:06:51.1250778Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n2026-11-01T13:06:51.1250951Z \n2026-11-01T13:06:51.1256684Z all doctests ran in 0.10s; merged doctests compilation took 0.10s\n2026-11-01T13:06:51.1274527Z    Doc-tests fnox_core\n2026-11-01T13:06:52.2360050Z \n2026-11-01T13:06:52.2360434Z running 2 tests\n2026-11-01T13:06:52.2360752Z test crates/fnox-core/src/spanned.rs - spanned::SpannedValue (line 15) ... ignored\n2026-11-01T13:06:52.2361031Z test crates/fnox-core/src/library.rs - library (line 20) - compile ... ok\n2026-11-01T13:06:52.2361180Z \n2026-11-01T13:06:52.2361513Z test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n2026-11-01T13:06:52.2361678Z \n2026-11-01T13:06:52.2388307Z all doctests ran in 0.45s; merged doctests compilation took 0.45s\n2026-11-01T13:06:52.2532871Z ##[group]Run mise run render\n2026-11-01T13:06:52.2533049Z mise run render\n2026-11-01T13:06:52.2543431Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:06:52.2543566Z env:\n2026-11-01T13:06:52.2543678Z   MBX_DISABLE: 1\n2026-11-01T13:06:52.2543808Z   CARGO_TERM_COLOR: always\n2026-11-01T13:06:52.2545268Z   GITHUB_TOKEN: ***\n2026-11-01T13:06:52.2545580Z   MISE_LOG_LEVEL: info\n2026-11-01T13:06:52.2545734Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:06:52.2545901Z   MISE_YES: 1\n2026-11-01T13:06:52.2546026Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:06:52.2546417Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:06:52.2547016Z ##[endgroup]\n2026-11-01T13:06:52.3004967Z [build] $ cargo build\n2026-11-01T13:06:52.5556717Z [build]    Compiling fnox-client v1.46.0 (/home/runner/work/fnox/fnox/crates/fnox-client)\n2026-11-01T13:06:52.5583588Z [build]    Compiling rmcp v3.8.0\n2026-11-01T13:06:52.9405258Z [build]    Compiling fnox-core v1.46.0 (/home/runner/work/fnox/fnox/crates/fnox-core)\n2026-11-01T13:07:03.6395562Z [build]    Compiling fnox v1.46.0 (/home/runner/work/fnox/fnox)\n2026-11-01T13:07:13.5122556Z [build]     Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.18s\n2026-11-01T13:07:13.5439073Z [build] Finished in 21.24s\n2026-11-01T13:07:13.5460613Z [render:usage] $ fnox usage > fnox.usage.kdl\n2026-11-01T13:07:13.5460936Z [render:schema] $ fnox schema > docs/public/schema.json\n2026-11-01T13:07:13.5536617Z [render:usage] $ rm -rf docs/cli && mkdir -p docs/cli\n2026-11-01T13:07:13.5559738Z [render:usage] $ usage g markdown -mf fnox.usage.kdl --out-dir docs/cli --url-prefix /cli --html-encode\n2026-11-01T13:07:13.5564359Z [render:schema] $ oxfmt --write docs/public/schema.json\n2026-11-01T13:07:13.5718560Z [render:usage] writing to docs/cli/activate.md\n2026-11-01T13:07:13.5731441Z [render:usage] writing to docs/cli/audit.md\n2026-11-01T13:07:13.5743699Z [render:usage] writing to docs/cli/check.md\n2026-11-01T13:07:13.6068752Z [render:schema] Finished in 0ms on 1 files using 4 threads.\n2026-11-01T13:07:13.6092671Z [render:schema] Finished in 63.3ms\n2026-11-01T13:07:13.6294049Z [render:usage] $ usage g json -f fnox.usage.kdl > docs/cli/commands.json\n2026-11-01T13:07:13.6370352Z [render:usage] $ node docs/.vitepress/cli-pages.mjs\n2026-11-01T13:07:13.6541653Z [render:usage] $ oxfmt --write docs/cli\n2026-11-01T13:07:13.6813869Z [render:usage] Finished in 4ms on 56 files using 4 threads.\n2026-11-01T13:07:13.6845244Z [render:usage] Finished in 138.5ms\n2026-11-01T13:07:13.6864157Z Finished in 21.39s\n2026-11-01T13:07:13.6899832Z ##[group]Run if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:07:13.6900091Z if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:07:13.6900327Z   echo \"::error::'mise run render' produced changes. Run it locally and commit.\"\n2026-11-01T13:07:13.6900546Z   git status\n2026-11-01T13:07:13.6900762Z   git diff HEAD\n2026-11-01T13:07:13.6900894Z   exit 1\n2026-11-01T13:07:13.6901012Z fi\n2026-11-01T13:07:13.6910673Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:07:13.6910810Z env:\n2026-11-01T13:07:13.6910924Z   MBX_DISABLE: 1\n2026-11-01T13:07:13.6911048Z   CARGO_TERM_COLOR: always\n2026-11-01T13:07:13.6912235Z   GITHUB_TOKEN: ***\n2026-11-01T13:07:13.6912539Z   MISE_LOG_LEVEL: info\n2026-11-01T13:07:13.6912696Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:07:13.6912862Z   MISE_YES: 1\n2026-11-01T13:07:13.6913002Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:07:13.6913210Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:07:13.6913729Z ##[endgroup]\n2026-11-01T13:07:13.7252110Z ##[error]'mise run render' produced changes. Run it locally and commit.\n2026-11-01T13:07:13.7308036Z HEAD detached at pull/1099/merge\n2026-11-01T13:07:13.7308364Z Changes not staged for commit:\n2026-11-01T13:07:13.7308548Z   (use \"git add <file>...\" to update what will be committed)\n2026-11-01T13:07:13.7308780Z   (use \"git restore <file>...\" to discard changes in working directory)\n2026-11-01T13:07:13.7308985Z \tmodified:   docs/public/schema.json\n2026-11-01T13:07:13.7309085Z \n2026-11-01T13:07:13.7309181Z no changes added to commit (use \"git add\" and/or \"git commit -a\")\n2026-11-01T13:07:13.7363214Z diff --git a/docs/public/schema.json b/docs/public/schema.json\n2026-11-01T13:07:13.7363463Z index e2af6cd..59aac2d 100644\n2026-11-01T13:07:13.7363609Z --- a/docs/public/schema.json\n2026-11-01T13:07:13.7363746Z +++ b/docs/public/schema.json\n2026-11-01T13:07:13.7363884Z @@ -698,6 +698,15 @@\n2026-11-01T13:07:13.7364012Z              \"identity\": {\n2026-11-01T13:07:13.7364170Z                \"$ref\": \"#/$defs/OptionProviderSecretRef\"\n2026-11-01T13:07:13.7364332Z              },\n2026-11-01T13:07:13.7364507Z +            \"identities\": {\n2026-11-01T13:07:13.7364650Z +              \"type\": \"object\",\n2026-11-01T13:07:13.7364793Z +              \"additionalProperties\": {\n2026-11-01T13:07:13.7364956Z +                \"$ref\": \"#/$defs/StringOrSecretRef\"\n2026-11-01T13:07:13.7365106Z +              }\n2026-11-01T13:07:13.7365221Z +            },\n2026-11-01T13:07:13.7365339Z +            \"default_identity\": {\n2026-11-01T13:07:13.7365501Z +              \"$ref\": \"#/$defs/OptionStringOrSecretRef\"\n2026-11-01T13:07:13.7365653Z +            },\n2026-11-01T13:07:13.7365772Z              \"auth_command\": {\n2026-11-01T13:07:13.7365912Z                \"type\": [\"string\", \"null\"]\n2026-11-01T13:07:13.7366050Z              },\n2026-11-01T13:07:13.7367413Z ##[error]Process completed with exit code 1.\n2026-11-01T13:07:13.7447670Z Post job cleanup.\n",
+      "$until": 60,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7103": {
+      "id": 7103,
+      "run_id": 9001,
+      "node_id": "J_7103",
+      "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "age-named-identity",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-11-01T13:04:17Z",
+      "completed_at": "2026-11-01T13:05:02Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7103",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7103",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Run",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 3",
+      "$until": 45,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Run",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7103/logs": {
+      "$text": "2026-11-01T13:05:40.0000000Z ##[group]Run mise run test:bats\n2026-11-01T13:07:36.9000000Z ok 412 tests\n",
+      "$until": 45,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7104": {
+      "id": 7104,
+      "run_id": 9001,
+      "node_id": "J_7104",
+      "name": "trusted / ci-other (macos-latest)",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "age-named-identity",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-11-01T13:04:17Z",
+      "completed_at": "2026-11-01T13:05:32Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7104",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7104",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Install Rust components",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Add fnox to PATH",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Setup age key for fnox",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Run tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "mise run render",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "assert render produces no diff",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 9
+        },
+        {
+          "name": "Check formatting",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 10
+        },
+        {
+          "name": "Run clippy",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 11
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12
+        }
+      ],
+      "labels": [
+        "macos-latest"
+      ],
+      "runner_name": "GitHub Actions 4",
+      "$until": 75,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Install Rust components",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Add fnox to PATH",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          },
+          {
+            "name": "Setup age key for fnox",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 6
+          },
+          {
+            "name": "Run tests",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 7
+          },
+          {
+            "name": "mise run render",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 8
+          },
+          {
+            "name": "assert render produces no diff",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 9
+          },
+          {
+            "name": "Check formatting",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 10
+          },
+          {
+            "name": "Run clippy",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 11
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 12
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7104/logs": {
+      "$text": "2026-11-01T13:09:35.2380810Z ##[group]Run mise run render\n2026-11-01T13:09:35.2381150Z mise run render\n2026-11-01T13:09:35.2417110Z shell: /opt/homebrew/bin/bash -e {0}\n2026-11-01T13:09:35.2417320Z env:\n2026-11-01T13:09:35.2417500Z   MBX_DISABLE: 1\n2026-11-01T13:09:35.2417650Z   CARGO_TERM_COLOR: always\n2026-11-01T13:09:35.2419390Z   GITHUB_TOKEN: ***\n2026-11-01T13:09:35.2419530Z   MISE_LOG_LEVEL: info\n2026-11-01T13:09:35.2419700Z   MISE_TRUSTED_CONFIG_PATHS: /Users/runner/work/fnox/fnox\n2026-11-01T13:09:35.2419910Z   MISE_YES: 1\n2026-11-01T13:09:35.2420040Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:09:35.2420320Z   MANPATH: /Users/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:09:35.2420630Z ##[endgroup]\n2026-11-01T13:09:35.3556540Z [build] $ cargo build\n2026-11-01T13:09:35.9195960Z [build]    Compiling fnox-client v1.46.0 (/Users/runner/work/fnox/fnox/crates/fnox-client)\n2026-11-01T13:09:36.3934850Z [build]    Compiling fnox-core v1.46.0 (/Users/runner/work/fnox/fnox/crates/fnox-core)\n2026-11-01T13:09:51.7976150Z [build]    Compiling fnox v1.46.0 (/Users/runner/work/fnox/fnox)\n2026-11-01T13:10:03.7881230Z [build]     Finished `dev` profile [unoptimized + debuginfo] target(s) in 28.37s\n2026-11-01T13:10:03.8244130Z [build] Finished in 28.47s\n2026-11-01T13:10:03.8337790Z [render:usage] $ fnox usage > fnox.usage.kdl\n2026-11-01T13:10:03.8357120Z [render:schema] $ fnox schema > docs/public/schema.json\n2026-11-01T13:10:03.8669080Z [render:usage] $ rm -rf docs/cli && mkdir -p docs/cli\n2026-11-01T13:10:03.8753220Z [render:schema] $ oxfmt --write docs/public/schema.json\n2026-11-01T13:10:03.8821260Z [render:usage] $ usage g markdown -mf fnox.usage.kdl --out-dir docs/cli --url-prefix /cli --html-encode\n2026-11-01T13:10:03.9255900Z [render:usage] writing to docs/cli/activate.md\n2026-11-01T13:10:03.9269640Z [render:usage] writing to docs/cli/audit.md\n2026-11-01T13:10:03.9282030Z [render:usage] writing to docs/cli/check.md\n2026-11-01T13:10:03.9714540Z [render:schema] Finished in 5ms on 1 files using 6 threads.\n2026-11-01T13:10:03.9814450Z [render:schema] Finished in 145.9ms\n2026-11-01T13:10:03.9916330Z [render:usage] $ usage g json -f fnox.usage.kdl > docs/cli/commands.json\n2026-11-01T13:10:04.0064590Z [render:usage] $ node docs/.vitepress/cli-pages.mjs\n2026-11-01T13:10:04.0398930Z [render:usage] $ oxfmt --write docs/cli\n2026-11-01T13:10:04.0894950Z [render:usage] Finished in 11ms on 56 files using 6 threads.\n2026-11-01T13:10:04.0917560Z [render:usage] Finished in 258.2ms\n2026-11-01T13:10:04.0993430Z Finished in 28.76s\n2026-11-01T13:10:04.1353940Z ##[group]Run if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:10:04.1354480Z if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:10:04.1354760Z   echo \"::error::'mise run render' produced changes. Run it locally and commit.\"\n2026-11-01T13:10:04.1355010Z   git status\n2026-11-01T13:10:04.1355150Z   git diff HEAD\n2026-11-01T13:10:04.1355300Z   exit 1\n2026-11-01T13:10:04.1355420Z fi\n2026-11-01T13:10:04.1383010Z shell: /opt/homebrew/bin/bash -e {0}\n2026-11-01T13:10:04.1383200Z env:\n2026-11-01T13:10:04.1383330Z   MBX_DISABLE: 1\n2026-11-01T13:10:04.1383470Z   CARGO_TERM_COLOR: always\n2026-11-01T13:10:04.1384980Z   GITHUB_TOKEN: ***\n2026-11-01T13:10:04.1385120Z   MISE_LOG_LEVEL: info\n2026-11-01T13:10:04.1385320Z   MISE_TRUSTED_CONFIG_PATHS: /Users/runner/work/fnox/fnox\n2026-11-01T13:10:04.1385540Z   MISE_YES: 1\n2026-11-01T13:10:04.1385680Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:10:04.1385980Z   MANPATH: /Users/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:10:04.1386220Z ##[endgroup]\n2026-11-01T13:10:04.3116690Z ##[error]'mise run render' produced changes. Run it locally and commit.\n2026-11-01T13:10:04.3403020Z HEAD detached at pull/1099/merge\n2026-11-01T13:10:04.3403340Z Changes not staged for commit:\n2026-11-01T13:10:04.3405160Z   (use \"git add <file>...\" to update what will be committed)\n2026-11-01T13:10:04.3405460Z   (use \"git restore <file>...\" to discard changes in working directory)\n2026-11-01T13:10:04.3405710Z \tmodified:   docs/public/schema.json\n2026-11-01T13:10:04.3405850Z \n2026-11-01T13:10:04.3405980Z no changes added to commit (use \"git add\" and/or \"git commit -a\")\n2026-11-01T13:10:04.3687440Z diff --git a/docs/public/schema.json b/docs/public/schema.json\n2026-11-01T13:10:04.3688550Z index e2af6cd..59aac2d 100644\n2026-11-01T13:10:04.3688810Z --- a/docs/public/schema.json\n2026-11-01T13:10:04.3689010Z +++ b/docs/public/schema.json\n2026-11-01T13:10:04.3689260Z @@ -698,6 +698,15 @@\n2026-11-01T13:10:04.3689430Z              \"identity\": {\n2026-11-01T13:10:04.3689610Z                \"$ref\": \"#/$defs/OptionProviderSecretRef\"\n2026-11-01T13:10:04.3690160Z              },\n2026-11-01T13:10:04.3690600Z +            \"identities\": {\n2026-11-01T13:10:04.3690770Z +              \"type\": \"object\",\n2026-11-01T13:10:04.3690980Z +              \"additionalProperties\": {\n2026-11-01T13:10:04.3691200Z +                \"$ref\": \"#/$defs/StringOrSecretRef\"\n2026-11-01T13:10:04.3691390Z +              }\n2026-11-01T13:10:04.3691530Z +            },\n2026-11-01T13:10:04.3691680Z +            \"default_identity\": {\n2026-11-01T13:10:04.3691870Z +              \"$ref\": \"#/$defs/OptionStringOrSecretRef\"\n2026-11-01T13:10:04.3692070Z +            },\n2026-11-01T13:10:04.3692200Z              \"auth_command\": {\n2026-11-01T13:10:04.3692370Z                \"type\": [\"string\", \"null\"]\n2026-11-01T13:10:04.3692530Z              },\n2026-11-01T13:10:04.3708860Z ##[error]Process completed with exit code 1.\n2026-11-01T13:10:04.4608900Z Post job cleanup.\n2026-11-01T13:10:04.6561060Z Post job cleanup.\n",
+      "$until": 75,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7105": {
+      "id": 7105,
+      "run_id": 9001,
+      "node_id": "J_7105",
+      "name": "trusted / final",
+      "head_sha": "{{head_sha}}",
+      "head_branch": "age-named-identity",
+      "workflow_name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-11-01T13:04:17Z",
+      "completed_at": "2026-11-01T13:05:37Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7105",
+      "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7105",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Check job results",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_name": "GitHub Actions 5",
+      "$until": 80,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 2
+          },
+          {
+            "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 3
+          },
+          {
+            "name": "Check job results",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 4
+          },
+          {
+            "name": "Complete job",
+            "status": "in_progress",
+            "conclusion": null,
+            "number": 5
+          }
+        ]
+      }
+    },
+    "/repos/jdx/demo/actions/jobs/7105/logs": {
+      "$text": "2026-11-01T13:10:11.0000000Z ##[group]Run Check job results\n2026-11-01T13:10:11.5000000Z ci-other failed\n2026-11-01T13:10:11.6000000Z ##[error]Process completed with exit code 1.\n",
+      "$until": 80,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/check-runs": {
+      "total_count": 5,
+      "check_runs": [
+        {
+          "id": 7101,
+          "node_id": "CR_7101",
+          "name": "trusted / build (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:04:47Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 0
+          },
+          "$until": 30,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7102,
+          "node_id": "CR_7102",
+          "name": "trusted / ci-other (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:17Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 60,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7103,
+          "node_id": "CR_7103",
+          "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:02Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7103",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 0
+          },
+          "$until": 45,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7104,
+          "node_id": "CR_7104",
+          "name": "trusted / ci-other (macos-latest)",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:32Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7104",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 75,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        },
+        {
+          "id": 7105,
+          "node_id": "CR_7105",
+          "name": "trusted / final",
+          "head_sha": "{{head_sha}}",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:37Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+          "details_url": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+          "url": "http://api.github.localhost/repos/jdx/demo/check-runs/7105",
+          "app": {
+            "slug": "github-actions",
+            "name": "GitHub Actions"
+          },
+          "check_suite": {
+            "id": 8001
+          },
+          "output": {
+            "title": null,
+            "summary": null,
+            "annotations_count": 1
+          },
+          "$until": 80,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/commits/{{head_sha}}/status": {
+      "state": "pending",
+      "statuses": [],
+      "total_count": 0,
+      "sha": "{{head_sha}}"
+    },
+    "/repos/jdx/demo/branches/main": {
+      "name": "main",
+      "commit": {
+        "sha": "{{base_sha}}"
+      },
+      "protected": false
+    },
+    "/repos/jdx/demo/actions/runs": {
+      "total_count": 1,
+      "workflow_runs": [
+        {
+          "id": 9001,
+          "node_id": "WFR_9001",
+          "name": "ci",
+          "display_title": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+          "head_branch": "age-named-identity",
+          "head_sha": "{{head_sha}}",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "failure",
+          "workflow_id": 501,
+          "run_number": 5324,
+          "run_attempt": 1,
+          "created_at": "2026-11-01T13:04:17Z",
+          "updated_at": "2026-11-01T13:05:37Z",
+          "run_started_at": "2026-11-01T13:04:17Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+          "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+          "path": ".github/workflows/ci.yml",
+          "repository": {
+            "full_name": "jdx/demo"
+          },
+          "pull_requests": [
+            {
+              "number": 1099,
+              "head": {
+                "ref": "age-named-identity",
+                "sha": "{{head_sha}}"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "{{base_sha}}"
+              }
+            }
+          ],
+          "$until": 80,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001": {
+      "id": 9001,
+      "node_id": "WFR_9001",
+      "name": "ci",
+      "display_title": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+      "head_branch": "age-named-identity",
+      "head_sha": "{{head_sha}}",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "workflow_id": 501,
+      "run_number": 5324,
+      "run_attempt": 1,
+      "created_at": "2026-11-01T13:04:17Z",
+      "updated_at": "2026-11-01T13:05:37Z",
+      "run_started_at": "2026-11-01T13:04:17Z",
+      "html_url": "https://github.com/jdx/demo/actions/runs/9001",
+      "url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+      "jobs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/jobs",
+      "logs_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001/logs",
+      "path": ".github/workflows/ci.yml",
+      "repository": {
+        "full_name": "jdx/demo"
+      },
+      "pull_requests": [
+        {
+          "number": 1099,
+          "head": {
+            "ref": "age-named-identity",
+            "sha": "{{head_sha}}"
+          },
+          "base": {
+            "ref": "main",
+            "sha": "{{base_sha}}"
+          }
+        }
+      ],
+      "$until": 80,
+      "$before": {
+        "status": "in_progress",
+        "conclusion": null
+      }
+    },
+    "/repos/jdx/demo/actions/runs/9001/jobs": {
+      "total_count": 5,
+      "jobs": [
+        {
+          "id": 7101,
+          "run_id": 9001,
+          "node_id": "J_7101",
+          "name": "trusted / build (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "age-named-identity",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:04:47Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7101",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7101",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 1",
+          "$until": 30,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Run",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              }
+            ]
+          }
+        },
+        {
+          "id": 7102,
+          "run_id": 9001,
+          "node_id": "J_7102",
+          "name": "trusted / ci-other (ubuntu-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "age-named-identity",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:17Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7102",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7102",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install Rust components",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Add fnox to PATH",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Setup age key for fnox",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "mise run render",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "assert render produces no diff",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 9
+            },
+            {
+              "name": "Check formatting",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Run clippy",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 2",
+          "$until": 60,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Install Rust components",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Add fnox to PATH",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              },
+              {
+                "name": "Setup age key for fnox",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 6
+              },
+              {
+                "name": "Run tests",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 7
+              },
+              {
+                "name": "mise run render",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 8
+              },
+              {
+                "name": "assert render produces no diff",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 9
+              },
+              {
+                "name": "Check formatting",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 10
+              },
+              {
+                "name": "Run clippy",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 11
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 12
+              }
+            ]
+          }
+        },
+        {
+          "id": 7103,
+          "run_id": 9001,
+          "node_id": "J_7103",
+          "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "age-named-identity",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:02Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7103",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7103",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 3",
+          "$until": 45,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Run",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              }
+            ]
+          }
+        },
+        {
+          "id": 7104,
+          "run_id": 9001,
+          "node_id": "J_7104",
+          "name": "trusted / ci-other (macos-latest)",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "age-named-identity",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:32Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7104",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7104",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install Rust components",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Add fnox to PATH",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Setup age key for fnox",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "mise run render",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "assert render produces no diff",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 9
+            },
+            {
+              "name": "Check formatting",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Run clippy",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            }
+          ],
+          "labels": [
+            "macos-latest"
+          ],
+          "runner_name": "GitHub Actions 4",
+          "$until": 75,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Install Rust components",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Add fnox to PATH",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              },
+              {
+                "name": "Setup age key for fnox",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 6
+              },
+              {
+                "name": "Run tests",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 7
+              },
+              {
+                "name": "mise run render",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 8
+              },
+              {
+                "name": "assert render produces no diff",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 9
+              },
+              {
+                "name": "Check formatting",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 10
+              },
+              {
+                "name": "Run clippy",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 11
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 12
+              }
+            ]
+          }
+        },
+        {
+          "id": 7105,
+          "run_id": 9001,
+          "node_id": "J_7105",
+          "name": "trusted / final",
+          "head_sha": "{{head_sha}}",
+          "head_branch": "age-named-identity",
+          "workflow_name": "ci",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-01T13:04:17Z",
+          "completed_at": "2026-11-01T13:05:37Z",
+          "html_url": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+          "url": "http://api.github.localhost/repos/jdx/demo/actions/jobs/7105",
+          "run_url": "http://api.github.localhost/repos/jdx/demo/actions/runs/9001",
+          "check_run_url": "http://api.github.localhost/repos/jdx/demo/check-runs/7105",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Check job results",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 4
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            }
+          ],
+          "labels": [
+            "ubuntu-latest"
+          ],
+          "runner_name": "GitHub Actions 5",
+          "$until": 80,
+          "$before": {
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success",
+                "number": 1
+              },
+              {
+                "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 2
+              },
+              {
+                "name": "Run jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 3
+              },
+              {
+                "name": "Check job results",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 4
+              },
+              {
+                "name": "Complete job",
+                "status": "in_progress",
+                "conclusion": null,
+                "number": 5
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/workflows/501": {
+      "id": 501,
+      "node_id": "W_501",
+      "name": "ci",
+      "path": ".github/workflows/ci.yml",
+      "state": "active",
+      "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+    },
+    "/repos/jdx/demo/actions/workflows": {
+      "total_count": 1,
+      "workflows": [
+        {
+          "id": 501,
+          "node_id": "W_501",
+          "name": "ci",
+          "path": ".github/workflows/ci.yml",
+          "state": "active",
+          "html_url": "https://github.com/jdx/demo/actions/workflows/ci.yml"
+        }
+      ]
+    },
+    "/repos/jdx/demo/actions/runs/9001/logs": {
+      "$zip": {
+        "0_trusted _ build (ubuntu-latest).txt": "2026-11-01T13:04:30.1000000Z ##[group]Run cargo build --all-features\n2026-11-01T13:05:05.2000000Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.07s\n",
+        "1_trusted _ ci-other (ubuntu-latest).txt": "2026-11-01T13:05:43.2855393Z ##[group]Run cargo test --workspace\n2026-11-01T13:05:43.2855568Z cargo test --workspace\n2026-11-01T13:05:43.2864384Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:05:43.2864520Z env:\n2026-11-01T13:05:43.2864632Z   MBX_DISABLE: 1\n2026-11-01T13:05:43.2864763Z   CARGO_TERM_COLOR: always\n2026-11-01T13:05:43.2866049Z   GITHUB_TOKEN: ***\n2026-11-01T13:05:43.2866358Z   MISE_LOG_LEVEL: info\n2026-11-01T13:05:43.2866515Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:05:43.2866679Z   MISE_YES: 1\n2026-11-01T13:05:43.2866805Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:05:43.2867016Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:06:50.9693089Z \n2026-11-01T13:06:50.9719893Z    Doc-tests fnox_client\n2026-11-01T13:06:51.1249449Z \n2026-11-01T13:06:51.1249812Z running 1 test\n2026-11-01T13:06:51.1250461Z test crates/fnox-client/src/lib.rs - (line 12) - compile ... ok\n2026-11-01T13:06:51.1250647Z \n2026-11-01T13:06:51.1250778Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n2026-11-01T13:06:51.1250951Z \n2026-11-01T13:06:51.1256684Z all doctests ran in 0.10s; merged doctests compilation took 0.10s\n2026-11-01T13:06:51.1274527Z    Doc-tests fnox_core\n2026-11-01T13:06:52.2360050Z \n2026-11-01T13:06:52.2360434Z running 2 tests\n2026-11-01T13:06:52.2360752Z test crates/fnox-core/src/spanned.rs - spanned::SpannedValue (line 15) ... ignored\n2026-11-01T13:06:52.2361031Z test crates/fnox-core/src/library.rs - library (line 20) - compile ... ok\n2026-11-01T13:06:52.2361180Z \n2026-11-01T13:06:52.2361513Z test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n2026-11-01T13:06:52.2361678Z \n2026-11-01T13:06:52.2388307Z all doctests ran in 0.45s; merged doctests compilation took 0.45s\n2026-11-01T13:06:52.2532871Z ##[group]Run mise run render\n2026-11-01T13:06:52.2533049Z mise run render\n2026-11-01T13:06:52.2543431Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:06:52.2543566Z env:\n2026-11-01T13:06:52.2543678Z   MBX_DISABLE: 1\n2026-11-01T13:06:52.2543808Z   CARGO_TERM_COLOR: always\n2026-11-01T13:06:52.2545268Z   GITHUB_TOKEN: ***\n2026-11-01T13:06:52.2545580Z   MISE_LOG_LEVEL: info\n2026-11-01T13:06:52.2545734Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:06:52.2545901Z   MISE_YES: 1\n2026-11-01T13:06:52.2546026Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:06:52.2546417Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:06:52.2547016Z ##[endgroup]\n2026-11-01T13:06:52.3004967Z [build] $ cargo build\n2026-11-01T13:06:52.5556717Z [build]    Compiling fnox-client v1.46.0 (/home/runner/work/fnox/fnox/crates/fnox-client)\n2026-11-01T13:06:52.5583588Z [build]    Compiling rmcp v3.8.0\n2026-11-01T13:06:52.9405258Z [build]    Compiling fnox-core v1.46.0 (/home/runner/work/fnox/fnox/crates/fnox-core)\n2026-11-01T13:07:03.6395562Z [build]    Compiling fnox v1.46.0 (/home/runner/work/fnox/fnox)\n2026-11-01T13:07:13.5122556Z [build]     Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.18s\n2026-11-01T13:07:13.5439073Z [build] Finished in 21.24s\n2026-11-01T13:07:13.5460613Z [render:usage] $ fnox usage > fnox.usage.kdl\n2026-11-01T13:07:13.5460936Z [render:schema] $ fnox schema > docs/public/schema.json\n2026-11-01T13:07:13.5536617Z [render:usage] $ rm -rf docs/cli && mkdir -p docs/cli\n2026-11-01T13:07:13.5559738Z [render:usage] $ usage g markdown -mf fnox.usage.kdl --out-dir docs/cli --url-prefix /cli --html-encode\n2026-11-01T13:07:13.5564359Z [render:schema] $ oxfmt --write docs/public/schema.json\n2026-11-01T13:07:13.5718560Z [render:usage] writing to docs/cli/activate.md\n2026-11-01T13:07:13.5731441Z [render:usage] writing to docs/cli/audit.md\n2026-11-01T13:07:13.5743699Z [render:usage] writing to docs/cli/check.md\n2026-11-01T13:07:13.6068752Z [render:schema] Finished in 0ms on 1 files using 4 threads.\n2026-11-01T13:07:13.6092671Z [render:schema] Finished in 63.3ms\n2026-11-01T13:07:13.6294049Z [render:usage] $ usage g json -f fnox.usage.kdl > docs/cli/commands.json\n2026-11-01T13:07:13.6370352Z [render:usage] $ node docs/.vitepress/cli-pages.mjs\n2026-11-01T13:07:13.6541653Z [render:usage] $ oxfmt --write docs/cli\n2026-11-01T13:07:13.6813869Z [render:usage] Finished in 4ms on 56 files using 4 threads.\n2026-11-01T13:07:13.6845244Z [render:usage] Finished in 138.5ms\n2026-11-01T13:07:13.6864157Z Finished in 21.39s\n2026-11-01T13:07:13.6899832Z ##[group]Run if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:07:13.6900091Z if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:07:13.6900327Z   echo \"::error::'mise run render' produced changes. Run it locally and commit.\"\n2026-11-01T13:07:13.6900546Z   git status\n2026-11-01T13:07:13.6900762Z   git diff HEAD\n2026-11-01T13:07:13.6900894Z   exit 1\n2026-11-01T13:07:13.6901012Z fi\n2026-11-01T13:07:13.6910673Z shell: /usr/bin/bash -e {0}\n2026-11-01T13:07:13.6910810Z env:\n2026-11-01T13:07:13.6910924Z   MBX_DISABLE: 1\n2026-11-01T13:07:13.6911048Z   CARGO_TERM_COLOR: always\n2026-11-01T13:07:13.6912235Z   GITHUB_TOKEN: ***\n2026-11-01T13:07:13.6912539Z   MISE_LOG_LEVEL: info\n2026-11-01T13:07:13.6912696Z   MISE_TRUSTED_CONFIG_PATHS: /home/runner/work/fnox/fnox\n2026-11-01T13:07:13.6912862Z   MISE_YES: 1\n2026-11-01T13:07:13.6913002Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:07:13.6913210Z   MANPATH: /home/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:07:13.6913729Z ##[endgroup]\n2026-11-01T13:07:13.7252110Z ##[error]'mise run render' produced changes. Run it locally and commit.\n2026-11-01T13:07:13.7308036Z HEAD detached at pull/1099/merge\n2026-11-01T13:07:13.7308364Z Changes not staged for commit:\n2026-11-01T13:07:13.7308548Z   (use \"git add <file>...\" to update what will be committed)\n2026-11-01T13:07:13.7308780Z   (use \"git restore <file>...\" to discard changes in working directory)\n2026-11-01T13:07:13.7308985Z \tmodified:   docs/public/schema.json\n2026-11-01T13:07:13.7309085Z \n2026-11-01T13:07:13.7309181Z no changes added to commit (use \"git add\" and/or \"git commit -a\")\n2026-11-01T13:07:13.7363214Z diff --git a/docs/public/schema.json b/docs/public/schema.json\n2026-11-01T13:07:13.7363463Z index e2af6cd..59aac2d 100644\n2026-11-01T13:07:13.7363609Z --- a/docs/public/schema.json\n2026-11-01T13:07:13.7363746Z +++ b/docs/public/schema.json\n2026-11-01T13:07:13.7363884Z @@ -698,6 +698,15 @@\n2026-11-01T13:07:13.7364012Z              \"identity\": {\n2026-11-01T13:07:13.7364170Z                \"$ref\": \"#/$defs/OptionProviderSecretRef\"\n2026-11-01T13:07:13.7364332Z              },\n2026-11-01T13:07:13.7364507Z +            \"identities\": {\n2026-11-01T13:07:13.7364650Z +              \"type\": \"object\",\n2026-11-01T13:07:13.7364793Z +              \"additionalProperties\": {\n2026-11-01T13:07:13.7364956Z +                \"$ref\": \"#/$defs/StringOrSecretRef\"\n2026-11-01T13:07:13.7365106Z +              }\n2026-11-01T13:07:13.7365221Z +            },\n2026-11-01T13:07:13.7365339Z +            \"default_identity\": {\n2026-11-01T13:07:13.7365501Z +              \"$ref\": \"#/$defs/OptionStringOrSecretRef\"\n2026-11-01T13:07:13.7365653Z +            },\n2026-11-01T13:07:13.7365772Z              \"auth_command\": {\n2026-11-01T13:07:13.7365912Z                \"type\": [\"string\", \"null\"]\n2026-11-01T13:07:13.7366050Z              },\n2026-11-01T13:07:13.7367413Z ##[error]Process completed with exit code 1.\n2026-11-01T13:07:13.7447670Z Post job cleanup.\n",
+        "2_trusted _ ci-bats (ubuntu-latest, tranche 0).txt": "2026-11-01T13:05:40.0000000Z ##[group]Run mise run test:bats\n2026-11-01T13:07:36.9000000Z ok 412 tests\n",
+        "3_trusted _ ci-other (macos-latest).txt": "2026-11-01T13:09:35.2380810Z ##[group]Run mise run render\n2026-11-01T13:09:35.2381150Z mise run render\n2026-11-01T13:09:35.2417110Z shell: /opt/homebrew/bin/bash -e {0}\n2026-11-01T13:09:35.2417320Z env:\n2026-11-01T13:09:35.2417500Z   MBX_DISABLE: 1\n2026-11-01T13:09:35.2417650Z   CARGO_TERM_COLOR: always\n2026-11-01T13:09:35.2419390Z   GITHUB_TOKEN: ***\n2026-11-01T13:09:35.2419530Z   MISE_LOG_LEVEL: info\n2026-11-01T13:09:35.2419700Z   MISE_TRUSTED_CONFIG_PATHS: /Users/runner/work/fnox/fnox\n2026-11-01T13:09:35.2419910Z   MISE_YES: 1\n2026-11-01T13:09:35.2420040Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:09:35.2420320Z   MANPATH: /Users/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:09:35.2420630Z ##[endgroup]\n2026-11-01T13:09:35.3556540Z [build] $ cargo build\n2026-11-01T13:09:35.9195960Z [build]    Compiling fnox-client v1.46.0 (/Users/runner/work/fnox/fnox/crates/fnox-client)\n2026-11-01T13:09:36.3934850Z [build]    Compiling fnox-core v1.46.0 (/Users/runner/work/fnox/fnox/crates/fnox-core)\n2026-11-01T13:09:51.7976150Z [build]    Compiling fnox v1.46.0 (/Users/runner/work/fnox/fnox)\n2026-11-01T13:10:03.7881230Z [build]     Finished `dev` profile [unoptimized + debuginfo] target(s) in 28.37s\n2026-11-01T13:10:03.8244130Z [build] Finished in 28.47s\n2026-11-01T13:10:03.8337790Z [render:usage] $ fnox usage > fnox.usage.kdl\n2026-11-01T13:10:03.8357120Z [render:schema] $ fnox schema > docs/public/schema.json\n2026-11-01T13:10:03.8669080Z [render:usage] $ rm -rf docs/cli && mkdir -p docs/cli\n2026-11-01T13:10:03.8753220Z [render:schema] $ oxfmt --write docs/public/schema.json\n2026-11-01T13:10:03.8821260Z [render:usage] $ usage g markdown -mf fnox.usage.kdl --out-dir docs/cli --url-prefix /cli --html-encode\n2026-11-01T13:10:03.9255900Z [render:usage] writing to docs/cli/activate.md\n2026-11-01T13:10:03.9269640Z [render:usage] writing to docs/cli/audit.md\n2026-11-01T13:10:03.9282030Z [render:usage] writing to docs/cli/check.md\n2026-11-01T13:10:03.9714540Z [render:schema] Finished in 5ms on 1 files using 6 threads.\n2026-11-01T13:10:03.9814450Z [render:schema] Finished in 145.9ms\n2026-11-01T13:10:03.9916330Z [render:usage] $ usage g json -f fnox.usage.kdl > docs/cli/commands.json\n2026-11-01T13:10:04.0064590Z [render:usage] $ node docs/.vitepress/cli-pages.mjs\n2026-11-01T13:10:04.0398930Z [render:usage] $ oxfmt --write docs/cli\n2026-11-01T13:10:04.0894950Z [render:usage] Finished in 11ms on 56 files using 6 threads.\n2026-11-01T13:10:04.0917560Z [render:usage] Finished in 258.2ms\n2026-11-01T13:10:04.0993430Z Finished in 28.76s\n2026-11-01T13:10:04.1353940Z ##[group]Run if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:10:04.1354480Z if [ -n \"$(git status --porcelain)\" ]; then\n2026-11-01T13:10:04.1354760Z   echo \"::error::'mise run render' produced changes. Run it locally and commit.\"\n2026-11-01T13:10:04.1355010Z   git status\n2026-11-01T13:10:04.1355150Z   git diff HEAD\n2026-11-01T13:10:04.1355300Z   exit 1\n2026-11-01T13:10:04.1355420Z fi\n2026-11-01T13:10:04.1383010Z shell: /opt/homebrew/bin/bash -e {0}\n2026-11-01T13:10:04.1383200Z env:\n2026-11-01T13:10:04.1383330Z   MBX_DISABLE: 1\n2026-11-01T13:10:04.1383470Z   CARGO_TERM_COLOR: always\n2026-11-01T13:10:04.1384980Z   GITHUB_TOKEN: ***\n2026-11-01T13:10:04.1385120Z   MISE_LOG_LEVEL: info\n2026-11-01T13:10:04.1385320Z   MISE_TRUSTED_CONFIG_PATHS: /Users/runner/work/fnox/fnox\n2026-11-01T13:10:04.1385540Z   MISE_YES: 1\n2026-11-01T13:10:04.1385680Z   BATS_PARALLEL_BINARY_NAME: rush\n2026-11-01T13:10:04.1385980Z   MANPATH: /Users/runner/.local/share/mise/installs/usage/7.1.3/.mise-packslip/man:\n2026-11-01T13:10:04.1386220Z ##[endgroup]\n2026-11-01T13:10:04.3116690Z ##[error]'mise run render' produced changes. Run it locally and commit.\n2026-11-01T13:10:04.3403020Z HEAD detached at pull/1099/merge\n2026-11-01T13:10:04.3403340Z Changes not staged for commit:\n2026-11-01T13:10:04.3405160Z   (use \"git add <file>...\" to update what will be committed)\n2026-11-01T13:10:04.3405460Z   (use \"git restore <file>...\" to discard changes in working directory)\n2026-11-01T13:10:04.3405710Z \tmodified:   docs/public/schema.json\n2026-11-01T13:10:04.3405850Z \n2026-11-01T13:10:04.3405980Z no changes added to commit (use \"git add\" and/or \"git commit -a\")\n2026-11-01T13:10:04.3687440Z diff --git a/docs/public/schema.json b/docs/public/schema.json\n2026-11-01T13:10:04.3688550Z index e2af6cd..59aac2d 100644\n2026-11-01T13:10:04.3688810Z --- a/docs/public/schema.json\n2026-11-01T13:10:04.3689010Z +++ b/docs/public/schema.json\n2026-11-01T13:10:04.3689260Z @@ -698,6 +698,15 @@\n2026-11-01T13:10:04.3689430Z              \"identity\": {\n2026-11-01T13:10:04.3689610Z                \"$ref\": \"#/$defs/OptionProviderSecretRef\"\n2026-11-01T13:10:04.3690160Z              },\n2026-11-01T13:10:04.3690600Z +            \"identities\": {\n2026-11-01T13:10:04.3690770Z +              \"type\": \"object\",\n2026-11-01T13:10:04.3690980Z +              \"additionalProperties\": {\n2026-11-01T13:10:04.3691200Z +                \"$ref\": \"#/$defs/StringOrSecretRef\"\n2026-11-01T13:10:04.3691390Z +              }\n2026-11-01T13:10:04.3691530Z +            },\n2026-11-01T13:10:04.3691680Z +            \"default_identity\": {\n2026-11-01T13:10:04.3691870Z +              \"$ref\": \"#/$defs/OptionStringOrSecretRef\"\n2026-11-01T13:10:04.3692070Z +            },\n2026-11-01T13:10:04.3692200Z              \"auth_command\": {\n2026-11-01T13:10:04.3692370Z                \"type\": [\"string\", \"null\"]\n2026-11-01T13:10:04.3692530Z              },\n2026-11-01T13:10:04.3708860Z ##[error]Process completed with exit code 1.\n2026-11-01T13:10:04.4608900Z Post job cleanup.\n2026-11-01T13:10:04.6561060Z Post job cleanup.\n",
+        "4_trusted _ final.txt": "2026-11-01T13:10:11.0000000Z ##[group]Run Check job results\n2026-11-01T13:10:11.5000000Z ci-other failed\n2026-11-01T13:10:11.6000000Z ##[error]Process completed with exit code 1.\n"
+      },
+      "$until": 80,
+      "$before": {
+        "$status": 404
+      }
+    },
+    "/repos/jdx/demo/pulls/1099/reviews": [
+      {
+        "id": 4401,
+        "node_id": "PRR_1",
+        "user": {
+          "login": "greptile-apps[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-11-01T13:07:12Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/1099#pullrequestreview-4401"
+      },
+      {
+        "id": 4402,
+        "node_id": "PRR_2",
+        "user": {
+          "login": "coderabbitai[bot]",
+          "type": "Bot"
+        },
+        "body": "",
+        "state": "COMMENTED",
+        "submitted_at": "2026-11-01T13:10:09Z",
+        "commit_id": "{{head_sha}}",
+        "html_url": "https://github.com/jdx/demo/pull/1099#pullrequestreview-4402"
+      }
+    ],
+    "/repos/jdx/demo/issues/1099/comments": [],
+    "/repos/jdx/demo/activity": []
+  },
+  "graphql": {
+    "viewer": {
+      "__typename": "User",
+      "login": "jdx",
+      "id": "U_jdx",
+      "name": "jdx"
+    },
+    "repository": {
+      "__typename": "Repository",
+      "id": "R_demo",
+      "name": "demo",
+      "nameWithOwner": "jdx/demo",
+      "url": "https://github.com/jdx/demo",
+      "owner": {
+        "__typename": "User",
+        "login": "jdx",
+        "id": "U_jdx",
+        "name": "jdx"
+      },
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "viewerPermission": "ADMIN",
+      "isPrivate": false,
+      "pullRequests": {
+        "nodes": [
+          {
+            "__typename": "PullRequest",
+            "id": "PR_1099",
+            "number": 1099,
+            "databaseId": 31099,
+            "title": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+            "body": "Shared configs often need a different age identity per machine, for example a separate YubiKey plugged into each computer. Until now the age provider had a single `key_file`, so that meant per-machine config files or wrapper scripts. Requested in [discussion #1095](https://github.com/jdx/fnox/discussions/1095).\n\nThe age provider now accepts named identity files and a way to choose one:\n\n```toml\n[providers.age]\ntype = \"age\"\nrecipients = [\"age1yubikey1...\", \"age1yubikey1...\", \"age1...\"]\ndefault_identity = \"yk1\"\n\n[providers.age.identities]\nyk1 = \"~/.config/fnox/yk1-identity.txt\"\nyk2 = \"~/.config/fnox/yk2-identity.txt\"\nrecovery = \"~/.config/fnox/recovery.txt\"\n```\n\nOn a machine with the second YubiKey, `export FNOX_AGE_IDENTITY=yk2` overrides `default_identity`, so one shared `fnox.toml` works everywhere.\n\n- The selected identity replaces `key_file`; paths resolve the same way as `key_file`.\n- `FNOX_AGE_KEY` still takes precedence over everything.\n- Naming an identity that is not in `identities` is an error that lists the available names.\n- Without `identities`, `default_identity` or `FNOX_AGE_IDENTITY`, behavior is unchanged.\n- Passphrase-protected identities are not part of this change.\n\nValidation: `mise run test:cargo` passes, including a new unit test for the selection logic. The `FNOX_AGE_IDENTITY` env override is not covered by a test.",
+            "state": "OPEN",
+            "isDraft": false,
+            "closed": false,
+            "merged": false,
+            "url": "https://github.com/jdx/demo/pull/1099",
+            "author": {
+              "__typename": "User",
+              "login": "jdx",
+              "id": "U_jdx",
+              "name": "jdx"
+            },
+            "headRefName": "age-named-identity",
+            "headRefOid": "{{head_sha}}",
+            "baseRefName": "main",
+            "baseRefOid": "{{base_sha}}",
+            "headRepository": {
+              "__typename": "Repository",
+              "name": "demo",
+              "nameWithOwner": "jdx/demo",
+              "id": "R_demo"
+            },
+            "headRepositoryOwner": {
+              "__typename": "User",
+              "id": "U_jdx",
+              "login": "jdx",
+              "name": "jdx"
+            },
+            "isCrossRepository": false,
+            "maintainerCanModify": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "UNSTABLE",
+            "reviewDecision": null,
+            "additions": 105,
+            "deletions": 9,
+            "changedFiles": 8,
+            "createdAt": "2026-11-01T13:03:40Z",
+            "updatedAt": "2026-11-01T13:04:17Z",
+            "closedAt": null,
+            "mergedAt": null,
+            "commits": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "__typename": "PullRequestCommit",
+                  "id": "PRC_1",
+                  "commit": {
+                    "__typename": "Commit",
+                    "id": "COMMIT_head",
+                    "oid": "{{head_sha}}",
+                    "abbreviatedOid": "{{head_short}}",
+                    "statusCheckRollup": {
+                      "__typename": "StatusCheckRollup",
+                      "state": "FAILURE",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7101",
+                            "databaseId": 7101,
+                            "name": "trusted / build (ubuntu-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                            "startedAt": "2026-11-01T13:04:17Z",
+                            "completedAt": "2026-11-01T13:04:47Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                            "isRequired": false,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 30,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7102",
+                            "databaseId": 7102,
+                            "name": "trusted / ci-other (ubuntu-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-11-01T13:04:17Z",
+                            "completedAt": "2026-11-01T13:05:17Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                            "isRequired": false,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 60,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7103",
+                            "databaseId": 7103,
+                            "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                            "startedAt": "2026-11-01T13:04:17Z",
+                            "completedAt": "2026-11-01T13:05:02Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+                            "isRequired": false,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 45,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7104",
+                            "databaseId": 7104,
+                            "name": "trusted / ci-other (macos-latest)",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-11-01T13:04:17Z",
+                            "completedAt": "2026-11-01T13:05:32Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+                            "isRequired": false,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 75,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "id": "CR_7105",
+                            "databaseId": 7105,
+                            "name": "trusted / final",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "startedAt": "2026-11-01T13:04:17Z",
+                            "completedAt": "2026-11-01T13:05:37Z",
+                            "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+                            "isRequired": true,
+                            "title": null,
+                            "summary": null,
+                            "text": null,
+                            "checkSuite": {
+                              "__typename": "CheckSuite",
+                              "branch": null,
+                              "id": "CS_8001",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "workflowRun": {
+                                "__typename": "WorkflowRun",
+                                "runNumber": null,
+                                "runAttempt": null,
+                                "id": "WFR_9001",
+                                "databaseId": 9001,
+                                "event": "pull_request",
+                                "url": "https://github.com/jdx/demo/actions/runs/9001",
+                                "workflow": {
+                                  "__typename": "Workflow",
+                                  "id": "W_501",
+                                  "name": "ci"
+                                }
+                              }
+                            },
+                            "$until": 80,
+                            "$before": {
+                              "status": "IN_PROGRESS",
+                              "conclusion": null,
+                              "completedAt": null
+                            }
+                          }
+                        ]
+                      },
+                      "$until": 80,
+                      "$before": {
+                        "state": "PENDING"
+                      },
+                      "id": "SCR_1"
+                    },
+                    "messageHeadline": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+                    "committedDate": "2026-11-01T13:03:35Z",
+                    "authors": {
+                      "nodes": [
+                        {
+                          "name": "jdx",
+                          "email": "jdx@example.invalid",
+                          "user": {
+                            "login": "jdx"
+                          }
+                        }
+                      ]
+                    },
+                    "checkSuites": {
+                      "__typename": "CheckSuiteConnection",
+                      "nodes": []
+                    }
+                  }
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "__typename": "StatusCheckRollup",
+              "state": "FAILURE",
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7101",
+                    "databaseId": 7101,
+                    "name": "trusted / build (ubuntu-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-11-01T13:04:17Z",
+                    "completedAt": "2026-11-01T13:04:47Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                    "isRequired": false,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 30,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7102",
+                    "databaseId": 7102,
+                    "name": "trusted / ci-other (ubuntu-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-11-01T13:04:17Z",
+                    "completedAt": "2026-11-01T13:05:17Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                    "isRequired": false,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 60,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7103",
+                    "databaseId": 7103,
+                    "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-11-01T13:04:17Z",
+                    "completedAt": "2026-11-01T13:05:02Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+                    "isRequired": false,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 45,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7104",
+                    "databaseId": 7104,
+                    "name": "trusted / ci-other (macos-latest)",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-11-01T13:04:17Z",
+                    "completedAt": "2026-11-01T13:05:32Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+                    "isRequired": false,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 75,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "id": "CR_7105",
+                    "databaseId": 7105,
+                    "name": "trusted / final",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-11-01T13:04:17Z",
+                    "completedAt": "2026-11-01T13:05:37Z",
+                    "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+                    "isRequired": true,
+                    "title": null,
+                    "summary": null,
+                    "text": null,
+                    "checkSuite": {
+                      "__typename": "CheckSuite",
+                      "branch": null,
+                      "id": "CS_8001",
+                      "app": {
+                        "slug": "github-actions",
+                        "name": "GitHub Actions"
+                      },
+                      "workflowRun": {
+                        "__typename": "WorkflowRun",
+                        "runNumber": null,
+                        "runAttempt": null,
+                        "id": "WFR_9001",
+                        "databaseId": 9001,
+                        "event": "pull_request",
+                        "url": "https://github.com/jdx/demo/actions/runs/9001",
+                        "workflow": {
+                          "__typename": "Workflow",
+                          "id": "W_501",
+                          "name": "ci"
+                        }
+                      }
+                    },
+                    "$until": 80,
+                    "$before": {
+                      "status": "IN_PROGRESS",
+                      "conclusion": null,
+                      "completedAt": null
+                    }
+                  }
+                ]
+              },
+              "$until": 80,
+              "$before": {
+                "state": "PENDING"
+              },
+              "id": "SCR_2"
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "reviews": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "comments": {
+              "nodes": []
+            },
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "crates/fnox-core/src/providers/mod.rs",
+                  "line": 377,
+                  "startLine": 372,
+                  "originalLine": 377,
+                  "originalStartLine": 372,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo1",
+                        "databaseId": 55501,
+                        "fullDatabaseId": "55501",
+                        "url": "https://github.com/jdx/demo/pull/1099#discussion_r55501",
+                        "createdAt": "2026-11-01T13:07:12Z",
+                        "updatedAt": "2026-11-01T13:07:12Z",
+                        "body": "[P1] **Selected key is ignored**\n\nNamed selection replaces `key_file`, but `identity` is still passed unchanged to `new_with_config`. Decryption tries that provider reference before the selected file. A machine switching to a named local key still contacts the old provider and fails without trying the chosen file if that provider is unavailable.\n\nClear `identity` when a named identity is selected, as the new documentation promises.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_greptile",
+                          "login": "greptile-apps"
+                        },
+                        "path": "crates/fnox-core/src/providers/mod.rs",
+                        "line": 377,
+                        "originalLine": 377,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo2",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "crates/fnox-core/src/providers/age.rs",
+                  "line": 43,
+                  "startLine": 35,
+                  "originalLine": 43,
+                  "originalStartLine": 35,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo2",
+                        "databaseId": 55502,
+                        "fullDatabaseId": "55502",
+                        "url": "https://github.com/jdx/demo/pull/1099#discussion_r55502",
+                        "createdAt": "2026-11-01T13:07:12Z",
+                        "updatedAt": "2026-11-01T13:07:12Z",
+                        "body": "[P1] **Inline key override is blocked**\n\nWith `FNOX_AGE_IDENTITY=yk2` exported, an age provider without that named entry fails during construction—even when `FNOX_AGE_KEY` contains the correct key. `select_key_file` returns an error before decryption reaches the inline-key check.\n\nSkip named-file selection when `FNOX_AGE_KEY` is set so it retains the promised precedence over every other identity source.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_greptile",
+                          "login": "greptile-apps"
+                        },
+                        "path": "crates/fnox-core/src/providers/age.rs",
+                        "line": 43,
+                        "originalLine": 43,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo3",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "crates/fnox-core/src/env.rs",
+                  "line": 101,
+                  "startLine": 100,
+                  "originalLine": 101,
+                  "originalStartLine": 100,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo3",
+                        "databaseId": 55503,
+                        "fullDatabaseId": "55503",
+                        "url": "https://github.com/jdx/demo/pull/1099#discussion_r55503",
+                        "createdAt": "2026-11-01T13:07:12Z",
+                        "updatedAt": "2026-11-01T13:07:12Z",
+                        "body": "[P1] **Daemon keeps the first identity**\n\n`FNOX_AGE_IDENTITY` is read once per process, but the daemon changes its environment for each request. Non-interactive requests resolve cache misses inside the daemon. After the first request reads this value, later requests with a different identity name still select the first name. Decryption can fail when only the newly selected key matches the requested ciphertext.\n\nRead the variable at selection time instead of keeping it in a `LazyLock`.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_greptile",
+                          "login": "greptile-apps"
+                        },
+                        "path": "crates/fnox-core/src/env.rs",
+                        "line": 101,
+                        "originalLine": 101,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo4",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "crates/fnox-core/src/providers/age.rs",
+                  "line": 589,
+                  "startLine": 584,
+                  "originalLine": 589,
+                  "originalStartLine": 584,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo4",
+                        "databaseId": 55504,
+                        "fullDatabaseId": "55504",
+                        "url": "https://github.com/jdx/demo/pull/1099#discussion_r55504",
+                        "createdAt": "2026-11-01T13:10:09Z",
+                        "updatedAt": "2026-11-01T13:10:09Z",
+                        "body": "**Minor** · **Functional Correctness** · **Quick win**\n\n[details: Supported by static analysis]\n\n**Isolate `FNOX_AGE_IDENTITY` in `select_key_file_uses_named_identity`.**\n\n`select_key_file` reads `env::FNOX_AGE_IDENTITY` before it reads `default_identity`. The test does not clear that variable. If a developer or CI job exports it, the default, fallback, and error assertions fail. Clearing the variable inside the test does not help, because the `LazyLock` caches its first read. Pass the environment identity into the selection logic as a parameter, and have the test pass `None` for it.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_coderabbit",
+                          "login": "coderabbitai"
+                        },
+                        "path": "crates/fnox-core/src/providers/age.rs",
+                        "line": 589,
+                        "originalLine": 589,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_2"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "__typename": "PullRequestReviewThread",
+                  "id": "PRRT_kwDOdemo5",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "isCollapsed": false,
+                  "path": "crates/fnox-core/src/providers/mod.rs",
+                  "line": 376,
+                  "startLine": 372,
+                  "originalLine": 376,
+                  "originalStartLine": 372,
+                  "diffSide": "RIGHT",
+                  "startDiffSide": "RIGHT",
+                  "subjectType": "LINE",
+                  "viewerCanResolve": true,
+                  "viewerCanReply": true,
+                  "resolvedBy": null,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "__typename": "PullRequestReviewComment",
+                        "id": "PRRC_kwDOdemo5",
+                        "databaseId": 55505,
+                        "fullDatabaseId": "55505",
+                        "url": "https://github.com/jdx/demo/pull/1099#discussion_r55505",
+                        "createdAt": "2026-11-01T13:10:10Z",
+                        "updatedAt": "2026-11-01T13:10:10Z",
+                        "body": "**Minor** · **Functional Correctness** · **Heavy lift**\n\n[details: Supported by static analysis]\n\n**Skip the `key_file` resolution when a named identity is selected.**\n\nWhen `default_identity` or `FNOX_AGE_IDENTITY` selects a named identity, the age provider still resolves `key_file` first. If `key_file` is a secret reference whose provider cannot be resolved, provider creation fails with `ProviderNotConfigured`. The selected identity is never used. `select_key_file` replaces `key_file` only after resolution has already completed, so the replacement cannot prevent this failure. Resolve `key_file` only when no named identity is selected, or make the generated resolver skip `key_file` in that case.",
+                        "author": {
+                          "__typename": "Bot",
+                          "id": "BOT_coderabbit",
+                          "login": "coderabbitai"
+                        },
+                        "path": "crates/fnox-core/src/providers/mod.rs",
+                        "line": 376,
+                        "originalLine": 376,
+                        "diffHunk": "",
+                        "outdated": false,
+                        "replyTo": null,
+                        "commit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "originalCommit": {
+                          "oid": "{{head_sha}}"
+                        },
+                        "state": "SUBMITTED",
+                        "authorAssociation": "NONE",
+                        "pullRequestReview": {
+                          "id": "PRR_2"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "projectCards": {
+              "nodes": []
+            },
+            "projectItems": {
+              "nodes": []
+            },
+            "milestone": null,
+            "autoMergeRequest": null,
+            "reactionGroups": [],
+            "files": {
+              "nodes": [
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "crates/fnox-core/build/generate_providers.rs",
+                  "additions": 2,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "crates/fnox-core/providers/age.toml",
+                  "additions": 10,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "crates/fnox-core/src/env.rs",
+                  "additions": 4,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "crates/fnox-core/src/providers/age.rs",
+                  "additions": 48,
+                  "deletions": 3
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "crates/fnox-core/src/providers/mod.rs",
+                  "additions": 10,
+                  "deletions": 1
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "docs/providers/age.md",
+                  "additions": 27,
+                  "deletions": 5
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "docs/reference/environment.md",
+                  "additions": 2,
+                  "deletions": 0
+                },
+                {
+                  "__typename": "PullRequestChangedFile",
+                  "path": "src/commands/provider/add.rs",
+                  "additions": 2,
+                  "deletions": 0
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "object": {
+        "__typename": "Commit",
+        "id": "COMMIT_head",
+        "oid": "{{head_sha}}",
+        "abbreviatedOid": "{{head_short}}",
+        "statusCheckRollup": {
+          "__typename": "StatusCheckRollup",
+          "state": "FAILURE",
+          "contexts": {
+            "nodes": [
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7101",
+                "databaseId": 7101,
+                "name": "trusted / build (ubuntu-latest)",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-11-01T13:04:17Z",
+                "completedAt": "2026-11-01T13:04:47Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7101",
+                "isRequired": false,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 30,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7102",
+                "databaseId": 7102,
+                "name": "trusted / ci-other (ubuntu-latest)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-11-01T13:04:17Z",
+                "completedAt": "2026-11-01T13:05:17Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7102",
+                "isRequired": false,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 60,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7103",
+                "databaseId": 7103,
+                "name": "trusted / ci-bats (ubuntu-latest, tranche 0)",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "startedAt": "2026-11-01T13:04:17Z",
+                "completedAt": "2026-11-01T13:05:02Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7103",
+                "isRequired": false,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 45,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7104",
+                "databaseId": 7104,
+                "name": "trusted / ci-other (macos-latest)",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-11-01T13:04:17Z",
+                "completedAt": "2026-11-01T13:05:32Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7104",
+                "isRequired": false,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 75,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              },
+              {
+                "__typename": "CheckRun",
+                "id": "CR_7105",
+                "databaseId": 7105,
+                "name": "trusted / final",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "startedAt": "2026-11-01T13:04:17Z",
+                "completedAt": "2026-11-01T13:05:37Z",
+                "detailsUrl": "https://github.com/jdx/demo/actions/runs/9001/job/7105",
+                "isRequired": true,
+                "title": null,
+                "summary": null,
+                "text": null,
+                "checkSuite": {
+                  "__typename": "CheckSuite",
+                  "branch": null,
+                  "id": "CS_8001",
+                  "app": {
+                    "slug": "github-actions",
+                    "name": "GitHub Actions"
+                  },
+                  "workflowRun": {
+                    "__typename": "WorkflowRun",
+                    "runNumber": null,
+                    "runAttempt": null,
+                    "id": "WFR_9001",
+                    "databaseId": 9001,
+                    "event": "pull_request",
+                    "url": "https://github.com/jdx/demo/actions/runs/9001",
+                    "workflow": {
+                      "__typename": "Workflow",
+                      "id": "W_501",
+                      "name": "ci"
+                    }
+                  }
+                },
+                "$until": 80,
+                "$before": {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "completedAt": null
+                }
+              }
+            ]
+          },
+          "$until": 80,
+          "$before": {
+            "state": "PENDING"
+          },
+          "id": "SCR_3"
+        },
+        "messageHeadline": "feat(age): select a named identity with default_identity or FNOX_AGE_IDENTITY",
+        "committedDate": "2026-11-01T13:03:35Z",
+        "authors": {
+          "nodes": [
+            {
+              "name": "jdx",
+              "email": "jdx@example.invalid",
+              "user": {
+                "login": "jdx"
+              }
+            }
+          ]
+        },
+        "checkSuites": {
+          "__typename": "CheckSuiteConnection",
+          "nodes": []
+        }
+      }
+    }
+  }
+}

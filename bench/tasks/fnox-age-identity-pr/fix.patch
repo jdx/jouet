@@ -1,0 +1,223 @@
+diff --git a/crates/fnox-core/src/env.rs b/crates/fnox-core/src/env.rs
+index a5d0833..9f01e4c 100644
+--- a/crates/fnox-core/src/env.rs
++++ b/crates/fnox-core/src/env.rs
+@@ -96,9 +96,11 @@ pub static FNOX_PROFILE: LazyLock<Vec<String>> = LazyLock::new(|| {
+ // Age encryption key configuration
+ pub static FNOX_AGE_KEY: LazyLock<Option<String>> = LazyLock::new(|| var("FNOX_AGE_KEY").ok());
+ 
+-// Selects a named age identity from the provider's `identities` table
+-pub static FNOX_AGE_IDENTITY: LazyLock<Option<String>> =
+-    LazyLock::new(|| var("FNOX_AGE_IDENTITY").ok().filter(|v| !v.is_empty()));
++/// Named age identity to decrypt with. Read on each call, not cached: the daemon changes its
++/// environment for every request.
++pub fn fnox_age_identity() -> Option<String> {
++    var("FNOX_AGE_IDENTITY").ok().filter(|v| !v.is_empty())
++}
+ 
+ // Auth prompt configuration (defaults to true if not set)
+ pub static FNOX_PROMPT_AUTH: LazyLock<Option<bool>> = LazyLock::new(|| {
+diff --git a/crates/fnox-core/src/providers/age.rs b/crates/fnox-core/src/providers/age.rs
+index 875f55b..111e8db 100644
+--- a/crates/fnox-core/src/providers/age.rs
++++ b/crates/fnox-core/src/providers/age.rs
+@@ -24,19 +24,59 @@ pub struct AgeEncryptionProvider {
+     identity_cycle_guard: Option<AgeIdentityCycleGuard>,
+ }
+ 
++/// The key file to decrypt with, and the `identity` reference to use alongside it.
++pub(crate) struct KeySelection {
++    pub key_file: Option<String>,
++    pub identity: OptionProviderSecretRef,
++}
++
+ /// Picks the key file to decrypt with. A named identity (`FNOX_AGE_IDENTITY`, else
+-/// `default_identity`) takes precedence over the plain `key_file`.
++/// `default_identity`) replaces `key_file` and the `identity` reference. An inline
++/// `FNOX_AGE_KEY` outranks all of them, so it skips the selection.
++///
++/// `FNOX_AGE_IDENTITY` is read on every call: the daemon changes its environment per request.
+ pub(crate) fn select_key_file(
+     provider_name: &str,
+     key_file: Option<String>,
++    identity: OptionProviderSecretRef,
++    identities: &indexmap::IndexMap<String, String>,
++    default_identity: Option<&str>,
++) -> Result<KeySelection> {
++    select_key_file_with(
++        provider_name,
++        key_file,
++        identity,
++        identities,
++        default_identity,
++        env::fnox_age_identity().as_deref(),
++        env::FNOX_AGE_KEY.is_some(),
++    )
++}
++
++fn select_key_file_with(
++    provider_name: &str,
++    key_file: Option<String>,
++    identity: OptionProviderSecretRef,
+     identities: &indexmap::IndexMap<String, String>,
+     default_identity: Option<&str>,
+-) -> Result<Option<String>> {
+-    let Some(name) = env::FNOX_AGE_IDENTITY.as_deref().or(default_identity) else {
+-        return Ok(key_file);
++    env_identity: Option<&str>,
++    inline_key_set: bool,
++) -> Result<KeySelection> {
++    let unchanged = KeySelection {
++        key_file: key_file.clone(),
++        identity: identity.clone(),
++    };
++    if inline_key_set {
++        return Ok(unchanged);
++    }
++    let Some(name) = env_identity.or(default_identity) else {
++        return Ok(unchanged);
+     };
+     match identities.get(name) {
+-        Some(path) => Ok(Some(path.clone())),
++        Some(path) => Ok(KeySelection {
++            key_file: Some(path.clone()),
++            identity: OptionProviderSecretRef::none(),
++        }),
+         None => Err(FnoxError::Config(format!(
+             "Age identity '{name}' is not defined in provider '{provider_name}' (available: {})",
+             identities.keys().cloned().collect::<Vec<_>>().join(", ")
+@@ -52,11 +92,19 @@ impl AgeEncryptionProvider {
+         identities: indexmap::IndexMap<String, String>,
+         default_identity: Option<String>,
+     ) -> Result<Self> {
+-        let key_file = select_key_file("age", key_file, &identities, default_identity.as_deref())?;
++        let selected = select_key_file(
++            "age",
++            key_file,
++            identity,
++            &identities,
++            default_identity.as_deref(),
++        )?;
+         Ok(Self {
+             recipients,
+-            key_file: key_file.map(|k| crate::config_path::resolve_relative_to_file(&k, None)),
+-            identity,
++            key_file: selected
++                .key_file
++                .map(|k| crate::config_path::resolve_relative_to_file(&k, None)),
++            identity: selected.identity,
+             config: None,
+             profile: vec!["default".to_string()],
+             provider_name: "age".to_string(),
+@@ -581,11 +629,45 @@ mod tests {
+             ("yk2".to_string(), "yk2.txt".to_string()),
+         ]
+         .into();
+-        let selected = select_key_file("age", Some("k.txt".into()), &identities, Some("yk2"));
+-        assert_eq!(selected.unwrap().as_deref(), Some("yk2.txt"));
+-        let kept = select_key_file("age", Some("k.txt".into()), &identities, None);
+-        assert_eq!(kept.unwrap().as_deref(), Some("k.txt"));
+-        let err = select_key_file("age", None, &identities, Some("nope")).unwrap_err();
++        let select = |default: Option<&str>, env_id: Option<&str>, inline: bool| {
++            select_key_file_with(
++                "age",
++                Some("k.txt".into()),
++                OptionProviderSecretRef::none(),
++                &identities,
++                default,
++                env_id,
++                inline,
++            )
++        };
++        assert_eq!(
++            select(Some("yk1"), None, false)
++                .unwrap()
++                .key_file
++                .as_deref(),
++            Some("yk1.txt")
++        );
++        // The environment name wins over default_identity.
++        assert_eq!(
++            select(Some("yk1"), Some("yk2"), false)
++                .unwrap()
++                .key_file
++                .as_deref(),
++            Some("yk2.txt")
++        );
++        assert_eq!(
++            select(None, None, false).unwrap().key_file.as_deref(),
++            Some("k.txt")
++        );
++        // An inline FNOX_AGE_KEY skips selection, even for an unknown name.
++        assert_eq!(
++            select(None, Some("nope"), true)
++                .unwrap()
++                .key_file
++                .as_deref(),
++            Some("k.txt")
++        );
++        let err = select(None, Some("nope"), false).err().unwrap();
+         assert!(err.to_string().contains("'nope'"), "{err}");
+     }
+ 
+diff --git a/crates/fnox-core/src/providers/mod.rs b/crates/fnox-core/src/providers/mod.rs
+index 52573cc..7629d23 100644
+--- a/crates/fnox-core/src/providers/mod.rs
++++ b/crates/fnox-core/src/providers/mod.rs
+@@ -369,19 +369,20 @@ pub(crate) fn get_provider_from_resolved_with_context_and_identity_cycle_guard(
+     {
+         let provider_source = provider_source_path(config, profile, provider_name);
+         // A selected named identity (FNOX_AGE_IDENTITY, else default_identity) replaces `key_file`.
+-        let key_file = age::select_key_file(
++        let selected = age::select_key_file(
+             provider_name,
+             key_file.clone(),
++            identity.clone(),
+             identities,
+             default_identity.as_deref(),
+         )?;
+         return Ok(Box::new(age::AgeEncryptionProvider::new_with_config(
+             recipients.clone(),
+             crate::config_path::resolve_optional_string_relative_to_file(
+-                key_file,
++                selected.key_file,
+                 provider_source.as_deref(),
+             ),
+-            identity.clone(),
++            selected.identity,
+             std::sync::Arc::new(config.clone()),
+             profile.to_vec(),
+             provider_name.to_string(),
+diff --git a/docs/public/schema.json b/docs/public/schema.json
+index e2af6cd..59aac2d 100644
+--- a/docs/public/schema.json
++++ b/docs/public/schema.json
+@@ -698,6 +698,15 @@
+             "identity": {
+               "$ref": "#/$defs/OptionProviderSecretRef"
+             },
++            "identities": {
++              "type": "object",
++              "additionalProperties": {
++                "$ref": "#/$defs/StringOrSecretRef"
++              }
++            },
++            "default_identity": {
++              "$ref": "#/$defs/OptionStringOrSecretRef"
++            },
+             "auth_command": {
+               "type": ["string", "null"]
+             },
+diff --git a/docs/reference/environment.md b/docs/reference/environment.md
+index 33085c6..f4593ff 100644
+--- a/docs/reference/environment.md
++++ b/docs/reference/environment.md
+@@ -32,7 +32,7 @@ For the full order in which `--if-missing`, these variables, and the config comb
+ | `FNOX_AGE_KEY`      | age identity contents. Takes precedence over every other identity source, including the provider's `identity` and `key_file`.               |
+ | `FNOX_AGE_KEY_FILE` | Path to an age identity or SSH private key. Used only when `FNOX_AGE_KEY` is unset and the provider sets neither `identity` nor `key_file`. |
+ 
+-`FNOX_AGE_IDENTITY` selects a named entry from the age provider's `identities` table, overriding `default_identity`. See [multiple identities](/providers/age#multiple-identities).
++`FNOX_AGE_IDENTITY` selects a named entry from the `identities` table of every age provider in the config, overriding `default_identity`. If an age provider's `identities` table lacks the name, reading a secret from that provider fails. `FNOX_AGE_KEY` still takes precedence. See [multiple identities](/providers/age#multiple-identities).
+ 
+ Without either, fnox reads `age.txt` in `FNOX_CONFIG_DIR`. `fnox exec` removes both variables from the command's environment. See [age identity selection](/providers/age#set-decryption-key).
+ 

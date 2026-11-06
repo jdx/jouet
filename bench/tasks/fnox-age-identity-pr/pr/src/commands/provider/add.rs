@@ -1,0 +1,407 @@
+use crate::commands::Cli;
+use crate::config::Config;
+use crate::error::{FnoxError, Result};
+use crate::providers::{OptionProviderSecretRef, OptionStringOrSecretRef, StringOrSecretRef};
+
+use super::ProviderType;
+
+/// Add a provider entry to a config file
+///
+/// Writes a `[providers.<PROVIDER>]` entry of type PROVIDER_TYPE to the config
+/// file in the current directory, or the global config with `--global`. Most
+/// types start from a template with placeholder values that you edit
+/// afterward; `fido2` and `yubikey` run an interactive hardware setup instead.
+///
+/// The `aws` and `gcp` choices create `aws-sm` and `gcp-sm` providers. With an
+/// explicit `-P` or `--write-profile`, the entry goes under that profile.
+#[derive(Debug, usage_rs::Args)]
+#[usage(alias("a", "set"))]
+#[usage(
+    example("fnox provider add op 1password", header = "Add a 1Password provider"),
+    example(
+        "fnox provider add sync-age age --global",
+        header = "Add an age provider to the global config"
+    ),
+    example(
+        "fnox provider add corp lua --plugin fnox-plugin-corp",
+        header = "Add a Lua plugin provider"
+    ),
+    after_long_help = "See also:\n- Providers: https://fnox.jdx.dev/providers/overview\n- Connect an existing vault: https://fnox.jdx.dev/guide/existing-vault"
+)]
+pub struct AddCommand {
+    /// Name for the provider, which secrets reference with `provider = "..."`
+    pub provider: String,
+
+    /// Provider type
+    #[usage(arg, value_enum)]
+    pub provider_type: ProviderType,
+
+    /// Write to the global config file (`~/.config/fnox/config.toml`)
+    #[usage(short = 'g', long)]
+    pub global: bool,
+
+    /// Lua plugin name or path (type `lua` only; default: the provider name)
+    #[usage(long)]
+    pub plugin: Option<String>,
+
+    /// Default Proton Pass vault (type `proton-pass` only)
+    #[usage(long)]
+    pub vault: Option<String>,
+}
+
+impl AddCommand {
+    pub async fn run(&self, cli: &Cli) -> Result<()> {
+        tracing::debug!(
+            "Adding provider '{}' of type '{}'",
+            self.provider,
+            self.provider_type
+        );
+
+        if self.vault.is_some() && self.provider_type != ProviderType::ProtonPass {
+            return Err(FnoxError::Config(
+                "--vault is only supported for provider type 'proton-pass'".to_string(),
+            ));
+        }
+        if self.plugin.is_some() && self.provider_type != ProviderType::Lua {
+            return Err(FnoxError::Config(
+                "--plugin is only supported for provider type 'lua'".to_string(),
+            ));
+        }
+
+        // Provider add only respects explicit CLI --profile flags, not
+        // FNOX_PROFILE env or Settings, so the default behavior (writing to
+        // top-level [providers]) stays unchanged unless the user opts in.
+        let profiles = Config::normalize_profiles(&cli.profile);
+        let write_profile = Config::resolve_write_profile(&profiles, cli.write_profile.as_deref())?;
+
+        // Determine the target config file
+        let target_path = if self.global {
+            let global_path = Config::global_config_path();
+            // Create parent directory if it doesn't exist
+            if let Some(parent) = global_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    FnoxError::Config(format!(
+                        "Failed to create config directory '{}': {}",
+                        parent.display(),
+                        e
+                    ))
+                })?;
+            }
+            global_path
+        } else {
+            let current_dir = std::env::current_dir().map_err(|e| {
+                FnoxError::Config(format!("Failed to get current directory: {}", e))
+            })?;
+            if cli.config == std::path::Path::new(crate::config::DEFAULT_CONFIG_FILENAME) {
+                crate::config::find_local_config(&current_dir, std::slice::from_ref(&write_profile))
+            } else {
+                current_dir.join(&cli.config)
+            }
+        };
+
+        // Load the target config file (or create new if it doesn't exist)
+        let mut config = if target_path.exists() {
+            Config::load(&target_path)?
+        } else {
+            Config::new()
+        };
+
+        if self.global || write_profile == "default" {
+            if config.providers.contains_key(&self.provider) {
+                return Err(FnoxError::Config(format!(
+                    "Provider '{}' already exists",
+                    self.provider
+                )));
+            }
+        } else {
+            if config
+                .profiles
+                .get(&write_profile)
+                .is_some_and(|p| p.providers.contains_key(&self.provider))
+            {
+                return Err(FnoxError::Config(format!(
+                    "Provider '{}' already exists",
+                    self.provider
+                )));
+            }
+        }
+
+        // Create a template provider config based on type
+        let provider_config = match self.provider_type {
+            ProviderType::OnePassword => crate::config::ProviderConfig::OnePassword {
+                vault: OptionStringOrSecretRef::literal("default"),
+                account: OptionStringOrSecretRef::none(),
+                token: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Aws => crate::config::ProviderConfig::AwsSecretsManager {
+                region: StringOrSecretRef::from("us-east-1"),
+                profile: OptionStringOrSecretRef::none(),
+                role_arn: OptionStringOrSecretRef::none(),
+                prefix: OptionStringOrSecretRef::none(),
+                endpoint: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Vault => crate::config::ProviderConfig::HashiCorpVault {
+                address: OptionStringOrSecretRef::literal("http://localhost:8200"),
+                path: OptionStringOrSecretRef::literal("secret"),
+                token: OptionStringOrSecretRef::none(),
+                namespace: OptionStringOrSecretRef::none(),
+                credential_command: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Gcp => crate::config::ProviderConfig::GoogleSecretManager {
+                project: StringOrSecretRef::from("my-project"),
+                prefix: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::AwsKms => crate::config::ProviderConfig::AwsKms {
+                region: StringOrSecretRef::from("us-east-1"),
+                key_id: StringOrSecretRef::from("alias/my-key"),
+                profile: OptionStringOrSecretRef::none(),
+                role_arn: OptionStringOrSecretRef::none(),
+                endpoint: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::AwsParameterStore => crate::config::ProviderConfig::AwsParameterStore {
+                region: StringOrSecretRef::from("us-east-1"),
+                profile: OptionStringOrSecretRef::none(),
+                role_arn: OptionStringOrSecretRef::none(),
+                prefix: OptionStringOrSecretRef::literal("/myapp/prod/"),
+                endpoint: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::AzureAppConfiguration => {
+                crate::config::ProviderConfig::AzureAppConfiguration {
+                    endpoint: StringOrSecretRef::from("https://my-store.azconfig.io"),
+                    label: OptionStringOrSecretRef::none(),
+                    prefix: OptionStringOrSecretRef::none(),
+                    auth: OptionStringOrSecretRef::none(),
+                    managed_identity_client_id: OptionStringOrSecretRef::none(),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::AzureKms => crate::config::ProviderConfig::AzureKms {
+                vault_url: StringOrSecretRef::from("https://my-vault.vault.azure.net/"),
+                key_name: StringOrSecretRef::from("my-key"),
+                auth: OptionStringOrSecretRef::none(),
+                managed_identity_client_id: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::AzureSecretsManager => {
+                crate::config::ProviderConfig::AzureSecretsManager {
+                    vault_url: StringOrSecretRef::from("https://my-vault.vault.azure.net/"),
+                    prefix: OptionStringOrSecretRef::none(),
+                    auth: OptionStringOrSecretRef::none(),
+                    managed_identity_client_id: OptionStringOrSecretRef::none(),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::GcpKms => crate::config::ProviderConfig::GcpKms {
+                project: StringOrSecretRef::from("my-project"),
+                location: StringOrSecretRef::from("global"),
+                keyring: StringOrSecretRef::from("my-keyring"),
+                key: StringOrSecretRef::from("my-key"),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Bitwarden => crate::config::ProviderConfig::Bitwarden {
+                collection: OptionStringOrSecretRef::none(),
+                organization_id: OptionStringOrSecretRef::none(),
+                profile: OptionStringOrSecretRef::none(),
+                folder: OptionStringOrSecretRef::none(),
+                backend: None,
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::BitwardenSecretsManager => {
+                crate::config::ProviderConfig::BitwardenSecretsManager {
+                    project_id: OptionStringOrSecretRef::none(),
+                    profile: OptionStringOrSecretRef::none(),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::Age => crate::config::ProviderConfig::AgeEncryption {
+                recipients: vec!["age1...".to_string()],
+                key_file: OptionStringOrSecretRef::none(),
+                identity: OptionProviderSecretRef::none(),
+                identities: Default::default(),
+                default_identity: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            #[cfg(not(target_env = "musl"))]
+            ProviderType::Fido2 => {
+                let provider_name = self.provider.clone();
+                let (credential_id_hex, salt_hex, rp_id, _pin) =
+                    tokio::task::spawn_blocking(move || {
+                        crate::providers::fido2::setup::setup_fido2(&provider_name)
+                    })
+                    .await
+                    .map_err(|e| FnoxError::Provider(format!("FIDO2 setup task failed: {e}")))??;
+                // PIN is not stored in config — it will be prompted at runtime
+                crate::config::ProviderConfig::Fido2 {
+                    credential_id: StringOrSecretRef::from(credential_id_hex.as_str()),
+                    salt: StringOrSecretRef::from(salt_hex.as_str()),
+                    rp_id: StringOrSecretRef::from(rp_id.as_str()),
+                    pin: OptionStringOrSecretRef::none(),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::Yubikey => {
+                let provider_name = self.provider.clone();
+                let (challenge_hex, slot_str) = tokio::task::spawn_blocking(move || {
+                    crate::providers::yubikey::setup::setup_yubikey(&provider_name)
+                })
+                .await
+                .map_err(|e| FnoxError::Provider(format!("YubiKey setup task failed: {e}")))??;
+                crate::config::ProviderConfig::Yubikey {
+                    challenge: StringOrSecretRef::from(challenge_hex.as_str()),
+                    slot: StringOrSecretRef::from(slot_str.as_str()),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::Doppler => crate::config::ProviderConfig::Doppler {
+                project: OptionStringOrSecretRef::literal("my-project"),
+                config: OptionStringOrSecretRef::literal("prd"),
+                token: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Enpass => crate::config::ProviderConfig::Enpass {
+                vault: StringOrSecretRef::from("~/Documents/Enpass/Vaults/primary"),
+                keyfile: OptionStringOrSecretRef::none(),
+                password: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Foks => crate::config::ProviderConfig::Foks {
+                prefix: OptionStringOrSecretRef::literal("/fnox/"),
+                team: OptionStringOrSecretRef::none(),
+                home: OptionStringOrSecretRef::none(),
+                host: OptionStringOrSecretRef::none(),
+                bot_token: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Infisical => crate::config::ProviderConfig::Infisical {
+                project_id: OptionStringOrSecretRef::literal("your-project-id"),
+                environment: OptionStringOrSecretRef::literal("dev"),
+                path: OptionStringOrSecretRef::literal("/"),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::KeePass => crate::config::ProviderConfig::KeePass {
+                database: StringOrSecretRef::from("~/secrets.kdbx"),
+                keyfile: OptionStringOrSecretRef::none(),
+                password: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::KeeperSecretsManager => {
+                crate::config::ProviderConfig::KeeperSecretsManager {
+                    config_file: OptionStringOrSecretRef::literal("~/.keeper/ksm-config.json"),
+                    token: OptionStringOrSecretRef::none(),
+                    auth_command: None,
+                    daemon_cache: None,
+                }
+            }
+            ProviderType::Keychain => crate::config::ProviderConfig::Keychain {
+                service: StringOrSecretRef::from("fnox"),
+                prefix: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Kubernetes => crate::config::ProviderConfig::Kubernetes {
+                context: OptionStringOrSecretRef::none(),
+                namespace: OptionStringOrSecretRef::none(),
+                kubeconfig: OptionStringOrSecretRef::none(),
+                prefix: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Gopass => crate::config::ProviderConfig::Gopass {
+                mount: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::PasswordStore => crate::config::ProviderConfig::PasswordStore {
+                prefix: OptionStringOrSecretRef::literal("fnox/"),
+                store_dir: OptionStringOrSecretRef::none(),
+                gpg_opts: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Passwordstate => crate::config::ProviderConfig::Passwordstate {
+                base_url: StringOrSecretRef::from("https://passwordstate.example.com"),
+                api_key: OptionStringOrSecretRef::none(),
+                password_list_id: StringOrSecretRef::from("123"),
+                verify_ssl: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Lua => crate::config::ProviderConfig::Lua {
+                plugin: StringOrSecretRef::from(
+                    self.plugin.clone().unwrap_or_else(|| self.provider.clone()),
+                ),
+                options: Default::default(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::Plain => crate::config::ProviderConfig::Plain {
+                file: crate::providers::OptionStringOrSecretRef::none(),
+                format: crate::providers::OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+            ProviderType::ProtonPass => crate::config::ProviderConfig::ProtonPass {
+                vault: self
+                    .vault
+                    .as_ref()
+                    .map_or_else(OptionStringOrSecretRef::none, |vault| {
+                        OptionStringOrSecretRef::literal(vault.clone())
+                    }),
+                agent_reason: OptionStringOrSecretRef::none(),
+                auth_command: None,
+                daemon_cache: None,
+            },
+        };
+
+        // Insert into the appropriate section — after the match so no
+        // mutable borrow is held across the (potentially async) match.
+        if self.global || write_profile == "default" {
+            config
+                .providers
+                .insert(self.provider.clone(), provider_config);
+        } else {
+            config
+                .profiles
+                .entry(write_profile.clone())
+                .or_default()
+                .providers
+                .insert(self.provider.clone(), provider_config);
+        }
+        config.save(&target_path)?;
+
+        let global_suffix = if self.global { " (global)" } else { "" };
+        println!("✓ Added provider '{}'{}", self.provider, global_suffix);
+        println!(
+            "\nNote: Please edit '{}' to configure the provider settings.",
+            target_path.display()
+        );
+
+        Ok(())
+    }
+}
