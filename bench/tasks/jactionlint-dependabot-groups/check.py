@@ -84,14 +84,15 @@ def check_committed_tests():
         package = Path(path).parent.as_posix()
         package = '.' if package == '.' else f'./{package}'
         try:
-            if not names:
-                listed = subprocess.run(['go', 'list', '-json', package], capture_output=True, text=True, timeout=60,
-                                        check=False)
-                package_info = json.loads(listed.stdout)
-                available = package_info.get('TestGoFiles', []) + package_info.get('XTestGoFiles', [])
-                if listed.returncode != 0 or Path(path).name not in available:
-                    UNVERIFIED.append(f'edited test file was not selected for {path}')
-                    continue
+            existed = bool(subprocess.run(['git', 'ls-tree', '-z', head_sha(), '--', path],
+                                          capture_output=True, timeout=30, check=True).stdout)
+            listed = subprocess.run(['go', 'list', '-json', package], capture_output=True, text=True, timeout=60,
+                                    check=False)
+            package_info = json.loads(listed.stdout)
+            available = package_info.get('TestGoFiles', []) + package_info.get('XTestGoFiles', [])
+            if listed.returncode != 0 or Path(path).name not in available:
+                UNVERIFIED.append(f'edited test file was not selected for {path}')
+                continue
             args = ['go', 'test', '-json', '-count=1']
             if names:
                 args.extend(['-run', '^(' + '|'.join(names) + ')$'])
@@ -101,7 +102,7 @@ def check_committed_tests():
         except subprocess.TimeoutExpired as error:
             UNVERIFIED.append(f'committed tests timed out in {path}:\n{timeout_output(error)}')
             continue
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
             UNVERIFIED.append(f'could not run committed tests in {path}: {error}')
             continue
         outcomes = {event.get('Test'): event.get('Action') for event in events
@@ -118,6 +119,21 @@ def check_committed_tests():
               or any(event.get('Action') == 'skip' and isinstance(event.get('Test'), str)
                      and (not names or any(event['Test'].startswith(name + '/') for name in names)) for event in events)):
             UNVERIFIED.append(f'committed tests did not all run and pass in {path}')
+        # A new function in an existing file can accompany changes to other
+        # tests or helpers. Running only the new function cannot cover those.
+        if names and existed:
+            try:
+                whole = subprocess.run(['go', 'test', '-json', '-count=1', package], capture_output=True,
+                                       text=True, timeout=300, check=False)
+                all_events = [json.loads(line) for line in whole.stdout.splitlines()]
+                if (whole.returncode != 0
+                        or not any(e.get('Action') == 'pass' and e.get('Test') for e in all_events)
+                        or any(e.get('Action') == 'skip' and e.get('Test') for e in all_events)):
+                    UNVERIFIED.append(f'package for edited test file did not all run and pass: {path}')
+            except subprocess.TimeoutExpired as error:
+                UNVERIFIED.append(f'package for edited test file timed out in {path}:\n{timeout_output(error)}')
+            except (OSError, json.JSONDecodeError) as error:
+                UNVERIFIED.append(f'could not check package for edited test file {path}: {error}')
     if files and not added_test:
         UNVERIFIED.append('no newly added Go test function could be identified')
 

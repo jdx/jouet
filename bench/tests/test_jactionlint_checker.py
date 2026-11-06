@@ -44,7 +44,12 @@ class JactionlintCheckerTest(unittest.TestCase):
     def check_events(self, events, exit_code=0, diff='+func TestAdded(t *testing.T) {'):
         def run(command, **kwargs):
             if command[0] == 'git':
+                if command[1] == 'ls-tree':
+                    return subprocess.CompletedProcess(command, 0, stdout=b'', stderr=b'')
                 return subprocess.CompletedProcess(command, 0, stdout=diff, stderr='')
+            if command[1] == 'list':
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'TestGoFiles': ['added_test.go']}),
+                                                   stderr='')
             self.assertEqual(command[-1], '.')
             output = '\n'.join(json.dumps(event) for event in events)
             return subprocess.CompletedProcess(command, exit_code, stdout=output, stderr='')
@@ -84,10 +89,14 @@ class JactionlintCheckerTest(unittest.TestCase):
     def test_existing_edited_file_runs_the_package_alongside_new_test(self):
         def run(command, **kwargs):
             if command[0] == 'git':
+                if command[1] == 'ls-tree':
+                    return subprocess.CompletedProcess(command, 0, stdout=b'old' if command[-1] == 'existing_test.go'
+                                                       else b'', stderr=b'')
                 diff = '+func TestAdded(t *testing.T) {' if command[-1] == 'added_test.go' else '+// edited'
                 return subprocess.CompletedProcess(command, 0, stdout=diff, stderr='')
             if command[1] == 'list':
-                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'TestGoFiles': ['existing_test.go']}),
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'TestGoFiles': ['existing_test.go',
+                                                                                                 'added_test.go']}),
                                                    stderr='')
             test = 'TestAdded' if '-run' in command else 'TestExisting'
             return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'Action': 'pass', 'Test': test}),
@@ -108,6 +117,36 @@ class JactionlintCheckerTest(unittest.TestCase):
                     self.assertFalse(checker.UNVERIFIED)
                     self.assertTrue(any(call.args[0][1] == 'test' and '-run' not in call.args[0]
                                         for call in process.call_args_list))
+            finally:
+                os.chdir(old)
+
+    def test_new_test_in_existing_file_also_checks_package(self):
+        def run(command, **kwargs):
+            if command[:2] == ['git', 'diff']:
+                return subprocess.CompletedProcess(command, 0, stdout='+func TestAdded(t *testing.T) {', stderr='')
+            if command[:2] == ['git', 'ls-tree']:
+                return subprocess.CompletedProcess(command, 0, stdout=b'old', stderr=b'')
+            if command[:2] == ['go', 'list']:
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'TestGoFiles': ['existing_test.go']}),
+                                                   stderr='')
+            if '-run' in command:
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'Action': 'pass', 'Test': 'TestAdded'}),
+                                                   stderr='')
+            return subprocess.CompletedProcess(command, 1, stdout=json.dumps({'Action': 'fail', 'Test': 'TestExisting'}),
+                                               stderr='')
+
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path.cwd()
+            try:
+                os.chdir(directory)
+                Path('existing_test.go').write_text('package example\n')
+                with mock.patch.object(checker, 'committed_files', return_value={'existing_test.go'}), \
+                        mock.patch.object(checker, 'head_sha', return_value='base'), \
+                        mock.patch.object(checker, 'UNVERIFIED', []), \
+                        mock.patch.object(checker, 'expect'), \
+                        mock.patch.object(checker.subprocess, 'run', side_effect=run):
+                    checker.check_committed_tests()
+                    self.assertTrue(checker.UNVERIFIED)
             finally:
                 os.chdir(old)
 
