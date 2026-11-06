@@ -436,6 +436,23 @@ fn a_passing_run_has_counts_and_no_failures() {
 }
 
 #[test]
+fn an_mbx_error_is_not_build_noise() {
+    let text = "mbx[cache]: 0 hits\nmbx[error]: failed to bind cache session listener: path must be shorter than SUN_LEN\nmbx[savings]: none\n";
+    let d = digest(text, true, DEFAULT_BUDGET);
+    let lines = &d.failures[0].lines;
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("mbx[error]: failed to bind")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("mbx[cache]")),
+        "{lines:#?}"
+    );
+}
+
+#[test]
 fn an_unrecognised_failure_shows_the_end_of_the_output() {
     let text: String = (1..=50).map(|i| format!("step {i}\n")).collect::<String>() + "boom\n";
     let d = digest(&text, true, DEFAULT_BUDGET);
