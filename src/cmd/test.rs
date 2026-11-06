@@ -533,6 +533,20 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         }
     }
     report.ok = exit == Exit::Ok;
+    if args.affected
+        && !args.baseline
+        && !out.json
+        && exit == Exit::Failed
+        && blamed.is_none()
+        && misuse.is_none()
+        && failed_tests.as_ref().is_some_and(|names| !names.is_empty())
+        && crate::settings::Settings::load().test.baseline != "off"
+    {
+        emit(&format!(
+            "baseline: if these failures may predate the change, `{}` retries the selected tests and compares failures at the merge base\n",
+            with_baseline()
+        ));
+    }
     // Kept by the run itself, since a pipe hides its exit status from the
     // hooks.
     if runs && misuse.is_none() {
