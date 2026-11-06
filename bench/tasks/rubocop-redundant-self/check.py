@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _check import UNVERIFIED, committed_files, dirty, expect, finish, new_commit
 
 SPEC = "spec/rubocop/cop/style/redundant_self_spec.rb"
+SOURCE = "lib/rubocop/cop/style/redundant_self.rb"
 DEADLINE = time.monotonic() + 120
 
 
@@ -45,7 +46,7 @@ def run(command, cwd, env, *, text=None, timeout=45):
     return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
 
-def phase(spec):
+def phase(mode):
     try:
         source = tomllib.loads((Path(__file__).parent / "task.toml").read_text())["source"]["git"]
         if source.startswith("~/"):
@@ -84,7 +85,7 @@ def phase(spec):
             env = os.environ.copy()
             env.update({"BUNDLE_PATH": str(checkout / "vendor/bundle"), "BUNDLE_APP_CONFIG": str(checkout / ".bundle"),
                         "BUNDLE_FROZEN": "true", "BUNDLE_DISABLE_SHARED_GEMS": "true"})
-            if spec:
+            if mode == "spec":
                 result = run(["bundle", "exec", "rspec", SPEC], checkout, env)
                 if result is None:
                     return
@@ -100,6 +101,21 @@ def phase(spec):
                     expect(False, f"the committed spec reported failures:\n{output}")
                 elif int(counts.group(3) or 0):
                     UNVERIFIED.append("the committed spec has pending examples")
+            elif mode == "lint":
+                result = run(["bundle", "exec", "rubocop", "--format", "json", "--cache", "false", SOURCE, SPEC],
+                             checkout, env)
+                if result is None:
+                    return
+                try:
+                    report = json.loads(result.stdout)
+                    inspected = {item["path"] for item in report["files"]}
+                    if not {SOURCE, SPEC} <= inspected:
+                        UNVERIFIED.append("project lint did not inspect both changed Ruby files")
+                    else:
+                        expect(result.returncode == 0 and report["summary"]["offense_count"] == 0,
+                               f"project lint found offenses (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+                except (ValueError, KeyError, TypeError):
+                    UNVERIFIED.append(f"project lint did not produce a usable report (exit {result.returncode}): {result.stderr}")
             else:
                 for source, expected in [("self.a, *self.b = c", 0), ("*self.a, self.b = c", 0),
                                          ("a, (self.b, *self.c) = d", 0), ("a, b = *self.c", 1), ("self.c", 1)]:
@@ -136,8 +152,9 @@ def main():
     expect(any(p.startswith("changelog/") and p.endswith(".md") for p in files), "no changelog entry was committed")
     expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
     if SPEC in files and Path(SPEC).is_file() and not Path(SPEC).is_symlink():
-        phase(spec=True)
-    phase(spec=False)
+        phase("spec")
+    phase("lint")
+    phase("cli")
     finish()
 
 
