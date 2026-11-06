@@ -75,8 +75,12 @@ if tests:
         tested = subprocess.run(["python3", "-m", "pytest", "-q", "--", *tests],
                                 capture_output=True, text=True, timeout=90)
         output = tested.stdout + tested.stderr
-        if tested.returncode:
+        if tested.returncode == 1 and re.search(r"\b[1-9][0-9]* failed\b", output):
             expect(False, f"committed tests failed:\n{output}")
+        elif tested.returncode == 5:
+            expect(False, f"committed test files collected no tests:\n{output}")
+        elif tested.returncode:
+            UNVERIFIED.append(f"committed tests could not report a test result:\n{output}")
         elif not re.search(r"\b[1-9][0-9]* passed\b", output) or re.search(r"\b[1-9][0-9]* skipped\b", output):
             UNVERIFIED.append(f"committed tests did not report complete passing coverage:\n{output}")
     except (OSError, subprocess.TimeoutExpired) as error:
