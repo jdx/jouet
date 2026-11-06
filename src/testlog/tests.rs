@@ -262,6 +262,13 @@ Caused by:
         d.failures[0].lines,
         ["fatal runtime error: thread local panicked on drop, aborting"]
     );
+    // libtest spells it --no-capture since Rust 1.88.
+    let log = log.replace("--nocapture`", "--no-capture`");
+    let d = digest(&log, true, DEFAULT_BUDGET);
+    assert_eq!(
+        d.failures[0].lines,
+        ["fatal runtime error: thread local panicked on drop, aborting"]
+    );
 }
 
 #[test]

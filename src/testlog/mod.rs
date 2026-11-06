@@ -681,9 +681,10 @@ fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
     let ended = exit
         .as_ref()
         .map_or("exited", |c| c.get(2).map_or("", |m| m.as_str()));
-    let nocapture = exit
-        .as_ref()
-        .is_some_and(|c| c[1].split_whitespace().any(|w| w == "--nocapture"));
+    let nocapture = exit.as_ref().is_some_and(|c| {
+        c[1].split_whitespace()
+            .any(|w| w == "--nocapture" || w == "--no-capture")
+    });
     let mut said: Vec<String> = jouet_wait::fold_backtraces(lines[start + 1..at].to_vec())
         .into_iter()
         .filter(|l| {
