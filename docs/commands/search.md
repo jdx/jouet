@@ -34,6 +34,10 @@ Inside an agent session, a second search prints only what is new. Running the fi
 ```output
 $ jouet search 'join_url|fetch\(' src/
 src/lib.rs: 4 matches already shown, unchanged
+    7: let url = join_url(&self.base, path);
+    8: fetch(&url)
+    12: fn join_url(base: &str, path: &str) -> String {
+    16: fn fetch(url: &str) -> String {
 ```
 
 Reads and searches are the largest share of what agents put in their context: 41% of tool output in the Claude Code sessions jouet was measured on, and 56% in the Codex ones. Most of that is the same lines read twice, or a search that printed every match in the tree when the agent needed a few.
@@ -79,7 +83,7 @@ src/b.rs
 
 ## Matches the session already saw {#sessions}
 
-Inside an agent session, jouet remembers which lines of which files it showed. Searching again prints only what is new; a file whose matches were all shown, and which has not changed since, becomes one line, such as `src/lib.rs: 4 matches already shown, unchanged`. A file whose size or modification time changed is new again. `--again` shows everything anyway. Neither `--again` nor `-l` adds what it prints to the session's memory.
+Inside an agent session, jouet remembers which lines of which files it showed. Searching again prints only what is new; a file whose matches were all shown, and which has not changed since, says so, such as `src/lib.rs: 4 matches already shown, unchanged`, and lists the first 8 again by line and text alone, without the definitions around them. An agent that cannot place a match it saw searches for it again with grep, at the cost of a whole request. A file whose size or modification time changed is new again. `--again` shows everything anyway. Neither `--again` nor `-l` adds what it prints to the session's memory.
 
 The session is `JOUET_SESSION_ID`, else the ID Claude Code (`CLAUDE_CODE_SESSION_ID`) or Codex (`CODEX_THREAD_ID`) sets for the commands it runs. Outside a session nothing is remembered. What a session was shown is kept in `$XDG_STATE_HOME/jouet/seen/` (`~/.local/state/jouet/seen/` without it) and is removed after a week untouched.
 

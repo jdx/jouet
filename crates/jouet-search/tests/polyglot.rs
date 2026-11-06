@@ -364,7 +364,9 @@ fn matches_already_shown_collapse_until_the_file_changes() {
     assert!(second.files[0].shown.is_empty());
     let text = search::render(&second, false);
     assert!(
-        text.ends_with("a.py: 2 matches already shown, unchanged\n"),
+        text.ends_with(
+            "a.py: 2 matches already shown, unchanged\n    2: return beta()\n    5: def beta():\n"
+        ),
         "{text}"
     );
 
