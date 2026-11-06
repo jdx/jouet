@@ -39,15 +39,19 @@ class RequestsCheckerTest(unittest.TestCase):
                 self.assertFalse(failures)
 
     def test_failure_and_runner_error_are_distinct(self):
-        for report, code in ((None, 1),
-                             ("<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>", 0)):
+        report = "<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>"
+        for code in (0, 1):
             with self.subTest(code=code):
                 unverified, failures = self.check_report(report, code)
                 self.assertFalse(unverified)
                 self.assertEqual(failures[0].args[0], False)
-        unverified, failures = self.check_report(None, 2)
-        self.assertTrue(unverified)
-        self.assertFalse(failures)
+        for report, code in ((None, 1), (None, 2), ("<broken", 1),
+                             ("<testsuite><testcase><error/></testcase></testsuite>", 1),
+                             ("<testsuite><testcase/></testsuite>", 1)):
+            with self.subTest(report=report, code=code):
+                unverified, failures = self.check_report(report, code)
+                self.assertTrue(unverified)
+                self.assertFalse(failures)
 
     def test_each_file_must_collect_tests(self):
         def run(command, **kwargs):

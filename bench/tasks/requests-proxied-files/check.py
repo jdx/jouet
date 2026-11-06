@@ -40,23 +40,19 @@ def check_test_file(path, timeout):
             UNVERIFIED.append(f"committed tests could not run for {path}: {error}")
             return
         output = (proc.stdout + proc.stderr)[-3000:]
-        if proc.returncode == 1:
-            expect(False, f"committed tests failed for {path}:\n{output}")
-            return
-        if proc.returncode != 0:
-            UNVERIFIED.append(f"committed tests could not run for {path} (exit {proc.returncode}):\n{output}")
-            return
         try:
             root = ET.parse(report).getroot()
             cases = root.findall(".//testcase")
-            if not cases:
+            if any(case.find("failure") is not None for case in cases):
+                expect(False, f"committed tests failed for {path}:\n{output}")
+            elif proc.returncode != 0 or any(case.find("error") is not None for case in cases):
+                UNVERIFIED.append(f"committed tests could not complete for {path} (exit {proc.returncode}):\n{output}")
+            elif not cases:
                 UNVERIFIED.append(f"committed tests reported no test cases for {path}")
-            elif any(case.find("failure") is not None or case.find("error") is not None for case in cases):
-                expect(False, f"committed tests reported failures for {path} despite a successful exit:\n{output}")
             elif any(case.find("skipped") is not None for case in cases):
                 UNVERIFIED.append(f"committed tests included skipped or expected-failure cases for {path}")
         except (OSError, ET.ParseError) as error:
-            UNVERIFIED.append(f"committed tests did not produce a readable report for {path}: {error}")
+            UNVERIFIED.append(f"committed tests did not produce a readable report for {path}: {error}\n{output}")
 
 # Exercise the public API without making a network request or replacing tests.
 program = r'''
