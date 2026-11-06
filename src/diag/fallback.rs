@@ -39,6 +39,7 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
     let mut report = Report::empty(Status::Findings, files);
     let mut uncovered = Vec::new();
     let mut ran = Vec::new();
+    let mut invalid = Vec::new();
     for checker in CHECKERS {
         let mine: Vec<&String> = report
             .files
@@ -62,6 +63,14 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
         let mine: Vec<String> = mine.into_iter().cloned().collect();
         let (findings, status, output) = run(checker, root, &mine, timeout);
         ran.push(checker.name);
+        if status == "invalid" {
+            invalid.push(checker.name);
+        }
+        let status = if status == "invalid" {
+            "failed"
+        } else {
+            status
+        };
         let excerpt = (status == "failed" && findings.is_empty())
             .then(|| super::excerpt(&output, None))
             .flatten();
@@ -95,12 +104,19 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
         return report;
     }
     report.source = ran.join(", ");
+    let mut reasons = Vec::new();
     if !uncovered.is_empty() {
-        report.status = Status::Unavailable;
-        report.reason = Some(format!(
+        reasons.push(format!(
             "no hk config, and no fallback checker for {}",
             uncovered.join(", ")
         ));
+    }
+    if !invalid.is_empty() {
+        reasons.push(format!("invalid JSON from {}", invalid.join(", ")));
+    }
+    if !reasons.is_empty() {
+        report.status = Status::Unavailable;
+        report.reason = Some(reasons.join("; "));
     }
     report
 }
@@ -136,6 +152,13 @@ fn run(
         Err(e) => return (Vec::new(), "failed", format!("running {}: {e}", argv[0])),
     };
     let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+    if ran.code == Some(0) && !ran.timed_out && !valid_json(checker.program, &stdout) {
+        return (
+            Vec::new(),
+            "invalid",
+            format!("invalid JSON from {}: {stdout}", checker.name),
+        );
+    }
     let findings = match checker.program {
         "cargo" => cargo(root, &stdout, checker.name),
         "ruff" => ruff(root, &stdout, checker.name),
@@ -152,6 +175,17 @@ fn run(
         stdout
     };
     (findings, status, output)
+}
+
+/// The single-document formats must be parseable before a clean result is trusted.
+fn valid_json(program: &str, stdout: &str) -> bool {
+    match program {
+        "ruff" => serde_json::from_str::<Value>(stdout).is_ok_and(|v| v.is_array()),
+        "shellcheck" => serde_json::from_str::<Value>(stdout)
+            .is_ok_and(|v| v.get("comments").is_some_and(Value::is_array)),
+        // Cargo produces a stream of JSON messages rather than one document.
+        _ => true,
+    }
 }
 
 /// `cargo clippy --message-format=json`: each `compiler-message` with a
@@ -265,6 +299,16 @@ pub(crate) fn on_path(program: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_fallback_json_shapes() {
+        assert!(valid_json("ruff", "[]"));
+        assert!(!valid_json("ruff", "{}"));
+        assert!(!valid_json("ruff", "not json"));
+        assert!(valid_json("shellcheck", r#"{"comments":[]}"#));
+        assert!(!valid_json("shellcheck", "{}"));
+        assert!(!valid_json("shellcheck", "not json"));
+    }
 
     #[test]
     fn reads_each_checkers_json() {

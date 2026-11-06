@@ -324,6 +324,25 @@ fake_hk_stop() {
 	assert_output --partial 'diagnostics unavailable: no hk config (hk.pkl) here, and no fallback checker for notes.txt'
 }
 
+@test "fallback rejects malformed successful checker output" {
+	git rm -q hk.pkl
+	printf '%s\n' '#!/bin/sh' 'printf "not json\\n"' >"$BATS_TEST_TMPDIR/tools/shellcheck"
+
+	run --separate-stderr jouet diag check run.sh --json
+	assert_failure 4
+	run jq -c '{status, reason, steps: [.steps[] | {name, status}]}' <<<"$output"
+	assert_output '{"status":"unavailable","reason":"invalid JSON from shellcheck","steps":[{"name":"shellcheck","status":"failed"}]}'
+
+	run --separate-stderr jouet diag check run.sh
+	assert_failure 4
+	assert_output --partial "invalid JSON from shellcheck"
+
+	run --separate-stderr jouet diag delta run.sh --json
+	assert_failure 4
+	run jq -r .status <<<"$output"
+	assert_output unavailable
+}
+
 @test "mixed fallback coverage is unavailable even when the supported file is clean" {
 	git rm -q hk.pkl
 	printf '%s\n' '#!/bin/sh' "echo \"\$1\"" >run.sh
