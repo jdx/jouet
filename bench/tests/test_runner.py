@@ -312,6 +312,27 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(path.read_text(), '{"id":"earlier"}\n')
             self.assertEqual(list(root.glob(".runs-*")), [])
 
+    def test_disk_guard_stops_the_suite_after_saving_the_record(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain"),
+                   runner.Planned(1, "second", "codex", "jouet")]
+        record = {"id": planned[0].id, "task": "first", "success": False,
+                  "error": "disk reserve", "error_kind": "disk_guard", "usage": {}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            messages = []
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", return_value=record) as execute:
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, messages.append)
+            self.assertEqual(records, [record])
+            self.assertEqual(execute.call_count, 1)
+            self.assertEqual(json.loads((root / "runs.jsonl").read_text())["error_kind"], "disk_guard")
+            self.assertTrue(any("disk reserve reached" in message for message in messages))
+
     def test_missing_codex_usage_stops_the_suite(self):
         import os
         from unittest.mock import patch
@@ -446,6 +467,31 @@ class PlanTest(unittest.TestCase):
                 passed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
                 self.assertTrue(passed["success"])
 
+    def test_disk_guard_skips_checker_and_is_not_scored(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            agent = {"lines": [], "session": None, "stopped": "disk_guard", "exit_code": None, "wall_s": 0}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                    patch.object(runner.arms_mod, "verify_codex_path"), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", return_value=agent), \
+                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner.tasks_mod, "run_check") as check:
+                record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+            check.assert_not_called()
+            self.assertEqual(record["error_kind"], "disk_guard")
+            self.assertIsNone(record["check"]["passed"])
+            self.assertFalse(report.scored(record))
+
     def test_capacity_error_skips_check_and_is_not_a_task_failure(self):
         from unittest.mock import patch
 
@@ -536,6 +582,28 @@ class StopTest(unittest.TestCase):
                 max_tokens,
                 Path(d) / "agent.jsonl",
             )
+
+    def test_disk_reserve_refuses_start_and_stops_an_active_agent(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            args = (HARNESSES["claude"], [sys.executable, "-c", "import time; time.sleep(30)"],
+                    {"PATH": "/usr/bin:/bin"}, root, root, 20, None, root / "agent.jsonl")
+            with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=99)), \
+                    patch.object(runner.subprocess, "Popen") as spawn:
+                refused = runner.run_agent(*args, min_free_bytes=100)
+            spawn.assert_not_called()
+            self.assertEqual(refused["stopped"], "disk_guard")
+            self.assertIsNone(refused["exit_code"])
+
+            readings = [SimpleNamespace(free=200)] * 3 + [SimpleNamespace(free=99)] * 6
+            with patch.object(runner.shutil, "disk_usage", side_effect=readings):
+                stopped = runner.run_agent(*args, min_free_bytes=100)
+            self.assertEqual(stopped["stopped"], "disk_guard")
+            self.assertLess(stopped["wall_s"], 15)
+            self.assertNotEqual(stopped["exit_code"], 0)
 
     def test_token_cap(self):
         result = self.run_agent(responses=3, timeout_s=20, max_tokens=1000)

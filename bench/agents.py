@@ -44,6 +44,7 @@ DEFAULTS = {
     "max_tokens_per_run": 4_000_000,
     "max_usd_per_run": 3.0,
     "max_total_tokens": 60_000_000,
+    "min_free_mib": 1024,
 }
 
 
@@ -94,6 +95,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="skip the remaining runs once the suite has spent this many tokens",
     )
     run.add_argument("--timeout", type=int, help="cap every task's timeout, in seconds")
+    run.add_argument("--min-free-mib", type=int, default=DEFAULTS["min_free_mib"],
+                     help="stop an agent run below this free disk space in MiB (default 1024; 0 disables)")
     run.add_argument("--jouet", type=Path, default=runner.REPO_ROOT / "target" / "debug" / "jouet")
     run.add_argument("--codex-reviewed-home", type=Path, default=REVIEWED_CODEX_HOME,
                      help="dedicated CODEX_HOME whose jouet hooks were reviewed in Codex "
@@ -219,6 +222,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     planned = runner.plan(selected, args.harness, args.arms, args.rounds, seed)
 
     problems = []
+    if args.min_free_mib < 0:
+        problems.append("--min-free-mib must be nonnegative")
     bins = {}
     for name in args.harness:
         h = HARNESSES[name]
@@ -254,7 +259,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
     print(
         f"  budget: stop a run past {args.max_tokens_per_run:,} tokens"
-        f" or ${args.max_usd_per_run} (Claude Code); stop the suite past {args.max_total_tokens:,} tokens"
+        f" or ${args.max_usd_per_run} (Claude Code); stop the suite past {args.max_total_tokens:,} tokens; "
+        f"agent disk reserve {args.min_free_mib:,} MiB (0 disables)"
     )
     for p in planned:
         print(f"  {p.id}")
@@ -293,6 +299,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             "max_usd_per_run": args.max_usd_per_run,
             "max_total_tokens": args.max_total_tokens,
             "timeout_s": args.timeout,
+            "min_free_mib": args.min_free_mib,
         },
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -304,6 +311,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "max_usd_per_run": args.max_usd_per_run,
         "max_total_tokens": args.max_total_tokens,
         "timeout_s": args.timeout,
+        "min_free_bytes": args.min_free_mib * 1024 * 1024,
         "jouet_bin": args.jouet.resolve(),
         "codex_reviewed_home": str(args.codex_reviewed_home.resolve()) if args.codex_reviewed_home else None,
         "jouet_env": jouet_env,
@@ -337,7 +345,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 4
     write_summary(out, records, meta)
     print(f"results: {out}")
-    return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable")
+    return 4 if any(r.get("error_kind") in ("codex_hook_preflight", "codex_usage_unavailable", "disk_guard")
                     for r in records) else 0
 
 

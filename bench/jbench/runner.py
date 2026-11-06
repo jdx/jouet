@@ -239,6 +239,10 @@ class DiskSamples:
             for name in paths
         }
 
+    def below(self, minimum: int) -> bool:
+        return minimum > 0 and any(entry["end_bytes"] is not None and entry["end_bytes"] < minimum
+                                   for entry in self.values.values())
+
     def sample(self) -> None:
         for name, path in self.paths.items():
             entry = self.values[name]
@@ -266,8 +270,9 @@ def run_agent(
     timeout_s: int,
     max_tokens: int | None,
     stream_path: Path,
+    min_free_bytes: int = 0,
 ) -> dict[str, Any]:
-    """Runs the agent, stopping it at the timeout or the token cap."""
+    """Runs the agent, stopping at the timeout, token cap or disk reserve."""
     lines: list[str] = []
     elapsed: list[float] = []
     stopped: list[str] = []
@@ -279,6 +284,12 @@ def run_agent(
         tmp = workdir / tmp
     disk = DiskSamples({"work": workdir, "tmp": tmp, "results": stream_path.parent})
     disk.sample()
+    if disk.below(min_free_bytes):
+        stream_path.write_text("")
+        (stream_path.parent / "agent.stderr").write_text("")
+        (stream_path.parent / "agent-timing.json").write_text(json.dumps({"elapsed_s": [], "stream_complete": True}))
+        return {"wall_s": 0, "exit_code": None, "stopped": "disk_guard", "lines": [], "elapsed": [],
+                "stream_complete": True, "disk_free": disk.values, "session": None}
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
         proc = subprocess.Popen(
             cmd,
@@ -315,7 +326,9 @@ def run_agent(
                 except subprocess.TimeoutExpired:
                     pass
                 disk.sample()
-                if time.perf_counter() - started > timeout_s:
+                if disk.below(min_free_bytes):
+                    stopped.append("disk_guard")
+                elif time.perf_counter() - started > timeout_s:
                     stopped.append("timeout")
                 elif max_tokens and harness.tokens_so_far(list(lines), config_dir) > max_tokens:
                     stopped.append("token_cap")
@@ -329,6 +342,8 @@ def run_agent(
         proc.wait()
         wall_s = time.perf_counter() - started
         disk.sample()
+        if disk.below(min_free_bytes):
+            stopped[:] = ["disk_guard"]
         reader.join(timeout=10)
         # A descendant can keep stdout open after the agent exits. Freeze the
         # transcript and timestamps together before closing the stream; a
@@ -575,7 +590,8 @@ def execute(
             raise codex_hooks.HookPreflightError("Dedicated Codex credentials appeared during setup") from error
         try:
             agent = run_agent(
-                harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"), keep / "agent.jsonl"
+                harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"),
+                keep / "agent.jsonl", opts.get("min_free_bytes", 0)
             )
         finally:
             # Before anything else can fail: a refresh the run made is the
@@ -614,7 +630,9 @@ def execute(
                 and usage.extra.get("capacity_error", False))
     missing_hook = harness.name == "codex" and arm.jouet and not arms_mod.codex_started(env)
     missing_usage = harness.name == "codex" and usage.extra.get("usage_observed") is False
-    if missing_hook:
+    if ran["agent"]["stopped"] == "disk_guard":
+        check = {"passed": None, "exit_code": None, "output": "Check skipped: disk reserve reached."}
+    elif missing_hook:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: jouet's Codex session-start hook was not observed."}
     elif capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
@@ -657,7 +675,10 @@ def execute(
         "credentials": ran["credentials"],
         "left_running": left,
     }
-    if missing_hook:
+    if agent["stopped"] == "disk_guard":
+        record["error"] = "Disk reserve reached; task result is unverified"
+        record["error_kind"] = "disk_guard"
+    elif missing_hook:
         record["error"] = "Codex did not record the jouet session-start hook"
         record["error_kind"] = "codex_hook_preflight"
     elif capacity:
@@ -802,6 +823,9 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             )
             for note in record.get("credentials") or []:
                 log(f"    credentials: {note}")
+            if record.get("error_kind") == "disk_guard":
+                log("stopping: disk reserve reached")
+                break
             if record.get("error_kind") == "codex_hook_preflight":
                 log("stopping: Codex hooks could not be verified")
                 break
