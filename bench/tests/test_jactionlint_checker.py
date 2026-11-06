@@ -1,0 +1,80 @@
+import importlib.util
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+CHECKER = Path(__file__).resolve().parents[1] / 'tasks/jactionlint-dependabot-groups/check.py'
+spec = importlib.util.spec_from_file_location('jactionlint_checker', CHECKER)
+checker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(checker)
+
+
+class JactionlintCheckerTest(unittest.TestCase):
+    def test_passing_behavior_does_not_excuse_a_missing_commit(self):
+        result = subprocess.CompletedProcess(['go'], 0, stdout='', stderr='')
+        with mock.patch.object(checker.subprocess, 'run', return_value=result), \
+                mock.patch.object(checker, 'new_commit', return_value=False), \
+                mock.patch.object(checker, 'dirty', return_value=[]), \
+                mock.patch.object(checker, 'check_committed_tests'), \
+                mock.patch.object(checker, 'finish'), \
+                mock.patch.object(checker, 'expect') as expect:
+            checker.main()
+            expect.assert_any_call(False, 'nothing was committed')
+
+    def test_behavior_failure_is_distinct_from_a_runner_error(self):
+        for output, failed in (('regular and group: got 1 duplicate diagnostics, want 0', True),
+                               ('go: module unavailable', False)):
+            with self.subTest(output=output), mock.patch.object(checker, 'UNVERIFIED', []), \
+                    mock.patch.object(checker.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                        ['go'], 1, stdout='', stderr=output)), \
+                    mock.patch.object(checker, 'new_commit', return_value=True), \
+                    mock.patch.object(checker, 'dirty', return_value=[]), \
+                    mock.patch.object(checker, 'check_committed_tests'), \
+                    mock.patch.object(checker, 'finish'), \
+                    mock.patch.object(checker, 'expect') as expect:
+                checker.main()
+                failures = [call for call in expect.call_args_list if call.args[0] is False]
+                self.assertEqual(bool(failures), failed)
+                self.assertEqual(bool(checker.UNVERIFIED), not failed)
+
+    def check_events(self, events, exit_code=0, diff='+func TestAdded(t *testing.T) {'):
+        def run(command, **kwargs):
+            if command[0] == 'git':
+                return subprocess.CompletedProcess(command, 0, stdout=diff, stderr='')
+            self.assertEqual(command[-1], '.')
+            output = '\n'.join(json.dumps(event) for event in events)
+            return subprocess.CompletedProcess(command, exit_code, stdout=output, stderr='')
+
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path.cwd()
+            try:
+                os.chdir(directory)
+                Path('added_test.go').write_text('package example\n')
+                with mock.patch.object(checker, 'committed_files', return_value={'added_test.go'}), \
+                        mock.patch.object(checker, 'head_sha', return_value='base'), \
+                        mock.patch.object(checker, 'UNVERIFIED', []), \
+                        mock.patch.object(checker, 'expect') as expect, \
+                        mock.patch.object(checker.subprocess, 'run', side_effect=run):
+                    checker.check_committed_tests()
+                    return list(checker.UNVERIFIED), expect.call_args_list
+            finally:
+                os.chdir(old)
+
+    def test_requires_the_added_test_to_pass_without_skipped_subtests(self):
+        passed = [{'Action': 'pass', 'Test': 'TestAdded'}]
+        self.assertFalse(self.check_events(passed)[0])
+        for events in ([], [{'Action': 'skip', 'Test': 'TestAdded'}],
+                       passed + [{'Action': 'skip', 'Test': 'TestAdded/child'}],
+                       passed + [{'Action': 'fail', 'Test': 'TestAdded/child'}]):
+            with self.subTest(events=events):
+                self.assertTrue(self.check_events(events)[0])
+        self.assertTrue(self.check_events(passed, exit_code=1)[0])
+        self.assertTrue(self.check_events(passed, diff='+// modified existing test')[0])
+
+
+if __name__ == '__main__':
+    unittest.main()

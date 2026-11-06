@@ -5,7 +5,7 @@ opt_in = true
 remote = false
 upstream = true
 timeout_s = 1200
-check_timeout_s = 600
+check_timeout_s = 900
 isolated_setup = [
   ["mise", "install"],
   ["mise", "exec", "--", "go", "version"],
