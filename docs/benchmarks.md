@@ -58,6 +58,8 @@ Each `task.toml` notes which jouet levels the task can exercise: what `jouet tes
 
 The Zod task checks the reported number-schema issue for success. The upstream fix also addressed a pre-existing bigint bounds issue; its hidden test is reported separately in the check log and does not decide whether the requested task passed.
 
+The Cobra task also checks `gofmt` on each changed Go file. A new formatting failure fails the check; if the base file is already unformatted or the formatter cannot run, the result is unverified. Older Cobra results did not include this formatting check.
+
 The opt-in Ghost task checks the automation editor after leaving and returning to it: a newly added paid tier must appear, the existing selection must stay selected, and saving both must send the right IDs. It requires a clean commit and an added or modified test-named file, but does not judge the content of the agent's own test. Its reference fix is adapted from [TryGhost/Ghost#32471](https://github.com/TryGhost/Ghost/pull/32471). Prepare the pinned tools, dependencies and Chromium once from the jouet checkout:
 
 ```sh
