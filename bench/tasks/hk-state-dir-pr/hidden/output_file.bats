@@ -110,14 +110,23 @@ EOF
 
     run hk check --all
     assert_failure
-    assert_output --partial "See $PWD/.git/hk/output.log for full command output"
-    assert_file_contains ".git/hk/output.log" "GIT_DIR_MARKER"
+    # Anywhere under the git dir's hk/ counts: the review lets each account
+    # keep its own directory there.
+    log="$(saved_log)"
+    [[ "$log" == "$PWD/.git/hk/"* ]]
+    assert_file_contains "$log" "GIT_DIR_MARKER"
 
     # A linked worktree keeps its own output.log
     cd "$BATS_TEST_TMPDIR/wt"
     run hk check --all
     assert_failure
     wt_git_dir="$(git rev-parse --absolute-git-dir)"
-    assert_output --partial "See $wt_git_dir/hk/output.log for full command output"
-    assert_file_contains "$wt_git_dir/hk/output.log" "GIT_DIR_MARKER"
+    log="$(saved_log)"
+    [[ "$log" == "$wt_git_dir/hk/"* ]]
+    assert_file_contains "$log" "GIT_DIR_MARKER"
+}
+
+# The output file hk named in its last "See ... for full command output".
+saved_log() {
+    printf '%s\n' "$output" | sed -n 's/.*See \(.*\) for full command output.*/\1/p' | tail -n 1
 }
