@@ -364,9 +364,25 @@ fn matches_already_shown_collapse_until_the_file_changes() {
     assert!(second.files[0].shown.is_empty());
     let text = search::render(&second, false);
     assert!(
-        text.ends_with("a.py: 2 matches already shown, unchanged\n"),
+        text.ends_with(
+            "a.py: 2 matches already shown, unchanged\n    2: return beta()\n    5: def beta():\n"
+        ),
         "{text}"
     );
+    // They are listed within the count and the budget a search asks for.
+    o.max_count = Some(1);
+    let again = search::run(&o, &mut Memory::open(state.path(), "session")).unwrap();
+    let text = search::render(&again, false);
+    assert!(
+        text.ends_with("    2: return beta()\n    ... and 1 more\n"),
+        "{text}"
+    );
+    o.max_count = None;
+    let per_file = o.budget.per_file;
+    o.budget.per_file = 1;
+    let again = search::run(&o, &mut Memory::open(state.path(), "session")).unwrap();
+    assert!(again.files[0].already_shown_lines.is_empty());
+    o.budget.per_file = per_file;
 
     // Another session has seen nothing.
     let other = search::run(&o, &mut Memory::open(state.path(), "other")).unwrap();

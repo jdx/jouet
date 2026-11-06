@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const LINE_MAX: usize = 200;
 /// How many files the closing marker names before counting the rest.
 const OMITTED_NAMED: usize = 10;
+/// Matches already shown that are listed again, by line, in each file.
+const SEEN_LISTED: usize = 8;
 
 /// What to search for, and where.
 #[derive(Debug, Default)]
@@ -90,6 +92,10 @@ pub struct FileReport {
     /// the file as it is now.
     #[serde(skip_serializing_if = "is_zero")]
     pub already_shown: usize,
+    /// The first of those, by line and text alone: an agent that cannot
+    /// place a match it saw greps for it again, at the cost of a request.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub already_shown_lines: Vec<Hit>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -150,6 +156,8 @@ struct Collected {
     /// Matches not shown before, as many as could ever be shown.
     fresh: Vec<(u32, String)>,
     already_shown: usize,
+    /// The first [`SEEN_LISTED`] of those already shown.
+    seen: Vec<(u32, String)>,
 }
 
 /// Why a search could not run.
@@ -273,6 +281,7 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                 matches: 0,
                 fresh: Vec::new(),
                 already_shown: 0,
+                seen: Vec::new(),
             };
             let mut kept = 0usize;
             let result = match (structural, &matcher) {
@@ -367,6 +376,9 @@ impl Note<'_> {
             let key = key.get_or_insert_with(|| memory::key(&c.path));
             if self.memory.shown(key, c.stamp, line) {
                 c.already_shown += 1;
+                if c.seen.len() < SEEN_LISTED {
+                    c.seen.push((line, clip(text.trim())));
+                }
                 return;
             }
         }
@@ -445,6 +457,26 @@ fn lay_out(report: &mut Report, found: Vec<Collected>, options: &Options, memory
             });
         }
         file.more = c.matches - c.already_shown - file.shown.len();
+        // Within the same budgets and count as new matches; those left out
+        // are counted by `seen_lines`.
+        for (line, text) in &c.seen {
+            let cost = text.len() + 8;
+            if options
+                .max_count
+                .is_some_and(|max| file.shown.len() + file.already_shown_lines.len() >= max)
+                || !fits(in_file, cost, budget.per_file)
+                || !fits(used, cost, budget.total)
+            {
+                break;
+            }
+            in_file += cost;
+            used += cost;
+            file.already_shown_lines.push(Hit {
+                line: *line,
+                text: text.clone(),
+                symbol: None,
+            });
+        }
         if memory.active() {
             let key = if c.key.is_empty() {
                 memory::key(&c.path)
@@ -622,6 +654,17 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+/// Matches already shown, one short line each, without their definitions.
+fn seen_lines(text: &mut String, file: &FileReport) {
+    for hit in &file.already_shown_lines {
+        let _ = writeln!(text, "    {}: {}", hit.line, hit.text);
+    }
+    let rest = file.already_shown - file.already_shown_lines.len();
+    if rest > 0 && !file.already_shown_lines.is_empty() {
+        let _ = writeln!(text, "    ... and {rest} more");
+    }
+}
+
 /// The report as text: each file, its matches under their enclosing
 /// definitions, and a marker for everything left out.
 pub fn render(report: &Report, files_only: bool) -> String {
@@ -646,6 +689,7 @@ pub fn render(report: &Report, files_only: bool) -> String {
                 file.path,
                 plural(file.already_shown, "match", "matches")
             );
+            seen_lines(&mut text, file);
             continue;
         }
         let _ = writeln!(text, "{}", file.path);
@@ -677,6 +721,7 @@ pub fn render(report: &Report, files_only: bool) -> String {
                 "  ... {} already shown, unchanged",
                 file.already_shown
             );
+            seen_lines(&mut text, file);
         }
     }
     if !report.omitted.is_empty() {
