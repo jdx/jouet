@@ -47,6 +47,43 @@ class InitCacheTest(unittest.TestCase):
                     init.prepared(replace(task, env={"MODE": "new"}), harness,
                                   {"head_sha": "base"}, opts, root, None)
 
+    def test_initialization_honors_disk_reserve_without_caching(self):
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            binary = root / "jouet"
+            binary.write_text("binary")
+            task = tasks.Task(name="example", dir=root, description="", prompt="", chore="", rules=[], timeout_s=1)
+            harness = HARNESSES["claude"]
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude"), "PATH": "/usr/bin:/bin"}
+            opts = {"jouet_bin": binary, "harness_bins": {"claude": "claude"}, "tmp_root": root,
+                    "min_free_bytes": 1234, "claude_model": "test"}
+            def prepare(_task, workdir):
+                workdir.mkdir(parents=True)
+                return {"head_sha": "base"}
+            agent = Mock(return_value={"stopped": "disk_guard"})
+            with patch.object(init, "CACHE", root / "cache"), \
+                    patch.object(init, "key", return_value="key"), \
+                    patch.object(init, "untracked", return_value=[]), \
+                    patch.object(init.tasks_mod, "prepare", side_effect=prepare), \
+                    patch.object(init.tasks_mod, "setup_environment"), \
+                    patch.object(init.arms_mod, "build", return_value=env), \
+                    patch.object(init.arms_mod, "setup_jouet"), \
+                    patch.object(init.arms_mod, "reviewed_codex"), \
+                    patch.object(init.arms_mod, "login_shell_path"), \
+                    patch.object(init, "has_mise", return_value=True), \
+                    patch.object(init, "mise_env"), \
+                    patch.object(init.credentials, "lend", return_value=[]), \
+                    patch.object(init.credentials, "give_back") as restore:
+                with self.assertRaises(init.DiskGuard):
+                    init.prepared(task, harness, {"head_sha": "base"}, opts, root, agent)
+            self.assertEqual(agent.call_args.args[-1], 1234)
+            restore.assert_called_once()
+            self.assertFalse((root / "cache" / "key").exists())
+
     def test_cache_identity_changes_with_init_inputs(self):
         from dataclasses import replace
         from unittest.mock import patch
@@ -335,6 +372,25 @@ class PlanTest(unittest.TestCase):
             self.assertTrue(any("error" in message for message in messages))
             self.assertFalse(any("FAILED" in message for message in messages))
 
+    def test_init_disk_guard_stops_the_suite(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "jouet-init"),
+                   runner.Planned(1, "second", "codex", "plain")]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=init.DiskGuard("disk reserve")) as execute:
+                records = runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+            self.assertEqual(execute.call_count, 1)
+            self.assertEqual(records[0]["error_kind"], "disk_guard")
+            self.assertEqual(records[0]["stopped"], "disk_guard")
+            self.assertIsNone(records[0]["check"]["passed"])
+            self.assertFalse(report.scored(records[0]))
+
     def test_missing_codex_usage_stops_the_suite(self):
         import os
         from unittest.mock import patch
@@ -493,6 +549,34 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(record["error_kind"], "disk_guard")
             self.assertIsNone(record["check"]["passed"])
             self.assertFalse(report.scored(record))
+
+    def test_disk_guard_skips_expensive_evidence(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude"), "PATH": "/usr/bin:/bin"}
+            agent = {"lines": [], "session": None, "stopped": "disk_guard", "exit_code": None, "wall_s": 0}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"claude": "claude"},
+                    "claude_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", return_value=agent), \
+                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner, "worktree_snapshot", return_value=None) as snapshot, \
+                    patch.object(runner, "audit") as audit, \
+                    patch.object(runner, "copy_transcripts") as transcripts, \
+                    patch.object(runner.tasks_mod, "run_check") as check:
+                record = runner.execute(runner.Planned(1, "smoke", "claude", "plain"), opts, root, root)
+            self.assertEqual(snapshot.call_count, 1)
+            audit.assert_not_called()
+            transcripts.assert_not_called()
+            check.assert_not_called()
+            self.assertIsNone(record["changed_paths"])
+            self.assertEqual(record["error_kind"], "disk_guard")
 
     def test_capacity_error_skips_check_and_is_not_a_task_failure(self):
         from unittest.mock import patch

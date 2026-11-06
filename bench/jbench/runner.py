@@ -613,7 +613,8 @@ def execute(
     if fixture is not None:
         with FakeGitHub(fixture, keep / "github-requests.jsonl") as fake:
             ran = go(fake.url)
-            state_path.write_text(json.dumps(fake.world.fixture, indent=2))
+            if ran["agent"]["stopped"] != "disk_guard":
+                state_path.write_text(json.dumps(fake.world.fixture, indent=2))
             github = fake.world.summary()
     else:
         ran = go(None)
@@ -621,7 +622,8 @@ def execute(
 
     env = ran["env"]
     left = sweep(run_dir, ran["agent"]["session"]) + sweep(tmp_dir, None)
-    changes = changed_paths(workdir, ran["before_snapshot"], worktree_snapshot(workdir))
+    disk_stopped = ran["agent"]["stopped"] == "disk_guard"
+    changes = None if disk_stopped else changed_paths(workdir, ran["before_snapshot"], worktree_snapshot(workdir))
     # The agent's environment without its credentials: the check builds and
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
@@ -642,8 +644,9 @@ def execute(
         check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None, task.check_docker))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
     # Ephemeral Codex sessions have no transcript for jouet audit to inspect.
-    audit_report = None if harness.name == "codex" else audit(opts["jouet_bin"], harness, env)
-    (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
+    audit_report = None if harness.name == "codex" or disk_stopped else audit(opts["jouet_bin"], harness, env)
+    if not disk_stopped:
+        (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
     agent = ran["agent"]
     record = {
         "id": p.id,
@@ -666,7 +669,7 @@ def execute(
         "command_activity": (timing.codex_commands(agent["lines"], agent.get("elapsed", []),
                                                    agent.get("stream_complete", False))
                              if harness.name == "codex" else None),
-        "ledger": ledger(env) if arm.jouet else None,
+        "ledger": ledger(env) if arm.jouet and not disk_stopped else None,
         "github": github,
         "setup": ran["setup"],
         "init": {"cached": init["cached"], **init["meta"]} if init else None,
@@ -693,7 +696,7 @@ def execute(
         record["tmp_dir"] = str(tmp_dir)
     (keep / "check.log").write_text(check["output"] + "\n")
     (keep / "result.json").write_text(json.dumps(record, indent=2))
-    if harness.name != "codex":
+    if harness.name != "codex" and not disk_stopped:
         copy_transcripts(ran["config_dir"], keep / "transcripts")
     if not opts.get("keep_work"):
         remove(run_dir)
@@ -793,7 +796,11 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
-                if isinstance(e, codex_hooks.HookPreflightError):
+                if isinstance(e, init_mod.DiskGuard):
+                    record["error_kind"] = "disk_guard"
+                    record["stopped"] = "disk_guard"
+                    record["check"] = {"passed": None, "exit_code": None}
+                elif isinstance(e, codex_hooks.HookPreflightError):
                     record["error_kind"] = "codex_hook_preflight"
                 if found := task_dir(p.task):
                     record["task_dir"] = found
