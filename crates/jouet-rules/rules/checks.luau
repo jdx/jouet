@@ -151,6 +151,21 @@ local function cargo_scope(args: { string }, dir: string | false | nil, libtest:
 		end
 	end
 	local named = if #packages > 0 then "-p " .. table.concat(packages, " -p ") else nil
+	-- `cargo test --bin a x` runs in the current package, which a bare
+	-- `cargo test` there records as `-p NAME`: name it, so that run can be
+	-- seen to cover this one. A manifest path or `-C` moves elsewhere.
+	if #picks > 0 and not named and not whole and dir ~= false then
+		local elsewhere = false
+		for _, pick in picks do
+			if string.match(pick, "^%-%-manifest%-path") or string.match(pick, "^%-C") then
+				elsewhere = true
+			end
+		end
+		local ws = if elsewhere then nil else jouet.cargo.workspace(dir or nil)
+		if ws and ws.package and not (ws.members and #ws.members == 1 and ws.members[1] == ws.package) then
+			named = `-p {ws.package}`
+		end
+	end
 	if #picks > 0 then
 		return partial(table.concat(if named then { named, table.concat(picks, " ") } else picks, " "))
 	end

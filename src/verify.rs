@@ -175,14 +175,23 @@ impl Run {
             return true;
         }
         // Selections leave out the runner, which these two read words by.
-        if same_runner(&self.command, &failed.command)
-            && (without_names(ran, wanted)
+        let widens = |wanted: &str| {
+            without_names(ran, wanted)
                 || wider_filter(&failed.command, ran, wanted)
                 || reran_failures(&failed.command, ran, wanted, &failed.tests)
+                || whole_package(&failed.command, ran, wanted)
                 || without_name_filter(ran, wanted)
                 || wider_name_filter(ran, wanted)
                 || (runner_argv(&self.command).first().map(String::as_str) == Some("go")
-                    && go_covers(ran, wanted)))
+                    && go_covers(ran, wanted))
+        };
+        // A `--workspace` run records its picks without packages and runs
+        // them in every package, so it covers them narrowed to some.
+        if same_runner(&self.command, &failed.command)
+            && (widens(wanted)
+                || (cargo_workspace(&self.command)
+                    && !ran.starts_with("-p ")
+                    && without_packages(wanted).is_some_and(|w| ran == w || widens(&w))))
         {
             return true;
         }
@@ -554,6 +563,56 @@ fn reran_failures(command: &str, ran: &str, wanted: &str, tests: &[String]) -> b
         return false;
     };
     ran_head == wanted_head && tests.iter().all(|t| ran.iter().any(|r| t.contains(r)))
+}
+
+/// Whether `ran`, a cargo test run of whole packages (`-p jouet`, which a
+/// bare `cargo test` in that package records), covers `wanted`: the same
+/// packages narrowed to test targets (`--bin jouet`, `--lib`) or names.
+/// Ignored tests, examples, benches and other picks run what `ran` did not.
+fn whole_package(command: &str, ran: &str, wanted: &str) -> bool {
+    if !cargo_test(command) {
+        return false;
+    }
+    let ran: Vec<&str> = ran.split_whitespace().collect();
+    let wanted: Vec<&str> = wanted.split_whitespace().collect();
+    if ran.is_empty() || !ran.len().is_multiple_of(2) || !ran.chunks(2).all(|p| p[0] == "-p") {
+        return false;
+    }
+    let Some(rest) = wanted.strip_prefix(ran.as_slice()) else {
+        return false;
+    };
+    let mut rest = rest.iter();
+    while let Some(word) = rest.next() {
+        let target = ["--bin", "--test"].contains(word);
+        let ok = ["--lib", "--bins", "--tests", "--doc"].contains(word)
+            || word.starts_with("--bin=")
+            || word.starts_with("--test=")
+            || (target && rest.next().is_some_and(|v| !v.starts_with('-')))
+            || !word.starts_with('-');
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether `command` is a cargo test run of the whole workspace.
+fn cargo_workspace(command: &str) -> bool {
+    cargo_test(command)
+        && runner_argv(command)
+            .iter()
+            .take_while(|word| *word != "--")
+            .any(|word| word == "--workspace" || word == "--all")
+}
+
+/// `selector` without its leading `-p NAME` pairs, or None when it has none.
+fn without_packages(selector: &str) -> Option<String> {
+    let words: Vec<&str> = selector.split_whitespace().collect();
+    let pairs = words
+        .chunks(2)
+        .take_while(|p| p.len() == 2 && p[0] == "-p")
+        .count();
+    (pairs > 0).then(|| words[pairs * 2..].join(" "))
 }
 
 fn cargo_test(command: &str) -> bool {
@@ -2725,6 +2784,73 @@ mod tests {
         );
         assert!(reason(&state, "t2").is_some());
         assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn a_whole_package_run_covers_its_targets_and_filters() {
+        let run = |state: &mut State, args: &str, code, selector: &str, tree| {
+            state.record(
+                "/home",
+                [test(
+                    &format!("jouet test --cmd -- cargo test{args}"),
+                    code,
+                    selector,
+                )],
+                Some(tree),
+            );
+        };
+        let block =
+            |state: &State| state.block("/home", |_| Some("t2".into()), |_| false, |_| true);
+        let covered = |failed: &str, ran: &str| {
+            let mut state = State::default();
+            run(&mut state, " --bin jouet x", 101, failed, "t1");
+            run(&mut state, "", 0, ran, "t2");
+            block(&state).is_none()
+        };
+        assert!(covered(
+            "-p jouet --bin jouet a_cargo codex_replay",
+            "-p jouet"
+        ));
+        assert!(covered("-p jouet --lib --test cli a", "-p jouet"));
+        // Another package, ignored tests and examples are not in the run.
+        assert!(!covered("-p other --bin other a", "-p jouet"));
+        assert!(!covered("-p jouet --ignored a", "-p jouet"));
+        assert!(!covered("-p jouet --example demo", "-p jouet"));
+        assert!(!covered("--bin jouet a", "-p jouet"));
+    }
+
+    #[test]
+    fn a_workspace_run_covers_its_picks_in_one_package() {
+        let run = |state: &mut State, args: &str, code, selector: &str, tree| {
+            state.record(
+                "/home",
+                [test(
+                    &format!("jouet test --cmd -- cargo test{args}"),
+                    code,
+                    selector,
+                )],
+                Some(tree),
+            );
+        };
+        let covered = |args: &str, ran: &str| {
+            let mut state = State::default();
+            run(
+                &mut state,
+                " --bin jouet a",
+                101,
+                "-p jouet --bin jouet a",
+                "t1",
+            );
+            run(&mut state, args, 0, ran, "t2");
+            state
+                .block("/home", |_| Some("t2".into()), |_| false, |_| true)
+                .is_none()
+        };
+        assert!(covered(" --workspace --bin jouet a", "--bin jouet a"));
+        assert!(covered(" --all --bin jouet a", "--bin jouet a"));
+        // Without `--workspace` the same picks run in the current package only.
+        assert!(!covered(" --bin jouet a", "--bin jouet a"));
+        assert!(!covered(" --workspace --bin jouet b", "--bin jouet b"));
     }
 
     #[test]
