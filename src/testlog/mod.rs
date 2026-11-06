@@ -674,23 +674,37 @@ fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
         .take(4)
         .find_map(|l| CARGO_TEST_EXIT.captures(l))
         .map_or_else(|| "exited".to_string(), |c| c[1].to_string());
-    let mut said: Vec<String> = lines[start + 1..at]
-        .iter()
+    let mut said: Vec<String> = jouet_wait::fold_backtraces(lines[start + 1..at].to_vec())
+        .into_iter()
         .filter(|l| {
             !l.trim().is_empty()
                 && !LIBTEST_OK.is_match(l)
                 && !LIBTEST_RUNNING.is_match(l)
                 && !RUST_NOISE.is_match(l)
         })
-        .cloned()
         .collect();
-    said = said.split_off(said.len().saturating_sub(OUTPUT_TAIL));
-    // libtest keeps a test's output until the test ends, so a crash loses
-    // the panic that caused it.
-    if !said.iter().any(|l| l.contains("panicked at")) {
-        said.push(
-            "libtest held back the tests' own output; rerun with `-- --nocapture` to see it".into(),
-        );
+    // The first panic is the cause; with `--nocapture` the panics after it
+    // and their backtraces would push it out of the tail.
+    match said.iter().position(|l| l.contains("panicked at")) {
+        Some(first) if said.len() - first > OUTPUT_TAIL => {
+            let end = said.len() - OUTPUT_TAIL / 2;
+            let skipped = end - (first + OUTPUT_TAIL / 2);
+            said.drain(first + OUTPUT_TAIL / 2..end);
+            said.insert(first + OUTPUT_TAIL / 2, skipped_marker(skipped));
+            said.drain(..first);
+        }
+        Some(first) => {
+            said.drain(..first);
+        }
+        None => {
+            said = said.split_off(said.len().saturating_sub(OUTPUT_TAIL));
+            // libtest keeps a test's output until the test ends, so a crash
+            // loses the panic that caused it.
+            said.push(
+                "libtest held back the tests' own output; rerun with `-- --nocapture` to see it"
+                    .into(),
+            );
+        }
     }
     out.push(
         at,

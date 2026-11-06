@@ -280,6 +280,63 @@ error: test failed, to rerun pass `--test a`
 }
 
 #[test]
+fn a_test_binary_that_crashes_keeps_its_first_panic_over_later_ones() {
+    // `-- --nocapture` with RUST_BACKTRACE=1: the panic that caused the abort
+    // comes first, then a panic in a destructor and the abort, each with a
+    // backtrace.
+    let frames = |n: usize| -> String {
+        (0..n)
+            .map(|i| format!("  {i}: std::rt::frame_{i}\n             at /rustc/abc/library/std/src/rt.rs:{i}:5\n"))
+            .collect()
+    };
+    let mut log = String::from(
+        "     Running tests/task_local_set.rs (target/debug/deps/task_local_set-0123456789abcdef)\n\nrunning 1 test\n",
+    );
+    log += "thread '<unnamed>' panicked at library/std/src/thread/local.rs:429:25:\n";
+    log += "cannot access a Thread Local Storage value during or after destruction: AccessError\n";
+    log += "stack backtrace:\n";
+    log += &frames(24);
+    for i in 0..30 {
+        log += &format!("note: dropping task {i}\n");
+    }
+    log += "thread '<unnamed>' panicked at library/core/src/panicking.rs:233:5:\n";
+    log += "panic in a destructor during cleanup\n";
+    log += &frames(24);
+    log += "thread caused non-unwinding panic. aborting.\n";
+    log += "error: test failed, to rerun pass `--test task_local_set`\n\nCaused by:\n";
+    log += "  process didn't exit successfully: `target/debug/deps/task_local_set-0123456789abcdef --nocapture` (signal: 6, SIGABRT: process abort signal)\n";
+    let d = digest(&log, true, DEFAULT_BUDGET);
+    assert_eq!(
+        names(&d),
+        [
+            "tests/task_local_set.rs ended before its result (signal: 6, SIGABRT: process abort signal)"
+        ]
+    );
+    let lines = &d.failures[0].lines;
+    assert_eq!(
+        lines[..2],
+        [
+            "thread '<unnamed>' panicked at library/std/src/thread/local.rs:429:25:",
+            "cannot access a Thread Local Storage value during or after destruction: AccessError",
+        ],
+        "{lines:#?}"
+    );
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("thread caused non-unwinding panic. aborting."),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("--nocapture")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "note: dropping task 15"),
+        "{lines:#?}"
+    );
+}
+
+#[test]
 fn a_test_binary_that_crashes_after_a_panic_keeps_the_panic() {
     let log = "     Running unittests src/lib.rs (target/debug/deps/demo-0123456789abcdef)
 
