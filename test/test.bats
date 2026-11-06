@@ -1311,7 +1311,7 @@ SH
 	tests 3
 	run --separate-stderr jouet test --baseline
 	assert_failure 1
-	assert_output --partial 'baseline: 1 of 2 failures is new, not failing at main'
+	assert_output --partial 'baseline: NEW FAILURE: 1 of 2 failures is new in the current run; no matching failure was reported at main'
 	assert_output --partial 'test_math'
 	# The merge base's worktree is gone again.
 	run git worktree list
