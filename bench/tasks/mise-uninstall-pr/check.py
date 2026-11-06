@@ -9,7 +9,11 @@ from _check import dirty, expect, finish, git, github_state, new_commit  # noqa:
 
 # What was committed, before the hidden test replaces the agent's copy.
 expect(new_commit(), "nothing was committed")
-expect(not dirty(), f"changes were left uncommitted: {dirty()}")
+# Running mise during the task can re-resolve `latest` tools in mise.lock
+# (cargo:flamegraph 0.6.14 -> 0.6.15). That churn is not the fix, and a PR
+# that leaves it out is right to.
+left = [p for p in dirty() if p != "mise.lock"]
+expect(not left, f"changes were left uncommitted: {left}")
 source = git("show", "HEAD:src/cli/uninstall.rs")
 expect("#[test]" in source, "src/cli/uninstall.rs has no unit test, which the review asked for")
 
