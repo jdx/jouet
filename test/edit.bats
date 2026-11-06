@@ -361,6 +361,7 @@ EOF
 EOF
 	assert_failure 4
 	assert_line "  edit 1: 2 matches, expected 1, at lines 1, 2"
+	assert_line "    add surrounding context lines to the hunk until it matches once"
 	refute_output --partial "count"
 	assert_content b.txt $'x\nx\n'
 }

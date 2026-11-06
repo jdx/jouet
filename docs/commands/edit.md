@@ -212,6 +212,7 @@ The format used by OpenAI Codex's `apply_patch`, accepted as is:
 
 - `*** Add File:` creates a file from the `+` lines that follow. `*** Delete File:` removes one. `*** Update File:` changes one, and an optional `*** Move to:` straight after it renames it, keeping its mode.
 - Each hunk is a run of context lines (starting with a space), removed lines (`-`) and added lines (`+`).
+- If a hunk matches more than once, add surrounding context lines until it matches once; the patch is not applied while a hunk is ambiguous.
 - `@@ TEXT` is an anchor: the hunk is searched for after the first line equal to `TEXT` (ignoring surrounding whitespace if no line is exactly equal). Several `@@` lines narrow the search one after another.
 - Hunks are searched for in order, each after the one before, and must match exactly once in what remains.
 - `*** End of File` pins the hunk above it to the end of the file.

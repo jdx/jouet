@@ -56,7 +56,7 @@ pub(crate) fn run(args: EditArgs, out: &Output) -> Exit {
             counts = match format {
                 Format::Blocks => Some(CountSyntax::Block),
                 Format::Json => Some(CountSyntax::Json),
-                Format::Patch => None,
+                Format::Patch => Some(CountSyntax::Patch),
             };
             spec
         }),
@@ -892,13 +892,14 @@ fn status_word(status: FileStatus) -> &'static str {
     }
 }
 
-/// How the input that gave the edits sets a match count, for the hint on a
-/// count that did not match. A patch or a structural pattern has no count.
+/// How the input describes a match, for the hint when its count did not match.
+/// A structural pattern has no count.
 #[derive(Clone, Copy)]
 enum CountSyntax {
     Flags,
     Block,
     Json,
+    Patch,
 }
 
 impl CountSyntax {
@@ -913,6 +914,9 @@ impl CountSyntax {
                 format!("`\"count\": {found}`"),
                 "`\"count\": \"all\"`".to_string(),
             ),
+            Self::Patch => {
+                return "add surrounding context lines to the hunk until it matches once".into();
+            }
         };
         let mut hint = format!("set {n} or {all} to replace every match");
         if too_many {
