@@ -133,7 +133,7 @@ impl Js {
     fn list(
         &self,
         project: &Project,
-        base: &Base,
+        base: Option<&Base>,
         sources: &[Change],
         extra: &[String],
     ) -> Result<Vec<String>, Error> {
@@ -145,14 +145,27 @@ impl Js {
             Runner::Vitest => {
                 // `--json` takes an optional file; given as `--json=FILE` so
                 // the list is not mixed with vitest's other output.
-                command.args(["list", "--changed", &base.merge_base, "--filesOnly"]);
-                command.args(config_args(extra));
+                command.arg("list");
+                if let Some(base) = base {
+                    command.args(["--changed", &base.merge_base]);
+                }
+                command.arg("--filesOnly");
+                if base.is_some() {
+                    command.args(config_args(extra));
+                } else {
+                    command.args(extra);
+                }
                 command.arg(format!("--json={}", json.path().display()));
             }
             Runner::Jest => {
-                command.args(config_args(extra));
-                command.args(["--listTests", "--findRelatedTests"]);
-                command.args(sources.iter().map(|s| project.root.join(&s.path)));
+                if base.is_some() {
+                    command.args(config_args(extra));
+                    command.args(["--listTests", "--findRelatedTests"]);
+                    command.args(sources.iter().map(|s| project.root.join(&s.path)));
+                } else {
+                    command.args(extra);
+                    command.arg("--listTests");
+                }
             }
         }
         let out = command
@@ -202,6 +215,15 @@ impl Js {
         tests.sort();
         tests.dedup();
         Ok(tests)
+    }
+
+    /// The full runner's files, with the same arguments as its eventual run.
+    pub(super) fn list_full(
+        &self,
+        project: &Project,
+        extra: &[String],
+    ) -> Result<Vec<String>, Error> {
+        self.list(project, None, &[], extra)
     }
 }
 
@@ -298,7 +320,7 @@ impl Adapter for Js {
         sources: &[Change],
         extra: &[String],
     ) -> Result<Selection, Error> {
-        let tests = self.list(project, base, sources, extra)?;
+        let tests = self.list(project, Some(base), sources, extra)?;
         let mut argv = vec![self.bin(project)?];
         match self.runner {
             Runner::Vitest => {
