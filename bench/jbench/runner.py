@@ -207,6 +207,34 @@ class Budget:
         return self.max_total_tokens is not None and self.spent >= self.max_total_tokens
 
 
+class DiskSamples:
+    """Free space observed on the run's filesystems, without storing paths."""
+
+    def __init__(self, paths: dict[str, Path]):
+        self.paths = paths
+        self.values: dict[str, dict[str, int | None]] = {
+            name: {"start_bytes": None, "end_bytes": None, "min_bytes": None, "samples": 0, "errors": 0}
+            for name in paths
+        }
+
+    def sample(self) -> None:
+        for name, path in self.paths.items():
+            entry = self.values[name]
+            first = entry["samples"] == 0 and entry["errors"] == 0
+            try:
+                free = shutil.disk_usage(path).free
+            except OSError:
+                entry["end_bytes"] = None
+                entry["errors"] += 1
+                continue
+            if first:
+                entry["start_bytes"] = free
+            entry["end_bytes"] = free
+            previous = entry["min_bytes"]
+            entry["min_bytes"] = free if previous is None else min(previous, free)
+            entry["samples"] += 1
+
+
 def run_agent(
     harness: Harness,
     cmd: list[str],
@@ -224,6 +252,11 @@ def run_agent(
     reader_lock = threading.Lock()
     reader_closed = threading.Event()
     reader_eof = threading.Event()
+    tmp = Path(env.get("TMPDIR") or workdir)
+    if not tmp.is_absolute():
+        tmp = workdir / tmp
+    disk = DiskSamples({"work": workdir, "tmp": tmp, "results": stream_path.parent})
+    disk.sample()
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
         proc = subprocess.Popen(
             cmd,
@@ -259,6 +292,7 @@ def run_agent(
                     break
                 except subprocess.TimeoutExpired:
                     pass
+                disk.sample()
                 if time.perf_counter() - started > timeout_s:
                     stopped.append("timeout")
                 elif max_tokens and harness.tokens_so_far(list(lines), config_dir) > max_tokens:
@@ -272,6 +306,7 @@ def run_agent(
                 kill(proc)
         proc.wait()
         wall_s = time.perf_counter() - started
+        disk.sample()
         reader.join(timeout=10)
         # A descendant can keep stdout open after the agent exits. Freeze the
         # transcript and timestamps together before closing the stream; a
@@ -292,6 +327,7 @@ def run_agent(
         "lines": captured_lines,
         "elapsed": captured_elapsed,
         "stream_complete": complete,
+        "disk_free": disk.values,
         # The agent leads a session of its own; what it started and left
         # running is still in it, unless it started a session too.
         "session": proc.pid,
@@ -581,6 +617,7 @@ def execute(
         "stopped": agent["stopped"],
         "exit_code": agent["exit_code"],
         "wall_s": agent["wall_s"],
+        "disk_free": agent.get("disk_free"),
         "usage": asdict(usage),
         "audit": summarize_audit(audit_report),
         "shell": (codex_shell_metrics(agent["lines"])
