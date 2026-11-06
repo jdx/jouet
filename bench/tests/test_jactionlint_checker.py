@@ -68,12 +68,22 @@ class JactionlintCheckerTest(unittest.TestCase):
         passed = [{'Action': 'pass', 'Test': 'TestAdded'}]
         self.assertFalse(self.check_events(passed)[0])
         for events in ([], [{'Action': 'skip', 'Test': 'TestAdded'}],
-                       passed + [{'Action': 'skip', 'Test': 'TestAdded/child'}],
-                       passed + [{'Action': 'fail', 'Test': 'TestAdded/child'}]):
+                       passed + [{'Action': 'skip', 'Test': 'TestAdded/child'}]):
             with self.subTest(events=events):
                 self.assertTrue(self.check_events(events)[0])
         self.assertTrue(self.check_events(passed, exit_code=1)[0])
         self.assertTrue(self.check_events(passed, diff='+// modified existing test')[0])
+
+    def test_named_test_failures_are_failed_not_unverified(self):
+        for name in ('TestAdded', 'TestAdded/child'):
+            with self.subTest(name=name):
+                unverified, calls = self.check_events([{'Action': 'fail', 'Test': name}], exit_code=1)
+                self.assertFalse(unverified)
+                self.assertTrue(any(call.args[0] is False and name in call.args[1] for call in calls))
+
+    def test_timeout_output_preserves_bytes_and_text(self):
+        error = subprocess.TimeoutExpired('go', 1, output=b'partial\xff', stderr=b'error')
+        self.assertEqual(checker.timeout_output(error), 'partial\ufffderror')
 
 
 if __name__ == '__main__':
