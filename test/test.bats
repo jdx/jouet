@@ -1623,6 +1623,12 @@ PY
 	assert_success
 	run --separate-stderr jq -r '.trees[].runs.lint.exit_code' "$XDG_STATE_HOME/jouet/sessions/ruff_check.json"
 	assert_output '0'
+
+	# After `--`, a file named `--diff` is not a preview flag.
+	run env CLAUDE_CODE_SESSION_ID=ruff_file jouet test --cmd -- ./ruff check -- --diff
+	assert_failure 1
+	run --separate-stderr jq -r '.trees[].runs.lint.exit_code' "$XDG_STATE_HOME/jouet/sessions/ruff_file.json"
+	assert_output '1'
 }
 
 @test "unknown tests with Ruff-like flags still count as tests" {
