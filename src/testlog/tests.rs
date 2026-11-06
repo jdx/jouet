@@ -253,6 +253,15 @@ Caused by:
         "{:?}",
         d.failures[0].lines
     );
+    assert_eq!(d.failed, 1);
+
+    // Run with --nocapture, nothing was held back, so the hint would be wrong.
+    let log = log.replace("local_set_in_thread`", "local_set_in_thread --nocapture`");
+    let d = digest(&log, true, DEFAULT_BUDGET);
+    assert_eq!(
+        d.failures[0].lines,
+        ["fatal runtime error: thread local panicked on drop, aborting"]
+    );
 }
 
 #[test]

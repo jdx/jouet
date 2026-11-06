@@ -265,7 +265,7 @@ regexes! {
     CARGO_TEST_BINARY = r"^\s*Running (?:unittests )?(.+?) \((.+)\)$";
     // How a test binary that cargo gave up on ended: `(signal: 6, SIGABRT:
     // process abort signal)` or `(exit status: 1)`.
-    CARGO_TEST_EXIT = r"^\s*process didn't exit successfully: `.*` \((.+)\)$";
+    CARGO_TEST_EXIT = r"^\s*process didn't exit successfully: `(.*)` \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
@@ -669,11 +669,16 @@ fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
     let Some(binary) = CARGO_TEST_BINARY.captures(&lines[start]) else {
         return;
     };
-    let ended = lines[at + 1..]
+    let exit = lines[at + 1..]
         .iter()
         .take(4)
-        .find_map(|l| CARGO_TEST_EXIT.captures(l))
-        .map_or_else(|| "exited".to_string(), |c| c[1].to_string());
+        .find_map(|l| CARGO_TEST_EXIT.captures(l));
+    let ended = exit
+        .as_ref()
+        .map_or("exited", |c| c.get(2).map_or("", |m| m.as_str()));
+    let nocapture = exit
+        .as_ref()
+        .is_some_and(|c| c[1].split_whitespace().any(|w| w == "--nocapture"));
     let mut said: Vec<String> = jouet_wait::fold_backtraces(lines[start + 1..at].to_vec())
         .into_iter()
         .filter(|l| {
@@ -699,13 +704,17 @@ fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
         None => {
             said = said.split_off(said.len().saturating_sub(OUTPUT_TAIL));
             // libtest keeps a test's output until the test ends, so a crash
-            // loses the panic that caused it.
-            said.push(
+            // loses the panic that caused it, unless it ran with --nocapture.
+            if !nocapture {
+                said.push(
                 "libtest held back the tests' own output; rerun with `-- --nocapture` to see it"
                     .into(),
             );
+            }
         }
     }
+    // The binary's tests never reported, so it counts as one failure.
+    out.count(0, 1, 0);
     out.push(
         at,
         format!("{} ended before its result ({ended})", &binary[1]),
