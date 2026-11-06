@@ -346,6 +346,28 @@ fn a_test_binary_that_crashes_keeps_its_first_panic_over_later_ones() {
 }
 
 #[test]
+fn a_test_binary_that_refuses_its_arguments_is_a_usage_error_not_a_crash() {
+    let log = "     Running tests/a.rs (target/debug/deps/a-0123456789abcdef)
+error: Unrecognized option: 'bogus'
+error: test failed, to rerun pass `--test a`
+
+Caused by:
+  process didn't exit successfully: `target/debug/deps/a-0123456789abcdef --bogus` (exit status: 101)
+";
+    let d = digest(log, true, DEFAULT_BUDGET);
+    assert_eq!(d.failed, 0);
+    assert!(
+        !names(&d).iter().any(|n| n.contains("ended before")),
+        "{:?}",
+        names(&d)
+    );
+    assert_eq!(
+        usage_error(log, &[]).as_deref(),
+        Some("error: Unrecognized option: 'bogus'")
+    );
+}
+
+#[test]
 fn a_test_binary_that_crashes_after_a_panic_keeps_the_panic() {
     let log = "     Running unittests src/lib.rs (target/debug/deps/demo-0123456789abcdef)
 

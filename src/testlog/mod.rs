@@ -249,7 +249,7 @@ regexes! {
     FAILURE_MARK = r"^\s*(FAIL|FAILED|ERROR)(:|\s)|^\s*not ok\b";
     // A runner refusing its own arguments, before it runs anything; argparse
     // and pytest name the program, and a subcommand, first.
-    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
+    USAGE = r"^(error: (unexpected argument|Unrecognized option: |Argument to option '[^']+' missing|Option '[^']+' given more than once|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -669,6 +669,11 @@ fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
     let Some(binary) = CARGO_TEST_BINARY.captures(&lines[start]) else {
         return;
     };
+    // A binary that refused its arguments ran no test: that is a usage
+    // error, which `usage_error` reports, not a crash.
+    if lines[start + 1..at].iter().any(|l| USAGE.is_match(l)) {
+        return;
+    }
     let exit = lines[at + 1..]
         .iter()
         .take(4)
