@@ -326,7 +326,7 @@ fake_hk_stop() {
 
 @test "mixed fallback coverage is unavailable even when the supported file is clean" {
 	git rm -q hk.pkl
-	printf '#!/bin/sh\necho "$1"\n' >run.sh
+	printf '%s\n' '#!/bin/sh' "echo \"\$1\"" >run.sh
 
 	run --separate-stderr jouet diag check run.sh notes.txt --json
 	assert_failure 4
@@ -343,7 +343,7 @@ fake_hk_stop() {
 	run jq -r .status <<<"$output"
 	assert_output unavailable
 
-	printf '#!/bin/sh\nprintf "%s\\n" "$1"\n' >run.sh
+	printf '%s\n' '#!/bin/sh' "printf '%s\\n' \"\$1\"" >run.sh
 	run --separate-stderr jouet diag delta run.sh --json
 	assert_success
 	run jq -c .no_baseline <<<"$output"
