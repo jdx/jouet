@@ -692,7 +692,7 @@ mod tests {
             let mut command = Command::new("sh");
             command.args([
                 "-c",
-                "sleep 30 & echo $! > \"$1\"; wait",
+                "sleep 30 & echo $! > \"$1.tmp\"; mv \"$1.tmp\" \"$1\"; wait",
                 "_",
                 &path.to_string_lossy(),
             ]);
