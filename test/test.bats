@@ -378,6 +378,21 @@ vitest (vitest's module graph): 2 test files
 	assert_line --regexp '^full log: .+\.log$'
 	assert_line "This was a partial run; the full suite was not verified."
 	assert_output --partial '1 failed'
+	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+
+	# A configured but untrusted setup cannot run at the merge base yet.
+	mkdir -p .jouet
+	printf '[baseline]\nsetup = ["npm", "ci"]\n' >.jouet/test.toml
+	run --separate-stderr jouet test --affected
+	assert_failure 1
+	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+	run --separate-stderr jouet trust --yes
+	assert_success
+	run --separate-stderr jouet test --affected
+	assert_failure 1
+	assert_output --partial 'jouet test --baseline --affected'
+	refute_output --partial 'the isolated checkout may need dependencies'
+	rm .jouet/test.toml
 
 	printf "export const shout = (s) => s + '!'\n" >src/fmt.js
 	run --separate-stderr jouet test --affected --json
@@ -1343,6 +1358,7 @@ PY
 	run --separate-stderr env -u JOUET_TEST_BASELINE JOUET_SESSION_ID=hint PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main -- -v
 	assert_failure 1
 	assert_output --partial 'jouet test --baseline --affected --since main -- -v'
+	refute_output --partial 'the isolated checkout may need dependencies'
 	run --separate-stderr env -u JOUET_TEST_BASELINE JOUET_SESSION_ID=hint PYTHONDONTWRITEBYTECODE=1 jouet test --affected --since main --json -- -v
 	assert_failure 1
 	run jq -e '.affected and (.ok | not)' <<<"$output"
