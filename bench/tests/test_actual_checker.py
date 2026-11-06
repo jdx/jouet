@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import runpy
@@ -34,17 +35,52 @@ class ActualCheckerTest(unittest.TestCase):
         spec = {'title': 'regression', 'ok': True, 'tests': [test]}
         report = {'suites': [{'file': 'accounts.test.ts', 'specs': [spec]}], 'errors': [],
                   'stats': {'expected': 1, 'skipped': 0, 'unexpected': 0, 'flaky': 0}}
-        self.assertTrue(verdict(report, 0, 'accounts.test.ts'))
-        self.assertFalse(verdict(report, 1, 'accounts.test.ts'))
-        self.assertFalse(verdict(report, 0, 'different.test.ts'))
-        self.assertFalse(verdict({'suites': [], 'errors': []}, 0, 'accounts.test.ts'))
+        self.assertTrue(verdict(report, 0, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 1, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 0, ['different.test.ts']))
+        self.assertFalse(verdict({'suites': [], 'errors': []}, 0, ['accounts.test.ts']))
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'].append({'file': 'other.test.ts', 'specs': [spec]})
+        self.assertTrue(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'][1]['specs'] = []
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts', 'other.test.ts']))
+        report['suites'].pop()
         report['stats']['skipped'] = 1
-        self.assertFalse(verdict(report, 0, 'accounts.test.ts'))
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
         report['stats']['skipped'] = 0
         test['results'][0]['status'] = 'timedOut'
-        self.assertFalse(verdict(report, 0, 'accounts.test.ts'))
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
         test['results'][0]['status'] = 'skipped'
-        self.assertFalse(verdict(report, 0, 'accounts.test.ts'))
+        self.assertFalse(verdict(report, 0, ['accounts.test.ts']))
+
+    def test_changed_browser_files_share_one_run_and_timeout(self):
+        checker = runpy.run_path(str(CHECKER))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'packages/desktop-client/e2e'
+            tests.mkdir(parents=True)
+            names = ['one.test.ts', 'two.test.ts']
+            for name in names:
+                (tests / name).write_text('test')
+            spec = {'title': 'test', 'ok': True,
+                    'tests': [{'expectedStatus': 'passed', 'results': [{'status': 'passed'}]}]}
+            report = {'suites': [{'file': name, 'specs': [spec]} for name in names],
+                      'errors': [], 'stats': {'expected': 2, 'skipped': 0, 'unexpected': 0, 'flaky': 0}}
+
+            def run(_command, **kwargs):
+                Path(kwargs['env']['PLAYWRIGHT_JSON_OUTPUT_FILE']).write_text(json.dumps(report))
+                return subprocess.CompletedProcess([], 0, '', '')
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with mock.patch.object(subprocess, 'run', side_effect=run) as command:
+                    checker['check_agent_browser_tests']([f'packages/desktop-client/e2e/{name}' for name in names])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(command.call_args.kwargs['timeout'], 600)
+                self.assertEqual(checker['UNVERIFIED'], [])
+            finally:
+                os.chdir(old_cwd)
 
     def test_requires_the_working_tree_used_by_the_check_to_be_committed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -117,7 +153,7 @@ exit 0
             env['AGENT_BROWSER_FAILED'] = '1'
             result = check()
             self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
-            self.assertIn('changed Playwright test file did not complete successfully', result.stdout)
+            self.assertIn('changed Playwright test files did not all complete successfully', result.stdout)
             self.assertIn('JOUET_BENCH_UNVERIFIED_V1', result.stdout)
             del env['AGENT_BROWSER_FAILED']
             shutil.rmtree(work / 'blob-report')

@@ -47,8 +47,8 @@ def browser_verdict(report, exit_code):
     return 'unverified'
 
 
-def agent_browser_passed(report, exit_code, filename):
-    """Require the selected file and every reported test to complete once."""
+def agent_browser_passed(report, exit_code, filenames):
+    """Require each selected file and every reported test to complete once."""
     try:
         if exit_code != 0 or report.get('errors'):
             return False
@@ -58,12 +58,11 @@ def agent_browser_passed(report, exit_code, filename):
                        for key in ('skipped', 'unexpected', 'flaky'))):
             return False
         suites = report['suites']
-        if len(suites) != 1 or suites[0]['file'] != filename:
+        if len(suites) != len(filenames) or {suite['file'] for suite in suites} != set(filenames):
             return False
-        found = list(specs(suites))
-        if not found:
+        if any(not list(specs([suite])) for suite in suites):
             return False
-        for spec in found:
+        for spec in specs(suites):
             tests = spec['tests']
             if not tests or spec.get('ok') is not True:
                 return False
@@ -78,7 +77,7 @@ def agent_browser_passed(report, exit_code, filename):
 
 
 def check_agent_browser_tests(changed):
-    """A changed browser test file must run; incomplete evidence is unknown."""
+    """Run changed browser tests together under one shared time budget."""
     root = Path('packages/desktop-client/e2e')
     files = [Path(path) for path in changed if path.startswith(f'{root}/')
              and path.endswith(('.test.ts', '.spec.ts')) and Path(path).is_file()]
@@ -88,30 +87,31 @@ def check_agent_browser_tests(changed):
     for path in files:
         if any(parent.is_symlink() for parent in (path, *path.parents)):
             UNVERIFIED.append(f'changed Playwright test path contains a symlink: {path}')
-            continue
-        relative = path.relative_to(root).as_posix()
-        with tempfile.TemporaryDirectory(prefix='actual-agent-test-') as directory:
-            report = Path(directory) / 'playwright.json'
-            try:
-                result = subprocess.run([
-                    'node', 'node_modules/@playwright/test/cli.js', 'test',
-                    '--config', 'packages/desktop-client/playwright.config.ts',
-                    '--retries=0', '--reporter=json', '--', re.escape(relative) + '$',
-                ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
-                    capture_output=True, text=True, timeout=600)
-                verdict = agent_browser_passed(json.loads(report.read_text()), result.returncode, relative)
-                if not verdict:
-                    print(result.stdout, end="")
-                    print(result.stderr, end="")
-                    print(report.read_text())
-            except subprocess.TimeoutExpired as error:
-                print_timeout_output(error)
-                verdict = False
-            except (OSError, ValueError) as error:
-                print(f"could not read changed Playwright test result: {error}")
-                verdict = False
+            return
+    names = [path.relative_to(root).as_posix() for path in files]
+    with tempfile.TemporaryDirectory(prefix='actual-agent-test-') as directory:
+        report = Path(directory) / 'playwright.json'
+        try:
+            result = subprocess.run([
+                'node', 'node_modules/@playwright/test/cli.js', 'test',
+                '--config', 'packages/desktop-client/playwright.config.ts',
+                '--retries=0', '--reporter=json', '--', *[re.escape(name) + '$' for name in names],
+            ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
+                capture_output=True, text=True, timeout=600)
+            verdict = agent_browser_passed(json.loads(report.read_text()), result.returncode, names)
             if not verdict:
-                UNVERIFIED.append(f'changed Playwright test file did not complete successfully: {path}')
+                print(result.stdout, end="")
+                print(result.stderr, end="")
+                print(report.read_text())
+        except subprocess.TimeoutExpired as error:
+            print_timeout_output(error)
+            verdict = False
+        except (OSError, ValueError) as error:
+            print(f"could not read changed Playwright test result: {error}")
+            verdict = False
+        if not verdict:
+            UNVERIFIED.append('changed Playwright test files did not all complete successfully: '
+                              + ', '.join(str(path) for path in files))
 
 
 def check():
