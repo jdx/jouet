@@ -714,12 +714,26 @@ fn ruff_preview_only(argv: &[String]) -> bool {
         let command = &script.commands[0];
         let words = command.argv();
         if command.program() == Some("ruff") {
-            return words.get(1).is_some_and(|word| word == "check")
-                && words
-                    .iter()
-                    .skip(2)
-                    .take_while(|word| word.as_str() != "--")
-                    .any(|word| matches!(word.as_str(), "--diff" | "--fix-only"));
+            let mut args = words.iter().skip(1);
+            while let Some(word) = args.next() {
+                match word.as_str() {
+                    "check" => {
+                        return args
+                            .take_while(|word| word.as_str() != "--")
+                            .any(|word| matches!(word.as_str(), "--diff" | "--fix-only"));
+                    }
+                    "--config" | "--color" => {
+                        if args.next().is_none() {
+                            return false;
+                        }
+                    }
+                    "--isolated" | "--verbose" | "--quiet" | "--silent" | "-v" | "-q" | "-s" => {}
+                    option if option.starts_with("--config=") || option.starts_with("--color=") => {
+                    }
+                    _ => return false,
+                }
+            }
+            return false;
         }
         let inner = script.inner_scripts();
         matches!(inner.as_slice(), [one] if inspect(one, depth + 1))

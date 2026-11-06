@@ -1619,6 +1619,16 @@ PY
 	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_shell_diff.json"
 	assert_output '[]'
 
+	run env CLAUDE_CODE_SESSION_ID=ruff_global jouet test --cmd -- ./ruff --isolated --color never check --fix-only .
+	assert_success
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_global.json"
+	assert_output '[]'
+
+	run env CLAUDE_CODE_SESSION_ID=ruff_global_shell jouet test --cmd -- sh -c './ruff --config check check --diff clean.py'
+	assert_success
+	run --separate-stderr jq -c '[.trees[]?.runs.lint // empty, .trees[]?.runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/ruff_global_shell.json"
+	assert_output '[]'
+
 	run env CLAUDE_CODE_SESSION_ID=ruff_check jouet test --cmd -- ./ruff check .
 	assert_success
 	run --separate-stderr jq -r '.trees[].runs.lint.exit_code' "$XDG_STATE_HOME/jouet/sessions/ruff_check.json"
