@@ -10,7 +10,7 @@
 //! from `git ls-tree -r`, so committing the changes a test ran against,
 //! new files included, keeps the hash, and so does moving to another branch
 //! with the same content. Ignored files are left out, and so are untracked
-//! ones past [`MAX_UNTRACKED`], and a submodule counts by the commit the
+//! ones past [`MAX_UNTRACKED`] and core dumps, and a submodule counts by the commit the
 //! index records for it.
 //!
 //! `git stash create` would give a real tree id, but it writes objects into
@@ -97,7 +97,10 @@ pub fn work_tree(dir: Option<&Path>, timeout: Duration) -> Result<String, String
         .collect();
     if untracked.len() <= MAX_UNTRACKED {
         for path in untracked {
-            if let Some(mode) = file_mode(&top.join(path)) {
+            let file = top.join(path);
+            if let Some(mode) = file_mode(&file)
+                && !core_dump(&file)
+            {
                 changed.push((path.to_string(), mode.to_string()));
             }
         }
@@ -122,6 +125,27 @@ pub fn work_tree(dir: Option<&Path>, timeout: Duration) -> Result<String, String
         }
     }
     Ok(digest(&files))
+}
+
+/// Whether `path` is an ELF core dump, which a crashing test leaves in its
+/// directory (`core`, `core.1234`): it is output, not source, so creating or
+/// deleting one changes nothing a check ran against. Only a regular file is
+/// opened: opening a FIFO would wait for a writer.
+fn core_dump(path: &Path) -> bool {
+    use std::io::Read;
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+        return false;
+    }
+    let mut head = [0u8; 18];
+    let read = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut head));
+    // `e_type` is ET_CORE (4), in either byte order (`EI_DATA`: 1 little, 2 big).
+    read.is_ok()
+        && head[..4] == *b"\x7fELF"
+        && match head[5] {
+            1 => head[16..18] == [4, 0],
+            2 => head[16..18] == [0, 4],
+            _ => false,
+        }
 }
 
 /// The mode git would commit a regular file at `path` with, or None for
@@ -187,8 +211,10 @@ pub fn changed_paths(dir: &Path, timeout: Duration) -> Result<Vec<String>, Strin
         // whatever its status says.
         .filter_map(|entry| {
             let path = entry.get(3..)?;
-            let meta = std::fs::symlink_metadata(top.join(path)).ok()?;
-            (!meta.is_dir()).then(|| path.to_string())
+            let file = top.join(path);
+            let meta = std::fs::symlink_metadata(&file).ok()?;
+            let dump = entry.starts_with("??") && core_dump(&file);
+            (!meta.is_dir() && !dump).then(|| path.to_string())
         })
         .collect())
 }
@@ -348,6 +374,28 @@ mod tests {
         ] {
             assert!(!prose(path), "{path}");
         }
+    }
+
+    #[test]
+    fn an_untracked_core_dump_is_not_a_change() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path();
+        run(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.rs"), "one").unwrap();
+        run(dir, &["add", "."]);
+        run(dir, &["commit", "-q", "-m", "a"]);
+        let before = work_tree(Some(dir), T).unwrap();
+        let mut core = b"\x7fELF\x02\x01\x01".to_vec();
+        core.resize(16, 0);
+        core.extend([4, 0, 0x3e, 0]);
+        std::fs::write(dir.join("core.2460150"), &core).unwrap();
+        assert_eq!(work_tree(Some(dir), T).unwrap(), before);
+        assert_eq!(changed_paths(dir, T).unwrap(), Vec::<String>::new());
+        // An executable (ET_EXEC) of the same name is a file like any other.
+        core[16] = 2;
+        std::fs::write(dir.join("core.2460150"), &core).unwrap();
+        assert_ne!(work_tree(Some(dir), T).unwrap(), before);
+        assert_eq!(changed_paths(dir, T).unwrap(), vec!["core.2460150"]);
     }
 
     #[test]
