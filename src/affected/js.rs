@@ -163,15 +163,13 @@ impl Js {
                     command.args(["--listTests", "--findRelatedTests"]);
                     command.args(sources.iter().map(|s| project.root.join(&s.path)));
                 } else {
-                    command.args(extra);
+                    command.args(jest_list_args(extra));
                     command.arg("--listTests");
                 }
             }
         }
-        let out = command
-            .current_dir(&project.dir)
-            .stdin(Stdio::null())
-            .output()
+        command.current_dir(&project.dir).stdin(Stdio::null());
+        let out = listing_output(&mut command, std::time::Duration::from_secs(120))
             .map_err(|e| Error::new(Exit::Precondition, format!("running {bin}: {e}")))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
@@ -225,6 +223,68 @@ impl Js {
     ) -> Result<Vec<String>, Error> {
         self.list(project, None, &[], extra)
     }
+}
+
+/// Bound runner discovery without blocking on descendants holding output pipes.
+fn listing_output(
+    command: &mut Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    let stdout = tempfile::NamedTempFile::new()?;
+    let stderr = tempfile::NamedTempFile::new()?;
+    command.stdout(stdout.reopen()?).stderr(stderr.reopen()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn()?;
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            #[cfg(unix)]
+            if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+                // SAFETY: the child was placed in its own process group above.
+                unsafe {
+                    libc::killpg(pid, libc::SIGKILL);
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "test discovery timed out",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: std::fs::read(stdout.path())?,
+        stderr: std::fs::read(stderr.path())?,
+    })
+}
+
+/// Preserve selection flags while keeping Jest listing output on stdout.
+fn jest_list_args(extra: &[String]) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut iter = extra.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--outputFile" | "--output-file" => {
+                iter.next();
+            }
+            "--json" | "--no-json" => {}
+            _ if arg.starts_with("--outputFile=")
+                || arg.starts_with("--output-file=")
+                || arg.starts_with("--json=") => {}
+            _ => args.push(arg.as_str()),
+        }
+    }
+    args
 }
 
 /// The files in `vitest list --filesOnly --json`: objects with a `file`, or
@@ -534,6 +594,17 @@ fn normalize(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn listing_stops_a_hung_runner() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 10 & wait"]);
+        let started = std::time::Instant::now();
+        let error = listing_output(&mut command, std::time::Duration::from_millis(50)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
 
     #[test]
     fn conventional_test_names_do_not_include_test_helpers() {

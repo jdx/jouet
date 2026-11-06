@@ -649,6 +649,31 @@ fn full_jest_accepts_a_changed_test_the_runner_lists() {
 }
 
 #[test]
+fn full_jest_listing_keeps_selection_but_not_output_options() {
+    let dir = repo("jest", "");
+    let root = dir.path();
+    write(&root.join("jest.config.js"), "module.exports = {}\n");
+    write(&root.join("test/new.test.js"), "test('new', () => {})\n");
+    let runner = root.join("node_modules/.bin/jest");
+    write(
+        &runner,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > .git/jest-list-args
+printf '%s/test/new.test.js\n' "$PWD"
+"##,
+    );
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let extra = ["--json", "--outputFile", "report.json", "--shard=1/2"].map(str::to_string);
+    let plan = plan(root, Some("main"), None, &extra).unwrap();
+    let args = std::fs::read_to_string(root.join(".git/jest-list-args")).unwrap();
+    assert!(args.lines().any(|arg| arg == "--shard=1/2"));
+    assert!(!args.contains("--json") && !args.contains("report.json"));
+    let command = plan.suites[0].command.as_ref().unwrap();
+    assert!(command.iter().any(|arg| arg == "--json"));
+    assert!(command.iter().any(|arg| arg == "report.json"));
+}
+
+#[test]
 fn a_changed_js_test_omitted_by_the_runner_is_not_silently_skipped() {
     let dir = repo("vitest", "");
     let root = dir.path();
