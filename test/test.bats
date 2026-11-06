@@ -1291,6 +1291,32 @@ SH
 	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 5
 }
 
+@test "--baseline compares Go JSON failure details" {
+	cat >check-go-json <<'SH'
+#!/bin/sh
+printf '%s\n' '{"Action":"run","Package":"example/a","Test":"TestBroken"}'
+printf '{"Action":"output","Package":"example/a","Test":"TestBroken","Output":"%s\\n"}\n' "$(cat detail.txt)"
+printf '%s\n' '{"Action":"fail","Package":"example/a","Test":"TestBroken"}'
+printf '%s\n' '{"Action":"fail","Package":"example/a"}'
+exit 1
+SH
+	chmod +x check-go-json
+	printf 'expected original\n' >detail.txt
+	git add check-go-json detail.txt
+	git commit -qm base
+	git checkout -qb work
+	printf 'unrelated\n' >change.txt
+	run --separate-stderr jouet test --baseline --cmd -- ./check-go-json
+	assert_success
+	assert_output --partial 'matching failure details'
+	assert_output --partial 'TestBroken'
+
+	printf 'different cause\n' >detail.txt
+	run --separate-stderr jouet test --baseline --cmd -- ./check-go-json
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+}
+
 @test "--baseline passes a run whose every failure also fails at the merge base" {
 	# The test file is rewritten within a second to the same size, which
 	# Python's bytecode cache cannot tell from the old one.

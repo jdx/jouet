@@ -315,7 +315,7 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 - a cargo build script that failed, with its stderr;
 - `cargo fmt --check` and rustfmt, each place by file and line, with the diff;
 - tsc;
-- go test and go build, including a package that fails with no failed test of its own, as when `TestMain` gives up, named by the package;
+- go test and go build, including a package that fails with no failed test of its own, as when `TestMain` gives up, named by the package. For `go test -json`, named tests and their output are associated by package and test; incomplete or ambiguous event sequences are not used as matching baseline details;
 - pytest, unittest, RSpec, jest and vitest;
 - Playwright's list reporter for `.test` and `.spec` files, including its numbered failure blocks;
 - TAP, which bats prints;

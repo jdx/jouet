@@ -51,7 +51,7 @@ static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
 static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)\b0 (?:errors?|failed|failures?)\b").expect("zero failures pattern")
 });
-const DETAILS_VERSION: u32 = 3;
+const DETAILS_VERSION: u32 = 4;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -1262,6 +1262,50 @@ docs/README.md\n\
             evidence("/src/app", &long("first")).details,
             evidence("/src/app", &long("second")).details
         );
+    }
+
+    #[test]
+    fn go_json_baselines_compare_each_packages_failure_details() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestSame"}
+{"Action":"run","Package":"example/b","Test":"TestSame"}
+{"Action":"output","Package":"example/a","Test":"TestSame","Output":"a_test.go:5: expected alpha\n"}
+{"Action":"output","Package":"example/b","Test":"TestSame","Output":"b_test.go:7: expected beta\n"}
+{"Action":"fail","Package":"example/b","Test":"TestSame"}
+{"Action":"fail","Package":"example/a","Test":"TestSame"}
+{"Action":"fail","Package":"example/a"}
+{"Action":"fail","Package":"example/b"}"#;
+        let evidence = |text: &str| failure_evidence(text, &[], Path::new("/work"), true).unwrap();
+        let original = evidence(output);
+        assert_eq!(original.names.len(), 2);
+        assert_eq!(original.details.len(), 2);
+        let changed = evidence(&output.replace("expected beta", "expected different"));
+        assert_eq!(original.names, changed.names);
+        assert_eq!(
+            original.details["example/a::TestSame"],
+            changed.details["example/a::TestSame"]
+        );
+        assert_ne!(
+            original.details["example/b::TestSame"],
+            changed.details["example/b::TestSame"]
+        );
+        let truncated = evidence(&output.replace(
+            "{\"Action\":\"run\",\"Package\":\"example/a\",\"Test\":\"TestSame\"}\n",
+            "",
+        ));
+        assert!(!truncated.details.contains_key("example/a::TestSame"));
+    }
+
+    #[test]
+    fn go_json_unidentified_package_failure_cannot_be_a_baseline_pass() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestOne"}
+{"Action":"output","Package":"example/a","Test":"TestOne","Output":"assertion failed\n"}
+{"Action":"fail","Package":"example/a","Test":"TestOne"}
+{"Action":"fail","Package":"example/a"}
+{"Action":"fail","Package":"example/b"}"#;
+        assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.names.contains("package example/b"));
+        assert!(!evidence.details.contains_key("package example/b"));
     }
 
     #[test]
