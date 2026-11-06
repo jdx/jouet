@@ -96,6 +96,7 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
     }
     report.source = ran.join(", ");
     if !uncovered.is_empty() {
+        report.status = Status::Unavailable;
         report.reason = Some(format!(
             "no hk config, and no fallback checker for {}",
             uncovered.join(", ")
