@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use socket2::{Domain, Protocol, Socket, Type};
+
 const JOUET: &str = env!("CARGO_BIN_EXE_jouet");
 
 fn command(dir: &Path, args: &[&str]) -> Command {
@@ -247,10 +249,21 @@ fn a_log_wait_from_the_start_reads_what_is_there() {
 #[test]
 fn a_port_opens_and_closes() {
     let dir = tempfile::tempdir().unwrap();
-    // A port that is free now.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
+    // Reserve the port without listening until the wait is running, so no
+    // other process can take it between choosing the address and opening it.
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+    socket
+        .bind(
+            &"127.0.0.1:0"
+                .parse::<std::net::SocketAddr>()
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+    let port = socket
         .local_addr()
+        .unwrap()
+        .as_socket()
         .unwrap()
         .port()
         .to_string();
@@ -260,10 +273,12 @@ fn a_port_opens_and_closes() {
         &["wait", "port", &addr, "--interval", "100ms", "--json"],
     );
     let (tx, rx) = std::sync::mpsc::channel();
-    let a = addr.clone();
-    later(move || tx.send(TcpListener::bind(a).unwrap()).unwrap())
-        .join()
-        .unwrap();
+    later(move || {
+        socket.listen(128).unwrap();
+        tx.send(TcpListener::from(socket)).unwrap();
+    })
+    .join()
+    .unwrap();
     let listener = rx.recv().unwrap();
     let out = finish(child);
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
