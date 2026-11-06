@@ -744,49 +744,74 @@ const FORMATTED_KEPT: usize = 20;
 
 /// Whether a Bash call only formats files or commits them: every command in
 /// it is a formatter (`cargo fmt`, `prettier --write`, `hk fix`, ...), a
-/// commit, whose hooks may fix what they check, `git add`, or `git status`,
-/// with pipes into `tail` or `head`. A `cd` makes it something else, since
-/// the files it changed are elsewhere.
+/// commit, whose hooks may fix what they check, `git add`, or a command that
+/// leaves the files as they are: `git status`, `git diff`, `git log`, `git
+/// push`, a new branch at the current commit, `cargo clippy` without `--fix`
+/// (also through `jouet test --cmd --`), and `tail` or `head` in a pipe. The
+/// script is parsed, so a commit message's newlines, `;` and backticks in
+/// single quotes are words. A `cd` makes it something else, since the files
+/// it changed are elsewhere.
 pub(crate) fn formats(command: &str) -> bool {
-    let bare = command
-        .replace("2>&1", "")
-        .replace("1>&2", "")
-        .replace(">&2", "")
-        .replace("2>/dev/null", "")
-        .replace(">/dev/null", "");
-    // Anything still redirected writes a file: `git status > src/a.rs`. A
-    // substitution runs a command of its own: `git status $(sed -i ...)`.
-    if bare.contains('>') || bare.contains("$(") || bare.contains('`') || bare.contains("<(") {
+    let script = jouet_rules::shell::parse(command);
+    // A substitution runs a command of its own: `git status $(sed -i ...)`,
+    // or with backticks, which the parser keeps as words.
+    if !script.nested.is_empty()
+        || command.contains("<(")
+        || backtick_outside_single_quotes(command)
+    {
         return false;
     }
-    let segments: Vec<&str> = bare
-        .split(['\n', ';', '|', '&'])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
-    !segments.is_empty()
-        && segments.iter().all(|segment| {
-            let words: Vec<&str> = segment.split_whitespace().collect();
-            let words = match words.as_slice() {
-                ["mise", "x", rest @ ..] => match rest.iter().position(|w| *w == "--") {
-                    Some(i) => &rest[i + 1..],
-                    None => rest,
-                },
-                all => all,
-            };
-            let has = |flag: &str| words.contains(&flag);
-            match words {
-                ["cargo", "fmt", ..] | ["rustfmt", ..] | ["gofmt", ..] | ["go", "fmt", ..] => true,
-                ["black", ..] | ["ruff", "format", ..] | ["hk", "fix", ..] => true,
-                ["prettier", ..] | ["npx", "prettier", ..] => has("--write") || has("-w"),
-                ["git", "commit", ..]
-                | ["jouet", "commit", ..]
-                | ["git", "add", ..]
-                | ["git", "status", ..] => true,
-                ["tail", ..] | ["head", ..] | ["true"] => true,
-                _ => false,
-            }
+    !script.commands.is_empty()
+        && script.commands.iter().all(|command| {
+            // A redirection writes a file (`git status > src/a.rs`), and so
+            // does a here-document's `cat`.
+            command.heredocs.is_empty()
+                && command
+                    .stdout_to
+                    .as_deref()
+                    .is_none_or(|to| to == "/dev/null")
+                && leaves_or_formats(command.argv())
         })
+}
+
+/// Whether `command` has a backtick that the shell would substitute: one
+/// outside single quotes (double quotes substitute it too).
+fn backtick_outside_single_quotes(command: &str) -> bool {
+    let mut quoted = false;
+    command.chars().any(|c| {
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        c == '`' && !quoted
+    })
+}
+
+/// [`formats`] for one command's words.
+fn leaves_or_formats(words: &[String]) -> bool {
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let has = |flag: &str| words.contains(&flag);
+    match words.as_slice() {
+        ["cargo", "fmt", ..] | ["rustfmt", ..] | ["gofmt", ..] | ["go", "fmt", ..] => true,
+        ["black", ..] | ["ruff", "format", ..] | ["hk", "fix", ..] => true,
+        ["prettier", ..] | ["npx", "prettier", ..] => has("--write") || has("-w"),
+        ["git", "commit", ..]
+        | ["jouet", "commit", ..]
+        | ["git", "add", ..]
+        | ["git", "status", ..]
+        | ["git", "log", ..]
+        | ["git", "push", ..] => true,
+        ["git", "diff" | "show", ..] => !words.iter().any(|w| w.starts_with("--output")),
+        // A new branch with no start point keeps the files.
+        ["git", "checkout", "-q", "-b" | "-B", _]
+        | ["git", "checkout", "-b" | "-B", _]
+        | ["git", "switch", "-c" | "-C", _] => true,
+        ["cargo", "clippy", ..] => !has("--fix"),
+        ["jouet", "test", "--cmd", "--", rest @ ..] => {
+            matches!(rest, ["cargo", "clippy", ..]) && !rest.contains(&"--fix")
+        }
+        ["tail", ..] | ["head", ..] | ["true"] => true,
+        _ => false,
+    }
 }
 
 /// A command as the unverifiable failures key it: `jouet test` without
@@ -2487,11 +2512,26 @@ mod tests {
             "mise x -- cargo fmt -p a && jouet commit src/a.rs --message m",
             "prettier --write src && git add src/a.ts && git commit -qm m",
             "hk fix; git status --short",
+            // A commit message's lines, `;` and backticks are its words.
+            "cargo fmt && jouet commit src/a.rs --message \"fix(a): keep b; and c\n\nCo-Authored-By: X <x@y>\"",
+            "jouet commit src/a.rs --message 'fix: `b` stays'",
+            "cargo fmt && git diff --stat && jouet commit src/a.rs --message m",
+            "cargo fmt --all && cargo fmt --all -- --check | head -2; git diff --stat | tail -3; (jouet commit a --message m 2>&1 | tail -4)",
+            "cargo fmt -p a 2>&1 | tail -3; git status --short; jouet test --cmd -- cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -4",
+            "git checkout -q -b fix/a 2>&1; jouet commit src/a.rs --message m | tail -2; git push -u origin HEAD 2>&1 | tail -2",
+            "git commit -q -m m > /dev/null 2>&1",
         ] {
             assert!(formats(yes), "{yes}");
         }
         for no in [
             "cargo fmt && cargo test",
+            "cargo clippy --fix --allow-dirty",
+            "jouet test --cmd -- cargo test",
+            "git checkout -b fix/a origin/main",
+            "git checkout src/a.rs",
+            "git diff --output=src/a.rs",
+            "cat > src/a.rs <<'EOF'\nfn main() {}\nEOF\ncargo fmt",
+            "jouet commit a --message \"$(sed -i s/a/b/ src/main.rs)\"",
             "prettier --check src",
             "cd sub && cargo fmt",
             "sed -i s/a/b/ src/a.rs && cargo fmt",
