@@ -249,7 +249,7 @@ regexes! {
     FAILURE_MARK = r"^\s*(FAIL|FAILED|ERROR)(:|\s)|^\s*not ok\b";
     // A runner refusing its own arguments, before it runs anything; argparse
     // and pytest name the program, and a subcommand, first.
-    USAGE = r"^(error: (unexpected argument|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
+    USAGE = r"^(error: (unexpected argument|Unrecognized option: |Argument to option '[^']+' missing|Option '[^']+' given more than once|unrecognized subcommand|unrecognized arguments:|the following required arguments were not provided)|flag provided but not defined:|error: no such command:|[\w./-]+( [\w-]+)*: error: (unrecognized arguments:|the following arguments are required:|argument [\w/-]+: (invalid|expected|ignored|not allowed)))";
     // cargo test's libtest.
     LIBTEST_FAILED = r"^test (.+) \.\.\. FAILED$";
     LIBTEST_OK = r"^test (.+) \.\.\. ok$";
@@ -263,6 +263,9 @@ regexes! {
     // cargo giving up after a test binary failed.
     CARGO_TEST_FAILED = r"^error: test failed, to rerun pass ";
     CARGO_TEST_BINARY = r"^\s*Running (?:unittests )?(.+?) \((.+)\)$";
+    // How a test binary that cargo gave up on ended: `(signal: 6, SIGABRT:
+    // process abort signal)` or `(exit status: 1)`.
+    CARGO_TEST_EXIT = r"^\s*process didn't exit successfully: `(.*)` \((.+)\)$";
     // A Go package's result line: `ok  pkg  0.01s` or `(cached)`, with
     // `[no tests to run]` after it when the package ran none.
     GO_PACKAGE_OK = r"^ok\s+\S+\s+(\(cached\)|[\d.]+s)";
@@ -647,8 +650,82 @@ fn libtest(lines: &[String], out: &mut Parsed) {
         } else if let Some(c) = LIBTEST_RESULT.captures(line) {
             let n = |k: usize| c[k].parse().unwrap_or(0);
             out.count(n(1), n(2), n(3));
+        } else if depth[i] == 0 && CARGO_TEST_FAILED.is_match(line) {
+            crashed(lines, i, out);
         }
     }
+}
+
+/// A test binary that ended before its result, which cargo's `error: test
+/// failed` at `at` follows: it crashed or exited. What it printed since cargo
+/// started it says why, and how it ended comes after the error.
+fn crashed(lines: &[String], at: usize, out: &mut Parsed) {
+    let Some(start) = lines[..at]
+        .iter()
+        .rposition(|l| CARGO_TEST_BINARY.is_match(l) || LIBTEST_RESULT.is_match(l))
+    else {
+        return;
+    };
+    let Some(binary) = CARGO_TEST_BINARY.captures(&lines[start]) else {
+        return;
+    };
+    // A binary that refused its arguments ran no test: that is a usage
+    // error, which `usage_error` reports, not a crash.
+    if lines[start + 1..at].iter().any(|l| USAGE.is_match(l)) {
+        return;
+    }
+    let exit = lines[at + 1..]
+        .iter()
+        .take(4)
+        .find_map(|l| CARGO_TEST_EXIT.captures(l));
+    let ended = exit
+        .as_ref()
+        .map_or("exited", |c| c.get(2).map_or("", |m| m.as_str()));
+    let nocapture = exit.as_ref().is_some_and(|c| {
+        c[1].split_whitespace()
+            .any(|w| w == "--nocapture" || w == "--no-capture")
+    });
+    let mut said: Vec<String> = jouet_wait::fold_backtraces(lines[start + 1..at].to_vec())
+        .into_iter()
+        .filter(|l| {
+            !l.trim().is_empty()
+                && !LIBTEST_OK.is_match(l)
+                && !LIBTEST_RUNNING.is_match(l)
+                && !RUST_NOISE.is_match(l)
+        })
+        .collect();
+    // The first panic is the cause; with `--nocapture` the panics after it
+    // and their backtraces would push it out of the tail.
+    match said.iter().position(|l| l.contains("panicked at")) {
+        Some(first) if said.len() - first > OUTPUT_TAIL => {
+            let end = said.len() - OUTPUT_TAIL / 2;
+            let skipped = end - (first + OUTPUT_TAIL / 2);
+            said.drain(first + OUTPUT_TAIL / 2..end);
+            said.insert(first + OUTPUT_TAIL / 2, skipped_marker(skipped));
+            said.drain(..first);
+        }
+        Some(first) => {
+            said.drain(..first);
+        }
+        None => {
+            said = said.split_off(said.len().saturating_sub(OUTPUT_TAIL));
+            // libtest keeps a test's output until the test ends, so a crash
+            // loses the panic that caused it, unless it ran with --nocapture.
+            if !nocapture {
+                said.push(
+                "libtest held back the tests' own output; rerun with `-- --nocapture` to see it"
+                    .into(),
+            );
+            }
+        }
+    }
+    // The binary's tests never reported, so it counts as one failure.
+    out.count(0, 1, 0);
+    out.push(
+        at,
+        format!("{} ended before its result ({ended})", &binary[1]),
+        said,
+    );
 }
 
 /// How many libtest runs each line is inside. A run is `running N tests` up
