@@ -245,7 +245,7 @@ end
 -- Whether every `.replace(` old text is in the files the code edits: true
 -- or false with the first one missing, from `jouet.file.contains`; nil when
 -- that cannot be told, and the edit is judged as before.
-local function olds_found(code: string, targets: { string }, dir: string | false | nil): (boolean?, string?, string?)
+local function olds_found(code: string, targets: { string }, dir: string | false | nil): (boolean?, string?, { string }?)
 	local olds = replace_olds(code)
 	if not olds or #olds == 0 or #targets == 0 or dir == false then
 		return nil, nil, nil
@@ -290,7 +290,7 @@ local function olds_found(code: string, targets: { string }, dir: string | false
 			end
 		end
 		if not found then
-			return false, old, table.concat(paths, " or ")
+			return false, old, paths
 		end
 	end
 	return true, nil, nil
@@ -323,14 +323,20 @@ local rule: JouetRule = {
 					if #edited > 0 then
 						-- Replacements whose old text is there land; one whose
 						-- text is not would change nothing, so say which.
-						local found, missing, path = olds_found(code, edited, dirs[i])
-						if found == false and missing then
+						local found, missing, paths = olds_found(code, edited, dirs[i])
+						if found == false and missing and paths then
+							-- `jouet edit replace` applies each pair to every path
+							-- it names, so a script over several files gets one
+							-- command per file.
+							local command = if #paths == 1
+								then `\`jouet edit replace {paths[1]} --old TEXT --new TEXT\``
+								else "`jouet edit replace PATH --old TEXT --new TEXT` for each file"
 							return jouet.deny(
-								`The \`.replace(\` text \`{shown(missing)}\` is not in {path}, so this script would change nothing there. Fix the text, or run \`jouet edit\`, which reports any replacement that does not match.`
+								`The \`.replace(\` text \`{shown(missing)}\` is not in {table.concat(paths, " or ")}, so this script would change nothing there. Fix the text, or run {command}, which reports any replacement that does not match.`
 							)
 						elseif found ~= true then
 							return jouet.deny(
-								"Run `jouet edit` instead. It applies exact replacements across files all-or-nothing and reports any that do not match (`jouet agent-help edit`). To add code, replace a line next to where it goes with that line plus the new code."
+								"Run `jouet edit replace PATH... --old TEXT --new TEXT` instead (repeat the pair for more). It applies exact replacements across files all-or-nothing and reports any that do not match. To add code, replace a line next to where it goes with that line plus the new code."
 							)
 						end
 					end
