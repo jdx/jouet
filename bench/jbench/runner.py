@@ -239,6 +239,10 @@ class DiskSamples:
             for name in paths
         }
 
+    def below(self, minimum: int) -> bool:
+        return minimum > 0 and any(entry["end_bytes"] is not None and entry["end_bytes"] < minimum
+                                   for entry in self.values.values())
+
     def sample(self) -> None:
         for name, path in self.paths.items():
             entry = self.values[name]
@@ -266,8 +270,10 @@ def run_agent(
     timeout_s: int,
     max_tokens: int | None,
     stream_path: Path,
+    min_free_bytes: int = 0,
+    disk_guard_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    """Runs the agent, stopping it at the timeout or the token cap."""
+    """Runs the agent, stopping at the timeout, token cap or disk reserve."""
     lines: list[str] = []
     elapsed: list[float] = []
     stopped: list[str] = []
@@ -279,6 +285,11 @@ def run_agent(
         tmp = workdir / tmp
     disk = DiskSamples({"work": workdir, "tmp": tmp, "results": stream_path.parent})
     disk.sample()
+    if disk.below(min_free_bytes):
+        if disk_guard_event is not None:
+            disk_guard_event.set()
+        return {"wall_s": 0, "exit_code": None, "stopped": "disk_guard", "lines": [], "elapsed": [],
+                "stream_complete": True, "disk_free": disk.values, "session": None}
     with stream_path.open("w") as stream, (stream_path.parent / "agent.stderr").open("w") as err:
         proc = subprocess.Popen(
             cmd,
@@ -315,7 +326,11 @@ def run_agent(
                 except subprocess.TimeoutExpired:
                     pass
                 disk.sample()
-                if time.perf_counter() - started > timeout_s:
+                if disk.below(min_free_bytes):
+                    if disk_guard_event is not None:
+                        disk_guard_event.set()
+                    stopped.append("disk_guard")
+                elif time.perf_counter() - started > timeout_s:
                     stopped.append("timeout")
                 elif max_tokens and harness.tokens_so_far(list(lines), config_dir) > max_tokens:
                     stopped.append("token_cap")
@@ -329,6 +344,10 @@ def run_agent(
         proc.wait()
         wall_s = time.perf_counter() - started
         disk.sample()
+        if disk.below(min_free_bytes):
+            if disk_guard_event is not None:
+                disk_guard_event.set()
+            stopped[:] = ["disk_guard"]
         reader.join(timeout=10)
         # A descendant can keep stdout open after the agent exits. Freeze the
         # transcript and timestamps together before closing the stream; a
@@ -339,9 +358,10 @@ def run_agent(
             captured_lines = list(lines)
             captured_elapsed = list(elapsed)
         # One timestamp per line; no transcript content or project paths.
-        (stream_path.parent / "agent-timing.json").write_text(json.dumps({
-            "elapsed_s": captured_elapsed, "stream_complete": complete,
-        }))
+        if not stopped or stopped[0] != "disk_guard":
+            (stream_path.parent / "agent-timing.json").write_text(json.dumps({
+                "elapsed_s": captured_elapsed, "stream_complete": complete,
+            }))
     return {
         "wall_s": round(wall_s, 3),
         "exit_code": proc.returncode,
@@ -575,7 +595,8 @@ def execute(
             raise codex_hooks.HookPreflightError("Dedicated Codex credentials appeared during setup") from error
         try:
             agent = run_agent(
-                harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"), keep / "agent.jsonl"
+                harness, cmd, env, workdir, config_dir, timeout_s, opts.get("max_tokens_per_run"),
+                keep / "agent.jsonl", opts.get("min_free_bytes", 0), opts.get("disk_guard_event")
             )
         finally:
             # Before anything else can fail: a refresh the run made is the
@@ -597,7 +618,8 @@ def execute(
     if fixture is not None:
         with FakeGitHub(fixture, keep / "github-requests.jsonl") as fake:
             ran = go(fake.url)
-            state_path.write_text(json.dumps(fake.world.fixture, indent=2))
+            if ran["agent"]["stopped"] != "disk_guard":
+                state_path.write_text(json.dumps(fake.world.fixture, indent=2))
             github = fake.world.summary()
     else:
         ran = go(None)
@@ -605,7 +627,8 @@ def execute(
 
     env = ran["env"]
     left = sweep(run_dir, ran["agent"]["session"]) + sweep(tmp_dir, None)
-    changes = changed_paths(workdir, ran["before_snapshot"], worktree_snapshot(workdir))
+    disk_stopped = ran["agent"]["stopped"] == "disk_guard"
+    changes = None if disk_stopped else changed_paths(workdir, ran["before_snapshot"], worktree_snapshot(workdir))
     # The agent's environment without its credentials: the check builds and
     # runs what the agent did, in the same home, cache and TMPDIR.
     base = {k: v for k, v in env.items() if k not in harness.auth_env}
@@ -614,7 +637,9 @@ def execute(
                 and usage.extra.get("capacity_error", False))
     missing_hook = harness.name == "codex" and arm.jouet and not arms_mod.codex_started(env)
     missing_usage = harness.name == "codex" and usage.extra.get("usage_observed") is False
-    if missing_hook:
+    if ran["agent"]["stopped"] == "disk_guard":
+        check = {"passed": None, "exit_code": None, "output": "Check skipped: disk reserve reached."}
+    elif missing_hook:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: jouet's Codex session-start hook was not observed."}
     elif capacity:
         check = {"passed": False, "exit_code": None, "output": "Check skipped: Codex model at capacity."}
@@ -624,8 +649,9 @@ def execute(
         check = tasks_mod.run_check(task, workdir, base, tasks_mod.check_env(shas, state_path if fixture else None, task.check_docker))
     left += sweep(run_dir, None) + sweep(tmp_dir, None)
     # Ephemeral Codex sessions have no transcript for jouet audit to inspect.
-    audit_report = None if harness.name == "codex" else audit(opts["jouet_bin"], harness, env)
-    (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
+    audit_report = None if harness.name == "codex" or disk_stopped else audit(opts["jouet_bin"], harness, env)
+    if not disk_stopped:
+        (keep / "audit.json").write_text(json.dumps(audit_report, indent=2))
     agent = ran["agent"]
     record = {
         "id": p.id,
@@ -648,7 +674,7 @@ def execute(
         "command_activity": (timing.codex_commands(agent["lines"], agent.get("elapsed", []),
                                                    agent.get("stream_complete", False))
                              if harness.name == "codex" else None),
-        "ledger": ledger(env) if arm.jouet else None,
+        "ledger": ledger(env) if arm.jouet and not disk_stopped else None,
         "github": github,
         "setup": ran["setup"],
         "init": {"cached": init["cached"], **init["meta"]} if init else None,
@@ -657,7 +683,10 @@ def execute(
         "credentials": ran["credentials"],
         "left_running": left,
     }
-    if missing_hook:
+    if agent["stopped"] == "disk_guard":
+        record["error"] = "Disk reserve reached; task result is unverified"
+        record["error_kind"] = "disk_guard"
+    elif missing_hook:
         record["error"] = "Codex did not record the jouet session-start hook"
         record["error_kind"] = "codex_hook_preflight"
     elif capacity:
@@ -670,9 +699,13 @@ def execute(
     if opts.get("keep_work"):
         record["workdir"] = str(workdir)
         record["tmp_dir"] = str(tmp_dir)
-    (keep / "check.log").write_text(check["output"] + "\n")
-    (keep / "result.json").write_text(json.dumps(record, indent=2))
-    if harness.name != "codex":
+    try:
+        (keep / "check.log").write_text(check["output"] + "\n")
+        (keep / "result.json").write_text(json.dumps(record, indent=2))
+    except OSError:
+        if not disk_stopped:
+            raise
+    if harness.name != "codex" and not disk_stopped:
         copy_transcripts(ran["config_dir"], keep / "transcripts")
     if not opts.get("keep_work"):
         remove(run_dir)
@@ -758,6 +791,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 log(f"budget: {budget.spent} tokens spent of {budget.max_total_tokens}; skipping the rest")
                 break
             log(f"[{n}/{len(planned)}] {p.id}")
+            guard = threading.Event()
+            opts["disk_guard_event"] = guard
             try:
                 record = execute(p, opts, work_root, out_dir)
             except Exception as e:  # one broken run must not lose the others
@@ -772,7 +807,11 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                     "success": False,
                     "error": f"{type(e).__name__}: {e}",
                 }
-                if isinstance(e, codex_hooks.HookPreflightError):
+                if guard.is_set() or isinstance(e, init_mod.DiskGuard):
+                    record["error_kind"] = "disk_guard"
+                    record["stopped"] = "disk_guard"
+                    record["check"] = {"passed": None, "exit_code": None}
+                elif isinstance(e, codex_hooks.HookPreflightError):
                     record["error_kind"] = "codex_hook_preflight"
                 if found := task_dir(p.task):
                     record["task_dir"] = found
@@ -794,7 +833,7 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 ) from error
             u = record.get("usage") or {}
             log(
-                f"    {'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
+                f"    {'error' if record.get('error') else 'unverified' if record['success'] is None else 'ok' if record['success'] else 'FAILED'}"
                 f"  {record.get('wall_s', '-')}s"
                 f"  in {u.get('input_tokens', '-')} out {u.get('output_tokens', '-')}"
                 + (f"  stopped: {record['stopped']}" if record.get("stopped") else "")
@@ -802,6 +841,9 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             )
             for note in record.get("credentials") or []:
                 log(f"    credentials: {note}")
+            if record.get("error_kind") == "disk_guard":
+                log("stopping: disk reserve reached")
+                break
             if record.get("error_kind") == "codex_hook_preflight":
                 log("stopping: Codex hooks could not be verified")
                 break

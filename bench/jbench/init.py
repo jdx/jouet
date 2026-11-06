@@ -34,6 +34,10 @@ CACHE = Path.home() / ".cache" / "jouet-bench" / "init"
 TIMEOUT_S = 1800
 
 
+class DiskGuard(RuntimeError):
+    """Initialization stopped because the agent reached the disk reserve."""
+
+
 def key(task: tasks_mod.Task, head_sha: str, jouet_bin: Path, harness: Harness, opts: dict[str, Any]) -> str:
     """A hash only: like a measured run's directory, the skill's paths carry
     no task name, which a project's tests could see."""
@@ -153,12 +157,16 @@ def prepared(
             TIMEOUT_S,
             opts.get("max_tokens_per_run"),
             run_dir / "agent.jsonl",
+            opts.get("min_free_bytes", 0),
+            opts.get("disk_guard_event"),
         )
     finally:
         if harness.name == "codex":
             credentials.give_back_and_remove(lent)
         else:
             credentials.give_back(lent)
+    if agent["stopped"] == "disk_guard":
+        raise DiskGuard("disk reserve reached during project initialization")
     usage = harness.usage(agent["lines"], config_dir)
     if harness.name == "codex" and not arms_mod.codex_started(env):
         raise codex_hooks.HookPreflightError(f"Codex did not record the jouet session-start hook; see {run_dir / 'agent.jsonl'}")

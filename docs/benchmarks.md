@@ -326,10 +326,11 @@ python3 bench/agents.py report bench/results/<id>   # rewrite a summary
 | `--max-usd-per-run` | 3 | Claude Code's `--max-budget-usd` (Codex reports no cost) |
 | `--max-total-tokens` | 60,000,000 | skip the remaining runs once the suite has spent this |
 | `--timeout` | each task's | cap every task's timeout, in seconds |
+| `--min-free-mib` | 1024 | stop the agent and suite when sampled free space falls below this many MiB; 0 disables |
 | `--jouet` | `target/debug/jouet` | the jouet binary the jouet arm runs. It is copied once when the suite starts, so a rebuild during the suite neither changes nor removes what is measured |
 | `--keep-work` | off | keep each run's work tree and home, for debugging; its result records `workdir` and `tmp_dir` |
 
-A run stopped by its timeout or a budget counts as a failure, and the report says which stopped it.
+A run stopped by its timeout or a token budget counts as a failure, and the report says which stopped it. A disk-reserve stop is an unscored infrastructure error; the checker and remaining runs are skipped.
 
 Results go to `bench/results/<timestamp>/`, which git ignores:
 
@@ -340,7 +341,7 @@ Results go to `bench/results/<timestamp>/`, which git ignores:
 
 Each run's `changed_paths` lists paths whose contents or Git index entries changed between setup and the checker, including committed, staged and untracked changes. The summary shows up to ten paths per run and points to `runs.jsonl` when more were recorded; `summary.json` retains the full list. Staging an existing file can list it even when its contents did not change. This is evidence for a scope review, not a pass/fail judgment or a substitute for reviewing the diff. Ignored files and changes inside submodules are not included. `null` means the snapshots could not be compared; it does not mean nothing changed. The snapshots use a temporary Git index and do not change the agent's index.
 
-Each run's `disk_free` records free bytes at the start and end of the agent and the lowest observed value on the work, temporary and results filesystems. The harness samples about once per second while the agent runs; it also records successful samples and errors. Paths are not included. Missing readings are `null`, and space can fall lower between samples or during setup and checking, so a healthy recorded minimum does not prove disk exhaustion did not occur. Older runs have no measurements.
+Each run's `disk_free` records free bytes at the start and end of the agent and the lowest observed value on the work, temporary and results filesystems. The harness samples about once per second while the agent runs; it also records successful samples and errors. Paths are not included. The disk reserve is checked before and during task and initialization agent execution and once after each exits; it does not monitor their environment setup or the checker. On a disk stop, changed-path snapshots, audit and transcript copies are skipped. Missing readings are `null` and cannot trigger the guard. Space can fall lower between samples, so the reserve cannot guarantee that disk exhaustion will be avoided. Older runs have no measurements.
 
 Each run also saves `agent-timing.json`, with one elapsed receipt time for each line of `agent.jsonl` and whether the stream reached EOF. For Codex, `command_activity` in the run record pairs command-start and command-completion events and reports the union of their observed intervals, plus unmatched events, duplicate starts, and intervals whose events arrived within a millisecond of each other. Overlapping commands count once. These are times at which the harness received events: buffering and missing events can distort them, and incomplete intervals are not included. An interval reported as coalesced may have been buffered or the command may have finished quickly; it cannot distinguish the two. The remaining wall time is not necessarily model inference or jouet overhead. Older runs have no timing sidecar.
 
