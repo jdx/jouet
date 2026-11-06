@@ -270,9 +270,10 @@ regexes! {
     // A runner saying it ran nothing: TAP's `1..0`, pytest, jest, go.
     NO_TESTS = r"^(1\.\.0\b|collected 0 items|(=+ )?no tests ran\b|(=+ )?\d+ deselected in [\d.]+s( =+)?$|collected \d+ items? / \d+ deselected / 0 selected|(?:Error: )?No tests found|testing: warning: no tests to run)";
     // Lines of libtest's that say nothing about a failure.
-    // mbx's build cache and savings lines too, which a cargo build through
-    // it prints last.
-    RUST_NOISE = r"^\s*(running \d+ tests?|failures:|test result: .*|test \S+ \.\.\. FAILED|note: run with `RUST_BACKTRACE=1`.*|mbx\[\w+\]: .*)$";
+    // mbx's build cache, savings and warning lines too, which a cargo
+    // build through it prints last. Not `mbx[error]`, which can be all a
+    // failed run printed.
+    RUST_NOISE = r"^\s*(running \d+ tests?|failures:|test result: .*|test \S+ \.\.\. FAILED|note: run with `RUST_BACKTRACE=1`.*|mbx\[(cache|progress|savings|gc|target|warning)\]: .*)$";
     // A line in the middle of a long failure worth keeping: an error, an
     // assertion, or a line of a diff.
     // A numbered line is an error chain's (eyre's `0: x is not installed`):
