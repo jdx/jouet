@@ -146,6 +146,11 @@ ask the person to review and trust it, then run it. Record what you saw:
   cause in a few words. Not in `full` or `lint`: agents then do not spend
   their task repairing the machine, and the stop gate does not hold them on
   it. Report each one, so a person can fix the environment and remove it.
+  A test that runs and fails its assertions is a failure in the code, not
+  the machine, even when it fails before you changed anything: never put it
+  in `[checks.broken]`. On a branch other than the default one it is often
+  the work in progress, and recording it tells every later agent to ignore
+  the failures it was asked to fix. Report it instead.
 - A check that is slow, or needs what a workstation lacks (services,
   credentials, tools only CI installs), goes in `[checks.ci]`. Agents push
   and wait for CI rather than run it.
