@@ -156,7 +156,18 @@ The first batch had ten SWE-bench Verified instances, chosen from the dataset's 
 | `swebench-django-14631` | `BaseForm` should read values through `BoundField` | 2 files | forms and bound fields |
 | `swebench-pytest-5787` | Exception serialization loses chained exceptions | 1 file, 260 lines | report serialization, read against `_pytest._code` |
 
-SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
+The second batch targets exploration in large Rust workspaces, where the agent has to find the code an issue is about before it can fix it. The four come from Multi-SWE-bench (`ByteDance-Seed/Multi-SWE-bench`, the `rust/` files), and their gold patches cross crates or modules. They run with the host's rustup Rust, which `[tools]` links ahead of any distro `cargo`, and their checks need the network for crates, since nothing is primed. `test_timeout_s` in `swebench.json` gives the tests room for a cold workspace build (1500s for nushell, 800s for tokio), inside the check's own `check_timeout_s`. Each one's `--test-cmd` runs the whole test module or file the hidden tests are in, so the existing tests there guard against regressions:
+
+| task | instance | gold patch | test command |
+|---|---|---|---|
+| `swebench-nushell-13870` | An external command failing mid-pipeline raises an error | 12 files in nu-protocol, nu-engine, nu-command and nu-cmd-lang | `cargo test --test main -- shell::pipeline::commands::external` |
+| `swebench-nushell-10395` | Too few arguments to a custom command panic the highlighter | 2 files in nu-parser and nu-protocol | `cargo test --test main -- repl::test_parser` |
+| `swebench-tokio-5179` | A `LocalSet` and a `Runtime` cannot both live in thread-locals | 5 files across the runtime context, coop and `task::local` | `cargo test --manifest-path tokio/Cargo.toml --features full --test task_local_set` |
+| `swebench-tokio-7111` | `select!` keeps polling an mpsc receiver that has used up its budget | 4 files in the macros and `task` | the same for `--test macros_select`, built first and then run under `timeout 120` |
+
+tokio commits no `Cargo.lock`, and a fresh resolve brings a second tokio from crates.io, which makes `-p tokio` ambiguous, so its commands name the manifest. Unsolved, tokio-7111's test hangs, which is the bug. The timeout turns that hang into a failure, so the check does not count it as unverified. tokio-7111's hidden `coop_budget.rs` calls `task::poll_budget_available`, an API the fix adds and the issue never names, so its command builds only `macros_select`.
+
+SWE-bench is MIT-licensed, and Django, sympy and Sphinx are BSD-licensed and pytest is MIT-licensed, so their tasks are committed. Multi-SWE-bench is CC0, subject to any rights ByteDance holds in it, and nushell and tokio are MIT-licensed, so theirs are committed too. pylint is GPL-2.0, so its instances (`pylint-dev__pylint-4551` was a candidate) are left to be generated locally. The dataset itself is not committed. Download it as JSONL, for example from the dataset viewer's `/rows` API for `princeton-nlp/SWE-bench_Verified`.
 
 The models under test may have seen these issues and fixes in training. Both arms use the same model, but jouet may change how an agent uses what it remembers, so pairing does not eliminate this confounder. Success and cost differences on these tasks may not generalize to unfamiliar work.
 
