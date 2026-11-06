@@ -81,6 +81,36 @@ class JactionlintCheckerTest(unittest.TestCase):
                 self.assertFalse(unverified)
                 self.assertTrue(any(call.args[0] is False and name in call.args[1] for call in calls))
 
+    def test_existing_edited_file_runs_the_package_alongside_new_test(self):
+        def run(command, **kwargs):
+            if command[0] == 'git':
+                diff = '+func TestAdded(t *testing.T) {' if command[-1] == 'added_test.go' else '+// edited'
+                return subprocess.CompletedProcess(command, 0, stdout=diff, stderr='')
+            if command[1] == 'list':
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'TestGoFiles': ['existing_test.go']}),
+                                                   stderr='')
+            test = 'TestAdded' if '-run' in command else 'TestExisting'
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'Action': 'pass', 'Test': test}),
+                                               stderr='')
+
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path.cwd()
+            try:
+                os.chdir(directory)
+                for name in ('added_test.go', 'existing_test.go'):
+                    Path(name).write_text('package example\n')
+                with mock.patch.object(checker, 'committed_files', return_value={'added_test.go', 'existing_test.go'}), \
+                        mock.patch.object(checker, 'head_sha', return_value='base'), \
+                        mock.patch.object(checker, 'UNVERIFIED', []), \
+                        mock.patch.object(checker, 'expect'), \
+                        mock.patch.object(checker.subprocess, 'run', side_effect=run) as process:
+                    checker.check_committed_tests()
+                    self.assertFalse(checker.UNVERIFIED)
+                    self.assertTrue(any(call.args[0][1] == 'test' and '-run' not in call.args[0]
+                                        for call in process.call_args_list))
+            finally:
+                os.chdir(old)
+
     def test_timeout_output_preserves_bytes_and_text(self):
         error = subprocess.TimeoutExpired('go', 1, output=b'partial\xff', stderr=b'error')
         self.assertEqual(checker.timeout_output(error), 'partial\ufffderror')
