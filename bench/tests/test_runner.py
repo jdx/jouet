@@ -210,6 +210,7 @@ class PlanTest(unittest.TestCase):
             def agent_with_session(*args):
                 result = agent(*args)
                 result["session"] = 123
+                result["disk_free"] = {"work": {"min_bytes": 42}}
                 return result
 
             with patch.object(runner.arms_mod, "build", return_value=env), \
@@ -223,6 +224,7 @@ class PlanTest(unittest.TestCase):
                     patch.object(runner.tasks_mod, "run_check", side_effect=check):
                 record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
             self.assertEqual(record["changed_paths"], ["agent-only.txt", "cleanup-written.txt"])
+            self.assertEqual(record["disk_free"], {"work": {"min_bytes": 42}})
 
     def test_every_round_runs_every_arm_in_a_seeded_order(self):
         planned = runner.plan(["a", "b"], ["claude"], ["plain", "jouet"], 3, seed=7)
@@ -506,6 +508,34 @@ class StopTest(unittest.TestCase):
             self.assertEqual(len(timing["elapsed_s"]), 2)
             self.assertEqual(timing["elapsed_s"], sorted(timing["elapsed_s"]))
             self.assertEqual(timing["elapsed_s"], result["elapsed"])
+            self.assertEqual(set(result["disk_free"]), {"work", "tmp", "results"})
+            for space in result["disk_free"].values():
+                self.assertGreaterEqual(space["samples"], 2)
+                self.assertLessEqual(space["min_bytes"], space["start_bytes"])
+                self.assertLessEqual(space["min_bytes"], space["end_bytes"])
+
+    def test_disk_samples_resolve_relative_temp_directory_in_agent_workdir(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "relative-tmp").mkdir()
+            result = runner.run_agent(HARNESSES["codex"], [sys.executable, "-c", "pass"],
+                                      {"PATH": "/usr/bin:/bin", "TMPDIR": "relative-tmp"},
+                                      root, root, 5, None, root / "agent.jsonl")
+            self.assertEqual(result["disk_free"]["tmp"]["errors"], 0)
+
+    def test_disk_samples_preserve_missing_readings(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        samples = runner.DiskSamples({"work": Path("/example")})
+        with patch.object(runner.shutil, "disk_usage", side_effect=[OSError("unavailable"),
+                                                                   SimpleNamespace(free=30),
+                                                                   SimpleNamespace(free=10),
+                                                                   OSError("unavailable")]):
+            for _ in range(4):
+                samples.sample()
+        self.assertEqual(samples.values["work"], {"start_bytes": None, "end_bytes": None,
+                                                  "min_bytes": 10, "samples": 2, "errors": 2})
 
     def test_late_descendant_cannot_change_a_finalized_stream(self):
         import threading
