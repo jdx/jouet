@@ -29,6 +29,7 @@ struct Metadata {
 #[derive(Deserialize)]
 struct Package {
     name: String,
+    version: String,
     id: String,
     manifest_path: PathBuf,
     #[serde(default)]
@@ -42,11 +43,13 @@ struct Dependency {
     path: Option<PathBuf>,
 }
 
-/// A workspace member: its name, its directory from the repository root
-/// (empty at the root) and the members it depends on, by index.
+/// A workspace member: its name, how `cargo test -p` names it, its directory
+/// from the repository root (empty at the root) and the members it depends
+/// on, by index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Member {
     name: String,
+    spec: String,
     dir: String,
     deps: Vec<usize>,
 }
@@ -148,6 +151,7 @@ fn members(meta: &Metadata, root: &Path) -> Result<Vec<Member>, String> {
         .iter()
         .filter(|p| meta.workspace_members.contains(&p.id))
         .collect();
+    let lock = std::fs::read_to_string(meta.workspace_root.join("Cargo.lock")).unwrap_or_default();
     let dirs: Vec<PathBuf> = packages
         .iter()
         .map(|p| canon(p.manifest_path.parent().unwrap_or(&meta.workspace_root)))
@@ -164,12 +168,25 @@ fn members(meta: &Metadata, root: &Path) -> Result<Vec<Member>, String> {
                 .collect();
             Ok(Member {
                 name: p.name.clone(),
+                spec: spec(&p.name, &p.version, &lock),
                 dir: rel(dir)
                     .ok_or_else(|| format!("{} is outside the repository", dir.display()))?,
                 deps,
             })
         })
         .collect()
+}
+
+/// How `cargo test -p` names a member: by name, or with its version when
+/// the lockfile has another package of that name (tokio's workspace locks a
+/// published tokio too), where the name alone is ambiguous.
+fn spec(name: &str, version: &str, lock: &str) -> String {
+    let entry = format!("name = \"{name}\"");
+    if lock.lines().filter(|l| l.trim() == entry).count() > 1 {
+        format!("{name}@{version}")
+    } else {
+        name.to_string()
+    }
 }
 
 /// The members to test for changes to `changed`: those members and every
@@ -254,29 +271,28 @@ impl Adapter for Cargo {
             .map_err(|e| Error::new(Exit::Precondition, e.clone()))?;
         let changed: BTreeSet<usize> = sources.iter().filter_map(|c| self.owner(&c.path)).collect();
         let chains = dependents(members, &changed);
-        let mut picked: Vec<(&str, Vec<String>)> = chains
+        let mut picked: Vec<(&Member, Vec<String>)> = chains
             .iter()
             .map(|(&i, chain)| {
-                let name = members[i].name.as_str();
                 (
-                    name,
+                    &members[i],
                     chain.iter().map(|&k| members[k].name.clone()).collect(),
                 )
             })
             .collect();
-        picked.sort_by(|a, b| a.0.cmp(b.0));
+        picked.sort_by(|a, b| a.0.name.cmp(&b.0.name));
         let mut command = vec!["cargo".to_string(), "test".to_string()];
-        for (name, _) in &picked {
+        for (member, _) in &picked {
             command.push("-p".into());
-            command.push((*name).to_string());
+            command.push(member.spec.clone());
         }
         command.extend(extra.iter().cloned());
         let note = others(sources);
         Ok(Selection {
             tests: picked
                 .into_iter()
-                .map(|(name, via)| Test {
-                    path: name.to_string(),
+                .map(|(member, via)| Test {
+                    path: member.name.clone(),
                     via,
                 })
                 .collect(),
@@ -333,6 +349,7 @@ mod tests {
     fn member(name: &str, dir: &str, deps: &[usize]) -> Member {
         Member {
             name: name.into(),
+            spec: name.into(),
             dir: dir.into(),
             deps: deps.to_vec(),
         }
@@ -354,6 +371,14 @@ mod tests {
             .as_deref(),
             Some("cargo runs no tests of test/x.bats, bench/a.py: run their own tests too")
         );
+    }
+
+    #[test]
+    fn a_member_whose_name_the_lockfile_shares_is_named_with_its_version() {
+        let lock = "[[package]]\nname = \"tokio\"\nversion = \"1.21.2\"\n\n[[package]]\nname = \"tokio\"\nversion = \"1.54.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n\n[[package]]\nname = \"tokio-util\"\nversion = \"0.7.4\"\n";
+        assert_eq!(spec("tokio", "1.21.2", lock), "tokio@1.21.2");
+        assert_eq!(spec("tokio-util", "0.7.4", lock), "tokio-util");
+        assert_eq!(spec("tokio", "1.21.2", ""), "tokio");
     }
 
     #[test]
