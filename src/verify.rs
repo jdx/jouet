@@ -755,10 +755,7 @@ pub(crate) fn formats(command: &str) -> bool {
     let script = jouet_rules::shell::parse(command);
     // A substitution runs a command of its own: `git status $(sed -i ...)`,
     // or with backticks, which the parser keeps as words.
-    if !script.nested.is_empty()
-        || command.contains("<(")
-        || backtick_outside_single_quotes(command)
-    {
+    if !script.nested.is_empty() || command.contains("<(") || writes_or_substitutes(command) {
         return false;
     }
     !script.commands.is_empty()
@@ -774,16 +771,52 @@ pub(crate) fn formats(command: &str) -> bool {
         })
 }
 
-/// Whether `command` has a backtick that the shell would substitute: one
-/// outside single quotes (double quotes substitute it too).
-fn backtick_outside_single_quotes(command: &str) -> bool {
-    let mut quoted = false;
-    command.chars().any(|c| {
-        if c == '\'' {
-            quoted = !quoted;
+/// Whether `command` has a backtick the shell would substitute (one outside
+/// single quotes: double quotes substitute it too), or a redirection that
+/// writes a file other than `/dev/null`, from any descriptor: the parser
+/// keeps only standard output's target.
+fn writes_or_substitutes(command: &str) -> bool {
+    let chars: Vec<char> = command.chars().collect();
+    let (mut single, mut double) = (false, false);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        i += 1;
+        match c {
+            '\\' if !single => i += 1,
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '`' if !single => return true,
+            '>' if !single && !double => {
+                while chars.get(i).is_some_and(|c| matches!(c, '>' | '|')) {
+                    i += 1;
+                }
+                // `>&2` and `>&-` duplicate or close a descriptor.
+                if chars.get(i) == Some(&'&')
+                    && chars
+                        .get(i + 1)
+                        .is_some_and(|c| c.is_ascii_digit() || *c == '-')
+                {
+                    continue;
+                }
+                if chars.get(i) == Some(&'&') {
+                    i += 1;
+                }
+                while chars.get(i).is_some_and(|c| *c == ' ' || *c == '\t') {
+                    i += 1;
+                }
+                let target: String = chars[i..]
+                    .iter()
+                    .take_while(|c| !c.is_whitespace() && !matches!(c, ';' | '&' | '|' | ')'))
+                    .collect();
+                if target != "/dev/null" {
+                    return true;
+                }
+            }
+            _ => {}
         }
-        c == '`' && !quoted
-    })
+    }
+    false
 }
 
 /// [`formats`] for one command's words.
@@ -798,9 +831,8 @@ fn leaves_or_formats(words: &[String]) -> bool {
         | ["jouet", "commit", ..]
         | ["git", "add", ..]
         | ["git", "status", ..]
-        | ["git", "log", ..]
         | ["git", "push", ..] => true,
-        ["git", "diff" | "show", ..] => !words.iter().any(|w| w.starts_with("--output")),
+        ["git", "diff" | "show" | "log", ..] => !words.iter().any(|w| w.starts_with("--output")),
         // A new branch with no start point keeps the files.
         ["git", "checkout", "-q", "-b" | "-B", _]
         | ["git", "checkout", "-b" | "-B", _]
@@ -2520,6 +2552,8 @@ mod tests {
             "cargo fmt -p a 2>&1 | tail -3; git status --short; jouet test --cmd -- cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -4",
             "git checkout -q -b fix/a 2>&1; jouet commit src/a.rs --message m | tail -2; git push -u origin HEAD 2>&1 | tail -2",
             "git commit -q -m m > /dev/null 2>&1",
+            "git log --oneline -3 2>/dev/null; cargo fmt >&2",
+            "jouet commit a --message \"keep > and 'b' as words\"",
         ] {
             assert!(formats(yes), "{yes}");
         }
@@ -2539,6 +2573,10 @@ mod tests {
             "git status $(sed -i s/a/b/ src/main.rs)",
             "git commit -m `sed -i s/a/b/ src/main.rs`",
             "cargo fmt &> out.txt",
+            "git log -p --output=src/a.rs",
+            "git status 2> src/a.rs",
+            "cargo fmt 2>>src/a.rs",
+            "jouet commit a --message \"it's `sed -i s/a/b/ src/main.rs`\"",
             "",
         ] {
             assert!(!formats(no), "{no}");
