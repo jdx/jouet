@@ -10,8 +10,25 @@ import unittest
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/cobra-completion-args/check.py"
 
 
+def gofmt_binary():
+    """Find the formatter beside Go before isolating PATH for the test."""
+    go = shutil.which("go")
+    if go:
+        try:
+            result = subprocess.run([go, "env", "GOROOT"], capture_output=True, text=True, timeout=10)
+            candidate = Path(result.stdout.strip()) / "bin" / "gofmt"
+            if result.returncode == 0 and candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return shutil.which("gofmt")
+
+
+GOFMT = gofmt_binary()
+
+
 class CobraCheckerTest(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("gofmt"), "gofmt is not installed")
+    @unittest.skipUnless(GOFMT, "gofmt is not installed")
     def test_changed_go_files_are_compared_with_the_base(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -37,7 +54,7 @@ class CobraCheckerTest(unittest.TestCase):
             bindir = root / "bin"
             bindir.mkdir()
             (bindir / "git").symlink_to(shutil.which("git"))
-            (bindir / "gofmt").symlink_to(shutil.which("gofmt"))
+            (bindir / "gofmt").symlink_to(GOFMT)
             go = bindir / "go"
             go.write_text("#!/bin/sh\nexit 0\n")
             go.chmod(0o755)
