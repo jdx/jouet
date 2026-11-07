@@ -33,6 +33,7 @@ def check_bats() -> None:
             return
         env = {**os.environ, "PATH": f"{Path.cwd() / 'target/debug'}{os.pathsep}{os.environ.get('PATH', '')}"}
         env.pop("GIT_CONFIG_GLOBAL", None)
+        found_new = False
         for path in sorted(changed):
             current = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True,
                                      check=True, timeout=30).stdout
@@ -45,11 +46,19 @@ def check_bats() -> None:
                 UNVERIFIED.append(f"starting Bats tests are missing, renamed, or ambiguous in {path}")
                 continue
             new = [name for name in after if name not in set(before)]
-            if not new:
-                UNVERIFIED.append(f"no new standard-form Bats regression test in {path}")
+            found_new |= bool(new)
+            try:
+                run = subprocess.run(["test/bats/bin/bats", "--tap", path], capture_output=True, text=True,
+                                     timeout=300, check=False, env=env)
+            except subprocess.TimeoutExpired as error:
+                output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
+                print(output, end="")
+                failed = re.findall(r"^not ok \d+\b([^\n]*)$", output, re.MULTILINE)
+                if any(name.strip() in new for name in failed):
+                    expect(False, f"a committed Bats regression failed before the suite timed out in {path}")
+                else:
+                    UNVERIFIED.append(f"Bats suite timed out for {path}")
                 continue
-            run = subprocess.run(["test/bats/bin/bats", "--tap", path], capture_output=True, text=True,
-                                 timeout=300, check=False, env=env)
             print(run.stdout, end="")
             if run.stderr:
                 print(run.stderr, end="", file=sys.stderr)
@@ -62,10 +71,12 @@ def check_bats() -> None:
             names = [result[2].strip() for result in results]
             complete = (len(plans) == 1 and int(plans[0]) > 0 and len(results) == int(plans[0])
                         and [int(result[1]) for result in results] == list(range(1, len(results) + 1))
-                        and all(names.count(name) == 1 for name in new)
+                        and all(names.count(name) == 1 for name in after)
                         and not any(re.search(r"#\s*(skip|todo)\b", result[2], re.IGNORECASE)
                                     for result in results))
             if run.returncode != 0 or failed or not complete:
                 UNVERIFIED.append(f"Bats results were incomplete or could not be verified for {path}")
+        if not found_new:
+            UNVERIFIED.append("no new standard-form Bats regression test was committed")
     except (OSError, subprocess.SubprocessError) as error:
         UNVERIFIED.append(f"could not verify committed Bats tests: {error}")

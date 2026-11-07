@@ -22,6 +22,7 @@ class HkCheckerTest(unittest.TestCase):
             bats = work / "test/bats/bin/bats"
             bats.parent.mkdir(parents=True)
             bats.write_text("#!/bin/sh\n"
+                            "if [ \"$2\" = test/existing.bats ]; then printf '1..1\\nok 1 old\\n'; exit 0; fi\n"
                             "if [ \"$1\" = --tap ] && ! grep -q regression \"$2\"; then exit 7; fi\n"
                             "case $BATS_CASE in\n"
                             "  skip) printf '1..1\\nok 1 regression # skip unavailable\\n' ;;\n"
@@ -30,6 +31,7 @@ class HkCheckerTest(unittest.TestCase):
                             "esac\n")
             bats.chmod(0o755)
             (work / "test/check.bats").write_text("original\n")
+            (work / "test/existing.bats").write_text('@test "old" {\n  true\n}\n')
             source = work / "source"
             source.write_text("original\n")
             env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
@@ -70,7 +72,8 @@ class HkCheckerTest(unittest.TestCase):
             self.assertIn("no committed Bats regression", result.stdout)
             git("restore", "test/check.bats")
             (work / "test/check.bats").write_text('@test "regression" {\n  true\n}\n')
-            git("add", "test/check.bats")
+            (work / "test/existing.bats").write_text('@test "old" {\n  echo changed\n}\n')
+            git("add", "test/check.bats", "test/existing.bats")
             git("commit", "-qm", "regression")
 
             result = check()

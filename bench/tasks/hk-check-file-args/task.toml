@@ -40,6 +40,9 @@ Fix this in hk, with a test, and commit.
 git = "~/src/hk"
 commit = "22dbf399a32d806b5d7366a589537648c1465c89"
 
+[tools]
+prettier = "prettier"
+
 [env]
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"
