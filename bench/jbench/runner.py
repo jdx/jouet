@@ -601,7 +601,7 @@ def execute(
         finally:
             # Before anything else can fail: a refresh the run made is the
             # user's only working login.
-            notes = (credentials.give_back_and_remove(lent) if harness.name == "codex" and arm.jouet
+            notes = (credentials.give_back_and_remove(lent) if harness.name == "codex"
                      else credentials.give_back(lent))
         usage = harness.usage(agent["lines"], config_dir)
         return {
