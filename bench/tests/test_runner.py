@@ -518,6 +518,45 @@ class PlanTest(unittest.TestCase):
                 setup.assert_called_once()
                 agent.assert_not_called()
 
+    def test_plain_codex_returns_and_removes_credentials_from_retained_home(self):
+        from unittest.mock import patch
+
+        for raises in (False, True):
+            with self.subTest(agent_raises=raises), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "home"
+                config = home / ".codex"
+                config.mkdir(parents=True)
+                original = root / "source" / "auth.json"
+                original.parent.mkdir()
+                original.write_text("old credential")
+                env = {"HOME": str(home), "CODEX_HOME": str(config), "PATH": "/usr/bin:/bin"}
+                opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                        "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+
+                def agent(*_args, config=config, raises=raises):
+                    self.assertEqual((config / "auth.json").read_text(), "old credential")
+                    (config / "auth.json").write_text("refreshed credential")
+                    if raises:
+                        raise RuntimeError("agent interrupted")
+                    return {"lines": [], "session": None, "stopped": None, "exit_code": 0, "wall_s": 1}
+
+                with patch.object(runner.arms_mod, "build", return_value=env), \
+                        patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                        patch.object(runner.arms_mod, "verify_codex_path"), \
+                        patch.object(runner.arms_mod, "credential_files", return_value=[original]), \
+                        patch.object(runner, "run_agent", side_effect=agent), \
+                        patch.object(runner, "sweep", return_value=[]), \
+                        patch.object(runner.tasks_mod, "run_check",
+                                     return_value={"passed": True, "exit_code": 0, "output": "ok"}):
+                    if raises:
+                        with self.assertRaisesRegex(RuntimeError, "agent interrupted"):
+                            runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                    else:
+                        runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                self.assertEqual(original.read_text(), "refreshed credential")
+                self.assertFalse((config / "auth.json").exists())
+
     def test_agent_exit_is_part_of_success(self):
         from unittest.mock import patch
 
