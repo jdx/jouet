@@ -82,6 +82,9 @@ export type JouetCall = {
 	cwd: string?,
 	-- The agent session making the call: the hook payload's `session_id`.
 	session: string?,
+	-- The subagent making the call within that session: the payload's
+	-- `agent_id`; nil for the session's own agent.
+	agent: string?,
 	-- The command's exit code (post-tool-use only).
 	exit_code: number?,
 	-- Every command the script runs: top-level ones first, then those inside
@@ -413,7 +416,7 @@ declare jouet: {
 		-- How many earlier tool calls in `session` (a call's `session`) the
 		-- rule named `rule` denied or warned about, from the end of the
 		-- hooks' ledger. nil when there is no ledger.
-		fired: (rule: string, session: string) -> (number?, string?),
+		fired: (rule: string, session: string, agent: string?) -> (number?, string?),
 	},
 	cargo: {
 		-- The Cargo workspace around `dir` (relative to the call's directory;

@@ -144,6 +144,7 @@ fn handle(
         dir: if hooks.ledger { ledger::dir() } else { None },
         harness: harness.name(),
         session: payload.get("session_id").and_then(Value::as_str),
+        agent: agents::of_payload(payload),
         repo: payload
             .get("cwd")
             .and_then(Value::as_str)
@@ -506,12 +507,14 @@ struct Log<'a> {
     dir: Option<PathBuf>,
     harness: &'static str,
     session: Option<&'a str>,
+    agent: Option<&'a str>,
     repo: Option<String>,
 }
 
 impl Log<'_> {
     fn entry(&self, event: &str) -> Entry {
         Entry {
+            agent: self.agent.map(ledger::redact_id),
             repo: self.repo.clone(),
             ..Entry::new(self.harness, self.session, event)
         }

@@ -197,8 +197,8 @@ impl Probes {
         ledger::last_run(self.ledger.as_deref()?, kind, scope, repo.as_deref())
     }
 
-    fn fired(&self, rule: &str, session: &str) -> Option<serde_json::Value> {
-        ledger::fired(self.ledger.as_deref()?, rule, session).map(Into::into)
+    fn fired(&self, rule: &str, session: &str, agent: Option<&str>) -> Option<serde_json::Value> {
+        ledger::fired(self.ledger.as_deref()?, rule, session, agent).map(Into::into)
     }
 }
 
@@ -327,16 +327,23 @@ pub(crate) fn install(
     let s = shared.clone();
     session_table.set(
         "fired",
-        lua.create_function(move |lua, (rule, session): (String, String)| {
-            // An example answers for any rule and session.
-            let stubbed = s.cache.borrow().get("fired:*").cloned();
-            if let Some(answer_) = stubbed {
-                return answer(lua, answer_);
-            }
-            let key = format!("fired:{rule}:{session}");
-            let found = cached(&s, &key, |p, _| Ok(p.fired(&rule, &session)))?;
-            answer(lua, found)
-        })?,
+        lua.create_function(
+            move |lua, (rule, session, agent): (String, String, Option<String>)| {
+                // An example answers for any rule and session.
+                let stubbed = s.cache.borrow().get("fired:*").cloned();
+                if let Some(answer_) = stubbed {
+                    return answer(lua, answer_);
+                }
+                let key = format!(
+                    "fired:{rule}:{session}:{}",
+                    agent.as_deref().unwrap_or_default()
+                );
+                let found = cached(&s, &key, |p, _| {
+                    Ok(p.fired(&rule, &session, agent.as_deref()))
+                })?;
+                answer(lua, found)
+            },
+        )?,
     )?;
     jouet.set("session", session_table)?;
 

@@ -241,10 +241,11 @@ end
 
 -- The rule warns the first time in a session, and denies after that: a
 -- warning alone was followed once and then forgotten, and the cut run was
--- often run again to see what the cut dropped.
+-- often run again to see what the cut dropped. A subagent was not shown its
+-- session's warning, so it gets its own.
 local function speak(call: JouetCall, message: string): JouetDecision
 	if call.session then
-		local fired = jouet.session.fired("piped-test-output", call.session)
+		local fired = jouet.session.fired("piped-test-output", call.session, call.agent)
 		if fired and fired > 0 then
 			return jouet.deny(`This session was already warned about cutting a run's output. {message} Nothing in this call ran, so run its other commands again too.`)
 		end
