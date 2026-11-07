@@ -39,7 +39,7 @@ mod bench_hidden {
 
     #[test]
     fn bench_hidden_a_mount_keeps_a_switch_the_command_turned_off() {
-        let mut spec: Spec = "bin \"ex\"\ncmd \"tasks\" disable_help_flag=#true disable_version_flag=#true {\n    mount run=\"list-tasks\"\n}\n"
+        let mut spec: Spec = "bin \"ex\"\ncmd \"tasks\" disable_help_flag=#true disable_help_subcommand=#true disable_version_flag=#true {\n    mount run=\"list-tasks\"\n}\n"
             .parse()
             .unwrap();
         let outputs = HashMap::from([(
@@ -49,6 +49,10 @@ mod bench_hidden {
         spec.resolve_mount_outputs(&outputs).unwrap();
         let tasks = &spec.cmd.subcommands["tasks"];
         assert!(tasks.disable_help_flag, "the mount turned --help back on");
+        assert!(
+            tasks.disable_help_subcommand,
+            "the mount turned the help subcommand back on"
+        );
         assert!(
             tasks.disable_version_flag,
             "the mount turned --version back on"

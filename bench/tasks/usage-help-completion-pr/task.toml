@@ -54,6 +54,8 @@ bash = "bash"
 zsh = "zsh"
 go = "~/.local/share/mise/installs/go/1.27.3/bin/go"
 gofmt = "~/.local/share/mise/installs/go/1.27.3/bin/gofmt"
+cargo = "~/.cargo/bin/cargo"
+rustc = "~/.cargo/bin/rustc"
 
 [env]
 RUSTUP_HOME = "~/.rustup"

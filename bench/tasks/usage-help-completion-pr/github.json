@@ -1072,9 +1072,9 @@
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "UNSTABLE",
             "reviewDecision": "CHANGES_REQUESTED",
-            "additions": 222,
+            "additions": 160,
             "deletions": 31,
-            "changedFiles": 9,
+            "changedFiles": 8,
             "createdAt": "2026-11-02T23:28:17Z",
             "updatedAt": "2026-11-02T23:33:50Z",
             "closedAt": null,
@@ -1711,12 +1711,6 @@
                   "path": "corpus/complete/02-values-and-restarts.json",
                   "additions": 1,
                   "deletions": 1
-                },
-                {
-                  "__typename": "PullRequestChangedFile",
-                  "path": "go/argv/complete.go",
-                  "additions": 62,
-                  "deletions": 0
                 },
                 {
                   "__typename": "PullRequestChangedFile",
