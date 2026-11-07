@@ -1,11 +1,10 @@
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/cobra-completion-args/check.py"
 
@@ -15,7 +14,7 @@ def gofmt_binary():
     go = shutil.which("go")
     if go:
         try:
-            result = subprocess.run([go, "env", "GOROOT"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([go, "env", "GOROOT"], check=False, capture_output=True, text=True, timeout=10)
             candidate = Path(result.stdout.strip()) / "bin" / "gofmt"
             if result.returncode == 0 and candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
@@ -49,22 +48,53 @@ class CobraCheckerTest(unittest.TestCase):
             git("commit", "-qm", "base")
             base = git("rev-parse", "HEAD")
             source.write_text("package main\n\nvar x = 2\n")
-            git("add", source.name)
+            (work / "agent_test.go").write_text('package main\n\nimport "testing"\n\nfunc TestProbe(t *testing.T) {}\n')
+            git("add", source.name, "agent_test.go")
             git("commit", "-qm", "change")
             bindir = root / "bin"
             bindir.mkdir()
             (bindir / "git").symlink_to(shutil.which("git"))
             (bindir / "gofmt").symlink_to(GOFMT)
             go = bindir / "go"
-            go.write_text("#!/bin/sh\nexit 0\n")
+            go.write_text(
+                '#!/bin/sh\n'
+                'if [ -e ignored.go ]; then exit 88; fi\n'
+                'case "$1" in\n'
+                '  list) printf \'{"ImportPath":"example.test","TestGoFiles":["agent_test.go"]}\\n\' ;;\n'
+                '  test) if [ "$2" = -json ]; then\n'
+                '    case "$*" in *TestJouetCompletionKeepsArguments*) name=TestJouetCompletionKeepsArguments ;;\n'
+                '      *) name=TestProbe ;; esac\n'
+                '    if [ "$name" = TestJouetCompletionKeepsArguments ] && [ "${FAKE_HIDE_HIDDEN:-}" = yes ]; then\n'
+                '      printf \'{"Action":"pass","Package":"example.test"}\\n\'; exit 0; fi\n'
+                '    printf \'{"Action":"run","Package":"example.test","Test":"%s"}\\n\' "$name"\n'
+                '    printf \'{"Action":"pass","Package":"example.test","Test":"%s"}\\n\' "$name"\n'
+                '    printf \'{"Action":"pass","Package":"example.test"}\\n\'\n'
+                '  fi ;;\n'
+                'esac\n'
+            )
             go.chmod(0o755)
             env.update({"PATH": str(bindir), "BENCH_HEAD_SHA": base})
 
             def check():
-                return subprocess.run([sys.executable, "-I", str(CHECKER)], cwd=work,
+                return subprocess.run([sys.executable, "-I", str(CHECKER)], check=False, cwd=work,
                                       env=env, capture_output=True, text=True)
 
             self.assertEqual(check().returncode, 0)
+            env["FAKE_HIDE_HIDDEN"] = "yes"
+            result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn("completion cases did not complete", result.stdout)
+            del env["FAKE_HIDE_HIDDEN"]
+            (work / "untracked.go").write_text("package main\n")
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("changes were left uncommitted", result.stdout)
+            (work / "untracked.go").unlink()
+            (work / ".git/info/exclude").write_text("ignored.go\n")
+            (work / "ignored.go").write_text("package main\n")
+            result = check()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            (work / "ignored.go").unlink()
             source.write_text("package main\nvar x=2\n")
             git("add", source.name)
             git("commit", "-qm", "unformatted")
