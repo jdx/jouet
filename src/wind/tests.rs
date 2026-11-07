@@ -8,7 +8,11 @@ const DAY: u64 = 1_793_318_400;
 #[test]
 fn extended_rule_loading_still_stops_a_runaway_script() {
     let f = fixture();
-    std::fs::write(f.paths.rules.join("spin.luau"), "while true do end").unwrap();
+    std::fs::write(
+        f.paths.rules.join("spin.luau"),
+        "--- why: exercise the sandbox\n--- mode: deny\nwhile true do end",
+    )
+    .unwrap();
     let mut engine = user_engine_with_budget(
         &f.paths.rules,
         jouet_rules::Budget {
@@ -19,8 +23,8 @@ fn extended_rule_loading_still_stops_a_runaway_script() {
     engine.load_scripts();
     assert!(
         matches!(
-            engine.rule("spin").unwrap().state,
-            jouet_rules::State::Broken(_)
+            &engine.rule("spin").unwrap().state,
+            jouet_rules::State::Broken(error) if error.contains("budget")
         ),
         "a runaway script must not load"
     );
