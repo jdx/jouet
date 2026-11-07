@@ -138,12 +138,18 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
 
 fn glob_path_hint(path: &Path) -> &'static str {
     if path.to_string_lossy().contains(['*', '?', '['])
-        && matches!(std::fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        && matches!(std::fs::symlink_metadata(path), Err(error) if missing_glob_path(&error))
     {
         "; paths are literal: use -g GLOB to filter filenames"
     } else {
         ""
     }
+}
+
+fn missing_glob_path(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound
+        // Windows rejects wildcard characters in a literal filename with ERROR_INVALID_NAME.
+        || cfg!(windows) && error.raw_os_error() == Some(123)
 }
 
 /// The most definitions a search prints the code of, and the most lines
@@ -242,4 +248,22 @@ pub(crate) fn session_memory(subcommand: &str) -> Memory {
 /// `<state dir>/seen`.
 pub(crate) fn seen_dir() -> Option<PathBuf> {
     jouet_output::paths::state_dir().map(|d| d.join("seen"))
+}
+
+#[cfg(test)]
+mod glob_hint_tests {
+    use super::missing_glob_path;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn recognizes_missing_paths_without_hiding_permission_errors() {
+        assert!(missing_glob_path(&Error::from(ErrorKind::NotFound)));
+        assert!(!missing_glob_path(&Error::from(
+            ErrorKind::PermissionDenied
+        )));
+        assert_eq!(
+            missing_glob_path(&Error::from_raw_os_error(123)),
+            cfg!(windows)
+        );
+    }
 }
