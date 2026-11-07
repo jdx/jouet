@@ -104,6 +104,9 @@ pub struct Case {
     pub git_branch: Option<String>,
     /// What `jouet.git.ahead()` answers, for any branch.
     pub git_ahead: Option<u32>,
+    /// How many worktrees `jouet.repo()` reports; None when it has no
+    /// answer.
+    pub git_worktrees: Option<u32>,
     /// What `jouet.stack.layer()` answers.
     pub stack: Option<serde_json::Value>,
     /// What `jouet.secrets.scan()` answers, for any scope.
@@ -296,6 +299,7 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         claims: None,
         git_branch: None,
         git_ahead: None,
+        git_worktrees: None,
         stack: None,
         secrets: None,
         node_scripts: None,
@@ -466,6 +470,7 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
         }),
         git_branch: t.git.as_ref().and_then(|g| g.branch.clone()),
         git_ahead: t.git.as_ref().and_then(|g| g.ahead),
+        git_worktrees: t.git.as_ref().and_then(|g| g.worktrees),
         stack: t.stack.as_ref().map(|s| {
             serde_json::json!({
                 "branch": s.branch,
@@ -581,6 +586,12 @@ impl Engine {
             }
             if let Some(ahead) = case.git_ahead {
                 self.stub("ahead:*", ahead.into());
+            }
+            if let Some(worktrees) = case.git_worktrees {
+                self.stub(
+                    "repo",
+                    serde_json::json!({ "root": "/repo", "linked_worktree": false, "worktrees": worktrees }),
+                );
             }
             if let Some(stack) = &case.stack {
                 self.stub("stack:layer", stack.clone());

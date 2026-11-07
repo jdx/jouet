@@ -158,6 +158,7 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../rules/pitchfork-stop.luau"),
     ),
     ("job-start.luau", include_str!("../rules/job-start.luau")),
+    ("git-stash.luau", include_str!("../rules/git-stash.luau")),
     ("rule-files.luau", include_str!("../rules/rule-files.luau")),
     (
         "unbounded-query.luau",

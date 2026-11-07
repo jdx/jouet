@@ -6,7 +6,9 @@ mode = "deny"
 scope = "builtin"
 author = "builtin"
 created = "2026-10-30"
-message = "Every worktree of a repository shares one stash, so a bare stash, pop or drop can take another session's work: commit a WIP instead, or `git stash push -m <unique-tag>` and restore with `git stash apply <sha>`."
+# The matcher finds a stash that takes the top entry or cannot be told
+# apart; the script lets it through where the repository has one worktree.
+script = "git-stash.luau"
 
 # `git stash` and `git stash -u`, without a message.
 [[rule.match]]
@@ -50,6 +52,18 @@ fires = [
   "git stash branch rescue",
   "rtk git stash",
   { command = "git stash pop", harness = "codex" },
+  # Other worktrees share the stash.
+  { command = "git stash -u", git = { worktrees = 2 } },
+  # A `cd` may reach another repository.
+  { command = "cd ../other && git stash", git = { worktrees = 1 } },
+  # So may `git -C`, `--git-dir`, `--work-tree` or `GIT_DIR`.
+  { command = "git -C ../other stash pop", git = { worktrees = 1 } },
+  { command = "git --git-dir=../other/.git stash", git = { worktrees = 1 } },
+  { command = "git --work-tree ../other stash drop", git = { worktrees = 1 } },
+  { command = "GIT_DIR=../other/.git git stash", git = { worktrees = 1 } },
+  { command = "git -C../other stash", git = { worktrees = 1 } },
+  { command = "env GIT_DIR=../other/.git git stash", git = { worktrees = 1 } },
+  { command = "git -c core.x=1 stash", git = { worktrees = 1 } },
 ]
 quiet = [
   "git stash push -m wip-ab12",
@@ -65,4 +79,7 @@ quiet = [
   "echo 'git stash'",
   "echo rtk git stash",
   "git commit -m 'avoid git stash'",
+  # One worktree: nothing else shares its stash.
+  { command = "git stash", git = { worktrees = 1 } },
+  { command = "git stash pop", git = { worktrees = 1 } },
 ]

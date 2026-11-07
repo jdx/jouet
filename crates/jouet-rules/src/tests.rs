@@ -657,6 +657,7 @@ return {
             claims: None,
             git_branch: None,
             git_ahead: None,
+            git_worktrees: None,
             stack: None,
             secrets: None,
             node_scripts: None,

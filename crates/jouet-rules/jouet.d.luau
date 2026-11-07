@@ -309,6 +309,8 @@ export type JouetRepo = {
 	-- The work tree's root.
 	root: string,
 	linked_worktree: boolean,
+	-- How many worktrees the repository has, its main one included.
+	worktrees: number,
 	-- From the git remotes, chosen as gh chooses; absent without a GitHub
 	-- remote.
 	owner: string?,

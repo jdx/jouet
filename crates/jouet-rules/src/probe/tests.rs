@@ -139,18 +139,18 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
     git(&work, &["worktree", "add", "-q", "../linked", "-b", "side"]);
     let expr = r#"(function()
         local r = jouet.repo()
-        return `{r.repo} {r.owner} {r.name} {r.linked_worktree} {r.root}`
+        return `{r.repo} {r.owner} {r.name} {r.linked_worktree} {r.worktrees} {r.root}`
     end)()"#;
     let e = engine(expr, Budget::default());
     e.set_probes(Probes::new(Some(work.clone()), None, false));
     let root = work.canonicalize().unwrap();
     assert_eq!(
         said(&e),
-        format!("jdx/jouet jdx jouet false {}", root.display())
+        format!("jdx/jouet jdx jouet false 2 {}", root.display())
     );
     let linked = dir.path().join("linked");
     e.set_probes(Probes::new(Some(linked), None, false));
-    assert!(said(&e).starts_with("jdx/jouet jdx jouet true "));
+    assert!(said(&e).starts_with("jdx/jouet jdx jouet true 2 "));
 
     let outside = tempfile::tempdir().unwrap();
     let e = engine(
