@@ -1,0 +1,100 @@
+description = "A whole PR session on real usage code (jdx/usage#1605): wait for CI, fix the Go conformance test it fails, address the review threads (four changes, one suggestion to decline), commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real Rust and Go workspace: it runs only when named.
+opt_in = true
+branch = "claude/github-issue-1604-0381aa"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 3600
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+# jouet levels: out of the box, `jouet wait ci`, `jouet pr threads` and
+# `jouet pr next` read the PR from the fake, and `jouet test` digests both
+# `cargo test` and `go test`. A Luau rule could say that the Go conformance
+# suite compares `go/argv` with the `usage` binary in target/debug, so it has
+# to be rebuilt after a Rust change before `go test` means anything.
+#
+# The PR at its first push (f127151): completion offers the parser's own
+# `--help` and `--version` in the Rust engines, and CI's `trusted / test` job
+# fails `TestTheCursorGetsTheReferencesAnswer` in `go test`, because the Go
+# runtime still offers only declared flags. All six threads were posted on that
+# push: greptile on the Go failure, on `SpecCommand::merge` changing how
+# includes merge, and on views losing `--version`, which coderabbit also
+# raised; coderabbit's request to give the root's supplied flags precedence
+# over the default command's in `complete-word`; and coderabbit's suggestion
+# about flags awaiting a value, which upstream declined (coderabbit withdrew
+# it). Upstream fixed the rest in 7eb1d6e and 343a135; the later pushes and
+# their threads are left out. The CI log is trimmed to the end of the test job.
+prompt = """
+PR #1605 (branch claude/github-issue-1604-0381aa, checked out here) makes shell completion offer
+`--help` and `--version`, which the parser answers without a declaration. CI is running on it, and
+reviewers have left comments. Get it ready: wait for CI and fix what fails, and address the open
+review threads: make the requested changes, reply on each thread saying what you did, and resolve
+the ones you fixed. A suggestion you decide not to take gets a reply saying why, and stays open.
+Commit your changes; don't push.
+"""
+
+# The completion integration tests drive real shells; resolve them from the
+# benchmark environment. The setup checks that Bash has default completion.
+setup = ["bash -c 'complete -D -W test'"]
+
+# The PR's base, 9c84621 on main; `pr/` holds its files at f127151. The clone
+# is the user's own checkout of jdx/usage. Cargo builds offline from the
+# registry it has already fetched, and Go from the user's module cache, with
+# the Go that usage's mise.toml pins.
+[source]
+git = "~/src/usage"
+commit = "9c846219a48e25a16c541133aa72bf0369a73e6c"
+
+[tools]
+bash = "bash"
+zsh = "zsh"
+go = "~/.local/share/mise/installs/go/1.27.3/bin/go"
+gofmt = "~/.local/share/mise/installs/go/1.27.3/bin/gofmt"
+cargo = "~/.cargo/bin/cargo"
+rustc = "~/.cargo/bin/rustc"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+CARGO_NET_OFFLINE = "true"
+GOMODCACHE = "~/go/pkg/mod"
+GOPROXY = "off"
+GOTOOLCHAIN = "local"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py):
+# a cold build, the Go suite CI failed, then the Rust suite.
+[cost]
+seed = [
+    "cargo build",
+    "go test -C go ./...",
+    "cargo test --all --all-features",
+]
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "1605", "--json"]
+exit = 1
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "1605", "--json"]
+stdout_contains = "Included settings no longer win"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "55502", "1605", "--body", "SpecCommand::merge overwrites again; mount keeps the switches.", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "1605"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "TestTheCursorGetsTheReferencesAnswer"
