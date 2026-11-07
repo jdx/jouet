@@ -96,9 +96,20 @@ pub(crate) enum Nesting {
 impl Nesting {
     /// The nesting of the runner `argv` starts, through `python -m`.
     fn of(argv: &[String]) -> Option<Self> {
-        let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let mut words: Vec<&str> = argv.iter().map(String::as_str).collect();
         let program = words.first()?.rsplit('/').next()?;
         let python = program.starts_with("python");
+        // The interpreter's own flags (`-I`, `-u`) come before `-m` or the script.
+        if python {
+            let flags = words[1..]
+                .iter()
+                .take_while(|w| w.starts_with('-') && **w != "-m")
+                .count();
+            if words[1..=flags].contains(&"-c") {
+                return None;
+            }
+            words.drain(1..=flags);
+        }
         match words.as_slice() {
             _ if matches!(program, "pytest" | "py.test") => Some(Self::Pytest),
             [_, "-m", "pytest", ..] if python => Some(Self::Pytest),
@@ -111,6 +122,15 @@ impl Nesting {
             [_, "test", ..] if program == "django-admin" => Some(Self::Django),
             _ => None,
         }
+    }
+
+    /// The one mise task `command` runs, through `jouet test --cmd --`.
+    fn task(command: &str) -> Option<String> {
+        let argv = runner_argv(command);
+        let [name] = crate::wind::tasks::task_runs(&argv.join(" "))
+            .try_into()
+            .ok()?;
+        Some(name)
     }
 
     /// The nesting of the runner a mise task's last command starts.
@@ -1175,7 +1195,7 @@ impl State {
         // partial run, the kind a name above can cover.
         let mut tasks = None;
         let mut task_nesting = |command: &str| {
-            let [name] = crate::wind::tasks::task_runs(command).try_into().ok()?;
+            let name = Nesting::task(command)?;
             let tasks = tasks
                 .get_or_insert_with(|| crate::mise::tasks(Path::new(root)).unwrap_or_default());
             Nesting::of_task(tasks, &name)
@@ -2962,6 +2982,25 @@ mod tests {
             Some(Nesting::Django)
         );
         assert_eq!(Nesting::of(&argv("python -m unittest a")), None);
+        assert_eq!(
+            Nesting::of(&argv("python3 -I -u -m pytest a")),
+            Some(Nesting::Pytest)
+        );
+        assert_eq!(
+            Nesting::of(&argv("python -I runtests.py a")),
+            Some(Nesting::Django)
+        );
+        assert_eq!(Nesting::of(&argv("python -c x -m pytest")), None);
+        assert_eq!(
+            Nesting::task("jouet test --cmd -- mise run test:unit admin_views").as_deref(),
+            Some("test:unit")
+        );
+        assert_eq!(
+            Nesting::task("mise run test:unit a").as_deref(),
+            Some("test:unit")
+        );
+        assert_eq!(Nesting::task("mise run a ::: b"), None);
+        assert_eq!(Nesting::task("pytest tests"), None);
     }
 
     #[test]
