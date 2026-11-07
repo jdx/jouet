@@ -12,7 +12,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 /// Whether `dir` has a Cargo manifest with a package or a workspace in it.
 pub(crate) fn detect(dir: &Path) -> bool {
@@ -67,6 +67,9 @@ pub(crate) struct Cargo {
     root: PathBuf,
     /// [`Cargo::readers`] by path, as each is looked up more than once.
     readers: Mutex<HashMap<String, Vec<usize>>>,
+    /// Each member's Rust files, read once for every path
+    /// [`Cargo::readers`] looks up.
+    sources: OnceLock<Vec<(usize, String)>>,
 }
 
 impl Cargo {
@@ -78,6 +81,7 @@ impl Cargo {
             workspace,
             root: project.root.clone(),
             readers: Mutex::default(),
+            sources: OnceLock::new(),
         }
     }
 
@@ -107,20 +111,31 @@ impl Cargo {
         }
         let needles: Vec<Vec<(String, String)>> =
             members.iter().map(|m| names_of(&m.dir, path)).collect();
-        let mut found = BTreeSet::new();
-        for file in self.rust_files() {
-            let Some(i) = self.owner(&file) else { continue };
-            if found.contains(&i) || needles[i].is_empty() {
-                continue;
-            }
-            let text = std::fs::read_to_string(self.root.join(&file)).unwrap_or_default();
-            if names_any(&text, &needles[i]) {
-                found.insert(i);
-            }
-        }
-        let found: Vec<usize> = found.into_iter().collect();
+        let found: Vec<usize> = self
+            .sources()
+            .iter()
+            .filter(|(i, text)| names_any(text, &needles[*i]))
+            .map(|(i, _)| *i)
+            .collect::<BTreeSet<usize>>()
+            .into_iter()
+            .collect();
         cache.insert(path.to_string(), found.clone());
         found
+    }
+
+    /// The text of each Rust file that git tracks or would add, with the
+    /// member that holds it, read on the first lookup.
+    fn sources(&self) -> &[(usize, String)] {
+        self.sources.get_or_init(|| {
+            self.rust_files()
+                .into_iter()
+                .filter_map(|file| {
+                    let i = self.owner(&file)?;
+                    let text = std::fs::read_to_string(self.root.join(&file)).ok()?;
+                    Some((i, text))
+                })
+                .collect()
+        })
     }
 
     /// The repository's Rust files that git tracks or would add, from the
@@ -147,8 +162,10 @@ impl Cargo {
 }
 
 /// How a member in `dir` can name `path` or a directory holding it: each
-/// such path from the root and from `dir`, keeping those with a `/`, with
-/// the rest of `path` after it (empty for `path` itself).
+/// such path from the root, from `dir` up through their common directory
+/// (`"../corpus/x.json"` from `crates/a` for `crates/corpus/x.json`) and
+/// from `dir` up to the root, keeping those with a `/`, with the rest of
+/// `path` after it (empty for `path` itself).
 fn names_of(dir: &str, path: &str) -> Vec<(String, String)> {
     let up = if dir.is_empty() {
         String::new()
@@ -159,7 +176,7 @@ fn names_of(dir: &str, path: &str) -> Vec<(String, String)> {
     let mut at = Some(path);
     while let Some(p) = at {
         let rest = &path[p.len()..];
-        for name in [p.to_string(), format!("{up}{p}")] {
+        for name in [p.to_string(), relative(dir, p), format!("{up}{p}")] {
             if name.contains('/') && !names.iter().any(|(n, _)| *n == name) {
                 names.push((name, rest.to_string()));
             }
@@ -167,6 +184,17 @@ fn names_of(dir: &str, path: &str) -> Vec<(String, String)> {
         at = p.rsplit_once('/').map(|(parent, _)| parent);
     }
     names
+}
+
+/// `to` from `dir`, both from the root: up to the directory they share,
+/// then down.
+fn relative(dir: &str, to: &str) -> String {
+    let from: Vec<&str> = dir.split('/').filter(|c| !c.is_empty()).collect();
+    let to: Vec<&str> = to.split('/').collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts = vec![".."; from.len() - shared];
+    parts.extend(&to[shared..]);
+    parts.join("/")
 }
 
 /// Whether `text` holds one of `names` in a string, opened by a quote or a
@@ -526,6 +554,7 @@ mod tests {
             workspace: true,
             root: PathBuf::new(),
             readers: Mutex::default(),
+            sources: OnceLock::new(),
         };
         // The deepest directory owns a file; build output is no crate's.
         assert_eq!(cargo.owner("crates/core/src/lib.rs"), Some(1));
@@ -561,6 +590,10 @@ mod tests {
             "crates/lib/src/lib.rs",
             r#"const A: &str = "corpus"; const B: &str = "../corpus/completed";"#,
         );
+        write(
+            "crates/cli/src/main.rs",
+            r#"const X: &str = include_str!("../../shared/x.json");"#,
+        );
         let cargo = Cargo {
             members: Ok(vec![
                 member("conformance", "conformance", &[]),
@@ -571,12 +604,16 @@ mod tests {
             workspace: true,
             root: root.path().to_path_buf(),
             readers: Mutex::default(),
+            sources: OnceLock::new(),
         };
         assert_eq!(cargo.reached("corpus/complete/01-positions.json"), vec![0]);
         assert_eq!(cargo.reached("corpus/fmt/a.json"), vec![1]);
         assert!(cargo.traces("corpus/fmt/a.json"));
         assert!(!cargo.traces("corpus/README.md"));
         assert_eq!(cargo.reached("crates/lib/data/x.json"), vec![2]);
+        // A sibling directory, named through their parent; `include_str!`
+        // names it from the source file, which ends in the crate's name.
+        assert_eq!(cargo.reached("crates/shared/x.json"), vec![3]);
         let names: Vec<String> = names_of("crates/fmt", "corpus/fmt/a.json")
             .into_iter()
             .map(|(name, _)| name)
