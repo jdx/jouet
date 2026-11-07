@@ -649,11 +649,21 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 	if program == "npx" then
 		local at = if args[1] == "--no-install" then 2 else 1
 		if args[at] == "jest" then
+			-- The shell parser unwraps `env -C` and `mise x -C`, but does not
+			-- retain the directory they select. Do not attribute such a run to
+			-- the caller's directory.
+			for _, word in command.words do
+				if jouet.basename(word) == "npx" then break end
+				if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir"
+					or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+					return nil, unknown
+				end
+			end
 			local selection = { "@jouet:npx:jest" }
 			for i = at + 1, #args do
 				local arg = args[i]
 				local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
-				if arg == "" or string.find(arg, "[^%w%._/%-:=@]")
+				if arg == "" or INSPECT[name] or string.find(arg, "[^%w%._/%-:=@]")
 					or name == "--showConfig" or name == "--show-config" or name == "--clearCache" or name == "--clear-cache" or name == "--init"
 					or name == "--updateSnapshot" or name == "--update-snapshot" or name == "-u"
 					or name == "--watch" or name == "--watchAll" or name == "--watch-all" then

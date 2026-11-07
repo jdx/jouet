@@ -259,7 +259,32 @@ impl Run {
         };
         match (npx_jest(ran), npx_jest(wanted)) {
             (true, true) => {
-                return !ran.contains("@jouet:cwd=unknown:") && ran == wanted;
+                if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
+                    return false;
+                }
+                if ran == wanted {
+                    return true;
+                }
+                // Join only paths without `..`: resolving a parent across a
+                // symlink lexically could identify different directories.
+                fn scope(s: &str) -> Option<(String, &str)> {
+                    let (directory, selection) = s.split_once(' ')?;
+                    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
+                    if !cwd.starts_with('/')
+                        || cwd.split('/').chain(cd.split('/')).any(|p| p == "..")
+                    {
+                        return None;
+                    }
+                    let path = if cd.starts_with('/') {
+                        cd.to_string()
+                    } else if cd == "." {
+                        cwd.to_string()
+                    } else {
+                        format!("{}/{cd}", cwd.trim_end_matches('/'))
+                    };
+                    Some((path.trim_end_matches('/').to_string(), selection))
+                }
+                return scope(ran).is_some_and(|a| scope(wanted).is_some_and(|b| a == b));
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
@@ -2312,7 +2337,11 @@ mod tests {
         state.record([test("npm test", 0, "full")], Some("t1"));
         assert!(reason(&state, "t1").is_some());
         state.record(
-            [test("npx jest --config=unit.js a.test.js", 0, failed)],
+            [test(
+                "npx jest --config=unit.js a.test.js",
+                0,
+                "@jouet:cwd=/repo/web:cd=. @jouet:npx:jest --config=unit.js a.test.js",
+            )],
             Some("t1"),
         );
         assert_eq!(reason(&state, "t1"), None);
