@@ -490,6 +490,22 @@ fn dedupe<T, K: PartialEq>(items: &mut Vec<T>, key: impl Fn(&T) -> K) {
 /// the message already gives in its own words is skipped too: a co-author
 /// with the same address, or a second AI disclosure.
 fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String, Error> {
+    // Check every configured trailer, including one the message makes
+    // redundant, so a bad setting fails whatever the message says.
+    for t in trailers {
+        match t.split_once(':') {
+            Some((key, value))
+                if !key.trim().is_empty()
+                    && !key.contains(char::is_whitespace)
+                    && !value.trim().is_empty() => {}
+            _ => {
+                return Err(Error::new(
+                    Exit::Usage,
+                    format!("a trailer is `Key: value`, not `{t}`"),
+                ));
+            }
+        }
+    }
     let given = given_trailers(message);
     let trailers: Vec<&String> = trailers
         .iter()
@@ -506,18 +522,6 @@ fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String
         "interpret-trailers".to_string(),
     ];
     for t in trailers {
-        match t.split_once(':') {
-            Some((key, value))
-                if !key.trim().is_empty()
-                    && !key.contains(char::is_whitespace)
-                    && !value.trim().is_empty() => {}
-            _ => {
-                return Err(Error::new(
-                    Exit::Usage,
-                    format!("a trailer is `Key: value`, not `{t}`"),
-                ));
-            }
-        }
         args.push("--trailer".into());
         args.push(t.to_string());
     }
@@ -548,16 +552,21 @@ fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The `Key: value` lines of the message's last paragraph.
+/// The `Key: value` lines of the message's last paragraph, when it has
+/// one after the subject. Blank lines split paragraphs whatever the line
+/// ending.
 fn given_trailers(message: &str) -> Vec<&str> {
-    let last = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
-    let lines: Vec<&str> = last.lines().collect();
+    let lines: Vec<&str> = message.trim_end().lines().collect();
+    let Some(blank) = lines.iter().rposition(|l| l.trim().is_empty()) else {
+        return Vec::new();
+    };
+    let lines = &lines[blank + 1..];
     let trailer = |l: &&str| {
         l.split_once(':')
             .is_some_and(|(k, _)| !k.is_empty() && !k.contains(char::is_whitespace))
     };
     if lines.iter().all(trailer) {
-        lines
+        lines.to_vec()
     } else {
         Vec::new()
     }

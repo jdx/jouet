@@ -259,10 +259,33 @@ fn trailers_are_appended_once() {
             .ends_with("AI-Assisted: Tool: X; model: y")
     );
 
-    req.trailers = vec!["not a trailer".into()];
+    // A subject is not a trailer block, even one shaped like a trailer.
     repo.write("a.txt", "a5\n");
-    let err = run(&repo.git_handle(), &req).unwrap_err();
-    assert_eq!(err.exit, Exit::Usage);
+    req.message = "AI-Assisted: improve disclosure formatting".into();
+    run(&repo.git_handle(), &req).unwrap();
+    assert!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .ends_with("\n\nAI-Assisted: Tool: X; model: y")
+    );
+    // A CRLF message splits its paragraphs the same way.
+    repo.write("a.txt", "a6\n");
+    req.message = "fix: d\r\n\r\nAI-Assisted: Tool: Claude Code; model: m\r\n".into();
+    run(&repo.git_handle(), &req).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .matches("AI-Assisted")
+            .count(),
+        1
+    );
+
+    // A bad trailer fails even when the message makes it redundant.
+    req.message = "fix: e\n\nAI-Assisted: Tool: Claude Code; model: m".into();
+    for bad in ["not a trailer", "AI-Assisted:", " AI-Assisted: value"] {
+        req.trailers = vec![bad.into()];
+        repo.write("a.txt", "a7\n");
+        let err = run(&repo.git_handle(), &req).unwrap_err();
+        assert_eq!(err.exit, Exit::Usage, "{bad}");
+    }
 }
 
 #[test]
