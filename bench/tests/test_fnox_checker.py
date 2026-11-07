@@ -4,6 +4,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,6 +19,27 @@ spec.loader.exec_module(checker)
 
 
 class FnoxBatsTest(unittest.TestCase):
+    def test_checker_imports_its_helper_in_isolated_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "user.name=Bench", "-c", "user.email=bench@example.invalid",
+                 "commit", "--allow-empty", "-qm", "base"],
+                check=True,
+            )
+            base = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+            (root / "cargo").write_text("#!/bin/sh\nexit 1\n")
+            (root / "cargo").chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}", "BENCH_HEAD_SHA": base}
+            result = subprocess.run(
+                [sys.executable, "-I", str(TASKS / "fnox-editor-args" / "check.py")],
+                cwd=root, env=env, capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("ModuleNotFoundError", result.stderr)
+            self.assertIn("build fails", result.stdout)
+
     def test_realistic_tap_requires_complete_success(self):
         self.assertIsNone(checker.inspect_tap("1..2\nok 1 first\nok 2 second\n", 0))
         cases = [

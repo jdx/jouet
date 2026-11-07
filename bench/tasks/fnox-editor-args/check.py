@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _check import dirty, expect, finish, new_commit
 from bats_check import check_bats
