@@ -287,6 +287,18 @@ impl Run {
             let words: Vec<String> = s.split_whitespace().map(str::to_string).collect();
             (!words.iter().any(|w| w.starts_with('-') && w != "--")).then_some(words)
         };
+        // pytest's `-k` and `-m` only narrow the names before them, so an
+        // unfiltered run of names above those covers it. Only a one-word
+        // filter at the end is known to be one: the selection drops quotes.
+        let filtered: Vec<&str> = wanted.rsplitn(3, ' ').collect();
+        let wanted = match (self.nesting, filtered.as_slice()) {
+            (Some(Nesting::Pytest), &[value, "-k" | "-m", names])
+                if failed.nesting == Some(Nesting::Pytest) && !value.starts_with('-') =>
+            {
+                names
+            }
+            _ => wanted,
+        };
         let (Some(ran), Some(wanted)) = (words(ran), words(wanted)) else {
             return false;
         };
@@ -2950,6 +2962,23 @@ mod tests {
         assert_eq!(reason(&state, "t1"), None);
         state.record([pytest("tests/b.py", 1)], Some("t1"));
         state.record([pytest("tests", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        // A run filtered by keyword or marker is covered by one without it,
+        // but not by one that keeps another filter or names less.
+        state.record([pytest("tests/a.py -k uncomparable", 1)], Some("t1"));
+        state.record([pytest("tests -k other", 0)], Some("t1"));
+        state.record([pytest("tests/b.py", 0)], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([pytest("tests", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        state.record([pytest("tests/a.py -m slow", 1)], Some("t1"));
+        state.record([pytest("tests/a.py", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        // A filter of several words, or names after it, is left exact.
+        state.record([pytest("tests/a.py -k not slow", 1)], Some("t1"));
+        state.record([pytest("tests", 0)], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([pytest("tests/a.py -k not slow", 0)], Some("t1"));
         assert_eq!(reason(&state, "t1"), None);
         // A directory beside the file, a path out of it, or another runner
         // that only shares the program, does not.
