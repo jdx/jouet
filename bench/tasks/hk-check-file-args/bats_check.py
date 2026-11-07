@@ -17,13 +17,17 @@ def check_bats() -> None:
     try:
         def paths(mode: str) -> set[str]:
             proc = subprocess.run(
-                ["git", "diff", "--name-only", "-z", f"--diff-filter={mode}", head_sha(), "HEAD", "--", "test"],
+                ["git", "diff", "--no-renames", "--name-only", "-z", f"--diff-filter={mode}",
+                 head_sha(), "HEAD", "--", "test"],
                 capture_output=True, check=True, timeout=30,
             )
             return {os.fsdecode(path) for path in proc.stdout.split(b"\0") if path}
 
         changed = {path for path in paths("AM") if path.endswith(".bats")}
         added_files = paths("A")
+        removed = sorted(path for path in paths("D") if path.endswith(".bats"))
+        if removed:
+            UNVERIFIED.append(f"committed Bats files were removed or renamed: {', '.join(removed)}")
         if not changed:
             UNVERIFIED.append("no committed Bats regression test was changed")
             return

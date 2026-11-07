@@ -89,6 +89,16 @@ class HkCheckerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn("committed Bats regression failed", result.stdout)
 
+            git("restore", "test/check.bats")
+            git("rm", "test/check.bats")
+            (work / "test/new.bats").write_text('@test "regression" {\n  true\n}\n')
+            git("add", "test/new.bats")
+            git("commit", "-qm", "replace test file")
+            env["BATS_CASE"] = ""
+            result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn("removed or renamed", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
