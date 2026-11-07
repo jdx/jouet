@@ -204,8 +204,43 @@ impl Run {
         let (Some(ran), Some(wanted)) = (words(ran), words(wanted)) else {
             return false;
         };
-        !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
+        if !ran.is_empty()
+            && ran.first() == wanted.first()
+            && wanted.iter().all(|w| ran.contains(w))
+        {
+            return true;
+        }
+        // A name above each failed one, through the same runner. Go's `./a`
+        // is one package, not the ones below it.
+        same_runner(&self.command, &failed.command)
+            && runner_argv(&self.command).first().map(String::as_str) != Some("go")
+            && !wanted.is_empty()
+            && wanted
+                .iter()
+                .all(|w| ran.iter().any(|r| r == w || holds(r, w)))
     }
+}
+
+/// Whether the name `ran` selects `wanted` and the tests beside it: a module
+/// label or path above it (Django's `admin_views` holds
+/// `admin_views.tests.T`, pytest's `tests` holds `tests/a.py::t`). A dot
+/// parts module labels, never a file from its extension.
+fn holds(ran: &str, wanted: &str) -> bool {
+    const SOURCE: &[&str] = &[
+        "bats", "cjs", "cs", "ex", "exs", "go", "java", "js", "jsx", "kt", "mjs", "php", "py",
+        "rb", "rs", "ts", "tsx",
+    ];
+    let Some(rest) = wanted.strip_prefix(ran) else {
+        return false;
+    };
+    rest.starts_with('/')
+        || rest.starts_with("::")
+        || (rest.starts_with('.')
+            && !wanted.contains('/')
+            && !std::path::Path::new(wanted)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| SOURCE.contains(&e)))
 }
 
 fn playwright_selection_args(selection: &str) -> Option<Vec<String>> {
@@ -2784,6 +2819,49 @@ mod tests {
         // A selection with an option has to match exactly.
         state.record([test("pytest -k x", 1, "-k x")], Some("t1"));
         state.record([test("pytest -k not x", 0, "-k not x")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_pass_of_a_label_or_path_above_a_name_clears_its_failure() {
+        let unit = |names: &str, code| {
+            test(
+                &format!("mise run test:unit {names}"),
+                code,
+                &format!("test:unit {names}"),
+            )
+        };
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        state.record(
+            [unit(
+                "delete admin_views.tests.AdminViewDeletedObjectsTest",
+                1,
+            )],
+            Some("t1"),
+        );
+        // A sibling label, or one that only starts the same, does not.
+        state.record([unit("delete admin_views.forms admin_view", 0)], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([unit("delete admin_views", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+
+        state.record(
+            [test("pytest tests/a.py::t", 1, "tests/a.py::t")],
+            Some("t1"),
+        );
+        state.record([test("pytest tests/a.py", 0, "tests/a.py")], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        state.record([test("pytest tests/b.py", 1, "tests/b.py")], Some("t1"));
+        state.record([test("pytest tests", 0, "tests")], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+
+        // A module is not its file, and Go's package is not the ones below.
+        assert!(!holds("tests/a", "tests/a.py"));
+        assert!(!holds("a", "a.py"));
+        assert!(holds("a", "a.tests"));
+        state.record([test("go test ./a/b", 1, "./a/b")], Some("t1"));
+        state.record([test("go test ./a", 0, "./a")], Some("t1"));
         assert!(reason(&state, "t1").is_some());
     }
 
