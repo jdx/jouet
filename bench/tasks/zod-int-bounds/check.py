@@ -88,6 +88,7 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                 return
             label = "hidden tests" if hidden else "committed tests"
             details = []
+            statuses = []
             try:
                 counts = json.loads(report.read_text())
                 passed = counts["numPassedTests"]
@@ -97,6 +98,7 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                     raise TypeError("test counts are not integers")
                 for suite in counts.get("testResults", []):
                     for assertion in suite.get("assertionResults", []):
+                        statuses.append(assertion.get("status"))
                         if assertion.get("status") == "failed":
                             details.append(f"{assertion.get('fullName', '(unnamed test)')}:\n"
                                            + "\n".join(assertion.get("failureMessages") or []))
@@ -106,8 +108,20 @@ def test_checkout(hidden: bool, tests: list[str]) -> None:
                 expect(failed == 0, f"{label} reported {failed} failing tests:\n" + "\n".join(details))
                 if total == 0:
                     expect(False, f"{label} ran no tests")
-                elif passed == 0 and result.returncode == 0:
-                    UNVERIFIED.append(f"{label} did not pass any tests")
+                else:
+                    pending = counts.get("numPendingTests")
+                    todo = counts.get("numTodoTests")
+                    if (any(not isinstance(count, int) or isinstance(count, bool) or count < 0
+                            for count in (pending, todo))
+                            or passed + failed + pending + todo != total):
+                        UNVERIFIED.append(f"{label} reported missing or inconsistent test counts")
+                    elif pending or todo:
+                        UNVERIFIED.append(f"{label} skipped {pending} tests and marked {todo} TODO")
+                    elif (len(statuses) != total or statuses.count("passed") != passed
+                          or statuses.count("failed") != failed):
+                        UNVERIFIED.append(f"{label} reported incomplete or inconsistent assertion results")
+                    elif passed == 0 and result.returncode == 0:
+                        UNVERIFIED.append(f"{label} did not pass any tests")
             expect(result.returncode == 0, f"{label} failed:\n{result.stdout}{result.stderr}\n" + "\n".join(details))
             if hidden:
                 related = checkout / "packages/zod/src/v4/classic/tests/bigint.test.ts"
