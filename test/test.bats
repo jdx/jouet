@@ -1951,6 +1951,35 @@ SCRIPT
 	refute_output --partial 'also fails at main'
 }
 
+@test "Go JSON baseline reruns the failing test with its package and JSON output" {
+	cat >go.mod <<-'EOF'
+		module example.com/shop
+
+		go 1.22
+	EOF
+	cat >fail.json <<-'EOF'
+		{"Action":"run","Package":"example.com/shop/other","Test":"TestBroken"}
+		{"Action":"output","Package":"example.com/shop/other","Test":"TestBroken","Output":"other_test.go:5: boom\n"}
+		{"Action":"fail","Package":"example.com/shop/other","Test":"TestBroken"}
+		{"Action":"fail","Package":"example.com/shop/other"}
+	EOF
+	printf '#!/bin/sh\necho run >>"%s/checks"\ncat "%s/fail.json"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >check.sh
+	mkdir -p bin
+	printf '#!/bin/sh\necho "$*" >>"%s/go"\ncat "%s/fail.json"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >bin/go
+	chmod +x check.sh bin/go
+	git add go.mod fail.json check.sh
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+	PATH="$PWD/bin:$PATH" JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- ./check.sh
+	assert_success
+	assert_output --partial 'also fails at main'
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/go")" 'test -json -run ^(TestBroken)$ example.com/shop/other'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/checks")" 1
+}
+
 @test "a large passing run names the tests the change adds, and only those" {
 	git commit -q --allow-empty -m base
 	cat >run-tests <<'SH'

@@ -1098,10 +1098,16 @@ fn go_json(lines: &[String], out: &mut Parsed) {
             result => {
                 test.ambiguous |= !test.started || test.finished;
                 test.finished = true;
-                if result != "fail" {
-                    test.output.clear();
+                let already_failed = test
+                    .result
+                    .as_ref()
+                    .is_some_and(|(_, result)| result == "fail");
+                if !already_failed {
+                    if result != "fail" {
+                        test.output.clear();
+                    }
+                    test.result = Some((at, result.to_string()));
                 }
-                test.result = Some((at, result.to_string()));
             }
         }
     }
@@ -1124,6 +1130,9 @@ fn go_json(lines: &[String], out: &mut Parsed) {
         }
         if result == "fail" {
             failed_packages.insert(package.clone());
+            if test.ambiguous {
+                incomplete_packages.insert(package.clone());
+            }
             let complete = packages.get(&package).is_some_and(|package| {
                 package
                     .end
@@ -1146,8 +1155,8 @@ fn go_json(lines: &[String], out: &mut Parsed) {
         let Some((at, result)) = data.end else {
             continue;
         };
-        if result == "fail"
-            && (!failed_packages.contains(&package) || incomplete_packages.contains(&package))
+        if (result == "fail" && !failed_packages.contains(&package))
+            || incomplete_packages.contains(&package)
         {
             out.count(0, 1, 0);
             out.push(at, format!("package {package}"), data.output);
