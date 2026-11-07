@@ -77,7 +77,7 @@ fn reads_both_harnesses_and_reports_what_it_could_not_read() {
         .iter()
         .find(|s| s.category == Category::CiPolling)
         .expect("a CI suggestion");
-    assert_eq!(ci.saving.as_ref().map(|s| s.input_tokens), Some(21_000));
+    assert!(ci.saving.is_none());
 
     let codex = harness(&report, "codex");
     // The live session, the archived one, and the one cut off after its
