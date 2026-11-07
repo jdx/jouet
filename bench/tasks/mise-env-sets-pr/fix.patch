@@ -1,0 +1,178 @@
+diff --git a/docs/configuration/environments.md b/docs/configuration/environments.md
+index b9401919ad..019375dd5e 100644
+--- a/docs/configuration/environments.md
++++ b/docs/configuration/environments.md
+@@ -92,8 +92,8 @@ expand the same way. A name that is not a set is an environment, so
+ `env = ["workstation", "ci"]` also works. A set expands one level and cannot
+ contain another set, and an environment listed twice keeps its first position.
+ 
+-A set from the system or global `miserc.toml` cannot be redefined by a project
+-`.miserc.toml`.
++A project `.miserc.toml` cannot define a set named like one the system or global
++`miserc.toml` defines, or like an environment it selects.
+ 
+ ## File names and precedence {#file-names-and-precedence}
+ 
+diff --git a/e2e/config/test_miserc_env_sets b/e2e/config/test_miserc_env_sets
+index bc52dc78aa..16c8112757 100644
+--- a/e2e/config/test_miserc_env_sets
++++ b/e2e/config/test_miserc_env_sets
+@@ -6,7 +6,7 @@
+ cat >mise.toml <<'TOML'
+ tools.dummy = '1'
+ [env]
+-SELECTED = "{{ mise_env | join(sep=',') }}"
++SELECTED = "[{{ mise_env | default(value=[]) | join(sep=',') }}]"
+ TOML
+ echo "tools.dummy = '2'" >mise.ssh.toml
+ echo "tools.dummy = '3'" >mise.server.toml
+@@ -17,15 +17,23 @@ TOML
+ 
+ # env names a set
+ echo 'env = ["server"]' >.miserc.local.toml
+-assert "mise env --json | jq -r .SELECTED" "server,ssh"
++assert "mise env --json | jq -r .SELECTED" "[server,ssh]"
+ assert "mise ls dummy" "dummy  2.0.0 (missing)  ~/workdir/mise.ssh.toml  2"
+ 
+ # -E and MISE_ENV expand too, and plain names still work
+-assert "mise -E server env --json | jq -r .SELECTED" "server,ssh"
+-MISE_ENV=server,ci assert "mise env --json | jq -r .SELECTED" "server,ssh,ci"
+-assert "mise -E ssh env --json | jq -r .SELECTED" "ssh"
++assert "mise -E server env --json | jq -r .SELECTED" "[server,ssh]"
++MISE_ENV=server,ci assert "mise env --json | jq -r .SELECTED" "[server,ssh,ci]"
++assert "mise -E ssh env --json | jq -r .SELECTED" "[ssh]"
+ 
+ # a project file cannot redefine a set of the global miserc
+ rm .miserc.local.toml
+ printf '[env_sets]\nserver = ["server"]\n' >"$MISE_CONFIG_DIR/miserc.toml"
+-MISE_ENV=server assert "mise env --json | jq -r .SELECTED" "server"
++MISE_ENV=server assert "mise env --json | jq -r .SELECTED" "[server]"
++
++# nor empty a global environment, and an empty MISE_ENV selects nothing
++printf 'env = ["floor"]\n' >"$MISE_CONFIG_DIR/miserc.toml"
++printf '[env_sets]\nfloor = []\n' >.miserc.toml
++assert "mise env --json | jq -r .SELECTED" "[floor]"
++printf 'env = ["ssh"]\n' >.miserc.toml
++rm "$MISE_CONFIG_DIR/miserc.toml"
++MISE_ENV='' assert "mise env --json | jq -r .SELECTED" "[]"
+diff --git a/man/man1/mise.1 b/man/man1/mise.1
+index e9f4e6fcc8..3fe725cbe4 100644
+--- a/man/man1/mise.1
++++ b/man/man1/mise.1
+@@ -1528,6 +1528,11 @@ Ask for `[vars]` entries that declare a `prompt` and have no saved answer
+ 
+ mise saves each answer under `$MISE_STATE_DIR`, not in any config file, and never asks for it again. Without a terminal, a var keeps its default. A `\-\-dry\-run` still saves the answers it asks for.
+ .TP
++\fB\-\-save\-env\fR
++Save the environments of `\-E` or `MISE_ENV` to `miserc.local.toml`
++
++Writes `env` in the `miserc.local.toml` of mise's config directory, so later runs, including `mise bootstrap \-\-update`, select the same environments without `\-E`. Names may be sets from `[env_sets]` in `miserc.toml`. Other keys in the file are kept. Needs `\-E` or `MISE_ENV`, and a `\-\-dry\-run` writes nothing.
++.TP
+ \fB\-\-skip\fR \fI<PART>\fR
+ Skip these parts
+ 
+diff --git a/settings.toml b/settings.toml
+index 50e0b2b6d3..5c1c7870cb 100644
+--- a/settings.toml
++++ b/settings.toml
+@@ -902,8 +902,8 @@ environment, so a machine can still list environments one by one. A set expands
+ level: a set cannot contain another set, and a set may list an environment of its
+ own name (`server` above). An environment that appears twice keeps its first position.
+ 
+-A set defined in the system or global `miserc.toml` cannot be redefined by a
+-project `.miserc.toml`; among the other files, the closest one wins for each name.
++A project `.miserc.toml` cannot define a set named like one the system or global
++`miserc.toml` defines, or like an environment it selects; among the other files, the closest one wins for each name.
+ """
+ optional = true
+ rc = true
+diff --git a/src/cli/bootstrap.rs b/src/cli/bootstrap.rs
+index 92eca18a6a..f501be11a0 100644
+--- a/src/cli/bootstrap.rs
++++ b/src/cli/bootstrap.rs
+@@ -2037,7 +2037,10 @@ impl Bootstrap {
+         }
+         if self.save_env {
+             let args = crate::env::ARGS.read().unwrap().clone();
+-            save_env(&crate::env::explicit_environment(&args), self.dry_run)?;
++            save_env(
++                &crate::env::explicit_environment(&args).unwrap_or_default(),
++                self.dry_run,
++            )?;
+         }
+         if self.prompt_vars {
+             crate::config::env_directive::prompt::enable();
+diff --git a/src/config/miserc.rs b/src/config/miserc.rs
+index 1ba8efc181..1ebb02b4ad 100644
+--- a/src/config/miserc.rs
++++ b/src/config/miserc.rs
+@@ -493,7 +493,9 @@ fn load_miserc_files(files: Vec<PathBuf>) -> Result<MisercSettings> {
+             } else {
+                 keep_global_envs(&mut settings, &global_env);
+                 if let Some(sets) = settings.env_sets.as_mut() {
+-                    sets.retain(|name, _| !global_sets.contains(name));
++                    sets.retain(|name, _| {
++                        !global_sets.contains(name) && !global_env.contains(name)
++                    });
+                 }
+                 merge_settings(&mut merged, settings);
+             }
+@@ -837,6 +839,14 @@ ceiling_paths = ["/home/user"]
+         );
+     }
+ 
++    #[test]
++    fn test_drop_env_set_members_leaving_the_directory() {
++        let mut settings: MisercSettings =
++            toml::from_str("[env_sets]\nteam = [\"ssh\", \"x/../../other\", \"a\\\\b\"]").unwrap();
++        drop_names_leaving_the_directory(&mut settings, Path::new("/work/.miserc.toml"));
++        assert_eq!(settings.env_sets.unwrap()["team"], ["ssh"]);
++    }
++
+     #[test]
+     fn test_resolve_ignored_config_paths_from_declaring_file() {
+         let mut settings = MisercSettings {
+diff --git a/src/env.rs b/src/env.rs
+index e531e371df..a5daadeee8 100644
+--- a/src/env.rs
++++ b/src/env.rs
+@@ -262,16 +262,16 @@ pub fn should_truncate() -> bool {
+ // python
+ 
+ fn environment(args: &[String]) -> Vec<String> {
+-    let mut names = explicit_environment(args);
+-    if names.is_empty() {
+-        names = miserc::get_env().cloned().unwrap_or_default();
+-    }
++    // an empty MISE_ENV selects nothing, so only an absent selection falls back
++    let names = explicit_environment(args)
++        .or_else(|| miserc::get_env().cloned())
++        .unwrap_or_default();
+     miserc::expand_env_sets(names)
+ }
+ 
+ /// The environments named by `-E` or `MISE_ENV`, before set names expand.
+-/// Empty when neither is given.
+-pub fn explicit_environment(args: &[String]) -> Vec<String> {
++/// `None` when neither is given; an empty `MISE_ENV` is `Some` of an empty list.
++pub fn explicit_environment(args: &[String]) -> Option<Vec<String>> {
+     let arg_defs = HashSet::from(["--profile", "-P", "--env", "-E"]);
+ 
+     // Get environment value from args or env vars
+@@ -330,7 +330,7 @@ pub fn explicit_environment(args: &[String]) -> Vec<String> {
+             .collect()
+     };
+     if !from_args.is_empty() {
+-        return from_args;
++        return Some(from_args);
+     }
+     var("MISE_ENV")
+         .ok()
+@@ -342,7 +342,6 @@ pub fn explicit_environment(args: &[String]) -> Vec<String> {
+                 .map(String::from)
+                 .collect()
+         })
+-        .unwrap_or_default()
+ }
+ 
+ fn linux_distro() -> Option<String> {

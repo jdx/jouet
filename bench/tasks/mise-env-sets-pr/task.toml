@@ -1,0 +1,95 @@
+description = "A whole PR session on real mise code (jdx/mise#15327): wait for CI, fix the render diff it fails on, address four bot review threads (two bugs across three threads, one suggestion to answer), commit"
+chore = "pr-session"
+rules = ["checks", "git-add-all", "review-threads", "sleep-poll", "ci-rerun"]
+# A real repository with a Rust build of mise: it runs only when named.
+opt_in = true
+branch = "env-sets"
+# The PR is on GitHub (the fake), and the clone has origin/main to measure
+# the change from.
+remote = true
+upstream = true
+timeout_s = 3600
+check_timeout_s = 1800
+path = ["~/.cargo/bin"]
+# jouet levels: out of the box, `jouet wait ci`, `jouet pr threads` and
+# `jouet pr next` read the PR from the fake, and `jouet test` digests cargo's
+# output and the e2e runner's. CI fails on `mise run render` leaving a diff in
+# man/man1/mise.1, which a Luau rule or routine could name: the man page is
+# `usage generate manpage` over mise.usage.kdl, which `mise usage` writes
+# from the CLI's own help (`mise run render:mangen`).
+#
+# The PR at its first push (b34f4b2), which spans the settings generator
+# (crates/mise-settings), the schema generator (crates/mise-config),
+# settings.toml, the miserc loader, env selection, bootstrap, docs and e2e
+# tests. CI's lint job fails because the new `mise bootstrap --save-env` flag
+# is missing from the generated man page. Greptile and Cursor flag two bugs:
+# a project `.miserc.toml` can define a set named like an environment the
+# global miserc selects and so drop it, and an empty `MISE_ENV` now falls back
+# to the miserc `env`. CodeRabbit asks to drop `env_sets` from the mise.toml
+# settings schema, which upstream declined: the other miserc-only settings are
+# listed there too. Upstream fixed the rest in a45126a and 9f62cbab; the
+# later threads on its own e2e assertions are left out. Upstream's e2e job was
+# cancelled by the next push; here it passes, as the PR's e2e tests do.
+prompt = """
+PR #15327 (branch env-sets, checked out here) lets a shared miserc.toml name sets of mise
+environments with `[env_sets]`, which `env`, `MISE_ENV` and `-E` expand, and adds
+`mise bootstrap --save-env`. CI is running on it, and reviewers have left comments. Get it ready:
+wait for CI and fix what fails, and address the open review threads: make the requested changes,
+reply on each thread saying what you did, and resolve the ones you fixed. A suggestion you decide
+not to take gets a reply saying why, and stays open. Commit your changes; don't push.
+"""
+
+# The PR's base, cd57a6b on main; `pr/` holds the files b34f4b2 changed. The
+# clone is the user's own checkout of jdx/mise, and the build is offline from
+# the cargo registry it has already fetched.
+[source]
+git = "~/src/mise"
+commit = "cd57a6b40747c09f984e4dff27cb5fbe805096b3"
+
+# Resolve mise from the benchmark environment, as mise-uninstall-pr does.
+# `mise run` installs the repository's own tools (usage, which renders the man
+# page, among them) into the run's home.
+[tools]
+mise = "mise"
+
+[env]
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"
+CARGO_NET_OFFLINE = "true"
+MISE_TRUSTED_CONFIG_PATHS = "{workdir}"
+
+# Timed once, for the cost note every run starts with (bench/jbench/costs.py):
+# a cold build of the binary, `mise run build` (all features, through mbx),
+# the lib tests of the miserc loader, and the PR's e2e tests.
+[cost]
+seed = [
+    "cargo build",
+    "mise run build",
+    "cargo test --lib miserc",
+    "mise run test:e2e test_miserc_env_sets",
+    "mise run test:e2e test_bootstrap_save_env",
+]
+
+[[probe]]
+tool = "jouet"
+args = ["wait", "ci", "15327", "--json"]
+exit = 1
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "15327", "--json"]
+stdout_contains = "Empty selection loads defaults"
+
+[[probe]]
+tool = "jouet"
+args = ["pr", "threads", "reply", "55502", "15327", "--body", "An empty MISE_ENV selects nothing again.", "--resolve", "--json"]
+
+[[probe]]
+tool = "gh"
+args = ["pr", "checks", "15327"]
+exit = 1
+
+[[probe]]
+tool = "gh"
+args = ["run", "view", "9001", "--log-failed"]
+stdout_contains = "man/man1/mise.1"
