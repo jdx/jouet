@@ -111,6 +111,36 @@ class FnoxBatsTest(unittest.TestCase):
             self.assertIn("missing, renamed, or ambiguous", checker.UNVERIFIED[0])
             self.assertEqual(run.call_count, 3)
 
+    def test_timeout_preserves_a_failed_new_regression(self):
+        changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
+        original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
+        current = subprocess.CompletedProcess([], 0, '@test "old" {\n@test "first" {\n@test "second" {\n', "")
+        clean = subprocess.CompletedProcess([], 0, "", "")
+        timeout = subprocess.TimeoutExpired("bats", 180, output=b"1..3\nok 1 old\nnot ok 2 first\n")
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker, "expect") as expect, \
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, current, clean, timeout]), \
+                contextlib.redirect_stdout(output):
+            checker.check_bats()
+            expect.assert_called_once_with(False, "a committed regression test failed before the Bats suite timed out")
+            self.assertEqual(checker.UNVERIFIED, [])
+            self.assertIn("not ok 2 first", output.getvalue())
+
+    def test_timeout_without_a_failed_regression_is_unverified(self):
+        changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
+        original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
+        current = subprocess.CompletedProcess([], 0, '@test "old" {\n@test "first" {\n@test "second" {\n', "")
+        clean = subprocess.CompletedProcess([], 0, "", "")
+        timeout = subprocess.TimeoutExpired("bats", 180, output=b"1..3\nok 1 old\n")
+        with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, current, clean, timeout]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            checker.check_bats()
+            self.assertIn("timed out", checker.UNVERIFIED[0])
+
     def test_untracked_files_cannot_make_tests_pass(self):
         changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
         original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
