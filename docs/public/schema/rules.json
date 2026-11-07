@@ -567,6 +567,12 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "worktrees": {
+          "description": "How many worktrees `jouet.repo()` says the repository has, its main\none included. Omitted, `jouet.repo()` has no answer.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "additionalProperties": false

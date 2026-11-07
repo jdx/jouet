@@ -110,7 +110,9 @@ pub(crate) fn state(dir: Option<&Path>, timeout: Duration) -> Result<Value, Stri
     Ok(jouet_git::status::parse(&out))
 }
 
-/// The work tree's root, whether it is a linked worktree, and the GitHub
+/// The work tree's root, whether it is a linked worktree, how many
+/// worktrees the repository has (its main one and each linked one git keeps
+/// under `GIT_COMMON_DIR/worktrees`, pruned or not), and the GitHub
 /// repository its remotes name.
 pub(crate) fn repo(dir: Option<&Path>, timeout: Duration) -> Result<Value, String> {
     let started = std::time::Instant::now();
@@ -130,7 +132,14 @@ pub(crate) fn repo(dir: Option<&Path>, timeout: Duration) -> Result<Value, Strin
     else {
         return Err("not in a git work tree".into());
     };
-    let mut repo = json!({ "root": root, "linked_worktree": git_dir != common });
+    let linked = std::fs::read_dir(Path::new(common).join("worktrees"))
+        .map(|dir| dir.flatten().filter(|e| e.path().is_dir()).count())
+        .unwrap_or(0);
+    let mut repo = json!({
+        "root": root,
+        "linked_worktree": git_dir != common,
+        "worktrees": 1 + linked,
+    });
     // `--get-regexp` exits 1 when no remote matches: a repository without
     // a GitHub remote, which is an answer rather than an error.
     let left = timeout.saturating_sub(started.elapsed());

@@ -488,6 +488,9 @@ pub(crate) struct GitCase {
     /// What `jouet.git.ahead()` answers, for any branch: how many of its
     /// commits the other commit lacks. Omitted, it has no answer.
     pub ahead: Option<u32>,
+    /// How many worktrees `jouet.repo()` says the repository has, its main
+    /// one included. Omitted, `jouet.repo()` has no answer.
+    pub worktrees: Option<u32>,
 }
 
 /// An example's place in a stack, as `jouet.stack.layer()` would report it.
