@@ -1452,6 +1452,8 @@ docs/README.md\n\
         assert!(failure_names(&mixed, &[], Path::new("/work"), false).is_none());
         assert!(failure_evidence(&mixed, &[], Path::new("/work"), false).is_none());
         assert!(failure_evidence(&mixed, &[], Path::new("/work"), true).is_none());
+        let truncated = mixed.replace("Vitest caught 1 unhandled error during the test run.\n", "");
+        assert!(failure_evidence(&truncated, &[], Path::new("/work"), false).is_none());
     }
 
     #[test]
