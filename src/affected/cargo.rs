@@ -2,14 +2,17 @@
 //! belongs to the workspace member whose directory holds it, and the crates
 //! to test are those members and every member that depends on one of them,
 //! directly or through others, dev-dependencies included, as `cargo
-//! metadata` lists them. They run as `cargo test -p A -p B`.
+//! metadata` lists them. They run as `cargo test -p A -p B`. A file outside
+//! every member, such as a shared fixture directory, belongs to the members
+//! whose Rust sources name it or a directory holding it.
 
 use super::{Adapter, Base, Change, Ecosystem, Error, Project, Selection, Test};
 use jouet_output::exit::Exit;
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 /// Whether `dir` has a Cargo manifest with a package or a workspace in it.
 pub(crate) fn detect(dir: &Path) -> bool {
@@ -60,6 +63,10 @@ pub(crate) struct Cargo {
     /// Whether the project's manifest declares a workspace, so the whole
     /// suite is `cargo test --workspace`.
     workspace: bool,
+    /// The repository root, where members' sources are read from.
+    root: PathBuf,
+    /// [`Cargo::readers`] by path, as each is looked up more than once.
+    readers: Mutex<HashMap<String, Vec<usize>>>,
 }
 
 impl Cargo {
@@ -69,9 +76,122 @@ impl Cargo {
         Cargo {
             members: metadata(project).and_then(|m| members(&m, &project.root)),
             workspace,
+            root: project.root.clone(),
+            readers: Mutex::default(),
         }
     }
 
+    /// The members a changed file reaches: the one holding it or, for a file
+    /// outside every member, those that read it ([`Cargo::readers`]).
+    fn reached(&self, path: &str) -> Vec<usize> {
+        match self.owner(path) {
+            Some(i) => vec![i],
+            None => self.readers(path),
+        }
+    }
+
+    /// The members whose Rust sources name `path`, or a directory holding it,
+    /// in a string: from the member's directory (`"../corpus/complete"`) or
+    /// from the root (`"corpus/complete"`). Only names with a `/` count, as a
+    /// bare word such as `"corpus"` is too common to mean the file.
+    fn readers(&self, path: &str) -> Vec<usize> {
+        let Ok(members) = self.members.as_ref() else {
+            return Vec::new();
+        };
+        if members.iter().any(|m| inside(&m.dir, path)) {
+            return Vec::new();
+        }
+        let mut cache = self.readers.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = cache.get(path) {
+            return found.clone();
+        }
+        let needles: Vec<Vec<(String, String)>> =
+            members.iter().map(|m| names_of(&m.dir, path)).collect();
+        let mut found = BTreeSet::new();
+        for file in self.rust_files() {
+            let Some(i) = self.owner(&file) else { continue };
+            if found.contains(&i) || needles[i].is_empty() {
+                continue;
+            }
+            let text = std::fs::read_to_string(self.root.join(&file)).unwrap_or_default();
+            if names_any(&text, &needles[i]) {
+                found.insert(i);
+            }
+        }
+        let found: Vec<usize> = found.into_iter().collect();
+        cache.insert(path.to_string(), found.clone());
+        found
+    }
+
+    /// The repository's Rust files that git tracks or would add, from the
+    /// root.
+    fn rust_files(&self) -> Vec<String> {
+        super::changes::git(
+            &self.root,
+            &[
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.rs",
+            ],
+        )
+        .unwrap_or_default()
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
+    }
+}
+
+/// How a member in `dir` can name `path` or a directory holding it: each
+/// such path from the root and from `dir`, keeping those with a `/`, with
+/// the rest of `path` after it (empty for `path` itself).
+fn names_of(dir: &str, path: &str) -> Vec<(String, String)> {
+    let up = if dir.is_empty() {
+        String::new()
+    } else {
+        "../".repeat(dir.split('/').count())
+    };
+    let mut names = Vec::new();
+    let mut at = Some(path);
+    while let Some(p) = at {
+        let rest = &path[p.len()..];
+        for name in [p.to_string(), format!("{up}{p}")] {
+            if name.contains('/') && !names.iter().any(|(n, _)| *n == name) {
+                names.push((name, rest.to_string()));
+            }
+        }
+        at = p.rsplit_once('/').map(|(parent, _)| parent);
+    }
+    names
+}
+
+/// Whether `text` holds one of `names` in a string, opened by a quote or a
+/// `/`, where what follows it up to the closing quote leads on to the file:
+/// nothing, or the rest of its path up to any placeholder (`/{name}.json`). A
+/// directory's sibling (`"../corpus/complete"` for `corpus/fmt/a.json`)
+/// does not count.
+fn names_any(text: &str, names: &[(String, String)]) -> bool {
+    names.iter().any(|(name, rest)| {
+        text.match_indices(name.as_str()).any(|(at, _)| {
+            let before = text[..at].chars().next_back();
+            let tail = &text[at + name.len()..];
+            let Some(end) = tail.find(['"', '\n']) else {
+                return false;
+            };
+            let tail = &tail[..end];
+            matches!(before, Some('"' | '/'))
+                && (tail.is_empty()
+                    || tail.starts_with('/')
+                        && rest.starts_with(tail.split('{').next().unwrap_or(tail)))
+        })
+    })
+}
+
+impl Cargo {
     /// The member whose directory holds `path`, a path from the root: the
     /// deepest one, as a crate can sit inside another's directory.
     fn owner(&self, path: &str) -> Option<usize> {
@@ -233,7 +353,7 @@ impl Adapter for Cargo {
     }
 
     fn traces(&self, path: &str) -> bool {
-        self.owner(path).is_some()
+        !self.reached(path).is_empty()
     }
 
     fn traces_deletions(&self) -> bool {
@@ -269,7 +389,7 @@ impl Adapter for Cargo {
             .members
             .as_ref()
             .map_err(|e| Error::new(Exit::Precondition, e.clone()))?;
-        let changed: BTreeSet<usize> = sources.iter().filter_map(|c| self.owner(&c.path)).collect();
+        let changed: BTreeSet<usize> = sources.iter().flat_map(|c| self.reached(&c.path)).collect();
         let chains = dependents(members, &changed);
         let mut picked: Vec<(&Member, Vec<String>)> = chains
             .iter()
@@ -404,11 +524,72 @@ mod tests {
         let cargo = Cargo {
             members: Ok(members.to_vec()),
             workspace: true,
+            root: PathBuf::new(),
+            readers: Mutex::default(),
         };
         // The deepest directory owns a file; build output is no crate's.
         assert_eq!(cargo.owner("crates/core/src/lib.rs"), Some(1));
         assert_eq!(cargo.owner("src/main.rs"), Some(2));
         assert_eq!(cargo.owner("crates/util/target/debug/x"), None);
         assert_eq!(cargo.owner("target/debug/x"), None);
+    }
+
+    #[test]
+    fn a_shared_fixture_reaches_the_crates_that_name_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root.path())
+            .status()
+            .unwrap();
+        assert!(init.success());
+        let write = |path: &str, text: &str| {
+            let path = root.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "conformance/src/lib.rs",
+            r#"fn dir() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus/complete") }"#,
+        );
+        write(
+            "crates/fmt/tests/it.rs",
+            r#"let case = format!("../../corpus/fmt/{name}.json");"#,
+        );
+        // A bare word names nothing, and a longer path is another directory.
+        write(
+            "crates/lib/src/lib.rs",
+            r#"const A: &str = "corpus"; const B: &str = "../corpus/completed";"#,
+        );
+        let cargo = Cargo {
+            members: Ok(vec![
+                member("conformance", "conformance", &[]),
+                member("fmt", "crates/fmt", &[]),
+                member("lib", "crates/lib", &[]),
+                member("cli", "crates/cli", &[2]),
+            ]),
+            workspace: true,
+            root: root.path().to_path_buf(),
+            readers: Mutex::default(),
+        };
+        assert_eq!(cargo.reached("corpus/complete/01-positions.json"), vec![0]);
+        assert_eq!(cargo.reached("corpus/fmt/a.json"), vec![1]);
+        assert!(cargo.traces("corpus/fmt/a.json"));
+        assert!(!cargo.traces("corpus/README.md"));
+        assert_eq!(cargo.reached("crates/lib/data/x.json"), vec![2]);
+        let names: Vec<String> = names_of("crates/fmt", "corpus/fmt/a.json")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "corpus/fmt/a.json",
+                "../../corpus/fmt/a.json",
+                "corpus/fmt",
+                "../../corpus/fmt",
+                "../../corpus"
+            ]
+        );
     }
 }
