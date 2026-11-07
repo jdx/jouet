@@ -61,6 +61,9 @@ fires = [
   { command = "git --git-dir=../other/.git stash", git = { worktrees = 1 } },
   { command = "git --work-tree ../other stash drop", git = { worktrees = 1 } },
   { command = "GIT_DIR=../other/.git git stash", git = { worktrees = 1 } },
+  { command = "git -C../other stash", git = { worktrees = 1 } },
+  { command = "env GIT_DIR=../other/.git git stash", git = { worktrees = 1 } },
+  { command = "git -c core.x=1 stash", git = { worktrees = 1 } },
 ]
 quiet = [
   "git stash push -m wip-ab12",
