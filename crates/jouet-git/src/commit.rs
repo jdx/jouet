@@ -486,8 +486,15 @@ fn dedupe<T, K: PartialEq>(items: &mut Vec<T>, key: impl Fn(&T) -> K) {
 }
 
 /// The message with `trailers` appended by `git interpret-trailers`, which
-/// joins an existing trailer block and skips a trailer already present.
+/// joins an existing trailer block and skips a trailer already present. One
+/// the message already gives in its own words is skipped too: a co-author
+/// with the same address, or a second AI disclosure.
 fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String, Error> {
+    let given = given_trailers(message);
+    let trailers: Vec<&String> = trailers
+        .iter()
+        .filter(|t| !given.iter().any(|g| same_trailer(g, t)))
+        .collect();
     if trailers.is_empty() {
         return Ok(format!("{message}\n"));
     }
@@ -512,7 +519,7 @@ fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String
             }
         }
         args.push("--trailer".into());
-        args.push(t.clone());
+        args.push(t.to_string());
     }
     let mut child = git
         .command(&args)
@@ -539,6 +546,41 @@ fn with_trailers(git: &Git, message: &str, trailers: &[String]) -> Result<String
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The `Key: value` lines of the message's last paragraph.
+fn given_trailers(message: &str) -> Vec<&str> {
+    let last = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
+    let lines: Vec<&str> = last.lines().collect();
+    let trailer = |l: &&str| {
+        l.split_once(':')
+            .is_some_and(|(k, _)| !k.is_empty() && !k.contains(char::is_whitespace))
+    };
+    if lines.iter().all(trailer) {
+        lines
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether `given` already says what `trailer` would: the same key and
+/// address (`Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` gives
+/// `Co-Authored-By: Claude <noreply@anthropic.com>`), or an `AI-Assisted`
+/// disclosure, which a commit carries once.
+fn same_trailer(given: &str, trailer: &str) -> bool {
+    let split = |t: &str| {
+        t.split_once(':')
+            .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+    };
+    let (Some((key, value)), Some((wanted_key, wanted))) = (split(given), split(trailer)) else {
+        return false;
+    };
+    let address = |v: &str| {
+        let (_, rest) = v.rsplit_once('<')?;
+        Some(rest.strip_suffix('>')?.to_ascii_lowercase())
+    };
+    key == wanted_key
+        && (key == "ai-assisted" || address(&value).is_some_and(|a| address(&wanted) == Some(a)))
 }
 
 /// Runs `scanner` over a temporary index of HEAD plus `paths` as they are in

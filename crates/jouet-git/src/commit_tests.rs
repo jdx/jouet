@@ -229,8 +229,38 @@ fn trailers_are_appended_once() {
     assert_eq!(report.subject, "feat: change a");
     assert!(report.message.ends_with("version: 2.1.309"), "{report:?}");
 
-    req.trailers = vec!["not a trailer".into()];
+    // A trailer the message gives in its own words is not added again: a
+    // co-author with the same address, or a second AI disclosure. Another
+    // co-author, or the same name at another address, still is.
     repo.write("a.txt", "a3\n");
+    req.message = "fix: b\n\nCo-Authored-By: Claude Opus 5.5 <NoReply@anthropic.com>\n\
+                   AI-Assisted: Tool: Claude Code; model: anthropic/claude-opus-5-5"
+        .into();
+    req.trailers = vec![
+        "Co-Authored-By: Claude <noreply@anthropic.com>".into(),
+        "AI-Assisted: Tool: Claude Code; model: unavailable; version: 2.1.309".into(),
+        "Co-Authored-By: Claude <claude@example.com>".into(),
+    ];
+    run(&repo.git_handle(), &req).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]),
+        "fix: b\n\n\
+         Co-Authored-By: Claude Opus 5.5 <NoReply@anthropic.com>\n\
+         AI-Assisted: Tool: Claude Code; model: anthropic/claude-opus-5-5\n\
+         Co-Authored-By: Claude <claude@example.com>"
+    );
+    // Only a trailer block counts: a body line that looks like one does not.
+    repo.write("a.txt", "a4\n");
+    req.message = "fix: c\n\nAI-Assisted: is mentioned here.\nAnd this line is prose.".into();
+    req.trailers = vec!["AI-Assisted: Tool: X; model: y".into()];
+    run(&repo.git_handle(), &req).unwrap();
+    assert!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .ends_with("AI-Assisted: Tool: X; model: y")
+    );
+
+    req.trailers = vec!["not a trailer".into()];
+    repo.write("a.txt", "a5\n");
     let err = run(&repo.git_handle(), &req).unwrap_err();
     assert_eq!(err.exit, Exit::Usage);
 }
