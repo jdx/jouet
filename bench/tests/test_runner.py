@@ -2143,6 +2143,14 @@ class CostSeedTest(unittest.TestCase):
                 costs.seed(task, Path(sys.executable), root / "other", lambda _: None, root / "results")
             self.assertTrue((root / "other" / "cost-seed-smoke" / "work" / "a").exists())
 
+            checkout = root / "third" / "cost-seed-smoke" / "work"
+            task = dataclasses.replace(task, env={})
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup), \
+                    self.assertRaises(tasks.EnvironmentSetupError):
+                costs.seed(task, Path(sys.executable), root / "third", lambda _: None, checkout / "logs")
+            self.assertEqual((checkout / "logs" / "smoke.environment.log").read_text(), "setup details\n")
+
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
         import os
 
