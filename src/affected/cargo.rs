@@ -2,14 +2,17 @@
 //! belongs to the workspace member whose directory holds it, and the crates
 //! to test are those members and every member that depends on one of them,
 //! directly or through others, dev-dependencies included, as `cargo
-//! metadata` lists them. They run as `cargo test -p A -p B`.
+//! metadata` lists them. They run as `cargo test -p A -p B`. A file outside
+//! every member, such as a shared fixture directory, belongs to the members
+//! whose Rust sources name it or a directory holding it.
 
 use super::{Adapter, Base, Change, Ecosystem, Error, Project, Selection, Test};
 use jouet_output::exit::Exit;
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{LazyLock, Mutex, OnceLock};
 
 /// Whether `dir` has a Cargo manifest with a package or a workspace in it.
 pub(crate) fn detect(dir: &Path) -> bool {
@@ -60,6 +63,13 @@ pub(crate) struct Cargo {
     /// Whether the project's manifest declares a workspace, so the whole
     /// suite is `cargo test --workspace`.
     workspace: bool,
+    /// The repository root, where members' sources are read from.
+    root: PathBuf,
+    /// [`Cargo::readers`] by path, as each is looked up more than once.
+    readers: Mutex<HashMap<String, Vec<usize>>>,
+    /// Each member's Rust files, read once for every path
+    /// [`Cargo::readers`] looks up.
+    sources: OnceLock<Vec<(usize, Vec<Name>)>>,
 }
 
 impl Cargo {
@@ -69,9 +79,272 @@ impl Cargo {
         Cargo {
             members: metadata(project).and_then(|m| members(&m, &project.root)),
             workspace,
+            root: project.root.clone(),
+            readers: Mutex::default(),
+            sources: OnceLock::new(),
         }
     }
 
+    /// The members a changed file reaches: the one holding it or, for a file
+    /// outside every member, those that read it ([`Cargo::readers`]).
+    fn reached(&self, path: &str) -> Vec<usize> {
+        match self.owner(path) {
+            Some(i) => vec![i],
+            None => self.readers(path),
+        }
+    }
+
+    /// The members whose Rust sources name `path`, or a directory holding it,
+    /// in a string ([`named`]). Only names with a `/` count, as a bare word
+    /// such as `"corpus"` is too common to mean the file.
+    fn readers(&self, path: &str) -> Vec<usize> {
+        let Ok(members) = self.members.as_ref() else {
+            return Vec::new();
+        };
+        if members.iter().any(|m| inside(&m.dir, path)) {
+            return Vec::new();
+        }
+        let mut cache = self.readers.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = cache.get(path) {
+            return found.clone();
+        }
+        let found: Vec<usize> = self
+            .sources()
+            .iter()
+            .filter(|(_, names)| names.iter().any(|name| name.reaches(path)))
+            .map(|(i, _)| *i)
+            .collect::<BTreeSet<usize>>()
+            .into_iter()
+            .collect();
+        cache.insert(path.to_string(), found.clone());
+        found
+    }
+
+    /// What each Rust file that git tracks or would add names ([`named`]),
+    /// with the member that holds it, read on the first lookup.
+    fn sources(&self) -> &[(usize, Vec<Name>)] {
+        self.sources.get_or_init(|| {
+            let Ok(members) = self.members.as_ref() else {
+                return Vec::new();
+            };
+            self.rust_files()
+                .into_iter()
+                .filter_map(|file| {
+                    let i = self.owner(&file)?;
+                    let text = std::fs::read_to_string(self.root.join(&file)).ok()?;
+                    Some((i, named(&text, &members[i].dir, &file)))
+                })
+                .collect()
+        })
+    }
+
+    /// The repository's Rust files that git tracks or would add, from the
+    /// root.
+    fn rust_files(&self) -> Vec<String> {
+        super::changes::git(
+            &self.root,
+            &[
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.rs",
+            ],
+        )
+        .unwrap_or_default()
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
+    }
+}
+
+/// A path a Rust file names, from the root: a file or directory, or with a
+/// placeholder (`"cases/{name}.json"`) the start of the paths it can be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Name {
+    path: String,
+    placeholder: bool,
+}
+
+impl Name {
+    /// Whether `path` is this one, inside it, or one it can be.
+    fn reaches(&self, path: &str) -> bool {
+        if self.placeholder {
+            path.starts_with(&self.path)
+        } else {
+            path == self.path
+                || path
+                    .strip_prefix(&self.path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+    }
+}
+
+/// The paths the strings in `text`, a Rust file at `file` in a member at
+/// `dir`, name: each string with a `/`, read from the member's directory
+/// (`Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus")`, or after it
+/// in a `concat!` or a leading `{}` in `format!`), from the root, or, in `include_str!`, `include_bytes!`
+/// or `include!`, from the file's own directory. A string that leads out of
+/// the repository names nothing.
+fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
+    static INCLUDE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"include(?:_str|_bytes)?!\s*\(\s*$").expect("include macro")
+    });
+    let here = file.rsplit_once('/').map_or("", |(d, _)| d);
+    let mut names = Vec::new();
+    for (start, literal) in strings(text) {
+        if !literal.contains('/') {
+            continue;
+        }
+        // A leading placeholder is the directory the rest is read from, as
+        // in `format!("{}/../corpus", env!("CARGO_MANIFEST_DIR"))`.
+        let literal = match literal.strip_prefix('{').and_then(|l| l.split_once('}')) {
+            Some((_, rest)) if rest.starts_with('/') => rest,
+            _ => literal,
+        };
+        let literal = literal.trim_start_matches('/');
+        let (fixed, placeholder) = match literal.split_once('{') {
+            Some((fixed, _)) => (fixed, true),
+            None => (literal, false),
+        };
+        let bases: &[&str] = if INCLUDE.is_match(&text[..start]) {
+            &[here]
+        } else {
+            &[dir, ""]
+        };
+        for base in bases {
+            if let Some(path) = resolve(base, fixed, placeholder)
+                && !path.is_empty()
+            {
+                let name = Name { path, placeholder };
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+/// The string literals in Rust source `text`, each with where it starts
+/// (its `r`, `b` or quote) and what it holds: plain strings with their
+/// escapes skipped over, byte strings and raw strings (`r#"..."#`). Char
+/// literals and comments are passed over, so a `'"'` or a quote in a
+/// comment does not open a string. A plain string with an escape holds a
+/// path only by accident and is left out.
+fn strings(text: &str) -> Vec<(usize, &str)> {
+    let bytes = text.as_bytes();
+    let ident = |i: usize| i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                // Block comments nest.
+                let mut depth = 1;
+                i += 2;
+                while i < bytes.len() && depth > 0 {
+                    match (bytes[i], bytes.get(i + 1)) {
+                        (b'/', Some(b'*')) => (depth, i) = (depth + 1, i + 2),
+                        (b'*', Some(b'/')) => (depth, i) = (depth - 1, i + 2),
+                        _ => i += 1,
+                    }
+                }
+            }
+            b'\'' => {
+                // A char literal ('x', '\n', '\u{..}'), or else a lifetime.
+                let close = if bytes.get(i + 1) == Some(&b'\\') {
+                    text[i + 2..].find('\'').map(|n| i + 2 + n)
+                } else {
+                    text[i + 1..]
+                        .char_indices()
+                        .nth(1)
+                        .filter(|&(_, c)| c == '\'')
+                        .map(|(n, _)| i + 1 + n)
+                };
+                i = close.map_or(i + 1, |c| c + 1);
+            }
+            b'r' | b'b' if !ident(i) => {
+                let mut j = i + 1;
+                if bytes[i] == b'b' && bytes.get(j) == Some(&b'r') {
+                    j += 1;
+                }
+                let raw = j > i + 1 || bytes[i] == b'r';
+                let hashes = bytes[j..].iter().take_while(|&&b| b == b'#').count();
+                if raw && bytes.get(j + hashes) == Some(&b'"') {
+                    let open = j + hashes + 1;
+                    let close = format!("\"{}", "#".repeat(hashes));
+                    let end = text[open..].find(&close).map_or(bytes.len(), |n| open + n);
+                    found.push((i, &text[open..end]));
+                    i = end + close.len();
+                } else {
+                    // A byte string's quote is read next.
+                    i += 1;
+                }
+            }
+            b'"' => {
+                let start = if i > 0 && bytes[i - 1] == b'b' && !ident(i - 1) {
+                    i - 1
+                } else {
+                    i
+                };
+                let mut j = i + 1;
+                let mut escaped = false;
+                while j < bytes.len() && bytes[j] != b'"' {
+                    if bytes[j] == b'\\' {
+                        escaped = true;
+                        j += 1;
+                    }
+                    j += 1;
+                }
+                let end = j.min(bytes.len());
+                if !escaped {
+                    found.push((start, &text[i + 1..end]));
+                }
+                i = end + 1;
+            }
+            _ => i += 1,
+        }
+    }
+    found
+}
+
+/// `rel` from `base`, both from the root, with `.` and `..` taken out, or
+/// `None` when it leads out of the root. With a placeholder after `rel`, its
+/// last part is kept as the start of a name.
+fn resolve(base: &str, rel: &str, placeholder: bool) -> Option<String> {
+    let mut parts: Vec<&str> = base.split('/').filter(|c| !c.is_empty()).collect();
+    let (dirs, last) = if placeholder {
+        rel.rsplit_once('/').unwrap_or(("", rel))
+    } else {
+        (rel, "")
+    };
+    for part in dirs.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            part => parts.push(part),
+        }
+    }
+    let mut path = parts.join("/");
+    if placeholder {
+        if !path.is_empty() {
+            path.push('/');
+        }
+        path.push_str(last);
+    }
+    Some(path)
+}
+
+impl Cargo {
     /// The member whose directory holds `path`, a path from the root: the
     /// deepest one, as a crate can sit inside another's directory.
     fn owner(&self, path: &str) -> Option<usize> {
@@ -233,7 +506,7 @@ impl Adapter for Cargo {
     }
 
     fn traces(&self, path: &str) -> bool {
-        self.owner(path).is_some()
+        !self.reached(path).is_empty()
     }
 
     fn traces_deletions(&self) -> bool {
@@ -269,7 +542,7 @@ impl Adapter for Cargo {
             .members
             .as_ref()
             .map_err(|e| Error::new(Exit::Precondition, e.clone()))?;
-        let changed: BTreeSet<usize> = sources.iter().filter_map(|c| self.owner(&c.path)).collect();
+        let changed: BTreeSet<usize> = sources.iter().flat_map(|c| self.reached(&c.path)).collect();
         let chains = dependents(members, &changed);
         let mut picked: Vec<(&Member, Vec<String>)> = chains
             .iter()
@@ -404,11 +677,144 @@ mod tests {
         let cargo = Cargo {
             members: Ok(members.to_vec()),
             workspace: true,
+            root: PathBuf::new(),
+            readers: Mutex::default(),
+            sources: OnceLock::new(),
         };
         // The deepest directory owns a file; build output is no crate's.
         assert_eq!(cargo.owner("crates/core/src/lib.rs"), Some(1));
         assert_eq!(cargo.owner("src/main.rs"), Some(2));
         assert_eq!(cargo.owner("crates/util/target/debug/x"), None);
         assert_eq!(cargo.owner("target/debug/x"), None);
+    }
+
+    #[test]
+    fn a_shared_fixture_reaches_the_crates_that_name_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root.path())
+            .status()
+            .unwrap();
+        assert!(init.success());
+        let write = |path: &str, text: &str| {
+            let path = root.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "conformance/src/lib.rs",
+            r#"fn dir() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus/complete") }"#,
+        );
+        write(
+            "crates/fmt/tests/it.rs",
+            r#"let case = format!("../../corpus/fmt/{name}.json"); let y = dir.join("../shared/y.json");"#,
+        );
+        // A bare word names nothing, a longer path is another directory, and
+        // a path from the crate's directory ends where it leads.
+        write(
+            "crates/lib/src/lib.rs",
+            r#"const A: &str = "corpus"; const B: &str = "../corpus/completed"; const C: &str = "../../corpus/x.json";"#,
+        );
+        write(
+            "crates/cli/src/main.rs",
+            r#"const X: &str = include_str!("../../shared/x.json");"#,
+        );
+        let cargo = Cargo {
+            members: Ok(vec![
+                member("conformance", "conformance", &[]),
+                member("fmt", "crates/fmt", &[]),
+                member("lib", "crates/lib", &[]),
+                member("cli", "crates/cli", &[2]),
+            ]),
+            workspace: true,
+            root: root.path().to_path_buf(),
+            readers: Mutex::default(),
+            sources: OnceLock::new(),
+        };
+        assert_eq!(cargo.reached("corpus/complete/01-positions.json"), vec![0]);
+        assert_eq!(cargo.reached("corpus/fmt/a.json"), vec![1]);
+        assert!(cargo.traces("corpus/fmt/a.json"));
+        assert!(!cargo.traces("corpus/README.md"));
+        assert_eq!(cargo.reached("crates/lib/data/x.json"), vec![2]);
+        // A sibling directory, named through their parent; `include_str!`
+        // names it from the source file, which ends in the crate's name.
+        assert_eq!(cargo.reached("crates/shared/x.json"), vec![3]);
+        assert_eq!(cargo.reached("crates/shared/y.json"), vec![1]);
+        // `"../../corpus/x.json"` from `crates/lib` is `corpus/x.json`.
+        assert_eq!(cargo.reached("corpus/x.json"), vec![2]);
+        assert!(!cargo.traces("crates/corpus/x.json"));
+    }
+
+    #[test]
+    fn strings_keep_track_of_their_quotes() {
+        let text = r####"let label = "\n"; let p = "../corpus/x.json";
+let q = '"'; // a "quote" in a comment
+let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/d";
+/* "e/f" /* nested */ " */ let g = "g/h";"####;
+        let found: Vec<&str> = strings(text).into_iter().map(|(_, s)| s).collect();
+        assert_eq!(
+            found,
+            [
+                "../corpus/x.json",
+                "../../../corpus/y.json",
+                "a/b",
+                "c/d",
+                "g/h"
+            ]
+        );
+        let names = named(text, "crates/a", "crates/a/src/lib.rs");
+        let name = |path: &str| Name {
+            path: path.into(),
+            placeholder: false,
+        };
+        assert!(names.contains(&name("crates/corpus/x.json")), "{names:?}");
+        assert!(names.contains(&name("corpus/y.json")), "{names:?}");
+    }
+
+    #[test]
+    fn a_name_resolves_from_its_directory() {
+        assert_eq!(
+            resolve("crates/a", "../corpus/x.json", false).as_deref(),
+            Some("crates/corpus/x.json")
+        );
+        assert_eq!(
+            resolve("crates/a", "../../corpus/./x", false).as_deref(),
+            Some("corpus/x")
+        );
+        assert_eq!(resolve("a", "../../x", false), None);
+        assert_eq!(
+            resolve("a", "../cases/case_", true).as_deref(),
+            Some("cases/case_")
+        );
+        assert_eq!(
+            named(
+                r#"concat!(env!("CARGO_MANIFEST_DIR"), "/../corpus")"#,
+                "cli",
+                "cli/src/main.rs"
+            ),
+            [Name {
+                path: "corpus".into(),
+                placeholder: false
+            }]
+        );
+        // A leading placeholder is the directory; a later one ends the name.
+        assert_eq!(
+            named(
+                r#"format!("{}/../corpus/complete", env!("CARGO_MANIFEST_DIR")); format!("{dir}/../corpus/{name}.json")"#,
+                "cli",
+                "cli/src/main.rs"
+            ),
+            [
+                Name {
+                    path: "corpus/complete".into(),
+                    placeholder: false
+                },
+                Name {
+                    path: "corpus/".into(),
+                    placeholder: true
+                }
+            ]
+        );
     }
 }
