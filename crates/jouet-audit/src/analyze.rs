@@ -600,10 +600,8 @@ fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
     let (fix, why, saving) = match category {
         Category::CiPolling => (
             "jouet wait ci",
-            "one call blocks until the checks settle and shows why any failed, instead of a model turn per check (built-in rule `sleep-poll`)",
-            repeat(
-                "requests that polled CI right after a request that did; a wait would have made each run of polls one call",
-            ),
+            "can wait until checks settle and show why any failed (built-in rule `sleep-poll`)",
+            None,
         ),
         Category::ProcessPolling => (
             "a longer tool wait",
@@ -894,14 +892,14 @@ mod tests {
     }
 
     #[test]
-    fn counts_runs_of_polls_as_the_saving() {
+    fn ci_polling_is_observed_without_claiming_savings() {
         let mut a = Analyzer::default();
         a.add(
             "codex",
             &transcript(&[
                 (100, &["gh pr checks 1"]),
-                (110, &["gh pr checks 1"]),
-                (120, &["gh pr checks 1"]),
+                (110, &["gh pr checks 2"]),
+                (120, &["gh pr checks 2 --watch"]),
                 (130, &["git push"]),
                 (140, &["gh pr checks 1"]),
             ]),
@@ -912,9 +910,10 @@ mod tests {
         assert_eq!(r.categories[0].top_shapes[0].shape, "gh pr checks <n>");
         let ci = &r.suggestions[0];
         assert_eq!(ci.fix, "jouet wait ci");
-        // The second and third polls repeat the one before them.
-        assert_eq!(ci.saving.as_ref().map(|s| s.input_tokens), Some(230));
-        // Two runs of polls: three in a row, then one after the push.
+        // Adjacent calls can check different runs or block; their category
+        // alone is not enough evidence that a request could be avoided.
+        assert!(ci.saving.is_none());
+        // These are runs of category observations, not linked waits.
         assert_eq!(r.categories[0].runs, 2);
         assert_eq!(r.categories[0].requests, 4);
     }

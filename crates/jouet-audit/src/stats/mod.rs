@@ -803,6 +803,9 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                 basis: String::new(),
                 refused: Some(reason),
             };
+            if kind == Kind::CiWait {
+                return refuse("CI polling history does not establish linked, avoidable checks".to_string());
+            }
             let Some(b) = baselines.iter().find(|b| b.harness == harness) else {
                 return refuse(format!("no {harness} history from before setup"));
             };

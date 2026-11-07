@@ -42,7 +42,7 @@ stamp_revisions() {
 	assert_line --regexp '^  python-edit +1 +0 +1 +0 +1 +0 +1 +0$'
 	assert_line '  checks recorded: test 1 (1 failed)'
 	assert_line "  failing CI logs returned as the failing step's excerpt: 1"
-	assert_line '  - jouet wait ci/run/pr: 1 run, not estimated: only 1 CI wait before setup, and an estimate needs 20'
+	assert_line '  - jouet wait ci/run/pr: 1 run, not estimated: CI polling history does not establish linked, avoidable checks'
 	refute_output --partial 'estimated total'
 	[[ -f "$XDG_STATE_HOME/jouet/stats/baselines.json" ]]
 }
@@ -84,13 +84,14 @@ stamp_revisions() {
 	assert_line '  - calls a rule denied: 2, not estimated: only 8 requests with token counts before setup, and a price needs 20'
 	assert_line --regexp '^  - requests carrying the session-start primer: 0, about 0 input tokens$'
 	assert_line --partial '  - rule warnings: 1, not estimated: '
-	assert_line 'estimated savings 0, costs 0: no net, since a cost above could not be priced.'
+	assert_line 'estimated savings 0, costs 0: no net, since a saving or cost above could not be priced.'
 
 	run --separate-stderr jouet stats --json --display plain
 	assert_success
 	[[ "$(jq -r '[.costs[] | select(.harness == "claude") | .kind] | join(",")' <<<"$output")" == stop_blocks,denials,primer ]]
 	[[ "$(jq -r '.after_setup | map(.harness) | join(",")' <<<"$output")" == claude,codex ]]
 	[[ "$(jq 'has("net_input_tokens")' <<<"$output")" == false ]]
+	[[ "$(jq -c '[.estimates[] | select(.kind == "ci_wait") | has("input_tokens")]' <<<"$output")" == '[false]' ]]
 }
 
 @test "a jouet command in a session records its own exit code, and the stats use it" {
@@ -192,7 +193,7 @@ stamp_revisions() {
 	assert_success
 	assert_line --index 0 "jouet stats: no ledger at $XDG_STATE_HOME/jouet/ledger, so nothing is measured yet. \`jouet setup\` starts one."
 	assert_line 'what one jouet run would save, by your history:'
-	assert_line '  - jouet wait ci/run/pr: not estimated: only 1 CI wait before setup, and an estimate needs 20'
+	assert_line '  - jouet wait ci/run/pr: not estimated: CI polling history does not establish linked, avoidable checks'
 
 	run --separate-stderr jouet stats --summary
 	assert_success

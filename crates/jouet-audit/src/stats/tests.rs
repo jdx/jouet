@@ -192,11 +192,11 @@ fn estimates_against_the_harness_baseline_and_shows_the_basis() {
     };
     let ci = get("claude", Kind::CiWait);
     assert_eq!(ci.runs, 1);
-    assert_eq!(ci.requests_avoided, Some(8.0));
-    assert_eq!(ci.input_tokens, Some(800_000));
+    assert_eq!(ci.requests_avoided, None);
+    assert_eq!(ci.input_tokens, None);
     assert_eq!(
-        ci.basis,
-        "25 CI waits before setup, averaging 9.0 requests each at 100k tokens per request"
+        ci.refused.as_deref(),
+        Some("CI polling history does not establish linked, avoidable checks")
     );
     let status = get("claude", Kind::PrStatus);
     assert_eq!(status.input_tokens, None);
@@ -548,9 +548,15 @@ fn costs_are_priced_like_savings_and_the_net_may_be_negative() {
     );
     let baselines = [priced(
         "claude",
-        vec![kind(Kind::CiWait, 25, 225, 22_500_000)],
+        vec![kind(Kind::PrStatus, 25, 225, 22_500_000)],
     )];
-    let saved = estimate(&m, &baselines);
+    let mut saved = estimate(&m, &baselines);
+    assert_eq!(
+        net(&saved, &[]),
+        None,
+        "unpriced CI waits make the net unknown"
+    );
+    saved.retain(|e| e.kind != Kind::CiWait);
     let after = |requests, primer_tokens| {
         [AfterSetup {
             harness: "claude".into(),
@@ -579,7 +585,7 @@ fn costs_are_priced_like_savings_and_the_net_may_be_negative() {
         c[2].basis,
         "50 requests in the history after setup, subagents' included, each reading the primer's ~500 tokens"
     );
-    // The CI wait saved 800k; the costs come to 325k.
+    // The PR status estimate saves 800k; the costs come to 325k.
     assert_eq!(net(&saved, &c), Some(475_000));
     // A long history after setup: the primer alone outweighs the saving.
     let c = costs(&m, &baselines, &after(10_000, 500));

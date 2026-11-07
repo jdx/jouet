@@ -434,7 +434,7 @@ fn text(doc: &Doc<'_>) -> String {
             ),
             None => writeln!(
                 s,
-                "\n{totals}: no net, since a cost above could not be priced."
+                "\n{totals}: no net, since a saving or cost above could not be priced."
             ),
         };
         let mut outside: Vec<&str> = doc

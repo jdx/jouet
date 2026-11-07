@@ -31,14 +31,14 @@ A request re-reads the whole context, so a request avoided saves its whole input
 
 | jouet command | Priced by |
 |---|---|
-| `jouet wait ci`, `wait run`, `wait pr` | CI waits before setup: the requests after the first in each run of CI polls |
+| `jouet wait ci`, `wait run`, `wait pr` | not estimated: CI polling history does not establish linked, avoidable checks |
 | `jouet wait file`, `log`, `port`, `http`, `pid`, `cmd` | linked runs of short, quiet checks of the same still-running process |
 | `jouet pr status` | runs of PR status reads |
 | `jouet pr threads` | runs of review-thread calls |
 | `jouet edit` | the share of edits that failed and were redone, less `jouet edit`'s own failure rate |
 | `jouet test` | the output a test, lint or build call gave the agent before setup, less what `jouet test` gave |
 
-Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis, such as "6,450 CI waits before setup, averaging 1.7 requests each at 305k tokens per request". A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
+Each harness is priced by its own history, which ends at that harness's first ledger entry. Every estimate shows its basis. A kind of work with fewer than 20 runs before setup is not estimated, and the report says so instead of guessing. Time saved is not estimated yet.
 
 `jouet edit` is credited only for failing less often than edits did before setup: its runs times the difference in failure rate, at that history's tokens per request, assuming each failed edit before setup was redone once. When it failed as often or more, it is credited nothing, and the extra failures are a cost. Its own failure rate comes from the runs that recorded their own exit code (see [own exit codes](#own-exit-codes)); without any, it is not estimated.
 
@@ -66,7 +66,7 @@ Each cost is priced the way the savings are, at the harness's average request be
 
 One request per event is an assumption, not a measured minimum: an agent may recover from several failures in one request, or spend several requests on one failure. The ledger alone does not show how many requests an event added. A failed run whose exit code is a check's answer is not a cost, since it fails without jouet too: exit 1 (or 124, or `pr next`'s 10 and 20) from `jouet test`, `wait`, `ci`, `secrets`, `http`, `pr status` or `pr next`. A `jouet search` exit 1 means no matches and is not priced as a failure; search usage, missing-path and other errors still are. Older hook records that did not retain the search subcommand cannot be identified as searches. A search chained with another jouet command in a record without command-specific exits also remains ambiguous and is counted as a failed call. When a call ran a check and another jouet command, as in `jouet edit replace ... && jouet test`, and exited with the check's answer, `calls failed` counts it as the check's. `jouet edit`'s failures are counted against the old rate instead, in their own line. The primer's requests include subagents', which may not read it, so that line can count high; its notes, such as the slow checks, are left out of its size.
 
-The net is the savings less the costs, and may be negative. When a cost cannot be priced, as when the history after setup was not read or, with `--session`, none of that session's transcripts was found, there is no net rather than one that leaves the cost out. A harness with no history before setup at all, such as Cursor, can have neither its savings nor its costs priced: its costs are listed, left out of the net, and named under it. A saving that cannot be estimated counts as nothing.
+The net is the savings less the costs, and may be negative. When a cost cannot be priced, as when the history after setup was not read or, with `--session`, none of that session's transcripts was found, there is no net rather than one that leaves the cost out. The net is also unavailable when CI waits were used but their savings cannot be estimated. A harness with no history before setup at all, such as Cursor, can have neither its savings nor its costs priced: its costs are listed, left out of the net, and named under it. Other savings that cannot be estimated count as nothing.
 
 The history before setup does not change, so `jouet stats` saves each harness's baseline and reuses it while that harness's first ledger entry and the jouet version stay the same, instead of reading the transcripts again. Reading them takes seconds on a large history. A harness with no ledger entries yet is always read, and `--rescan` reads them again.
 
@@ -100,7 +100,7 @@ measured, from the ledger:
 
 estimated savings: what these runs would have cost at your rates before setup (assumed, not measured):
   Claude Code (1 session before 2026-10-31T00:00:00Z):
-  - jouet wait ci/run/pr: 1 run, not estimated: only 1 CI wait before setup, and an estimate needs 20
+  - jouet wait ci/run/pr: 1 run, not estimated: CI polling history does not establish linked, avoidable checks
   - jouet pr status: 1 run, not estimated: only 1 PR status check before setup, and an estimate needs 20
   Codex (3 sessions before 2026-10-31T00:06:40Z):
   - jouet pr threads: 1 run, not estimated: only 0 review-thread rounds before setup, and an estimate needs 20
@@ -117,7 +117,7 @@ estimated costs, priced the same way:
   - requests carrying the session-start primer: 0, about 0 input tokens
       basis: 0 requests in the history after setup, subagents' included, each reading the primer's ~505 tokens
 
-estimated savings 0, costs 0: no net, since a cost above could not be priced.
+estimated savings 0, costs 0: no net, since a saving or cost above could not be priced.
 
 Measured figures come from the ledger; estimates price them by your own history and are not measurements.
 ```
