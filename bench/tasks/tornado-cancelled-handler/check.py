@@ -39,9 +39,10 @@ def run_tests(workdir: Path, module: str) -> None:
         elif int(summary.group(1)) == 0:
             expect(False, f"{module} ran no tests")
         else:
-            skipped = re.search(r"skipped=(\d+)", proc.stdout + proc.stderr)
-            if skipped and int(skipped.group(1)) >= int(summary.group(1)):
-                UNVERIFIED.append(f"{module} skipped all its tests")
+            for kind in ("skipped", "expected failures"):
+                incomplete = re.search(rf"\b{kind}=(\d+)", proc.stdout + proc.stderr)
+                if incomplete and int(incomplete.group(1)):
+                    UNVERIFIED.append(f"{module} reported {kind}={incomplete.group(1)}")
 
 
 def check_committed(hidden: bool, tests: list[str]) -> None:
