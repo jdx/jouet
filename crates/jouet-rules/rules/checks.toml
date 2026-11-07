@@ -162,6 +162,8 @@ quiet = [
   { command = "env -C web npx jest tests/example.test.js", exit_code = 0 },
   { command = "jouet test --cmd -- env -C web npx jest tests/example.test.js", exit_code = 0 },
   { command = "jouet test --cmd -- mise x -C web -- npx jest tests/example.test.js", exit_code = 0 },
+  { command = "jouet test --cmd -- env -C web sh -c 'npx jest tests/example.test.js'", exit_code = 0 },
+  { command = "jouet test --cmd -- mise x -C web -- sh -c 'npx jest tests/example.test.js'", exit_code = 0 },
   { command = "npx jest --updateSnapshot=true", exit_code = 0 },
   { command = "npx jest --update-snapshot", exit_code = 0 },
   { command = "npx jest -u=true", exit_code = 0 },

@@ -625,6 +625,16 @@ local function top_level(script: { JouetCommand }): { JouetCommand }
 	return top
 end
 
+local function wrapper_changes_dir(given: { string }, argv: { string }): boolean
+	for i = 1, #given - #argv do
+		local word = given[i]
+		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+			return true
+		end
+	end
+	return false
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil, cwd: string?, harness: string?): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -754,6 +764,7 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 			-- ran go test, and its pass clears that test's failure.
 			local shell = if argv[1] then jouet.basename(argv[1]) else nil
 			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
+				if wrapper_changes_dir(given, argv) then return nil, unknown end
 				local top = top_level(jouet.parse(argv[3], command.status))
 				if #top == 1 then
 					-- Its own status is unknown when the script says nothing
@@ -855,12 +866,7 @@ local function script_commands(command: JouetCommand, dir: string?, cwd: string?
 	end
 	-- A wrapper that changes directory (`env -C`, `mise x -C`) ran the
 	-- script in a work tree the rule cannot name.
-	for i = 1, #given - #argv do
-		local word = given[i]
-		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
-			return nil
-		end
-	end
+	if wrapper_changes_dir(given, argv) then return nil end
 	-- A command in `$(...)` runs in a subshell: its `cd` moves nothing, and
 	-- it is not one of the script's checks.
 	local script = top_level(jouet.parse(argv[3], command.status))
