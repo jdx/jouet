@@ -12,7 +12,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock};
 
 /// Whether `dir` has a Cargo manifest with a package or a workspace in it.
 pub(crate) fn detect(dir: &Path) -> bool {
@@ -69,7 +69,7 @@ pub(crate) struct Cargo {
     readers: Mutex<HashMap<String, Vec<usize>>>,
     /// Each member's Rust files, read once for every path
     /// [`Cargo::readers`] looks up.
-    sources: OnceLock<Vec<(usize, String)>>,
+    sources: OnceLock<Vec<(usize, Vec<Name>)>>,
 }
 
 impl Cargo {
@@ -95,9 +95,8 @@ impl Cargo {
     }
 
     /// The members whose Rust sources name `path`, or a directory holding it,
-    /// in a string: from the member's directory (`"../corpus/complete"`) or
-    /// from the root (`"corpus/complete"`). Only names with a `/` count, as a
-    /// bare word such as `"corpus"` is too common to mean the file.
+    /// in a string ([`named`]). Only names with a `/` count, as a bare word
+    /// such as `"corpus"` is too common to mean the file.
     fn readers(&self, path: &str) -> Vec<usize> {
         let Ok(members) = self.members.as_ref() else {
             return Vec::new();
@@ -109,12 +108,10 @@ impl Cargo {
         if let Some(found) = cache.get(path) {
             return found.clone();
         }
-        let needles: Vec<Vec<(String, String)>> =
-            members.iter().map(|m| names_of(&m.dir, path)).collect();
         let found: Vec<usize> = self
             .sources()
             .iter()
-            .filter(|(i, text)| names_any(text, &needles[*i]))
+            .filter(|(_, names)| names.iter().any(|name| name.reaches(path)))
             .map(|(i, _)| *i)
             .collect::<BTreeSet<usize>>()
             .into_iter()
@@ -123,16 +120,19 @@ impl Cargo {
         found
     }
 
-    /// The text of each Rust file that git tracks or would add, with the
-    /// member that holds it, read on the first lookup.
-    fn sources(&self) -> &[(usize, String)] {
+    /// What each Rust file that git tracks or would add names ([`named`]),
+    /// with the member that holds it, read on the first lookup.
+    fn sources(&self) -> &[(usize, Vec<Name>)] {
         self.sources.get_or_init(|| {
+            let Ok(members) = self.members.as_ref() else {
+                return Vec::new();
+            };
             self.rust_files()
                 .into_iter()
                 .filter_map(|file| {
                     let i = self.owner(&file)?;
                     let text = std::fs::read_to_string(self.root.join(&file)).ok()?;
-                    Some((i, text))
+                    Some((i, named(&text, &members[i].dir, &file)))
                 })
                 .collect()
         })
@@ -161,62 +161,98 @@ impl Cargo {
     }
 }
 
-/// How a member in `dir` can name `path` or a directory holding it: each
-/// such path from the root, from `dir` up through their common directory
-/// (`"../corpus/x.json"` from `crates/a` for `crates/corpus/x.json`) and
-/// from `dir` up to the root, keeping those with a `/`, with the rest of
-/// `path` after it (empty for `path` itself).
-fn names_of(dir: &str, path: &str) -> Vec<(String, String)> {
-    let up = if dir.is_empty() {
-        String::new()
-    } else {
-        "../".repeat(dir.split('/').count())
-    };
+/// A path a Rust file names, from the root: a file or directory, or with a
+/// placeholder (`"cases/{name}.json"`) the start of the paths it can be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Name {
+    path: String,
+    placeholder: bool,
+}
+
+impl Name {
+    /// Whether `path` is this one, inside it, or one it can be.
+    fn reaches(&self, path: &str) -> bool {
+        if self.placeholder {
+            path.starts_with(&self.path)
+        } else {
+            path == self.path
+                || path
+                    .strip_prefix(&self.path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+    }
+}
+
+/// The paths the strings in `text`, a Rust file at `file` in a member at
+/// `dir`, name: each string with a `/`, read from the member's directory
+/// (`Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus")`, or after it
+/// in a `concat!`), from the root, or, in `include_str!`, `include_bytes!`
+/// or `include!`, from the file's own directory. A string that leads out of
+/// the repository names nothing.
+fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
+    static STRING: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#""([^"\\\n]*)""#).expect("string literal"));
+    static INCLUDE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"include(?:_str|_bytes)?!\s*\(\s*$").expect("include macro")
+    });
+    let here = file.rsplit_once('/').map_or("", |(d, _)| d);
     let mut names = Vec::new();
-    let mut at = Some(path);
-    while let Some(p) = at {
-        let rest = &path[p.len()..];
-        for name in [p.to_string(), relative(dir, p), format!("{up}{p}")] {
-            if name.contains('/') && !names.iter().any(|(n, _)| *n == name) {
-                names.push((name, rest.to_string()));
+    for found in STRING.captures_iter(text) {
+        let (whole, literal) = (found.get(0).expect("match"), &found[1]);
+        if !literal.contains('/') {
+            continue;
+        }
+        let literal = literal.trim_start_matches('/');
+        let (fixed, placeholder) = match literal.split_once('{') {
+            Some((fixed, _)) => (fixed, true),
+            None => (literal, false),
+        };
+        let bases: &[&str] = if INCLUDE.is_match(&text[..whole.start()]) {
+            &[here]
+        } else {
+            &[dir, ""]
+        };
+        for base in bases {
+            if let Some(path) = resolve(base, fixed, placeholder)
+                && !path.is_empty()
+            {
+                let name = Name { path, placeholder };
+                if !names.contains(&name) {
+                    names.push(name);
+                }
             }
         }
-        at = p.rsplit_once('/').map(|(parent, _)| parent);
     }
     names
 }
 
-/// `to` from `dir`, both from the root: up to the directory they share,
-/// then down.
-fn relative(dir: &str, to: &str) -> String {
-    let from: Vec<&str> = dir.split('/').filter(|c| !c.is_empty()).collect();
-    let to: Vec<&str> = to.split('/').collect();
-    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
-    let mut parts = vec![".."; from.len() - shared];
-    parts.extend(&to[shared..]);
-    parts.join("/")
-}
-
-/// Whether `text` holds one of `names` in a string, opened by a quote or a
-/// `/`, where what follows it up to the closing quote leads on to the file:
-/// nothing, or the rest of its path up to any placeholder (`/{name}.json`). A
-/// directory's sibling (`"../corpus/complete"` for `corpus/fmt/a.json`)
-/// does not count.
-fn names_any(text: &str, names: &[(String, String)]) -> bool {
-    names.iter().any(|(name, rest)| {
-        text.match_indices(name.as_str()).any(|(at, _)| {
-            let before = text[..at].chars().next_back();
-            let tail = &text[at + name.len()..];
-            let Some(end) = tail.find(['"', '\n']) else {
-                return false;
-            };
-            let tail = &tail[..end];
-            matches!(before, Some('"' | '/'))
-                && (tail.is_empty()
-                    || tail.starts_with('/')
-                        && rest.starts_with(tail.split('{').next().unwrap_or(tail)))
-        })
-    })
+/// `rel` from `base`, both from the root, with `.` and `..` taken out, or
+/// `None` when it leads out of the root. With a placeholder after `rel`, its
+/// last part is kept as the start of a name.
+fn resolve(base: &str, rel: &str, placeholder: bool) -> Option<String> {
+    let mut parts: Vec<&str> = base.split('/').filter(|c| !c.is_empty()).collect();
+    let (dirs, last) = if placeholder {
+        rel.rsplit_once('/').unwrap_or(("", rel))
+    } else {
+        (rel, "")
+    };
+    for part in dirs.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            part => parts.push(part),
+        }
+    }
+    let mut path = parts.join("/");
+    if placeholder {
+        if !path.is_empty() {
+            path.push('/');
+        }
+        path.push_str(last);
+    }
+    Some(path)
 }
 
 impl Cargo {
@@ -583,12 +619,13 @@ mod tests {
         );
         write(
             "crates/fmt/tests/it.rs",
-            r#"let case = format!("../../corpus/fmt/{name}.json");"#,
+            r#"let case = format!("../../corpus/fmt/{name}.json"); let y = dir.join("../shared/y.json");"#,
         );
-        // A bare word names nothing, and a longer path is another directory.
+        // A bare word names nothing, a longer path is another directory, and
+        // a path from the crate's directory ends where it leads.
         write(
             "crates/lib/src/lib.rs",
-            r#"const A: &str = "corpus"; const B: &str = "../corpus/completed";"#,
+            r#"const A: &str = "corpus"; const B: &str = "../corpus/completed"; const C: &str = "../../corpus/x.json";"#,
         );
         write(
             "crates/cli/src/main.rs",
@@ -614,19 +651,37 @@ mod tests {
         // A sibling directory, named through their parent; `include_str!`
         // names it from the source file, which ends in the crate's name.
         assert_eq!(cargo.reached("crates/shared/x.json"), vec![3]);
-        let names: Vec<String> = names_of("crates/fmt", "corpus/fmt/a.json")
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect();
+        assert_eq!(cargo.reached("crates/shared/y.json"), vec![1]);
+        // `"../../corpus/x.json"` from `crates/lib` is `corpus/x.json`.
+        assert_eq!(cargo.reached("corpus/x.json"), vec![2]);
+        assert!(!cargo.traces("crates/corpus/x.json"));
+    }
+
+    #[test]
+    fn a_name_resolves_from_its_directory() {
         assert_eq!(
-            names,
-            [
-                "corpus/fmt/a.json",
-                "../../corpus/fmt/a.json",
-                "corpus/fmt",
-                "../../corpus/fmt",
-                "../../corpus"
-            ]
+            resolve("crates/a", "../corpus/x.json", false).as_deref(),
+            Some("crates/corpus/x.json")
+        );
+        assert_eq!(
+            resolve("crates/a", "../../corpus/./x", false).as_deref(),
+            Some("corpus/x")
+        );
+        assert_eq!(resolve("a", "../../x", false), None);
+        assert_eq!(
+            resolve("a", "../cases/case_", true).as_deref(),
+            Some("cases/case_")
+        );
+        assert_eq!(
+            named(
+                r#"concat!(env!("CARGO_MANIFEST_DIR"), "/../corpus")"#,
+                "cli",
+                "cli/src/main.rs"
+            ),
+            [Name {
+                path: "corpus".into(),
+                placeholder: false
+            }]
         );
     }
 }
