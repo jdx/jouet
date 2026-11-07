@@ -26,13 +26,21 @@ class MemosCheckerTest(unittest.TestCase):
 import os, pathlib, sys
 args = sys.argv[1:]
 if args[:2] == ['rev-parse', 'HEAD']:
-    print('new-commit')
+    print('changed-head' if (pathlib.Path.cwd() / '.changed-head').exists() else 'new-commit')
 elif args[:2] == ['diff', '--name-only']:
-    print('web/tests/new.test.tsx')
-elif args[:2] == ['diff', '--quiet'] and os.environ.get('CHANGED_DEPS'):
+    sys.stdout.write('web/tests/new.test.tsx\\0')
+    if os.environ.get('OTHER_TEST'):
+        sys.stdout.write('web/src/other.test.tsx\\0')
+elif args[:2] == ['diff', '--quiet'] and (os.environ.get('CHANGED_DEPS')
+        or (os.environ.get('CHANGED_CONFIG') and 'web/vitest.config.mts' in args)):
     sys.exit(1)
 elif args and args[0] == 'clone':
-    (pathlib.Path(args[-1]) / 'web' / 'tests').mkdir(parents=True)
+    checkout = pathlib.Path(args[-1])
+    (checkout / 'web' / 'tests').mkdir(parents=True)
+    if checkout.name == 'work':
+        (checkout / 'web' / 'tests' / 'new.test.tsx').write_text('test')
+    elif os.environ.get('ORIGINAL_TEST'):
+        (checkout / 'web' / 'tests' / 'new.test.tsx').write_text('pristine')
 ''')
         pnpm = self.bin / 'pnpm'
         pnpm.write_text('#!/bin/sh\nexit 0\n')
@@ -40,6 +48,23 @@ elif args and args[0] == 'clone':
         node.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
+if '--no-allow-only' in args:
+    base = 'authored-base' in pathlib.Path.cwd().parts
+    pristine = base and pathlib.Path('tests/new.test.tsx').read_text() == 'pristine'
+    failed = ((pristine and os.environ.get('ORIGINAL_FAIL'))
+              or (base and not pristine and not os.environ.get('AUTHORED_SAME'))
+              or (not base and os.environ.get('AUTHORED_FAIL')))
+    status = 'pending' if os.environ.get('AUTHORED_SKIPPED') else ('failed' if failed else 'passed')
+    report = {'testResults': [{'name': str(pathlib.Path.cwd() / 'tests/new.test.tsx'),
+                               'assertionResults': [{'fullName': 'new regression', 'status': status}]}],
+              'numTotalTests': 1, 'numPassedTests': int(status == 'passed'),
+              'numFailedTests': int(status == 'failed'), 'numPendingTests': int(status == 'pending')}
+    pathlib.Path(args[args.index('--outputFile') + 1]).write_text(json.dumps(report))
+    if (not base and os.environ.get('MUTATE_FIXED')) or (base and not pristine and os.environ.get('MUTATE_BASE')):
+        pathlib.Path('tests/new.test.tsx').write_text('changed during test')
+    if not base and os.environ.get('MUTATE_HEAD'):
+        (pathlib.Path.cwd().parent / '.changed-head').write_text('commit made')
+    sys.exit(1 if failed else 0)
 browser = '--config' in args
 if browser and os.environ.get('MISSING_BROWSER'):
     print('browser missing', file=sys.stderr)
@@ -88,6 +113,54 @@ sys.exit(1 if not browser and os.environ.get('FAIL_DOM') else 0)
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[-1], 'JOUET_BENCH_UNVERIFIED_V1')
         self.assertIn('browser missing', result.stdout)
+
+    def test_authored_test_must_distinguish_the_original(self):
+        result = self.check(AUTHORED_SAME='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('did not distinguish', result.stdout)
+
+    def test_skipped_authored_test_is_unverified(self):
+        result = self.check(AUTHORED_SKIPPED='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('skipped or unknown', result.stdout)
+
+    def test_failing_authored_test_fails_the_check(self):
+        result = self.check(AUTHORED_FAIL='1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('authored tests fail on the fix', result.stdout)
+
+    def test_a_failing_original_suite_cannot_prove_a_regression(self):
+        result = self.check(ORIGINAL_TEST='1', ORIGINAL_FAIL='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('original test suite did not pass', result.stdout)
+
+    def test_changed_runner_configuration_is_unverified(self):
+        result = self.check(CHANGED_CONFIG='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('runner configuration changed', result.stdout)
+
+    def test_tests_outside_the_supported_directory_are_unverified(self):
+        result = self.check(OTHER_TEST='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('outside web/tests', result.stdout)
+
+    def test_authored_tests_cannot_change_the_files_being_compared(self):
+        for key in ('MUTATE_FIXED', 'MUTATE_BASE', 'MUTATE_HEAD'):
+            with self.subTest(key=key):
+                result = self.check(**{key: '1'})
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertIn('checkout changed during test execution', result.stdout)
+
+    def test_authored_test_paths_cannot_follow_symlinks(self):
+        web = self.root / 'web'
+        (web / 'tests').mkdir(parents=True)
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (web / 'tests' / 'linked').symlink_to(outside, target_is_directory=True)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            checker = runpy.run_path(str(CHECK))
+        with self.assertRaises(checker['IncompleteEvidence']):
+            checker['safe_test_path'](web, 'tests/linked/new.test.tsx', required=False)
 
     def test_missing_sidebar_browser_case_is_unverified(self):
         result = self.check(MISSING_TIMELINE='1')
