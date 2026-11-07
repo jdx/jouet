@@ -503,7 +503,7 @@ A probe still has to answer within the probes' 200 ms. [Routines](/routines) rea
 Each script runs in a sandboxed Luau VM:
 
 - **What a rule can reach.** The standard library, without `require`, plus the `jouet` module and its read-only [probes](#probes). Running jouet's commands and writing are for [routines](/routines), not rules. Luau has no `io`, and its `os` is limited to the clock. The `jouet` module and the libraries are read-only, and every rule has globals of its own.
-- **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget for its own work, 200 ms for the [probes](#probes) it waits on, and a budget of a million interrupts. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
+- **Budgets.** Every call to a script's `check`, and every loading of its file, has a 50 ms time budget for its own work, 200 ms for the [probes](#probes) it waits on, and a budget of a million interrupts. The explicit rule-sharing check allows one second for its own work. Luau raises an interrupt at every function call and loop iteration. The whole VM may use 32 MiB.
 - **Failing open.** A rule that does not load, or a script that does not compile, throws, runs out of budget or returns something unexpected, says nothing. jouet reports it and carries on with the other rules.
 - **Compiled-script cache.** Compiled scripts are cached in `$XDG_CACHE_HOME/jouet/luau`, keyed by a hash of their source. Luau does not verify bytecode, so that directory must stay writable only by you.
 - **Every source alike.** A script from a repository, a plugin or the system directory runs in the same sandbox and budgets as a built-in one.
