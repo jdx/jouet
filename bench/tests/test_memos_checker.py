@@ -49,6 +49,9 @@ elif args and args[0] == 'clone':
 import json, os, pathlib, sys
 args = sys.argv[1:]
 if '--no-allow-only' in args:
+    if os.environ.get('AUTHORED_NO_REPORT'):
+        print('runner could not start', file=sys.stderr)
+        sys.exit(1)
     base = 'authored-base' in pathlib.Path.cwd().parts
     pristine = base and pathlib.Path('tests/new.test.tsx').read_text() == 'pristine'
     failed = ((pristine and os.environ.get('ORIGINAL_FAIL'))
@@ -56,10 +59,13 @@ if '--no-allow-only' in args:
               or (not base and os.environ.get('AUTHORED_FAIL')))
     status = 'pending' if os.environ.get('AUTHORED_SKIPPED') else ('failed' if failed else 'passed')
     report = {'testResults': [{'name': str(pathlib.Path.cwd() / 'tests/new.test.tsx'),
-                               'assertionResults': [{'fullName': 'new regression', 'status': status}]}],
+                               'assertionResults': [{'fullName': 'new regression', 'status': status,
+                                                     'failureMessages': ['report assertion details'] if failed else []}]}],
               'numTotalTests': 1, 'numPassedTests': int(status == 'passed'),
               'numFailedTests': int(status == 'failed'), 'numPendingTests': int(status == 'pending')}
     pathlib.Path(args[args.index('--outputFile') + 1]).write_text(json.dumps(report))
+    if failed:
+        print('assertion details', file=sys.stderr)
     if (not base and os.environ.get('MUTATE_FIXED')) or (base and not pristine and os.environ.get('MUTATE_BASE')):
         pathlib.Path('tests/new.test.tsx').write_text('changed during test')
     if not base and os.environ.get('MUTATE_HEAD'):
@@ -128,6 +134,13 @@ sys.exit(1 if not browser and os.environ.get('FAIL_DOM') else 0)
         result = self.check(AUTHORED_FAIL='1')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('authored tests fail on the fix', result.stdout)
+        self.assertIn('assertion details', result.stdout)
+        self.assertIn('report assertion details', result.stdout)
+
+    def test_missing_authored_report_includes_runner_output(self):
+        result = self.check(AUTHORED_NO_REPORT='1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('runner could not start', result.stdout)
 
     def test_a_failing_original_suite_cannot_prove_a_regression(self):
         result = self.check(ORIGINAL_TEST='1', ORIGINAL_FAIL='1')

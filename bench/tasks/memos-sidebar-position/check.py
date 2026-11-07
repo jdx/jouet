@@ -48,7 +48,7 @@ def safe_test_path(web, name, *, required):
     return path
 
 
-def run_authored_tests(web, files, report):
+def run_authored_tests(web, files, report, *, show_failures=False):
     """Run exactly the named files; reject incomplete reports and focused tests."""
     command = ['node', 'node_modules/vitest/vitest.mjs', 'run', *sorted(files),
                '--config', 'vitest.config.mts', '--no-allow-only',
@@ -56,12 +56,24 @@ def run_authored_tests(web, files, report):
     proc = subprocess.run(command, cwd=web, env={**os.environ, 'CI': '1', 'TZ': 'UTC'},
                           capture_output=True, text=True, timeout=90)
     try:
-        result = outcomes(json.loads(report.read_text()), web, files)
+        document = json.loads(report.read_text())
+        result = outcomes(document, web, files)
     except (OSError, ValueError, TypeError) as error:
+        print(f'Authored test runner output:\n{proc.stdout}{proc.stderr}')
         raise IncompleteEvidence(f'authored test report unavailable: {error}') from error
     failures = [name for (_, name), status in result.items() if status == 'failed']
     if proc.returncode not in (0, 1) or (proc.returncode == 0) != (not failures):
+        print(f'Authored test runner output:\n{proc.stdout}{proc.stderr}')
         raise IncompleteEvidence('authored test exit disagrees with its cases')
+    if failures and show_failures:
+        print(f'Authored test runner output:\n{proc.stdout}{proc.stderr}')
+        for suite in document['testResults']:
+            for case in suite['assertionResults']:
+                if case['status'] == 'failed':
+                    messages = case.get('failureMessages')
+                    if isinstance(messages, list):
+                        for message in messages:
+                            print(message)
     return result
 
 
@@ -100,7 +112,7 @@ def check_authored_regression(checkout, changed, directory):
     fixed_web = checkout / 'web'
     content = {name: safe_test_path(fixed_web, name, required=True).read_bytes() for name in names}
     fixed_state = checkout_state(checkout)
-    fixed = run_authored_tests(fixed_web, names, directory / 'authored-fixed.json')
+    fixed = run_authored_tests(fixed_web, names, directory / 'authored-fixed.json', show_failures=True)
     if (checkout_state(checkout) != fixed_state
             or any(safe_test_path(fixed_web, name, required=True).read_bytes() != content[name] for name in names)):
         raise IncompleteEvidence('fixed checkout changed during test execution')
