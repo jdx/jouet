@@ -1437,11 +1437,19 @@ class TasksTest(unittest.TestCase):
                 return {"base_sha": "base", "head_sha": "head"}
 
             failures = []
+            swept = []
+
+            def sweep(phase, _session):
+                self.assertTrue((phase / "work/large-install").exists())
+                swept.append(phase)
+
             with patch.object(tasks, "prepare", side_effect=prepare), \
                     patch.object(tasks, "setup_environment", side_effect=RuntimeError("setup failed")), \
-                    patch.object(agents.arms, "base_env", return_value={}):
+                    patch.object(agents.arms, "base_env", return_value={}), \
+                    patch.object(agents.runner, "sweep", side_effect=sweep):
                 self.assertTrue(agents.check_task_phase(task, root, "unsolved", False, failures))
             self.assertIn("setup failed", failures[0])
+            self.assertEqual(len(swept), 1)
             self.assertEqual(list(root.iterdir()), [])
 
     def test_reference_solution_and_check_use_task_dependencies(self):

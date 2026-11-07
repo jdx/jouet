@@ -384,55 +384,61 @@ def check_task_phase(task: tasks.Task, root: Path, label: str, solve: bool, fail
     """Check one fresh fixture and release it before preparing the next one."""
     with tempfile.TemporaryDirectory(prefix=f"{label}-", dir=root) as directory:
         phase = Path(directory)
-        workdir = phase / "work"
         try:
-            shas = tasks.prepare(task, workdir)
-        except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
-            failures.append(f"{task.name}: preparation failed: {error}")
-            return False
-        run_dir = phase / "run"
-        base = arms.base_env(run_dir, None, "jdx/demo")
-        task.agent_env(base, run_dir / "bin", workdir)
-        env_log = phase / "environment.log"
-        try:
-            tasks.setup_environment(task, base, workdir, root / "python-cache", env_log)
-        except (OSError, RuntimeError, ValueError) as error:
-            details = env_log.read_text(errors="replace")[-4000:] if env_log.exists() else ""
-            failures.append(f"{task.name}: environment setup failed: {error}\n{details}")
-            return True
-        fixture = task.github_fixture(shas)
-        state = phase / "state.json"
-        fake = FakeGitHub(fixture, offset_s=10_000) if fixture is not None else None
-        if fake:
-            fake.__enter__()
-        try:
-            if solve:
-                env = {**base, **tasks.GIT_ENV, **tasks.helpers_env()}
-                if fake:
-                    env["BENCH_GITHUB_URL"] = fake.url
-                proc = subprocess.run(
-                    ["python3", "-I", str(task.dir / "solve.py")],
-                    cwd=workdir, env=env, capture_output=True, text=True,
-                )
-                if proc.returncode != 0:
-                    failures.append(f"{task.name}: solve.py failed: {proc.stderr.strip()}")
-                    return True
-            if fake:
-                state.write_text(json.dumps(fake.world.fixture))
+            return run_check_task_phase(task, root, phase, label, solve, failures)
         finally:
-            if fake:
-                fake.__exit__()
-        check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None, task.check_docker))
-        runner.sweep(run_dir, None)
-        runner.sweep(workdir, None)
-        if check["passed"] is None:
-            failures.append(f"{task.name}: the check is unverified when {label}:\n{check['output']}")
-        elif check["passed"] != solve:
-            want = "pass" if solve else "fail"
-            failures.append(f"{task.name}: the check should {want} when {label}:\n{check['output']}")
-        else:
-            print(f"ok   {task.name}: check {'passes' if solve else 'fails'} when {label}")
+            runner.sweep(phase, None)
+
+
+def run_check_task_phase(task: tasks.Task, root: Path, phase: Path, label: str,
+                         solve: bool, failures: list[str]) -> bool:
+    workdir = phase / "work"
+    try:
+        shas = tasks.prepare(task, workdir)
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        failures.append(f"{task.name}: preparation failed: {error}")
+        return False
+    run_dir = phase / "run"
+    base = arms.base_env(run_dir, None, "jdx/demo")
+    task.agent_env(base, run_dir / "bin", workdir)
+    env_log = phase / "environment.log"
+    try:
+        tasks.setup_environment(task, base, workdir, root / "python-cache", env_log)
+    except (OSError, RuntimeError, ValueError) as error:
+        details = env_log.read_text(errors="replace")[-4000:] if env_log.exists() else ""
+        failures.append(f"{task.name}: environment setup failed: {error}\n{details}")
         return True
+    fixture = task.github_fixture(shas)
+    state = phase / "state.json"
+    fake = FakeGitHub(fixture, offset_s=10_000) if fixture is not None else None
+    if fake:
+        fake.__enter__()
+    try:
+        if solve:
+            env = {**base, **tasks.GIT_ENV, **tasks.helpers_env()}
+            if fake:
+                env["BENCH_GITHUB_URL"] = fake.url
+            proc = subprocess.run(
+                ["python3", "-I", str(task.dir / "solve.py")],
+                cwd=workdir, env=env, capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                failures.append(f"{task.name}: solve.py failed: {proc.stderr.strip()}")
+                return True
+        if fake:
+            state.write_text(json.dumps(fake.world.fixture))
+    finally:
+        if fake:
+            fake.__exit__()
+    check = tasks.run_check(task, workdir, base, tasks.check_env(shas, state if fake else None, task.check_docker))
+    if check["passed"] is None:
+        failures.append(f"{task.name}: the check is unverified when {label}:\n{check['output']}")
+    elif check["passed"] != solve:
+        want = "pass" if solve else "fail"
+        failures.append(f"{task.name}: the check should {want} when {label}:\n{check['output']}")
+    else:
+        print(f"ok   {task.name}: check {'passes' if solve else 'fails'} when {label}")
+    return True
 
 
 def cmd_check_tasks(args: argparse.Namespace) -> int:
