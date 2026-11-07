@@ -279,7 +279,7 @@ pub fn code_part(tree: &str) -> &str {
 /// notice or authors file with no other extension (`LICENSE`,
 /// `LICENSE-MIT`, `NOTICE`), never source that only starts with one of
 /// those names (`license.rs`).
-fn prose(path: &str) -> bool {
+pub fn prose(path: &str) -> bool {
     const TEXT: [&str; 6] = ["md", "mdx", "markdown", "rst", "adoc", "txt"];
     let name = path.rsplit('/').next().unwrap_or(path);
     let lower = name.to_ascii_lowercase();
