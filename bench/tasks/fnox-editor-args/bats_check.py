@@ -39,15 +39,28 @@ def check_bats() -> None:
         ["git", "diff", "--name-only", "--diff-filter=AM", head_sha(), "HEAD", "--", "test/edit.bats"],
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
-    expect("test/edit.bats" in changed, "no committed editor regression test was changed")
     if not changed:
+        UNVERIFIED.append("no committed editor regression test was changed")
         return
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", head_sha(), "HEAD", "--", "test/edit.bats"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    added = re.findall(r'^\+@test\s+"([^"]+)"\s*\{', diff, re.MULTILINE)
-    if len(added) < 2 or len(set(added)) != len(added):
+    def names_at(revision: str) -> list[str]:
+        contents = subprocess.run(
+            ["git", "show", f"{revision}:test/edit.bats"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        return re.findall(r'^\s*@test\s+"([^"]+)"\s*\{', contents, re.MULTILINE)
+
+    try:
+        original = names_at(head_sha())
+        current = names_at("HEAD")
+    except subprocess.CalledProcessError:
+        UNVERIFIED.append("could not compare committed editor tests with the starting revision")
+        return
+    if (not original or len(set(original)) != len(original) or len(set(current)) != len(current)
+            or not set(original).issubset(current)):
+        UNVERIFIED.append("starting editor tests are missing, renamed, or ambiguous")
+        return
+    added = [name for name in current if name not in set(original)]
+    if len(added) < 2:
         UNVERIFIED.append("expected two distinct new editor regression tests in standard Bats form")
         return
     untracked = subprocess.run(

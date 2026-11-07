@@ -65,42 +65,64 @@ class FnoxBatsTest(unittest.TestCase):
 
     def test_complete_run_executes_both_committed_tests(self):
         changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
-        diff = subprocess.CompletedProcess([], 0, '+@test "first" {\n+@test "second" {\n', "")
+        original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
+        current = subprocess.CompletedProcess([], 0, '@test "old" {\n@test "first" {\n@test "second" {\n', "")
         clean = subprocess.CompletedProcess([], 0, "", "")
-        report = subprocess.CompletedProcess([], 0, "1..2\nok 1 first\nok 2 second\n", "")
+        report = subprocess.CompletedProcess([], 0, "1..3\nok 1 old\nok 2 first\nok 3 second\n", "")
         with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
                 mock.patch.object(checker, "UNVERIFIED", []), \
-                mock.patch.object(checker.subprocess, "run", side_effect=[changed, diff, clean, report]), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, current, clean, report]), \
                 contextlib.redirect_stdout(io.StringIO()):
             checker.check_bats()
             self.assertEqual(checker.UNVERIFIED, [])
 
     def test_bats_failure_and_skip_are_unverified(self):
         changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
-        diff = subprocess.CompletedProcess([], 0, '+@test "first" {\n+@test "second" {\n', "")
+        original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
+        current = subprocess.CompletedProcess([], 0, '@test "old" {\n@test "first" {\n@test "second" {\n', "")
         clean = subprocess.CompletedProcess([], 0, "", "")
         report = subprocess.CompletedProcess(
             [], 1, "1..2\nok 1 editor # skip unavailable\nnot ok 2 keychain\n", ""
         )
         with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
                 mock.patch.object(checker, "UNVERIFIED", []), \
-                mock.patch.object(checker.subprocess, "run", side_effect=[changed, diff, clean, report]), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, current, clean, report]), \
                 contextlib.redirect_stdout(io.StringIO()):
             checker.check_bats()
             self.assertEqual(len(checker.UNVERIFIED), 1)
             self.assertIn("skipped", checker.UNVERIFIED[0])
 
+    def test_missing_tests_are_unverified(self):
+        unchanged = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", return_value=unchanged):
+            checker.check_bats()
+            self.assertIn("no committed editor regression", checker.UNVERIFIED[0])
+
+    def test_renamed_existing_tests_are_unverified(self):
+        changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
+        original = subprocess.CompletedProcess([], 0, '@test "old one" {\n@test "old two" {\n', "")
+        renamed = subprocess.CompletedProcess([], 0, '@test "new one" {\n@test "new two" {\n', "")
+        with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
+                mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, renamed]) as run:
+            checker.check_bats()
+            self.assertIn("missing, renamed, or ambiguous", checker.UNVERIFIED[0])
+            self.assertEqual(run.call_count, 3)
+
     def test_untracked_files_cannot_make_tests_pass(self):
         changed = subprocess.CompletedProcess([], 0, "test/edit.bats\n", "")
-        diff = subprocess.CompletedProcess([], 0, '+@test "first" {\n+@test "second" {\n', "")
+        original = subprocess.CompletedProcess([], 0, '@test "old" {\n', "")
+        current = subprocess.CompletedProcess([], 0, '@test "old" {\n@test "first" {\n@test "second" {\n', "")
         untracked = subprocess.CompletedProcess([], 0, "test/helper.bash\n", "")
         with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": "base"}), \
                 mock.patch.object(checker, "UNVERIFIED", []), \
-                mock.patch.object(checker.subprocess, "run", side_effect=[changed, diff, untracked]) as run:
+                mock.patch.object(checker.subprocess, "run", side_effect=[changed, original, current, untracked]) as run:
             checker.check_bats()
             self.assertEqual(len(checker.UNVERIFIED), 1)
             self.assertIn("untracked", checker.UNVERIFIED[0])
-            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_count, 4)
 
 
 if __name__ == "__main__":
