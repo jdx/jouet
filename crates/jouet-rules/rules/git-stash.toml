@@ -56,6 +56,11 @@ fires = [
   { command = "git stash -u", git = { worktrees = 2 } },
   # A `cd` may reach another repository.
   { command = "cd ../other && git stash", git = { worktrees = 1 } },
+  # So may `git -C`, `--git-dir`, `--work-tree` or `GIT_DIR`.
+  { command = "git -C ../other stash pop", git = { worktrees = 1 } },
+  { command = "git --git-dir=../other/.git stash", git = { worktrees = 1 } },
+  { command = "git --work-tree ../other stash drop", git = { worktrees = 1 } },
+  { command = "GIT_DIR=../other/.git git stash", git = { worktrees = 1 } },
 ]
 quiet = [
   "git stash push -m wip-ab12",
