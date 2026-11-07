@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -54,30 +55,30 @@ class CobraAgentTests(unittest.TestCase):
 
     def test_real_committed_test_passes(self):
         self.add_test("")
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertEqual(PROBLEMS, [])
         self.assertEqual(UNVERIFIED, [])
 
     def test_real_committed_failure_fails(self):
         self.add_test('t.Fatal("regression")')
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertTrue(PROBLEMS)
 
     def test_real_skipped_test_is_unverified(self):
         self.add_test('t.Skip("not available")')
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertFalse(PROBLEMS)
         self.assertTrue(UNVERIFIED)
 
     def test_skipped_subtest_is_unverified(self):
         self.add_test('t.Run("child", func(t *testing.T) { t.Skip("not available") })')
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertFalse(PROBLEMS)
         self.assertTrue(UNVERIFIED)
 
     def test_compile_failure_is_unverified(self):
         self.add_test("missingFunction()")
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertFalse(PROBLEMS)
         self.assertTrue(UNVERIFIED)
 
@@ -87,22 +88,24 @@ class CobraAgentTests(unittest.TestCase):
 
         def run(args, **kwargs):
             if args[:2] == ["go", "test"]:
-                raise subprocess.TimeoutExpired(args, 300, output=b'{"Action":"fail","Test":"TestAgent"}\n')
+                return real_run([sys.executable, "-c", 'import time; print(\'{"Action":"fail","Test":"TestAgent"}\', flush=True); time.sleep(10)'], **kwargs)
             return real_run(args, **kwargs)
 
+        started = time.monotonic()
         with mock.patch.object(checker.subprocess, "run", side_effect=run):
-            checker.check_committed_tests()
+            checker.check_committed_tests(started + 4)
         self.assertTrue(PROBLEMS)
         self.assertTrue(UNVERIFIED)
+        self.assertLess(time.monotonic() - started, 10)
 
     def test_unselected_build_tag_is_unverified(self):
         self.add_test("", "//go:build jouet_unavailable_tag\n\n")
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertFalse(PROBLEMS)
         self.assertTrue(UNVERIFIED)
 
     def test_missing_committed_tests_are_unverified(self):
-        checker.check_committed_tests()
+        checker.check_committed_tests(time.monotonic() + 30)
         self.assertFalse(PROBLEMS)
         self.assertTrue(UNVERIFIED)
 

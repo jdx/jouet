@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from _check import UNVERIFIED, expect, head_sha
@@ -31,11 +32,18 @@ def events_from(output: str) -> tuple[list[dict], bool]:
     return events, malformed
 
 
-def check_committed_tests() -> None:
+def remaining(deadline: float) -> float:
+    budget = deadline - time.monotonic()
+    if budget <= 0:
+        raise TimeoutError("checker deadline exhausted")
+    return budget
+
+
+def check_committed_tests(deadline: float) -> None:
     try:
         changed = subprocess.run(
             ["git", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=ACMRT", head_sha(), "HEAD"],
-            capture_output=True, text=True, check=True, timeout=30,
+            capture_output=True, text=True, check=True, timeout=min(30, remaining(deadline)),
         ).stdout.split("\0")
         files = sorted(Path(path) for path in changed if path.endswith("_test.go"))
         if not files:
@@ -50,7 +58,7 @@ def check_committed_tests() -> None:
             package = "." if path.parent == Path(".") else f"./{path.parent.as_posix()}"
             if package not in packages:
                 listed = subprocess.run(["go", "list", "-json", package], capture_output=True, text=True,
-                                        check=False, timeout=60)
+                                        check=False, timeout=min(60, remaining(deadline)))
                 if listed.returncode:
                     UNVERIFIED.append(f"cannot list Go package {package}: {listed.stderr}")
                     continue
@@ -60,7 +68,7 @@ def check_committed_tests() -> None:
                 UNVERIFIED.append(f"changed test file is not selected by Go: {path}")
                 continue
             diff = subprocess.run(["git", "diff", "--unified=0", head_sha(), "HEAD", "--", str(path)],
-                                  capture_output=True, text=True, check=True, timeout=30).stdout
+                                  capture_output=True, text=True, check=True, timeout=min(30, remaining(deadline))).stdout
             added.update((info["ImportPath"], name) for name in
                          re.findall(r"^\+func\s+(Test[A-Za-z0-9_]+)\s*\(", diff, re.MULTILINE))
         if not added:
@@ -68,7 +76,7 @@ def check_committed_tests() -> None:
         for package, info in packages.items():
             try:
                 run = subprocess.run(["go", "test", "-json", "-count=1", package], capture_output=True,
-                                     text=True, check=False, timeout=300)
+                                     text=True, check=False, timeout=remaining(deadline))
             except subprocess.TimeoutExpired as error:
                 output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
                 stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
