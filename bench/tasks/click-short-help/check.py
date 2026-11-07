@@ -1,17 +1,27 @@
 import os
 import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, committed_files, dirty, expect, finish, head_sha, new_commit  # noqa: E402
+from _check import (
+    UNVERIFIED,
+    committed_files,
+    dirty,
+    expect,
+    finish,
+    head_sha,
+    new_commit,
+)
 
 
 def check_ruff(path: str, mode: str, added: bool) -> None:
     """Only count a new failure when the same file passes at the task base."""
     args = ["ruff", "check"] if mode == "lint" else ["ruff", "format", "--check"]
     try:
-        current = subprocess.run([*args, "--", path], capture_output=True, text=True, timeout=60)
+        current = subprocess.run([*args, "--", path], capture_output=True, text=True, timeout=60, check=False)
         if current.returncode == 0:
             return
         if current.returncode != 1:
@@ -20,13 +30,13 @@ def check_ruff(path: str, mode: str, added: bool) -> None:
         if added:
             expect(False, f"Ruff {mode} fails on new file {path}:\n{current.stdout}{current.stderr}")
             return
-        original = subprocess.run(["git", "show", f"{head_sha()}:{path}"], capture_output=True, timeout=30)
+        original = subprocess.run(["git", "show", f"{head_sha()}:{path}"], capture_output=True, timeout=30, check=False)
         if original.returncode:
             UNVERIFIED.append(f"Ruff {mode} cannot compare {path} with its base")
             return
         baseline = subprocess.run(
             [*args, "--stdin-filename", path, "-"], input=original.stdout,
-            capture_output=True, timeout=60,
+            capture_output=True, timeout=60, check=False,
         )
         if baseline.returncode == 0:
             expect(False, f"Ruff {mode} fails on {path}:\n{current.stdout}{current.stderr}")
@@ -34,6 +44,54 @@ def check_ruff(path: str, mode: str, added: bool) -> None:
             UNVERIFIED.append(f"Ruff {mode} also fails or cannot run on the base version of {path}")
     except (OSError, subprocess.TimeoutExpired) as error:
         UNVERIFIED.append(f"Ruff {mode} could not check {path}: {error}")
+
+
+def check_committed_tests(tests: list[str]) -> None:
+    """Run the committed tests in isolation and refuse incomplete reports."""
+    with tempfile.TemporaryDirectory(prefix="click-bench-tests-") as directory:
+        checkout = Path(directory) / "work"
+        report = Path(directory) / "pytest.xml"
+        try:
+            created = subprocess.run(
+                ["git", "worktree", "add", "--detach", "--quiet", str(checkout), "HEAD"],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if created.returncode:
+                UNVERIFIED.append(f"could not create committed test checkout: {created.stderr.strip()}")
+                return
+            try:
+                for name in tests:
+                    path = checkout / name
+                    if (not path.is_file() or path.is_symlink()
+                            or not path.resolve().is_relative_to(checkout.resolve())):
+                        UNVERIFIED.append(f"committed test is not a regular file in the checkout: {name}")
+                        return
+                proc = subprocess.run(
+                    ["python3", "-m", "pytest", "-o", "addopts=", f"--junitxml={report}", "--", *tests],
+                    cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
+                    env={**os.environ, "PYTHONPATH": str(checkout / "src")},
+                )
+                output = (proc.stdout + proc.stderr)[-3000:]
+                try:
+                    cases = ET.parse(report).getroot().findall(".//testcase")
+                except (OSError, ET.ParseError) as error:
+                    UNVERIFIED.append(f"committed tests produced no readable report: {error}\n{output}")
+                    return
+                if any(case.find("failure") is not None for case in cases):
+                    expect(False, f"committed tests failed:\n{output}")
+                elif proc.returncode != 0 or any(case.find("error") is not None for case in cases):
+                    UNVERIFIED.append(f"committed tests could not complete (exit {proc.returncode}):\n{output}")
+                elif not cases or any(case.find("skipped") is not None for case in cases):
+                    UNVERIFIED.append(f"committed tests reported no cases or incomplete coverage:\n{output}")
+            finally:
+                removed = subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(checkout)],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+                if removed.returncode:
+                    UNVERIFIED.append(f"could not remove test checkout: {removed.stderr.strip()}")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            UNVERIFIED.append(f"committed tests could not run: {error}")
 
 # Test the public Command API without replacing the agent's tests.
 program = r'''
@@ -56,11 +114,16 @@ for text, limit, expected in cases:
 assert click.Command("example", help="Long text", short_help="Exact.").get_short_help_str() == "Exact."
 '''
 run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
-                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60)
+                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60, check=False)
 expect(run.returncode == 0, f"short-help cases failed:\n{run.stdout}\n{run.stderr}")
 expect(new_commit(), "nothing was committed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
 changed = committed_files()
+tests = sorted(path for path in changed if path.startswith("tests/")
+               and Path(path).name.startswith("test_") and path.endswith(".py"))
+expect(bool(tests), "no committed Python test file was changed")
+if tests:
+    check_committed_tests(tests)
 added_result = subprocess.run(
     ["git", "diff", "--name-only", "--diff-filter=A", head_sha(), "HEAD"],
     capture_output=True, text=True, check=True,
