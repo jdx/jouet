@@ -34,7 +34,10 @@ def run(target: str, label: str, deadline: float, checkout: Path) -> None:
     except (OSError, subprocess.TimeoutExpired) as error:
         if isinstance(error, subprocess.TimeoutExpired) and error.stdout:
             output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout
-            print(tail(output))
+            if re.search(r"^test [^\r\n]+ \.\.\. FAILED\r?$", output, re.MULTILINE):
+                expect(False, f"{label} reported a failing test before it timed out:\n{tail(output)}")
+            else:
+                print(tail(output))
         UNVERIFIED.append(f"{label} could not complete: {error}")
         return
     output = proc.stdout

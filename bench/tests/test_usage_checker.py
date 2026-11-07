@@ -77,6 +77,16 @@ class UsageEvidenceTest(unittest.TestCase):
         self.assertTrue(self.checker.UNVERIFIED)
         self.assertFalse(self.problems)
 
+    def test_timeout_after_reported_test_failure_stays_a_failure(self):
+        output = b"running 2 tests\ntest tests::first ... FAILED\ntest tests::second ... "
+        error = subprocess.TimeoutExpired("cargo", 1, output=output)
+        with mock.patch.object(self.checker.subprocess, "run", side_effect=error), \
+                mock.patch.object(self.checker.time, "monotonic", return_value=0):
+            self.checker.run("heading_help", "committed test", 100, Path("checkout"))
+        self.assertTrue(self.checker.UNVERIFIED)
+        self.assertTrue(self.problems)
+        self.assertIn("test tests::first ... FAILED", self.problems[0])
+
 
 class UsageCheckerTest(unittest.TestCase):
     def test_requires_a_commit_and_no_tracked_changes_before_hidden_test(self):
