@@ -50,6 +50,10 @@ fires = [
   { command = "cargo build -q 2>&1 | tail -5", session = "s1", fired = 0, action = "warn" },
   { command = "cargo build -q 2>&1 | tail -5", session = "s1", fired = 1, action = "deny" },
   { command = "jouet test --cmd -- sh -c 'cargo test | tail'", session = "s1", fired = 2, action = "deny" },
+  # `jouet test` itself cut with head or tail: warned once, never denied.
+  { command = "jouet test --cmd -- mise run test:e2e test_a 2>&1 | tail -4 && cargo clippy", session = "s1", fired = 0, action = "warn" },
+  { command = "cd app && jouet test --affected | head -20", action = "warn" },
+  { command = "jouet test --cmd -- cargo test 2>&1 | tee t.log | tail -3", action = "warn" },
   # No session to count in (or no ledger): it only warns.
   { command = "cargo build -q 2>&1 | tail -5", fired = 3, action = "warn" },
   { command = "cargo test | tail", session = "s1", action = "warn" },
@@ -79,9 +83,10 @@ quiet = [
   "jouet test --affected --dry-run | grep vitest",
   "jouet test --help | head",
   "jouet test --cmd -- cargo test 2>&1 | tee test.log",
-  # `jouet test` cut: it records its own result, and its output is short.
-  "jouet test --cmd -- mise run test 2>&1 | tail -10",
-  "jouet test --cmd -- cargo test --workspace --all-targets 2>&1 | tail -3 && git push",
+  # `jouet test` cut: it records its own result, and its output is short;
+  # a head or tail on it was warned about once already.
+  { command = "jouet test --cmd -- mise run test 2>&1 | tail -10", session = "s1", fired = 1 },
+  { command = "jouet test --cmd -- cargo test --workspace --all-targets 2>&1 | tail -3 && git push", session = "s1", fired = 2 },
   "jouet --json test --affected | grep -c failed",
   "jouet test > t.log 2>&1; tail -5 t.log",
   "jouet pr status | head -3",

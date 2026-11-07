@@ -1601,21 +1601,25 @@ fn a_script_sees_which_commands_its_matchers_matched() {
 }
 
 #[test]
-fn a_cut_jouet_test_is_left_alone() {
+fn a_cut_jouet_test_is_only_warned_about() {
     let engine = engine(builtin());
     let warning = |command: &str| {
         let outcome = engine.evaluate(&bash(command));
+        assert!(outcome.deny.is_none(), "{command}");
         let w = outcome
             .warnings
             .into_iter()
             .find(|w| w.rule == "piped-test-output");
         w.and_then(|w| w.message).unwrap_or_default()
     };
-    // It records its own result, piped or not, and prints little.
-    assert_eq!(
-        warning("jouet test --cmd -- mise run test 2>&1 | tail -10"),
-        ""
+    // It records its own result, piped or not, and prints little; but a
+    // failure piped into tail can lose the line naming it.
+    let why = warning("jouet test --cmd -- mise run test 2>&1 | tail -10");
+    assert!(
+        why.contains("tail can cut the line naming the failure"),
+        "{why}"
     );
+    // Its log read back is not a cut of what it printed.
     assert_eq!(warning("jouet test > t.log 2>&1; tail -5 t.log"), "");
     // Other runners are still pointed at `jouet test`.
     assert!(warning("cargo test 2>&1 | tail -3").starts_with("Run `jouet test`"));

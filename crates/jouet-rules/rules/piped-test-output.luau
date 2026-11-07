@@ -261,10 +261,35 @@ local rule: JouetRule = {
 			end
 			-- `jouet test` already prints only what matters, keeps the whole
 			-- output in its log, and records its own result for the hooks,
-			-- piped or not: a cut drops nothing the agent needs. Inside it, a
-			-- shell script that cuts a run leaves it only the cut output to
-			-- read, and the exit code of the script's last command.
+			-- piped or not. Inside it, a shell script that cuts a run leaves
+			-- it only the cut output to read, and the exit code of the
+			-- script's last command.
 			if jouet_test(command) then
+				-- Its own output piped into head or tail is short already, but a
+				-- failure is longer than a pass: the cut can drop the line naming
+				-- what failed, and its exit code, so a `&&` after it goes on.
+				-- That is said once, as a warning: most such runs pass.
+				-- Down its pipeline, past `tee` or another filter.
+				local cut_by: JouetCommand? = nil
+				local j = i
+				while call.commands[j].op == "pipe" and call.commands[j + 1] and not call.commands[j + 1].nested do
+					j += 1
+					local step = call.commands[j]
+					if step.program == "tail" or step.program == "head" then
+						cut_by = step
+						break
+					end
+				end
+				if cut_by then
+					local fired = if call.session
+						then jouet.session.fired("piped-test-output", call.session, call.agent)
+						else nil
+					if not fired or fired == 0 then
+						return jouet.warn(
+							`\`jouet test\` keeps a passing run to one line and a failure within --budget bytes (default 4000); {cut_by.program} can cut the line naming the failure, and the pipe hides its exit code from \`&&\`. Run it without the pipe, with \`--budget BYTES\` for a shorter failure.`
+						)
+					end
+				end
 				local script = script_under(command)
 				if script then
 					local inner = jouet.parse(script)
