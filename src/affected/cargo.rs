@@ -186,7 +186,7 @@ impl Name {
 /// The paths the strings in `text`, a Rust file at `file` in a member at
 /// `dir`, name: each string with a `/`, read from the member's directory
 /// (`Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus")`, or after it
-/// in a `concat!`), from the root, or, in `include_str!`, `include_bytes!`
+/// in a `concat!` or a leading `{}` in `format!`), from the root, or, in `include_str!`, `include_bytes!`
 /// or `include!`, from the file's own directory. A string that leads out of
 /// the repository names nothing.
 fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
@@ -199,6 +199,12 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
         if !literal.contains('/') {
             continue;
         }
+        // A leading placeholder is the directory the rest is read from, as
+        // in `format!("{}/../corpus", env!("CARGO_MANIFEST_DIR"))`.
+        let literal = match literal.strip_prefix('{').and_then(|l| l.split_once('}')) {
+            Some((_, rest)) if rest.starts_with('/') => rest,
+            _ => literal,
+        };
         let literal = literal.trim_start_matches('/');
         let (fixed, placeholder) = match literal.split_once('{') {
             Some((fixed, _)) => (fixed, true),
@@ -784,6 +790,24 @@ let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/
                 path: "corpus".into(),
                 placeholder: false
             }]
+        );
+        // A leading placeholder is the directory; a later one ends the name.
+        assert_eq!(
+            named(
+                r#"format!("{}/../corpus/complete", env!("CARGO_MANIFEST_DIR")); format!("{dir}/../corpus/{name}.json")"#,
+                "cli",
+                "cli/src/main.rs"
+            ),
+            [
+                Name {
+                    path: "corpus/complete".into(),
+                    placeholder: false
+                },
+                Name {
+                    path: "corpus/".into(),
+                    placeholder: true
+                }
+            ]
         );
     }
 }
