@@ -608,8 +608,12 @@ ran() {
 	run --separate-stderr jouet hook claude stop <<<"$stop"
 	assert_output ""
 	# A change after it, with no test run since, is asked about (not back
-	# to the fixture's own text, which the full run passed at).
-	printf 'def shout(s):\n    return s + "?"\n' >src/calc/fmt.py
+	# to the fixture's own text, which the full run passed at), once it is
+	# more than a small fix.
+	{
+		printf 'def shout(s):\n    return s + "?"\n'
+		for i in $(seq 60); do printf 'X%d = %d\n' "$i" "$i"; done
+	} >src/calc/fmt.py
 	run --separate-stderr jouet hook claude stop <<<"$stop"
 	run jq -r '.reason' <<<"$output"
 	assert_output --partial "Files changed after the last test run passed (\`jouet test --affected\`)"

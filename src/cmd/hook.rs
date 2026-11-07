@@ -1335,6 +1335,13 @@ fn session_state_path(payload: &Value) -> Option<PathBuf> {
 /// The stop gate: jouet's verify and, when setup merged it, hk's own stop
 /// hook, as one decision. hk is not run when the session's last hk check
 /// passed at the tree as it is now.
+/// Whether the change in the work tree at `root` is a small fix: at most
+/// [`verify::SMALL_FIX_LINES`] lines of code differ from the merge base with
+/// its base branch ([`crate::affected::changed_code_lines`]).
+fn small_fix(root: &Path) -> bool {
+    crate::affected::changed_code_lines(root).is_some_and(|lines| lines <= verify::SMALL_FIX_LINES)
+}
+
 fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> Option<Value> {
     // Jobs left running are a note, never a reason to block.
     let mut note = if verify { jobs_note(payload) } else { None };
@@ -1408,10 +1415,18 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
 
     let hk_repo =
         |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
-    let affected =
-        |root: &str| !root.is_empty() && !crate::affected::near(Path::new(root)).is_empty();
+    let scope = |root: &str| verify::Scope {
+        affected: !root.is_empty() && !crate::affected::near(Path::new(root)).is_empty(),
+        // Only a tree whose newest test run passed is asked about after
+        // an edit, so only there is the change measured.
+        small_fix: !root.is_empty()
+            && state
+                .checks(root)
+                .is_some_and(verify::Checks::last_test_passed)
+            && small_fix(Path::new(root)),
+    };
     let block = if verify {
-        state.block(&home, tree_of, hk_repo, affected)
+        state.block(&home, tree_of, hk_repo, scope)
     } else {
         None
     };

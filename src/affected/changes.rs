@@ -151,6 +151,72 @@ pub(crate) fn changed(root: &Path, merge_base: &str) -> Result<Vec<Change>, Erro
     Ok(changes)
 }
 
+/// How many lines of code in the work tree at `root` differ from the merge
+/// base with its default [`base`], added plus removed, committed or not,
+/// untracked files counted whole; prose ([`jouet_rules::tree::prose`]) is
+/// left out. None when it cannot tell: no base branch, or the branch is its
+/// own base (work committed on `main` with no `origin/main`), so what it
+/// committed cannot be seen; a merge since the base; a changed file that is
+/// binary, or an untracked one that is not a regular text file; or git
+/// failing.
+pub(crate) fn changed_code_lines(root: &Path) -> Option<u64> {
+    use jouet_rules::tree::prose;
+    let base = base(root, None).ok()?;
+    let branch = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
+    if base.name == "HEAD" || base.name == branch.trim() {
+        return None;
+    }
+    let merge_base = base.merge_base.as_str();
+    // A merge brings in code the change did not write, which can interact
+    // with it however few lines the change itself has.
+    let range = format!("{merge_base}..HEAD");
+    if !git(root, &["rev-list", "--merges", "--max-count=1", &range])
+        .ok()?
+        .trim()
+        .is_empty()
+    {
+        return None;
+    }
+    let numstat = git(
+        root,
+        &[
+            "diff",
+            "--numstat",
+            "--no-renames",
+            "--no-ext-diff",
+            "-z",
+            merge_base,
+            "--",
+        ],
+    )
+    .ok()?;
+    let mut lines = 0;
+    // `ADDED\tREMOVED\tPATH`, with `-` for both in a binary file.
+    for entry in numstat.split('\0').filter(|e| !e.is_empty()) {
+        let mut fields = entry.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if prose(path) {
+            continue;
+        }
+        lines += added.parse::<u64>().ok()? + removed.parse::<u64>().ok()?;
+    }
+    let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"]).ok()?;
+    for path in untracked.split('\0').filter(|p| !p.is_empty() && !prose(p)) {
+        // Only a regular file is opened: a FIFO would wait for a writer.
+        let file = root.join(path);
+        if !std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
+            return None;
+        }
+        let text = std::fs::read_to_string(file).ok()?;
+        lines += text.lines().count() as u64;
+    }
+    Some(lines)
+}
+
 /// `git diff --name-status -z` output: a status letter, then the path.
 fn parse_name_status(text: &str) -> Vec<Change> {
     let mut words = text.split('\0').filter(|w| !w.is_empty());
@@ -172,6 +238,52 @@ fn parse_name_status(text: &str) -> Vec<Change> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_the_lines_of_code_a_branch_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let run = |args: &[&str]| {
+            let mut all = vec![
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ];
+            all.extend_from_slice(args);
+            git(root, &all).unwrap();
+        };
+        run(&["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("a.py"), "one\ntwo\n").unwrap();
+        run(&["add", "a.py"]);
+        run(&["commit", "-q", "-m", "base"]);
+        // Committed on `main` with no other base to see it from.
+        assert_eq!(changed_code_lines(root), None);
+        run(&["switch", "-q", "-c", "fix"]);
+        std::fs::write(root.join("a.py"), "one\n2\nthree\n").unwrap();
+        run(&["commit", "-q", "-am", "fix"]);
+        // Uncommitted and untracked changes count too, prose does not.
+        std::fs::write(root.join("a.py"), "one\n2\nthree\nfour\n").unwrap();
+        std::fs::write(root.join("test_a.py"), "x\ny\n").unwrap();
+        std::fs::write(root.join("NOTES.md"), "a\nb\nc\n").unwrap();
+        // two -> 2 (2), three (1), four (1), test_a.py (2)
+        assert_eq!(changed_code_lines(root), Some(6));
+        std::fs::write(root.join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+        assert_eq!(changed_code_lines(root), None);
+        std::fs::remove_file(root.join("blob.bin")).unwrap();
+        // A merge brings in code the change did not write.
+        run(&["commit", "-q", "-am", "more"]);
+        run(&["switch", "-q", "main"]);
+        std::fs::write(root.join("b.py"), "b\n").unwrap();
+        run(&["add", "b.py"]);
+        run(&["commit", "-q", "-m", "theirs"]);
+        run(&["switch", "-q", "fix"]);
+        assert!(changed_code_lines(root).is_some());
+        run(&["merge", "-q", "--no-edit", "main"]);
+        assert_eq!(changed_code_lines(root), None);
+    }
 
     #[test]
     fn reads_name_status_output() {

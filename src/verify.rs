@@ -42,6 +42,30 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// A change of at most this many lines of code against its merge base,
+/// added plus removed, is a small fix: finishing does not wait for a test
+/// run after its last edit, though a failed run still holds it up.
+pub(crate) const SMALL_FIX_LINES: u64 = 50;
+
+/// What the stop knows of a work tree besides its runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Scope {
+    /// Whether `jouet test --affected` can select tests there, for the
+    /// message.
+    pub affected: bool,
+    /// Whether its change is a small fix ([`SMALL_FIX_LINES`]).
+    pub small_fix: bool,
+}
+
+impl From<bool> for Scope {
+    fn from(affected: bool) -> Self {
+        Scope {
+            affected,
+            small_fix: false,
+        }
+    }
+}
+
 /// How many unresolved failures of a kind are kept; older ones are dropped.
 const MAX_FAILURES: usize = 16;
 
@@ -1316,14 +1340,15 @@ impl State {
     /// runs count as evidence, but its scratch repositories are its own.
     /// A tree whose reasons were all raised, with nothing changed since,
     /// is passed over (see [`Checks::block`]). `tree` gives a root's work
-    /// tree now, `hk_repo` whether it has an hk config, and `affected`
-    /// whether `jouet test --affected` can select tests there.
-    pub(crate) fn block(
+    /// tree now, `hk_repo` whether it has an hk config, and `scope` what
+    /// else is known of it ([`Scope`]; a bool is whether `jouet test
+    /// --affected` can select tests there).
+    pub(crate) fn block<S: Into<Scope>>(
         &self,
         home: &str,
         tree: impl Fn(&str) -> Option<String>,
         hk_repo: impl Fn(&str) -> bool,
-        affected: impl Fn(&str) -> bool,
+        scope: impl Fn(&str) -> S,
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
         // Runs outside any repository ("") share one entry, whatever
@@ -1343,7 +1368,7 @@ impl State {
             .into_iter()
             .chain(others)
             .filter_map(|(root, checks)| {
-                let raised = checks.block(|| tree(root), hk_repo(root), affected(root))?;
+                let raised = checks.block(|| tree(root), hk_repo(root), scope(root))?;
                 // Those raised now: the ones before were raised at this tree.
                 let before = match &checks.raised {
                     Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
@@ -1749,11 +1774,11 @@ impl Checks {
         &self,
         tree: impl Fn() -> Option<String>,
         hk_repo: bool,
-        affected: bool,
+        scope: impl Into<Scope>,
     ) -> Option<Raised> {
         let cell = std::cell::OnceCell::new();
         let now = || cell.get_or_init(&tree).clone();
-        let reasons = self.keyed_reasons(now, hk_repo, affected);
+        let reasons = self.keyed_reasons(now, hk_repo, scope.into());
         let tree = now();
         let mut raised = match &self.raised {
             Some(raised) if tree.is_some() && raised.tree == tree => raised.reasons.clone(),
@@ -1813,7 +1838,7 @@ impl Checks {
         hk_repo: bool,
         affected: bool,
     ) -> Vec<String> {
-        self.keyed_reasons(tree, hk_repo, affected)
+        self.keyed_reasons(tree, hk_repo, affected.into())
             .into_iter()
             .map(|(reason, _)| reason)
             .collect()
@@ -1825,14 +1850,14 @@ impl Checks {
         &self,
         tree: impl Fn() -> Option<String>,
         hk_repo: bool,
-        affected: bool,
+        scope: Scope,
     ) -> Vec<(String, String)> {
         // While a test run is still going, its result decides; the agent
         // waiting for it is not finishing on a stale one.
         let testing = self.running.iter().any(Running::alive);
         let mut reasons = self.failure_reasons(&tree, testing);
         if !testing {
-            reasons.extend(self.untested_reason(&tree, affected));
+            reasons.extend(self.untested_reason(&tree, scope));
         }
         reasons.extend(self.hk_reason(&tree, hk_repo));
         reasons
@@ -1864,17 +1889,27 @@ impl Checks {
         )))
     }
 
+    /// Whether the newest test run passed at a known tree: only then can
+    /// files change after it ([`Checks::untested_reason`]).
+    pub(crate) fn last_test_passed(&self) -> bool {
+        self.runs
+            .get(&Kind::Test)
+            .is_some_and(|last| last.passed() && last.tree.is_some())
+    }
+
     /// Files other than prose changed after the newest test run passed, and
     /// no test run has passed at the files now. Any passing run counts, a partial one too:
     /// the tests a change affects are enough here, as the full suite runs
-    /// on CI. A failed newest run is a failure reason instead.
+    /// on CI. A failed newest run is a failure reason instead. A small fix
+    /// ([`Scope::small_fix`]) is not asked about: an agent that tested it
+    /// once is not sent back for the last few lines.
     fn untested_reason(
         &self,
         tree: &impl Fn() -> Option<String>,
-        affected: bool,
+        scope: Scope,
     ) -> Option<(String, String)> {
         let last = self.runs.get(&Kind::Test)?;
-        if !last.passed() || last.tree.is_none() {
+        if !last.passed() || last.tree.is_none() || scope.small_fix {
             return None;
         }
         let now = tree()?;
@@ -1888,7 +1923,7 @@ impl Checks {
         if passed_now {
             return None;
         }
-        let run = if affected {
+        let run = if scope.affected {
             "`jouet test --affected`, or the tests for the code you changed"
         } else {
             "the tests for the code you changed"
@@ -3518,6 +3553,17 @@ mod tests {
         // Prose changed after a formatter rewrote the tested code.
         docs.reformatted("all1.code1", "all4.code4");
         assert_eq!(reason(&docs, "all5.code4"), None);
+        // A small fix is not sent back for its last edit, but a failure in
+        // one still holds it up.
+        let small = Scope {
+            affected: true,
+            small_fix: true,
+        };
+        let mut fix = Checks::default();
+        fix.record([test("cargo test -p a", 0, "-p a")], Some("t1"));
+        assert_eq!(fix.block(|| Some("t2".into()), false, small), None);
+        fix.record([test("cargo test -p a", 101, "-p a")], Some("t2"));
+        assert!(fix.block(|| Some("t3".into()), false, small).is_some());
         // An unknown tree (a Codex session) cannot be compared.
         assert_eq!(state.block_reason(|| None, false), None);
         // A partial lint or build run is not asked about.

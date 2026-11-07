@@ -26,7 +26,7 @@ mod pyimports;
 mod python;
 mod unaffected;
 
-pub(crate) use changes::{Base, Change, Status, base, unchanged_since};
+pub(crate) use changes::{Base, Change, Status, base, changed_code_lines, unchanged_since};
 pub(crate) use classify::Effect;
 use classify::Packages;
 use jouet_output::exit::Exit;
