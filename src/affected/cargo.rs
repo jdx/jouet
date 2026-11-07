@@ -190,15 +190,12 @@ impl Name {
 /// or `include!`, from the file's own directory. A string that leads out of
 /// the repository names nothing.
 fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
-    static STRING: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r#""([^"\\\n]*)""#).expect("string literal"));
     static INCLUDE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"include(?:_str|_bytes)?!\s*\(\s*$").expect("include macro")
     });
     let here = file.rsplit_once('/').map_or("", |(d, _)| d);
     let mut names = Vec::new();
-    for found in STRING.captures_iter(text) {
-        let (whole, literal) = (found.get(0).expect("match"), &found[1]);
+    for (start, literal) in strings(text) {
         if !literal.contains('/') {
             continue;
         }
@@ -207,7 +204,7 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
             Some((fixed, _)) => (fixed, true),
             None => (literal, false),
         };
-        let bases: &[&str] = if INCLUDE.is_match(&text[..whole.start()]) {
+        let bases: &[&str] = if INCLUDE.is_match(&text[..start]) {
             &[here]
         } else {
             &[dir, ""]
@@ -224,6 +221,85 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
         }
     }
     names
+}
+
+/// The string literals in Rust source `text`, each with where it starts
+/// (its `r`, `b` or quote) and what it holds: plain strings with their
+/// escapes skipped over, byte strings and raw strings (`r#"..."#`). Char
+/// literals and comments are passed over, so a `'"'` or a quote in a
+/// comment does not open a string. A plain string with an escape holds a
+/// path only by accident and is left out.
+fn strings(text: &str) -> Vec<(usize, &str)> {
+    let bytes = text.as_bytes();
+    let ident = |i: usize| i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i = text[i + 2..]
+                    .find("*/")
+                    .map_or(bytes.len(), |n| i + 2 + n + 2);
+            }
+            b'\'' => {
+                // A char literal ('x', '\n', '\u{..}'), or else a lifetime.
+                let close = if bytes.get(i + 1) == Some(&b'\\') {
+                    text[i + 2..].find('\'').map(|n| i + 2 + n)
+                } else {
+                    text[i + 1..]
+                        .char_indices()
+                        .nth(1)
+                        .filter(|&(_, c)| c == '\'')
+                        .map(|(n, _)| i + 1 + n)
+                };
+                i = close.map_or(i + 1, |c| c + 1);
+            }
+            b'r' | b'b' if !ident(i) => {
+                let mut j = i + 1;
+                if bytes[i] == b'b' && bytes.get(j) == Some(&b'r') {
+                    j += 1;
+                }
+                let raw = j > i + 1 || bytes[i] == b'r';
+                let hashes = bytes[j..].iter().take_while(|&&b| b == b'#').count();
+                if raw && bytes.get(j + hashes) == Some(&b'"') {
+                    let open = j + hashes + 1;
+                    let close = format!("\"{}", "#".repeat(hashes));
+                    let end = text[open..].find(&close).map_or(bytes.len(), |n| open + n);
+                    found.push((i, &text[open..end]));
+                    i = end + close.len();
+                } else {
+                    // A byte string's quote is read next.
+                    i += 1;
+                }
+            }
+            b'"' => {
+                let start = if i > 0 && bytes[i - 1] == b'b' && !ident(i - 1) {
+                    i - 1
+                } else {
+                    i
+                };
+                let mut j = i + 1;
+                let mut escaped = false;
+                while j < bytes.len() && bytes[j] != b'"' {
+                    if bytes[j] == b'\\' {
+                        escaped = true;
+                        j += 1;
+                    }
+                    j += 1;
+                }
+                let end = j.min(bytes.len());
+                if !escaped {
+                    found.push((start, &text[i + 1..end]));
+                }
+                i = end + 1;
+            }
+            _ => i += 1,
+        }
+    }
+    found
 }
 
 /// `rel` from `base`, both from the root, with `.` and `..` taken out, or
@@ -655,6 +731,32 @@ mod tests {
         // `"../../corpus/x.json"` from `crates/lib` is `corpus/x.json`.
         assert_eq!(cargo.reached("corpus/x.json"), vec![2]);
         assert!(!cargo.traces("crates/corpus/x.json"));
+    }
+
+    #[test]
+    fn strings_keep_track_of_their_quotes() {
+        let text = r####"let label = "\n"; let p = "../corpus/x.json";
+let q = '"'; // a "quote" in a comment
+let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/d";
+/* "e/f" */ let g = "g/h";"####;
+        let found: Vec<&str> = strings(text).into_iter().map(|(_, s)| s).collect();
+        assert_eq!(
+            found,
+            [
+                "../corpus/x.json",
+                "../../../corpus/y.json",
+                "a/b",
+                "c/d",
+                "g/h"
+            ]
+        );
+        let names = named(text, "crates/a", "crates/a/src/lib.rs");
+        let name = |path: &str| Name {
+            path: path.into(),
+            placeholder: false,
+        };
+        assert!(names.contains(&name("crates/corpus/x.json")), "{names:?}");
+        assert!(names.contains(&name("corpus/y.json")), "{names:?}");
     }
 
     #[test]
