@@ -82,7 +82,7 @@ def check_agent_browser_tests(changed):
     files = [Path(path) for path in changed if path.startswith(f'{root}/')
              and path.endswith(('.test.ts', '.spec.ts')) and Path(path).is_file()]
     if not files:
-        UNVERIFIED.append('no runnable changed Playwright test file')
+        check_agent_unit_tests(changed)
         return
     for path in files:
         if any(parent.is_symlink() for parent in (path, *path.parents)):
@@ -111,6 +111,45 @@ def check_agent_browser_tests(changed):
             verdict = False
         if not verdict:
             UNVERIFIED.append('changed Playwright test files did not all complete successfully: '
+                              + ', '.join(str(path) for path in files))
+
+
+def check_agent_unit_tests(changed):
+    """Run changed Vitest files when the agent wrote its regression test as a unit test."""
+    root = Path('packages/desktop-client')
+    files = [Path(path) for path in changed if path.startswith(f'{root}/src/')
+             and path.endswith(('.test.ts', '.test.tsx')) and Path(path).is_file()]
+    if not files:
+        UNVERIFIED.append('no runnable changed Playwright or Vitest test file')
+        return
+    if any(parent.is_symlink() for path in files for parent in (path, *path.parents)):
+        UNVERIFIED.append('changed Vitest test path contains a symlink')
+        return
+    names = [path.relative_to(root).as_posix() for path in files]
+    with tempfile.TemporaryDirectory(prefix='actual-agent-unit-') as directory:
+        report = Path(directory) / 'vitest.json'
+        try:
+            result = subprocess.run([
+                'node', str(Path('node_modules/vitest/vitest.mjs').resolve()), '--run',
+                '--reporter=json', f'--outputFile={report}', *names,
+            ], cwd=root, capture_output=True, text=True, timeout=600)
+            data = json.loads(report.read_text())
+            ran = {Path(suite['name']).resolve() for suite in data['testResults']}
+            verdict = (result.returncode == 0 and data.get('success') is True
+                       and ran == {path.resolve() for path in files}
+                       and data.get('numPassedTests', 0) > 0 and data.get('numFailedTests') == 0)
+        except subprocess.TimeoutExpired as error:
+            print_timeout_output(error)
+            verdict = False
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"could not read changed Vitest test result: {error}")
+            verdict = False
+        else:
+            if not verdict:
+                print(result.stdout, end="")
+                print(result.stderr, end="")
+        if not verdict:
+            UNVERIFIED.append('changed Vitest test files did not all complete successfully: '
                               + ', '.join(str(path) for path in files))
 
 
