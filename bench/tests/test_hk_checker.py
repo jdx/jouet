@@ -21,7 +21,13 @@ class HkCheckerTest(unittest.TestCase):
             cargo.chmod(0o755)
             bats = work / "test/bats/bin/bats"
             bats.parent.mkdir(parents=True)
-            bats.write_text("#!/bin/sh\nexit 0\n")
+            bats.write_text("#!/bin/sh\n"
+                            "if [ \"$1\" = --tap ] && ! grep -q regression \"$2\"; then exit 7; fi\n"
+                            "case $BATS_CASE in\n"
+                            "  skip) printf '1..1\\nok 1 regression # skip unavailable\\n' ;;\n"
+                            "  fail) printf '1..1\\nnot ok 1 regression\\n'; exit 1 ;;\n"
+                            "  *) printf '1..1\\nok 1 regression\\n' ;;\n"
+                            "esac\n")
             bats.chmod(0o755)
             (work / "test/check.bats").write_text("original\n")
             source = work / "source"
@@ -60,8 +66,28 @@ class HkCheckerTest(unittest.TestCase):
             (work / "extra").unlink()
 
             result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn("no committed Bats regression", result.stdout)
+            git("restore", "test/check.bats")
+            (work / "test/check.bats").write_text('@test "regression" {\n  true\n}\n')
+            git("add", "test/check.bats")
+            git("commit", "-qm", "regression")
+
+            result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("ok", result.stdout)
+
+            git("restore", "test/check.bats")
+            env["BATS_CASE"] = "skip"
+            result = check()
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn("unverified", result.stdout)
+
+            git("restore", "test/check.bats")
+            env["BATS_CASE"] = "fail"
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("committed Bats regression failed", result.stdout)
 
 
 if __name__ == "__main__":

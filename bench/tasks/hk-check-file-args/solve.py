@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import commit  # noqa: E402
+from _check import commit
 
 # The fix as merged (jdx/hk#1754), with its tests.
 subprocess.run(["git", "apply", str(Path(__file__).parent / "fix.patch")], check=True)

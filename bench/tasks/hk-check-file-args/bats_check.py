@@ -1,0 +1,67 @@
+"""Verify the committed Bats regressions before installing hidden tests."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from _check import UNVERIFIED, expect, head_sha
+
+
+def test_names(source: str) -> list[str]:
+    return re.findall(r'^\s*@test\s+"([^"]+)"\s*\{', source, re.MULTILINE)
+
+
+def check_bats() -> None:
+    try:
+        def paths(mode: str) -> set[str]:
+            proc = subprocess.run(
+                ["git", "diff", "--name-only", "-z", f"--diff-filter={mode}", head_sha(), "HEAD", "--", "test"],
+                capture_output=True, check=True, timeout=30,
+            )
+            return {os.fsdecode(path) for path in proc.stdout.split(b"\0") if path}
+
+        changed = {path for path in paths("AM") if path.endswith(".bats")}
+        added_files = paths("A")
+        if not changed:
+            UNVERIFIED.append("no committed Bats regression test was changed")
+            return
+        env = {**os.environ, "PATH": f"{Path.cwd() / 'target/debug'}{os.pathsep}{os.environ.get('PATH', '')}"}
+        env.pop("GIT_CONFIG_GLOBAL", None)
+        for path in sorted(changed):
+            current = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True,
+                                     check=True, timeout=30).stdout
+            original = "" if path in added_files else subprocess.run(
+                ["git", "show", f"{head_sha()}:{path}"], capture_output=True, text=True, check=True, timeout=30,
+            ).stdout
+            before, after = test_names(original), test_names(current)
+            if (len(set(before)) != len(before) or len(set(after)) != len(after)
+                    or not set(before).issubset(after)):
+                UNVERIFIED.append(f"starting Bats tests are missing, renamed, or ambiguous in {path}")
+                continue
+            new = [name for name in after if name not in set(before)]
+            if not new:
+                UNVERIFIED.append(f"no new standard-form Bats regression test in {path}")
+                continue
+            run = subprocess.run(["test/bats/bin/bats", "--tap", path], capture_output=True, text=True,
+                                 timeout=300, check=False, env=env)
+            print(run.stdout, end="")
+            if run.stderr:
+                print(run.stderr, end="", file=sys.stderr)
+            results = re.findall(r"^(not ok|ok) (\d+)\b([^\n]*)$", run.stdout, re.MULTILINE)
+            failed = [result[2].strip() for result in results if result[0] == "not ok"]
+            if any(name in new for name in failed):
+                expect(False, f"a committed Bats regression failed in {path}")
+                continue
+            plans = re.findall(r"^1\.\.(\d+)\s*$", run.stdout, re.MULTILINE)
+            names = [result[2].strip() for result in results]
+            complete = (len(plans) == 1 and int(plans[0]) > 0 and len(results) == int(plans[0])
+                        and [int(result[1]) for result in results] == list(range(1, len(results) + 1))
+                        and all(names.count(name) == 1 for name in new)
+                        and not any(re.search(r"#\s*(skip|todo)\b", result[2], re.IGNORECASE)
+                                    for result in results))
+            if run.returncode != 0 or failed or not complete:
+                UNVERIFIED.append(f"Bats results were incomplete or could not be verified for {path}")
+    except (OSError, subprocess.SubprocessError) as error:
+        UNVERIFIED.append(f"could not verify committed Bats tests: {error}")
