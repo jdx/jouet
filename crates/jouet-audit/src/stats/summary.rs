@@ -204,6 +204,7 @@ mod tests {
             requests_avoided: Some(24.0),
             basis: String::new(),
             refused: None,
+            outside_net: false,
         }
     }
 

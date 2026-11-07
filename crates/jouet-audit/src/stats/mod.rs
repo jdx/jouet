@@ -767,6 +767,9 @@ pub struct Estimate {
     /// Why there is no estimate, when there is none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refused: Option<String>,
+    /// The harness has no baseline and is excluded from the combined net.
+    #[serde(skip)]
+    pub(crate) outside_net: bool,
 }
 
 /// Prices the measured jouet runs by each harness's own history: what they
@@ -802,10 +805,14 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                 requests_avoided: None,
                 basis: String::new(),
                 refused: Some(reason),
+                outside_net: !baselines.iter().any(|b| b.harness == harness),
             };
             let Some(b) = baselines.iter().find(|b| b.harness == harness) else {
                 return refuse(format!("no {harness} history from before setup"));
             };
+            if kind == Kind::CiWait {
+                return refuse("CI polling history does not establish linked, avoidable checks".to_string());
+            }
             if b.requests_with_tokens == 0 {
                 return refuse(format!("the {harness} history records no token counts"));
             }
@@ -903,6 +910,7 @@ pub fn estimate(measured: &Measured, baselines: &[Baseline]) -> Vec<Estimate> {
                 requests_avoided: avoided,
                 basis,
                 refused: None,
+            outside_net: false,
             }
         })
         .collect()
