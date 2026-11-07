@@ -323,7 +323,7 @@ Failures are recognised by their lines, whatever command printed them, in the ou
 
 One task can run several of them, as `mise run test` may run cargo's tests and then bats, and mise's `[task]` line prefixes are taken off. For any other output, a failing run shows the end of it, with earlier lines that look like errors.
 
-Playwright's generic test timeouts are named in the digest but remain unresolved in baseline comparisons: the same timeout headline can have different causes.
+Playwright's generic test timeouts are named in the digest but remain unresolved in baseline comparisons: the same timeout headline can have different causes. Vitest unhandled source type errors are named in a failed run when every reported unhandled error has a location; they are display-only. Runs reporting unhandled Vitest errors are not compared with a baseline, even if they also name failing tests.
 
 A run that passed without running a test says so when the output shows it: TAP's `1..0`, libtest running no test in any binary, or pytest, RSpec, jest, Playwright or go saying they ran none. With `--cmd`, if the command is recognised as a test and its output shows no test ran, jouet exits `4` instead of accepting the runner's successful exit; check the filter or path. For Go, including `go test -json`, a run where every package reports `[no test files]` is empty; packages without test files do not make a mixed run empty. An unrecognised command retains its own exit code, and an empty `--affected` plan still succeeds. A Rust backtrace, std's or color-eyre's, is folded into one `... N backtrace lines skipped` line, so a panic's 40 frames do not push the message above them out of what is shown.
 
