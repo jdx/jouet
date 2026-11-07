@@ -66,11 +66,18 @@ def check_committed_tests(tests: list[str]) -> None:
                             or not path.resolve().is_relative_to(checkout.resolve())):
                         UNVERIFIED.append(f"committed test is not a regular file in the checkout: {name}")
                         return
-                proc = subprocess.run(
-                    ["python3", "-m", "pytest", "-o", "addopts=", f"--junitxml={report}", "--", *tests],
-                    cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
-                    env={**os.environ, "PYTHONPATH": str(checkout / "src")},
-                )
+                try:
+                    proc = subprocess.run(
+                        ["python3", "-m", "pytest", "-o", "addopts=", f"--junitxml={report}", "--", *tests],
+                        cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
+                        env={**os.environ, "PYTHONPATH": str(checkout / "src")},
+                    )
+                except subprocess.TimeoutExpired as error:
+                    def as_text(value):
+                        return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+                    output = (as_text(error.stdout) + as_text(error.stderr))[-3000:]
+                    UNVERIFIED.append(f"committed tests timed out: {error}\n{output}")
+                    return
                 output = (proc.stdout + proc.stderr)[-3000:]
                 try:
                     cases = ET.parse(report).getroot().findall(".//testcase")
@@ -90,8 +97,31 @@ def check_committed_tests(tests: list[str]) -> None:
                 )
                 if removed.returncode:
                     UNVERIFIED.append(f"could not remove test checkout: {removed.stderr.strip()}")
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except subprocess.TimeoutExpired as error:
+            def as_text(value):
+                return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+            output = (as_text(error.stdout) + as_text(error.stderr))[-3000:]
+            UNVERIFIED.append(f"committed tests timed out: {error}\n{output}")
+        except OSError as error:
             UNVERIFIED.append(f"committed tests could not run: {error}")
+
+
+def changed_tests() -> list[str] | None:
+    """Find changed test files present at HEAD, including renamed files."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=ACMRT", "-z", head_sha(), "HEAD", "--", "tests/"],
+            capture_output=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        UNVERIFIED.append(f"could not list committed tests: {error}")
+        return None
+    if result.returncode:
+        UNVERIFIED.append("could not list committed tests")
+        return None
+    paths = (os.fsdecode(path) for path in result.stdout.split(b"\0") if path)
+    return sorted(path for path in paths if path.startswith("tests/") and path.endswith(".py")
+                  and (Path(path).name.startswith("test_") or Path(path).name.endswith("_test.py")))
 
 # Test the public Command API without replacing the agent's tests.
 program = r'''
@@ -113,24 +143,29 @@ for text, limit, expected in cases:
         raise AssertionError(f"{text!r}: got {actual!r}, expected {expected!r}")
 assert click.Command("example", help="Long text", short_help="Exact.").get_short_help_str() == "Exact."
 '''
-run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
-                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60, check=False)
-expect(run.returncode == 0, f"short-help cases failed:\n{run.stdout}\n{run.stderr}")
-expect(new_commit(), "nothing was committed")
-expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
-changed = committed_files()
-tests = sorted(path for path in changed if path.startswith("tests/")
-               and Path(path).name.startswith("test_") and path.endswith(".py"))
-expect(bool(tests), "no committed Python test file was changed")
-if tests:
-    check_committed_tests(tests)
-added_result = subprocess.run(
-    ["git", "diff", "--name-only", "--diff-filter=A", head_sha(), "HEAD"],
-    capture_output=True, text=True, check=True,
-)
-added = set(added_result.stdout.splitlines())
-for path in sorted(changed):
-    if path.endswith(".py") and Path(path).is_file():
-        check_ruff(path, "lint", path in added)
-        check_ruff(path, "format", path in added)
-finish()
+def main() -> None:
+    run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
+                         env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60, check=False)
+    expect(run.returncode == 0, f"short-help cases failed:\n{run.stdout}\n{run.stderr}")
+    expect(new_commit(), "nothing was committed")
+    expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
+    changed = committed_files()
+    tests = changed_tests()
+    if tests is not None:
+        expect(bool(tests), "no committed Python test file was changed")
+        if tests:
+            check_committed_tests(tests)
+    added_result = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=A", head_sha(), "HEAD"],
+        capture_output=True, text=True, check=True,
+    )
+    added = set(added_result.stdout.splitlines())
+    for path in sorted(changed):
+        if path.endswith(".py") and Path(path).is_file():
+            check_ruff(path, "lint", path in added)
+            check_ruff(path, "format", path in added)
+    finish()
+
+
+if __name__ == "__main__":
+    main()

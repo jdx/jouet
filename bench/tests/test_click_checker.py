@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -5,11 +6,26 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/click-short-help/check.py"
 
 
 class ClickCheckerTest(unittest.TestCase):
+    def test_timeout_keeps_captured_output_and_removes_checkout(self):
+        spec = importlib.util.spec_from_file_location("click_checker", CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        timeout = subprocess.TimeoutExpired("pytest", 120, output=b"stdout\xff", stderr=b"stderr\n")
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[ok, timeout, ok]) as process:
+            checker.check_committed_tests([])
+            self.assertEqual(len(checker.UNVERIFIED), 1)
+            self.assertIn("timed out", checker.UNVERIFIED[0])
+            self.assertIn("stdout\ufffdstderr", checker.UNVERIFIED[0])
+            self.assertEqual(process.call_count, 3)
+
     def test_ruff_failures_are_compared_and_unavailable_checks_are_unverified(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -53,7 +69,7 @@ class ClickCheckerTest(unittest.TestCase):
             ruff.write_text(
                 '#!/bin/sh\n'
                 '[ "$1" = check ] && exit 0\n'
-                'case "$*" in *tests/test_change.py*) exit 0;; esac\n'
+                'case "$*" in *tests/test_*) exit 0;; esac\n'
                 'case "$*" in *--stdin-filename*) exit "${FAKE_BASE_EXIT:-0}";; esac\n'
                 'exit "${FAKE_FORMAT_EXIT:-0}"\n'
             )
@@ -81,6 +97,18 @@ class ClickCheckerTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
             (work / "tests/helper.py").write_text("untracked\n")
             self.assertEqual(check(FAKE_PYTEST="helper").returncode, 3)
+            test_commit = git("rev-parse", "HEAD")
+            git("mv", "tests/test_change.py", "tests/test_renamed.py")
+            git("commit", "-qm", "rename test")
+            result = check()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            git("rm", "tests/test_renamed.py")
+            git("commit", "-qm", "delete test")
+            result = check()
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("no committed Python test file", result.stdout)
+            git("checkout", test_commit, "--", "tests/test_change.py")
+            git("commit", "-qm", "restore test")
             result = check(FAKE_FORMAT_EXIT="1")
             self.assertEqual(result.returncode, 1)
             self.assertIn("Ruff format fails on source with spaces.py", result.stdout)
