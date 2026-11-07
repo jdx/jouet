@@ -20,6 +20,8 @@ The commands are listed costliest first. Each line ends with what the estimate r
 
 `pnpm vitest run` is recorded as a partial test when the nearest `package.json` has no `vitest` script. If that manifest is missing, unreadable, or defines the script, jouet cannot tell what pnpm ran and does not classify the command. `pnpm exec vitest run` explicitly invokes the executable.
 
+`npx jest` and `npx --no-install jest` are recorded as partial tests, including the arguments that select tests or configuration. Ambiguous arguments and commands that only inspect, watch or update snapshots are not recorded.
+
 The session-start primer names up to four checks that take 20 seconds or more, so the agent sees the slowest without running `jouet cost`:
 
 ```text

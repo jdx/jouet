@@ -643,6 +643,27 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 	if playwright_at then
 		return playwright_scope(args, playwright_at, workspace)
 	end
+	-- An explicit npx Jest invocation may be a focused run, a custom config,
+	-- or a different suite from the project's test script. Preserve every
+	-- argument and never let it clear a full-suite or other runner's failure.
+	if program == "npx" then
+		local at = if args[1] == "--no-install" then 2 else 1
+		if args[at] == "jest" then
+			local selection = { "@jouet:npx:jest" }
+			for i = at + 1, #args do
+				local arg = args[i]
+				local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
+				if arg == "" or string.find(arg, "[^%w%._/%-:=@]")
+					or name == "--showConfig" or name == "--show-config" or name == "--clearCache" or name == "--clear-cache" or name == "--init"
+					or name == "--updateSnapshot" or name == "--update-snapshot" or name == "-u"
+					or name == "--watch" or name == "--watchAll" or name == "--watch-all" then
+					return nil, unknown
+				end
+				table.insert(selection, arg)
+			end
+			return "test", partial(table.concat(selection, " "))
+		end
+	end
 	if program == "pnpm" then
 		local is_test = first == "test" or first == "t" or ((first == "run" or first == "run-script") and (args[2] == "test" or args[2] == "t"))
 		local scoped_test = dir ~= nil
@@ -864,7 +885,7 @@ local rule: JouetRule = {
 				for _, ran in ipairs(script_commands(command, project_dir, call.cwd, call.harness) or { command }) do
 					local kind, scope = classify(ran, project_dir, call.cwd, call.harness)
 					if kind then
-						if scope.selector and string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" then
+						if scope.selector and (string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" or string.sub(scope.selector, 1, 15) == "@jouet:npx:jest") then
 							-- Identical --dir arguments can refer to different projects
 							-- when calls start in different directories.
 							local cwd = call.cwd or (if call.harness == "test" then "." else "unknown")
