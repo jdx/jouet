@@ -1220,7 +1220,9 @@ printf '%s\n' '$ xargs -0 remark --use remark-validate-links --frail --quiet' \
 exit 1
 SH
 	chmod +x check-command
-	git add reason check-command
+	cp check-command check-text
+	cp check-command check-json
+	git add reason check-command check-text check-json
 	git commit -qm base
 	git checkout -qb work
 	printf 'change\n' >changed
@@ -1231,9 +1233,23 @@ SH
 	assert_success
 	assert_output --partial 'remark docs/README.md:1:1-1:2'
 	printf 'different heading\n' >reason
-	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	run --separate-stderr jouet test --baseline --cmd -- ./check-text
 	assert_failure 1
 	assert_output --partial 'could not be compared'
+	assert_output --partial 'baseline log: '
+	# The baseline log is also available to JSON consumers when the details differ.
+	run --separate-stderr jouet test --baseline --json --cmd -- ./check-json
+	assert_failure 1
+	local baseline_log
+	baseline_log=$(jq -er '.baseline.logs[0]' <<<"$output")
+	[[ -f "$baseline_log" ]]
+	run cat "$baseline_log"
+	assert_output --partial 'missing heading'
+	# Reusing the saved fingerprint does not promise a still-available log.
+	run --separate-stderr jouet test --baseline --json --cmd -- ./check-json
+	assert_failure 1
+	run jq -e '.baseline | has("logs") | not' <<<"$output"
+	assert_success
 	printf 'missing heading\n' >reason
 	printf 'Earlier task failed unexpectedly\n' >earlier
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command
