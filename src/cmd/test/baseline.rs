@@ -220,6 +220,133 @@ pub(super) struct Evidence {
     go: Option<BTreeMap<String, BTreeSet<String>>>,
 }
 
+/// A Ruff diagnostic is comparable only when the directly executed command
+/// reports every diagnostic in its complete default text format.
+fn ruff_evidence(output: &str, root: &Path) -> Option<Evidence> {
+    static HEADER: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^([A-Z][A-Z0-9]*[0-9]{3})(?: \[\*\])? .+$")
+            .expect("Ruff diagnostic header")
+    });
+    static LOCATION: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^\s*--> (.+):(\d+):(\d+)$").expect("Ruff diagnostic location")
+    });
+    static SUMMARY: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^Found (\d+) errors?\.$").expect("Ruff diagnostic summary")
+    });
+    static FIXABLE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^(?:\[\*\] \d+ fixable with (?:`--fix`|the `--fix` option)(?: \(\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`\))?|\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`)\.$")
+            .expect("Ruff fixable summary")
+    });
+    static FRAME: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^\s*(?:\d+\s*)?[|+-]").expect("Ruff diagnostic frame")
+    });
+    let lines = testlog::clean(output);
+    let summary = lines.iter().position(|line| SUMMARY.is_match(line))?;
+    let count = SUMMARY.captures(&lines[summary])?[1]
+        .parse::<usize>()
+        .ok()?;
+    if count == 0
+        || lines[summary + 1..]
+            .iter()
+            .any(|line| !line.is_empty() && !FIXABLE.is_match(line))
+    {
+        return None;
+    }
+    let mut details = BTreeMap::new();
+    let mut i = 0;
+    while i < summary {
+        if lines[i].is_empty() {
+            i += 1;
+            continue;
+        }
+        let code = HEADER.captures(&lines[i])?.get(1)?.as_str();
+        let location = LOCATION.captures(lines.get(i + 1)?)?;
+        let file = from_root(&location[1], root);
+        let name = format!("ruff {file}:{}:{} {code}", &location[2], &location[3]);
+        let start = i;
+        i += 2;
+        let mut has_frame = false;
+        while i < summary && !HEADER.is_match(&lines[i]) {
+            let line = &lines[i];
+            if FRAME.is_match(line) {
+                has_frame = true;
+            } else if !line.is_empty() && !line.starts_with("help:") && !line.starts_with("note:") {
+                return None;
+            }
+            i += 1;
+        }
+        if !has_frame {
+            return None;
+        }
+        let block = lines[start..i]
+            .iter()
+            .map(|line| from_root(line, root))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let hash = Sha256::digest(block.as_bytes());
+        let hash: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        if details.insert(name, hash).is_some() {
+            return None;
+        }
+    }
+    if details.len() != count {
+        return None;
+    }
+    Some(Evidence {
+        names: details.keys().cloned().collect(),
+        details,
+        go: None,
+    })
+}
+
+pub(super) fn job_evidence(
+    job: &Job,
+    code: i32,
+    output: &str,
+    formats: &[Format],
+    root: &Path,
+    scoped: bool,
+) -> Option<Evidence> {
+    let command = jouet_rules::shell::Command {
+        words: job.argv.clone(),
+        ..Default::default()
+    };
+    let argv = command.argv();
+    if argv
+        .first()
+        .is_some_and(|word| jouet_rules::shell::basename(word) == "ruff")
+    {
+        let mut check = 1;
+        loop {
+            match argv.get(check).map(String::as_str) {
+                Some("check") => break,
+                Some("--config" | "--color") if argv.get(check + 1).is_some() => check += 2,
+                Some("--isolated" | "--verbose" | "--quiet" | "--silent" | "-v" | "-q" | "-s") => {
+                    check += 1;
+                }
+                Some(option)
+                    if option.starts_with("--config=") || option.starts_with("--color=") =>
+                {
+                    check += 1;
+                }
+                _ => return None,
+            }
+        }
+        let mutating = argv.iter().skip(check + 1).any(|word| {
+            matches!(
+                word.as_str(),
+                "-" | "--fix" | "--fix-only" | "--diff" | "--watch"
+            ) || ["--fix=", "--fix-only=", "--diff=", "--watch="]
+                .iter()
+                .any(|prefix| word.starts_with(prefix))
+        });
+        return (code == 1 && !scoped && !mutating)
+            .then(|| ruff_evidence(output, root))
+            .flatten();
+    }
+    failure_evidence(output, formats, root, scoped)
+}
+
 /// Only the complete, terminal output of remark's explicit frail link check
 /// is comparable. A warning alone does not prove why a command exited nonzero.
 fn remark_evidence(output: &str, root: &Path) -> Option<Evidence> {
@@ -875,7 +1002,8 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    match failure_evidence(&output, formats, &tree, mode == Mode::Fresh) {
+                    match job_evidence(&at_base, code, &output, formats, &tree, mode == Mode::Fresh)
+                    {
                         Some(evidence) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
                             known::Outcome::Failed {
@@ -1252,6 +1380,93 @@ mod tests {
             failure_names("something broke\n", &[], Path::new("/x"), false),
             None
         );
+    }
+
+    #[test]
+    fn ruff_baselines_require_complete_unambiguous_diagnostics() {
+        let output = "F821 Undefined name `x`\n --> /work/a.py:1:7\n  |\n1 | print(x)\n  |       ^\n\nFound 1 error.\n";
+        let ruff = |args: &[&str]| Job {
+            argv: args.iter().map(|word| (*word).to_string()).collect(),
+            env: Vec::new(),
+            dir: PathBuf::from("/work"),
+            exit: Box::new(|_| Exit::Failed),
+        };
+        let wrapped = ruff(&[
+            "env",
+            "MODE=1",
+            "mise",
+            "x",
+            "ruff@0.17",
+            "--",
+            "ruff",
+            "check",
+            ".",
+        ]);
+        let global = ruff(&["ruff", "--color", "never", "check", "."]);
+        assert!(job_evidence(&global, 1, output, &[], Path::new("/work"), false).is_some());
+        let global_fix = ruff(&["ruff", "--color=never", "check", "--fix", "."]);
+        assert!(job_evidence(&global_fix, 1, output, &[], Path::new("/work"), false).is_none());
+        let missing_value = ruff(&["ruff", "--color", "check"]);
+        assert!(job_evidence(&missing_value, 1, output, &[], Path::new("/work"), false).is_none());
+        let evidence = job_evidence(&wrapped, 1, output, &[], Path::new("/work"), false).unwrap();
+        assert_eq!(evidence.names.len(), 1);
+        let other = output.replace("/work/", "/base/");
+        let other = job_evidence(&wrapped, 1, &other, &[], Path::new("/base"), false).unwrap();
+        assert_eq!(evidence.names, other.names);
+        assert_eq!(evidence.details, other.details);
+        for footer in [
+            "[*] 1 fixable with `--fix`.",
+            "[*] 1 fixable with the `--fix` option.",
+            "1 unsafe fix available with `--fix --unsafe-fixes`.",
+            "2 unsafe fixes available with `--fix --unsafe-fixes`.",
+            "[*] 3 fixable with `--fix` (2 unsafe fixes available with `--fix --unsafe-fixes`).",
+        ] {
+            let fixable = format!("{output}{footer}\n");
+            assert!(ruff_evidence(&fixable, Path::new("/work")).is_some());
+        }
+        let changed = output.replace("print(x)", "other(x)");
+        assert_ne!(
+            evidence.details,
+            ruff_evidence(&changed, Path::new("/work")).unwrap().details
+        );
+        for incomplete in [
+            output.replace("Found 1 error.", "Found 2 errors."),
+            output.replace("Found 1 error.\n", ""),
+            format!("{output}unexpected error\n"),
+            output.replace(" --> /work/a.py:1:7", " no location"),
+            output.replace(
+                "Found 1 error.",
+                "error: could not read file\nFound 1 error.",
+            ),
+            output.replace("  |\n1 | print(x)\n  |       ^\n", ""),
+            output.replace("Found 1 error.", "  unrelated failure\nFound 1 error."),
+        ] {
+            assert!(ruff_evidence(&incomplete, Path::new("/work")).is_none());
+        }
+        assert!(
+            job_evidence(
+                &ruff(&["ruff", "check", "--fix", "."]),
+                1,
+                output,
+                &[],
+                Path::new("/work"),
+                false
+            )
+            .is_none()
+        );
+        assert!(
+            job_evidence(
+                &ruff(&["sh", "-c", "ruff check ."]),
+                1,
+                output,
+                &[],
+                Path::new("/work"),
+                false
+            )
+            .is_none()
+        );
+        assert!(job_evidence(&wrapped, 1, output, &[], Path::new("/work"), true).is_none());
+        assert!(job_evidence(&wrapped, 2, output, &[], Path::new("/work"), false).is_none());
     }
 
     #[test]

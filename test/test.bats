@@ -1241,6 +1241,47 @@ SH
 	assert_output --partial 'baseline: all 2 failures also fail at'
 }
 
+@test "--baseline compares complete Ruff diagnostics and rejects unexpected output" {
+	printf 'original\n' >reason
+	cat >ruff <<'SH'
+#!/bin/sh
+printf 'F821 Undefined name `x`\n --> a.py:1:7\n  |\n1 | %s\n  |       ^\n\n' "$(cat reason)"
+test ! -f extra || cat extra
+printf 'Found 1 error.\n'
+if test -f unsafe; then
+  printf '1 unsafe fix available with `--fix --unsafe-fixes`.\n'
+else
+  printf '[*] 1 fixable with the `--fix` option.\n'
+fi
+exit 1
+SH
+	chmod +x ruff
+	git add reason ruff
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >changed
+	git add changed
+	git commit -qm change
+
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_success
+	assert_output --partial 'matching failure details'
+	touch unsafe
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_success
+	assert_output --partial 'matching failure details'
+	rm unsafe
+	printf 'different\n' >reason
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	printf 'original\n' >reason
+	printf 'error: could not read another file\n' >extra
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+}
+
 @test "--baseline compares complete remark link warnings with their details" {
 	printf 'missing heading\n' >reason
 	cat >check-command <<'SH'
