@@ -2134,6 +2134,22 @@ class CostSeedTest(unittest.TestCase):
                     self.assertRaises(tasks.EnvironmentSetupError):
                 costs.seed(task, Path(sys.executable), root / "work", lambda _: None, root / "results")
             self.assertEqual((root / "results" / "smoke.environment.log").read_text(), "setup details\n")
+            self.assertFalse((root / "work" / "cost-seed-smoke" / "work").exists())
+
+            task = dataclasses.replace(task, env={"JOUET_LOG_DIR": "{workdir}/logs"})
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup), \
+                    self.assertRaises(tasks.EnvironmentSetupError):
+                costs.seed(task, Path(sys.executable), root / "other", lambda _: None, root / "results")
+            self.assertTrue((root / "other" / "cost-seed-smoke" / "work" / "a").exists())
+
+            checkout = root / "third" / "cost-seed-smoke" / "work"
+            task = dataclasses.replace(task, env={})
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}), \
+                    patch.object(tasks, "setup_environment", side_effect=fail_setup), \
+                    self.assertRaises(tasks.EnvironmentSetupError):
+                costs.seed(task, Path(sys.executable), root / "third", lambda _: None, checkout / "logs")
+            self.assertEqual((checkout / "logs" / "smoke.environment.log").read_text(), "setup details\n")
 
     def test_seed_times_the_commands_once_and_runs_start_with_the_note(self):
         import os
@@ -2161,6 +2177,9 @@ class CostSeedTest(unittest.TestCase):
             stand_in.write_text(
                 "#!/bin/sh\n"
                 f'echo "$*" >> {calls}\n'
+                'mkdir -p "$HOME/.local/state/jouet/logs"\n'
+                'echo seed-log > "$HOME/.local/state/jouet/logs/check.log"\n'
+                'if [ ! -d locked ]; then mkdir locked && touch locked/file && chmod 200 locked; fi\n'
                 "shift 3\n"
                 "line=$(printf '{\"cmd\":\"%s\"}' \"$*\")\n"
                 "old=$(git notes --ref jouet-cost show HEAD 2>/dev/null)\n"
@@ -2175,6 +2194,12 @@ class CostSeedTest(unittest.TestCase):
                 del os.environ["XDG_CACHE_HOME"]
             self.assertEqual(note, '{"cmd":"cargo build"}\n{"cmd":"cargo test -p a"}\n')
             self.assertEqual(again, note)
+            self.assertFalse((root / "work" / "cost-seed-t" / "work").exists())
+            self.assertTrue((root / "work" / "cost-seed-t" / "home").is_dir())
+            self.assertEqual(
+                (root / "work" / "cost-seed-t" / "home" / ".local/state/jouet/logs/check.log").read_text(),
+                "seed-log\n",
+            )
             # Timed once: the second call read the cache.
             self.assertEqual(
                 calls.read_text().splitlines(), ["test --cmd -- cargo build", "test --cmd -- cargo test -p a"]
@@ -2214,6 +2239,7 @@ class CostSeedTest(unittest.TestCase):
             self.assertIsNone(note)
             self.assertTrue(any("no timing was recorded for pnpm vitest run test.ts" in m for m in messages))
             self.assertTrue(any("runs start without a cost note" in m for m in messages))
+            self.assertFalse((root / "work" / "cost-seed-t" / "work").exists())
             failed = dataclasses.replace(task, cost_seed=["cargo build"], env={"FAIL_RECORDED": "1"})
             messages.clear()
             with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
@@ -2248,6 +2274,7 @@ class CostSeedTest(unittest.TestCase):
             self.assertTrue(any("could not be timed" in message for message in messages))
             self.assertTrue(any("runs start without a cost note" in message for message in messages))
             self.assertFalse(Path(tmp_record.read_text()).exists())
+            self.assertFalse((root / "work" / "cost-seed-t" / "work").exists())
             subprocess.run(["sleep", "2"], check=True)
             self.assertFalse(marker.exists(), "the timed-out check's child kept running")
 

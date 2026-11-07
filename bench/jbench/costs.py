@@ -27,6 +27,7 @@ from typing import Any
 
 from . import arms as arms_mod
 from . import tasks as tasks_mod
+from .cleanup import remove
 
 NOTES_REF = "jouet-cost"
 
@@ -153,6 +154,15 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
             note = updated
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        # Keep the checkout if it contains the task's home or logs.
+        paths = [str(setup_log.resolve()), *(env.get(name) for name in ("HOME", "XDG_STATE_HOME", "JOUET_LOG_DIR"))]
+        if any(value and (workdir / value).resolve().is_relative_to(workdir.resolve()) for value in paths):
+            log(f"    keeping cost seed checkout {workdir}: it contains home or logs")
+        else:
+            try:
+                remove(workdir)
+            except OSError as error:
+                log(f"    could not remove cost seed checkout {workdir}: {error}")
     if incomplete:
         log(f"    {task.name}: runs start without a cost note because the seed is incomplete")
         return None
