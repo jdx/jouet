@@ -1326,6 +1326,71 @@ fn a_small_passing_run_names_its_tests() {
 }
 
 #[test]
+fn vitest_unhandled_source_errors_are_named_only_for_display_when_complete() {
+    let text = " RUN  v4.1.5 /repo\n\
+⎯⎯⎯ Unhandled Errors ⎯⎯⎯\n\
+Vitest caught 2 unhandled errors during the test run.\n\
+⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\n\
+TypeCheckError: 'bag.minimum' is possibly 'null'.\n\
+ ❯ packages/zod/src/checks.ts:291:40\n\
+  291 | bag.minimum < minimum\n\
+⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\n\
+TypeCheckError: Operator '<' cannot be applied to types '{}' and 'number'.\n\
+ ❯ packages/zod/src/checks.ts:291:40\n\
+⎯⎯⎯⎯⎯⎯\n\
+ Test Files  3 passed (3)\n      Tests  477 passed (477)\n";
+    let d = digest(text, true, DEFAULT_BUDGET);
+    assert_eq!(d.passed, 477);
+    assert_eq!(d.failures.len(), 2);
+    assert!(d.failures[0].name.contains("checks.ts:291:40"));
+    assert!(d.failures[0].name.contains("possibly 'null'"));
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("291 |"))
+    );
+    assert!(d.failures[1].name.contains("Operator '<'"));
+    // Display-only errors cannot establish a matching baseline.
+    assert!(failure_names(text, &[]).is_empty());
+    assert!(failure_details(text, &[]).is_empty());
+    // Do not hide an additional unrecognised error, or match a quoted
+    // excerpt without Vitest's run header.
+    let incomplete = text.replace("caught 2", "caught 3");
+    assert!(
+        digest(&incomplete, true, DEFAULT_BUDGET).failures[0]
+            .name
+            .contains("no failure recognised")
+    );
+    let quoted = text.replace(" RUN  v4.1.5 /repo\n", "");
+    assert!(
+        digest(&quoted, true, DEFAULT_BUDGET).failures[0]
+            .name
+            .contains("no failure recognised")
+    );
+    assert!(digest(text, false, DEFAULT_BUDGET).failures.is_empty());
+
+    let first = " RUN  v4.1.5 /first\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: first\n ❯ src/a.ts:1:2\n⎯⎯⎯\n";
+    let second = " RUN  v4.1.5 /second\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: second\n ❯ src/b.ts:3:4\n⎯⎯⎯\n";
+    let combined = format!("{first}{second}");
+    let d = digest(&combined, true, DEFAULT_BUDGET);
+    assert_eq!(d.failures.len(), 2);
+    assert!(d.failures[0].name.contains("src/a.ts:1:2"));
+    assert!(d.failures[1].name.contains("src/b.ts:3:4"));
+    let unknown = format!(
+        "{first} RUN  v4.1.5 /second\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: unknown\n"
+    );
+    let d = digest(&unknown, true, DEFAULT_BUDGET);
+    assert!(d.failures[0].name.contains("no failure recognised"));
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("Error: unknown"))
+    );
+}
+
+#[test]
 fn vitest_files_that_failed_to_load_show_their_shared_error_once() {
     let mut text = String::from("⎯⎯⎯⎯⎯⎯ Failed Suites 30 ⎯⎯⎯⎯⎯⎯\n\n");
     for i in 0..30 {

@@ -161,6 +161,10 @@ pub(super) fn failure_names(
     checkout: &Path,
     scoped: bool,
 ) -> Option<BTreeSet<String>> {
+    // Named test failures do not account for Vitest's unhandled errors.
+    if testlog::vitest_has_unhandled_errors(output) {
+        return None;
+    }
     // Not a digest: it names an output it recognises nothing in by a
     // stand-in that would match the merge base's, and shows a vitest test
     // that failed in several projects once.
@@ -312,6 +316,9 @@ pub(super) fn failure_evidence(
     root: &Path,
     scoped: bool,
 ) -> Option<Evidence> {
+    if testlog::vitest_has_unhandled_errors(output) {
+        return None;
+    }
     let Some(names) = failure_names(output, formats, root, scoped) else {
         return (!scoped).then(|| remark_evidence(output, root)).flatten();
     };
@@ -1433,6 +1440,18 @@ docs/README.md\n\
         let repeated = "test same ... FAILED\n---- same stdout ----\nfirst cause\n---- same stdout ----\nsecond cause\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
         let evidence = failure_evidence(repeated, &[], Path::new("/x"), false).unwrap();
         assert!(evidence.details.is_empty());
+    }
+
+    #[test]
+    fn vitest_unhandled_errors_prevent_comparing_named_failures() {
+        let test = " RUN  v4.1.5 /work\n FAIL  test/a.test.ts > fails\nAssertionError: wrong\n\n Tests  1 failed (1)\n";
+        assert!(failure_evidence(test, &[], Path::new("/work"), false).is_some());
+        let mixed = format!(
+            "{test}\n⎯⎯⎯ Unhandled Errors ⎯⎯⎯\nVitest caught 1 unhandled error during the test run.\n"
+        );
+        assert!(failure_names(&mixed, &[], Path::new("/work"), false).is_none());
+        assert!(failure_evidence(&mixed, &[], Path::new("/work"), false).is_none());
+        assert!(failure_evidence(&mixed, &[], Path::new("/work"), true).is_none());
     }
 
     #[test]

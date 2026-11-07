@@ -872,6 +872,18 @@ SH
 	assert_success
 }
 
+@test "a passing outer test can print a child Vitest error" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf 'running 1 test\n RUN  v4.1.5 /work\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: fixture\n ❯ src/checks.ts:4:2\n⎯⎯⎯\ntest child_output ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n'
+exit 0
+SH
+	chmod +x bin/cargo
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test -- --nocapture
+	assert_success
+}
+
 @test "a contradictory merge-base test result is not recorded as a pass" {
 	mkdir bin
 	cat >bin/cargo <<'SH'
