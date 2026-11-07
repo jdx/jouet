@@ -316,7 +316,23 @@ pub(super) fn job_evidence(
         .first()
         .is_some_and(|word| jouet_rules::shell::basename(word) == "ruff")
     {
-        let mutating = argv.iter().skip(2).any(|word| {
+        let mut check = 1;
+        loop {
+            match argv.get(check).map(String::as_str) {
+                Some("check") => break,
+                Some("--config" | "--color") if argv.get(check + 1).is_some() => check += 2,
+                Some("--isolated" | "--verbose" | "--quiet" | "--silent" | "-v" | "-q" | "-s") => {
+                    check += 1;
+                }
+                Some(option)
+                    if option.starts_with("--config=") || option.starts_with("--color=") =>
+                {
+                    check += 1;
+                }
+                _ => return None,
+            }
+        }
+        let mutating = argv.iter().skip(check + 1).any(|word| {
             matches!(
                 word.as_str(),
                 "-" | "--fix" | "--fix-only" | "--diff" | "--watch"
@@ -324,12 +340,9 @@ pub(super) fn job_evidence(
                 .iter()
                 .any(|prefix| word.starts_with(prefix))
         });
-        return (code == 1
-            && !scoped
-            && !mutating
-            && argv.get(1).is_some_and(|word| word == "check"))
-        .then(|| ruff_evidence(output, root))
-        .flatten();
+        return (code == 1 && !scoped && !mutating)
+            .then(|| ruff_evidence(output, root))
+            .flatten();
     }
     failure_evidence(output, formats, root, scoped)
 }
@@ -1389,6 +1402,12 @@ mod tests {
             "check",
             ".",
         ]);
+        let global = ruff(&["ruff", "--color", "never", "check", "."]);
+        assert!(job_evidence(&global, 1, output, &[], Path::new("/work"), false).is_some());
+        let global_fix = ruff(&["ruff", "--color=never", "check", "--fix", "."]);
+        assert!(job_evidence(&global_fix, 1, output, &[], Path::new("/work"), false).is_none());
+        let missing_value = ruff(&["ruff", "--color", "check"]);
+        assert!(job_evidence(&missing_value, 1, output, &[], Path::new("/work"), false).is_none());
         let evidence = job_evidence(&wrapped, 1, output, &[], Path::new("/work"), false).unwrap();
         assert_eq!(evidence.names.len(), 1);
         let other = output.replace("/work/", "/base/");
