@@ -168,6 +168,22 @@ class UsageCheckerTest(unittest.TestCase):
             self.assertEqual(source.read_text(), "fixed\n")
             self.assertFalse(list(tests.glob("jouet_hidden_*.rs")))
             self.assertEqual(sum(line.startswith("worktree ") for line in git("worktree", "list", "--porcelain").splitlines()), 1)
+            git("rm", "conformance/tests/heading_help.rs")
+            git("commit", "-qm", "remove test target")
+            result = check()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no changed conformance test target to verify", result.stdout)
+            tests.mkdir(parents=True, exist_ok=True)
+            (tests / "replacement.rs").write_text("replacement test\n")
+            git("add", "conformance/tests/replacement.rs")
+            git("commit", "-qm", "replace test target")
+            trace.write_text("")
+            result = check()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            runs = [line.split() for line in trace.read_text().splitlines()]
+            self.assertEqual(len(runs), 2)
+            self.assertEqual(runs[0][0], "replacement")
+            self.assertTrue(runs[1][0].startswith("jouet_hidden_"))
 
 
 if __name__ == "__main__":

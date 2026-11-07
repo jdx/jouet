@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, committed_files, expect, finish, new_commit
+from _check import UNVERIFIED, expect, finish, head_sha, new_commit
 
 
 def tail(output: str) -> str:
@@ -117,8 +117,12 @@ def check() -> None:
                             capture_output=True, text=True, check=True).stdout
     expect(not status, "changes remain uncommitted")
     root = Path("conformance/tests")
-    tests = sorted(Path(path) for path in committed_files()
-                   if Path(path).parent == root and Path(path).suffix == ".rs")
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=ACMRT", head_sha(), "HEAD", "--", str(root)],
+        capture_output=True, check=True,
+    ).stdout
+    tests = sorted(Path(os.fsdecode(path)) for path in changed.split(b"\0") if path
+                   and Path(os.fsdecode(path)).parent == root and Path(os.fsdecode(path)).suffix == ".rs")
     if tests:
         check_phase(tests, deadline, hidden=False)
     else:
