@@ -194,7 +194,7 @@ fn line(checks: &Checks) -> Option<String> {
         return None;
     }
     let text = format!(
-        "jouet: this project's checks (.jouet/project.toml): {}.",
+        "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): {}.",
         parts.join("; ")
     );
     Some(if text.chars().count() > LINE_MAX {
@@ -225,7 +225,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             line(&project.checks).unwrap(),
-            "jouet: this project's checks (.jouet/project.toml): bats `jouet test --cmd -- mise run test:bats -- test/NAME.bats`; unit `jouet test --affected`; full suite `mise run test`; before pushing `cargo clippy -- -D warnings`."
+            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats `jouet test --cmd -- mise run test:bats -- test/NAME.bats`; unit `jouet test --affected`; full suite `mise run test`; before pushing `cargo clippy -- -D warnings`."
         );
         assert_eq!(line(&Checks::default()), None);
     }
@@ -238,7 +238,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             line(&project.checks).unwrap(),
-            "jouet: this project's checks (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
+            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
         );
         let checks = &project.checks;
         let why = Some("golangci-lint is built with Go 1.26");

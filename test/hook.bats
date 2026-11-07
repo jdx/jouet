@@ -859,10 +859,10 @@ claude_payload() {
 	}
 	# Not before a person trusts it: it is text every session reads.
 	run start
-	refute_output --partial "this project's checks"
+	refute_output --partial "prefer these project-specific checks over generic examples when applicable"
 	(cd repo && jouet trust --yes >/dev/null)
 	run start
-	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
+	assert_output --partial "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
 }
 
 @test "session-start points at a trusted .jouet/map.md without inlining it" {
