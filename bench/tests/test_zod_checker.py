@@ -80,7 +80,9 @@ class ZodCheckerTest(unittest.TestCase):
                 'if [ "${FAIL_AGENT:-}" = 1 ] && [ "$hash" = "$AGENT_HASH" ]; then exit 1; fi\n'
                 'if [ "${REQUIRE_HELPER:-}" = 1 ] && [ ! -f packages/zod/helper.ts ]; then exit 1; fi\n'
                 'if [ -n "${TEST_REPORT:-}" ]; then printf "%s\\n" "$TEST_REPORT" > "$report";\n'
-                'else printf "{\\"numPassedTests\\":1,\\"numTotalTests\\":1,\\"numFailedTests\\":0}\\n" > "$report"; fi\n'
+                'else printf \'%s\\n\' \'{"numPassedTests":1,"numTotalTests":1,"numFailedTests":0,'
+                '"numPendingTests":0,"numTodoTests":0,"testResults":[{"assertionResults":'
+                '[{"status":"passed"}]}]}\' > "$report"; fi\n'
             )
             vitest.chmod(0o755)
             trace = root / "trace"
@@ -126,6 +128,31 @@ class ZodCheckerTest(unittest.TestCase):
             self.assertIn("ran no tests", check().stdout)
             env["TEST_REPORT"] = '{"numPassedTests":0,"numTotalTests":1,"numFailedTests":0}'
             self.assertEqual(check().returncode, 3)
+            env["TEST_REPORT"] = ('{"numPassedTests":1,"numTotalTests":2,"numFailedTests":0,'
+                                  '"numPendingTests":1,"numTodoTests":0,"testResults":[{"assertionResults":'
+                                  '[{"status":"passed"},{"status":"pending"}]}]}')
+            report = check()
+            self.assertEqual(report.returncode, 3, report.stdout + report.stderr)
+            self.assertIn("skipped 1 tests", report.stdout)
+            env["TEST_REPORT"] = ('{"numPassedTests":1,"numTotalTests":1,"numFailedTests":0,'
+                                  '"numPendingTests":0,"numTodoTests":0,"testResults":[{"assertionResults":'
+                                  '[{"status":"pending"}]}]}')
+            report = check()
+            self.assertEqual(report.returncode, 3, report.stdout + report.stderr)
+            self.assertIn("inconsistent assertion results", report.stdout)
+            for payload, message in [
+                (('{"numPassedTests":1,"numTotalTests":2,"numFailedTests":0,'
+                  '"numPendingTests":0,"numTodoTests":1}'), "marked 1 TODO"),
+                (('{"numPassedTests":1,"numTotalTests":2,"numFailedTests":0,'
+                  '"numPendingTests":0,"numTodoTests":0}'), "inconsistent test counts"),
+                (('{"numPassedTests":1,"numTotalTests":1,"numFailedTests":0,'
+                  '"numPendingTests":0,"numTodoTests":0}'), "inconsistent assertion results"),
+            ]:
+                with self.subTest(message=message):
+                    env["TEST_REPORT"] = payload
+                    report = check()
+                    self.assertEqual(report.returncode, 3, report.stdout + report.stderr)
+                    self.assertIn(message, report.stdout)
             env["TEST_REPORT"] = ('{"numPassedTests":1,"numTotalTests":2,"numFailedTests":1,'
                                   '"testResults":[{"assertionResults":[{"status":"failed",'
                                   '"fullName":"broken assertion","failureMessages":["expected 3"]}]}]}')
