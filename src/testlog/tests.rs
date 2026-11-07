@@ -1369,6 +1369,25 @@ TypeCheckError: Operator '<' cannot be applied to types '{}' and 'number'.\n\
             .contains("no failure recognised")
     );
     assert!(digest(text, false, DEFAULT_BUDGET).failures.is_empty());
+
+    let first = " RUN  v4.1.5 /first\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: first\n ❯ src/a.ts:1:2\n⎯⎯⎯\n";
+    let second = " RUN  v4.1.5 /second\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: second\n ❯ src/b.ts:3:4\n⎯⎯⎯\n";
+    let combined = format!("{first}{second}");
+    let d = digest(&combined, true, DEFAULT_BUDGET);
+    assert_eq!(d.failures.len(), 2);
+    assert!(d.failures[0].name.contains("src/a.ts:1:2"));
+    assert!(d.failures[1].name.contains("src/b.ts:3:4"));
+    let unknown = format!(
+        "{first} RUN  v4.1.5 /second\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: unknown\n"
+    );
+    let d = digest(&unknown, true, DEFAULT_BUDGET);
+    assert!(d.failures[0].name.contains("no failure recognised"));
+    assert!(
+        d.failures[0]
+            .lines
+            .iter()
+            .any(|line| line.contains("Error: unknown"))
+    );
 }
 
 #[test]

@@ -1398,44 +1398,63 @@ fn vitest(lines: &[String], out: &mut Parsed) {
 /// These are display-only: a partially understood Vitest run must not clear
 /// the verification gate through baseline comparison.
 fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
-    if !lines.iter().any(|line| VITEST_RUN.is_match(line)) {
-        return;
-    }
-    let Some(expected) = lines.iter().find_map(|line| {
-        VITEST_UNHANDLED
-            .captures(line)
-            .and_then(|c| c[1].parse::<usize>().ok())
-    }) else {
-        return;
-    };
+    let starts: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| VITEST_RUN.is_match(line).then_some(i))
+        .collect();
     let mut errors = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        if VITEST_SOURCE_ERROR.is_match(line) {
-            let block = until(lines, i + 1, &VITEST_END);
-            let error = block
+    for (index, start) in starts.iter().copied().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(lines.len());
+        let run = &lines[start..end];
+        let counts: Vec<usize> = run
+            .iter()
+            .filter_map(|line| VITEST_UNHANDLED.captures(line))
+            .filter_map(|c| c[1].parse().ok())
+            .collect();
+        if counts.is_empty() {
+            if run
                 .iter()
-                .position(|line| VITEST_TYPE_ERROR.is_match(line));
-            let location = block.iter().enumerate().find_map(|(at, line)| {
-                VITEST_LOCATION
-                    .captures(line)
-                    .map(|capture| (at, capture[1].to_string()))
-            });
-            if let (Some(error), Some((at, location))) = (error, location) {
-                let name = format!("{location}: {}", block[error]);
-                let details = block
-                    .into_iter()
-                    .enumerate()
-                    .filter(|(index, _)| *index != error && *index != at)
-                    .map(|(_, line)| line)
-                    .collect();
-                errors.push((i, name, details));
+                .any(|line| line.contains("Unhandled Errors") || VITEST_SOURCE_ERROR.is_match(line))
+            {
+                return;
+            }
+            continue;
+        }
+        if counts.len() != 1 {
+            return;
+        }
+        let mut found = Vec::new();
+        for (i, line) in run.iter().enumerate() {
+            if VITEST_SOURCE_ERROR.is_match(line) {
+                let block = until(run, i + 1, &VITEST_END);
+                let error = block
+                    .iter()
+                    .position(|line| VITEST_TYPE_ERROR.is_match(line));
+                let location = block.iter().enumerate().find_map(|(at, line)| {
+                    VITEST_LOCATION
+                        .captures(line)
+                        .map(|capture| (at, capture[1].to_string()))
+                });
+                if let (Some(error), Some((at, location))) = (error, location) {
+                    let name = format!("{location}: {}", block[error]);
+                    let details = block
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(index, _)| *index != error && *index != at)
+                        .map(|(_, line)| line)
+                        .collect();
+                    found.push((start + i, name, details));
+                }
             }
         }
-    }
-    if expected > 0 && errors.len() == expected {
-        for (i, name, block) in errors {
-            out.push(i, name, block);
+        if counts[0] == 0 || found.len() != counts[0] {
+            return;
         }
+        errors.extend(found);
+    }
+    for (i, name, block) in errors {
+        out.push(i, name, block);
     }
 }
 
