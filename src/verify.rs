@@ -1881,6 +1881,14 @@ impl Checks {
         )))
     }
 
+    /// Whether the newest test run passed at a known tree: only then can
+    /// files change after it ([`Checks::untested_reason`]).
+    pub(crate) fn last_test_passed(&self) -> bool {
+        self.runs
+            .get(&Kind::Test)
+            .is_some_and(|last| last.passed() && last.tree.is_some())
+    }
+
     /// Files other than prose changed after the newest test run passed, and
     /// no test run has passed at the files now. Any passing run counts, a partial one too:
     /// the tests a change affects are enough here, as the full suite runs

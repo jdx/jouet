@@ -156,8 +156,9 @@ pub(crate) fn changed(root: &Path, merge_base: &str) -> Result<Vec<Change>, Erro
 /// untracked files counted whole; prose ([`jouet_rules::tree::prose`]) is
 /// left out. None when it cannot tell: no base branch, or the branch is its
 /// own base (work committed on `main` with no `origin/main`), so what it
-/// committed cannot be seen; a changed file that is binary, or an untracked
-/// one that is not text; or git failing.
+/// committed cannot be seen; a merge since the base; a changed file that is
+/// binary, or an untracked one that is not a regular text file; or git
+/// failing.
 pub(crate) fn changed_code_lines(root: &Path) -> Option<u64> {
     use jouet_rules::tree::prose;
     let base = base(root, None).ok()?;
@@ -166,6 +167,16 @@ pub(crate) fn changed_code_lines(root: &Path) -> Option<u64> {
         return None;
     }
     let merge_base = base.merge_base.as_str();
+    // A merge brings in code the change did not write, which can interact
+    // with it however few lines the change itself has.
+    let range = format!("{merge_base}..HEAD");
+    if !git(root, &["rev-list", "--merges", "--max-count=1", &range])
+        .ok()?
+        .trim()
+        .is_empty()
+    {
+        return None;
+    }
     let numstat = git(
         root,
         &[
@@ -195,7 +206,12 @@ pub(crate) fn changed_code_lines(root: &Path) -> Option<u64> {
     }
     let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"]).ok()?;
     for path in untracked.split('\0').filter(|p| !p.is_empty() && !prose(p)) {
-        let text = std::fs::read_to_string(root.join(path)).ok()?;
+        // Only a regular file is opened: a FIFO would wait for a writer.
+        let file = root.join(path);
+        if !std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
+            return None;
+        }
+        let text = std::fs::read_to_string(file).ok()?;
         lines += text.lines().count() as u64;
     }
     Some(lines)
@@ -255,6 +271,17 @@ mod tests {
         // two -> 2 (2), three (1), four (1), test_a.py (2)
         assert_eq!(changed_code_lines(root), Some(6));
         std::fs::write(root.join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+        assert_eq!(changed_code_lines(root), None);
+        std::fs::remove_file(root.join("blob.bin")).unwrap();
+        // A merge brings in code the change did not write.
+        run(&["commit", "-q", "-am", "more"]);
+        run(&["switch", "-q", "main"]);
+        std::fs::write(root.join("b.py"), "b\n").unwrap();
+        run(&["add", "b.py"]);
+        run(&["commit", "-q", "-m", "theirs"]);
+        run(&["switch", "-q", "fix"]);
+        assert!(changed_code_lines(root).is_some());
+        run(&["merge", "-q", "--no-edit", "main"]);
         assert_eq!(changed_code_lines(root), None);
     }
 

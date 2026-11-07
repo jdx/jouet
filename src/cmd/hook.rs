@@ -1417,7 +1417,13 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
         |root: &str| !root.is_empty() && crate::diag::hk_config(Path::new(root)).is_some();
     let scope = |root: &str| verify::Scope {
         affected: !root.is_empty() && !crate::affected::near(Path::new(root)).is_empty(),
-        small_fix: !root.is_empty() && small_fix(Path::new(root)),
+        // Only a tree whose newest test run passed is asked about after
+        // an edit, so only there is the change measured.
+        small_fix: !root.is_empty()
+            && state
+                .checks(root)
+                .is_some_and(verify::Checks::last_test_passed)
+            && small_fix(Path::new(root)),
     };
     let block = if verify {
         state.block(&home, tree_of, hk_repo, scope)
