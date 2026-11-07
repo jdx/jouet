@@ -99,16 +99,21 @@ impl Nesting {
         let mut words: Vec<&str> = argv.iter().map(String::as_str).collect();
         let program = words.first()?.rsplit('/').next()?;
         let python = program.starts_with("python");
-        // The interpreter's own flags (`-I`, `-u`) come before `-m` or the script.
+        // The interpreter's own flags (`-I`, `-W error`) come before `-m` or
+        // the script.
         if python {
-            let flags = words[1..]
-                .iter()
-                .take_while(|w| w.starts_with('-') && **w != "-m")
-                .count();
-            if words[1..=flags].contains(&"-c") {
-                return None;
+            let mut end = 1;
+            while let Some(word) = words.get(end).filter(|w| w.starts_with('-') && **w != "-m") {
+                if *word == "-c" {
+                    return None;
+                }
+                end += if matches!(*word, "-W" | "-X" | "--check-hash-based-pycs") {
+                    2
+                } else {
+                    1
+                };
             }
-            words.drain(1..=flags);
+            words.drain(1..end.min(words.len()));
         }
         match words.as_slice() {
             _ if matches!(program, "pytest" | "py.test") => Some(Self::Pytest),
@@ -124,12 +129,15 @@ impl Nesting {
         }
     }
 
-    /// The one mise task `command` runs, through `jouet test --cmd --`.
+    /// The one mise task `command` runs, anywhere in it or through `jouet
+    /// test --cmd --`.
     fn task(command: &str) -> Option<String> {
-        let argv = runner_argv(command);
-        let [name] = crate::wind::tasks::task_runs(&argv.join(" "))
-            .try_into()
-            .ok()?;
+        let runs = crate::wind::tasks::task_runs;
+        let mut names = runs(command);
+        if names.is_empty() {
+            names = runs(&runner_argv(command).join(" "));
+        }
+        let [name] = names.try_into().ok()?;
         Some(name)
     }
 
@@ -2991,6 +2999,15 @@ mod tests {
             Some(Nesting::Django)
         );
         assert_eq!(Nesting::of(&argv("python -c x -m pytest")), None);
+        assert_eq!(
+            Nesting::of(&argv("python -W error -X dev -m pytest a")),
+            Some(Nesting::Pytest)
+        );
+        assert_eq!(Nesting::of(&argv("python -W")), None);
+        assert_eq!(
+            Nesting::task("cd tests && mise run test:unit a").as_deref(),
+            Some("test:unit")
+        );
         assert_eq!(
             Nesting::task("jouet test --cmd -- mise run test:unit admin_views").as_deref(),
             Some("test:unit")
