@@ -80,10 +80,12 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
     };
     if !out.json {
         for path in &report.unsearched {
-            eprintln!(
-                "jouet: {path}: not searched (path unavailable){}",
+            let hint = if args.paths.iter().any(|arg| arg == path) {
                 glob_path_hint(Path::new(path))
-            );
+            } else {
+                ""
+            };
+            eprintln!("jouet: {path}: not searched (path unavailable){}", hint);
         }
         for error in &report.walk_errors {
             eprintln!("jouet: search incomplete: {error}");
@@ -131,7 +133,9 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
 }
 
 fn glob_path_hint(path: &Path) -> &'static str {
-    if path.to_string_lossy().contains(['*', '?', '[']) {
+    if path.to_string_lossy().contains(['*', '?', '['])
+        && matches!(std::fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
         "; paths are literal: use -g GLOB to filter filenames"
     } else {
         ""

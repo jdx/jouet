@@ -124,6 +124,20 @@ RS
 	assert_stderr ''
 }
 
+@test "search does not suggest a glob for an unreadable literal path" {
+	printf 'download\n' >'[literal].rs'
+	chmod 000 '[literal].rs'
+	if [ -r '[literal].rs' ]; then
+		chmod 600 '[literal].rs'
+		skip 'the test user can read files without permissions'
+	fi
+	run --separate-stderr jouet search download '[literal].rs' src/main.rs
+	chmod 600 '[literal].rs'
+	assert_failure 3
+	assert_stderr --partial '[literal].rs: not searched'
+	refute_stderr --partial 'use -g GLOB'
+}
+
 @test "search reports an unreadable directory without discarding other matches" {
 	mkdir unreadable
 	printf 'download\n' >unreadable/hidden.rs
