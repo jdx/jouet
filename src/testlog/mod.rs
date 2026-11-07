@@ -1417,11 +1417,13 @@ fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
                 .iter()
                 .any(|line| line.contains("Unhandled Errors") || VITEST_SOURCE_ERROR.is_match(line))
             {
+                vitest_unhandled_fallback(lines, out);
                 return;
             }
             continue;
         }
         if counts.len() != 1 {
+            vitest_unhandled_fallback(lines, out);
             return;
         }
         let mut found = Vec::new();
@@ -1449,12 +1451,28 @@ fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
             }
         }
         if counts[0] == 0 || found.len() != counts[0] {
+            vitest_unhandled_fallback(lines, out);
             return;
         }
         errors.extend(found);
     }
     for (i, name, block) in errors {
         out.push(i, name, block);
+    }
+}
+
+/// Keep unhandled output visible even when it cannot be named individually.
+fn vitest_unhandled_fallback(lines: &[String], out: &mut Parsed) {
+    if let Some(at) = lines.iter().position(|line| {
+        line.contains("Unhandled Errors")
+            || VITEST_UNHANDLED.is_match(line)
+            || VITEST_SOURCE_ERROR.is_match(line)
+    }) {
+        out.push(
+            at,
+            "Vitest unhandled errors (details in full log)",
+            lines[at..].to_vec(),
+        );
     }
 }
 

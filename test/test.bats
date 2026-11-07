@@ -902,6 +902,20 @@ SH
 	assert_output --partial 'exited 0 but reported failing tests; failures cannot be compared'
 }
 
+@test "a Vitest failure keeps an unhandled error beside a named test failure" {
+	cat >run-tests <<'SH'
+#!/bin/sh
+printf ' RUN  v4.1.5 /repo\n FAIL  test/a.test.ts > fails\nAssertionError: wrong\n⎯⎯⎯ Unhandled Errors ⎯⎯⎯\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: connection lost\n Test Files  1 failed (1)\n Tests  1 failed (1)\n'
+exit 1
+SH
+	chmod +x run-tests
+	JOUET_TEST_BASELINE=off run --separate-stderr jouet test --cmd -- ./run-tests
+	assert_failure 1
+	assert_output --partial 'FAIL test/a.test.ts > fails'
+	assert_output --partial 'Vitest unhandled errors (details in full log)'
+	assert_output --partial 'Error: connection lost'
+}
+
 @test "a failing run shows each failure up to the budget, then names the rest" {
 	tap_script 6 "2 3 4 5 6"
 

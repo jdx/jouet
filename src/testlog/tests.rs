@@ -1360,7 +1360,7 @@ TypeCheckError: Operator '<' cannot be applied to types '{}' and 'number'.\n\
     assert!(
         digest(&incomplete, true, DEFAULT_BUDGET).failures[0]
             .name
-            .contains("no failure recognised")
+            .contains("Vitest unhandled errors")
     );
     let quoted = text.replace(" RUN  v4.1.5 /repo\n", "");
     assert!(
@@ -1381,12 +1381,41 @@ TypeCheckError: Operator '<' cannot be applied to types '{}' and 'number'.\n\
         "{first} RUN  v4.1.5 /second\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: unknown\n"
     );
     let d = digest(&unknown, true, DEFAULT_BUDGET);
-    assert!(d.failures[0].name.contains("no failure recognised"));
+    assert!(d.failures[0].name.contains("Vitest unhandled errors"));
     assert!(
         d.failures[0]
             .lines
             .iter()
             .any(|line| line.contains("Error: unknown"))
+    );
+}
+
+#[test]
+fn vitest_unknown_unhandled_errors_are_shown_alongside_named_failures() {
+    let output = " RUN  v4.1.5 /repo\n\
+ FAIL  test/a.test.ts > fails\nAssertionError: wrong\n\
+⎯⎯⎯ Unhandled Errors ⎯⎯⎯\n\
+Vitest caught 1 unhandled error during the test run.\n\
+⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: connection lost\n\
+ Test Files  1 failed (1)\n Tests  1 failed (1)\n";
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert!(d.failures.iter().any(|f| f.name.contains("test/a.test.ts")));
+    let unhandled = d
+        .failures
+        .iter()
+        .find(|f| f.name.contains("unhandled"))
+        .unwrap();
+    assert!(
+        unhandled
+            .lines
+            .iter()
+            .any(|line| line.contains("connection lost"))
+    );
+    // A generic block remains display-only and cannot establish a baseline.
+    assert!(
+        failure_names(output, &[])
+            .iter()
+            .all(|name| !name.contains("unhandled"))
     );
 }
 
