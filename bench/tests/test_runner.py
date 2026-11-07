@@ -2179,6 +2179,7 @@ class CostSeedTest(unittest.TestCase):
                 f'echo "$*" >> {calls}\n'
                 'mkdir -p "$HOME/.local/state/jouet/logs"\n'
                 'echo seed-log > "$HOME/.local/state/jouet/logs/check.log"\n'
+                'if [ ! -d locked ]; then mkdir locked && touch locked/file && chmod 200 locked; fi\n'
                 "shift 3\n"
                 "line=$(printf '{\"cmd\":\"%s\"}' \"$*\")\n"
                 "old=$(git notes --ref jouet-cost show HEAD 2>/dev/null)\n"

@@ -22,12 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from . import arms as arms_mod
-from . import codex_hooks
+from . import codex_hooks, credentials, timing
 from . import costs as costs_mod
-from . import credentials
 from . import init as init_mod
 from . import tasks as tasks_mod
-from . import timing
+from .cleanup import remove
 from .fake_github import FakeGitHub
 from .harness import HARNESSES, Harness, codex_shell_metrics
 
@@ -711,25 +710,6 @@ def execute(
         remove(run_dir)
         remove(tmp_dir)
     return record
-
-
-def remove(path: Path) -> None:
-    """Deletes a run's tree, including directories a project's tests left
-    without read or search permission (mise's leave `d-w-------` ones)."""
-
-    def unlock(_func: Any, failed: str, _exc: BaseException) -> None:
-        for p in (Path(failed).parent, Path(failed)):
-            try:
-                p.chmod(0o700)
-            except OSError:
-                pass
-        if Path(failed).is_dir():
-            shutil.rmtree(failed, onexc=unlock)
-        else:
-            Path(failed).unlink(missing_ok=True)
-
-    if path.exists():
-        shutil.rmtree(path, onexc=unlock)
 
 
 def snapshot(jouet_bin: Path, work_root: Path) -> Path:

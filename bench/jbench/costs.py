@@ -27,6 +27,7 @@ from typing import Any
 
 from . import arms as arms_mod
 from . import tasks as tasks_mod
+from .cleanup import remove
 
 NOTES_REF = "jouet-cost"
 
@@ -159,7 +160,7 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
             log(f"    keeping cost seed checkout {workdir}: it contains home or logs")
         else:
             try:
-                shutil.rmtree(workdir)
+                remove(workdir)
             except OSError as error:
                 log(f"    could not remove cost seed checkout {workdir}: {error}")
     if incomplete:
