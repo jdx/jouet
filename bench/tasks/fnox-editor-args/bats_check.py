@@ -1,0 +1,76 @@
+"""Check that fnox's editor regression suite actually ran completely."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from _check import UNVERIFIED, expect, head_sha
+
+
+def inspect_tap(output: str, exit_code: int, added: list[str] | None = None) -> str | None:
+    """Return why a Bats run does not prove complete coverage, if anything."""
+    plans = re.findall(r"^1\.\.(\d+)\s*$", output, re.MULTILINE)
+    results = re.findall(r"^(not ok|ok) (\d+)\b([^\n]*)$", output, re.MULTILINE)
+    if len(plans) != 1 or int(plans[0]) == 0:
+        return "missing or empty Bats test plan"
+    count = int(plans[0])
+    if len(results) != count or [int(result[1]) for result in results] != list(range(1, count + 1)):
+        return "incomplete or inconsistent Bats test results"
+    if added and any(
+        result[0] == "not ok" and result[2].strip() in added
+        and not re.search(r"#\s*(skip|todo)\b", result[2], re.IGNORECASE)
+        for result in results
+    ):
+        return "a committed regression test failed"
+    if any(re.search(r"#\s*(skip|todo)\b", result[2], re.IGNORECASE) for result in results):
+        return "Bats tests were skipped or marked TODO"
+    names = [result[2].strip() for result in results]
+    if added and any(names.count(name) != 1 for name in added):
+        return "a committed regression test was not reported exactly once"
+    if exit_code != 0 or any(result[0] == "not ok" for result in results):
+        return "Bats suite failed"
+    return None
+
+
+def check_bats() -> None:
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=AM", head_sha(), "HEAD", "--", "test/edit.bats"],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    expect("test/edit.bats" in changed, "no committed editor regression test was changed")
+    if not changed:
+        return
+    diff = subprocess.run(
+        ["git", "diff", "--unified=0", head_sha(), "HEAD", "--", "test/edit.bats"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    added = re.findall(r'^\+@test\s+"([^"]+)"\s*\{', diff, re.MULTILINE)
+    if len(added) < 2 or len(set(added)) != len(added):
+        UNVERIFIED.append("expected two distinct new editor regression tests in standard Bats form")
+        return
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    if untracked:
+        UNVERIFIED.append("untracked files could affect the editor tests")
+        return
+    env = {**os.environ, "PATH": f"{Path.cwd() / 'target/debug'}{os.pathsep}{os.environ.get('PATH', '')}"}
+    try:
+        run = subprocess.run(
+            ["test/bats/bin/bats", "--tap", "test/edit.bats"],
+            capture_output=True, text=True, timeout=180, check=False, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        UNVERIFIED.append(f"could not complete the editor Bats suite: {error}")
+        return
+    print(run.stdout, end="")
+    if run.stderr:
+        print(run.stderr, end="", file=sys.stderr)
+    reason = inspect_tap(run.stdout, run.returncode, added)
+    if reason == "a committed regression test failed":
+        expect(False, reason)
+    elif reason:
+        UNVERIFIED.append(reason)
