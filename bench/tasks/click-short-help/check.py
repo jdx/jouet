@@ -46,6 +46,28 @@ def check_ruff(path: str, mode: str, added: bool) -> None:
         UNVERIFIED.append(f"Ruff {mode} could not check {path}: {error}")
 
 
+def read_report(report: Path) -> list[ET.Element]:
+    """Require every pytest suite's totals to agree with its case outcomes."""
+    root = ET.parse(report).getroot()
+    suites = [root] if root.tag == "testsuite" else list(root) if root.tag == "testsuites" else []
+    if not suites or any(suite.tag != "testsuite" for suite in suites):
+        raise ValueError("missing pytest suites")
+    cases = []
+    for suite in suites:
+        rows = suite.findall("testcase")
+        actual = (len(rows), *(sum(row.find(kind) is not None for row in rows)
+                                for kind in ("failure", "error", "skipped")))
+        try:
+            reported = tuple(int(suite.attrib[key]) for key in ("tests", "failures", "errors", "skipped"))
+        except (KeyError, ValueError) as error:
+            raise ValueError("missing or invalid pytest totals") from error
+        if reported != actual or any(sum(row.find(kind) is not None for kind in ("failure", "error", "skipped")) > 1
+                                     for row in rows):
+            raise ValueError("pytest totals do not match test cases")
+        cases.extend(rows)
+    return cases
+
+
 def check_committed_tests(tests: list[str]) -> None:
     """Run the committed tests in isolation and refuse incomplete reports."""
     with tempfile.TemporaryDirectory(prefix="click-bench-tests-") as directory:
@@ -80,8 +102,8 @@ def check_committed_tests(tests: list[str]) -> None:
                     return
                 output = (proc.stdout + proc.stderr)[-3000:]
                 try:
-                    cases = ET.parse(report).getroot().findall(".//testcase")
-                except (OSError, ET.ParseError) as error:
+                    cases = read_report(report)
+                except (OSError, ET.ParseError, ValueError) as error:
                     UNVERIFIED.append(f"committed tests produced no readable report: {error}\n{output}")
                     return
                 if any(case.find("failure") is not None for case in cases):

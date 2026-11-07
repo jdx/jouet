@@ -57,12 +57,15 @@ class ClickCheckerTest(unittest.TestCase):
                 'if [ "$1" != -m ]; then exit "${FAKE_BEHAVIOR_EXIT:-0}"; fi\n'
                 'for arg in "$@"; do case "$arg" in --junitxml=*) report=${arg#--junitxml=};; esac; done\n'
                 'case "${FAKE_PYTEST:-pass}" in\n'
-                '  fail) printf "<testsuite><testcase><failure/></testcase></testsuite>" > "$report"; exit 1;;\n'
-                '  skip) printf "<testsuite><testcase><skipped/></testcase></testsuite>" > "$report"; exit 0;;\n'
+                '  fail) printf \'<testsuite tests="1" failures="1" errors="0" skipped="0"><testcase><failure/></testcase></testsuite>\' > "$report"; exit 1;;\n'
+                '  skip) printf \'<testsuite tests="1" failures="0" errors="0" skipped="1"><testcase><skipped/></testcase></testsuite>\' > "$report"; exit 0;;\n'
+                '  error) printf \'<testsuite tests="1" failures="0" errors="1" skipped="0"><testcase><error/></testcase></testsuite>\' > "$report"; exit 1;;\n'
+                '  empty) printf \'<testsuite tests="0" failures="0" errors="0" skipped="0"></testsuite>\' > "$report"; exit 0;;\n'
+                '  mismatch) printf \'<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase/></testsuite>\' > "$report"; exit 0;;\n'
                 '  missing) exit 0;;\n'
                 '  helper) [ -f tests/helper.py ] || exit 2;;\n'
                 'esac\n'
-                'printf "<testsuite><testcase/></testsuite>" > "$report"\n'
+                'printf \'<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase/></testsuite>\' > "$report"\n'
             )
             python.chmod(0o755)
             ruff = bin_dir / "ruff"
@@ -92,7 +95,7 @@ class ClickCheckerTest(unittest.TestCase):
             result = check(FAKE_PYTEST="fail")
             self.assertEqual(result.returncode, 1)
             self.assertIn("committed tests failed", result.stdout)
-            for mode in ("skip", "missing"):
+            for mode in ("skip", "error", "empty", "missing", "mismatch"):
                 result = check(FAKE_PYTEST=mode)
                 self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
             (work / "tests/helper.py").write_text("untracked\n")
