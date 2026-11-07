@@ -1462,7 +1462,12 @@ fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
 pub(crate) fn vitest_has_unhandled_errors(text: &str) -> bool {
     let lines = clean(text);
     lines.iter().any(|line| VITEST_RUN.is_match(line))
-        && lines.iter().any(|line| VITEST_UNHANDLED.is_match(line))
+        && lines.iter().any(|line| {
+            VITEST_UNHANDLED
+                .captures(line)
+                .and_then(|c| c[1].parse::<usize>().ok())
+                .is_some_and(|count| count > 0)
+        })
 }
 
 fn playwright(lines: &[String], out: &mut Parsed) {

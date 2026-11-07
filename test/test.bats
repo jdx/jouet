@@ -872,6 +872,23 @@ SH
 	assert_success
 }
 
+@test "a successful test command with unhandled Vitest errors is not accepted" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf ' RUN  v4.1.5 /work\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: invalid type\n ❯ src/checks.ts:4:2\n⎯⎯⎯\n Tests  2 passed (2)\n'
+exit 0
+SH
+	chmod +x bin/cargo
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test
+	assert_failure 4
+	assert_output --partial 'command exited 0 but reported unhandled test errors'
+	assert_output --partial 'FAIL src/checks.ts:4:2: TypeCheckError: invalid type'
+	cp bin/cargo ./other-command
+	run --separate-stderr jouet test --cmd -- ./other-command
+	assert_success
+}
+
 @test "a contradictory merge-base test result is not recorded as a pass" {
 	mkdir bin
 	cat >bin/cargo <<'SH'
@@ -888,6 +905,24 @@ SH
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- cargo test
 	assert_failure 1
 	assert_output --partial 'exited 0 but reported failing tests; failures cannot be compared'
+}
+
+@test "a merge-base run that hides unhandled Vitest errors is not a pass" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf ' RUN  v4.1.5 /work\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: invalid type\n ❯ src/checks.ts:4:2\n⎯⎯⎯\n Tests  2 passed (2)\n'
+test "$(cat mode)" = base
+SH
+	chmod +x bin/cargo
+	printf 'base\n' >mode
+	git add mode
+	git commit -qm base
+	git checkout -qb work
+	printf 'changed\n' >mode
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- cargo test
+	assert_failure 1
+	assert_output --partial 'exited 0 but reported unhandled test errors; failures cannot be compared'
 }
 
 @test "a failing run shows each failure up to the budget, then names the rest" {

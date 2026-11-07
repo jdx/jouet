@@ -861,13 +861,19 @@ pub(super) fn compare(
                 run_log = Some(log.clone());
                 let output = String::from_utf8_lossy(&output);
                 if code == 0
-                    && testlog::digest_with(&output, false, 0, formats).failed > 0
+                    && (testlog::digest_with(&output, false, 0, formats).failed > 0
+                        || testlog::vitest_has_unhandled_errors(&output))
                     && super::super::hook::checks(&at_base.dir, &super::command_line(&at_base.argv))
                         .iter()
                         .any(|record| record.kind == jouet_rules::Kind::Test)
                 {
+                    let reason = if testlog::vitest_has_unhandled_errors(&output) {
+                        "reported unhandled test errors"
+                    } else {
+                        "reported failing tests"
+                    };
                     return Err(NotCompared::from(format!(
-                        "the run at {} exited 0 but reported failing tests; failures cannot be compared (full log: {})",
+                        "the run at {} exited 0 but {reason}; failures cannot be compared (full log: {})",
                         base.name,
                         log.display()
                     )));

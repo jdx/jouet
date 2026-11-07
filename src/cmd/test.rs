@@ -358,7 +358,13 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let unhandled_vitest = code == 0
+                && records
+                    .iter()
+                    .any(|record| record.kind == jouet_rules::Kind::Test)
+                && testlog::vitest_has_unhandled_errors(&output);
+            let mut digest =
+                testlog::digest_with(&output, code != 0 || unhandled_vitest, budget, &formats);
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
                 digest.passed_changed = changed_tests(&digest.passed_all, &added);
             }
@@ -374,7 +380,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 && digest.no_tests
                 && matches!(records.as_slice(), [record] if record.kind == jouet_rules::Kind::Test);
             let contradictory = code == 0
-                && digest.failed > 0
+                && (digest.failed > 0 || unhandled_vitest)
                 && records
                     .iter()
                     .any(|record| record.kind == jouet_rules::Kind::Test);
@@ -1523,6 +1529,12 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
     let mut s = match suite.exit_code {
         Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
+        Some(0) if contradictory && suite.digest.as_ref().is_some_and(|d| d.failed == 0) => {
+            format!(
+                "{}: command exited 0 but reported unhandled test errors in {secs:.1}s",
+                suite.adapter
+            )
+        }
         Some(0) if contradictory => format!(
             "{}: command exited 0 but reported failing tests in {secs:.1}s",
             suite.adapter
