@@ -1,12 +1,11 @@
-import os
 import importlib.util
-from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
-
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/requests-proxied-files/check.py"
 spec = importlib.util.spec_from_file_location("requests_checker", CHECKER)
@@ -15,6 +14,45 @@ spec.loader.exec_module(checker)
 
 
 class RequestsCheckerTest(unittest.TestCase):
+    def test_report_totals_must_match_executed_cases(self):
+        for report in (
+            '<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase/></testsuite>',
+            '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase/><testcase/></testsuite>',
+            ('<testsuite tests="1" failures="0" errors="1" skipped="1">'
+             '<testcase><error/><skipped/></testcase></testsuite>'),
+            '<testsuite><testcase/></testsuite>',
+        ):
+            with self.subTest(report=report):
+                unverified, failures = self.check_report(report)
+                self.assertTrue(unverified)
+                self.assertFalse(failures)
+
+    def test_skipped_case_details_are_reported(self):
+        report = ('<testsuite tests="1" failures="0" errors="0" skipped="1">'
+                  '<testcase classname="tests.test_requests.TestRequests" name="test_https_warnings">'
+                  '<skipped type="pytest.skip" message="urllib3 warning unavailable"/>'
+                  '</testcase></testsuite>')
+        unverified, failures = self.check_report(report)
+        self.assertFalse(failures)
+        self.assertIn("test_https_warnings", unverified[0])
+        self.assertIn("urllib3 warning unavailable", unverified[0])
+
+    def test_failure_with_split_teardown_is_a_failure_even_if_totals_disagree(self):
+        report = ('<testsuite tests="1" failures="1" errors="1" skipped="0">'
+                  '<testcase classname="suite" name="test_one"><failure/></testcase>'
+                  '<testcase classname="suite" name="test_one"><error/></testcase></testsuite>')
+        unverified, failures = self.check_report(report, 1)
+        self.assertFalse(unverified)
+        self.assertEqual(failures[0].args[0], False)
+
+    def test_long_skip_list_is_explicitly_truncated(self):
+        report = ('<testsuite tests="11" failures="0" errors="0" skipped="11">'
+                  + "".join(f'<testcase name="test_{n}"><skipped message="reason"/></testcase>' for n in range(11))
+                  + '</testsuite>')
+        unverified, _ = self.check_report(report)
+        self.assertIn("test_0", unverified[0])
+        self.assertIn("1 more cases omitted", unverified[0])
+
     def check_report(self, xml, exit_code=0):
         def run(command, **kwargs):
             report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml="))
@@ -30,24 +68,31 @@ class RequestsCheckerTest(unittest.TestCase):
             return list(checker.UNVERIFIED), expect.call_args_list
 
     def test_pass_requires_a_complete_report(self):
-        self.assertEqual(self.check_report("<testsuites><testsuite><testcase/></testsuite></testsuites>"), ([], []))
+        self.assertEqual(self.check_report(
+            '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0">'
+            '<testcase/></testsuite></testsuites>'
+        ), ([], []))
         for report in (None, "<testsuites>", "<testsuites/>",
-                       "<testsuites><testsuite><testcase><skipped/></testcase></testsuite></testsuites>"):
+                       ('<testsuites><testsuite tests="1" failures="0" errors="0" skipped="1">'
+                        '<testcase><skipped/></testcase></testsuite></testsuites>')):
             with self.subTest(report=report):
                 unverified, failures = self.check_report(report)
                 self.assertTrue(unverified)
                 self.assertFalse(failures)
 
     def test_failure_and_runner_error_are_distinct(self):
-        report = "<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>"
+        report = ('<testsuites><testsuite tests="1" failures="1" errors="0" skipped="0">'
+                  '<testcase><failure/></testcase></testsuite></testsuites>')
         for code in (0, 1):
             with self.subTest(code=code):
                 unverified, failures = self.check_report(report, code)
                 self.assertFalse(unverified)
                 self.assertEqual(failures[0].args[0], False)
         for report, code in ((None, 1), (None, 2), ("<broken", 1),
-                             ("<testsuite><testcase><error/></testcase></testsuite>", 1),
-                             ("<testsuite><testcase/></testsuite>", 1)):
+                             (('<testsuite tests="1" failures="0" errors="1" skipped="0">'
+                               '<testcase><error/></testcase></testsuite>'), 1),
+                             (('<testsuite tests="1" failures="0" errors="0" skipped="0">'
+                               '<testcase/></testsuite>'), 1)):
             with self.subTest(report=report, code=code):
                 unverified, failures = self.check_report(report, code)
                 self.assertTrue(unverified)
@@ -57,7 +102,9 @@ class RequestsCheckerTest(unittest.TestCase):
         def run(command, **kwargs):
             report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml="))
             case = "<testcase/>" if command[-1] == "tests/test_one.py" else ""
-            Path(report).write_text(f"<testsuite>{case}</testsuite>")
+            Path(report).write_text(
+                f'<testsuite tests="{int(bool(case))}" failures="0" errors="0" skipped="0">{case}</testsuite>'
+            )
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with mock.patch.object(checker, "UNVERIFIED", []), \
@@ -104,13 +151,13 @@ class RequestsCheckerTest(unittest.TestCase):
             bin_dir.mkdir()
             fake_python = bin_dir / "python3"
             fake_python.write_text("#!/bin/sh\nfor arg do\ncase \"$arg\" in --junitxml=*) "
-                                   "printf '<testsuite><testcase/></testsuite>' > \"${arg#*=}\";; esac\n"
+                                   "printf '<testsuite tests=\"1\" failures=\"0\" errors=\"0\" skipped=\"0\"><testcase/></testsuite>' > \"${arg#*=}\";; esac\n"
                                    "done\nexit 0\n")
             fake_python.chmod(0o755)
             env.update({"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "BENCH_HEAD_SHA": base})
 
             def check():
-                return subprocess.run([sys.executable, str(CHECKER)], cwd=work, env=env,
+                return subprocess.run([sys.executable, str(CHECKER)], cwd=work, env=env, check=False,
                                       capture_output=True, text=True)
 
             result = check()
