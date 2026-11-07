@@ -1239,7 +1239,7 @@ SH
 #!/bin/sh
 printf 'F821 Undefined name `x`\n --> a.py:1:7\n  |\n1 | %s\n  |       ^\n\n' "$(cat reason)"
 test ! -f extra || cat extra
-printf 'Found 1 error.\n'
+printf 'Found 1 error.\n[*] 1 fixable with the `--fix` option.\n'
 exit 1
 SH
 	chmod +x ruff
