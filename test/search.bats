@@ -96,6 +96,9 @@ RS
 	run --separate-stderr jouet search download src/main.rs '*.rs'
 	assert_failure 3
 	assert_stderr --partial 'use -g GLOB'
+	run --separate-stderr jouet search download src/main.rs './*.rs'
+	assert_failure 3
+	assert_stderr --partial 'use -g GLOB'
 
 	run --separate-stderr jouet search download -g '*.rs'
 	assert_success

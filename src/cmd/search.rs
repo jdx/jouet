@@ -80,7 +80,11 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
     };
     if !out.json {
         for path in &report.unsearched {
-            let hint = if args.paths.iter().any(|arg| arg == path) {
+            let hint = if args.paths.iter().any(|arg| {
+                let arg = Path::new(arg);
+                let path = Path::new(path);
+                arg.strip_prefix(".").unwrap_or(arg) == path.strip_prefix(".").unwrap_or(path)
+            }) {
                 glob_path_hint(Path::new(path))
             } else {
                 ""
