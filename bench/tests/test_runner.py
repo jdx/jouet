@@ -1382,6 +1382,68 @@ class TasksTest(unittest.TestCase):
                 tasks.setup_environment(task, other_env, workdir, root / "cache", root / "bad-setup.log")
             self.assertIn("hash", (root / "bad-setup.log").read_text().lower())
 
+    def test_check_task_phase_removes_checkout_before_next_phase(self):
+        import argparse
+        import contextlib
+        import io
+        from unittest.mock import MagicMock, patch
+
+        import agents
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = MagicMock(name="task")
+            task.name = "sample"
+            task.dir = root
+            task.github_fixture.return_value = None
+            previous = []
+
+            def prepare(_task, workdir):
+                if previous:
+                    self.assertFalse(previous[-1].exists())
+                previous.append(workdir.parent)
+                workdir.mkdir()
+                (workdir / "large-install").write_text("fixture")
+                return {"base_sha": "base", "head_sha": "head"}
+
+            with patch.object(tasks, "all_names", return_value=["sample"]), \
+                    patch.object(tasks, "load", return_value=task), \
+                    patch.object(tasks, "prepare", side_effect=prepare), \
+                    patch.object(tasks, "setup_environment"), \
+                    patch.object(tasks, "check_env", return_value={}), \
+                    patch.object(tasks, "run_check", side_effect=[{"passed": False}, {"passed": True}]), \
+                    patch.object(agents.arms, "base_env", return_value={}), \
+                    patch.object(agents.runner, "sweep"), \
+                    patch.object(agents, "probe", return_value=[]), \
+                    patch.object(agents.subprocess, "run", return_value=MagicMock(returncode=0)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(agents.cmd_check_tasks(argparse.Namespace(tasks=["sample"], tasks_dir=[], jouet=root)), 0)
+            self.assertEqual(len(previous), 2)
+            self.assertTrue(all(not phase.exists() for phase in previous))
+
+    def test_check_task_phase_cleans_up_when_setup_fails(self):
+        from unittest.mock import MagicMock, patch
+
+        import agents
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = MagicMock(name="task")
+            task.name = "sample"
+
+            def prepare(_task, workdir):
+                workdir.mkdir()
+                (workdir / "large-install").write_text("fixture")
+                return {"base_sha": "base", "head_sha": "head"}
+
+            failures = []
+            with patch.object(tasks, "prepare", side_effect=prepare), \
+                    patch.object(tasks, "setup_environment", side_effect=RuntimeError("setup failed")), \
+                    patch.object(agents.arms, "base_env", return_value={}):
+                self.assertTrue(agents.check_task_phase(task, root, "unsolved", False, failures))
+            self.assertIn("setup failed", failures[0])
+            self.assertEqual(list(root.iterdir()), [])
+
     def test_reference_solution_and_check_use_task_dependencies(self):
         import argparse
         import contextlib
