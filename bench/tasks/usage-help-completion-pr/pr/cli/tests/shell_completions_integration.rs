@@ -1,0 +1,3360 @@
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// The program to run for `shell`, honouring the same `USAGECLI_SHELL_<SHELL>` override the CLI
+/// itself reads (`shell_program_override` in `cli/src/env.rs`), and the legacy
+/// `USAGE_SHELL_<SHELL>` behind it.
+///
+/// It matters on Windows, where the executable search order puts the system directory ahead of
+/// `PATH` and installing WSL puts `bash.exe` there — so a bare `bash` is the WSL launcher,
+/// which cannot open the Windows paths these tests write. Pointing the variable at a real bash
+/// is what makes them runnable. Unset, which is every other platform, means the bare name.
+///
+/// The current spelling is also the one that survives `mise run`, which clears `usage_*` from a
+/// task's environment — so it is what lets these tests be driven by `mise r test` rather than by
+/// a bare `cargo test`.
+fn shell_program(shell: &str) -> String {
+    let upper = shell.to_ascii_uppercase();
+    [
+        format!("USAGECLI_SHELL_{upper}"),
+        format!("USAGE_SHELL_{upper}"),
+    ]
+    .iter()
+    .find_map(|key| {
+        let value = env::var(key).ok()?;
+        let value = value.trim().to_string();
+        (!value.is_empty()).then_some(value)
+    })
+    .unwrap_or_else(|| shell.to_string())
+}
+
+/// A path as a POSIX shell will read it.
+///
+/// These tests interpolate paths into script bodies — `source "{}"`, `export PATH="{}:$PATH"` —
+/// where a Windows `\` is an escape character rather than a separator, so `C:\Users\x` arrives
+/// as `C:Usersx`. Every shell that can run these scripts accepts `/` instead, and on Unix this
+/// changes nothing.
+fn sh_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
+/// A path as it must appear inside the shell's `$PATH`.
+///
+/// `$PATH` is colon-separated, so a Windows `C:/Users/…` splits into `C` and `/Users/…` and
+/// neither resolves — a test that puts a directory there would silently look somewhere else.
+/// The POSIX-flavoured shells that can run these scripts on Windows (Git Bash, MSYS2, Cygwin)
+/// all ship `cygpath`, and only they know whether the answer is `/c/…`, `/cygdrive/c/…` or a
+/// mount point set in fstab. Asking through `shell` rather than spawning `cygpath` directly
+/// finds the one that belongs to the shell actually in use, which need not be on Windows' own
+/// `PATH`.
+///
+/// Off Windows, and if the conversion is unavailable, the path is already what `$PATH` wants.
+fn path_var_entry(shell: &str, path: &Path) -> String {
+    if !cfg!(windows) {
+        return sh_path(path);
+    }
+    Command::new(shell_program(shell))
+        .args(["-c", "cygpath -u \"$1\"", "--"])
+        .arg(sh_path(path))
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|converted| !converted.is_empty())
+        .unwrap_or_else(|| sh_path(path))
+}
+
+/// Run `script` under `shell`, giving up after `secs` seconds.
+///
+/// `timeout` is spelled the same wherever these shells live, but spawning it directly walks
+/// into the trap this whole file is about: Windows keeps an unrelated `timeout.exe` in the
+/// system directory — a sleep, not a watchdog — and the search order puts it first. Going
+/// through the shell resolves the one on *its* `PATH`, and reuses the program the guard
+/// probed rather than a second, possibly different one.
+fn run_with_timeout(shell: &str, secs: u32, script: &Path) -> std::io::Result<Output> {
+    let program = shell_program(shell);
+    Command::new(&program)
+        .arg("-c")
+        .arg(format!("timeout {secs} \"$0\" \"$1\""))
+        .arg(&program)
+        .arg(sh_path(script))
+        .output()
+}
+
+/// Returns `true` if the test should be skipped because the shell cannot run a script.
+///
+/// Not "is it installed": a WSL `bash` on Windows answers `--version` perfectly well and then
+/// fails to open the very files these tests hand it, which is how five bash tests came to fail
+/// there rather than skip. Running a script from a temp directory is the precondition every
+/// test in this file actually needs, so that is what gets checked.
+///
+/// It probes `shell_program(shell)`, which is also what every test here spawns — the guard and
+/// the thing it guards must be the same executable, or an override would be honoured by one and
+/// not the other.
+///
+/// Panics under `CI=1` (or any non-empty `CI`) to prevent silent false-positives in CI: if a
+/// shell is unusable in CI it's a configuration bug, not an excuse to skip the test.
+fn skip_if_shell_missing(shell: &str) -> bool {
+    if shell_can_run_a_script(shell) {
+        return false;
+    }
+    // Unix only. The workflow installs zsh and fish for the Linux job alone, so a shell missing
+    // there is a configuration bug and refusing to skip is what catches it. Nothing installs them
+    // on Windows, where their absence is the expected state rather than a mistake — mise draws the
+    // same line, installing no POSIX shells on its Windows runners at all.
+    if cfg!(unix) && env::var("CI").is_ok_and(|v| !v.is_empty()) {
+        panic!("shell `{shell}` cannot run a script but CI is set — refusing to skip");
+    }
+    eprintln!(
+        "Skipping {shell} test - `{}` cannot run a script from {}",
+        shell_program(shell),
+        env::temp_dir().display()
+    );
+    true
+}
+
+/// The system bash-completion library, or `None` if it isn't installed.
+///
+/// usage no longer embeds a copy of bash-completion, so the generated bash completion needs
+/// the real one loaded before it — `_init_completion` and `__ltrim_colon_completions` come from
+/// there.
+///
+/// Candidates are the library itself, never the `profile.d/bash_completion.sh` snippet that
+/// Homebrew and others also install: that one is guarded on `$PS1` and so does nothing at all
+/// in a non-interactive shell, which is the only kind these tests run. Sourcing it would look
+/// like success and then fail the completion assertions. `BASH_COMPLETION_USER_DIR` is not
+/// consulted either — it holds per-command completions, not the library.
+///
+/// `USAGE_TEST_BASH_COMPLETION` names a library directly, for testing against a copy that is
+/// not installed system-wide.
+fn bash_completion_candidates() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(path) = env::var_os("USAGE_TEST_BASH_COMPLETION") {
+        candidates.push(PathBuf::from(path));
+    }
+    // Whichever Homebrew is installed: `/opt/homebrew` on Apple Silicon, `/usr/local` on Intel,
+    // and anywhere else if the user relocated it.
+    if let Some(prefix) = env::var_os("HOMEBREW_PREFIX") {
+        candidates.push(PathBuf::from(prefix).join("share/bash-completion/bash_completion"));
+    }
+    candidates.extend(
+        [
+            "/usr/share/bash-completion/bash_completion",
+            "/usr/local/share/bash-completion/bash_completion",
+            "/opt/homebrew/share/bash-completion/bash_completion",
+        ]
+        .into_iter()
+        .map(PathBuf::from),
+    );
+    candidates
+}
+
+/// Returns the first candidate that a non-interactive bash can actually load `_init_completion`
+/// from.
+///
+/// Existing on disk is not the property the test needs — being sourceable into the shell the
+/// test spawns is. Probing for it means a wrapper, a version too old to define the function, or
+/// a path guess that turns out wrong is rejected here rather than surfacing as a puzzling
+/// completion assertion failure further down.
+fn system_bash_completion() -> Option<PathBuf> {
+    bash_completion_candidates().into_iter().find(|candidate| {
+        candidate.is_file()
+            && Command::new(shell_program("bash"))
+                .args(["-c", "source \"$1\" && declare -F _init_completion", "--"])
+                .arg(sh_path(candidate))
+                .output()
+                .is_ok_and(|out| out.status.success())
+    })
+}
+
+/// Returns `Some(path)` to the system bash-completion, or `None` if the test should be skipped.
+///
+/// Panics under `CI` for the same reason [`skip_if_shell_missing`] does: bash-completion is
+/// installed by the workflow, so a run that quietly skipped this test would be reporting a
+/// green bash suite that never exercised a completion.
+///
+/// What CI finds is `ubuntu-latest`'s package, which is 2.11 — deliberately the oldest version
+/// the generated script claims to support, so the claim is tested rather than asserted.
+fn bash_completion_or_skip() -> Option<PathBuf> {
+    if let Some(path) = system_bash_completion() {
+        return Some(path);
+    }
+    // Unix only, for the same reason as `skip_if_shell_missing` and a stronger one: there is no
+    // bash-completion to install on Windows. Git for Windows does not ship the library, and usage
+    // stopped carrying its own copy in 6.0 (#1176) — so unlike a missing zsh, this is not a thing
+    // a runner could be configured to have.
+    if cfg!(unix) && env::var("CI").is_ok_and(|v| !v.is_empty()) {
+        panic!(
+            "no usable bash-completion but CI is set — refusing to skip. Tried: {:?}",
+            bash_completion_candidates()
+        );
+    }
+    eprintln!("Skipping bash completion test - no usable bash-completion library found");
+    None
+}
+
+fn shell_can_run_a_script(shell: &str) -> bool {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = env::temp_dir().join(format!(
+        "usage_shell_probe_{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::create_dir_all(&dir).is_err() {
+        return false;
+    }
+    // `echo ok` is the one thing bash, zsh, fish and pwsh all spell the same way. pwsh is the
+    // only one that insists on the extension.
+    let script = dir.join(if shell == "pwsh" {
+        "probe.ps1"
+    } else {
+        "probe"
+    });
+    let usable = fs::write(&script, "echo ok\n").is_ok()
+        && script_command(shell, &script).output().is_ok_and(|out| {
+            out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "ok"
+        });
+    let _ = fs::remove_dir_all(&dir);
+    usable
+}
+
+/// The command that runs `script` under `shell`.
+///
+/// One place, because the probe above and the tests it guards have to agree on more than the
+/// program: a guard that invokes the shell differently can call a working shell unusable, or
+/// miss one that is. pwsh is where they would have diverged — it needs `-File` to take a script
+/// path at all, and `-NoProfile -NonInteractive` so a developer's profile cannot add output or
+/// a prompt to a run whose stdout is being compared.
+fn script_command(shell: &str, script: &Path) -> Command {
+    let mut cmd = Command::new(shell_program(shell));
+    if shell == "pwsh" {
+        cmd.args(["-NoProfile", "-NonInteractive", "-File"]);
+    }
+    cmd.arg(sh_path(script));
+    cmd
+}
+
+/// Path to a checked-in generated completion under `cli/assets/completions/`.
+/// These are what users actually source, so the shell-function collision tests
+/// assert against them rather than a freshly generated stand-in.
+fn checked_in_completion(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("completions")
+        .join(name)
+}
+
+/// Helper to run usage complete-word and return stdout
+fn run_complete_word(usage_bin: &Path, shell: &str, spec_file: &Path, words: &[&str]) -> String {
+    run_complete_word_in(usage_bin, shell, spec_file, words, None)
+}
+
+fn run_complete_word_in(
+    usage_bin: &Path,
+    shell: &str,
+    spec_file: &Path,
+    words: &[&str],
+    cwd: Option<&Path>,
+) -> String {
+    let mut args = vec![
+        "complete-word".to_string(),
+        "--shell".to_string(),
+        shell.to_string(),
+        "-f".to_string(),
+        spec_file.to_str().unwrap().to_string(),
+        "--".to_string(),
+    ];
+    args.extend(words.iter().map(|w| w.to_string()));
+
+    let mut command = Command::new(usage_bin);
+    command.args(&args);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let output = command.output().expect("Failed to run usage complete-word");
+
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Build the usage binary and return its path
+fn build_usage_binary() -> PathBuf {
+    if let Some(usage_path) = std::env::var("CARGO_BIN_EXE_usage")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        return PathBuf::from(usage_path);
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap();
+
+    // Build the usage binary in debug mode
+    let output = Command::new("cargo")
+        .args(["build", "--bin", "usage"])
+        .current_dir(workspace_root)
+        .output()
+        .expect("Failed to build usage binary");
+
+    if !output.status.success() {
+        panic!(
+            "Failed to build usage binary: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Return the absolute path to the built binary
+    workspace_root.join("target/debug/usage")
+}
+
+/// Test that completions actually work in real shells
+/// These tests require the shells to be installed
+
+#[test]
+fn test_fish_completion_integration() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    // Build the usage binary
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_fish_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // Create a simple spec
+    let spec = r#"
+bin "testcli"
+arg "<file>" help="Input file"
+flag "-v --verbose" help="Verbose output"
+cmd "sub" help="Subcommand" {
+    arg "<item>" help="Item"
+}
+"#;
+
+    // Write spec to a file first (fish completion generator needs a file)
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    // Generate the completion script using the actual usage binary
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "fish", "testcli"])
+        .arg("-f")
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate fish completion");
+
+    let completion_script = String::from_utf8_lossy(&output.stdout);
+
+    // Write completion to a file
+    let comp_file = temp_dir.join("testcli.fish");
+    fs::write(&comp_file, completion_script.as_ref()).unwrap();
+
+    // Also write the spec directly to the expected location in usage format
+    // Convert from KDL to usage format
+    let usage_spec = r#"name testcli
+bin testcli
+flag "-v --verbose" help="Verbose output"
+arg <file> help="Input file"
+cmd sub help=Subcommand {
+    arg <item> help=Item
+}
+"#;
+    let spec_file = temp_dir.join("usage__usage_spec_testcli.spec");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Create a fish script that:
+    // 1. Sets up the PATH to include our usage binary
+    // 2. Sources the completion
+    // 3. Tests the actual completion mechanism
+    let test_script = format!(
+        r#"
+# Add usage binary to PATH
+set -gx PATH {} $PATH
+
+# Source the completion file
+source {}
+
+# Test 1: Check if completion file loads without error
+echo "LOAD_SUCCESS"
+
+# Test 2: Verify the completion mechanism works
+# Use the spec file we pre-created
+set -l spec_file "{}/usage__usage_spec_testcli.spec"
+
+# Check if spec file exists
+if test -f "$spec_file"
+    echo "SPEC_FILE_EXISTS"
+else
+    echo "SPEC_FILE_NOT_FOUND"
+end
+
+# Now test the actual completion by calling usage complete-word directly
+# This is what the completion script calls internally
+set -l completion_output (command usage complete-word --shell fish -f "$spec_file" -- testcli "")
+
+# Check if we got expected completions
+if test -n "$completion_output"
+    echo "GOT_COMPLETIONS"
+
+    # Check for expected completion items
+    if string match -q "*sub*" $completion_output
+        echo "COMPLETION_SUB_FOUND"
+    end
+
+    if string match -q "*verbose*" $completion_output
+        echo "COMPLETION_VERBOSE_FOUND"
+    end
+
+    # Also test partial completion
+    set -l partial_output (command usage complete-word --shell fish -f "$spec_file" -- testcli "s")
+    if string match -q "*sub*" $partial_output
+        echo "PARTIAL_COMPLETION_WORKS"
+    end
+else
+    echo "NO_COMPLETIONS"
+    echo "Error or empty output from usage complete-word"
+end
+
+# Test 3: Verify that complete -C returns actual completions (not the command)
+set -l actual_completions (complete -C"testcli ")
+if test -n "$actual_completions"
+    echo "COMPLETE_C_WORKS"
+    # This should show file completions or actual command completions
+end
+
+echo "COMPLETION_TEST_DONE"
+"#,
+        sh_path(usage_bin.parent().unwrap()),
+        sh_path(&comp_file),
+        sh_path(&temp_dir)
+    );
+
+    let script_file = temp_dir.join("test.fish");
+    fs::write(&script_file, &test_script).unwrap();
+
+    // Execute the test in fish
+    let result = script_command("fish", &script_file)
+        .output()
+        .expect("Failed to run fish test");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    println!("Fish test stdout:\n{}", stdout);
+    println!("Fish test stderr:\n{}", stderr);
+
+    // Simple assertions - just verify it loads and runs
+    assert!(
+        stdout.contains("LOAD_SUCCESS"),
+        "Should load completion script"
+    );
+    assert!(
+        stdout.contains("COMPLETION_TEST_DONE"),
+        "Should complete test"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_bash_completion_integration() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+    let Some(bash_completion) = bash_completion_or_skip() else {
+        return;
+    };
+
+    // Build the usage binary
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_bash_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+arg "<file>" help="Input file"
+flag "-v --verbose" help="Verbose output"
+cmd "sub" help="Subcommand" {
+    arg "<item>" help="Item"
+}
+"#;
+
+    // Write spec to a file first (bash completion generator needs a file)
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "bash", "testcli"])
+        .arg("-f")
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate bash completion");
+
+    let completion_script = String::from_utf8_lossy(&output.stdout);
+    let comp_file = temp_dir.join("testcli.bash");
+    fs::write(&comp_file, completion_script.as_ref()).unwrap();
+
+    // Also write the spec directly to the expected location in usage format
+    let usage_spec = r#"name testcli
+bin testcli
+flag "-v --verbose" help="Verbose output"
+arg <file> help="Input file"
+cmd sub help=Subcommand {
+    arg <item> help=Item
+}
+"#;
+    let spec_file = temp_dir.join("usage__usage_spec_testcli.spec");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Create a bash test script
+    let test_script = format!(
+        r#"
+#!/bin/bash
+# Don't exit on error for the completion calls
+set +e
+
+# Add usage binary to PATH
+export PATH="{}:$PATH"
+
+# bash-completion first: the generated completion calls its functions.
+source {}
+source {}
+
+echo "LOAD_SUCCESS"
+
+# Check if completion function exists
+if type -t _testcli >/dev/null; then
+    echo "COMPLETION_FUNCTION_EXISTS"
+else
+    echo "COMPLETION_FUNCTION_NOT_FOUND"
+fi
+
+# Check if complete command was registered
+if complete -p testcli 2>/dev/null; then
+    echo "COMPLETE_COMMAND_REGISTERED"
+else
+    echo "COMPLETE_COMMAND_NOT_REGISTERED"
+fi
+
+# Test 1: Test basic completion - empty input should show all options
+COMP_WORDS=(testcli "")
+COMP_CWORD=1
+COMP_LINE="testcli "
+COMP_POINT=${{#COMP_LINE}}
+COMPREPLY=()
+
+# Call the completion function
+echo "Calling _testcli with COMP_WORDS: ${{COMP_WORDS[@]}}, COMP_CWORD: $COMP_CWORD"
+_testcli testcli "" testcli 1
+echo "Exit code: $?"
+echo "COMPREPLY count: ${{#COMPREPLY[@]}}"
+
+# Check if we got completions
+if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
+    echo "GOT_COMPLETIONS"
+
+    # Check for expected completions
+    for item in "${{COMPREPLY[@]}}"; do
+        if [[ "$item" == "sub" ]]; then
+            echo "COMPLETION_SUB_FOUND"
+        fi
+        if [[ "$item" == "--verbose" ]] || [[ "$item" == "-v" ]]; then
+            echo "COMPLETION_VERBOSE_FOUND"
+        fi
+    done
+
+    # Show all completions for debugging
+    echo "COMPLETIONS: ${{COMPREPLY[@]}}"
+else
+    echo "NO_COMPLETIONS"
+fi
+
+# Test 2: Test partial completion - "s" should complete to "sub"
+COMP_WORDS=(testcli "s")
+COMP_CWORD=1
+COMP_LINE="testcli s"
+COMP_POINT=${{#COMP_LINE}}
+COMPREPLY=()
+
+_testcli testcli "s" s 1
+
+if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
+    for item in "${{COMPREPLY[@]}}"; do
+        if [[ "$item" == "sub" ]]; then
+            echo "PARTIAL_COMPLETION_WORKS"
+        fi
+    done
+fi
+
+# Test 3: Test flag completion - "-" should show flags
+COMP_WORDS=(testcli "-")
+COMP_CWORD=1
+COMP_LINE="testcli -"
+COMP_POINT=${{#COMP_LINE}}
+COMPREPLY=()
+
+_testcli testcli "-" "-" 1
+
+if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
+    for item in "${{COMPREPLY[@]}}"; do
+        if [[ "$item" == "--verbose" ]] || [[ "$item" == "-v" ]]; then
+            echo "FLAG_COMPLETION_WORKS"
+        fi
+    done
+fi
+
+# Test 4: Check that spec file was created/used
+spec_file="{}/usage__usage_spec_testcli.spec"
+if [[ -f "$spec_file" ]]; then
+    echo "SPEC_FILE_EXISTS"
+fi
+
+echo "COMPLETION_TEST_DONE"
+"#,
+        path_var_entry("bash", usage_bin.parent().unwrap()),
+        sh_path(&bash_completion),
+        sh_path(&comp_file),
+        sh_path(&temp_dir)
+    );
+
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    // Execute the test
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash test");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    println!("Bash test stdout:\n{}", stdout);
+    println!("Bash test stderr:\n{}", stderr);
+
+    // Simple assertions - just verify it loads and runs
+    assert!(
+        stdout.contains("LOAD_SUCCESS"),
+        "Should load completion script"
+    );
+    assert!(
+        stdout.contains("COMPLETION_TEST_DONE"),
+        "Should complete test"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_zsh_completion_integration() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    // Build the usage binary
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_zsh_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+arg "<file>" help="Input file"
+flag "-v --verbose" help="Verbose output"
+cmd "sub" help="Subcommand" {
+    arg "<item>" help="Item"
+}
+"#;
+
+    // Write spec to a file first (zsh completion generator needs a file)
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    // Also write the spec directly to the expected location in usage format
+    let usage_spec = r#"name testcli
+bin testcli
+flag "-v --verbose" help="Verbose output"
+arg <file> help="Input file"
+cmd sub help=Subcommand {
+    arg <item> help=Item
+}
+"#;
+    let spec_file = temp_dir.join("usage__usage_spec_testcli.spec");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Generate the completion
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "zsh", "testcli"])
+        .arg("-f")
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate zsh completion");
+
+    let completion_script = String::from_utf8_lossy(&output.stdout);
+    let comp_file = temp_dir.join("_testcli");
+    fs::write(&comp_file, completion_script.as_ref()).unwrap();
+
+    // Create a zsh test script using zpty to test actual completions
+    let test_script = format!(
+        r#"
+#!/bin/zsh
+
+# Add usage binary to PATH
+export PATH="{}:$PATH"
+export XDG_CACHE_HOME="{}"
+
+# Initialize completion system
+autoload -U compinit
+compinit -D
+
+# Source our completion
+source {}
+
+echo "LOAD_SUCCESS"
+
+# Define our test function
+comptest () {{
+    # Set up styles for easier parsing
+    zstyle ':completion:*:default' list-colors 'no=<COMPLETION>' 'lc=' 'rc=' 'ec=</COMPLETION>'
+    zstyle ':completion:*' group-name ''
+    zstyle ':completion:*:messages' format '<MESSAGE>%d</MESSAGE>'
+    zstyle ':completion:*:descriptions' format '<HEADER>%d</HEADER>'
+
+    # Bind TAB to complete-word
+    bindkey '^I' complete-word
+    zle -C {{,,}}complete-word
+    complete-word () {{
+        unset 'compstate[vared]'
+        compadd -x $'\002'  # Start delimiter
+        _main_complete "$@"
+        compadd -J -last- -x $'\003'  # End delimiter
+        exit
+    }}
+
+    vared -c tmp
+}}
+
+# Load zpty module
+zmodload zsh/zpty
+
+# Create a pty and run our test function
+zpty comptest comptest
+
+# Test 1: Complete from empty
+zpty -w comptest $'testcli \t'
+
+# Read up to first delimiter (with timeout)
+zpty -r comptest REPLY $'*\002' 2>/dev/null
+
+# Read actual completions
+zpty -r comptest REPLY $'*\003' 2>/dev/null
+
+# Check if we got completions
+if [[ -n "${{REPLY%$'\003'}}" ]]; then
+    echo "GOT_COMPLETIONS"
+    # Check for expected items
+    if [[ "$REPLY" == *"sub"* ]]; then
+        echo "FOUND_SUB"
+    fi
+    if [[ "$REPLY" == *"verbose"* ]] || [[ "$REPLY" == *"-v"* ]]; then
+        echo "FOUND_VERBOSE"
+    fi
+fi
+
+# Clean up
+zpty -d comptest
+
+echo "COMPLETION_TEST_DONE"
+"#,
+        path_var_entry("zsh", usage_bin.parent().unwrap()),
+        sh_path(&temp_dir),
+        sh_path(&comp_file)
+    );
+
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    // Execute the test with a timeout: the script drives a pty, which can hang.
+    let result = run_with_timeout("zsh", 5, &script_file).expect("Failed to run zsh test");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    println!("Zsh test stdout:\n{}", stdout);
+    println!("Zsh test stderr:\n{}", stderr);
+
+    // Simple assertion - just verify it loads and runs
+    assert!(
+        stdout.contains("LOAD_SUCCESS"),
+        "Should load completion script"
+    );
+    assert!(
+        stdout.contains("COMPLETION_TEST_DONE"),
+        "Should complete test"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Regression test for https://github.com/jdx/usage/issues/1298.
+///
+/// Zsh's `CURRENT` is one-based while `complete-word --cword` is zero-based.
+/// The generated completion must forward the converted index so completing a
+/// word in the middle of the command line does not target the final word.
+#[test]
+fn test_zsh_completion_forwards_midline_cursor() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_zsh_midline_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+flag "--foo"
+arg "<value>"
+"#;
+    let spec_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_file, spec).unwrap();
+
+    let generated = Command::new(&usage_bin)
+        .args(["generate", "completion", "zsh", "testcli", "-f"])
+        .arg(spec_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate zsh completion");
+    let completion_file = temp_dir.join("_testcli");
+    fs::write(&completion_file, &generated.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+set -e
+export PATH="{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+
+autoload -U compinit
+compinit -u
+source {completion}
+
+compadd() {{
+    print -r -- "[compadd:inserts] ${{inserts[*]}}"
+}}
+
+words=(testcli --f trailing)
+CURRENT=2
+_testcli
+"#,
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        completion = sh_path(&completion_file),
+    );
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "zsh completion script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+    assert!(
+        stdout.contains("[compadd:inserts] --foo"),
+        "expected `--foo` for mid-line `--f`, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Regression test for https://github.com/jdx/usage/issues/634
+///
+/// `usage complete-word --shell zsh` emits two tab-separated columns per
+/// match — `<display>\t<insert>` — and the generated completion script feeds
+/// those to `_describe ... -U -Q -S ''` so values with spaces are inserted
+/// with consistent single-quote quoting (e.g. `'Alice Alice'`) instead of
+/// zsh's default mix of backslash and single-quote styles.
+#[test]
+fn test_zsh_completion_quotes_choices_with_spaces() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!(
+        "usage_zsh_choices_quote_test_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+arg "<course>" required {
+  choices "A B & C"
+}
+arg "<recipient>" required {
+  choices "Alice Alice" "Bob Bob" "Carol Carol"
+}
+"#;
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    // 1. The raw `complete-word --shell zsh` output for the recipient arg
+    //    should be tab-separated, with the insert column pre-quoted.
+    let raw = Command::new(&usage_bin)
+        .args(["complete-word", "--shell", "zsh", "-f"])
+        .arg(spec_kdl_file.to_str().unwrap())
+        .args(["--", "testcli", "A B & C", ""])
+        .output()
+        .expect("Failed to run complete-word");
+    let raw_stdout = String::from_utf8_lossy(&raw.stdout);
+    let expected_lines = [
+        "Alice Alice\t\t'Alice Alice'",
+        "Bob Bob\t\t'Bob Bob'",
+        "Carol Carol\t\t'Carol Carol'",
+    ];
+    for line in expected_lines {
+        assert!(
+            raw_stdout.lines().any(|l| l == line),
+            "Expected `{line}` in complete-word output, got:\n{raw_stdout}"
+        );
+    }
+
+    // 2. The simple unquoted case still emits the three tab-separated columns
+    //    (value, empty description, raw insert with no surrounding quotes).
+    let raw_simple = Command::new(&usage_bin)
+        .args(["complete-word", "--shell", "zsh", "-s"])
+        .arg(r#"arg "<env>" { choices "dev" "prod" }"#)
+        .args(["--", "testcli", ""])
+        .output()
+        .expect("Failed to run complete-word");
+    let simple_stdout = String::from_utf8_lossy(&raw_simple.stdout);
+    assert!(
+        simple_stdout.lines().any(|l| l == "dev\t\tdev"),
+        "Expected `dev\\t\\tdev` in complete-word output, got:\n{simple_stdout}"
+    );
+
+    // 3. The generated zsh completion script wires the three columns into
+    //    `compadd -U -Q -d ...` so zsh inserts the pre-quoted value verbatim
+    //    without re-filtering.
+    let r#gen = Command::new(&usage_bin)
+        .args(["generate", "completion", "zsh", "testcli", "-f"])
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate zsh completion");
+    let script = String::from_utf8_lossy(&r#gen.stdout);
+    let expected_fragments = [
+        "(Q)words",                                            // unquote user input
+        r#"${(@ps:\t:)line}"#,                                 // tab-split preserves empty fields
+        "compadd -l -d _usage_display -U -Q -S '' -a inserts", // -U -Q on compadd
+    ];
+    for fragment in expected_fragments {
+        assert!(
+            script.contains(fragment),
+            "Expected `{fragment}` in generated script:\n{script}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Regression test: subcommands whose names contain `:` (e.g. `release:create`,
+/// `release:docs-sync`, `release:pr`) must all appear in the completion menu.
+///
+/// The previous implementation handed `\:`-escaped `value:description` strings
+/// to `_describe`, which groups matches that share a `\:`-escaped prefix and
+/// surfaces only one entry per group — so out of four `release:*` subcommands
+/// only `release:create` would show. The fix switches to `compadd` driven by
+/// three-column output; this test stubs `compadd` to capture the inserts array
+/// and asserts every colon-named subcommand is passed individually.
+#[test]
+fn test_zsh_completion_includes_all_colon_subcommands() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir =
+        env::temp_dir().join(format!("usage_zsh_colon_subs_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+cmd "release:create" help="Create release"
+cmd "release:docs-sync" help="Refresh docs"
+cmd "release:pr" help="Open release PR"
+cmd "release:update" help="Update release state"
+cmd "lint" help="Run lints"
+cmd "lint:fix" help="Auto-fix lints"
+"#;
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    let r#gen = Command::new(&usage_bin)
+        .args(["generate", "completion", "zsh", "testcli", "-f"])
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate zsh completion");
+    let comp_file = temp_dir.join("_testcli");
+    fs::write(&comp_file, &r#gen.stdout).unwrap();
+
+    // Drive the generated `_testcli` function directly with stubbed compadd
+    // so we can inspect the inserts array without needing a real ZLE context.
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+set -e
+export PATH="{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+
+autoload -U compinit
+compinit -u
+source {comp}
+
+compadd() {{
+    local i="${{inserts[*]}}"
+    print -r -- "[compadd:inserts] $i"
+}}
+
+words=(testcli "")
+CURRENT=2
+_testcli
+"#,
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        comp = sh_path(&comp_file),
+    );
+
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "zsh completion script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+
+    let expected = [
+        "release:create",
+        "release:docs-sync",
+        "release:pr",
+        "release:update",
+        "lint",
+        "lint:fix",
+    ];
+    for sub in expected {
+        assert!(
+            stdout.contains(sub),
+            "Expected subcommand `{sub}` in compadd inserts.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Regression test for user zsh options leaking into generated completions.
+///
+/// With KSH_ARRAYS enabled, zsh arrays become zero-indexed. The generated
+/// completion script indexes tab-split completion rows as zsh arrays, so it
+/// must enter local zsh emulation before parsing `complete-word` output.
+#[test]
+fn test_zsh_completion_ignores_ksh_arrays_option() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir =
+        env::temp_dir().join(format!("usage_zsh_ksh_arrays_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+cmd "doctor" help="Check installation"
+"#;
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    let r#gen = Command::new(&usage_bin)
+        .args(["generate", "completion", "zsh", "testcli", "-f"])
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate zsh completion");
+    let comp_file = temp_dir.join("_testcli");
+    fs::write(&comp_file, &r#gen.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+set -e
+setopt KSH_ARRAYS
+export PATH="{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+
+autoload -U compinit
+compinit -u
+source {comp}
+
+compadd() {{
+    print -r -- "[compadd:inserts] ${{inserts[*]}}"
+}}
+
+words=(testcli d)
+CURRENT=2
+_testcli
+"#,
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        comp = sh_path(&comp_file),
+    );
+
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "zsh completion script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+    assert!(
+        stdout.contains("[compadd:inserts] doctor"),
+        "Expected only the insert value in compadd inserts.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_powershell_completion_integration() {
+    if skip_if_shell_missing("pwsh") {
+        return;
+    }
+
+    // Build the usage binary
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_pwsh_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let spec = r#"
+bin "testcli"
+arg "<file>" help="Input file"
+flag "-v --verbose" help="Verbose output"
+cmd "sub" help="Subcommand" {
+    arg "<item>" help="Item"
+}
+"#;
+
+    // Write spec to a file
+    let spec_kdl_file = temp_dir.join("testcli.kdl");
+    fs::write(&spec_kdl_file, spec).unwrap();
+
+    // Generate the completion script using the actual usage binary
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "powershell", "testcli"])
+        .arg("-f")
+        .arg(spec_kdl_file.to_str().unwrap())
+        .output()
+        .expect("Failed to generate powershell completion");
+
+    let completion_script = String::from_utf8_lossy(&output.stdout);
+
+    // Write completion to a file
+    let comp_file = temp_dir.join("testcli.ps1");
+    fs::write(&comp_file, completion_script.as_ref()).unwrap();
+
+    // Also write the spec directly to the expected location
+    let usage_spec = r#"name testcli
+bin testcli
+flag "-v --verbose" help="Verbose output"
+arg <file> help="Input file"
+cmd sub help=Subcommand {
+    arg <item> help=Item
+}
+"#;
+    let spec_file = temp_dir.join("usage__usage_spec_testcli.kdl");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Create a PowerShell test script
+    let test_script = format!(
+        r#"
+$ErrorActionPreference = "Stop"
+
+# Add usage binary to PATH
+$env:PATH = "{};$env:PATH"
+$env:TEMP = "{}"
+
+# Source the completion file
+. {}
+
+Write-Host "LOAD_SUCCESS"
+
+# Test 1: Check if spec file exists
+$specFile = "{}"
+if (Test-Path $specFile) {{
+    Write-Host "SPEC_FILE_EXISTS"
+}} else {{
+    Write-Host "SPEC_FILE_NOT_FOUND"
+}}
+
+# Test 2: Call usage complete-word directly (this is what the completion script calls)
+$completionOutput = & usage complete-word --shell powershell -f "$specFile" -- testcli "" 2>$null
+
+if ($completionOutput) {{
+    Write-Host "GOT_COMPLETIONS"
+
+    # Check for expected completion items
+    $outputStr = $completionOutput -join "`n"
+    if ($outputStr -match "sub") {{
+        Write-Host "COMPLETION_SUB_FOUND"
+    }}
+    if ($outputStr -match "verbose") {{
+        Write-Host "COMPLETION_VERBOSE_FOUND"
+    }}
+
+    # Test partial completion
+    $partialOutput = & usage complete-word --shell powershell -f "$specFile" -- testcli "s" 2>$null
+    $partialStr = $partialOutput -join "`n"
+    if ($partialStr -match "sub") {{
+        Write-Host "PARTIAL_COMPLETION_WORKS"
+    }}
+}} else {{
+    Write-Host "NO_COMPLETIONS"
+}}
+
+# Test 3: Test flag completion
+$flagOutput = & usage complete-word --shell powershell -f "$specFile" -- testcli "-" 2>$null
+$flagStr = $flagOutput -join "`n"
+if ($flagStr -match "verbose" -or $flagStr -match "-v") {{
+    Write-Host "FLAG_COMPLETION_WORKS"
+}}
+
+Write-Host "COMPLETION_TEST_DONE"
+"#,
+        sh_path(usage_bin.parent().unwrap()),
+        sh_path(&temp_dir),
+        sh_path(&comp_file),
+        sh_path(&spec_file)
+    );
+
+    let script_file = temp_dir.join("test.ps1");
+    fs::write(&script_file, &test_script).unwrap();
+
+    // Execute the test in PowerShell
+    let result = script_command("pwsh", &script_file)
+        .output()
+        .expect("Failed to run pwsh - PowerShell Core must be installed for this test");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    println!("PowerShell test stdout:\n{}", stdout);
+    println!("PowerShell test stderr:\n{}", stderr);
+
+    // Assertions - verify it loads and runs
+    assert!(
+        stdout.contains("LOAD_SUCCESS"),
+        "Should load completion script"
+    );
+    assert!(
+        stdout.contains("COMPLETION_TEST_DONE"),
+        "Should complete test"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_zsh_complete_word_output_format() {
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_zsh_fmt_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // Spec with subcommands (which have descriptions)
+    let usage_spec = r#"name testcli
+bin testcli
+flag "-v --verbose" help="Verbose output"
+arg <file> help="Input file"
+cmd sub help="A subcommand"
+cmd other help="Another subcommand"
+"#;
+    let spec_file = temp_dir.join("test.spec");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Test zsh output format: each line is `<value>\t<description>\t<insert>`
+    // where <value> and <description> are the raw strings (no escaping) and
+    // <insert> is the shell-quoted form for `compadd -Q`. The generated
+    // completion script builds the menu label from value + description
+    // directly, so no `\:` / `\(` / `\[` escaping is needed.
+    let output = run_complete_word(&usage_bin, "zsh", &spec_file, &["testcli", ""]);
+    let lines: Vec<&str> = output.lines().collect();
+
+    assert!(
+        lines.contains(&"sub\tA subcommand\tsub"),
+        "Expected 'sub\\tA subcommand\\tsub' in zsh output, got: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&"other\tAnother subcommand\tother"),
+        "Expected 'other\\tAnother subcommand\\tother' in zsh output, got: {:?}",
+        lines
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Stage a `usage`-shebang test script onto a temp `bin/` directory and
+/// generate the `g completion-init <shell>` output. Returns (temp_dir,
+/// bin_dir, init_script_path).
+fn stage_init_test_env(usage_bin: &Path, shell: &str, label: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let temp_dir = env::temp_dir().join(format!("usage_{label}_init_test_{}", std::process::id()));
+    let bin_dir = temp_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let script = "\
+#!/usr/bin/env -S usage bash
+#USAGE bin \"ex\"
+#USAGE flag \"--foo\" help=\"Flag value\"
+#USAGE arg \"baz\" help=\"Positional values\"
+#USAGE complete \"baz\" run=\"echo val-1; echo val-2; echo val-3\"
+echo baz: $usage_baz
+";
+    let script_path = bin_dir.join("ex");
+    fs::write(&script_path, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    // Generate the init script
+    let output = Command::new(usage_bin)
+        .args(["generate", "completion-init", shell])
+        .output()
+        .expect("Failed to generate completion-init");
+    assert!(
+        output.status.success(),
+        "completion-init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let init_script = temp_dir.join(format!("init.{shell}"));
+    fs::write(&init_script, &output.stdout).unwrap();
+
+    (temp_dir, bin_dir, init_script)
+}
+
+#[test]
+fn test_bash_completion_init_integration() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, init_script) = stage_init_test_env(&usage_bin, "bash", "bash");
+
+    // Drive `_usage_default_complete` directly with simulated COMP_WORDS/CWORD.
+    // This mirrors what bash does at `<Tab>` time.
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+set -e
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+source "{init_script}"
+
+run_case() {{
+    local label="$1"; shift
+    local cword="$1"; shift
+    COMP_WORDS=("$@")
+    COMP_CWORD="$cword"
+    COMPREPLY=()
+    _usage_default_complete "${{COMP_WORDS[0]}}" "${{COMP_WORDS[$cword]}}" "${{COMP_WORDS[$((cword-1))]:-}}"
+    echo "[$label] ${{COMPREPLY[*]}}"
+}}
+
+run_case empty 1 ex ""
+run_case dashes 1 ex "--"
+run_case foo 1 ex "--f"
+"#,
+        bin_dir = path_var_entry("bash", &bin_dir),
+        usage_dir = path_var_entry("bash", usage_bin.parent().unwrap()),
+        init_script = sh_path(&init_script),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash init test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    println!("bash init stdout:\n{stdout}\nstderr:\n{stderr}");
+
+    assert!(
+        result.status.success(),
+        "bash init script exited non-zero. stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[empty] val-1 val-2 val-3"),
+        "expected positional completion, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[dashes] --foo"),
+        "expected flag listing for `--`, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[foo] --foo"),
+        "expected `--foo` for `--f`, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// Bash puts `=` in COMP_WORDBREAKS, so `mycli --out=<TAB>` reaches the completion function
+// as the words `mycli`, `--out`, `=` with `=` as the current word, and `--out=a` as `mycli`,
+// `--out`, `=`, `a`. Handed to complete-word like that, `=` bound as the flag's value and
+// nothing was offered. The COMP_WORDS below are what an interactive bash produces for these
+// lines; the candidates must be what readline inserts after the `=`.
+#[test]
+fn test_bash_completion_attached_long_flag_value() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+    let Some(bash_completion) = bash_completion_or_skip() else {
+        return;
+    };
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_bash_eq_test_{}", std::process::id()));
+    let bin_dir = temp_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let spec = r#"bin "mycli"
+flag "--out <file>" {
+    choices "a" "b"
+}
+"#;
+    let spec_file = temp_dir.join("mycli.kdl");
+    fs::write(&spec_file, spec).unwrap();
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "bash", "mycli", "-f"])
+        .arg(&spec_file)
+        .output()
+        .expect("Failed to generate bash completion");
+    assert!(output.status.success());
+    let comp_file = temp_dir.join("mycli.bash");
+    fs::write(&comp_file, &output.stdout).unwrap();
+
+    // The same flag on a shebang script, completed through the completion-init handler.
+    let script_path = bin_dir.join("ex");
+    fs::write(
+        &script_path,
+        "#!/usr/bin/env -S usage bash\n#USAGE bin \"ex\"\n#USAGE flag \"--out <file>\" {\n#USAGE   choices \"a\" \"b\"\n#USAGE }\n#USAGE arg \"[name]\"\necho $usage_out\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion-init", "bash"])
+        .output()
+        .expect("Failed to generate completion-init");
+    assert!(output.status.success());
+    let init_file = temp_dir.join("init.bash");
+    fs::write(&init_file, &output.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{cache_dir}"
+source "{bash_completion}"
+source "{comp_file}"
+source "{init_file}"
+
+run_case() {{
+    local label="$1" fn="$2" line="$3" cword="$4"; shift 4
+    COMP_WORDS=("$@")
+    COMP_CWORD="$cword"
+    COMP_LINE="$line"
+    COMP_POINT=${{POINT:-${{#line}}}}
+    COMPREPLY=()
+    "$fn" "${{COMP_WORDS[0]}}" "${{COMP_WORDS[$cword]}}" "${{COMP_WORDS[$((cword-1))]}}"
+    echo "[$label] <${{COMPREPLY[*]}}>"
+}}
+
+run_case bin-empty _mycli "mycli --out=" 2 mycli --out =
+run_case bin-partial _mycli "mycli --out=a" 3 mycli --out = a
+run_case bin-flag _mycli "mycli --o" 1 mycli --o
+run_case init-empty _usage_default_complete "ex --out=" 2 ex --out =
+run_case init-partial _usage_default_complete "ex --out=a" 3 ex --out = a
+# The cursor sits after `=` with another word already typed after it.
+POINT=9 run_case init-midline _usage_default_complete "ex --out= x" 2 ex --out = x
+# The cursor sits inside the value: `--out=a|X`.
+POINT=13 run_case bin-midword _mycli "mycli --out=aX" 3 mycli --out = aX
+POINT=10 run_case init-midword _usage_default_complete "ex --out=aX" 3 ex --out = aX
+# The cursor sits in the flag name, before an attached value: `--o|=a`.
+POINT=9 run_case bin-before-eq _mycli "mycli --o=a" 1 mycli --o = a
+POINT=6 run_case init-before-eq _usage_default_complete "ex --o=a" 1 ex --o = a
+# COMP_WORDS keeps a quoted word as typed, quotes and all, so the offsets still line up.
+POINT=21 run_case init-quoted _usage_default_complete 'ex "hi there" --out=aX' 4 ex '"hi there"' --out = aX
+"#,
+        bin_dir = path_var_entry("bash", &bin_dir),
+        usage_dir = path_var_entry("bash", usage_bin.parent().unwrap()),
+        cache_dir = sh_path(&temp_dir.join("cache")),
+        bash_completion = sh_path(&bash_completion),
+        comp_file = sh_path(&comp_file),
+        init_file = sh_path(&init_file),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    println!("stdout:\n{stdout}\nstderr:\n{stderr}");
+
+    assert!(
+        result.status.success(),
+        "bash test script exited non-zero. stderr: {stderr}"
+    );
+    for expected in [
+        "[bin-empty] <a b>",
+        "[bin-partial] <a>",
+        "[bin-flag] <--out>",
+        "[init-empty] <a b>",
+        "[init-partial] <a>",
+        "[init-midline] <a b>",
+        "[bin-midword] <a>",
+        "[init-midword] <a>",
+        "[bin-before-eq] <--out>",
+        "[init-before-eq] <--out>",
+        "[init-quoted] <a>",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "expected `{expected}`, got:\n{stdout}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// What a completer prints reaches `COMPREPLY` as text, in both bash scripts.
+///
+/// The per-binary script handed the candidates to `compgen -W`, which expands each word as shell
+/// input: a candidate `$(touch …)` ran the command at <Tab>, and `*` became the files in the
+/// working directory. The init handler split an unquoted `$(…)`, which globbed the same way.
+#[test]
+fn test_bash_completion_keeps_candidates_literal() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+    let Some(bash_completion) = bash_completion_or_skip() else {
+        return;
+    };
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_bash_literal_{}", std::process::id()));
+    let bin_dir = temp_dir.join("bin");
+    let work_dir = temp_dir.join("work");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&work_dir).unwrap();
+    fs::write(work_dir.join("only-file"), "").unwrap();
+
+    let completer = r##"complete "thing" run=#"printf '%s\n' plain '$(touch ran-bin)' '`touch ran-tick`' '*'"#"##;
+    let spec = format!("bin \"mycli\"\narg \"<thing>\"\n{completer}\n");
+    let spec_file = temp_dir.join("mycli.kdl");
+    fs::write(&spec_file, spec).unwrap();
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "bash", "mycli", "-f"])
+        .arg(&spec_file)
+        .output()
+        .expect("Failed to generate bash completion");
+    assert!(output.status.success());
+    let comp_file = temp_dir.join("mycli.bash");
+    fs::write(&comp_file, &output.stdout).unwrap();
+
+    let script_path = bin_dir.join("ex");
+    fs::write(
+        &script_path,
+        format!(
+            "#!/usr/bin/env -S usage bash\n#USAGE bin \"ex\"\n#USAGE arg \"<thing>\"\n#USAGE {}\n",
+            completer.replace("ran-bin", "ran-init")
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion-init", "bash"])
+        .output()
+        .expect("Failed to generate completion-init");
+    assert!(output.status.success());
+    let init_file = temp_dir.join("init.bash");
+    fs::write(&init_file, &output.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{cache_dir}"
+source "{bash_completion}"
+source "{comp_file}"
+source "{init_file}"
+cd "{work_dir}" || exit 1
+
+run_case() {{
+    local label="$1" fn="$2" line="$3" cword="$4"; shift 4
+    COMP_WORDS=("$@")
+    COMP_CWORD="$cword"
+    COMP_LINE="$line"
+    COMP_POINT=${{#line}}
+    COMPREPLY=()
+    "$fn" "${{COMP_WORDS[0]}}" "${{COMP_WORDS[$cword]}}" "${{COMP_WORDS[$((cword-1))]}}"
+    local item
+    for item in "${{COMPREPLY[@]}}"; do printf '[%s] %s\n' "$label" "$item"; done
+}}
+
+run_case bin _mycli "mycli " 1 mycli ""
+run_case init _usage_default_complete "ex " 1 ex ""
+ls
+"#,
+        bin_dir = path_var_entry("bash", &bin_dir),
+        usage_dir = path_var_entry("bash", usage_bin.parent().unwrap()),
+        cache_dir = sh_path(&temp_dir.join("cache")),
+        bash_completion = sh_path(&bash_completion),
+        comp_file = sh_path(&comp_file),
+        init_file = sh_path(&init_file),
+        work_dir = sh_path(&work_dir),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    println!("stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        result.status.success(),
+        "bash test script exited non-zero. stderr: {stderr}"
+    );
+
+    for marker in ["ran-bin", "ran-init", "ran-tick"] {
+        assert!(
+            !work_dir.join(marker).exists(),
+            "a candidate ran as a command ({marker}):\n{stdout}"
+        );
+    }
+    for label in ["bin", "init"] {
+        let offered: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix(&format!("[{label}] ")))
+            .collect();
+        assert!(offered.contains(&"plain"), "{label}: {offered:?}");
+        assert!(offered.contains(&"*"), "{label}: {offered:?}");
+        assert!(
+            offered.contains(&"`touch ran-tick`"),
+            "{label}: {offered:?}"
+        );
+        assert!(!offered.contains(&"only-file"), "{label}: {offered:?}");
+    }
+    assert!(stdout.contains("[bin] $(touch ran-bin)"), "{stdout}");
+    assert!(stdout.contains("[init] $(touch ran-init)"), "{stdout}");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_zsh_completion_init_integration() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, init_script) = stage_init_test_env(&usage_bin, "zsh", "zsh");
+
+    // Stub `compadd`/`_files` to capture what the handler offers without
+    // needing an interactive ZLE context. Drive with $words/$CURRENT.
+    // `complete` applies `$_comp_options` the way `_main_complete` does before
+    // it calls a completer, and the `_files` fallback must see them unchanged:
+    // resetting them (e.g. `emulate -L zsh` turning `nullglob` off) makes
+    // `_path_files` insert its own glob patterns as candidates (#712).
+    // The init template calls `compadd -l -d <display-arr> -U -Q -S '' -a <inserts-arr>`.
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+set -e
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+autoload -U compinit
+compinit -u
+source "{init_script}"
+
+compadd() {{
+    local d="${{_usage_display[*]}}"
+    local i="${{inserts[*]}}"
+    print -r -- "[compadd:display] $d"
+    print -r -- "[compadd:inserts] $i"
+}}
+_files() {{
+    print -r -- "[files-fallback] nullglob=$options[nullglob] rcexpandparam=$options[rcexpandparam] extendedglob=$options[extendedglob]"
+}}
+complete() {{
+    setopt localoptions ${{_comp_options[@]}}
+    _usage_default_complete
+}}
+
+words=(ex "")
+CURRENT=2
+complete
+
+words=(ex "--f")
+CURRENT=2
+complete
+
+words=(plain "")
+CURRENT=2
+complete
+"#,
+        bin_dir = path_var_entry("zsh", &bin_dir),
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        init_script = sh_path(&init_script),
+    );
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh init test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    println!("zsh init stdout:\n{stdout}\nstderr:\n{stderr}");
+
+    assert!(
+        result.status.success(),
+        "zsh init script exited non-zero. stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[compadd:inserts] val-1 val-2 val-3"),
+        "expected positional completions in compadd inserts, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[compadd:display]") && stdout.contains("--foo"),
+        "expected --foo flag in compadd display, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[files-fallback] nullglob=on rcexpandparam=on extendedglob=on"),
+        "expected file fallback to keep the completion system's options, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// Regression: init script (`compdef -default-` handler) must surface every
+/// colon-named subcommand, not collapse them via `_describe` grouping.
+/// Mirrors `test_zsh_completion_includes_all_colon_subcommands` but exercises
+/// the shebang/init path instead of a per-bin `compdef` registration.
+#[test]
+fn test_zsh_init_completion_includes_all_colon_subcommands() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!(
+        "usage_zsh_init_colon_subs_test_{}",
+        std::process::id()
+    ));
+    let bin_dir = temp_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let script = "\
+#!/usr/bin/env -S usage bash
+#USAGE bin \"testcli\"
+#USAGE cmd \"release:create\" help=\"Create release\"
+#USAGE cmd \"release:docs-sync\" help=\"Refresh docs\"
+#USAGE cmd \"release:pr\" help=\"Open release PR\"
+#USAGE cmd \"release:update\" help=\"Update release state\"
+#USAGE cmd \"lint\" help=\"Run lints\"
+#USAGE cmd \"lint:fix\" help=\"Auto-fix lints\"
+";
+    let script_path = bin_dir.join("testcli");
+    fs::write(&script_path, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let r#gen = Command::new(&usage_bin)
+        .args(["generate", "completion-init", "zsh"])
+        .output()
+        .expect("Failed to generate completion-init");
+    assert!(
+        r#gen.status.success(),
+        "completion-init failed: {}",
+        String::from_utf8_lossy(&r#gen.stderr)
+    );
+    let init_script = temp_dir.join("init.zsh");
+    fs::write(&init_script, &r#gen.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+set -e
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+
+autoload -U compinit
+compinit -u
+source "{init}"
+
+compadd() {{
+    local i="${{inserts[*]}}"
+    print -r -- "[compadd:inserts] $i"
+}}
+
+words=(testcli "")
+CURRENT=2
+_usage_default_complete
+"#,
+        bin_dir = path_var_entry("zsh", &bin_dir),
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        init = sh_path(&init_script),
+    );
+
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh init test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "zsh init completion script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+
+    let expected = [
+        "release:create",
+        "release:docs-sync",
+        "release:pr",
+        "release:update",
+        "lint",
+        "lint:fix",
+    ];
+    for sub in expected {
+        assert!(
+            stdout.contains(sub),
+            "Expected subcommand `{sub}` in init-path compadd inserts.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fish_completion_init_integration() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, init_script) = stage_init_test_env(&usage_bin, "fish", "fish");
+
+    // Fish: source the init (which scans $PATH), then verify `complete -C`
+    // produces the expected output. We restrict $PATH to the test bin dir
+    // plus coreutils so the scan stays bounded.
+    let test_script = format!(
+        r#"#!/usr/bin/env fish
+set -gx PATH "{bin_dir}" "{usage_dir}" /usr/bin /bin
+source "{init_script}"
+
+if not complete -c ex | string match -q -- '*usage*'
+    echo "FAIL: completion not registered for ex"
+    exit 1
+end
+echo "[registered] ex"
+
+echo "[empty]" (complete -C 'ex ')
+echo "[foo]" (complete -C 'ex --f')
+"#,
+        bin_dir = sh_path(&bin_dir),
+        usage_dir = sh_path(usage_bin.parent().unwrap()),
+        init_script = sh_path(&init_script),
+    );
+    let script_file = temp_dir.join("test.fish");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("fish", &script_file)
+        .output()
+        .expect("Failed to run fish init test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    println!("fish init stdout:\n{stdout}\nstderr:\n{stderr}");
+
+    assert!(
+        result.status.success(),
+        "fish init script exited non-zero. stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[registered] ex"),
+        "expected `ex` to be registered, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[empty] val-1 val-2 val-3"),
+        "expected positional completion, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("--foo"),
+        "expected --foo for `--f`, got: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Parse errors during completion (#596).
+//
+// `m help <Tab>` against a spec with no `help` command makes `complete-word`
+// exit 1 with `Error: unexpected word: help` on stderr. That error is useful
+// and `complete-word` keeps printing it, but the generated scripts run while
+// the user is mid-edit, so stderr reaching the terminal is printed straight
+// over the prompt. zsh shows the error through `_message` instead; bash and
+// fish discard it. Each test covers both the per-binary script and the
+// `completion-init` shebang handler.
+// ---------------------------------------------------------------------------
+
+/// Stage `m` for the parse-error tests: a spec file, the per-binary completion
+/// for `shell`, the `completion-init` script, and a `usage`-shebang copy of
+/// the same CLI on a `bin/` directory. Returns (temp_dir, bin_dir,
+/// per_bin_script, init_script).
+fn stage_parse_error_env(usage_bin: &Path, shell: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    let temp_dir = env::temp_dir().join(format!(
+        "usage_{shell}_parse_error_test_{}",
+        std::process::id()
+    ));
+    let bin_dir = temp_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let spec_file = temp_dir.join("m.kdl");
+    fs::write(&spec_file, "bin \"m\"\ncmd \"run\" help=\"Run it\"\n").unwrap();
+
+    let script_path = bin_dir.join("m");
+    fs::write(
+        &script_path,
+        "#!/usr/bin/env -S usage bash\n#USAGE bin \"m\"\n#USAGE cmd \"run\" help=\"Run it\"\necho ran\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let generate = |args: &[&str], out: &Path| {
+        let output = Command::new(usage_bin)
+            .args(args)
+            .output()
+            .expect("Failed to generate completion");
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::write(out, &output.stdout).unwrap();
+    };
+    let per_bin = temp_dir.join(format!("m.{shell}"));
+    generate(
+        &[
+            "generate",
+            "completion",
+            shell,
+            "m",
+            "-f",
+            spec_file.to_str().unwrap(),
+        ],
+        &per_bin,
+    );
+    let init = temp_dir.join(format!("init.{shell}"));
+    generate(&["generate", "completion-init", shell], &init);
+
+    (temp_dir, bin_dir, per_bin, init)
+}
+
+#[test]
+fn test_zsh_completion_shows_parse_error_as_message() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, per_bin, init) = stage_parse_error_env(&usage_bin, "zsh");
+
+    let test_script = format!(
+        r#"#!/usr/bin/env zsh
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+autoload -U compinit
+compinit -u -D
+source "{per_bin}"
+source "{init}"
+
+compadd() {{ print -r -- "[compadd] ${{inserts[*]}}" }}
+_message() {{ print -r -- "[_message] $*" }}
+
+words=(m help "")
+CURRENT=3
+print -r -- "[per-bin]"
+_m
+words=(m "")
+CURRENT=2
+_m
+
+# Trace logging writes to stderr too: a successful completion shows no message,
+# a failed one shows the error rather than the first log line, and `%` in the
+# typed word is escaped for `_message`.
+print -r -- "[traced]"
+words=(m "")
+CURRENT=2
+USAGECLI_TRACE=true _m
+words=(m 'h%Bx' "")
+CURRENT=3
+USAGECLI_TRACE=true _m
+
+words=(m help "")
+CURRENT=3
+print -r -- "[init]"
+_usage_default_complete
+words=(m "")
+CURRENT=2
+_usage_default_complete
+"#,
+        bin_dir = path_var_entry("zsh", &bin_dir),
+        usage_dir = path_var_entry("zsh", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        per_bin = sh_path(&per_bin),
+        init = sh_path(&init),
+    );
+    let script_file = temp_dir.join("test.zsh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("zsh", &script_file)
+        .output()
+        .expect("Failed to run zsh parse-error test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "zsh script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+    // Once from the per-binary script, once from the init handler, each
+    // followed by the working completion.
+    let expected = "[per-bin]\n\
+                    [_message] -r usage: unexpected word: help\n\
+                    [compadd] run\n\
+                    [traced]\n\
+                    [compadd] run\n\
+                    [_message] -r usage: unexpected word: h%%Bx\n\
+                    [init]\n\
+                    [_message] -r usage: unexpected word: help\n\
+                    [compadd] run\n";
+    assert_eq!(stdout, expected, "stderr:\n{stderr}");
+    // Only complete-word's error is under test: on Windows the scripts' own
+    // spec-cache `mkdir -m 700` can warn, which is unrelated.
+    assert!(
+        !stderr.contains("unexpected word"),
+        "complete-word's error must not reach the terminal.\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_bash_completion_discards_parse_error() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, per_bin, init) = stage_parse_error_env(&usage_bin, "bash");
+
+    // The per-binary script needs bash-completion. Use the real library when
+    // there is one; otherwise stand in the two functions the script calls, so
+    // what is under test (complete-word's stderr) is still exercised.
+    let bash_completion = match system_bash_completion() {
+        Some(path) => format!("source \"{}\"", sh_path(&path)),
+        None => r#"_init_completion() {
+    words=("${COMP_WORDS[@]}")
+    cword=$COMP_CWORD
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+}
+__ltrim_colon_completions() { :; }"#
+            .to_string(),
+    };
+
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{bin_dir}:{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{tmp}"
+{bash_completion}
+source "{per_bin}"
+source "{init}"
+
+run_case() {{
+    local label="$1" fn="$2"; shift 2
+    COMP_WORDS=("$@")
+    COMP_CWORD=$(( ${{#COMP_WORDS[@]}} - 1 ))
+    COMP_LINE="${{COMP_WORDS[*]}}"
+    COMP_POINT=${{#COMP_LINE}}
+    COMPREPLY=()
+    "$fn" m "${{COMP_WORDS[COMP_CWORD]}}" "${{COMP_WORDS[COMP_CWORD-1]}}"
+    echo "[$label] ${{COMPREPLY[*]}}"
+}}
+
+run_case per-bin-error _m m help ""
+run_case per-bin-ok _m m ""
+run_case init-error _usage_default_complete m help ""
+run_case init-ok _usage_default_complete m ""
+"#,
+        bin_dir = path_var_entry("bash", &bin_dir),
+        usage_dir = path_var_entry("bash", usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        per_bin = sh_path(&per_bin),
+        init = sh_path(&init),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash parse-error test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "bash script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+    assert_eq!(
+        stdout, "[per-bin-error] \n[per-bin-ok] run\n[init-error] \n[init-ok] run\n",
+        "stderr:\n{stderr}"
+    );
+    // Only complete-word's error is under test: on Windows the scripts' own
+    // spec-cache `mkdir -m 700` can warn, which is unrelated.
+    assert!(
+        !stderr.contains("unexpected word"),
+        "complete-word's error must not reach the terminal.\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fish_completion_discards_parse_error() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, per_bin, init) = stage_parse_error_env(&usage_bin, "fish");
+
+    // The per-binary script and the init scan both register a completer for
+    // `m`, so each runs in its own fish. $PATH is kept small so the init scan
+    // stays bounded.
+    let run = |label: &str, source: &Path| {
+        let test_script = format!(
+            r#"set -gx PATH "{bin_dir}" "{usage_dir}" /usr/bin /bin
+set -gx XDG_CACHE_HOME "{tmp}"
+source "{source}"
+echo "[error]" (complete -C 'm help ')
+echo "[ok]" (complete -C 'm ')
+"#,
+            bin_dir = sh_path(&bin_dir),
+            usage_dir = sh_path(usage_bin.parent().unwrap()),
+            tmp = sh_path(&temp_dir),
+            source = sh_path(source),
+        );
+        let script_file = temp_dir.join(format!("test-{label}.fish"));
+        fs::write(&script_file, &test_script).unwrap();
+
+        let result = script_command("fish", &script_file)
+            .output()
+            .expect("Failed to run fish parse-error test");
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+
+        assert!(
+            result.status.success(),
+            "{label}: fish script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+            result.status
+        );
+        assert!(
+            stdout.starts_with("[error]\n") && stdout.contains("[ok] run"),
+            "{label}: unexpected completions.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("unexpected word"),
+            "{label}: complete-word's error must not reach the terminal.\nstderr:\n{stderr}"
+        );
+    };
+    run("per-bin", &per_bin);
+    run("init", &init);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// fish hands `commandline -t` over as typed, quotes and backslashes included, so a word the
+/// user had started quoting matched nothing: `'prod<Tab>` looked for values beginning with
+/// a quote. And a multi-line `help` put its second line on a row of its own, where fish took
+/// it for a candidate.
+#[test]
+fn test_fish_completion_quoted_word_and_multiline_help() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_fish_quoting_test_{}", std::process::id()));
+    let bin_dir = temp_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let spec = r#"bin "m"
+cmd "deploy" help="Deploy it\nMore detail" {
+    arg "<env>" {
+        choices "prod env" "staging"
+    }
+}
+cmd "read" {
+    arg "<file>"
+}
+"#;
+    let spec_file = temp_dir.join("m.kdl");
+    fs::write(&spec_file, spec).unwrap();
+    // Path completion runs relative to the working directory, and an escaped space in a
+    // directory name is the other way a typed word differs from the value it names.
+    let work_dir = temp_dir.join("work");
+    fs::create_dir_all(work_dir.join("sub dir")).unwrap();
+    fs::write(work_dir.join("sub dir").join("c.txt"), "").unwrap();
+    let shebang: String = spec.lines().map(|l| format!("#USAGE {l}\n")).collect();
+    let script_path = bin_dir.join("m");
+    fs::write(
+        &script_path,
+        format!("#!/usr/bin/env -S usage bash\n{shebang}echo ran\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let generate = |args: &[&str], out: &Path| {
+        let output = Command::new(&usage_bin)
+            .args(args)
+            .output()
+            .expect("Failed to generate completion");
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::write(out, &output.stdout).unwrap();
+    };
+    let per_bin = temp_dir.join("m.fish");
+    generate(
+        &[
+            "generate",
+            "completion",
+            "fish",
+            "m",
+            "-f",
+            spec_file.to_str().unwrap(),
+        ],
+        &per_bin,
+    );
+    let init = temp_dir.join("init.fish");
+    generate(&["generate", "completion-init", "fish"], &init);
+
+    let run = |label: &str, source: &Path| {
+        let test_script = format!(
+            r#"set -gx PATH "{bin_dir}" "{usage_dir}" /usr/bin /bin
+set -gx XDG_CACHE_HOME "{tmp}"
+source "{source}"
+cd "{work_dir}"
+for line in 'm ' "m deploy 'prod" 'm deploy "prod e' 'm deploy prod\ e' 'm read sub\ dir/' "m read 'sub dir/"
+    echo "[$line]" (complete -C $line | string escape)
+end
+"#,
+            work_dir = sh_path(&work_dir),
+            bin_dir = sh_path(&bin_dir),
+            usage_dir = sh_path(usage_bin.parent().unwrap()),
+            tmp = sh_path(&temp_dir),
+            source = sh_path(source),
+        );
+        let script_file = temp_dir.join(format!("test-{label}.fish"));
+        fs::write(&script_file, &test_script).unwrap();
+
+        let result = script_command("fish", &script_file)
+            .output()
+            .expect("Failed to run fish quoting test");
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            result.status.success(),
+            "{label}: fish script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+            result.status
+        );
+        assert_eq!(
+            stdout.lines().collect::<Vec<_>>(),
+            [
+                r"[m ] deploy\tDeploy\ it read",
+                r"[m deploy 'prod] 'prod env'",
+                r#"[m deploy "prod e] 'prod env'"#,
+                r"[m deploy prod\ e] 'prod env'",
+                r"[m read sub\ dir/] 'sub dir/c.txt'",
+                r"[m read 'sub dir/] 'sub dir/c.txt'",
+            ],
+            "{label}: unexpected completions.\nstderr:\n{stderr}"
+        );
+    };
+    run("per-bin", &per_bin);
+    run("init", &init);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Shell-function collision tests.
+//
+// Two distinct ways a shell function can defeat the "is the usage CLI
+// installed?" logic:
+//
+//   1. Function only, no executable. `type -p` (bash) and `type -q` (fish)
+//      both succeed on a function, so the guard passed and the failure
+//      surfaced later as something unrelated. `type -P` searches $PATH only.
+//      oh-my-bash defines a `usage` function, which is how this was found.
+//
+//   2. Function shadowing a real executable. The guard is satisfied honestly,
+//      but a bare `usage --usage-spec` still resolves to the function, so the
+//      spec file gets filled with the function's output. The shipped
+//      completions call `command usage` to bypass function lookup.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_bash_guard_rejects_shell_function_masquerading_as_cli() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_bash_guard_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // `--usage-bin` names a probe that cannot be on $PATH, so the shell
+    // function defined below is the only thing that could satisfy the guard.
+    let output = Command::new(&usage_bin)
+        .args([
+            "generate",
+            "completion",
+            "bash",
+            "testcli",
+            "--usage-bin",
+            "usage_guard_probe",
+            "--usage-cmd",
+            "command usage_guard_probe --usage-spec",
+        ])
+        .output()
+        .expect("Failed to generate bash completion");
+    let comp_file = temp_dir.join("testcli.bash");
+    fs::write(&comp_file, &output.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+usage_guard_probe() {{ echo "I am a function"; }}
+source "{comp}"
+_testcli testcli "" testcli 1
+echo "GUARD_EXIT=$?"
+"#,
+        comp = sh_path(&comp_file),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash guard test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        stdout.contains("GUARD_EXIT=1"),
+        "guard should return 1 when only a shell function shadows the CLI.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("usage_guard_probe CLI not found"),
+        "guard should explain the CLI is missing.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_bash_guard_reports_missing_bash_completion() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    // usage no longer ships a copy of bash-completion, so "it isn't installed" is a
+    // reachable state for anyone sourcing a generated completion. It has to say so
+    // rather than fail as `_init_completion: command not found`.
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_bash_nobc_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "bash", "testcli"])
+        .args(["--usage-cmd", "command usage --usage-spec"])
+        .output()
+        .expect("Failed to generate bash completion");
+    let comp_file = temp_dir.join("testcli.bash");
+    fs::write(&comp_file, &output.stdout).unwrap();
+
+    // A non-interactive bash loads no bash-completion of its own, so sourcing only the
+    // generated script is exactly the state being tested.
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{path}:$PATH"
+source "{comp}"
+_testcli testcli "" testcli 1
+echo "GUARD_EXIT=$?"
+"#,
+        path = path_var_entry("bash", usage_bin.parent().unwrap()),
+        comp = sh_path(&comp_file),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        stdout.contains("GUARD_EXIT=1"),
+        "guard should return 1 when bash-completion is not loaded.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("bash-completion is required"),
+        "guard should name bash-completion.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("_init_completion: command not found"),
+        "the guard should fire before bash reports a missing function.\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_bash_self_completion_uses_executable_not_shadowing_function() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_bash_shadow_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // Native completions must invoke the executable even when a shell function
+    // shadows it, and must work without loading bash-completion.
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{usage_dir}:$PATH"
+export XDG_CACHE_HOME="{cache}"
+usage() {{ echo "FUNCTION_MARKER"; }}
+source "{asset}"
+COMP_LINE="usage ge"
+COMP_POINT=${{#COMP_LINE}}
+COMP_WORDS=(usage ge)
+COMP_CWORD=1
+COMPREPLY=()
+registration=$(complete -p usage)
+callback=${{registration#*-F }}
+callback=${{callback%% *}}
+"$callback"
+printf '%s\n' "${{COMPREPLY[@]}}"
+"#,
+        usage_dir = path_var_entry("bash", usage_bin.parent().unwrap()),
+        cache = sh_path(&temp_dir),
+        asset = sh_path(&checked_in_completion("usage.bash")),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash shadow test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        !stdout.contains("FUNCTION_MARKER"),
+        "completion called the shell function instead of the CLI.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.lines().any(|line| line == "generate"),
+        "native completion should return the generate command.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_bash_init_guard_rejects_shell_function() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, init_script) =
+        stage_init_test_env(&usage_bin, "bash", "bash_guard_init");
+
+    // $PATH deliberately omits the usage binary. A pre-registered `complete -D`
+    // handler gives us a positive signal: the init handler must chain to it
+    // rather than dispatch to a `usage` that is only a shell function.
+    let test_script = format!(
+        r#"#!/usr/bin/env bash
+export PATH="{bin_dir}:/usr/bin:/bin"
+usage() {{ echo "I am a function"; }}
+_test_chained_handler() {{ echo "FELL_THROUGH"; }}
+complete -D -F _test_chained_handler
+source "{init_script}"
+
+COMP_WORDS=(ex "")
+COMP_CWORD=1
+COMPREPLY=()
+_usage_default_complete ex "" ex
+echo "INIT_EXIT=$?"
+"#,
+        bin_dir = path_var_entry("bash", &bin_dir),
+        init_script = sh_path(&init_script),
+    );
+    let script_file = temp_dir.join("test.sh");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("bash", &script_file)
+        .output()
+        .expect("Failed to run bash init guard test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        stdout.contains("FELL_THROUGH"),
+        "init handler should chain to the previous default handler instead of dispatching to a shell function.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("command not found"),
+        "init handler dispatched to a missing CLI.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fish_guard_rejects_shell_function_masquerading_as_cli() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_fish_guard_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let output = Command::new(&usage_bin)
+        .args([
+            "generate",
+            "completion",
+            "fish",
+            "testcli",
+            "--usage-bin",
+            "usage_guard_probe",
+            "--usage-cmd",
+            "command usage_guard_probe --usage-spec",
+        ])
+        .output()
+        .expect("Failed to generate fish completion");
+    let comp_file = temp_dir.join("testcli.fish");
+    fs::write(&comp_file, &output.stdout).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env fish
+function usage_guard_probe
+    echo "I am a function"
+end
+source "{comp}"
+echo "[completions]" (complete -c testcli | string collect)
+"#,
+        comp = sh_path(&comp_file),
+    );
+    let script_file = temp_dir.join("test.fish");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("fish", &script_file)
+        .output()
+        .expect("Failed to run fish guard test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        stderr.contains("usage_guard_probe CLI not found"),
+        "guard should explain the CLI is missing.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("[completions]") && !stdout.contains("complete-word"),
+        "no completion should be registered when the CLI is absent.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fish_self_completion_uses_executable_not_shadowing_function() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!("usage_fish_shadow_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let test_script = format!(
+        r#"#!/usr/bin/env fish
+set -gx PATH "{usage_dir}" /usr/bin /bin
+set -gx XDG_CACHE_HOME "{cache}"
+function usage
+    echo "FUNCTION_MARKER"
+end
+source "{asset}"
+complete --do-complete "usage ge"
+"#,
+        usage_dir = sh_path(usage_bin.parent().unwrap()),
+        cache = sh_path(&temp_dir),
+        asset = sh_path(&checked_in_completion("usage.fish")),
+    );
+    let script_file = temp_dir.join("test.fish");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("fish", &script_file)
+        .output()
+        .expect("Failed to run fish shadow test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        !stdout.contains("FUNCTION_MARKER"),
+        "completion called the shell function instead of the CLI.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.split('\t').next() == Some("generate")),
+        "native completion should return the generate command.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fish_init_guard_rejects_shell_function() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let (temp_dir, bin_dir, init_script) =
+        stage_init_test_env(&usage_bin, "fish", "fish_guard_init");
+
+    // $PATH omits the usage binary but still holds the `ex` shebang script, so
+    // the scan would register `ex` if the guard let a shell function through.
+    let test_script = format!(
+        r#"#!/usr/bin/env fish
+set -gx PATH "{bin_dir}" /usr/bin /bin
+function usage
+    echo "I am a function"
+end
+source "{init_script}"
+echo "[registered]" (complete -c ex | string collect)
+"#,
+        bin_dir = sh_path(&bin_dir),
+        init_script = sh_path(&init_script),
+    );
+    let script_file = temp_dir.join("test.fish");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = script_command("fish", &script_file)
+        .output()
+        .expect("Failed to run fish init guard test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        stdout.contains("[registered]") && !stdout.contains("complete-word"),
+        "init scan should register nothing when only a shell function shadows the CLI.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_complete_path_adds_trailing_slash_for_directories() {
+    let usage_bin = build_usage_binary();
+
+    let temp_dir = env::temp_dir().join(format!("usage_path_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // Create a test directory structure
+    let test_dir = temp_dir.join("testdir");
+    fs::create_dir_all(test_dir.join("subdir")).unwrap();
+    fs::write(test_dir.join("file.txt"), "hello").unwrap();
+
+    // Spec with a path-type arg
+    let usage_spec = r#"name testcli
+bin testcli
+arg <path>
+complete path type="path"
+"#;
+    let spec_file = temp_dir.join("test.spec");
+    fs::write(&spec_file, usage_spec).unwrap();
+
+    // Complete with a path prefix pointing to our test directory
+    let test_dir_str = format!("{}/", test_dir.to_str().unwrap());
+    let output = run_complete_word(&usage_bin, "bash", &spec_file, &["testcli", &test_dir_str]);
+    let lines: Vec<&str> = output.lines().collect();
+
+    // Directory should have trailing slash
+    assert!(
+        lines.iter().any(|l| l.ends_with("subdir/")),
+        "Expected directory completion to end with '/', got: {:?}",
+        lines
+    );
+
+    // File should NOT have trailing slash
+    assert!(
+        lines.iter().any(|l| l.ends_with("file.txt")),
+        "Expected file completion without trailing '/', got: {:?}",
+        lines
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_complete_path_preserves_partially_typed_segments() {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let usage_bin = build_usage_binary();
+    let temp_dir = env::temp_dir().join(format!(
+        "usage_segment_path_test_{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(temp_dir.join("target/debug/incremental")).unwrap();
+
+    let spec_file = temp_dir.join("test.spec");
+    fs::write(
+        &spec_file,
+        "name testcli\nbin testcli\narg <path>\ncomplete path type=\"path\"\n",
+    )
+    .unwrap();
+
+    let output = run_complete_word_in(
+        &usage_bin,
+        "bash",
+        &spec_file,
+        &["testcli", "target/de/inc"],
+        Some(&temp_dir),
+    );
+    assert_eq!(output, "target/debug/incremental/\n");
+
+    let output = run_complete_word_in(
+        &usage_bin,
+        "bash",
+        &spec_file,
+        &["testcli", "tar/"],
+        Some(&temp_dir),
+    );
+    assert_eq!(output, "target/\n");
+
+    let output = run_complete_word_in(
+        &usage_bin,
+        "bash",
+        &spec_file,
+        &["testcli", "target/de/"],
+        Some(&temp_dir),
+    );
+    assert_eq!(output, "target/debug/\n");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+/// A wrapper whose trailing words belong to `fakecmd`, and `fakecmd`'s own completion
+/// registered where each shell looks for one: fish's per-user completions directory,
+/// bash-completion's per-user directory, and a `_fakecmd` function on zsh's `fpath`.
+struct DelegateFixture {
+    dir: PathBuf,
+    spec_file: PathBuf,
+}
+
+impl DelegateFixture {
+    fn new(label: &str) -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = env::temp_dir().join(format!(
+            "usage_delegate_{label}_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let fish = dir.join("config/fish/completions");
+        let bash = dir.join("data/bash-completion/completions");
+        let zsh = dir.join("zfunc");
+        let bin = dir.join("bin");
+        for d in [&fish, &bash, &zsh, &bin] {
+            fs::create_dir_all(d).unwrap();
+        }
+        // fish only loads the completions of a command that exists.
+        let fakecmd = bin.join("fakecmd");
+        fs::write(&fakecmd, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&fakecmd, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(
+            fish.join("fakecmd.fish"),
+            r#"complete -c fakecmd -f
+complete -c fakecmd -n __fish_use_subcommand -a plan -d 'Show a plan'
+complete -c fakecmd -n __fish_use_subcommand -a apply -d 'Apply it'
+complete -c fakecmd -n '__fish_seen_subcommand_from plan' -o out -d 'Write the plan'
+complete -c fakecmd -n '__fish_seen_subcommand_from plan; and string match -q -- "--*" (commandline -ct)' -l out -r -f -a 'plan.tfplan other.tfplan' -d 'Plan file'
+complete -c fakecmd -n '__fish_seen_subcommand_from plan' -o other
+complete -c fakecmd -n 'test (count (commandline -opc)) -eq 2; and not __fish_seen_subcommand_from plan' -a second -d 'Second word'
+"#,
+        )
+        .unwrap();
+        fs::write(
+            bash.join("fakecmd"),
+            r#"_fakecmd() {
+  local cur prev words cword split
+  _init_completion -s || return
+  if ((cword == 1)); then
+    COMPREPLY=($(compgen -W "plan apply" -- "$cur"))
+  elif ((cword == 2)) && [[ ${words[1]} != plan ]]; then
+    COMPREPLY=($(compgen -W "second" -- "$cur"))
+  elif [[ ${words[1]} == plan ]]; then
+    if [[ $prev == --out ]]; then
+      COMPREPLY=($(compgen -W "plan.tfplan other.tfplan" -- "$cur"))
+    else
+      COMPREPLY=($(compgen -W "-out -other" -- "$cur"))
+    fi
+  fi
+}
+complete -F _fakecmd fakecmd
+"#,
+        )
+        .unwrap();
+        // A completion that hangs: it leaves a child holding the pipe complete-word reads, and
+        // says where that child is.
+        fs::write(
+            bash.join("hangcmd"),
+            r#"_hangcmd() {
+  sleep 30 &
+  echo $! > "$HOME/hang.pid"
+  COMPREPLY=(x)
+}
+complete -F _hangcmd hangcmd
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("hang.usage.kdl"),
+            "bin \"wrap\"\narg \"<command>\" var=#true\ncomplete \"command\" delegate=\"hangcmd\"\n",
+        )
+        .unwrap();
+        fs::write(
+            zsh.join("_fakecmd"),
+            r#"#compdef fakecmd
+if (( CURRENT == 2 )); then
+  local -a cmds=('plan:Show a plan' 'apply:Apply it')
+  _describe command cmds
+elif [[ $words[2] == plan ]]; then
+  if compset -P '--out='; then
+    compadd -- plan.tfplan other.tfplan
+  else
+    local -a opts=('-out:Write the plan' '-other')
+    _describe option opts
+  fi
+elif (( CURRENT == 3 )) && [[ $words[2] != (plan|marker) ]]; then
+  compadd -- second
+elif [[ $words[2] == marker ]]; then
+  compadd -- a__USAGE_DELEGATE_DONE b c
+fi
+"#,
+        )
+        .unwrap();
+        let spec_file = dir.join("wrap.usage.kdl");
+        fs::write(
+            &spec_file,
+            r#"bin "wrap"
+flag "-v --verbose"
+arg "<layer>"
+arg "<command>" var=#true
+complete "command" delegate="fakecmd"
+"#,
+        )
+        .unwrap();
+        // The same wrapper, but with the parser handing every word after the first straight to
+        // the wrapped command.
+        fs::write(
+            dir.join("wrap_auto.usage.kdl"),
+            r#"bin "wrap"
+flag "-v --verbose"
+arg "<layer>"
+arg "<command>" var=#true double_dash="automatic"
+complete "command" delegate="fakecmd"
+"#,
+        )
+        .unwrap();
+        // The same wrapper with the completer written inside the argument it completes.
+        fs::write(
+            dir.join("wrap_inline.usage.kdl"),
+            r#"bin "wrap"
+flag "-v --verbose"
+arg "<layer>"
+arg "<command>" var=#true {
+    complete delegate="fakecmd"
+}
+"#,
+        )
+        .unwrap();
+        Self { dir, spec_file }
+    }
+
+    /// `usage complete-word --shell <shell>` for `words`, with the fixture's completions
+    /// visible and the developer's own configuration not.
+    fn complete(&self, shell: &str, words: &[&str]) -> String {
+        self.complete_with(&self.spec_file, shell, words)
+    }
+
+    fn complete_with(&self, spec_file: &Path, shell: &str, words: &[&str]) -> String {
+        let mut command = self.command(build_usage_binary());
+        command
+            .args(["complete-word", "--shell", shell, "-f"])
+            .arg(spec_file)
+            .arg("--")
+            .args(words);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "complete-word failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// `program`, run in the fixture's environment.
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut command = Command::new(program);
+        command
+            .current_dir(&self.dir)
+            .env("HOME", &self.dir)
+            .env("XDG_CONFIG_HOME", self.dir.join("config"))
+            .env("XDG_DATA_HOME", self.dir.join("data"))
+            .env(
+                "PATH",
+                env::join_paths(
+                    std::iter::once(self.dir.join("bin"))
+                        .chain(env::split_paths(&env::var_os("PATH").unwrap_or_default())),
+                )
+                .unwrap(),
+            );
+        if let Some(library) = system_bash_completion() {
+            command.env("BASH_COMPLETION", library);
+        }
+        // An exported FPATH replaces zsh's default rather than adding to it.
+        if let Ok(default) = Command::new(shell_program("zsh"))
+            .args(["-f", "-c", "print -r -- ${(j.:.)fpath}"])
+            .output()
+        {
+            let default = String::from_utf8_lossy(&default.stdout);
+            command.env(
+                "FPATH",
+                format!("{}:{}", sh_path(&self.dir.join("zfunc")), default.trim()),
+            );
+        }
+        command
+    }
+}
+
+impl Drop for DelegateFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The candidate column of complete-word's output, sorted.
+fn delegated_values(output: &str) -> Vec<&str> {
+    let mut values: Vec<&str> = output
+        .lines()
+        .map(|line| line.split('\t').next().unwrap())
+        .collect();
+    values.sort();
+    values
+}
+
+/// What every shell must return for the fixture, whichever way it computes it.
+fn assert_delegated(fixture: &DelegateFixture, shell: &str) {
+    // The first word of the delegated argument: the wrapped command's subcommands.
+    let first = fixture.complete(shell, &["wrap", "layer1", ""]);
+    assert_eq!(
+        delegated_values(&first),
+        ["apply", "plan"],
+        "{shell}: {first}"
+    );
+
+    let partial = fixture.complete(shell, &["wrap", "layer1", "pl"]);
+    assert_eq!(delegated_values(&partial), ["plan"], "{shell}: {partial}");
+
+    // A flag of the wrapped command, once the delegated argument has started. The parser binds
+    // it to that argument, so completion hands it to the wrapped command too.
+    let flag = fixture.complete(shell, &["wrap", "layer1", "plan", "-o"]);
+    assert_eq!(
+        delegated_values(&flag),
+        ["-other", "-out"],
+        "{shell}: {flag}"
+    );
+
+    // The wrapper's own flags stay on offer beside the wrapped command's, because the parser
+    // still gives those to the wrapper.
+    let dash = fixture.complete(shell, &["wrap", "layer1", "plan", "-"]);
+    assert_eq!(
+        delegated_values(&dash),
+        ["--help", "--verbose", "-h", "-other", "-out", "-v"],
+        "{shell}: {dash}"
+    );
+
+    // Under `double_dash="automatic"` the parser gives every word after the first to the
+    // wrapped command, so completion offers only the wrapped command's flags.
+    let auto = fixture.complete_with(
+        &fixture.dir.join("wrap_auto.usage.kdl"),
+        shell,
+        &["wrap", "layer1", "plan", "-"],
+    );
+    assert_eq!(
+        delegated_values(&auto),
+        ["-other", "-out"],
+        "{shell}: {auto}"
+    );
+
+    // An empty word stays a word: after `fakecmd ''` the cursor is on the second argument.
+    let empty = fixture.complete(shell, &["wrap", "layer1", "", ""]);
+    assert_eq!(delegated_values(&empty), ["second"], "{shell}: {empty}");
+
+    // A value in the same word as the wrapped command's flag. Each shell's script hands it over
+    // the way that shell splits it: bash, where `=` is a word break, as `--out`, `=`, `pl`,
+    // and wants back only what follows the `=`; the others as one word, answered with whole
+    // words. A bash completion answers with the value alone either way.
+    let (words, expected): (&[&str], &[&str]) = if shell == "bash" {
+        (
+            &["wrap", "layer1", "plan", "--out", "=", "pl"],
+            &["plan.tfplan"],
+        )
+    } else {
+        (
+            &["wrap", "layer1", "plan", "--out=pl"],
+            &["--out=plan.tfplan"],
+        )
+    };
+    let value = fixture.complete(shell, words);
+    assert_eq!(delegated_values(&value), expected, "{shell}: {value}");
+    // One word in every shell, as `usage complete-word` may also be called: whole words back.
+    let value = fixture.complete(shell, &["wrap", "layer1", "plan", "--out="]);
+    assert_eq!(
+        delegated_values(&value),
+        ["--out=other.tfplan", "--out=plan.tfplan"],
+        "{shell}: {value}"
+    );
+
+    // A `complete` inside the argument delegates the same way, flag words included.
+    let inline = fixture.complete_with(
+        &fixture.dir.join("wrap_inline.usage.kdl"),
+        shell,
+        &["wrap", "layer1", "plan", "-o"],
+    );
+    assert_eq!(
+        delegated_values(&inline),
+        ["-other", "-out"],
+        "{shell}: {inline}"
+    );
+
+    // Typed words reach the delegate as data, never as shell syntax.
+    fixture.complete(
+        shell,
+        &[
+            "wrap",
+            "layer1",
+            "$(touch pwned)",
+            "x;touch pwned2`touch pwned3`",
+        ],
+    );
+    for marker in ["pwned", "pwned2", "pwned3"] {
+        assert!(!fixture.dir.join(marker).exists(), "{shell} ran {marker}");
+    }
+}
+
+#[test]
+fn test_fish_delegates_to_wrapped_command_completion() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+    let fixture = DelegateFixture::new("fish");
+    assert_delegated(&fixture, "fish");
+    // The wrapped command's descriptions come through.
+    let out = fixture.complete("fish", &["wrap", "layer1", "pl"]);
+    assert_eq!(out, "plan\tShow a plan\n");
+}
+
+/// Through the generated fish script rather than `complete-word` alone: what a user pressing Tab
+/// gets.
+#[test]
+fn test_fish_generated_script_delegates() {
+    if skip_if_shell_missing("fish") {
+        return;
+    }
+    let fixture = DelegateFixture::new("fish_script");
+    let usage_bin = build_usage_binary();
+    let script = fixture
+        .command(&usage_bin)
+        .args(["generate", "completion", "fish", "wrap", "-f"])
+        .arg(&fixture.spec_file)
+        .output()
+        .unwrap();
+    assert!(script.status.success());
+    let script_file = fixture.dir.join("wrap.fish");
+    fs::write(&script_file, &script.stdout).unwrap();
+    let wrap = fixture.dir.join("bin/wrap");
+    fs::copy(fixture.dir.join("bin/fakecmd"), &wrap).unwrap();
+    let out = fixture
+        .command(shell_program("fish"))
+        .arg("-c")
+        .arg(r#"set -gx PATH $argv[1] $PATH; source $argv[2]; complete -C "wrap layer1 plan -o""#)
+        .arg(sh_path(usage_bin.parent().unwrap()))
+        .arg(sh_path(&script_file))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        delegated_values(&stdout),
+        ["-other", "-out"],
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn test_bash_delegates_to_wrapped_command_completion() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+    if bash_completion_or_skip().is_none() {
+        return;
+    }
+    let fixture = DelegateFixture::new("bash");
+    assert_delegated(&fixture, "bash");
+}
+
+#[test]
+fn test_zsh_delegates_to_wrapped_command_completion() {
+    if skip_if_shell_missing("zsh") {
+        return;
+    }
+    let fixture = DelegateFixture::new("zsh");
+    assert_delegated(&fixture, "zsh");
+    // The wrapped command's descriptions come through, in zsh's three-column format.
+    let out = fixture.complete("zsh", &["wrap", "layer1", "pl"]);
+    assert_eq!(out, "plan\tShow a plan\tplan\n");
+    // A candidate containing marker text is a candidate, not the end of the answer.
+    let out = fixture.complete("zsh", &["wrap", "layer1", "marker", ""]);
+    assert_eq!(
+        delegated_values(&out),
+        ["a__USAGE_DELEGATE_DONE", "b", "c"],
+        "{out}"
+    );
+}
+
+/// A completion that hangs with a child holding complete-word's pipe: complete-word gives up
+/// after its timeout, and takes that child down with the shell rather than leaving it behind.
+#[cfg(unix)]
+#[test]
+fn test_delegate_timeout_kills_the_whole_completion() {
+    if skip_if_shell_missing("bash") {
+        return;
+    }
+    if bash_completion_or_skip().is_none() {
+        return;
+    }
+    let fixture = DelegateFixture::new("hang");
+    let started = std::time::Instant::now();
+    let out = fixture.complete_with(&fixture.dir.join("hang.usage.kdl"), "bash", &["wrap", ""]);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "took {elapsed:?}"
+    );
+    // Nothing from the shell that hung, so the file fallback answers.
+    assert!(!out.lines().any(|line| line == "x"), "{out}");
+
+    let pid = fs::read_to_string(fixture.dir.join("hang.pid")).unwrap();
+    let pid = pid.trim();
+    // Reparented and reaped asynchronously once killed, so give it a moment.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let state = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&state.stdout);
+        let state = state.trim();
+        if state.is_empty() || state.starts_with('Z') {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = Command::new("kill").args(["-KILL", pid]).status();
+            panic!("the hung completion's child {pid} is still running ({state})");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn test_delegate_offers_nothing_in_shells_it_cannot_ask() {
+    let fixture = DelegateFixture::new("unsupported");
+    for shell in ["powershell", "nu"] {
+        // `-o` is a flag-shaped word, so the file fallback stays off and the answer is empty
+        // rather than an error.
+        let out = fixture.complete(shell, &["wrap", "layer1", "plan", "-o"]);
+        assert_eq!(out, "", "{shell}");
+    }
+}
+
+/// Nushell's completer captures complete-word's stderr with `| complete`, so a
+/// line that doesn't parse yields no candidates and prints nothing.
+///
+/// Skipped whenever `nu` can't run, in CI too: unlike zsh and fish, nothing
+/// installs Nushell on the runners.
+#[test]
+fn test_nu_completion_discards_parse_error() {
+    let nu_runs = Command::new("nu")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !nu_runs {
+        eprintln!("Skipping nu test - `nu` is not installed");
+        return;
+    }
+
+    let usage_bin = build_usage_binary();
+    let temp_dir =
+        env::temp_dir().join(format!("usage_nu_parse_error_test_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let spec_file = temp_dir.join("m.kdl");
+    fs::write(&spec_file, "bin \"m\"\ncmd \"run\" help=\"Run it\"\n").unwrap();
+
+    let output = Command::new(&usage_bin)
+        .args(["generate", "completion", "nu", "m", "-f"])
+        .arg(&spec_file)
+        .output()
+        .expect("Failed to generate completion");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The completer is private to the generated module; export it so the test
+    // can call it the way Nushell's `@complete` does.
+    let script = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace("    def m_completer", "    export def m_completer");
+    let per_bin = temp_dir.join("m.nu");
+    fs::write(&per_bin, script).unwrap();
+
+    let test_script = format!(
+        r#"$env.PATH = ($env.PATH | prepend "{usage_dir}")
+$env.XDG_CACHE_HOME = "{tmp}"
+source "{per_bin}"
+print $"[error] (m_completer [m help ''] | get value? | default [] | str join ' ')"
+print $"[ok] (m_completer [m ''] | get value | str join ' ')"
+"#,
+        usage_dir = sh_path(usage_bin.parent().unwrap()),
+        tmp = sh_path(&temp_dir),
+        per_bin = sh_path(&per_bin),
+    );
+    let script_file = temp_dir.join("test.nu");
+    fs::write(&script_file, &test_script).unwrap();
+
+    let result = Command::new("nu")
+        .arg("--no-config-file")
+        .arg(&script_file)
+        .output()
+        .expect("Failed to run nu parse-error test");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "nu script exited non-zero ({}).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        result.status
+    );
+    assert_eq!(stdout, "[error] \n[ok] run\n", "stderr:\n{stderr}");
+    assert!(
+        !stderr.contains("unexpected word"),
+        "complete-word's error must not reach the terminal.\nstderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}

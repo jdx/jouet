@@ -1,0 +1,5419 @@
+//! Splitting a command line the way the shell that typed it would.
+//!
+//! A completion request arrives as a line and a cursor, not as an argv: the user has pressed
+//! Tab in the middle of something the shell has not run and may never run. Four of the five
+//! shells hand that over directly — bash's `COMP_LINE`/`COMP_POINT`, zsh's `$BUFFER`/`$CURSOR`,
+//! fish's `commandline -cp`, PowerShell's `$commandAst.Extent.Text` with `$cursorPosition` —
+//! and nushell, whose external completer only ever sees spans, re-quotes them into a line.
+//!
+//! Taking the line rather than the shell's own word split is what lets `mise use "my tool<TAB>`
+//! complete inside a quoted word at all: a word split has already thrown away the quote that
+//! says the space is part of the word. The cost is that the splitting is ours to get right,
+//! which is what this module and its tests are.
+//!
+//! The words that come out are *unquoted*, because they are what the shell would have passed
+//! as argv had the line been run — the parser downstream should see exactly what it would see
+//! in a real invocation.
+
+use crate::spec::{ArgMeta, CommandMeta, CommandSelector, FlagMeta, Spec, SpecView};
+pub use crate::spec::{Candidate, CandidateKind, CompleteCtx, Completer};
+use crate::text::{push_all, push_char, replace_char, same_name, split_once_eq};
+use crate::{Arg, Command, Error, Flag, Parser};
+use core::future::Future;
+use core::pin::Pin;
+use std::ffi::OsString;
+
+/// Where the cursor is, in the grammar rather than in the line.
+///
+/// What can be typed at a cursor is decided by everything to its left: which command the words
+/// reached, whether a flag is still waiting for its value, which positional comes next, and
+/// whether flag interpretation is still on at all. This is that state, read off a real parse
+/// of the words before the cursor rather than guessed at — so what is offered and what would
+/// be accepted are decided by the same tables.
+#[derive(Debug, Clone)]
+pub struct Position<'t> {
+    /// The command in scope: the deepest one the words selected.
+    pub cmd: &'t Command<'t>,
+    /// Whether a dash-prefixed word here would still be read as a flag.
+    ///
+    /// False past a `--`, and past the first value of an `automatic` argument — a wrapper
+    /// forwarding to another tool. There is no flag of *this* CLI to offer in either place.
+    pub flags_possible: bool,
+    /// A flag whose value the cursor is at, if the last word was one that takes a value.
+    pub awaiting_value: Option<&'t Flag<'t>>,
+    /// The positional a word here would fill, if any are left.
+    pub next_arg: Option<&'t Arg<'t>>,
+    /// Values already bound to [`next_arg`](Self::next_arg).
+    ///
+    /// Non-zero only for a variadic positional that is still collecting. Completion hints use
+    /// this to distinguish the command word from the arguments in a forwarded argv vector.
+    pub next_arg_values: u32,
+    /// Whether a `--` has been typed.
+    ///
+    /// Narrower than `flags_possible`, which is also false past an `automatic` argument. An
+    /// argument that requires a separator is asking for *this* one specifically.
+    pub separator_seen: bool,
+    /// Whether the word here names a command to *read about* rather than one to run.
+    ///
+    /// True after `help`, where the only thing that belongs is a command name — not the
+    /// arguments of whatever the root would otherwise fall back to.
+    pub help_topic: bool,
+    /// Where the command in scope began, as an index into the words `walk` was given.
+    pub command_start: usize,
+    /// Every command the words passed through, and where each one's own words begin.
+    ///
+    /// The deepest is not always the one being asked about: a global flag is declared on an
+    /// ancestor, and a completer for its value wants the words *that* command was given — the
+    /// ones before the subcommand name included.
+    pub path: Vec<(&'t Command<'t>, usize)>,
+    /// The flags a word here could name: this command's own, then any ancestor's globals.
+    ///
+    /// Taken from the parser rather than gathered again, so what is offered is what would be
+    /// accepted — shadowing included.
+    pub flags: Vec<&'t Flag<'t>>,
+    /// Where the words left these tables for a program they do not describe, as an index into
+    /// the words `walk` was given: the external command's own word.
+    ///
+    /// `Some` only past an [`external_subcommand`](Command::external_subcommand) catch-all,
+    /// which forwards that word and everything after it. [`cmd`](Self::cmd) is still the
+    /// command that declared the catch-all — it is what the words selected — but the rest of
+    /// this position describes *that* command, and nothing it says is true of the forwarded
+    /// program. Whoever knows what the external name means answers from there; whoever does
+    /// not offers nothing.
+    pub external: Option<usize>,
+}
+
+/// Walk the words before the cursor, and report what the cursor is at.
+///
+/// Errors are not failures here. A line being completed is by definition unfinished — a flag
+/// with no value yet, a word that names nothing yet — so a parse error means "the grammar runs
+/// out here", which is exactly the position being asked about. The walk stops at the first one
+/// and reports the state it reached, rather than discarding it the way a real parse must.
+pub fn walk<'t>(root: &'t Command<'t>, words: &[String]) -> Position<'t> {
+    walk_inner(root, words, None)
+}
+
+/// Walk a command line through an executable view's selected globals.
+pub fn walk_view<'t>(
+    root: &'t Command<'t>,
+    words: &[String],
+    view: &'t crate::spec::ViewMeta<'t>,
+) -> Position<'t> {
+    // Route through the promoted command without changing the line custom completers see.
+    // Position offsets are translated back afterwards so `CompleteCtx` slices the user's
+    // words, not this internal projection.
+    let mut projected = words.to_vec();
+    let route: Vec<String> = view
+        .root
+        .split_ascii_whitespace()
+        .map(str::to_string)
+        .collect();
+    let count = route.len();
+    projected.splice(0..0, route);
+    let mut position = walk_inner(root, &projected, Some(view));
+    let original_index = |index: usize| index.saturating_sub(count);
+    position.command_start = original_index(position.command_start);
+    position.external = position.external.map(original_index);
+    for (_, start) in &mut position.path {
+        *start = original_index(*start);
+    }
+    position
+}
+
+/// [`walk`] or [`walk_view`], by whether a view was selected.
+fn walk_for<'t>(
+    root: &'t Command<'t>,
+    words: &[String],
+    view: Option<&'t crate::spec::ViewMeta<'t>>,
+) -> Position<'t> {
+    match view {
+        Some(view) => walk_view(root, words, view),
+        None => walk(root, words),
+    }
+}
+
+fn walk_inner<'t>(
+    root: &'t Command<'t>,
+    words: &[String],
+    view: Option<&'t crate::spec::ViewMeta<'t>>,
+) -> Position<'t> {
+    let mut argv: Vec<&std::ffi::OsStr> = Vec::new();
+    for word in words {
+        argv.push(std::ffi::OsStr::new(word));
+    }
+    let mut parser = Parser::for_completion(root, &argv);
+    if let Some(view) = view {
+        parser = parser.with_view(view);
+    }
+    let mut awaiting_value = None;
+    let mut last_arg = None;
+    let mut last_arg_values = 0u32;
+    let mut external = None;
+
+    while let Some(event) = parser.next_event() {
+        match event {
+            Ok(crate::Event::Arg { arg, .. }) => {
+                if last_arg.is_some_and(|prior| core::ptr::eq(prior, arg)) {
+                    last_arg_values = last_arg_values.saturating_add(1);
+                } else {
+                    last_arg = Some(arg);
+                    last_arg_values = 1;
+                }
+            }
+            // The words named a command these tables do not describe. Everything from that
+            // word on was forwarded in one go, so where it began is what is left of the line
+            // to say — the parser is finished either way.
+            Ok(crate::Event::External { values }) => {
+                external = Some(argv.len() - values.len());
+            }
+            Ok(_) => {}
+            // The one error that says something about the cursor rather than about the line:
+            // the last word was a flag that takes a value, so the cursor is standing in it.
+            Err(Error::MissingFlagValue { flag }) => {
+                awaiting_value = Some(flag);
+                break;
+            }
+            // `ex help config ⌶` is asking which command to read about, and the answer is a
+            // command under `config` — the one the help request already resolved. The parser
+            // never descended into it, on purpose (a topic is a question, not an invocation),
+            // so the position has to be taken from the request rather than from the parser.
+            //
+            // Nothing else can be typed there: a topic takes no flags and fills no argument.
+            Err(Error::Help { cmd, .. }) if parser.help_span() != (0, 0) => {
+                return Position {
+                    cmd,
+                    flags_possible: false,
+                    awaiting_value: None,
+                    next_arg: None,
+                    next_arg_values: 0,
+                    path: Vec::new(),
+                    separator_seen: false,
+                    command_start: 0,
+                    help_topic: true,
+                    flags: Vec::new(),
+                    external: None,
+                };
+            }
+            Err(_) => break,
+        }
+    }
+
+    let next_arg = parser.pending_arg();
+    let mut flags: Vec<_> = parser.flags_in_scope().collect();
+    if parser.command().default_subcommand_flags
+        && let Some(default) = parser.command().default_subcommand
+    {
+        flags.extend_from_slice(default.flags);
+    }
+    Position {
+        path: parser.command_path(),
+        cmd: parser.command(),
+        flags_possible: !parser.flags_stopped(),
+        // A variadic flag still claiming words is standing in the same place a flag waiting
+        // for its first value is: the next word belongs to it, not to the positional after it.
+        awaiting_value: awaiting_value.or_else(|| parser.collecting()),
+        next_arg,
+        next_arg_values: next_arg
+            .filter(|arg| last_arg.is_some_and(|prior| core::ptr::eq(prior, *arg)))
+            .map_or(0, |_| last_arg_values),
+        separator_seen: parser.double_dash_seen(),
+        command_start: parser.command_start(),
+        help_topic: false,
+        flags,
+        external,
+    }
+}
+
+/// Answer for the completer a spec names, wherever in the tree it was declared.
+///
+/// The other half of what `to_kdl` writes. A spec says `complete "tool" run="mise
+/// __complete_word__ --candidates tool"`, and this is what answers that command — so the KDL is
+/// complete for the usage CLI, for another shell's generator, for anything that reads a spec,
+/// while the binary still answers itself when its own script asks.
+///
+/// Found by the name a spec uses, which is the lowercased argument name — the same rule the
+/// reference resolves a `complete` block by, so the two agree about which completer a `run=`
+/// belongs to. `None` when nothing of that name declares one.
+pub fn for_name<'a>(
+    spec: &Spec<'a>,
+    name: &str,
+    ctx: &CompleteCtx<'_>,
+) -> Option<Vec<Candidate<'static>>> {
+    let reached = walk(spec.root.cmd, ctx.command_words_start());
+    for_name_at(spec, name, ctx, &reached, None)
+}
+
+/// Answer for a named completer through an executable view.
+pub fn for_name_view<'a>(
+    spec: &Spec<'a>,
+    name: &str,
+    ctx: &CompleteCtx<'_>,
+    view: &'a crate::spec::ViewMeta<'a>,
+) -> Option<Vec<Candidate<'static>>> {
+    let reached = walk_view(spec.root.cmd, ctx.command_words_start(), view);
+    for_name_at(spec, name, ctx, &reached, Some(view))
+}
+
+fn for_name_at<'a>(
+    spec: &Spec<'a>,
+    name: &str,
+    ctx: &CompleteCtx<'_>,
+    reached: &Position<'a>,
+    view: Option<&'a crate::spec::ViewMeta<'a>>,
+) -> Option<Vec<Candidate<'static>>> {
+    fn on(meta: &CommandMeta<'_>, name: &str) -> Option<Completer> {
+        for arg in meta.args.iter().chain(
+            meta.extra
+                .clause
+                .into_iter()
+                .flat_map(|clause| clause.args.iter()),
+        ) {
+            if same_name(arg.arg.name, name)
+                && let Some(completer) = arg.complete
+            {
+                return Some(completer);
+            }
+        }
+        for flag in meta.flags {
+            let value = flag.value_name.unwrap_or(flag.flag.name);
+            if same_name(value, name)
+                && let Some(completer) = flag.complete
+            {
+                return Some(completer);
+            }
+        }
+        None
+    }
+
+    fn find<'m, 's>(meta: &'m CommandMeta<'s>, name: &str) -> Option<&'m CommandMeta<'s>> {
+        if on(meta, name).is_some() {
+            return Some(meta);
+        }
+        meta.subcommands.iter().find_map(|sub| find(sub, name))
+    }
+
+    // A command can have two fields under one normalized completion name. Its emitted KDL has
+    // one name-keyed block, so the line that block passes back is what distinguishes them. Use
+    // the parser's position before falling back to declaration order for a stale or incomplete
+    // request whose line does not identify either field.
+    fn at_cursor(meta: &CommandMeta<'_>, name: &str, position: &Position<'_>) -> Option<Completer> {
+        if let Some(wanted) = position.awaiting_value {
+            let found = meta.flags.iter().find(|field| {
+                let value = field.value_name.unwrap_or(field.flag.name);
+                core::ptr::eq(field.flag, wanted) && same_name(value, name)
+            });
+            if let Some(completer) = found.and_then(|field| field.complete) {
+                return Some(completer);
+            }
+        }
+        if let Some(wanted) = position.next_arg {
+            let found = meta
+                .args
+                .iter()
+                .chain(
+                    meta.extra
+                        .clause
+                        .into_iter()
+                        .flat_map(|clause| clause.args.iter()),
+                )
+                .find(|field| core::ptr::eq(field.arg, wanted) && same_name(field.arg.name, name));
+            if let Some(completer) = found.and_then(|field| field.complete) {
+                return Some(completer);
+            }
+        }
+        None
+    }
+
+    // The root's own first, then the command the line reached, then anywhere in the tree.
+    //
+    // The first two in that order because the reference resolves a `complete` block that way —
+    // `spec.complete.get(name).or(cmd.complete.get(name))` — and the root's completers are what
+    // a spec writes at the top level, which is `spec.complete`. Answering in a different order
+    // would mean this binary and the reference disagreed about a spec they both read.
+    //
+    // Tree order last, and only as a fallback: two sibling commands may take a `tool` and mean
+    // different things by it, and the one the line reached is the one being asked about.
+    let chain = metadata_chain_on_route(spec, reached).unwrap_or_default();
+    // Cursor identity is stronger than name-keyed declaration order. In particular, an
+    // executable view may promote a field whose completion name is also used by an omitted
+    // host field. Only the promoted field's parser identity can match here.
+    let at_cursor = chain
+        .iter()
+        .rev()
+        .find_map(|meta| at_cursor(meta, name, reached));
+
+    let fallback = if let Some(view) = view {
+        let depth = view.root.split_ascii_whitespace().count();
+        chain.get(depth).copied().and_then(|promoted| {
+            let (flags, groups) = crate::help::view_root_fields(spec, promoted, view);
+            let projected = CommandMeta {
+                flags: &flags,
+                groups: &groups,
+                ..*promoted
+            };
+            on(&projected, name)
+                .or_else(|| chain.last().copied().and_then(|meta| on(meta, name)))
+                .or_else(|| find(promoted, name).and_then(|meta| on(meta, name)))
+        })
+    } else {
+        on(spec.root, name)
+            .or_else(|| chain.last().copied().and_then(|meta| on(meta, name)))
+            .or_else(|| find(spec.root, name).and_then(|meta| on(meta, name)))
+    };
+    let completer = at_cursor.or(fallback)?;
+    let mut found = completer(ctx);
+    keep_prefixed(&mut found, ctx.prefix);
+    Some(found)
+}
+
+/// Answer a derived CLI's completion request, written the way the asking shell reads it.
+///
+/// The body of the `completion_request` a derive generates, kept here so that each CLI's
+/// expansion is a call rather than its own copy. `view` is the executable view argv0 selected;
+/// `#[inline]` so that a CLI declaring none, whose `view_for_program` is a constant `None`,
+/// loses the view branches along with the call.
+#[doc(hidden)]
+#[inline]
+pub fn __usage_answer_request<'a>(
+    spec: &Spec<'a>,
+    request: &CompletionRequest,
+    view: Option<&'a crate::spec::ViewMeta<'a>>,
+) -> String {
+    let split = &request.split;
+    let answer = match &request.candidates_for {
+        Some(name) => {
+            // Walked here as well, because a `--candidates` request names a completer and says
+            // nothing about where the cursor is — and the completer still wants the words its
+            // own command was given.
+            let position = walk_for(spec.root.cmd, split.argv(), view);
+            let words = split.argv();
+            let path: Vec<(&Command<'_>, &[String])> = position
+                .path
+                .iter()
+                .map(|(cmd, start)| (*cmd, words.get(*start..).unwrap_or(&[])))
+                .collect();
+            let ctx = CompleteCtx {
+                words: &split.words,
+                cword: split.cword,
+                prefix: &split.prefix,
+                command_words: command_words(split, &position),
+                command_path: &path,
+            };
+            // Nothing of that name is an empty answer rather than an error: a spec written
+            // against a newer version of this CLI is a stale script, and a stale script should
+            // complete nothing rather than print a message into the user's prompt.
+            Completions {
+                candidates: for_name_at(spec, name, &ctx, &position, view).unwrap_or_default(),
+                files: None,
+            }
+        }
+        None => complete_inner(spec, split, view),
+    };
+    render_request(&answer, request)
+}
+
+/// The completers one command declares, as the names a `complete` block is written under.
+///
+/// One command's own, not the tree's: a spec writes the block inside the command that declares
+/// it, so two siblings taking a `tool` and meaning different things by it each say so.
+#[cfg(feature = "spec")]
+pub fn completers_on(meta: &CommandMeta<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    for arg in meta.args.iter().chain(
+        meta.extra
+            .clause
+            .into_iter()
+            .flat_map(|clause| clause.args.iter()),
+    ) {
+        if arg.complete.is_some() {
+            out.push(arg.arg.name.to_ascii_lowercase());
+        }
+    }
+    for flag in meta.flags {
+        if flag.complete.is_some() {
+            out.push(
+                flag.value_name
+                    .unwrap_or(flag.flag.name)
+                    .to_ascii_lowercase(),
+            );
+        }
+    }
+    crate::order::sort_by(&mut out, &mut |a, b| a.cmp(b));
+    out.dedup();
+    out
+}
+
+/// Paths a shell should offer, on top of whatever this crate knows about.
+///
+/// Listing them is the shell's job, not ours. It already does it better than a CLI can — the
+/// user's own completion styles, colours, escaping, directory-aware widgets — and doing it here
+/// would put a directory read in a binary whose whole claim is that it does not touch the
+/// filesystem to parse a command line. So the answer says *that* paths belong here, and the
+/// generated script hands the position to `_files`, `__fish_complete_path` or `compgen -f`.
+///
+/// This is a deliberate divergence from usage-lib, which reads the directory itself and returns
+/// the names. The conformance comparison holds the two equivalent rather than equal: where the
+/// reference answers with a listing, this answers with the marker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Files {
+    /// Anything: files, directories, whatever the shell shows for a path.
+    Any,
+    /// Directories only.
+    Dirs,
+    /// Executable files at a filesystem path.
+    ExecutablePaths,
+    /// Command names, including entries from the shell's command table and `PATH`.
+    Commands,
+    /// Files with one of these extensions, plus directories for continued traversal.
+    Extensions(Vec<String>),
+}
+
+impl core::fmt::Display for Files {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Any => f.write_str("paths"),
+            Self::Dirs => f.write_str("directories"),
+            Self::ExecutablePaths => f.write_str("executable paths"),
+            Self::Commands => f.write_str("commands"),
+            Self::Extensions(extensions) => {
+                f.write_str("paths with extensions ")?;
+                for (index, extension) in extensions.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, ".{extension}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Everything a shell needs to answer one Tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Completions<'a> {
+    /// What this CLI knows the word could be.
+    pub candidates: Vec<Candidate<'a>>,
+    /// Paths the shell should add, if the position admits them.
+    pub files: Option<Files>,
+}
+
+/// An inspectable account of how a partial line reached its completion answer.
+///
+/// This is deliberately data rather than log output: a CLI can print it in a hidden diagnostic
+/// command, a test can assert on one field, and another frontend can render it differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionTrace<'a> {
+    pub words: Vec<String>,
+    pub cword: usize,
+    pub prefix: String,
+    pub command_path: Vec<&'a str>,
+    pub flags_possible: bool,
+    pub awaiting_value: Option<&'a str>,
+    pub next_arg: Option<&'a str>,
+    pub separator_seen: bool,
+    pub help_topic: bool,
+    pub candidates: Vec<Candidate<'a>>,
+    pub files: Option<Files>,
+}
+
+impl core::fmt::Display for CompletionTrace<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "words: {:?}", self.words)?;
+        writeln!(
+            f,
+            "cursor: word {} with prefix {:?}",
+            self.cword, self.prefix
+        )?;
+        writeln!(f, "command: {}", self.command_path.join(" "))?;
+        let position = if let Some(flag) = self.awaiting_value {
+            format!("value of {flag}")
+        } else if self.flags_possible && self.prefix.starts_with('-') {
+            "flag".to_string()
+        } else if let Some(arg) = self.next_arg {
+            format!("argument {arg}")
+        } else if self.help_topic {
+            "help topic".to_string()
+        } else {
+            "command or flag".to_string()
+        };
+        writeln!(f, "position: {position}")?;
+        writeln!(f, "flags possible: {}", self.flags_possible)?;
+        writeln!(f, "separator seen: {}", self.separator_seen)?;
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|candidate| candidate.value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(f, "candidates: {candidates}")?;
+        match &self.files {
+            Some(files) => writeln!(f, "shell fallback: {files}"),
+            None => writeln!(f, "shell fallback: none"),
+        }
+    }
+}
+
+/// Explain a completion answer using the same parser walk and tables that produced it.
+pub fn trace<'a>(spec: &Spec<'a>, split: &Split) -> CompletionTrace<'a> {
+    let position = walk(spec.root.cmd, split.argv());
+    let answer = complete(spec, split);
+    trace_from(spec, split, position, answer, None)
+}
+
+/// Explain a completion answer through one executable view.
+pub fn trace_view<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    view: &'a crate::spec::ViewMeta<'a>,
+) -> CompletionTrace<'a> {
+    let position = walk_view(spec.root.cmd, split.argv(), view);
+    let answer = complete_view(spec, split, view);
+    trace_from(spec, split, position, answer, Some(view))
+}
+
+fn trace_from<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    position: Position<'a>,
+    answer: Completions<'a>,
+    view: Option<&crate::spec::ViewMeta<'_>>,
+) -> CompletionTrace<'a> {
+    let chain = metadata_chain_on_route(spec, &position);
+    let meta = chain.as_ref().and_then(|chain| chain.last().copied());
+    let next_arg = if restarted(meta, split) {
+        meta.and_then(restart_arg).map(|field| field.arg)
+    } else {
+        position
+            .next_arg
+            .or_else(|| default_subcommand_arg(spec, split, &position).map(|(_, field)| field.arg))
+    };
+    let command_path = if position.help_topic {
+        let argv = split
+            .argv()
+            .iter()
+            .map(std::ffi::OsStr::new)
+            .collect::<Vec<_>>();
+        let route = match view {
+            Some(view) => {
+                let mut view_argv = Vec::with_capacity(argv.len() + 1);
+                view_argv.push(std::ffi::OsStr::new(view.bin));
+                view_argv.extend_from_slice(&argv);
+                crate::help::route_to_view(spec.root.cmd, &view_argv, position.cmd, view)
+            }
+            None => crate::help::route_to(spec.root.cmd, &argv, position.cmd),
+        };
+        route
+            .map(|route| route.into_iter().map(|command| command.name).collect())
+            .or_else(|| chain.map(|chain| chain.into_iter().map(|meta| meta.cmd.name).collect()))
+            .unwrap_or_else(|| vec![position.cmd.name])
+    } else {
+        position
+            .path
+            .iter()
+            .map(|(command, _)| command.name)
+            .collect()
+    };
+    CompletionTrace {
+        words: split.words.clone(),
+        cword: split.cword,
+        prefix: split.prefix.clone(),
+        command_path,
+        flags_possible: position.flags_possible,
+        awaiting_value: position.awaiting_value.map(|flag| flag.name),
+        next_arg: next_arg.map(|arg| arg.name),
+        separator_seen: position.separator_seen,
+        help_topic: position.help_topic,
+        candidates: answer.candidates,
+        files: answer.files,
+    }
+}
+
+/// A completion future supplied by an embedding CLI.
+///
+/// usage-argv does not choose an executor. The application awaits this future on the runtime it
+/// already owns; the allocation exists only after the shell asks for candidates.
+pub type CompletionFuture<'a> = Pin<Box<dyn Future<Output = Vec<Candidate<'static>>> + 'a>>;
+
+/// An async completion function. Taking the context by value lets the future borrow its line and
+/// command tables without requiring global state or a runtime-specific callback trait.
+pub type AsyncCompleter = for<'a> fn(CompleteCtx<'a>) -> CompletionFuture<'a>;
+
+/// A runtime completion callback added to a derive-generated field.
+#[derive(Clone, Copy)]
+pub enum CompletionHandler {
+    Sync(Completer),
+    Async(AsyncCompleter),
+}
+
+impl core::fmt::Debug for CompletionHandler {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Sync(_) => "Sync(..)",
+            Self::Async(_) => "Async(..)",
+        })
+    }
+}
+
+/// One sparse completion override, selected by declaring command and normalized value name.
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionOverlay<'a> {
+    pub command: CommandSelector<'a>,
+    pub value: &'a str,
+    pub handler: CompletionHandler,
+}
+
+impl<'a> CompletionOverlay<'a> {
+    pub const fn sync_any(value: &'a str, completer: Completer) -> Self {
+        Self {
+            command: CommandSelector::Any,
+            value,
+            handler: CompletionHandler::Sync(completer),
+        }
+    }
+
+    pub const fn async_any(value: &'a str, completer: AsyncCompleter) -> Self {
+        Self {
+            command: CommandSelector::Any,
+            value,
+            handler: CompletionHandler::Async(completer),
+        }
+    }
+
+    pub const fn sync(path: &'a str, value: &'a str, completer: Completer) -> Self {
+        Self {
+            command: CommandSelector::Path(path),
+            value,
+            handler: CompletionHandler::Sync(completer),
+        }
+    }
+
+    pub const fn asynchronous(path: &'a str, value: &'a str, completer: AsyncCompleter) -> Self {
+        Self {
+            command: CommandSelector::Path(path),
+            value,
+            handler: CompletionHandler::Async(completer),
+        }
+    }
+}
+
+/// A self-contained completion surface over a borrowed [`SpecView`].
+///
+/// A projection inserts a command path after argv0 before walking the base tables. That lets a
+/// multicall binary such as `aubr` expose `aube run` without cloning a command tree or losing the
+/// root's global flags.
+#[derive(Debug, Clone)]
+pub struct App<'a> {
+    view: SpecView<'a>,
+    overlays: &'a [CompletionOverlay<'a>],
+    projection: Option<&'a str>,
+}
+
+impl<'a> App<'a> {
+    pub const fn new(view: SpecView<'a>) -> Self {
+        Self {
+            view,
+            overlays: &[],
+            projection: None,
+        }
+    }
+
+    pub const fn completions(mut self, overlays: &'a [CompletionOverlay<'a>]) -> Self {
+        self.overlays = overlays;
+        self
+    }
+
+    pub const fn project(mut self, command_path: &'a str) -> Self {
+        self.projection = Some(command_path);
+        self
+    }
+
+    pub fn completion_script(self, shell: Shell) -> String {
+        let spec = self.view.spec();
+        crate::script::script(spec.bin.unwrap_or(spec.name), shell)
+    }
+
+    /// Register completion under `alias` while invoking this view's real binary.
+    pub fn completion_script_for_alias(self, alias: &str, shell: Shell) -> String {
+        let spec = self.view.spec();
+        crate::script::script_for(spec.bin.unwrap_or(spec.name), alias, shell)
+    }
+
+    /// Where this view's completion script goes, and what else the user has to do.
+    ///
+    /// Touches no filesystem, so this is the answer a preview prints. The binary is resolved the
+    /// same way [`App::completion_script`] resolves it, which is what keeps a view or a multicall
+    /// projection from needing a second idea of its own name.
+    pub fn completion_install_plan(
+        self,
+        shell: Shell,
+        env: &crate::install::Env,
+    ) -> Result<crate::install::Plan, crate::install::Error> {
+        let spec = self.view.spec();
+        crate::install::plan(spec.bin.unwrap_or(spec.name), shell, env)
+    }
+
+    /// Where an alias's script would go. The preview half of [`App::install_completion_for_alias`].
+    pub fn completion_install_plan_for_alias(
+        self,
+        alias: &str,
+        shell: Shell,
+        env: &crate::install::Env,
+    ) -> Result<crate::install::Plan, crate::install::Error> {
+        let spec = self.view.spec();
+        crate::install::plan_for(spec.bin.unwrap_or(spec.name), alias, shell, env)
+    }
+
+    /// Write this view's completion script where the described environment says it goes.
+    pub fn install_completion(
+        self,
+        shell: Shell,
+        env: &crate::install::Env,
+        on_foreign: crate::install::OnForeign,
+    ) -> Result<crate::install::Installed, crate::install::Error> {
+        let spec = self.view.spec();
+        crate::install::install(spec.bin.unwrap_or(spec.name), shell, env, on_foreign)
+    }
+
+    /// Install under a shell alias while still asking this view's real binary for answers.
+    pub fn install_completion_for_alias(
+        self,
+        alias: &str,
+        shell: Shell,
+        env: &crate::install::Env,
+        on_foreign: crate::install::OnForeign,
+    ) -> Result<crate::install::Installed, crate::install::Error> {
+        let spec = self.view.spec();
+        crate::install::install_for(spec.bin.unwrap_or(spec.name), alias, shell, env, on_foreign)
+    }
+
+    /// Answer a hidden completion invocation, or return `None` for ordinary argv.
+    pub async fn completion_request(self, argv: &[OsString]) -> Option<String> {
+        let request = CompletionRequest::parse(argv)?;
+        let answer = self.complete_request(&request).await;
+        Some(render_request(&answer, &request))
+    }
+
+    /// The words this app actually walks: the request's, with any multicall projection spliced
+    /// in after argv0.
+    ///
+    /// A caller that has to know where in the line the cursor landed — which command it
+    /// selected, whether it left these tables — has to ask about the same words the answer was
+    /// computed from, or its indices point one projection away from where it thinks.
+    pub fn effective_split(&self, split: &Split) -> Split {
+        let mut split = split.clone();
+        if let Some(path) = self.projection {
+            let projected: Vec<String> =
+                path.split_ascii_whitespace().map(str::to_string).collect();
+            let count = projected.len();
+            split.words.splice(1..1, projected);
+            // A projection lives after argv0. When the cursor is still editing
+            // argv0, inserting that path must not move the cursor into it.
+            if split.cword > 0 {
+                split.cword += count;
+            }
+        }
+        split
+    }
+
+    /// The answer to a parsed request, before it is written the way a shell reads it.
+    ///
+    /// [`completion_request`](Self::completion_request) is this plus [`render`]. They are
+    /// separate for a caller that answers part of a line itself — a host whose runtime commands
+    /// these tables do not describe — and needs this half's answer as data to add to.
+    pub async fn complete_request(&self, request: &CompletionRequest) -> Completions<'a> {
+        let split = self.effective_split(&request.split);
+        let spec = self.view.spec();
+        match &request.candidates_for {
+            Some(name) => complete_named_with(&spec, &split, self.overlays, name).await,
+            None => complete_with(&spec, &split, self.overlays).await,
+        }
+    }
+}
+
+impl<'a> SpecView<'a> {
+    /// Add compiled completion callbacks and optional multicall projections to this view.
+    pub const fn completion_app(self) -> App<'a> {
+        App::new(self)
+    }
+}
+
+/// What a shell asked, read off the hidden `__complete_word__` invocation.
+///
+/// The protocol is small and its own thing: five options, none of them in any CLI's tables,
+/// because a completion is not a command anybody runs. This is the one reader of it — a host
+/// that answers part of a line itself parses the request once, here, rather than keeping a
+/// second idea of what the flags mean.
+///
+/// `#[non_exhaustive]` because the protocol may grow an option; these come from
+/// [`parse`](Self::parse), never from a literal.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct CompletionRequest {
+    /// Which shell is asking, and so how the answer is written.
+    pub shell: Shell,
+    /// The line, split the way that shell splits it, with the cursor's word singled out.
+    pub split: Split,
+    /// The single named completer being asked for, when a spec's `run=` line asked for one
+    /// rather than for everything the cursor could take.
+    pub candidates_for: Option<String>,
+    /// Bash's current Readline word, which may omit a colon-prefixed part of [`Split::prefix`].
+    bash_word: Option<String>,
+    /// Bash's configured word-breaking characters.
+    bash_wordbreaks: Option<String>,
+    /// Bash's current prefix with escaped and quoted colons distinguished from word breaks.
+    bash_marked_prefix: Option<String>,
+    /// The quote left open in the word bash is completing, and the part of that word before it,
+    /// unquoted. Readline replaces only the text after such a quote.
+    bash_open_quote: Option<(BashQuote, String)>,
+}
+
+impl CompletionRequest {
+    /// A request for a line that is already split, with everything else defaulted.
+    ///
+    /// For a caller holding a [`Split`] rather than the argv a shell passed — a host answering
+    /// part of a line itself, a test asking what a position offers.
+    pub const fn for_split(split: Split) -> Self {
+        Self {
+            shell: Shell::Bash,
+            split,
+            candidates_for: None,
+            bash_word: None,
+            bash_wordbreaks: None,
+            bash_marked_prefix: None,
+            bash_open_quote: None,
+        }
+    }
+
+    /// Read a completion request, or return `None` for ordinary argv.
+    ///
+    /// `None` is the load-bearing case: it is what tells a `main` that this is a real
+    /// invocation and the parse should go ahead.
+    ///
+    /// Unknown options are ignored rather than refused. A stale generated script asking with a
+    /// flag this version dropped should still complete something; a beeping shell is worse than
+    /// an ignored word.
+    pub fn parse(argv: &[OsString]) -> Option<Self> {
+        if argv.first()?.to_str()? != "__complete_word__" {
+            return None;
+        }
+        let mut shell = Shell::Bash;
+        let mut line = String::new();
+        let mut cursor = None;
+        let mut candidates_for = None;
+        let mut bash_word = None;
+        let mut bash_wordbreaks = None;
+        let mut words: Option<Vec<String>> = None;
+        let mut rest = argv.get(1..).unwrap_or_default().iter();
+        while let Some(arg) = rest.next() {
+            let arg = arg.to_string_lossy();
+            // `--line=LINE` as well as `--line LINE`: the `run=` a derived CLI writes for a typed
+            // completer passes the line joined, and a request read without it would complete an
+            // empty line.
+            let (option, joined) = match split_once_eq(&arg) {
+                Some((option, value)) if option.starts_with("--") => (option, Some(value)),
+                _ => (&*arg, None),
+            };
+            if option == "--words" && joined.is_none() {
+                let mut all = Vec::new();
+                for word in rest.by_ref() {
+                    all.push(word.to_string_lossy().into_owned());
+                }
+                words = Some(all);
+                break;
+            }
+            if !matches!(
+                option,
+                "--shell"
+                    | "--line"
+                    | "--cursor"
+                    | "--candidates"
+                    | "--bash-word"
+                    | "--bash-wordbreaks"
+            ) {
+                continue;
+            }
+            // Every other option takes its joined value or the next word, read once here rather
+            // than per option. Lossily for all of them: a number or a shell name that is not
+            // UTF-8 is not one either way.
+            let value = match joined {
+                Some(value) => Some(value.to_string()),
+                None => rest
+                    .next()
+                    .map(|value| value.to_string_lossy().into_owned()),
+            };
+            match option {
+                "--shell" => {
+                    if let Some(found) = value.as_deref().and_then(Shell::from_name) {
+                        shell = found;
+                    }
+                }
+                "--line" => {
+                    if let Some(value) = value {
+                        line = value;
+                    }
+                }
+                "--cursor" => cursor = value.and_then(|value| value.parse().ok()),
+                "--candidates" => candidates_for = value,
+                "--bash-word" => bash_word = value,
+                _ => bash_wordbreaks = value,
+            }
+        }
+        let bash_marked_prefix = (shell == Shell::Bash && words.is_none()).then(|| {
+            let cursor = cursor.unwrap_or(line.len());
+            split(&mark_bash_nonbreaking_colons(&line), cursor, shell).prefix
+        });
+        let bash_open_quote = (shell == Shell::Bash && words.is_none())
+            .then(|| {
+                let before_cursor =
+                    &line[..floor_char_boundary(&line, cursor.unwrap_or(line.len()))];
+                let (at, quote) = open_quote(before_cursor)?;
+                Some((quote, split(&before_cursor[..at], at, shell).prefix))
+            })
+            .flatten();
+        let split = match words {
+            Some(mut words) => {
+                if words.is_empty() {
+                    words.push(String::new());
+                }
+                let cword = words.len() - 1;
+                let prefix = words.get(cword).cloned().unwrap_or_default();
+                Split {
+                    words,
+                    cword,
+                    prefix,
+                }
+            }
+            None => {
+                let cursor = cursor.unwrap_or(line.len());
+                split(&line, cursor, shell)
+            }
+        };
+        Some(Self {
+            shell,
+            split,
+            candidates_for,
+            bash_word,
+            bash_wordbreaks,
+            bash_marked_prefix,
+            bash_open_quote,
+        })
+    }
+}
+
+/// The kinds of quote bash can leave open in a word, each read differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BashQuote {
+    /// `'…'`: nothing inside is special but the closing quote.
+    Single,
+    /// `"…"`: `"`, `\`, `$` and `` ` `` are special, and `!` still expands history.
+    Double,
+    /// `$'…'`: backslash escapes are read, so a literal `\` has to be doubled.
+    AnsiC,
+}
+
+impl BashQuote {
+    /// The character that closes it.
+    const fn close(self) -> char {
+        match self {
+            Self::Double => '"',
+            Self::Single | Self::AnsiC => '\'',
+        }
+    }
+}
+
+/// Where the quote still open at the end of `line` opened, and which kind it is. An ANSI-C or
+/// locale quote opens at its `$`, which is not part of the value either.
+///
+/// The same reading of quotes and escapes as [`mark_bash_nonbreaking_colons`], with `$'…'`
+/// added: a backslash escapes outside quotes and inside double and ANSI-C ones, and nothing
+/// inside single ones.
+fn open_quote(line: &str) -> Option<(usize, BashQuote)> {
+    let mut open: Option<(usize, BashQuote)> = None;
+    let mut escaped = false;
+    // An unquoted `$` just before, which makes the quote after it an ANSI-C or locale one.
+    let mut dollar = None;
+    for (at, c) in line.bytes().enumerate() {
+        let after_dollar = dollar.take();
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (open.map(|(_, quote)| quote), c) {
+            (Some(BashQuote::Single | BashQuote::AnsiC), b'\'')
+            | (Some(BashQuote::Double), b'"') => {
+                open = None;
+            }
+            (Some(BashQuote::Double | BashQuote::AnsiC) | None, b'\\') => escaped = true,
+            (None, b'$') => dollar = Some(at),
+            (None, b'\'') => {
+                open = Some(match after_dollar {
+                    Some(dollar) => (dollar, BashQuote::AnsiC),
+                    None => (at, BashQuote::Single),
+                });
+            }
+            (None, b'"') => open = Some((after_dollar.unwrap_or(at), BashQuote::Double)),
+            _ => {}
+        }
+    }
+    open
+}
+
+const BASH_NONBREAKING_COLON: char = '\u{1}';
+
+/// Mark colons that Bash Readline keeps inside its current word.
+///
+/// The regular split intentionally removes quoting and escapes, but the Bash wrapper also needs
+/// to distinguish `::` from `:\:`. Reusing [`split`] after marking those colons preserves that
+/// distinction without maintaining a second shell-word parser.
+fn mark_bash_nonbreaking_colons(line: &str) -> String {
+    // Bytes rather than chars: every character this looks at is ASCII, and so is the marker, so
+    // replacing one keeps the line valid UTF-8 — and a byte of a multi-byte character is never
+    // one of them, whether it is read here or skipped as the character after an escape.
+    let mut marked = line.as_bytes().to_vec();
+    let mut quote = None;
+    // Whether the byte in hand is the one a backslash escaped, which is skipped as a character
+    // of its own but may still be a colon to mark.
+    let mut escaped = false;
+    for byte in &mut marked {
+        let c = *byte;
+        if escaped {
+            escaped = false;
+            if c == b':' {
+                *byte = BASH_NONBREAKING_COLON as u8;
+            }
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) if c == b':' => *byte = BASH_NONBREAKING_COLON as u8,
+            Some(b'"') | None if c == b'\\' => escaped = true,
+            None if c == b'\'' || c == b'"' => quote = Some(c),
+            _ => {}
+        }
+    }
+    String::from_utf8(marked).unwrap_or_default()
+}
+
+/// The line a shell reads to mean "paths belong here too".
+///
+/// A whole line rather than a flag on the protocol, because every one of the five shells can
+/// already split output into lines and look at the last one. `\x01` opens it because no
+/// candidate this crate produces can contain a control character, so it cannot be mistaken for
+/// one.
+pub const FILES_MARKER: &str = "\u{1}files";
+/// See [`FILES_MARKER`]. Directories only.
+pub const DIRS_MARKER: &str = "\u{1}dirs";
+/// See [`FILES_MARKER`]. Executable filesystem paths only.
+pub const EXECUTABLE_PATHS_MARKER: &str = "\u{1}executables";
+/// See [`FILES_MARKER`]. Command names from the shell and `PATH` only.
+pub const COMMANDS_MARKER: &str = "\u{1}commands";
+
+/// Render an answer with the shell-specific context carried by its request.
+///
+/// Bash's Readline splits the word being replaced at `:` by default, while the completion engine
+/// deliberately parses the full shell word. Tell the generated wrapper which already-typed prefix
+/// Readline will preserve so it can trim that prefix from full candidates before insertion.
+pub fn render_request(answer: &Completions<'_>, request: &CompletionRequest) -> String {
+    let insert = match (BashInsert::for_answer(answer), &request.bash_open_quote) {
+        (BashInsert::Unquoted, Some((quote, before))) => BashInsert::Quoted {
+            quote: *quote,
+            before,
+        },
+        (insert, _) => insert,
+    };
+    let mut out = render_inserting(answer, request.shell, &insert);
+    // Inside a quote, Readline's word starts after it, so no colon before it is a break.
+    if request.shell == Shell::Bash
+        && !matches!(insert, BashInsert::Quoted { .. })
+        && request
+            .bash_wordbreaks
+            .as_deref()
+            .is_some_and(|wordbreaks| wordbreaks.as_bytes().contains(&b':'))
+        && let Some(word) = request.bash_word.as_deref()
+    {
+        // COMP_WORDS holds the entire Readline fragment even when the cursor is in its
+        // middle. Find the colon whose remaining fragment starts that word. This cannot
+        // simply take the last normalized colon: an escaped colon remains inside Bash's
+        // word but is indistinguishable in the unescaped Split::prefix.
+        let marked_prefix = request
+            .bash_marked_prefix
+            .as_deref()
+            .unwrap_or(&request.split.prefix);
+        let prefix = marked_prefix
+            .match_indices(':')
+            .rev()
+            .find_map(|(colon, _)| {
+                let fragment = replace_char(
+                    marked_prefix.get(colon + 1..).unwrap_or_default(),
+                    BASH_NONBREAKING_COLON,
+                    ":",
+                );
+                ((fragment.is_empty() && word == ":")
+                    || (!fragment.is_empty() && word.starts_with(&fragment)))
+                .then(|| {
+                    replace_char(
+                        marked_prefix.get(..=colon).unwrap_or_default(),
+                        BASH_NONBREAKING_COLON,
+                        ":",
+                    )
+                })
+            });
+        if let Some(prefix) = prefix.filter(|prefix| !prefix.chars().any(char::is_control)) {
+            // Written as the candidates are, so the wrapper finds it at the start of each.
+            push_all(&mut out, &["\u{1}prefix\t", &insert.write(&prefix), "\n"]);
+        }
+    }
+    out
+}
+
+/// Write an answer the way `shell` reads it.
+///
+/// One line per candidate, in the shape the shell's own completion machinery expects — which is
+/// where the five differ. bash reads values only, escaped the way Readline has to insert them;
+/// fish and nu take a description after a tab; PowerShell takes value, description and display
+/// text; zsh takes display text, description and the quoted text to insert.
+///
+/// A trailing [`FILES_MARKER`] says the generated script should hand the position to the
+/// shell's own path completion afterwards.
+///
+/// bash candidates are escaped for a word with no quote open; [`render_request`] knows the
+/// line, and so whether one is.
+pub fn render(answer: &Completions<'_>, shell: Shell) -> String {
+    render_inserting(answer, shell, &BashInsert::for_answer(answer))
+}
+
+/// [`render`], with bash candidates written for `insert`.
+fn render_inserting(answer: &Completions<'_>, shell: Shell, insert: &BashInsert<'_>) -> String {
+    let mut out = String::new();
+    // Descriptions are all-or-nothing per answer: a column that appears on some rows and not
+    // others reads as missing data rather than as an absent description, which is the reason
+    // the reference decides this per answer too.
+    let described = answer.candidates.iter().any(|c| c.description.is_some());
+
+    for candidate in &answer.candidates {
+        let description = one_line(candidate.description.as_deref().unwrap_or_default());
+        let display = || one_line(candidate.display.as_deref().unwrap_or(&candidate.value));
+        // Every shell but zsh starts with the value to insert; the arms below say what follows.
+        if shell == Shell::Zsh {
+            // Display, then description, then what to type: a candidate containing a space or
+            // a quote has to reach the command line intact.
+            push_all(
+                &mut out,
+                &[
+                    &display(),
+                    "\t",
+                    &description,
+                    "\t",
+                    &zsh_quote(&candidate.value),
+                ],
+            );
+        } else if shell == Shell::Bash {
+            push_all(&mut out, &[&insert.write(&candidate.value)]);
+        } else {
+            push_all(&mut out, &[&candidate.value]);
+        }
+        match shell {
+            Shell::Bash | Shell::Zsh => {}
+            Shell::PowerShell | Shell::Elvish => {
+                let kind = if shell == Shell::PowerShell {
+                    match candidate.kind {
+                        CandidateKind::Value => "\tvalue",
+                        CandidateKind::Command => "\tcommand",
+                        CandidateKind::Flag => "\tflag",
+                        CandidateKind::File => "\tfile",
+                        CandidateKind::Directory => "\tdirectory",
+                    }
+                } else {
+                    ""
+                };
+                push_all(&mut out, &["\t", &description, "\t", &display(), kind]);
+            }
+            Shell::Fish | Shell::Nu => {
+                if described {
+                    push_all(&mut out, &["\t", &description]);
+                }
+            }
+        }
+        push_all(&mut out, &["\n"]);
+    }
+
+    if let Some(files) = &answer.files {
+        push_all(
+            &mut out,
+            &[match files {
+                Files::Any => FILES_MARKER,
+                Files::Dirs => DIRS_MARKER,
+                Files::ExecutablePaths => EXECUTABLE_PATHS_MARKER,
+                Files::Commands => COMMANDS_MARKER,
+                Files::Extensions(_) => "\u{1}extensions",
+            }],
+        );
+        if let Files::Extensions(extensions) = files {
+            for extension in extensions {
+                push_all(&mut out, &["\t", extension]);
+            }
+        }
+        push_all(&mut out, &["\n"]);
+    }
+    out
+}
+
+/// A description with nothing in it that a line-based protocol would read as structure.
+///
+/// One line per candidate, fields separated by tabs — so a description containing either splits
+/// one candidate into several rows, or invents a field. mise declares multi-line `help` on 37 of
+/// its commands and flags, so this is the common case rather than a defensive one.
+///
+/// Collapsed rather than truncated at the first line: a description written across two lines is
+/// one sentence to a reader, and showing half of it is worse than showing it spaced.
+fn one_line(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut spaced = false;
+    for c in text.chars() {
+        if matches!(c, '\n' | '\r' | '\t') {
+            // One space for a run of them, and never a leading one.
+            if !spaced && !out.is_empty() {
+                out.push(' ');
+                spaced = true;
+            }
+        } else {
+            push_char(&mut out, c);
+            spaced = false;
+        }
+    }
+    // A trailing break became a trailing space.
+    while out.ends_with(' ') {
+        out.pop();
+    }
+    out
+}
+
+/// How bash's Readline inserts a candidate the wrapper hands it, and so how one is written.
+///
+/// Readline puts `COMPREPLY` on the line as it is, so a value with a quote or a space in it would
+/// be read back by the shell as something else: `tasks."build.sh"` arrives as `tasks.build.sh`.
+/// The exception is the wrapper's `compopt -o filenames`, under which Readline quotes each
+/// insertion itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BashInsert<'a> {
+    /// As given: the wrapper turns on `-o filenames` for this answer, and Readline quotes it.
+    Raw,
+    /// Into a word with no quote open: every character the shell would act on is escaped.
+    Unquoted,
+    /// After the quote left open in the word, where Readline's word starts. The part of the word
+    /// before the quote, `before`, unquoted, stays on the line, so it is dropped from the value.
+    Quoted { quote: BashQuote, before: &'a str },
+}
+
+impl BashInsert<'_> {
+    /// What an answer gets with nothing known about the line: escaped, unless the wrapper hands
+    /// quoting to Readline by turning on `-o filenames`, which it does for every path request
+    /// but command names.
+    fn for_answer(answer: &Completions<'_>) -> Self {
+        match answer.files {
+            Some(Files::Commands) | None => Self::Unquoted,
+            Some(_) => Self::Raw,
+        }
+    }
+
+    /// `value` as this insertion has to write it.
+    fn write(&self, value: &str) -> String {
+        let (quote, value) = match self {
+            Self::Raw => return value.to_string(),
+            Self::Unquoted => {
+                let mut out = String::with_capacity(value.len());
+                for c in value.chars() {
+                    if matches!(
+                        c,
+                        ' ' | '\t'
+                            | '\\'
+                            | '\''
+                            | '"'
+                            | '$'
+                            | '`'
+                            | '!'
+                            | '&'
+                            | ';'
+                            | '|'
+                            | '<'
+                            | '>'
+                            | '('
+                            | ')'
+                            | '['
+                            | ']'
+                            | '{'
+                            | '}'
+                            | '*'
+                            | '?'
+                            | '#'
+                            | '~'
+                    ) {
+                        push_char(&mut out, '\\');
+                    }
+                    push_char(&mut out, c);
+                }
+                return out;
+            }
+            Self::Quoted { quote, before } => {
+                (*quote, value.strip_prefix(*before).unwrap_or(value))
+            }
+        };
+        let mut out = String::with_capacity(value.len() + 2);
+        for c in value.chars() {
+            match (quote, c) {
+                (BashQuote::Single, '\'') => push_all(&mut out, &["'\\''"]),
+                // History expansion reaches inside double quotes, and a backslash there is kept,
+                // so `!` steps outside them to be escaped.
+                (BashQuote::Double, '!') => push_all(&mut out, &["\"\\!\""]),
+                (BashQuote::Double, '"' | '\\' | '$' | '`') | (BashQuote::AnsiC, '\\' | '\'') => {
+                    push_char(&mut out, '\\');
+                    push_char(&mut out, c);
+                }
+                _ => push_char(&mut out, c),
+            }
+        }
+        // Readline closes the quote after a lone match, unless the text already ends in that
+        // quote character, as one ending in an escaped or reopened quote does.
+        if out.ends_with(quote.close()) {
+            push_char(&mut out, quote.close());
+        }
+        out
+    }
+}
+
+/// A candidate as zsh would have to see it typed.
+///
+/// The same rule the reference uses: left alone when every character is safe, and otherwise
+/// single-quoted with the close-open dance around any apostrophe.
+fn zsh_quote(value: &str) -> String {
+    // Bytes: every safe character is ASCII, so a byte of anything else is an unsafe one.
+    let safe = |c: &u8| {
+        c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'+' | b'=' | b'%' | b','
+            )
+    };
+    if !value.is_empty() && value.as_bytes().iter().all(safe) {
+        return value.to_string();
+    }
+    let mut quoted = String::new();
+    push_all(
+        &mut quoted,
+        &["'", &replace_char(value, '\'', "'\\''"), "'"],
+    );
+    quoted
+}
+
+/// The paths an argument or value name asks for, by the name itself.
+///
+/// The reference resolves a completer by the *lowercased name* and falls back to treating that
+/// name as the type, so an argument called `<FILE>` completes files and `<DIR>` directories
+/// without a spec saying so. Reimplemented rather than modelled as new vocabulary, because it
+/// is the same rule read off the same names.
+fn files_for(name: &str) -> Option<Files> {
+    // Compared one by one through the shared case-insensitive comparison, which is a loop over
+    // a short list rather than a lowercased copy and a match on each length.
+    let found = [
+        "file",
+        "path",
+        "config_file",
+        "dir",
+        "directory",
+        "executable",
+        "command",
+    ]
+    .iter()
+    .position(|known| same_name(name, known))?;
+    Some(match found {
+        0..=2 => Files::Any,
+        3 | 4 => Files::Dirs,
+        5 => Files::ExecutablePaths,
+        _ => Files::Commands,
+    })
+}
+
+fn declared_files(type_: &str, next_arg_values: u32) -> Option<Files> {
+    if let Some(extensions) = type_
+        .strip_prefix("path:")
+        .or_else(|| type_.strip_prefix("file:"))
+    {
+        // A loop and not an adapter chain: the chain is a type of its own to compile for a
+        // list that is read once, when a shell asks.
+        let mut found = Vec::new();
+        for extension in extensions.split(',') {
+            let extension = extension.trim().trim_start_matches('.');
+            if !extension.is_empty() {
+                found.push(extension.to_string());
+            }
+        }
+        let extensions = found;
+        if !extensions.is_empty() {
+            return Some(Files::Extensions(extensions));
+        }
+    }
+    if same_name(type_, "command_args") {
+        return Some(if next_arg_values == 0 {
+            Files::Commands
+        } else {
+            Files::Any
+        });
+    }
+    files_for(type_)
+}
+
+fn declared_files_at_cursor(
+    spec: &Spec<'_>,
+    split: &Split,
+    position: &Position<'_>,
+) -> Option<Files> {
+    let attached = attached_long_value(position, &split.prefix);
+    if split.cword == 0
+        || (position.awaiting_value.is_none()
+            && attached.is_none()
+            && position.flags_possible
+            && split.prefix.starts_with('-'))
+    {
+        return None;
+    }
+    let meta = metadata_chain_on_route(spec, position).and_then(|chain| chain.last().copied());
+    let after_restart = restarted(meta, split);
+    let sigil_cursor = sigil_arg_at_cursor(spec, position, split);
+    let at_cursor = if after_restart {
+        meta.and_then(restart_arg).map(|m| m.arg)
+    } else {
+        sigil_cursor
+            .map(|(_, field, _, _)| field.arg)
+            .or(position.next_arg)
+            .or_else(|| default_subcommand_arg(spec, split, position).map(|(_, field)| field.arg))
+    };
+    if position.awaiting_value.is_none()
+        && attached.is_none()
+        && at_cursor.is_some_and(|arg| arg.double_dash == crate::DoubleDash::Required)
+        && !position.separator_seen
+    {
+        return None;
+    }
+    if sigil_cursor.is_some() {
+        return None;
+    }
+    let value_flag = position
+        .awaiting_value
+        .or_else(|| attached.map(|(flag, _, _)| flag));
+    let (name, complete_type) = if let Some(flag) = value_flag {
+        let meta = flag_meta(spec.root, flag);
+        (
+            meta.and_then(|m| m.value_name).or(Some(flag.name)),
+            meta.and_then(|m| m.extra.complete_type),
+        )
+    } else if let Some(arg) = at_cursor {
+        let meta = arg_meta(spec.root, arg);
+        (Some(arg.name), meta.and_then(|m| m.complete_type))
+    } else {
+        (None, None)
+    };
+    match complete_type {
+        Some(type_) => declared_files(
+            type_,
+            if after_restart {
+                0
+            } else {
+                position.next_arg_values
+            },
+        )
+        .or_else(|| {
+            same_name(type_, "unknown")
+                .then(|| name.and_then(files_for))
+                .flatten()
+        }),
+        None => name.and_then(files_for),
+    }
+}
+
+/// What could be typed at the cursor, given a spec and a split line.
+///
+/// The rules are usage-lib's, because a CLI's completions should not change with the
+/// implementation that answers them:
+///
+/// - a lone `-` offers both forms, `--…` offers longs, `-…` offers shorts;
+/// - a flag waiting for its value offers that flag's choices, and nothing else;
+/// - otherwise the next positional's choices and the subcommands, aliases included.
+///
+/// Hidden things are never offered, in any branch. What is *not* here yet: the file fallback
+/// for a word nothing is known about, and the `run=` completions a spec can declare.
+pub fn complete<'a>(spec: &Spec<'a>, split: &Split) -> Completions<'a> {
+    complete_inner(spec, split, None)
+}
+
+/// Complete through an executable view, omitting root globals it does not carry.
+pub fn complete_view<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    view: &'a crate::spec::ViewMeta<'a>,
+) -> Completions<'a> {
+    complete_inner(spec, split, Some(view))
+}
+
+fn complete_inner<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    view: Option<&'a crate::spec::ViewMeta<'a>>,
+) -> Completions<'a> {
+    let position = walk_for(spec.root.cmd, split.argv(), view);
+    // Past an external catch-all the cursor is inside another program's line, and these tables
+    // describe none of it. The command that declared the catch-all still has subcommands, flags
+    // and an unfilled positional to report, and every one of them would be an answer about the
+    // wrong CLI. Nothing is the honest answer — including no working directory, which would
+    // claim paths belong somewhere only the external program knows.
+    if position.external.is_some() {
+        return Completions {
+            candidates: Vec::new(),
+            files: None,
+        };
+    }
+    let chain = metadata_chain_on_route(spec, &position);
+    let meta = chain.as_ref().and_then(|chain| chain.last().copied());
+    let token = split.prefix.as_str();
+    let attached = attached_long_value(&position, token);
+    let sigil_cursor = chain
+        .as_deref()
+        .and_then(|chain| sigil_arg_on_chain(chain, &position, split));
+    // From the same walk: a second one would reach the same position, and in a binary this
+    // function is inlined into, every walk is its own copy of the code around it.
+    let candidates = candidates_at(spec, split, &position, meta, sigil_cursor);
+
+    // Which argument the cursor is at — the same question `candidates` answers, asked once so
+    // that the two halves cannot disagree. Past a restart token it is the first clause argument,
+    // or the command's first ordinary argument when there is no clause, whatever the words
+    // before the token filled. Everything below follows from that: whether paths belong,
+    // whether the set is declared, whether a separator is owed.
+    let after_restart = restarted(meta, split);
+    let at_cursor = if after_restart {
+        meta.and_then(restart_arg).map(|m| m.arg)
+    } else {
+        sigil_cursor
+            .map(|(_, field, _, _)| field.arg)
+            .or(position.next_arg)
+    };
+
+    // A dash-prefixed word is a flag or nothing: no path starts with one, and the reference
+    // suppresses its own listing there for the same reason.
+    let flag_like = attached.is_none() && position.flags_possible && token.starts_with('-');
+
+    // The name a value here would have, which is what says whether paths belong, and whether
+    // that value declares its own set.
+    let value_flag = position
+        .awaiting_value
+        .or_else(|| attached.map(|(flag, _, _)| flag));
+    let (named, declares_choices, complete_type) = if let Some(flag) = value_flag {
+        let meta = flag_meta(spec.root, flag);
+        (
+            meta.and_then(|m| m.value_name).or(Some(flag.name)),
+            meta.is_some_and(|m| !m.choices.is_empty() || !m.accepted_choices.is_empty()),
+            meta.and_then(|m| m.extra.complete_type),
+        )
+    } else if let Some(arg) = at_cursor {
+        let meta = arg_meta(spec.root, arg);
+        (
+            Some(arg.name),
+            meta.is_some_and(|m| !m.choices.is_empty() || !m.accepted_choices.is_empty()),
+            meta.and_then(|m| m.complete_type),
+        )
+    } else {
+        (None, false, None)
+    };
+    let asked_for = match complete_type {
+        Some(type_) => declared_files(
+            type_,
+            if after_restart {
+                0
+            } else {
+                position.next_arg_values
+            },
+        )
+        .or_else(|| {
+            same_name(type_, "unknown")
+                .then(|| named.and_then(files_for))
+                .flatten()
+        }),
+        None => named.and_then(files_for),
+    };
+
+    // An argument that requires a separator is not fillable yet, so nothing else belongs here —
+    // not even a path, which the parser would reject exactly as it rejects a value.
+    //
+    // Only when the cursor is *at* that argument, though. A flag waiting for its value is a
+    // different position that happens to have an unfilled positional behind it, and a rule about
+    // the positional has nothing to say about the flag: `ex --from ⌶` takes a path whatever the
+    // argument after it needs.
+    let needs_separator = value_flag.is_none()
+        && at_cursor.is_some_and(|arg| arg.double_dash == crate::DoubleDash::Required)
+        && !position.separator_seen;
+
+    // Two questions, and the reference asks both. Was anything found — because a position that
+    // answered does not need help. And does the position *declare* its set — because then an
+    // unmatched prefix means no matches rather than "ask somebody else", which is the difference
+    // between "there is nothing else this can be" and "nothing matched what you typed".
+    // Offering the working directory for a mistyped choice answers the second as though it were
+    // the first.
+    let declared_non_file_type =
+        complete_type.is_some_and(|type_| !same_name(type_, "unknown") && asked_for.is_none());
+    let closed =
+        !candidates.is_empty() || declares_choices || declared_non_file_type || position.help_topic;
+
+    let files = if flag_like || needs_separator || sigil_cursor.is_some() {
+        None
+    } else if asked_for.is_some() {
+        asked_for
+    } else if closed {
+        None
+    } else {
+        Some(Files::Any)
+    };
+
+    Completions { candidates, files }
+}
+
+/// Complete from the static tables plus sparse sync or async runtime callbacks.
+///
+/// No future or callback is created until a completion request reaches a field with an overlay.
+pub async fn complete_with<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    overlays: &[CompletionOverlay<'_>],
+) -> Completions<'a> {
+    let position = walk(spec.root.cmd, split.argv());
+    let Some(overlay) = overlay_at_cursor(spec, split, &position, overlays) else {
+        return complete(spec, split);
+    };
+
+    let attached = attached_long_value(&position, &split.prefix);
+    let sigil = attached
+        .is_none()
+        .then(|| {
+            sigil_arg_at_cursor(spec, &position, split).map(|(_, _, sigil, prefix)| (sigil, prefix))
+        })
+        .flatten();
+    let value_prefix = attached
+        .map(|(_, _, prefix)| prefix)
+        .or_else(|| sigil.map(|(_, prefix)| prefix))
+        .unwrap_or(split.prefix.as_str());
+    let words = split.argv();
+    let command_path: Vec<(&Command<'_>, &[String])> = position
+        .path
+        .iter()
+        .map(|(cmd, start)| (*cmd, words.get(*start..).unwrap_or(&[])))
+        .collect();
+    let ctx = CompleteCtx {
+        words: &split.words,
+        cword: split.cword,
+        prefix: value_prefix,
+        command_words: command_words(split, &position),
+        command_path: &command_path,
+    };
+    let mut dynamic = match overlay.handler {
+        CompletionHandler::Sync(completer) => completer(&ctx),
+        CompletionHandler::Async(completer) => completer(ctx).await,
+    };
+    keep_prefixed(&mut dynamic, value_prefix);
+    if let Some((_, form, _)) = attached {
+        attach_candidates(&mut dynamic, form);
+    } else if let Some((sigil, _)) = sigil {
+        for candidate in &mut dynamic {
+            candidate.value.insert_str(0, sigil);
+        }
+    }
+
+    let mut answer = complete(spec, split);
+    answer.candidates.extend(dynamic);
+    sort_and_dedup_candidates(&mut answer.candidates);
+    // Even an empty callback suppresses the cwd fallback, but a field that
+    // explicitly declares files or directories keeps that shell completion.
+    answer.files = declared_files_at_cursor(spec, split, &position);
+    answer
+}
+
+async fn complete_named_with<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    overlays: &[CompletionOverlay<'_>],
+    name: &str,
+) -> Completions<'a> {
+    let position = walk(spec.root.cmd, split.argv());
+    let attached = attached_long_value(&position, &split.prefix);
+    let sigil = attached
+        .is_none()
+        .then(|| {
+            sigil_arg_at_cursor(spec, &position, split).map(|(_, _, sigil, prefix)| (sigil, prefix))
+        })
+        .flatten();
+    let value_prefix = attached
+        .map(|(_, _, prefix)| prefix)
+        .or_else(|| sigil.map(|(_, prefix)| prefix))
+        .unwrap_or(split.prefix.as_str());
+    let words = split.argv();
+    let command_path: Vec<(&Command<'_>, &[String])> = position
+        .path
+        .iter()
+        .map(|(cmd, start)| (*cmd, words.get(*start..).unwrap_or(&[])))
+        .collect();
+    let ctx = CompleteCtx {
+        words: &split.words,
+        cword: split.cword,
+        prefix: value_prefix,
+        command_words: command_words(split, &position),
+        command_path: &command_path,
+    };
+    let mut candidates = for_name(spec, name, &ctx).unwrap_or_default();
+    if let Some(overlay) = overlay_for_name(spec, split, &position, overlays, name) {
+        let mut dynamic = match overlay.handler {
+            CompletionHandler::Sync(completer) => completer(&ctx),
+            CompletionHandler::Async(completer) => completer(ctx).await,
+        };
+        candidates.append(&mut dynamic);
+    }
+    keep_prefixed(&mut candidates, value_prefix);
+    if let Some((_, form, _)) = attached {
+        attach_candidates(&mut candidates, form);
+    } else if let Some((sigil, _)) = sigil {
+        for candidate in &mut candidates {
+            candidate.value.insert_str(0, sigil);
+        }
+    }
+    sort_and_dedup_candidates(&mut candidates);
+    Completions {
+        candidates,
+        files: None,
+    }
+}
+
+/// Drop the candidates that do not start with what has been typed. One copy for every place a
+/// completer's answer is filtered, since each `retain` with a closure of its own is compiled again.
+#[inline(never)]
+fn keep_prefixed(candidates: &mut Vec<Candidate<'_>>, prefix: &str) {
+    candidates.retain(|candidate| candidate.value.starts_with(prefix));
+}
+
+/// Sort candidates by insertion value and merge presentation metadata from duplicates.
+///
+/// Static metadata and a runtime overlay can legitimately offer the same value. Keeping the
+/// first candidate after derived sorting would prefer `None` over `Some`, discarding the richer
+/// display label or description.
+fn sort_and_dedup_candidates(candidates: &mut Vec<Candidate<'_>>) {
+    crate::order::sort_by(candidates, &mut |a, b| a.cmp(b));
+    // `dup` is the later of two neighbours with one value: it goes, and `kept` takes what it
+    // had that `kept` lacked.
+    candidates.dedup_by(|dup, kept| {
+        if kept.value != dup.value {
+            return false;
+        }
+        if kept.display.is_none() {
+            kept.display = dup.display.take();
+        }
+        if kept.description.is_none() {
+            kept.description = dup.description.take();
+        }
+        true
+    });
+}
+
+fn overlay_for_name<'o>(
+    spec: &Spec<'_>,
+    split: &Split,
+    position: &Position<'_>,
+    overlays: &'o [CompletionOverlay<'_>],
+    name: &str,
+) -> Option<&'o CompletionOverlay<'o>> {
+    if let Some(overlay) = overlay_at_cursor(spec, split, position, overlays)
+        .filter(|overlay| same_name(overlay.value, name))
+    {
+        return Some(overlay);
+    }
+    let chain = metadata_chain_on_route(spec, position)?;
+    let owner = chain.last()?;
+    let path: Vec<&str> = chain.iter().skip(1).map(|meta| meta.cmd.name).collect();
+    overlays
+        .iter()
+        .rev()
+        .find(|overlay| same_name(overlay.value, name) && overlay.command.matches(owner, &path))
+}
+
+fn overlay_at_cursor<'o>(
+    spec: &Spec<'_>,
+    split: &Split,
+    position: &Position<'_>,
+    overlays: &'o [CompletionOverlay<'_>],
+) -> Option<&'o CompletionOverlay<'o>> {
+    let attached = attached_long_value(position, &split.prefix);
+    // The external case is the same rule as the flag one: past a catch-all the position reports
+    // the parent's unfilled positional, and firing that positional's completer against another
+    // program's line answers a question nobody asked.
+    if split.cword == 0
+        || position.external.is_some()
+        || (position.awaiting_value.is_none()
+            && attached.is_none()
+            && position.flags_possible
+            && split.prefix.starts_with('-'))
+    {
+        return None;
+    }
+    let meta = metadata_chain_on_route(spec, position).and_then(|chain| chain.last().copied());
+    let sigil_target = sigil_arg_at_cursor(spec, position, split);
+    let target = if restarted(meta, split) {
+        meta.and_then(|owner| {
+            restart_arg(owner).map(|field| {
+                (
+                    owner,
+                    field.arg.name,
+                    field.arg.double_dash == crate::DoubleDash::Required,
+                )
+            })
+        })
+    } else if let Some(flag) = position
+        .awaiting_value
+        .or_else(|| attached.map(|(flag, _, _)| flag))
+    {
+        flag_meta_owner_on_route(spec, position, flag)
+            .map(|(owner, field)| (owner, field.value_name.unwrap_or(field.flag.name), false))
+    } else if let Some((owner, field, _, _)) = sigil_target {
+        Some((owner, field.arg.name, false))
+    } else {
+        position
+            .next_arg
+            .and_then(|arg| arg_meta_owner_on_route(spec, position, arg))
+            .map(|(owner, field)| {
+                (
+                    owner,
+                    field.arg.name,
+                    field.arg.double_dash == crate::DoubleDash::Required,
+                )
+            })
+            .or_else(|| {
+                default_subcommand_arg(spec, split, position).map(|(owner, field)| {
+                    (
+                        owner,
+                        field.arg.name,
+                        field.arg.double_dash == crate::DoubleDash::Required,
+                    )
+                })
+            })
+    };
+    let (owner, value, needs_separator) = target?;
+    if needs_separator && !position.separator_seen {
+        return None;
+    }
+    let chain = metadata_chain_on_route(spec, position)?;
+    let path: Vec<&str> = if let Some(owner_at) = chain
+        .iter()
+        .position(|candidate| core::ptr::eq(*candidate, owner))
+    {
+        chain[..=owner_at]
+            .iter()
+            .skip(1)
+            .map(|meta| meta.cmd.name)
+            .collect()
+    } else if core::ptr::eq(position.cmd, spec.root.cmd)
+        && spec
+            .root
+            .subcommands
+            .iter()
+            .any(|candidate| core::ptr::eq(*candidate, owner))
+    {
+        // A default subcommand can supply the root cursor's first argument without the
+        // parser descending into it. Its metadata identity is already unambiguous here;
+        // preserve that implied route instead of falling back to a tree-wide pointer search.
+        vec![owner.cmd.name]
+    } else {
+        return None;
+    };
+    overlays
+        .iter()
+        .rev()
+        .find(|overlay| same_name(overlay.value, value) && overlay.command.matches(owner, &path))
+}
+
+fn sigil_arg_at_cursor<'a, 'p>(
+    spec: &Spec<'a>,
+    position: &Position<'_>,
+    split: &'p Split,
+) -> Option<(&'a CommandMeta<'a>, &'a ArgMeta<'a>, &'a str, &'p str)> {
+    sigil_arg_on_chain(&metadata_chain_on_route(spec, position)?, position, split)
+}
+
+/// [`sigil_arg_at_cursor`] for a caller that already has the position's metadata chain.
+fn sigil_arg_on_chain<'a, 'p>(
+    chain: &[&'a CommandMeta<'a>],
+    position: &Position<'_>,
+    split: &'p Split,
+) -> Option<(&'a CommandMeta<'a>, &'a ArgMeta<'a>, &'a str, &'p str)> {
+    if !position.flags_possible
+        || position.awaiting_value.is_some()
+        || restart_seen(chain.last().copied(), split)
+    {
+        return None;
+    }
+    let token = split.prefix.as_str();
+    // The longest sigil that fits, the later declaration winning a tie — what `max_by_key`
+    // answers, written as a loop because the adapter chain is a type of its own to compile.
+    let mut best = None;
+    for &owner in chain {
+        for field in owner.args {
+            let Some(sigil) = field
+                .arg
+                .sigil
+                .and_then(|value| core::str::from_utf8(value).ok())
+            else {
+                continue;
+            };
+            if let Some(prefix) = token.strip_prefix(sigil)
+                && best
+                    .is_none_or(|(_, _, longest, _): (_, _, &str, _)| sigil.len() >= longest.len())
+            {
+                best = Some((owner, field, sigil, prefix));
+            }
+        }
+    }
+    best
+}
+
+fn flag_meta_owner_on_route<'a>(
+    spec: &Spec<'a>,
+    position: &Position<'_>,
+    flag: &Flag<'_>,
+) -> Option<(&'a CommandMeta<'a>, &'a FlagMeta<'a>)> {
+    let chain = metadata_chain_on_route(spec, position)?;
+    chain.iter().rev().find_map(|owner| {
+        owner
+            .flags
+            .iter()
+            .find(|field| core::ptr::eq(field.flag, flag))
+            .map(|field| (*owner, field))
+    })
+}
+
+fn arg_meta_owner_on_route<'a>(
+    spec: &Spec<'a>,
+    position: &Position<'_>,
+    arg: &Arg<'_>,
+) -> Option<(&'a CommandMeta<'a>, &'a ArgMeta<'a>)> {
+    let chain = metadata_chain_on_route(spec, position)?;
+    chain.iter().rev().find_map(|owner| {
+        owner
+            .args
+            .iter()
+            .find(|field| core::ptr::eq(field.arg, arg))
+            .or_else(|| {
+                owner.extra.clause.and_then(|clause| {
+                    clause
+                        .args
+                        .iter()
+                        .find(|field| core::ptr::eq(field.arg, arg))
+                })
+            })
+            .map(|field| (*owner, field))
+    })
+}
+
+fn default_subcommand_arg<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    position: &Position<'_>,
+) -> Option<(&'a CommandMeta<'a>, &'a ArgMeta<'a>)> {
+    if !core::ptr::eq(position.cmd, spec.root.cmd) || position.help_topic || split.cword == 0 {
+        return None;
+    }
+    let default = spec.default_subcommand?;
+    let subcommands = || spec.root.subcommands.iter().copied();
+    subcommands()
+        .find(|sub| sub.cmd.name == default)
+        .or_else(|| subcommands().find(|sub| crate::has_str(sub.cmd.aliases, default)))
+        .and_then(|sub| restart_arg(sub).map(|field| (sub, field)))
+}
+
+/// The first argument that advances the ordinary positional cursor.
+fn first_ordinary_arg<'m, 'a>(meta: &'m CommandMeta<'a>) -> Option<&'m ArgMeta<'a>> {
+    meta.args.iter().find(|field| field.arg.sigil.is_none())
+}
+
+/// The positional target immediately after this command's restart token.
+fn restart_arg<'m, 'a>(meta: &'m CommandMeta<'a>) -> Option<&'m ArgMeta<'a>> {
+    meta.extra
+        .clause
+        .and_then(|clause| clause.args.first())
+        .or_else(|| first_ordinary_arg(meta))
+}
+
+/// The metadata route selected by the parser, preserving parent identity even when two
+/// wrappers reuse the same nested command tables.
+fn metadata_chain_on_route<'a>(
+    spec: &Spec<'a>,
+    position: &Position<'_>,
+) -> Option<Vec<&'a CommandMeta<'a>>> {
+    if position.path.is_empty() {
+        return crate::help::find(spec, position.cmd).map(|(_, chain)| chain);
+    }
+    let mut chain = vec![spec.root];
+    let mut current = spec.root;
+    for (command, _) in position.path.iter().skip(1) {
+        current = current
+            .subcommands
+            .iter()
+            .copied()
+            .find(|meta| core::ptr::eq(meta.cmd, *command))?;
+        chain.push(current);
+    }
+    Some(chain)
+}
+
+/// Just the candidates this CLI knows about, without the question of paths.
+pub fn candidates<'a>(spec: &Spec<'a>, split: &Split) -> Vec<Candidate<'a>> {
+    let position = walk(spec.root.cmd, split.argv());
+    // See `complete_inner`: nothing these tables hold describes the forwarded program.
+    if position.external.is_some() {
+        return Vec::new();
+    }
+    let chain = metadata_chain_on_route(spec, &position);
+    let meta = chain.as_ref().and_then(|chain| chain.last().copied());
+    let sigil_arg = chain
+        .as_deref()
+        .and_then(|chain| sigil_arg_on_chain(chain, &position, split));
+    candidates_at(spec, split, &position, meta, sigil_arg)
+}
+
+/// The candidates at a position already walked, with the command metadata it reached and the
+/// sigil argument the cursor is in, if any.
+fn candidates_at<'a>(
+    spec: &Spec<'a>,
+    split: &Split,
+    position: &Position<'_>,
+    meta: Option<&'a CommandMeta<'a>>,
+    sigil_arg: Option<(&'a CommandMeta<'a>, &'a ArgMeta<'a>, &'a str, &str)>,
+) -> Vec<Candidate<'a>> {
+    let token = split.prefix.as_str();
+
+    let mut out = if position.flags_possible && token.starts_with('-') {
+        // Only a `--flag=` word has a value attached; any other dash-prefixed word is a flag.
+        match attached_long_value(position, token) {
+            Some((flag, form, value_prefix)) => flag_meta(spec.root, flag)
+                .map(|meta| {
+                    let mut found = declared(
+                        meta.choices,
+                        meta.extra.choice_details,
+                        meta.complete,
+                        split,
+                        position,
+                        value_prefix,
+                    );
+                    attach_candidates(&mut found, form);
+                    found
+                })
+                .unwrap_or_default(),
+            None => flag_forms(spec, position, token),
+        }
+    } else if restarted(meta, split) {
+        // Past a restart token — mise's `:::`, which starts a fresh invocation of the same
+        // command — the cursor is at its first clause argument, or its first ordinary argument
+        // when there is no clause, whatever the words before the token filled.
+        meta.and_then(restart_arg)
+            .map(|m| positional(m, position, split, token))
+            .unwrap_or_default()
+    } else if let Some(flag) = position.awaiting_value {
+        flag_meta(spec.root, flag)
+            .map(|m| {
+                declared(
+                    m.choices,
+                    m.extra.choice_details,
+                    m.complete,
+                    split,
+                    position,
+                    token,
+                )
+            })
+            .unwrap_or_default()
+    } else if let Some((_, arg, sigil, prefix)) = sigil_arg {
+        let mut found = positional(arg, position, split, prefix);
+        for candidate in &mut found {
+            candidate.value.insert_str(0, sigil);
+        }
+        found
+    } else {
+        let mut found = Vec::new();
+        if let Some(arg) = position.next_arg
+            && let Some(m) = arg_meta(spec.root, arg)
+        {
+            found.extend(positional(m, position, split, token));
+        }
+        if let Some(meta) = meta {
+            found.extend(subcommands(meta, token));
+        }
+        // At the root, a word may also be meant for the command the root falls back to —
+        // `mise build` is `mise run build` — so what that command's first argument accepts is
+        // a candidate here too. Only its first: the words that would fill the rest have not
+        // been typed, since the subcommand name itself was elided.
+        if let Some((_, arg)) = default_subcommand_arg(spec, split, position) {
+            found.extend(positional(arg, position, split, token));
+        }
+        found
+    };
+
+    sort_and_dedup_candidates(&mut out);
+    out
+}
+
+/// A value being typed in the same word as its long flag.
+///
+/// The shell replaces the whole word, so callers complete against the fragment after `=` and
+/// then put the flag spelling back on each candidate.
+fn attached_long_value<'t, 'p>(
+    position: &Position<'t>,
+    token: &'p str,
+) -> Option<(&'t Flag<'t>, &'p str, &'p str)> {
+    let (form, prefix) = split_once_eq(token)?;
+    let long = form.strip_prefix("--")?;
+    position
+        .flags
+        .iter()
+        .copied()
+        .find(|flag| (flag.takes_value || flag.bool_value) && crate::has_str(flag.longs, long))
+        .map(|flag| (flag, form, prefix))
+}
+
+fn attach_candidates(candidates: &mut [Candidate<'_>], form: &str) {
+    for candidate in candidates {
+        let mut value = String::new();
+        push_all(&mut value, &[form, "=", &candidate.value]);
+        candidate.value = value;
+    }
+}
+
+/// Whether the word before the cursor is this command's restart token.
+///
+/// mise writes `:::` between two runs of the same command, and what follows one is a fresh
+/// invocation — so the cursor is back at the first argument rather than wherever the previous
+/// words had reached.
+fn restarted(meta: Option<&CommandMeta<'_>>, split: &Split) -> bool {
+    let Some(token) = meta.and_then(|m| m.extra.restart_token) else {
+        return false;
+    };
+    split
+        .words
+        .get(split.cword.wrapping_sub(1))
+        .is_some_and(|word| word == token)
+}
+
+fn restart_seen(meta: Option<&CommandMeta<'_>>, split: &Split) -> bool {
+    let Some(token) = meta.and_then(|m| m.extra.restart_token) else {
+        return false;
+    };
+    split
+        .words
+        .get(..split.cword)
+        .unwrap_or_default()
+        .iter()
+        .any(|word| word == token)
+}
+
+/// Add one candidate to a list, copying `value`. One routine for every place a list is built, so
+/// the allocation, the growth check and the write are compiled once rather than at each of them.
+fn offer<'a>(
+    out: &mut Vec<Candidate<'a>>,
+    value: &str,
+    kind: CandidateKind,
+    description: Option<std::borrow::Cow<'a, str>>,
+) {
+    offer_owned(out, value.to_string(), kind, description);
+}
+
+/// [`offer`] for a value that is already a `String`.
+#[inline(never)]
+fn offer_owned<'a>(
+    out: &mut Vec<Candidate<'a>>,
+    value: String,
+    kind: CandidateKind,
+    description: Option<std::borrow::Cow<'a, str>>,
+) {
+    out.push(Candidate {
+        value,
+        kind,
+        display: None,
+        description,
+    });
+}
+
+/// [`offer_owned`] for a description that stays with the caller, copied here once rather than at
+/// each of the places that offer several candidates under one.
+#[inline(never)]
+fn offer_owned_like<'a>(
+    out: &mut Vec<Candidate<'a>>,
+    value: String,
+    kind: CandidateKind,
+    description: &Option<std::borrow::Cow<'a, str>>,
+) {
+    offer_owned(out, value, kind, description.clone());
+}
+
+/// The subcommands a word here could name, each under every name it answers to.
+///
+/// Aliases are offered beside canonical names — someone who types `mise ls<TAB>` means `list`
+/// and should see it — except the hidden ones, which the parser answers to but nothing
+/// advertises. A hidden command is offered under none of its names at all.
+fn subcommands<'a>(meta: &'a CommandMeta<'a>, token: &str) -> Vec<Candidate<'a>> {
+    let mut out = Vec::new();
+    for sub in meta.subcommands {
+        if sub.hide {
+            continue;
+        }
+        for name in core::iter::once(&sub.cmd.name).chain(sub.cmd.aliases.iter()) {
+            // A hidden alias is one the parser answers to but nothing advertises — usually an
+            // old name kept working after a rename. The parse table holds it beside the
+            // visible ones because both must be *accepted*; only the metadata says which are
+            // meant to be *offered*.
+            if crate::has_str(sub.extra.hidden_aliases, name) {
+                continue;
+            }
+            if name.starts_with(token) {
+                offer(
+                    &mut out,
+                    name,
+                    CandidateKind::Command,
+                    deprecated_description(
+                        sub.about,
+                        sub.extra.deprecated,
+                        sub.extra.deprecated_warn_at,
+                        sub.extra.deprecated_remove_at,
+                    ),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// The forms of every flag in scope that a dash-prefixed word could be the start of.
+///
+/// `--…` asks for long forms, and the negations of flags that have one. `-x` asks about the
+/// letter `x`, so only that letter's flag is offered: bundling means anything else would be a
+/// candidate for a different position in the word. A lone `-` says nothing about which was
+/// meant, so it gets both. One loop for the two, since each form needs the same metadata; the
+/// order they are found in does not matter, because the caller sorts.
+fn flag_forms<'a>(spec: &Spec<'a>, position: &Position<'_>, token: &str) -> Vec<Candidate<'a>> {
+    let longs = token == "-" || token.starts_with("--");
+    let shorts = !token.starts_with("--");
+    let wanted = token.as_bytes().get(1).copied();
+    let mut out = Vec::new();
+    // The flags the parser answers to without a declaration — `--help`, and `--version` where
+    // a version is declared — are offered by the same rule that lists them on a help page, so
+    // what completes is what the page shows. Anything the tables declare takes its spelling
+    // first, hidden or not, exactly as the parser resolves it.
+    let mut claimed = Vec::new();
+    for flag in &position.flags {
+        for long in flag.longs.iter().copied().chain(flag.negate) {
+            claimed.push(crate::help::Form::Long(long));
+        }
+        for short in flag.shorts {
+            claimed.push(crate::help::Form::Short(*short));
+        }
+    }
+    let mut flags: Vec<(&Flag<'_>, Option<&'a FlagMeta<'a>>)> = position
+        .flags
+        .iter()
+        .map(|flag| (*flag, flag_meta(spec.root, flag)))
+        .collect();
+    flags.extend(
+        crate::help::supplied_entries(position.cmd, &claimed)
+            .into_iter()
+            .map(|meta| (meta.flag, Some(meta))),
+    );
+    for (flag, meta) in flags {
+        if meta.is_some_and(|m| m.hide) {
+            continue;
+        }
+        // A negation is a way to write the same flag, so it carries the same help — the
+        // reference leaves it bare, which reads as a flag nobody documented.
+        let description = meta.and_then(|m| {
+            deprecated_description(
+                m.help,
+                m.extra.deprecated,
+                m.extra.deprecated_warn_at,
+                m.extra.deprecated_remove_at,
+            )
+        });
+        let mut offer = |value: String| {
+            offer_owned_like(&mut out, value, CandidateKind::Flag, &description);
+        };
+        if shorts {
+            for &short in flag.shorts {
+                if meta.is_some_and(|m| crate::has_byte(m.extra.hidden_shorts, short)) {
+                    continue;
+                }
+                // Written out rather than with `is_none_or`, which this crate's MSRV predates.
+                let asked_about = match wanted {
+                    None => true,
+                    Some(letter) => letter == short,
+                };
+                if asked_about {
+                    let mut value = String::from("-");
+                    value.push(short as char);
+                    offer(value);
+                }
+            }
+        }
+        if longs {
+            // No metadata hides a negation: `hidden_longs` names longs.
+            for i in 0..flag.longs.len() + usize::from(flag.negate.is_some()) {
+                let long = match flag.longs.get(i) {
+                    Some(long) => *long,
+                    None => flag.negate.unwrap_or_default(),
+                };
+                if i < flag.longs.len()
+                    && meta.is_some_and(|m| crate::has_str(m.extra.hidden_longs, long))
+                {
+                    continue;
+                }
+                // The table holds a negation the way the parser matches it — with the dashes
+                // already taken off — so a candidate has to put them back. Offered bare, it
+                // never matched a `--` the user had typed, and a lone `-` offered a word no
+                // shell would accept.
+                let mut value = String::from("--");
+                value.push_str(long);
+                if value.starts_with(token) {
+                    offer(value);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn deprecated_description<'a>(
+    base: Option<&'a str>,
+    message: Option<&'a str>,
+    warn_at: Option<&'a str>,
+    remove_at: Option<&'a str>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    if message.is_none() && warn_at.is_none() && remove_at.is_none() {
+        return base.map(std::borrow::Cow::Borrowed);
+    }
+    // Pieces appended in place; a `format!` per piece compiles its own copy of the formatting.
+    let mut label = String::from("[deprecated: ");
+    let mut first = true;
+    for (lead, text) in [
+        ("", message),
+        ("warns at ", warn_at),
+        ("removed at ", remove_at),
+    ] {
+        if let Some(text) = text {
+            push_all(&mut label, &[if first { "" } else { "; " }, lead, text]);
+            first = false;
+        }
+    }
+    label.push(']');
+    Some(std::borrow::Cow::Owned(match base {
+        Some(base) if !base.is_empty() => {
+            let mut full = String::new();
+            push_all(&mut full, &[base, " ", &label]);
+            full
+        }
+        _ => label,
+    }))
+}
+
+/// What a positional accepts here — its choices, or the separator that has to come first.
+///
+/// An argument declared `double_dash = "required"` is not fillable until a `--` has been
+/// typed, so its values are not candidates yet: the parser would reject every one of them. The
+/// only useful thing to offer is the separator itself, and only when nothing has been typed to
+/// filter it away.
+fn positional<'a>(
+    meta: &'a ArgMeta<'a>,
+    position: &Position<'_>,
+    split: &Split,
+    token: &str,
+) -> Vec<Candidate<'a>> {
+    if meta.arg.double_dash == crate::DoubleDash::Required && !position.separator_seen {
+        if token.is_empty() {
+            let mut out = Vec::new();
+            offer(&mut out, "--", CandidateKind::Value, None);
+            return out;
+        }
+        return Vec::new();
+    }
+    declared(
+        meta.choices,
+        meta.choice_details,
+        meta.complete,
+        split,
+        position,
+        token,
+    )
+}
+
+/// What a position declares it takes: its choices, or the completer that answers for it.
+///
+/// Choices first, and a completer only where there are none — the order the reference reads a
+/// spec in, where a `run=` is what an argument has *instead of* a fixed set rather than beside
+/// one. The answer is filtered here so a completer may return everything it knows, which is what
+/// the reference does with a `run=` command's output.
+fn declared<'a>(
+    choices_declared: &'a [&'a str],
+    choice_details: &'a [crate::spec::ChoiceMeta<'a>],
+    completer: Option<Completer>,
+    split: &Split,
+    position: &Position<'_>,
+    token: &str,
+) -> Vec<Candidate<'a>> {
+    if !choices_declared.is_empty() {
+        return choices(choices_declared, choice_details, token);
+    }
+    let Some(completer) = completer else {
+        return Vec::new();
+    };
+    // The words each command on the path was given, so a completer declared on an ancestor —
+    // which is what a global flag is — reads its own command's rather than the deepest one's.
+    let words = split.argv();
+    let path: Vec<(&Command<'_>, &[String])> = position
+        .path
+        .iter()
+        .map(|(cmd, start)| (*cmd, words.get(*start..).unwrap_or(&[])))
+        .collect();
+    let ctx = CompleteCtx {
+        words: &split.words,
+        cword: split.cword,
+        prefix: token,
+        command_words: command_words(split, position),
+        command_path: &path,
+    };
+    let mut found = completer(&ctx);
+    keep_prefixed(&mut found, token);
+    found
+}
+
+/// The words the command in scope was given, out of the whole line.
+///
+/// `walk` was handed the words after the program name and before the cursor's, and reported
+/// where the command in scope began within them — so this is the tail of that, which is what
+/// that command would have been given had the line been run.
+fn command_words<'s>(split: &'s Split, position: &Position<'_>) -> &'s [String] {
+    let words = split.argv();
+    words.get(position.command_start..).unwrap_or(&[])
+}
+
+/// The declared values of a flag or argument, filtered by what has been typed.
+fn choices<'a>(
+    declared: &'a [&'a str],
+    details: &'a [crate::spec::ChoiceMeta<'a>],
+    token: &str,
+) -> Vec<Candidate<'a>> {
+    let mut out = Vec::new();
+    for c in declared {
+        if !c.starts_with(token) {
+            continue;
+        }
+        offer(
+            &mut out,
+            c,
+            CandidateKind::Value,
+            details
+                .iter()
+                .find(|detail| {
+                    detail.value == *c || detail.aliases.iter().any(|alias| alias.value == *c)
+                })
+                .and_then(|detail| detail.help)
+                .map(::std::borrow::Cow::Borrowed),
+        );
+    }
+    out
+}
+
+/// The metadata for a flag, wherever in the tree it was declared.
+///
+/// By identity rather than by name: a global flag's metadata sits on the command that declared
+/// it, which is an ancestor of the one being completed, and two commands may declare different
+/// flags under one name.
+#[inline(never)]
+fn flag_meta<'a>(meta: &'a CommandMeta<'a>, flag: &Flag<'_>) -> Option<&'a FlagMeta<'a>> {
+    meta.flags
+        .iter()
+        .find(|m| core::ptr::eq(m.flag, flag))
+        .or_else(|| meta.subcommands.iter().find_map(|sub| flag_meta(sub, flag)))
+}
+
+/// The metadata for an argument, wherever in the tree it was declared.
+#[inline(never)]
+fn arg_meta<'a>(meta: &'a CommandMeta<'a>, arg: &Arg<'_>) -> Option<&'a ArgMeta<'a>> {
+    meta.args
+        .iter()
+        .find(|m| core::ptr::eq(m.arg, arg))
+        .or_else(|| {
+            meta.extra
+                .clause
+                .and_then(|clause| clause.args.iter().find(|m| core::ptr::eq(m.arg, arg)))
+        })
+        .or_else(|| meta.subcommands.iter().find_map(|sub| arg_meta(sub, arg)))
+}
+
+/// Which shell's quoting rules a line follows.
+///
+/// Most shells follow the POSIX word shape, while PowerShell and Elvish need their own
+/// lossless argv handling and output protocols.
+/// closely enough that a completion request cannot tell them apart, while PowerShell escapes
+/// with a backtick and doubles a quote to escape it. The distinction is kept per *shell*
+/// rather than per rule set so that a shell whose rules turn out to differ can be given its
+/// own without changing this type's public shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Shell {
+    Bash,
+    Elvish,
+    Zsh,
+    Fish,
+    Nu,
+    PowerShell,
+}
+
+impl Shell {
+    /// The spelling a shell is named by, on the command line and in a spec.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Shell::Bash => "bash",
+            Shell::Elvish => "elvish",
+            Shell::Zsh => "zsh",
+            Shell::Fish => "fish",
+            Shell::Nu => "nu",
+            Shell::PowerShell => "powershell",
+        }
+    }
+
+    /// Read a shell by name, as it is spelled on the command line.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "bash" => Some(Shell::Bash),
+            "elvish" => Some(Shell::Elvish),
+            "zsh" => Some(Shell::Zsh),
+            "fish" => Some(Shell::Fish),
+            "nu" | "nushell" => Some(Shell::Nu),
+            "powershell" | "pwsh" => Some(Shell::PowerShell),
+            _ => None,
+        }
+    }
+
+    /// Whether an escape is written with a backtick rather than a backslash.
+    fn backtick_escapes(self) -> bool {
+        matches!(self, Shell::PowerShell)
+    }
+
+    /// Whether a quote inside a quoted string is written by doubling it.
+    fn doubles_quotes(self) -> bool {
+        matches!(self, Shell::PowerShell)
+    }
+}
+
+/// A command line as the shell would have passed it, plus where the cursor was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Split {
+    /// The words, unquoted — what argv would hold had the line been run.
+    ///
+    /// Always at least one: a cursor sitting after a space is completing a word that does not
+    /// exist yet, and an empty word is how that is said. Candidates for "anything at all" and
+    /// candidates for "something starting with `no`" are the same question with a different
+    /// prefix, and a caller should not have to special-case the empty one.
+    pub words: Vec<String>,
+    /// Which of `words` the cursor is in.
+    pub cword: usize,
+    /// The part of that word before the cursor, unquoted — what a candidate must start with.
+    pub prefix: String,
+}
+
+impl Split {
+    /// The words up to and including the one being completed.
+    ///
+    /// What the parser should walk: everything after the cursor describes a command line the
+    /// user has not finished thinking about, and a half-typed tail behind the cursor should
+    /// not decide what can be typed at it.
+    pub fn walked(&self) -> &[String] {
+        self.words.get(..=self.cword).unwrap_or(&self.words)
+    }
+
+    /// The words a parser should walk: after the program name, before the cursor's word.
+    ///
+    /// Two things dropped for two reasons. The program name, because argv does not contain it
+    /// and the parse tables describe what comes *after* it. The word being completed, because
+    /// it is half-typed by definition — feeding it in would ask what can follow a word the
+    /// user has not finished, when the question is what that word could be.
+    pub fn argv(&self) -> &[String] {
+        let start = 1.min(self.cword);
+        self.words.get(start..self.cword).unwrap_or_default()
+    }
+}
+
+/// Split a line at a byte cursor, the way `shell` would have split it.
+///
+/// `cursor` is a byte offset into `line`; anything past the end is treated as the end, and an
+/// offset landing inside a multi-byte character is moved back to that character's start rather
+/// than panicking — a completion request is not a place to be strict about a shell's arithmetic.
+pub fn split(line: &str, cursor: usize, shell: Shell) -> Split {
+    let mut at = Splitting {
+        cursor: floor_char_boundary(line, cursor.min(line.len())),
+        words: Vec::new(),
+        word: String::new(),
+        started: false,
+        cword: None,
+        prefix_len: None,
+        cursor_in_word: false,
+    };
+
+    let mut chars = line.char_indices().peekable();
+    let mut quote: Option<char> = None;
+
+    // The cursor is reached before the character it sits in front of is read, so the word in
+    // hand is the word being completed and what is in it is the prefix.
+    //
+    // It is checked at *two* places: at the top of each character, and again before an escape
+    // swallows the one after it. Only checking the top meant a cursor sitting on an escaped
+    // character was never noticed, and the split described the last word of the line instead of
+    // the one being typed.
+    while let Some((i, c)) = chars.next() {
+        at.reached(i);
+
+        match quote {
+            Some('\'') => {
+                if c == '\'' {
+                    // PowerShell writes a quote inside a quoted string by doubling it; the
+                    // POSIX-shaped shells have no such rule, and there a second quote always
+                    // ends the string.
+                    if let Some(&(j, _)) = chars
+                        .peek()
+                        .filter(|&&(_, n)| shell.doubles_quotes() && n == '\'')
+                    {
+                        at.reached(j);
+                        push_char(&mut at.word, '\'');
+                        chars.next();
+                    } else {
+                        quote = None;
+                    }
+                } else {
+                    push_char(&mut at.word, c);
+                }
+            }
+            Some(q) => {
+                if c == q {
+                    if let Some(&(j, _)) = chars
+                        .peek()
+                        .filter(|&&(_, n)| shell.doubles_quotes() && n == q)
+                    {
+                        at.reached(j);
+                        push_char(&mut at.word, q);
+                        chars.next();
+                    } else {
+                        quote = None;
+                    }
+                } else if is_escape(c, shell) {
+                    // Inside double quotes an escape is only an escape before a character it
+                    // could mean something to; before anything else it is a literal, which is
+                    // why a Windows path in double quotes survives.
+                    match chars.peek() {
+                        Some(&(j, next)) if escapable_in_quotes(next, shell) => {
+                            at.reached(j);
+                            push_char(&mut at.word, next);
+                            chars.next();
+                        }
+                        _ => push_char(&mut at.word, c),
+                    }
+                } else {
+                    push_char(&mut at.word, c);
+                }
+            }
+            None => {
+                if c == '\'' || c == '"' {
+                    quote = Some(c);
+                    at.started = true;
+                } else if is_escape(c, shell) {
+                    // Before the check, because the escape has already started the word: a
+                    // cursor on the escaped character is inside it, not in the gap before it.
+                    // A trailing escape is a line the user is still typing, not a mistake to
+                    // report: it escapes the character they have not typed yet.
+                    at.started = true;
+                    if let Some(&(j, next)) = chars.peek() {
+                        at.reached(j);
+                        push_char(&mut at.word, next);
+                        chars.next();
+                    }
+                } else if c.is_whitespace() {
+                    if at.started {
+                        at.end_word();
+                    }
+                } else {
+                    push_char(&mut at.word, c);
+                    at.started = true;
+                }
+            }
+        }
+    }
+
+    // The cursor at the very end of the line: the loop above only sees positions it reads a
+    // character at, and there is no character there.
+    at.reached(at.cursor);
+
+    if at.started {
+        at.end_word();
+    }
+
+    let Splitting {
+        mut words,
+        cword,
+        prefix_len,
+        cursor_in_word,
+        ..
+    } = at;
+    let cword = cword.unwrap_or(0);
+    // A word not yet started is empty, so a cursor in a gap has nothing before it. A started one
+    // was pushed whole, at the index the cursor recorded.
+    let prefix = if cursor_in_word {
+        words
+            .get(cword)
+            .and_then(|word| word.get(..prefix_len.unwrap_or(0)))
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        String::new()
+    };
+    // A cursor in a gap is completing a word that is not in the line yet — at the end of it,
+    // or between two that are already there. `mise ⌶use` is asking what can go *before* `use`,
+    // and answering about `use` itself would complete the wrong word.
+    if !cursor_in_word {
+        words.insert(cword, String::new());
+    }
+    Split {
+        words,
+        cword,
+        prefix,
+    }
+}
+
+/// What [`split`] has read of a line so far.
+struct Splitting {
+    /// Where the cursor is, as a byte offset.
+    cursor: usize,
+    words: Vec<String>,
+    word: String,
+    /// Whether anything has been written into `word` — including a quote that so far contains
+    /// nothing, so that `mise ""` is a word and not a gap between two.
+    started: bool,
+    cword: Option<usize>,
+    /// How much of the word in hand was before the cursor. A length rather than a copy: the word
+    /// in hand is the one that lands at `cword`, so the prefix is read off it once, at the end.
+    prefix_len: Option<usize>,
+    /// Whether the cursor sat inside a word rather than in the gap before one. A gap is a word
+    /// the user is about to type, so one has to be made for them.
+    cursor_in_word: bool,
+}
+
+impl Splitting {
+    /// Note the cursor, if `index` is where it is and it has not been noted yet.
+    ///
+    /// Out of line because it runs at several places in the loop, each of which would otherwise
+    /// carry a copy.
+    #[inline(never)]
+    fn reached(&mut self, index: usize) {
+        if index == self.cursor && self.prefix_len.is_none() {
+            self.cword = Some(self.words.len());
+            self.prefix_len = Some(self.word.len());
+            self.cursor_in_word = self.started;
+        }
+    }
+
+    /// Finish the word in hand.
+    #[inline(never)]
+    fn end_word(&mut self) {
+        let word = core::mem::take(&mut self.word);
+        self.words.push(word);
+        self.started = false;
+    }
+}
+
+/// Whether a character starts an escape in this shell.
+fn is_escape(c: char, shell: Shell) -> bool {
+    if shell.backtick_escapes() {
+        c == '`'
+    } else {
+        c == '\\'
+    }
+}
+
+/// Whether an escape inside double quotes applies to the character after it.
+fn escapable_in_quotes(c: char, shell: Shell) -> bool {
+    if shell.backtick_escapes() {
+        matches!(c, '"' | '`' | '$')
+    } else {
+        matches!(c, '"' | '\\' | '$' | '`')
+    }
+}
+
+/// The start of the character containing `index`.
+///
+/// `str::floor_char_boundary` is still unstable, and this crate takes no dependencies.
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spec::CommandExtra;
+    use std::task::{Context, Poll, Waker};
+
+    fn run_ready<F: Future>(future: F) -> F::Output {
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test completion unexpectedly needed an executor wakeup"),
+        }
+    }
+
+    /// A small tree with the shapes that make a cursor's position non-obvious: a global flag,
+    /// a flag that takes a value, a subcommand of a subcommand, and a wrapper that forwards.
+    static GLOBAL: Flag = Flag {
+        key: 1,
+        name: "verbose",
+        longs: &["verbose"],
+        shorts: b"v",
+        global: true,
+        // Held without its dashes, which is how the parser matches it.
+        negate: Some("quiet"),
+        ..Flag::BOOL
+    };
+    static JOBS: Flag = Flag {
+        key: 2,
+        name: "jobs",
+        longs: &["jobs"],
+        ..Flag::VALUE
+    };
+    /// A flag that keeps claiming words once it has one.
+    static TOOLS: Flag = Flag {
+        key: 8,
+        name: "tools",
+        longs: &["tools"],
+        variadic: true,
+        ..Flag::VALUE
+    };
+    static TOOL: Arg = Arg {
+        key: 3,
+        name: "TOOL",
+        ..Arg::REQUIRED
+    };
+    static USE: Command = Command {
+        name: "use",
+        aliases: &["u"],
+        flags: &[&JOBS, &TOOLS],
+        args: &[&TOOL],
+        ..Command::EMPTY
+    };
+    static FORWARDED: Arg = Arg {
+        key: 4,
+        name: "ARGS",
+        double_dash: crate::DoubleDash::Automatic,
+        ..Arg::VAR
+    };
+    static EXEC: Command = Command {
+        name: "exec",
+        args: &[&FORWARDED],
+        ..Command::EMPTY
+    };
+    static LS: Command = Command {
+        name: "ls",
+        ..Command::EMPTY
+    };
+    /// Two arguments and a restart token, so that "back at the first" is a different answer
+    /// from "wherever the words reached".
+    static FIRST: Arg = Arg {
+        key: 5,
+        name: "FIRST",
+        ..Arg::REQUIRED
+    };
+    static SECOND: Arg = Arg {
+        key: 6,
+        name: "SECOND",
+        ..Arg::REQUIRED
+    };
+    static TASK: Command = Command {
+        name: "task",
+        args: &[&FIRST, &SECOND],
+        ..Command::EMPTY
+    };
+    /// A restarting command whose first argument takes paths and whose second does not, so that
+    /// "which argument is the cursor at" has two different answers.
+    static SCRIPT_ARG: Arg = Arg {
+        key: 13,
+        name: "FILE",
+        ..Arg::REQUIRED
+    };
+    static MODE: Arg = Arg {
+        key: 14,
+        name: "MODE",
+        ..Arg::REQUIRED
+    };
+    static SHIP: Command = Command {
+        name: "ship",
+        // The choices-bearing one first, so that "which argument is the cursor at" has two
+        // different *answers* rather than two routes to the same one.
+        args: &[&MODE, &SCRIPT_ARG],
+        ..Command::EMPTY
+    };
+    static FILE: Arg = Arg {
+        key: 9,
+        name: "FILE",
+        ..Arg::REQUIRED
+    };
+    /// A path-named argument that is not fillable until a `--` is typed.
+    static PIPED: Arg = Arg {
+        key: 11,
+        name: "PATH",
+        double_dash: crate::DoubleDash::Required,
+        ..Arg::REQUIRED
+    };
+    static FROM: Flag = Flag {
+        key: 12,
+        name: "from",
+        longs: &["from"],
+        ..Flag::VALUE
+    };
+    static PIPE: Command = Command {
+        name: "pipe",
+        flags: &[&FROM],
+        args: &[&PIPED],
+        ..Command::EMPTY
+    };
+    static EDIT: Command = Command {
+        name: "edit",
+        flags: &[&INTO],
+        args: &[&FILE],
+        ..Command::EMPTY
+    };
+    static INTO: Flag = Flag {
+        key: 10,
+        name: "into",
+        longs: &["into"],
+        ..Flag::VALUE
+    };
+    static AFTER: Arg = Arg {
+        key: 7,
+        name: "AFTER",
+        double_dash: crate::DoubleDash::Required,
+        ..Arg::REQUIRED
+    };
+    static WRAP: Command = Command {
+        name: "wrap",
+        args: &[&AFTER],
+        ..Command::EMPTY
+    };
+    static PLUGINS: Command = Command {
+        name: "plugins",
+        subcommands: &[&LS],
+        ..Command::EMPTY
+    };
+    static ROOT: Command = Command {
+        name: "mise",
+        flags: &[&GLOBAL],
+        subcommands: &[&USE, &EXEC, &PLUGINS],
+        ..Command::EMPTY
+    };
+
+    /// The same tree's metadata: help text, choices, and what is hidden.
+    static SECRET: Command = Command {
+        name: "secret",
+        ..Command::EMPTY
+    };
+    static LIST: Command = Command {
+        name: "list",
+        // `l` is answered to but never advertised — an old name kept working.
+        aliases: &["ls", "l"],
+        ..Command::EMPTY
+    };
+    static META_LS: CommandMeta = CommandMeta {
+        cmd: &LS,
+        about: Some("List them"),
+        ..CommandMeta::EMPTY
+    };
+    static META_PLUGINS: CommandMeta = CommandMeta {
+        cmd: &PLUGINS,
+        about: Some("Manage plugins"),
+        subcommands: &[&META_LS],
+        ..CommandMeta::EMPTY
+    };
+    static META_USE: CommandMeta = CommandMeta {
+        cmd: &USE,
+        about: Some("Use a tool"),
+        flags: &[FlagMeta {
+            flag: &JOBS,
+            help: Some("How many at once"),
+            choices: &["1", "2", "4"],
+            extra: &crate::spec::FlagExtra {
+                choice_details: &[crate::spec::ChoiceMeta {
+                    value: "2",
+                    help: Some("Two workers"),
+                    hide: false,
+                    aliases: &[],
+                }],
+                ..crate::spec::FlagExtra::EMPTY
+            },
+            ..FlagMeta::EMPTY
+        }],
+        args: &[ArgMeta {
+            arg: &TOOL,
+            help: Some("Which tool"),
+            choices: &["node", "python"],
+            ..ArgMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+    /// What answers for `mise install <TOOL>`: everything it knows, prefix and all, because the
+    /// filtering is not its job.
+    fn tools(ctx: &CompleteCtx<'_>) -> Vec<Candidate<'static>> {
+        // Reads the line, which is what a `run=` gets through tera and what half of mise's
+        // completers use — `{{words[PREV]}}` is `ctx.previous()`.
+        if ctx.previous() == Some("--only") {
+            return vec![Candidate::new("node")];
+        }
+        vec![
+            Candidate::described("node", "JavaScript"),
+            Candidate::described("python", "Snakes"),
+            Candidate::new("ruby"),
+            Candidate::new("ruby").displayed("Ruby runtime"),
+        ]
+    }
+
+    static TOOL_ARG: Arg = Arg {
+        key: 15,
+        name: "TOOL",
+        ..Arg::REQUIRED
+    };
+    static ONLY: Flag = Flag {
+        key: 16,
+        name: "only",
+        longs: &["only"],
+        ..Flag::VALUE
+    };
+    /// A flag whose completer is *not* the argument's, so which one answered is visible.
+    fn sources(_ctx: &CompleteCtx<'_>) -> Vec<Candidate<'static>> {
+        vec![Candidate::new("upstream")]
+    }
+    static SOURCE: Flag = Flag {
+        key: 17,
+        name: "source",
+        longs: &["source"],
+        ..Flag::VALUE
+    };
+    static INSTALL: Command = Command {
+        name: "install",
+        flags: &[&ONLY, &SOURCE],
+        args: &[&TOOL_ARG],
+        ..Command::EMPTY
+    };
+    static META_INSTALL: CommandMeta = CommandMeta {
+        cmd: &INSTALL,
+        about: Some("Install a tool"),
+        flags: &[
+            FlagMeta {
+                flag: &ONLY,
+                help: Some("Just this one"),
+                complete: Some(tools),
+                ..FlagMeta::EMPTY
+            },
+            FlagMeta {
+                flag: &SOURCE,
+                help: Some("Where from"),
+                complete: Some(sources),
+                ..FlagMeta::EMPTY
+            },
+        ],
+        args: &[ArgMeta {
+            arg: &TOOL_ARG,
+            help: Some("Which tool"),
+            complete: Some(tools),
+            ..ArgMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+
+    static META_SHIP: CommandMeta = CommandMeta {
+        cmd: &SHIP,
+        about: Some("Ship a file"),
+        args: &[
+            ArgMeta {
+                arg: &MODE,
+                choices: &["fast", "slow"],
+                ..ArgMeta::EMPTY
+            },
+            ArgMeta {
+                arg: &SCRIPT_ARG,
+                help: Some("Which file"),
+                ..ArgMeta::EMPTY
+            },
+        ],
+        extra: &CommandExtra {
+            restart_token: Some(":::"),
+            ..CommandExtra::EMPTY
+        },
+        ..CommandMeta::EMPTY
+    };
+    static META_PIPE: CommandMeta = CommandMeta {
+        cmd: &PIPE,
+        about: Some("Pipe a file"),
+        flags: &[FlagMeta {
+            flag: &FROM,
+            help: Some("Read from"),
+            value_name: Some("FILE"),
+            ..FlagMeta::EMPTY
+        }],
+        args: &[ArgMeta {
+            arg: &PIPED,
+            help: Some("Where from"),
+            ..ArgMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+    static META_EDIT: CommandMeta = CommandMeta {
+        cmd: &EDIT,
+        about: Some("Edit a file"),
+        flags: &[FlagMeta {
+            flag: &INTO,
+            help: Some("Where to write it"),
+            value_name: Some("DIR"),
+            ..FlagMeta::EMPTY
+        }],
+        args: &[ArgMeta {
+            arg: &FILE,
+            help: Some("Which file"),
+            // Two well-known ones, so the position has candidates *and* wants paths — which is
+            // what makes the name the deciding rule rather than the emptiness.
+            choices: &["mise.toml", "mise.local.toml"],
+            ..ArgMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+    static META_WRAP: CommandMeta = CommandMeta {
+        cmd: &WRAP,
+        about: Some("Wrap something"),
+        args: &[ArgMeta {
+            arg: &AFTER,
+            choices: &["red", "blue"],
+            ..ArgMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+    static META_TASK: CommandMeta = CommandMeta {
+        cmd: &TASK,
+        about: Some("Do two things"),
+        args: &[
+            ArgMeta {
+                arg: &FIRST,
+                choices: &["one", "two"],
+                ..ArgMeta::EMPTY
+            },
+            ArgMeta {
+                arg: &SECOND,
+                choices: &["alpha", "beta"],
+                ..ArgMeta::EMPTY
+            },
+        ],
+        extra: &CommandExtra {
+            restart_token: Some(":::"),
+            ..CommandExtra::EMPTY
+        },
+        ..CommandMeta::EMPTY
+    };
+    static META_EXEC: CommandMeta = CommandMeta {
+        cmd: &EXEC,
+        about: Some("Run something"),
+        args: &[ArgMeta {
+            arg: &FORWARDED,
+            help: Some("What to run"),
+            choices: &["one", "two"],
+            complete_type: Some("command_args"),
+            ..ArgMeta::EMPTY
+        }],
+        extra: &CommandExtra {
+            restart_token: Some(":::"),
+            ..CommandExtra::EMPTY
+        },
+        ..CommandMeta::EMPTY
+    };
+    static META_SECRET: CommandMeta = CommandMeta {
+        cmd: &SECRET,
+        about: Some("Not for you"),
+        hide: true,
+        ..CommandMeta::EMPTY
+    };
+    static META_LIST: CommandMeta = CommandMeta {
+        cmd: &LIST,
+        about: Some("List everything"),
+        extra: &CommandExtra {
+            hidden_aliases: &["l"],
+            ..CommandExtra::EMPTY
+        },
+        ..CommandMeta::EMPTY
+    };
+    static META_ROOT: CommandMeta = CommandMeta {
+        cmd: &ROOT_WITH_META,
+        flags: &[FlagMeta {
+            flag: &GLOBAL,
+            help: Some("Say more"),
+            ..FlagMeta::EMPTY
+        }],
+        subcommands: &[
+            &META_USE,
+            &META_EXEC,
+            &META_PLUGINS,
+            &META_SECRET,
+            &META_LIST,
+            &META_TASK,
+            &META_WRAP,
+            &META_EDIT,
+            &META_PIPE,
+            &META_SHIP,
+            &META_INSTALL,
+        ],
+        ..CommandMeta::EMPTY
+    };
+    static ROOT_WITH_META: Command = Command {
+        name: "mise",
+        flags: &[&GLOBAL],
+        subcommands: &[
+            &USE, &EXEC, &PLUGINS, &SECRET, &LIST, &TASK, &WRAP, &EDIT, &PIPE, &SHIP, &INSTALL,
+        ],
+        ..Command::EMPTY
+    };
+    static SPEC: Spec = Spec {
+        name: "mise",
+        bin: Some("mise"),
+        root: &META_ROOT,
+        // What a word at the root falls back to, as mise's `run` does.
+        default_subcommand: Some("u"),
+        ..Spec::EMPTY
+    };
+
+    /// What a shell would be offered at the end of a line.
+    fn offered(line: &str) -> Vec<String> {
+        candidates(&SPEC, &at_end(line))
+            .into_iter()
+            .map(|c| c.value)
+            .collect()
+    }
+
+    #[test]
+    fn sigil_completion_matches_the_stripped_value_and_restores_the_prefix() {
+        static FILE_ARG: Arg = Arg {
+            key: 89,
+            name: "file",
+            ..Arg::REQUIRED
+        };
+        static OVERLAY: Arg = Arg {
+            key: 90,
+            name: "TOOL",
+            sigil: Some(b"+"),
+            ..Arg::VAR
+        };
+        static COMMAND: Command = Command {
+            name: "ex",
+            flags: &[&JOBS],
+            args: &[&OVERLAY, &FILE_ARG],
+            ..Command::EMPTY
+        };
+        static META: CommandMeta = CommandMeta {
+            cmd: &COMMAND,
+            flags: &[FlagMeta {
+                flag: &JOBS,
+                ..FlagMeta::EMPTY
+            }],
+            args: &[
+                ArgMeta {
+                    arg: &OVERLAY,
+                    choices: &["node@22", "node@24", "python@3.14"],
+                    ..ArgMeta::EMPTY
+                },
+                ArgMeta {
+                    arg: &FILE_ARG,
+                    ..ArgMeta::EMPTY
+                },
+            ],
+            extra: &CommandExtra {
+                restart_token: Some(":::"),
+                ..CommandExtra::EMPTY
+            },
+            ..CommandMeta::EMPTY
+        };
+        static SIGIL_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &META,
+            ..Spec::EMPTY
+        };
+
+        let values = candidates(&SIGIL_SPEC, &at_end("ex +n"))
+            .into_iter()
+            .map(|candidate| candidate.value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["+node@22", "+node@24"]);
+        assert!(candidates(&SIGIL_SPEC, &at_end("ex -- +n")).is_empty());
+
+        // The ordinary positional would ask the shell for files, but a sigil token is
+        // classified as the closed-choice overlay field even when no choice matches.
+        assert_eq!(complete(&SIGIL_SPEC, &at_end("ex +z")).files, None);
+        assert_eq!(
+            complete(&SIGIL_SPEC, &at_end("ex --jobs +z")).files,
+            Some(Files::Any)
+        );
+        assert_eq!(
+            complete(&SIGIL_SPEC, &at_end("ex file ::: +z")).files,
+            Some(Files::Any)
+        );
+        assert_eq!(
+            complete(&SIGIL_SPEC, &at_end("ex file ::: value +z")).files,
+            Some(Files::Any)
+        );
+
+        static OPEN_META: CommandMeta = CommandMeta {
+            cmd: &COMMAND,
+            args: &[
+                ArgMeta {
+                    arg: &FILE_ARG,
+                    ..ArgMeta::EMPTY
+                },
+                ArgMeta {
+                    arg: &OVERLAY,
+                    complete_type: Some("path"),
+                    ..ArgMeta::EMPTY
+                },
+            ],
+            ..CommandMeta::EMPTY
+        };
+        static OPEN_SIGIL_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &OPEN_META,
+            ..Spec::EMPTY
+        };
+        assert_eq!(complete(&OPEN_SIGIL_SPEC, &at_end("ex +z")).files, None);
+
+        static RUNTIME: [CompletionOverlay<'static>; 1] =
+            [CompletionOverlay::async_any("TOOL", runtime_tools)];
+        let dynamic = run_ready(complete_with(&SIGIL_SPEC, &at_end("ex +r"), &RUNTIME));
+        assert_eq!(
+            dynamic
+                .candidates
+                .iter()
+                .map(|candidate| candidate.value.as_str())
+                .collect::<Vec<_>>(),
+            ["+ruby"]
+        );
+    }
+
+    fn runtime_tools(ctx: CompleteCtx<'_>) -> CompletionFuture<'_> {
+        Box::pin(async move {
+            vec![Candidate::described(
+                format!("{}uby", ctx.prefix),
+                "from async runtime state",
+            )]
+        })
+    }
+
+    fn labeled_ruby(_ctx: &CompleteCtx<'_>) -> Vec<Candidate<'static>> {
+        vec![Candidate::new("ruby").displayed("Ruby runtime")]
+    }
+
+    static RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::asynchronous(
+            "use",
+            "tool",
+            runtime_tools,
+        )];
+    static LABELED_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::sync("install", "tool", labeled_ruby)];
+    static GLOBAL_RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::async_any("tool", runtime_tools)];
+    static FILE_RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::asynchronous(
+            "edit",
+            "file",
+            runtime_tools,
+        )];
+    static PIPE_RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::asynchronous(
+            "pipe",
+            "path",
+            runtime_tools,
+        )];
+    static FROM_RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::asynchronous(
+            "pipe",
+            "FILE",
+            runtime_tools,
+        )];
+    static PLUGIN_RUNTIME_COMPLETIONS: [CompletionOverlay<'static>; 1] =
+        [CompletionOverlay::asynchronous(
+            "plugins",
+            "tool",
+            runtime_tools,
+        )];
+
+    #[test]
+    fn a_failed_view_name_fallback_keeps_the_cursor_selected_completer() {
+        static DEEP_VIEW: crate::spec::ViewMeta = crate::spec::ViewMeta {
+            id: "installer",
+            name: "installer",
+            bin: "installer",
+            // Deliberately deeper than the metadata route below. A stale named-completion
+            // request may have enough cursor identity to answer even when its view path cannot
+            // be recovered, and the weaker name fallback must not erase that answer.
+            root: "install nested",
+            all_globals: false,
+            globals: &[],
+        };
+        let split = at_end("mise install r");
+        let position = walk(SPEC.root.cmd, split.argv());
+        let words = split.argv();
+        let command_path: Vec<(&Command<'_>, &[String])> = position
+            .path
+            .iter()
+            .map(|(cmd, start)| (*cmd, words.get(*start..).unwrap_or(&[])))
+            .collect();
+        let ctx = CompleteCtx {
+            words: &split.words,
+            cword: split.cword,
+            prefix: &split.prefix,
+            command_words: command_words(&split, &position),
+            command_path: &command_path,
+        };
+
+        let found = for_name_at(&SPEC, "tool", &ctx, &position, Some(&DEEP_VIEW))
+            .expect("the cursor-selected completer should survive fallback failure");
+        assert!(
+            found.iter().any(|candidate| candidate.value == "ruby"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn async_overlays_run_only_for_the_field_and_projection_at_the_cursor() {
+        let split = at_end("mise use r");
+        let answer = run_ready(complete_with(&SPEC, &split, &RUNTIME_COMPLETIONS));
+        assert_eq!(
+            answer
+                .candidates
+                .iter()
+                .map(|candidate| candidate.value.as_str())
+                .collect::<Vec<_>>(),
+            ["ruby"]
+        );
+        assert_eq!(answer.files, None);
+
+        let file = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise edit "),
+            &FILE_RUNTIME_COMPLETIONS,
+        ));
+        assert_eq!(file.files, Some(Files::Any));
+
+        let before_separator = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise pipe "),
+            &PIPE_RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            before_separator
+                .candidates
+                .iter()
+                .all(|candidate| candidate.value != "uby"),
+            "{before_separator:?}"
+        );
+        assert_eq!(before_separator.files, None);
+
+        let after_separator = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise pipe -- "),
+            &PIPE_RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            after_separator
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "uby"),
+            "{after_separator:?}"
+        );
+        assert_eq!(after_separator.files, Some(Files::Any));
+
+        let attached_file = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise pipe --from="),
+            &FROM_RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            attached_file
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "--from=uby"),
+            "{attached_file:?}"
+        );
+        assert_eq!(attached_file.files, Some(Files::Any));
+
+        let flag = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise use -"),
+            &RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            flag.candidates
+                .iter()
+                .all(|candidate| candidate.value != "-uby"),
+            "{flag:?}"
+        );
+
+        let implied = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise r"),
+            &RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            implied
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "ruby"),
+            "{implied:?}"
+        );
+
+        static FILE_DEFAULT_SPEC: Spec = Spec {
+            name: "mise",
+            bin: Some("mise"),
+            root: &META_ROOT,
+            default_subcommand: Some("edit"),
+            ..Spec::EMPTY
+        };
+        let implied_file = run_ready(complete_with(
+            &FILE_DEFAULT_SPEC,
+            &at_end("mise m"),
+            &FILE_RUNTIME_COMPLETIONS,
+        ));
+        assert_eq!(implied_file.files, Some(Files::Any));
+
+        let named = run_ready(complete_named_with(
+            &SPEC,
+            &at_end("mise plugins "),
+            &GLOBAL_RUNTIME_COMPLETIONS,
+            "tool",
+        ));
+        assert!(
+            named
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "uby"),
+            "{named:?}"
+        );
+        let named_at_root = run_ready(complete_named_with(
+            &SPEC,
+            &at_end("mise "),
+            &GLOBAL_RUNTIME_COMPLETIONS,
+            "tool",
+        ));
+        assert!(
+            named_at_root
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "uby"),
+            "{named_at_root:?}"
+        );
+
+        let named_on_owner = run_ready(complete_named_with(
+            &SPEC,
+            &at_end("mise plugins "),
+            &PLUGIN_RUNTIME_COMPLETIONS,
+            "tool",
+        ));
+        assert!(
+            named_on_owner
+                .candidates
+                .iter()
+                .any(|candidate| candidate.value == "uby"),
+            "{named_on_owner:?}"
+        );
+        let named_on_descendant = run_ready(complete_named_with(
+            &SPEC,
+            &at_end("mise plugins ls "),
+            &PLUGIN_RUNTIME_COMPLETIONS,
+            "tool",
+        ));
+        assert!(
+            named_on_descendant
+                .candidates
+                .iter()
+                .all(|candidate| candidate.value != "uby"),
+            "{named_on_descendant:?}"
+        );
+
+        let argv = [
+            OsString::from("__complete_word__"),
+            OsString::from("--shell"),
+            OsString::from("bash"),
+            OsString::from("--line"),
+            OsString::from("miser r"),
+        ];
+        let rendered = run_ready(
+            SPEC.view()
+                .name("miser")
+                .bin("miser")
+                .completion_app()
+                .completions(&RUNTIME_COMPLETIONS)
+                .project("use")
+                .completion_request(&argv),
+        );
+        assert_eq!(rendered.as_deref(), Some("ruby\n"));
+
+        let binary_argv = [
+            OsString::from("__complete_word__"),
+            OsString::from("--shell"),
+            OsString::from("bash"),
+            OsString::from("--line"),
+            OsString::from("mis"),
+        ];
+        let without_projection = run_ready(
+            SPEC.view()
+                .completion_app()
+                .completion_request(&binary_argv),
+        );
+        let with_projection = run_ready(
+            SPEC.view()
+                .completion_app()
+                .project("use")
+                .completion_request(&binary_argv),
+        );
+        assert_eq!(with_projection, without_projection);
+
+        static ROOT_ARG: Command = Command {
+            name: "root-arg",
+            args: &[&TOOL],
+            ..Command::EMPTY
+        };
+        static ROOT_ARG_META: CommandMeta = CommandMeta {
+            cmd: &ROOT_ARG,
+            args: &[ArgMeta {
+                arg: &TOOL,
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static ROOT_ARG_SPEC: Spec = Spec {
+            name: "root-arg",
+            root: &ROOT_ARG_META,
+            ..Spec::EMPTY
+        };
+        let argv0 = run_ready(complete_with(
+            &ROOT_ARG_SPEC,
+            &at_end("root"),
+            &GLOBAL_RUNTIME_COMPLETIONS,
+        ));
+        assert!(
+            argv0
+                .candidates
+                .iter()
+                .all(|candidate| candidate.value != "rootuby"),
+            "{argv0:?}"
+        );
+
+        let unrelated = at_end("mise plugins ");
+        let answer = run_ready(complete_with(&SPEC, &unrelated, &RUNTIME_COMPLETIONS));
+        assert_eq!(answer.candidates[0].value, "ls");
+    }
+
+    #[test]
+    fn cursor_completion_keeps_presentation_metadata_from_duplicate_values() {
+        let answer = run_ready(complete_with(
+            &SPEC,
+            &at_end("mise install r"),
+            &LABELED_COMPLETIONS,
+        ));
+        assert_eq!(answer.candidates.len(), 1, "{answer:?}");
+        assert_eq!(answer.candidates[0].value, "ruby");
+        assert_eq!(
+            answer.candidates[0].display.as_deref(),
+            Some("Ruby runtime")
+        );
+    }
+
+    #[test]
+    fn named_completion_keeps_presentation_metadata_from_duplicate_values() {
+        let answer = run_ready(complete_named_with(
+            &SPEC,
+            &at_end("mise install r"),
+            &LABELED_COMPLETIONS,
+            "tool",
+        ));
+        assert_eq!(answer.candidates.len(), 1, "{answer:?}");
+        assert_eq!(answer.candidates[0].value, "ruby");
+        assert_eq!(
+            answer.candidates[0].display.as_deref(),
+            Some("Ruby runtime")
+        );
+    }
+
+    /// The position at the cursor of a line, which is what a completion asks about.
+    fn position_at(line: &str) -> Position<'static> {
+        let s = at_end(line);
+        walk(&ROOT, s.argv())
+    }
+
+    #[test]
+    fn the_cursor_is_in_the_command_the_words_reached() {
+        assert_eq!(position_at("mise ").cmd.name, "mise");
+        assert_eq!(position_at("mise plugins ").cmd.name, "plugins");
+        assert_eq!(position_at("mise plugins ls ").cmd.name, "ls");
+        // A half-typed word names nothing yet, so it is not descended into: the cursor is
+        // still in the command before it.
+        assert_eq!(position_at("mise plug").cmd.name, "mise");
+    }
+
+    #[test]
+    fn a_flag_that_takes_a_value_puts_the_cursor_in_it() {
+        // The parser calls this a missing value; to a completion it is the question being
+        // asked, and the flag is what decides the answer.
+        let p = position_at("mise use --jobs ");
+        assert_eq!(p.awaiting_value.map(|f| f.name), Some("jobs"));
+
+        // A flag that takes none does not, and neither does one already given its value.
+        assert!(position_at("mise use --jobs 4 ").awaiting_value.is_none());
+        assert!(position_at("mise --verbose ").awaiting_value.is_none());
+    }
+
+    #[test]
+    fn declared_builtin_actions_do_not_turn_completion_into_a_help_topic() {
+        static ASSIST: Flag = Flag {
+            key: 100,
+            name: "assist",
+            longs: &["assist"],
+            action: crate::ArgAction::Help,
+            ..Flag::BOOL
+        };
+        static REVISION: Flag = Flag {
+            key: 101,
+            name: "revision",
+            longs: &["revision"],
+            action: crate::ArgAction::Version,
+            ..Flag::BOOL
+        };
+        static TARGET: Arg = Arg {
+            key: 102,
+            name: "TARGET",
+            ..Arg::REQUIRED
+        };
+        static APP: Command = Command {
+            name: "app",
+            flags: &[&ASSIST, &REVISION],
+            args: &[&TARGET],
+            ..Command::EMPTY
+        };
+
+        for action in ["--assist", "--revision"] {
+            let position = walk(&APP, &[action.to_string(), "filled".to_string()]);
+            assert!(!position.help_topic, "{action} became a help topic");
+            assert_eq!(position.next_arg, None, "{action} stopped the walk early");
+            assert!(position.flags_possible);
+        }
+    }
+
+    #[test]
+    fn a_variadic_flag_still_claiming_words_holds_the_cursor() {
+        // `mise use --tools node ⌶` — the next word is another tool, because the parser would
+        // bind it to the flag rather than to the positional after it. The state saying so is
+        // cleared by the very call that ends the walk, so it has to be read on the way.
+        let p = position_at("mise use --tools node ");
+        assert_eq!(p.awaiting_value.map(|f| f.name), Some("tools"));
+
+        // Until something that could not be a value comes along, which is when the parser
+        // stops claiming too.
+        let p = position_at("mise use --tools node -- ");
+        assert!(p.awaiting_value.is_none());
+    }
+
+    #[test]
+    fn the_next_positional_is_the_one_a_word_would_fill() {
+        assert_eq!(
+            position_at("mise use ").next_arg.map(|a| a.name),
+            Some("TOOL")
+        );
+        // Filled, so there is nothing left for a second word to go into.
+        assert!(position_at("mise use node ").next_arg.is_none());
+        // A variadic keeps taking values, so it is still the answer.
+        assert_eq!(
+            position_at("mise exec a b ").next_arg.map(|a| a.name),
+            Some("ARGS")
+        );
+    }
+
+    #[test]
+    fn flags_stop_being_possible_where_the_parser_stops_reading_them() {
+        assert!(position_at("mise use ").flags_possible);
+        assert!(!position_at("mise use -- ").flags_possible);
+        // And past an `automatic` argument's first value, which is a wrapper forwarding to
+        // another tool: the flags there are the other tool's, and this CLI has none to offer.
+        assert!(!position_at("mise exec node ").flags_possible);
+        assert!(position_at("mise exec ").flags_possible);
+    }
+
+    #[test]
+    fn a_help_topic_puts_the_cursor_under_the_command_it_named() {
+        // `mise help plugins ⌶` asks which command to read about, and the candidates are
+        // `plugins`'s own — not the root's, which is where the parser stayed, since a topic is
+        // resolved without being descended into.
+        let p = position_at("mise help plugins ");
+        assert_eq!(p.cmd.name, "plugins");
+        assert!(!p.flags_possible, "a topic takes no flags");
+        assert!(p.next_arg.is_none(), "and fills no argument");
+
+        // And with no topic yet, the cursor is under the command `help` was typed in.
+        assert_eq!(position_at("mise help ").cmd.name, "mise");
+    }
+
+    #[test]
+    fn a_global_flag_is_in_scope_inside_a_subcommand() {
+        // What the parser would accept there is what should be offered there — one rule, read
+        // from the same tables, rather than two that can disagree.
+        let names: Vec<_> = {
+            let argv = [std::ffi::OsStr::new("plugins")];
+            let mut parser = Parser::new(&ROOT, &argv);
+            while parser.next_event().is_some() {}
+            parser.flags_in_scope().map(|f| f.name).collect()
+        };
+        assert!(names.contains(&"verbose"), "{names:?}");
+    }
+
+    fn at_end(line: &str) -> Split {
+        split(line, line.len(), Shell::Bash)
+    }
+
+    #[test]
+    fn a_line_splits_into_the_words_the_shell_would_have_passed() {
+        let s = at_end("mise use node");
+        assert_eq!(s.words, ["mise", "use", "node"]);
+        assert_eq!(s.cword, 2);
+        assert_eq!(s.prefix, "node");
+    }
+
+    #[test]
+    fn a_cursor_after_a_space_is_completing_a_word_that_does_not_exist_yet() {
+        // The common case — Tab pressed to ask "what can go here?" — and the one an empty
+        // word exists for: without it a caller cannot tell "anything" from "nothing".
+        let s = at_end("mise use ");
+        assert_eq!(s.words, ["mise", "use", ""]);
+        assert_eq!(s.cword, 2);
+        assert_eq!(s.prefix, "");
+    }
+
+    #[test]
+    fn a_cursor_inside_a_word_completes_that_word_and_keeps_the_rest_of_the_line() {
+        // `mise us|e node` — the tail is still part of the line, because the parser walking
+        // left to right may need it, but the word being completed is `us`.
+        let line = "mise use node";
+        let s = split(line, 7, Shell::Bash);
+        assert_eq!(s.words, ["mise", "use", "node"]);
+        assert_eq!(s.cword, 1);
+        assert_eq!(s.prefix, "us");
+        assert_eq!(s.walked(), ["mise", "use"]);
+    }
+
+    #[test]
+    fn a_quoted_space_stays_inside_its_word() {
+        // The reason for taking a line rather than the shell's own split: by the time a shell
+        // has split, the quote that made this one word is gone.
+        let s = at_end(r#"mise run "my task"#);
+        assert_eq!(s.words, ["mise", "run", "my task"]);
+        assert_eq!(s.prefix, "my task");
+
+        let s = at_end("mise run 'my task");
+        assert_eq!(s.words, ["mise", "run", "my task"]);
+        assert_eq!(s.prefix, "my task");
+    }
+
+    #[test]
+    fn an_empty_quote_is_a_word() {
+        let s = at_end(r#"mise run "" "#);
+        assert_eq!(s.words, ["mise", "run", "", ""]);
+        assert_eq!(s.cword, 3);
+    }
+
+    #[test]
+    fn a_backslash_escapes_the_character_after_it() {
+        let s = at_end(r"mise run my\ task");
+        assert_eq!(s.words, ["mise", "run", "my task"]);
+
+        // And a trailing one escapes the character not yet typed, rather than being an error:
+        // the user is mid-word, which is the only state this function is ever called in.
+        let s = at_end(r"mise run my\");
+        assert_eq!(s.words, ["mise", "run", "my"]);
+        assert_eq!(s.prefix, "my");
+    }
+
+    #[test]
+    fn a_single_quote_keeps_a_backslash_literal() {
+        // Which is what makes a Windows path survive being completed.
+        let s = at_end(r"mise use 'C:\Users\me");
+        assert_eq!(s.words, ["mise", "use", r"C:\Users\me"]);
+
+        // In double quotes a backslash escapes only what it could mean something to, so the
+        // same path survives there too.
+        let s = at_end(r#"mise use "C:\Users\me"#);
+        assert_eq!(s.words, ["mise", "use", r"C:\Users\me"]);
+
+        let s = at_end(r#"mise use "say \"hi"#);
+        assert_eq!(s.words, ["mise", "use", r#"say "hi"#]);
+    }
+
+    #[test]
+    fn powershell_escapes_with_a_backtick() {
+        let s = split("mise run my` task", 17, Shell::PowerShell);
+        assert_eq!(s.words, ["mise", "run", "my task"]);
+
+        // And a backslash is an ordinary character there, which is the point: a path typed in
+        // PowerShell is full of them.
+        let s = split(r"mise use C:\Users\me", 20, Shell::PowerShell);
+        assert_eq!(s.words, ["mise", "use", r"C:\Users\me"]);
+    }
+
+    #[test]
+    fn a_cursor_in_a_gap_completes_a_word_that_is_not_there_yet() {
+        // `mise ⌶use` asks what can go *before* `use` — a word the line does not contain. It
+        // has to be made, or the question is answered about `use`, which is a different one.
+        let s = split("mise use", 5, Shell::Bash);
+        assert_eq!(s.words, ["mise", "", "use"]);
+        assert_eq!(s.cword, 1);
+        assert_eq!(s.prefix, "");
+        assert_eq!(s.walked(), ["mise", ""]);
+
+        // Same in a run of spaces, where there is no character at the cursor either way.
+        let s = split("mise   use", 6, Shell::Bash);
+        assert_eq!(s.words, ["mise", "", "use"]);
+        assert_eq!(s.cword, 1);
+    }
+
+    #[test]
+    fn a_cursor_on_an_escaped_character_is_still_in_its_word() {
+        // `mise run my\ ⌶task` — the cursor sits on the character the escape swallowed, which
+        // the loop never stops at on its own. Missing it made the split describe the last word
+        // of the line rather than the one being typed.
+        // The backslash is at 11 and the space it escapes at 12, which is where the cursor is.
+        let line = r"mise run my\ task and more";
+        let s = split(line, 12, Shell::Bash);
+        assert_eq!(s.cword, 2);
+        assert_eq!(s.prefix, "my");
+        assert_eq!(s.words, ["mise", "run", "my task", "and", "more"]);
+
+        // The same inside double quotes, where the escape applies to the quote it precedes.
+        let line = r#"mise run "say \"hi" then"#;
+        let s = split(line, 15, Shell::Bash);
+        assert_eq!(s.cword, 2);
+        assert_eq!(s.prefix, "say ");
+    }
+
+    #[test]
+    fn powershell_writes_a_quote_by_doubling_it() {
+        // Documented as PowerShell's rule, and now done: `''` inside a quoted string is one
+        // quote rather than the end of the string and the start of another.
+        let s = split("mise run 'it''s here", 20, Shell::PowerShell);
+        assert_eq!(s.words, ["mise", "run", "it's here"]);
+        assert_eq!(s.prefix, "it's here");
+
+        let s = split(r#"mise run "say ""hi"#, 18, Shell::PowerShell);
+        assert_eq!(s.words, ["mise", "run", r#"say "hi"#]);
+
+        // And not POSIX's rule, in either quote: there a second quote ends the string, so
+        // `'it''s` is two pieces of one word rather than an escaped quote.
+        let s = split("mise run 'it''s", 15, Shell::Bash);
+        assert_eq!(s.words, ["mise", "run", "its"]);
+        let s = split(r#"mise run "it""s"#, 15, Shell::Bash);
+        assert_eq!(s.words, ["mise", "run", "its"]);
+    }
+
+    #[test]
+    fn an_empty_line_is_still_completing_something() {
+        let s = at_end("");
+        assert_eq!(s.words, [""]);
+        assert_eq!(s.cword, 0);
+        assert_eq!(s.prefix, "");
+        assert_eq!(s.walked(), [""]);
+    }
+
+    #[test]
+    fn a_cursor_off_the_end_or_inside_a_character_lands_somewhere_sensible() {
+        // A shell's idea of a byte offset is not always ours — nushell counts spans, and a
+        // reconstructed line can be a byte or two off. Being wrong is better than panicking in
+        // a keystroke handler.
+        let s = split("mise use", 999, Shell::Bash);
+        assert_eq!(s.prefix, "use");
+
+        // `ü` is two bytes, at 5 and 6, so 7 is the boundary after it and 6 is inside it.
+        let line = "mise ünicode";
+        let s = split(line, 7, Shell::Bash);
+        assert_eq!(s.cword, 1);
+        assert_eq!(s.prefix, "ü");
+        // Mid-character, floored to the start of the `ü` rather than splitting it.
+        let s = split(line, 6, Shell::Bash);
+        assert_eq!(s.cword, 1);
+        assert_eq!(s.prefix, "");
+    }
+    #[test]
+    fn a_word_that_could_name_a_command_offers_the_commands() {
+        assert_eq!(
+            offered("mise "),
+            // `node` and `python` are the fallback command's, which the root offers too — see
+            // `the_root_offers_what_the_command_it_falls_back_to_accepts`.
+            [
+                "edit", "exec", "install", "list", "ls", "node", "pipe", "plugins", "python",
+                "ship", "task", "u", "use", "wrap",
+            ],
+            "sorted, and a hidden command is offered under none of its names"
+        );
+        assert_eq!(offered("mise pl"), ["plugins"]);
+        // An alias is a name someone types meaning the command, so it is offered too — but
+        // not a hidden one, which the parser answers to and nothing advertises.
+        assert_eq!(offered("mise l"), ["list", "ls"]);
+        assert_eq!(offered("mise plugins "), ["ls"]);
+    }
+
+    #[test]
+    fn a_dash_offers_the_flags_that_would_be_accepted_there() {
+        // Both forms for a lone dash, since it says nothing about which was meant.
+        // `--help` is the parser's own rather than a declared flag, and is offered all the same.
+        assert_eq!(
+            offered("mise -"),
+            ["--help", "--quiet", "--verbose", "-h", "-v"]
+        );
+        assert_eq!(offered("mise --"), ["--help", "--quiet", "--verbose"]);
+        assert_eq!(offered("mise -h"), ["-h"]);
+
+        // Inside a subcommand: its own flags and the globals it inherits, which is exactly
+        // what the parser would accept there.
+        assert_eq!(
+            offered("mise use --"),
+            ["--help", "--jobs", "--quiet", "--tools", "--verbose"]
+        );
+        // A short token asks about one letter, because bundling means any other letter would
+        // be a candidate for a different position in the token.
+        assert_eq!(offered("mise use -v"), ["-v"]);
+        assert!(
+            offered("mise use -j").is_empty(),
+            "--jobs has no short form"
+        );
+    }
+
+    #[test]
+    fn a_flag_waiting_for_its_value_offers_that_flags_choices() {
+        assert_eq!(offered("mise use --jobs "), ["1", "2", "4"]);
+        assert_eq!(offered("mise use --jobs 2"), ["2"]);
+        // And nothing else: the subcommands and the positional are not candidates for a
+        // value that a flag has already claimed.
+        assert!(!offered("mise use --jobs ").contains(&"node".to_string()));
+    }
+
+    #[test]
+    fn a_positional_offers_its_choices() {
+        assert_eq!(offered("mise use "), ["node", "python"]);
+        assert_eq!(offered("mise use p"), ["python"]);
+    }
+
+    #[test]
+    fn past_a_separator_a_dash_is_not_a_flag() {
+        // `--` stops flag interpretation, so there is no flag to offer — the word there is a
+        // value, and the only candidates are what a value could be.
+        assert!(offered("mise use -- -").is_empty());
+        // The fallback command's values are still offered past a separator: `--` says the
+        // word is not a flag, not that it is not a word.
+        assert_eq!(
+            offered("mise -- "),
+            [
+                "edit", "exec", "install", "list", "ls", "node", "pipe", "plugins", "python",
+                "ship", "task", "u", "use", "wrap",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_candidate_carries_the_help_a_page_would_print() {
+        let found = candidates(&SPEC, &at_end("mise use --"));
+        let jobs = found.iter().find(|c| c.value == "--jobs").expect("--jobs");
+        assert_eq!(jobs.description.as_deref(), Some("How many at once"));
+
+        let found = candidates(&SPEC, &at_end("mise pl"));
+        assert_eq!(found[0].description.as_deref(), Some("Manage plugins"));
+
+        let found = candidates(&SPEC, &at_end("mise use --jobs "));
+        let two = found.iter().find(|c| c.value == "2").expect("choice 2");
+        assert_eq!(two.description.as_deref(), Some("Two workers"));
+    }
+    #[test]
+    fn a_help_topic_offers_the_commands_under_it() {
+        // The candidate half of the same rule: after `mise help plugins ⌶` the useful answer
+        // is what can be read about under `plugins`, and nothing else belongs there.
+        assert_eq!(offered("mise help plugins "), ["ls"]);
+        // And nothing the root would fall back to: `mise help ⌶` is asking for a command to
+        // read about, not for a word to run.
+        assert_eq!(
+            offered("mise help "),
+            [
+                "edit", "exec", "install", "list", "ls", "pipe", "plugins", "ship", "task", "u",
+                "use", "wrap"
+            ]
+        );
+    }
+    #[test]
+    fn a_negation_is_offered_the_way_it_is_typed() {
+        // The table holds it without dashes, because that is what the parser matches once a
+        // token's `--` has been taken off. A candidate is what the user types, so it needs
+        // them back — offered bare it matched no `--` prefix and no shell would accept it.
+        assert!(offered("mise --").contains(&"--quiet".to_string()));
+        assert_eq!(offered("mise --q"), ["--quiet"]);
+    }
+
+    #[test]
+    fn a_restart_token_puts_the_cursor_back_at_the_first_argument() {
+        // `mise task one ::: ⌶` starts a fresh invocation of the same command, so the words
+        // before the token do not decide what comes after it: the cursor is back at the first
+        // argument, not at the second one the words had reached.
+        assert_eq!(offered("mise task one "), ["alpha", "beta"]);
+        assert_eq!(offered("mise task one ::: "), ["one", "two"]);
+        assert_eq!(offered("mise task one ::: t"), ["two"]);
+    }
+
+    #[test]
+    fn a_clause_restart_targets_the_first_inner_argument() {
+        static TASK_ARG: Arg = Arg {
+            key: 91,
+            name: "task",
+            ..Arg::REQUIRED
+        };
+        static TASKS: crate::Clause = crate::Clause {
+            key: 92,
+            name: "tasks",
+            separator: Some(b":::"),
+            flags: &[],
+            args: &[&TASK_ARG],
+        };
+        static COMMAND: Command = Command {
+            name: "run",
+            clause: Some(&TASKS),
+            ..Command::EMPTY
+        };
+        static META: CommandMeta = CommandMeta {
+            cmd: &COMMAND,
+            extra: &CommandExtra {
+                restart_token: Some(":::"),
+                clause: Some(&crate::spec::ClauseMeta {
+                    name: "tasks",
+                    separator: Some(":::"),
+                    flags: &[],
+                    help: None,
+                    long_help: None,
+                    canonical_selector: |_| None,
+                    args: &[ArgMeta {
+                        arg: &TASK_ARG,
+                        choices: &["build", "check"],
+                        ..ArgMeta::EMPTY
+                    }],
+                }),
+                ..CommandExtra::EMPTY
+            },
+            ..CommandMeta::EMPTY
+        };
+        static ROOT: Command = Command {
+            name: "ex",
+            subcommands: &[&COMMAND],
+            ..Command::EMPTY
+        };
+        static ROOT_META: CommandMeta = CommandMeta {
+            cmd: &ROOT,
+            subcommands: &[&META],
+            ..CommandMeta::EMPTY
+        };
+        static CLAUSE_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &ROOT_META,
+            default_subcommand: Some("run"),
+            ..Spec::EMPTY
+        };
+
+        let values = candidates(&CLAUSE_SPEC, &at_end("ex run build ::: b"))
+            .into_iter()
+            .map(|candidate| candidate.value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["build"]);
+
+        let values = candidates(&CLAUSE_SPEC, &at_end("ex b"))
+            .into_iter()
+            .map(|candidate| candidate.value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["build"]);
+    }
+
+    #[test]
+    fn the_root_offers_what_the_command_it_falls_back_to_accepts() {
+        // `mise build` means `mise run build`, so a word at the root may be meant for the
+        // default subcommand — and what its first argument accepts belongs here too, beside
+        // the subcommand names themselves.
+        let found = offered("mise ");
+        assert!(found.contains(&"use".to_string()), "{found:?}");
+        assert!(found.contains(&"node".to_string()), "{found:?}");
+        assert!(found.contains(&"python".to_string()), "{found:?}");
+
+        // Filtered like everything else, and not offered inside a subcommand: the fallback is
+        // the root's rule.
+        assert_eq!(offered("mise n"), ["node"]);
+        assert!(!offered("mise plugins ").contains(&"node".to_string()));
+    }
+    #[test]
+    fn an_argument_that_needs_a_separator_offers_the_separator() {
+        // `mise wrap ⌶` cannot take `red` yet — the parser rejects every value until a `--`
+        // has been typed — so offering the choices would be offering words that do not work.
+        assert_eq!(offered("mise wrap "), ["--"]);
+        // Nothing once something has been typed: the separator no longer matches, and the
+        // values are still not fillable.
+        assert!(offered("mise wrap r").is_empty());
+        // Past the separator they are.
+        assert_eq!(offered("mise wrap -- "), ["blue", "red"]);
+        assert_eq!(offered("mise wrap -- r"), ["red"]);
+    }
+
+    #[test]
+    fn the_fallback_command_is_found_by_any_name_it_answers_to() {
+        // `default_subcommand` names a command, and a spec may name it the way its author
+        // refers to it — here `u` rather than `use`. Resolving only canonical names silently
+        // dropped the fallback's values.
+        let found = offered("mise ");
+        assert!(found.contains(&"node".to_string()), "{found:?}");
+    }
+
+    #[test]
+    fn the_fallback_command_prefers_a_name_to_another_commands_alias() {
+        // Resolved the way a typed word is, so what a shell offers at the root is the first
+        // argument of the command the parser would actually route the word to. Matching name
+        // and alias in one pass offered `alpha`'s values for a line the parse sends to `run`.
+        static A_ARG: Arg = Arg {
+            key: 90,
+            name: "a",
+            ..Arg::REQUIRED
+        };
+        static B_ARG: Arg = Arg {
+            key: 91,
+            name: "b",
+            ..Arg::REQUIRED
+        };
+        static ALPHA: Command = Command {
+            name: "alpha",
+            aliases: &["run"],
+            args: &[&A_ARG],
+            ..Command::EMPTY
+        };
+        static PLAIN_RUN: Command = Command {
+            name: "run",
+            args: &[&B_ARG],
+            ..Command::EMPTY
+        };
+        static META_ALPHA: CommandMeta = CommandMeta {
+            cmd: &ALPHA,
+            args: &[ArgMeta {
+                arg: &A_ARG,
+                choices: &["from-alpha"],
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static META_PLAIN_RUN: CommandMeta = CommandMeta {
+            cmd: &PLAIN_RUN,
+            args: &[ArgMeta {
+                arg: &B_ARG,
+                choices: &["from-run"],
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static EX: Command = Command {
+            name: "ex",
+            subcommands: &[&ALPHA, &PLAIN_RUN],
+            ..Command::EMPTY
+        };
+        static META_EX: CommandMeta = CommandMeta {
+            cmd: &EX,
+            subcommands: &[&META_ALPHA, &META_PLAIN_RUN],
+            ..CommandMeta::EMPTY
+        };
+        static EX_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &META_EX,
+            default_subcommand: Some("run"),
+            ..Spec::EMPTY
+        };
+
+        let found: Vec<String> = candidates(&EX_SPEC, &at_end("ex "))
+            .into_iter()
+            .map(|c| c.value)
+            .collect();
+        assert!(found.contains(&"from-run".to_string()), "{found:?}");
+        assert!(!found.contains(&"from-alpha".to_string()), "{found:?}");
+    }
+
+    /// The whole answer for a line: what this CLI knows, and whether paths belong.
+    fn answer(line: &str) -> Completions<'static> {
+        complete(&SPEC, &at_end(line))
+    }
+
+    #[test]
+    fn a_word_named_like_a_path_asks_the_shell_for_paths() {
+        // The reference resolves a completer by the lowercased name and treats that name as the
+        // type when nothing else says otherwise, so `<FILE>` completes files without the spec
+        // mentioning it. Same rule, read off the same name.
+        assert_eq!(answer("mise edit ").files, Some(Files::Any));
+        // Even though it has choices of its own, which would otherwise close the position: a
+        // path argument that names two well-known files still takes any other path.
+        assert_eq!(offered("mise edit "), ["mise.local.toml", "mise.toml"]);
+        // And a flag's value is named by its placeholder, not by the flag.
+        assert_eq!(answer("mise edit --into ").files, Some(Files::Dirs));
+    }
+
+    #[test]
+    fn extension_types_preserve_the_filter_for_the_shell() {
+        assert_eq!(
+            declared_files("path:toml, .yaml,.", 0),
+            Some(Files::Extensions(vec![
+                "toml".to_string(),
+                "yaml".to_string()
+            ]))
+        );
+        let answer = Completions {
+            candidates: Vec::new(),
+            files: declared_files("path:toml,yaml", 0),
+        };
+        assert_eq!(
+            render(&answer, Shell::Bash),
+            "\u{1}extensions\ttoml\tyaml\n"
+        );
+    }
+
+    #[test]
+    fn a_trace_exposes_the_parser_decision_behind_an_answer() {
+        let trace = trace(&SPEC, &at_end("mise use --jobs "));
+        assert_eq!(trace.command_path, ["mise", "use"]);
+        assert_eq!(trace.awaiting_value, Some("jobs"));
+        assert_eq!(trace.next_arg, Some("TOOL"));
+        assert_eq!(trace.files, None);
+        let rendered = trace.to_string();
+        assert!(rendered.contains("position: value of jobs"), "{rendered}");
+        assert!(rendered.contains("shell fallback: none"), "{rendered}");
+    }
+
+    #[test]
+    fn a_trace_uses_the_effective_argument_after_a_restart() {
+        let trace = trace(&SPEC, &at_end("mise ship fast script ::: "));
+        assert_eq!(trace.next_arg, Some("MODE"));
+        assert_eq!(trace.files, None);
+        assert!(trace.to_string().contains("position: argument MODE"));
+    }
+
+    #[test]
+    fn a_help_trace_keeps_the_selected_topic_path() {
+        let trace = trace(&SPEC, &at_end("mise help plugins "));
+        assert!(trace.help_topic);
+        assert_eq!(trace.command_path, ["mise", "plugins"]);
+        assert!(trace.to_string().contains("command: mise plugins"));
+    }
+
+    #[test]
+    fn a_help_trace_keeps_the_typed_route_to_a_shared_command() {
+        static CONFIG: Flag = Flag {
+            name: "config",
+            longs: &["config"],
+            global: true,
+            ..Flag::VALUE
+        };
+        static SHARED: Command = Command {
+            name: "shared",
+            ..Command::EMPTY
+        };
+        static LEFT: Command = Command {
+            name: "left",
+            subcommands: &[&SHARED],
+            ..Command::EMPTY
+        };
+        static RIGHT: Command = Command {
+            name: "right",
+            subcommands: &[&SHARED],
+            ..Command::EMPTY
+        };
+        static ROOT: Command = Command {
+            name: "ex",
+            flags: &[&CONFIG],
+            subcommands: &[&LEFT, &RIGHT],
+            ..Command::EMPTY
+        };
+        static SHARED_META: CommandMeta = CommandMeta {
+            cmd: &SHARED,
+            ..CommandMeta::EMPTY
+        };
+        static LEFT_META: CommandMeta = CommandMeta {
+            cmd: &LEFT,
+            subcommands: &[&SHARED_META],
+            ..CommandMeta::EMPTY
+        };
+        static RIGHT_META: CommandMeta = CommandMeta {
+            cmd: &RIGHT,
+            subcommands: &[&SHARED_META],
+            ..CommandMeta::EMPTY
+        };
+        static ROOT_META: CommandMeta = CommandMeta {
+            cmd: &ROOT,
+            flags: &[FlagMeta {
+                flag: &CONFIG,
+                ..FlagMeta::EMPTY
+            }],
+            subcommands: &[&LEFT_META, &RIGHT_META],
+            ..CommandMeta::EMPTY
+        };
+        static SHARED_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &ROOT_META,
+            ..Spec::EMPTY
+        };
+        static RIGHT_VIEW: crate::spec::ViewMeta = crate::spec::ViewMeta {
+            id: "right",
+            name: "right",
+            bin: "right",
+            root: "right",
+            all_globals: true,
+            globals: &[],
+        };
+
+        let trace = trace(&SHARED_SPEC, &at_end("ex help right shared "));
+        assert!(trace.help_topic);
+        assert_eq!(trace.command_path, ["ex", "right", "shared"]);
+
+        let trace = trace_view(
+            &SHARED_SPEC,
+            &at_end("right --config alpha help shared "),
+            &RIGHT_VIEW,
+        );
+        assert!(trace.help_topic);
+        assert_eq!(trace.command_path, ["ex", "right", "shared"]);
+    }
+
+    #[test]
+    fn a_trace_labels_a_dash_prefixed_cursor_as_a_flag_position() {
+        let trace = trace(&SPEC, &at_end("mise install --s"));
+        assert!(trace.flags_possible);
+        assert_eq!(trace.next_arg, Some("TOOL"));
+        assert!(trace.to_string().contains("position: flag"));
+    }
+
+    #[test]
+    fn executable_paths_and_command_names_are_distinct_shell_requests() {
+        assert_eq!(files_for("executable"), Some(Files::ExecutablePaths));
+        assert_eq!(files_for("command"), Some(Files::Commands));
+    }
+
+    #[test]
+    fn open_ended_value_hints_suppress_path_fallback() {
+        static URL: Arg = Arg {
+            key: 80,
+            name: "URL",
+            ..Arg::REQUIRED
+        };
+        static ROOT: Command = Command {
+            name: "ex",
+            args: &[&URL],
+            ..Command::EMPTY
+        };
+        static URL_META: CommandMeta = CommandMeta {
+            cmd: &ROOT,
+            args: &[ArgMeta {
+                arg: &URL,
+                complete_type: Some("url"),
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static URL_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &URL_META,
+            ..Spec::EMPTY
+        };
+        static UNKNOWN_META: CommandMeta = CommandMeta {
+            cmd: &ROOT,
+            args: &[ArgMeta {
+                arg: &URL,
+                complete_type: Some("unknown"),
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static UNKNOWN_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &UNKNOWN_META,
+            ..Spec::EMPTY
+        };
+
+        assert_eq!(complete(&URL_SPEC, &at_end("ex ")).files, None);
+        assert_eq!(
+            complete(&UNKNOWN_SPEC, &at_end("ex ")).files,
+            Some(Files::Any)
+        );
+    }
+
+    #[test]
+    fn a_position_that_knows_its_answers_does_not_ask_for_paths() {
+        // Offering the working directory beside a known set is how a mistyped choice completes
+        // to whatever happened to be lying around.
+        assert_eq!(answer("mise use ").files, None);
+        assert_eq!(answer("mise plugins ").files, None);
+        // Nor for a flag, which no path starts with — including one that matches nothing, where
+        // there is otherwise no candidate to suppress the fallback.
+        assert_eq!(answer("mise use --").files, None);
+        assert_eq!(answer("mise -").files, None);
+        // And a prefix that matches none of a declared set: the set is still the whole answer,
+        // so "nothing matched what you typed" must not become "here is the working directory".
+        let a = answer("mise use nodx");
+        assert!(a.candidates.is_empty());
+        assert_eq!(a.files, None);
+        // A mistyped *command*, though, does fall back — nothing declared a set there, and the
+        // reference offers paths for the same reason.
+        assert_eq!(answer("mise plugni").files, Some(Files::Any));
+
+        let a = answer("mise use --zzz");
+        assert!(a.candidates.is_empty());
+        assert_eq!(a.files, None);
+        // Nor for a help topic, which is a command name and nothing else.
+        assert_eq!(answer("mise help ").files, None);
+    }
+
+    #[test]
+    fn hidden_only_choices_still_close_the_position() {
+        static VALUE: Arg = Arg {
+            key: 90,
+            name: "VALUE",
+            ..Arg::REQUIRED
+        };
+        static ROOT: Command = Command {
+            name: "hidden",
+            args: &[&VALUE],
+            ..Command::EMPTY
+        };
+        static META: CommandMeta = CommandMeta {
+            cmd: &ROOT,
+            args: &[ArgMeta {
+                arg: &VALUE,
+                accepted_choices: &["secret"],
+                ..ArgMeta::EMPTY
+            }],
+            ..CommandMeta::EMPTY
+        };
+        static HIDDEN_SPEC: Spec = Spec {
+            name: "hidden",
+            bin: Some("hidden"),
+            root: &META,
+            ..Spec::EMPTY
+        };
+
+        let answer = complete(&HIDDEN_SPEC, &at_end("hidden sec"));
+        assert!(answer.candidates.is_empty());
+        assert_eq!(answer.files, None);
+    }
+
+    #[test]
+    fn a_position_with_nothing_to_say_lets_the_shell_answer() {
+        // `mise edit some-file ⌶` has filled its only argument and has no subcommands, so this
+        // CLI has nothing to say — and a path is the shell's best guess, which is the
+        // reference's fallback too.
+        let a = answer("mise edit some-file ");
+        assert!(a.candidates.is_empty(), "{:?}", a.candidates);
+        assert_eq!(a.files, Some(Files::Any));
+    }
+
+    #[test]
+    fn a_path_that_needs_a_separator_is_still_not_a_path_yet() {
+        // Named `<PATH>`, so paths are what it takes — but not until the separator is typed,
+        // because until then the parser rejects a path exactly as it rejects any other value.
+        let a = answer("mise pipe ");
+        assert_eq!(a.files, None);
+        assert_eq!(a.candidates.len(), 1, "the separator, and nothing else");
+        assert_eq!(a.candidates[0].value, "--");
+
+        // Past it, they are.
+        assert_eq!(answer("mise pipe -- ").files, Some(Files::Any));
+
+        // And a flag waiting for its value is a different position that happens to have that
+        // argument behind it: `--from ⌶` takes a path whatever the positional after it needs.
+        assert_eq!(answer("mise pipe --from ").files, Some(Files::Any));
+        assert_eq!(answer("mise pipe --from=").files, Some(Files::Any));
+    }
+
+    #[test]
+    fn an_argument_that_needs_a_separator_asks_for_nothing_else() {
+        // The separator is the only useful candidate, and a path is not one: the parser would
+        // reject it until the `--` is typed.
+        let a = answer("mise wrap ");
+        assert_eq!(a.candidates.len(), 1);
+        assert_eq!(a.files, None);
+    }
+    #[test]
+    fn a_restart_asks_about_the_first_argument_for_paths_too() {
+        // Both halves of an answer have to agree about which argument the cursor is at. `ship`
+        // takes a `MODE` and then a `FILE`, so its two arguments want different things: the first
+        // declares its whole set, the second takes any path.
+        let first = answer("mise ship ");
+        assert_eq!(first.files, None, "MODE declares its set");
+        assert_eq!(
+            first
+                .candidates
+                .iter()
+                .map(|c| c.value.as_str())
+                .collect::<Vec<_>>(),
+            ["fast", "slow"]
+        );
+        assert_eq!(
+            answer("mise ship fast ").files,
+            Some(Files::Any),
+            "FILE takes paths"
+        );
+
+        // Past the restart token the cursor is back at the first argument, whatever the words
+        // before it filled — so a prefix matching none of `MODE`'s set means no matches, not
+        // "here is the working directory".
+        let after = answer("mise ship fast ::: ");
+        assert_eq!(after.files, None, "back at MODE, which declares its set");
+        assert_eq!(
+            after
+                .candidates
+                .iter()
+                .map(|c| c.value.as_str())
+                .collect::<Vec<_>>(),
+            ["fast", "slow"]
+        );
+        let mistyped = answer("mise ship fast ::: zzz");
+        assert!(mistyped.candidates.is_empty());
+        assert_eq!(mistyped.files, None, "a mistyped choice is still a choice");
+    }
+
+    #[test]
+    fn a_restart_makes_command_args_expect_a_command_again() {
+        assert_eq!(answer("mise exec ").files, Some(Files::Commands));
+        assert_eq!(answer("mise exec one ").files, Some(Files::Any));
+        assert_eq!(answer("mise exec one ::: ").files, Some(Files::Commands));
+    }
+
+    #[test]
+    fn each_shell_is_written_the_way_it_reads() {
+        let answer = complete(&SPEC, &at_end("mise pl"));
+
+        // bash shows values and nothing else.
+        assert_eq!(render(&answer, Shell::Bash), "plugins\n");
+
+        // fish and nu take a description after a tab.
+        assert_eq!(render(&answer, Shell::Fish), "plugins\tManage plugins\n");
+
+        // Elvish receives insertion, description, and presentation separately.
+        assert_eq!(
+            render(&answer, Shell::Elvish),
+            "plugins\tManage plugins\tplugins\n"
+        );
+
+        // PowerShell also receives its separately selectable display text.
+        assert_eq!(
+            render(&answer, Shell::PowerShell),
+            "plugins\tManage plugins\tplugins\tcommand\n"
+        );
+
+        // zsh takes a third field: what to type, which is not always what is shown.
+        assert_eq!(
+            render(&answer, Shell::Zsh),
+            "plugins\tManage plugins\tplugins\n"
+        );
+    }
+
+    #[test]
+    fn every_shell_writes_every_field_and_path_request_in_its_own_shape() {
+        let answer = Completions {
+            candidates: vec![
+                Candidate::described("it's", "two\nlines")
+                    .displayed("its\tlabel")
+                    .with_kind(CandidateKind::Directory),
+                Candidate::new("plain").with_kind(CandidateKind::Flag),
+            ],
+            files: Some(Files::Extensions(vec!["rs".into(), "toml".into()])),
+        };
+        let extensions = "\u{1}extensions\trs\ttoml\n";
+        assert_eq!(
+            render(&answer, Shell::Bash),
+            format!("it's\nplain\n{extensions}")
+        );
+        assert_eq!(
+            render(&answer, Shell::Zsh),
+            format!("its label\ttwo lines\t'it'\\''s'\nplain\t\tplain\n{extensions}")
+        );
+        for shell in [Shell::Fish, Shell::Nu] {
+            assert_eq!(
+                render(&answer, shell),
+                format!("it's\ttwo lines\nplain\t\n{extensions}")
+            );
+        }
+        assert_eq!(
+            render(&answer, Shell::Elvish),
+            format!("it's\ttwo lines\tits label\nplain\t\tplain\n{extensions}")
+        );
+        assert_eq!(
+            render(&answer, Shell::PowerShell),
+            format!("it's\ttwo lines\tits label\tdirectory\nplain\t\tplain\tflag\n{extensions}")
+        );
+
+        // An answer without descriptions leaves fish and nu their bare values.
+        let bare = |files| Completions {
+            candidates: vec![Candidate::new("plain")],
+            files,
+        };
+        assert_eq!(render(&bare(None), Shell::Nu), "plain\n");
+        for (files, marker) in [
+            (Files::Any, FILES_MARKER),
+            (Files::Dirs, DIRS_MARKER),
+            (Files::ExecutablePaths, EXECUTABLE_PATHS_MARKER),
+            (Files::Commands, COMMANDS_MARKER),
+        ] {
+            assert_eq!(
+                render(&bare(Some(files)), Shell::Fish),
+                format!("plain\n{marker}\n")
+            );
+        }
+    }
+
+    #[test]
+    fn bash_colons_are_marked_only_where_readline_keeps_them_in_the_word() {
+        let marked = |line: &str| mark_bash_nonbreaking_colons(line).replace('\u{1}', "#");
+        assert_eq!(marked("a:b"), "a:b");
+        assert_eq!(marked(r"a\:b"), r"a\#b");
+        assert_eq!(marked("'a:b'c:d"), "'a#b'c:d");
+        assert_eq!(marked(r#""a:\:b\"c:"d:"#), r#""a#\#b\"c#"d:"#);
+        // A backslash is literal in single quotes, so the colon after it is quoted, not escaped,
+        // and the quote after it still closes the string.
+        assert_eq!(marked(r"'a\:b\':c"), r"'a\#b\':c");
+        // An escaped quote opens nothing.
+        assert_eq!(marked(r#"\"a:b"#), r#"\"a:b"#);
+        // Characters outside ASCII pass through whole, escaped or not.
+        assert_eq!(marked("é:'ü:'"), "é:'ü#'");
+        assert_eq!(marked("\\é:\\ü"), "\\é:\\ü");
+        assert_eq!(marked("\\"), "\\");
+    }
+
+    #[test]
+    fn a_request_reads_each_option_and_skips_the_ones_it_does_not_know() {
+        let parse = |argv: &[&str]| {
+            let argv: Vec<OsString> = core::iter::once("__complete_word__")
+                .chain(argv.iter().copied())
+                .map(OsString::from)
+                .collect();
+            CompletionRequest::parse(&argv).expect("a completion request")
+        };
+        let request = parse(&[
+            "--shell",
+            "pwsh",
+            "--from-a-newer-script",
+            "--line",
+            "mise run 'a b' tail",
+            "--cursor",
+            "12",
+            "--candidates",
+            "tool",
+            "--bash-word",
+            "w",
+            "--bash-wordbreaks",
+            ":",
+        ]);
+        assert_eq!(request.shell, Shell::PowerShell);
+        assert_eq!(request.split.words, ["mise", "run", "a b", "tail"]);
+        assert_eq!(
+            (request.split.cword, request.split.prefix.as_str()),
+            (2, "a ")
+        );
+        assert_eq!(request.candidates_for.as_deref(), Some("tool"));
+        assert_eq!(request.bash_word.as_deref(), Some("w"));
+        assert_eq!(request.bash_wordbreaks.as_deref(), Some(":"));
+
+        // An unknown shell keeps the default, and an option left without its value clears
+        // what an earlier one set rather than keeping it.
+        let request = parse(&[
+            "--shell",
+            "tcsh",
+            "--line",
+            "mise ru",
+            "--candidates",
+            "tool",
+            "--cursor",
+            "not a number",
+            "--candidates",
+        ]);
+        assert_eq!(request.shell, Shell::Bash);
+        assert_eq!(request.split.prefix, "ru");
+        assert_eq!(request.candidates_for, None);
+    }
+
+    #[test]
+    fn a_request_reads_options_joined_to_their_values() {
+        // The form the `run=` of a typed completer passes back.
+        let argv = [
+            "__complete_word__",
+            "--shell=fish",
+            "--candidates",
+            "tool",
+            "--line=mise install actionl",
+            "--cursor=16",
+        ]
+        .map(OsString::from);
+        let request = CompletionRequest::parse(&argv).expect("a completion request");
+        assert_eq!(request.shell, Shell::Fish);
+        assert_eq!(request.candidates_for.as_deref(), Some("tool"));
+        assert_eq!(request.split.words, ["mise", "install", "actionl"]);
+        assert_eq!(request.split.prefix, "act");
+
+        // Only the first `=` separates: the line itself may contain more.
+        let argv = ["__complete_word__", "--line=mise set A=b"].map(OsString::from);
+        let request = CompletionRequest::parse(&argv).expect("a completion request");
+        assert_eq!(request.split.words, ["mise", "set", "A=b"]);
+    }
+
+    #[test]
+    fn a_shell_that_already_split_words_can_send_them_losslessly() {
+        let argv = [
+            OsString::from("__complete_word__"),
+            OsString::from("--shell"),
+            OsString::from("elvish"),
+            OsString::from("--words"),
+            OsString::from("mise"),
+            OsString::from("run"),
+            OsString::from("two words"),
+        ];
+        let request = CompletionRequest::parse(&argv).expect("a completion request");
+        assert_eq!(request.shell, Shell::Elvish);
+        assert_eq!(request.split.words, ["mise", "run", "two words"]);
+        assert_eq!(request.split.cword, 2);
+        assert_eq!(request.split.prefix, "two words");
+    }
+
+    #[test]
+    fn a_bash_request_reports_the_colon_prefix_readline_preserves() {
+        let argv = [
+            "__complete_word__",
+            "--shell",
+            "bash",
+            "--line",
+            "ex update:deps:no",
+            "--bash-word",
+            "no",
+            "--bash-wordbreaks",
+            " :",
+        ]
+        .map(OsString::from);
+        let request = CompletionRequest::parse(&argv).expect("a completion request");
+        let answer = Completions {
+            candidates: vec![Candidate::new("update:deps:no-cooldown")],
+            files: None,
+        };
+
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate:deps:\n"
+        );
+
+        let mut escaped_colon = argv.clone();
+        escaped_colon[4] = OsString::from(r"ex update:deps\:no");
+        escaped_colon[6] = OsString::from("deps:no");
+        let request = CompletionRequest::parse(&escaped_colon).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate:\n"
+        );
+
+        let mut in_the_middle = argv.clone();
+        in_the_middle[6] = OsString::from("no-cooldown");
+        let request = CompletionRequest::parse(&in_the_middle).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate:deps:\n"
+        );
+
+        let mut on_the_colon = argv.clone();
+        on_the_colon[4] = OsString::from("ex update:deps:");
+        on_the_colon[6] = OsString::from(":");
+        let request = CompletionRequest::parse(&on_the_colon).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate:deps:\n"
+        );
+
+        let mut after_consecutive_colons = argv.clone();
+        after_consecutive_colons[4] = OsString::from("ex update::");
+        after_consecutive_colons[6] = OsString::from(":");
+        let request =
+            CompletionRequest::parse(&after_consecutive_colons).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate::\n"
+        );
+
+        let mut after_escaped_trailing_colon = argv.clone();
+        after_escaped_trailing_colon[4] = OsString::from(r"ex update:\:");
+        after_escaped_trailing_colon[6] = OsString::from(":");
+        let request =
+            CompletionRequest::parse(&after_escaped_trailing_colon).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n\u{1}prefix\tupdate:\n"
+        );
+
+        let mut without_colon_break = argv;
+        without_colon_break[8] = OsString::from(" ");
+        let request = CompletionRequest::parse(&without_colon_break).expect("a completion request");
+        assert_eq!(
+            render_request(&answer, &request),
+            "update:deps:no-cooldown\n"
+        );
+    }
+
+    #[test]
+    fn bash_candidates_are_escaped_the_way_readline_has_to_insert_them() {
+        let answer = |files| Completions {
+            candidates: vec![
+                Candidate::new(r#"tasks."hello.sh""#),
+                Candidate::new("it's here"),
+                Candidate::new("a$b`c"),
+                Candidate::new("plain:value"),
+            ],
+            files,
+        };
+        // Readline puts COMPREPLY on the line as it is, so the shell has to read back the value.
+        assert_eq!(
+            render(&answer(None), Shell::Bash),
+            "tasks.\\\"hello.sh\\\"\nit\\'s\\ here\na\\$b\\`c\nplain:value\n"
+        );
+        // Command names are not paths, so the wrapper leaves quoting to the values.
+        assert!(render(&answer(Some(Files::Commands)), Shell::Bash).starts_with("tasks.\\\""));
+        // Under `-o filenames`, Readline quotes what it inserts, so the values stay as they are.
+        assert_eq!(
+            render(&answer(Some(Files::Any)), Shell::Bash),
+            format!("tasks.\"hello.sh\"\nit's here\na$b`c\nplain:value\n{FILES_MARKER}\n")
+        );
+        // Only bash: zsh's own insert column is unchanged.
+        assert!(render(&answer(None), Shell::Zsh).contains("'tasks.\"hello.sh\"'"));
+    }
+
+    #[test]
+    fn a_bash_candidate_after_an_open_quote_is_written_for_that_quote() {
+        let request = |line: &str| {
+            let argv = ["__complete_word__", "--shell", "bash", "--line", line].map(OsString::from);
+            CompletionRequest::parse(&argv).expect("a completion request")
+        };
+        let answer = Completions {
+            candidates: vec![
+                Candidate::new(r#"tasks."hello.sh".run"#),
+                Candidate::new("tasks.it's $HOME"),
+            ],
+            files: None,
+        };
+        // Readline replaces what follows the quote and closes it after a lone match.
+        assert_eq!(
+            render_request(&answer, &request("ex 'tas")),
+            "tasks.\"hello.sh\".run\ntasks.it'\\''s $HOME\n"
+        );
+        assert_eq!(
+            render_request(&answer, &request("ex \"tas")),
+            "tasks.\\\"hello.sh\\\".run\ntasks.it's \\$HOME\n"
+        );
+        // A quote opened inside the word: the part before it stays on the line.
+        assert_eq!(
+            render_request(&answer, &request("ex tasks.'")),
+            "\"hello.sh\".run\nit'\\''s $HOME\n"
+        );
+        // A closed quote leaves the word unquoted again.
+        assert_eq!(
+            render_request(&answer, &request("ex 'tasks'.")),
+            "tasks.\\\"hello.sh\\\".run\ntasks.it\\'s\\ \\$HOME\n"
+        );
+        // An escaped quote opens nothing.
+        assert_eq!(
+            render_request(&answer, &request("ex tasks.\\'"))
+                .lines()
+                .next(),
+            Some("tasks.\\\"hello.sh\\\".run")
+        );
+    }
+
+    #[test]
+    fn a_bash_candidate_closes_the_quote_readline_would_leave_open() {
+        let request = |line: &str| {
+            let argv = ["__complete_word__", "--shell", "bash", "--line", line].map(OsString::from);
+            CompletionRequest::parse(&argv).expect("a completion request")
+        };
+        let answer = |value: &str| Completions {
+            candidates: vec![Candidate::new(value.to_string())],
+            files: None,
+        };
+        // Readline closes a quote only when the text does not already end in that character.
+        assert_eq!(
+            render_request(&answer("ends'"), &request("ex 'e")),
+            "ends'\\'''\n"
+        );
+        assert_eq!(
+            render_request(&answer("quote\""), &request("ex \"q")),
+            "quote\\\"\"\n"
+        );
+        // `!` expands history inside double quotes, so it is escaped outside them.
+        assert_eq!(
+            render_request(&answer("hi!there"), &request("ex \"h")),
+            "hi\"\\!\"there\n"
+        );
+        assert_eq!(
+            render_request(&answer("hi!"), &request("ex \"h")),
+            "hi\"\\!\"\"\n"
+        );
+        assert_eq!(
+            render_request(&answer("hi!there"), &request("ex 'h")),
+            "hi!there\n"
+        );
+        assert_eq!(
+            render_request(&answer("hi!there"), &request("ex h")),
+            "hi\\!there\n"
+        );
+    }
+
+    #[test]
+    fn an_ansi_c_quote_doubles_backslashes() {
+        assert_eq!(open_quote("ex $'a"), Some((3, BashQuote::AnsiC)));
+        assert_eq!(open_quote("ex $\"a"), Some((3, BashQuote::Double)));
+        assert_eq!(open_quote("ex \\$'a"), Some((5, BashQuote::Single)));
+        // An escaped quote does not close an ANSI-C one.
+        assert_eq!(open_quote(r"ex $'a\'b"), Some((3, BashQuote::AnsiC)));
+        let insert = BashInsert::Quoted {
+            quote: BashQuote::AnsiC,
+            before: "",
+        };
+        assert_eq!(insert.write(r"tab\bend"), r"tab\\bend");
+        assert_eq!(insert.write("it's"), r"it\'s");
+        assert_eq!(insert.write("end'"), r"end\''");
+    }
+
+    #[test]
+    fn the_bash_colon_prefix_is_escaped_like_the_candidates() {
+        let argv = [
+            "__complete_word__",
+            "--shell",
+            "bash",
+            "--line",
+            "ex a\\ b:c",
+            "--bash-word",
+            "c",
+            "--bash-wordbreaks",
+            " :",
+        ]
+        .map(OsString::from);
+        let request = CompletionRequest::parse(&argv).expect("a completion request");
+        let answer = Completions {
+            candidates: vec![Candidate::new("a b:cd")],
+            files: None,
+        };
+        assert_eq!(
+            render_request(&answer, &request),
+            "a\\ b:cd\n\u{1}prefix\ta\\ b:\n"
+        );
+    }
+
+    #[test]
+    fn display_text_does_not_change_what_the_shell_inserts() {
+        let answer = Completions {
+            candidates: vec![Candidate::described("iad", "US East").displayed("IAD · Virginia")],
+            files: None,
+        };
+
+        assert_eq!(render(&answer, Shell::Bash), "iad\n");
+        assert_eq!(render(&answer, Shell::Fish), "iad\tUS East\n");
+        assert_eq!(
+            render(&answer, Shell::PowerShell),
+            "iad\tUS East\tIAD · Virginia\tvalue\n"
+        );
+        assert_eq!(
+            render(&answer, Shell::Zsh),
+            "IAD · Virginia\tUS East\tiad\n"
+        );
+    }
+
+    #[test]
+    fn powershell_receives_native_candidate_kinds() {
+        let answer = Completions {
+            candidates: vec![Candidate::new("deploy").with_kind(CandidateKind::Command)],
+            files: None,
+        };
+        assert_eq!(
+            render(&answer, Shell::PowerShell),
+            "deploy\t\tdeploy\tcommand\n"
+        );
+        // Shells without a typed candidate API lose only the metadata.
+        assert_eq!(render(&answer, Shell::Fish), "deploy\n");
+    }
+
+    #[test]
+    fn a_candidate_a_shell_could_not_read_is_quoted_for_zsh() {
+        static ODD: Command = Command {
+            name: "with space",
+            ..Command::EMPTY
+        };
+        static ODD_META: CommandMeta = CommandMeta {
+            cmd: &ODD,
+            about: Some("Odd"),
+            ..CommandMeta::EMPTY
+        };
+        static ODD_ROOT: Command = Command {
+            name: "ex",
+            subcommands: &[&ODD],
+            ..Command::EMPTY
+        };
+        static ODD_ROOT_META: CommandMeta = CommandMeta {
+            cmd: &ODD_ROOT,
+            subcommands: &[&ODD_META],
+            ..CommandMeta::EMPTY
+        };
+        static ODD_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &ODD_ROOT_META,
+            ..Spec::EMPTY
+        };
+
+        let answer = complete(&ODD_SPEC, &split("ex ", 3, Shell::Zsh));
+        let line = render(&answer, Shell::Zsh);
+        // Shown as it is, typed as the shell needs it.
+        assert!(
+            line.starts_with("with space\tOdd\t'with space'"),
+            "{line:?}"
+        );
+    }
+
+    #[test]
+    fn the_marker_is_the_last_line_when_paths_belong() {
+        let answer = complete(&SPEC, &at_end("mise edit "));
+        let out = render(&answer, Shell::Bash);
+        assert_eq!(out.lines().last(), Some(FILES_MARKER));
+        // And the candidates are still there in front of it.
+        assert!(out.starts_with("mise.local.toml\nmise.toml\n"), "{out:?}");
+
+        let answer = complete(&SPEC, &at_end("mise edit --into "));
+        assert_eq!(
+            render(&answer, Shell::Fish).lines().last(),
+            Some(DIRS_MARKER)
+        );
+
+        // And absent where paths do not belong, rather than saying "none".
+        let answer = complete(&SPEC, &at_end("mise use "));
+        let out = render(&answer, Shell::Bash);
+        assert!(!out.contains('\u{1}'), "{out:?}");
+    }
+    #[test]
+    fn a_description_written_across_lines_stays_one_row() {
+        // One line per candidate and tabs between fields, so a description containing either
+        // would split one candidate into several rows or invent a field. mise writes multi-line
+        // `help` on 37 of its commands and flags, so this is the ordinary case.
+        static WORDY: Command = Command {
+            name: "wordy",
+            ..Command::EMPTY
+        };
+        static WORDY_META: CommandMeta = CommandMeta {
+            cmd: &WORDY,
+            about: Some("First line\nsecond line\n\nand a\ttab"),
+            ..CommandMeta::EMPTY
+        };
+        static WORDY_ROOT: Command = Command {
+            name: "ex",
+            subcommands: &[&WORDY],
+            ..Command::EMPTY
+        };
+        static WORDY_ROOT_META: CommandMeta = CommandMeta {
+            cmd: &WORDY_ROOT,
+            subcommands: &[&WORDY_META],
+            ..CommandMeta::EMPTY
+        };
+        static WORDY_SPEC: Spec = Spec {
+            name: "ex",
+            bin: Some("ex"),
+            root: &WORDY_ROOT_META,
+            ..Spec::EMPTY
+        };
+
+        let answer = complete(&WORDY_SPEC, &split("ex w", 4, Shell::Fish));
+        let out = render(&answer, Shell::Fish);
+        assert_eq!(out, "wordy\tFirst line second line and a tab\n");
+        assert_eq!(out.lines().count(), 1, "one candidate, one row");
+
+        // zsh keeps its three fields, and no more.
+        let out = render(&answer, Shell::Zsh);
+        assert_eq!(out.matches('\t').count(), 2, "{out:?}");
+    }
+    #[test]
+    fn a_declared_completer_answers_for_its_value() {
+        // The Rust counterpart of a spec's `run=`, and the same shape of answer: values with
+        // descriptions where it has them.
+        assert_eq!(offered("mise install "), ["node", "python", "ruby"]);
+        let found = candidates(&SPEC, &at_end("mise install n"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].value, "node");
+        assert_eq!(found[0].description.as_deref(), Some("JavaScript"));
+
+        let ruby = candidates(&SPEC, &at_end("mise install ru"));
+        assert_eq!(ruby.len(), 1, "{ruby:?}");
+        assert_eq!(ruby[0].display.as_deref(), Some("Ruby runtime"));
+
+        // For a flag's value as well as an argument's.
+        assert_eq!(offered("mise install --only "), ["node"]);
+    }
+
+    #[test]
+    fn a_completer_is_filtered_for_rather_than_by() {
+        // The reference filters a `run=` command's output by the typed prefix rather than making
+        // every script do it, so a callback may answer with everything it knows.
+        assert_eq!(offered("mise install ru"), ["ruby"]);
+        assert!(offered("mise install zzz").is_empty());
+    }
+
+    #[test]
+    fn a_completer_can_read_the_line_it_was_called_about() {
+        // `{{words[PREV]}}` is what two of mise's nine completers use, so a callback has to be
+        // able to see at least that much: here the answer narrows after `--only`.
+        assert_eq!(offered("mise install --only "), ["node"]);
+        assert_eq!(offered("mise install "), ["node", "python", "ruby"]);
+    }
+
+    #[test]
+    fn a_completer_that_says_nothing_leaves_the_position_open() {
+        // "A script that prints nothing may simply have had nothing to say about this prefix",
+        // as the reference puts it — so paths still follow, rather than the position claiming
+        // to know its whole set.
+        let a = answer("mise install zzz");
+        assert!(a.candidates.is_empty());
+        assert_eq!(a.files, Some(Files::Any));
+    }
+    #[test]
+    fn an_attached_value_is_answered_by_its_flag() {
+        // The shell replaces the whole word, so an attached value keeps its flag prefix.
+        assert_eq!(offered("mise install --source="), ["--source=upstream"]);
+        assert_eq!(offered("mise install --source=u"), ["--source=upstream"]);
+
+        // It remains a flag position: the positional's completer is never reached.
+        assert!(!offered("mise install --source=").contains(&"node".to_string()));
+        assert!(!offered("mise install -s").contains(&"node".to_string()));
+
+        // Detached, the flag's own completer answers — which is the case that works.
+        assert_eq!(offered("mise install --source "), ["upstream"]);
+        assert_eq!(offered("mise install "), ["node", "python", "ruby"]);
+    }
+
+    static EXT_LS: Command = Command {
+        name: "ls",
+        ..Command::EMPTY
+    };
+    static EXT_QUIET: Flag = Flag {
+        key: 40,
+        name: "quiet",
+        longs: &["quiet"],
+        ..Flag::BOOL
+    };
+    static EXT_PLUGINS: Command = Command {
+        name: "plugins",
+        flags: &[&EXT_QUIET],
+        subcommands: &[&EXT_LS],
+        external_subcommand: true,
+        ..Command::EMPTY
+    };
+    static EXT_ROOT: Command = Command {
+        name: "host",
+        subcommands: &[&EXT_PLUGINS],
+        ..Command::EMPTY
+    };
+    static EXT_META_PLUGINS: CommandMeta = CommandMeta {
+        cmd: &EXT_PLUGINS,
+        subcommands: &[&CommandMeta {
+            cmd: &EXT_LS,
+            ..CommandMeta::EMPTY
+        }],
+        ..CommandMeta::EMPTY
+    };
+    static EXT_META: CommandMeta = CommandMeta {
+        cmd: &EXT_ROOT,
+        subcommands: &[&EXT_META_PLUGINS],
+        ..CommandMeta::EMPTY
+    };
+    static EXT_SPEC: Spec = Spec {
+        name: "host",
+        root: &EXT_META,
+        ..Spec::EMPTY
+    };
+
+    #[test]
+    fn a_walk_reports_where_the_words_left_these_tables() {
+        // The word after the catch-all is the boundary, and it is an index into the words the
+        // walk was given — `split.argv()`, which is argv0-less and cursor-less.
+        let split = at_end("host plugins myplugin ");
+        let position = walk(&EXT_ROOT, split.argv());
+        assert_eq!(position.external, Some(1), "{:?}", split.argv());
+        assert_eq!(position.cmd.name, "plugins", "the boundary's declarer");
+
+        // A flag of the host's own before the name is still the host's: it binds, and the name
+        // after it is still where the line left.
+        let split = at_end("host plugins --quiet myplugin ");
+        assert_eq!(walk(&EXT_ROOT, split.argv()).external, Some(2));
+
+        // The name being *typed* is not past anything. The cursor's word is excluded from the
+        // walk, so this is the ordinary "which subcommand?" position and stays static.
+        let split = at_end("host plugins mypl");
+        assert_eq!(walk(&EXT_ROOT, split.argv()).external, None);
+        let split = at_end("host plugins ");
+        assert_eq!(walk(&EXT_ROOT, split.argv()).external, None);
+
+        // A dash-prefixed word never forwards — it is a flag or an error, not a command name.
+        let split = at_end("host plugins --nope ");
+        assert_eq!(walk(&EXT_ROOT, split.argv()).external, None);
+    }
+
+    #[test]
+    fn nothing_is_offered_past_an_external_boundary() {
+        // The declarer still has a subcommand and a flag to report, and both would be answers
+        // about the wrong CLI: `myplugin` is a program these tables do not describe.
+        let answer = complete(&EXT_SPEC, &at_end("host plugins myplugin "));
+        assert!(answer.candidates.is_empty(), "{answer:?}");
+        assert_eq!(answer.files, None, "no working directory either");
+        assert!(candidates(&EXT_SPEC, &at_end("host plugins myplugin ")).is_empty());
+
+        // Including for a dash-prefixed word: the host's flags are not the plugin's.
+        let flags = complete(&EXT_SPEC, &at_end("host plugins myplugin --"));
+        assert!(flags.candidates.is_empty(), "{flags:?}");
+        assert_eq!(flags.files, None);
+
+        // The position *before* the boundary is untouched.
+        let parent = complete(&EXT_SPEC, &at_end("host plugins "));
+        assert_eq!(
+            parent
+                .candidates
+                .iter()
+                .map(|candidate| candidate.value.as_str())
+                .collect::<Vec<_>>(),
+            ["ls"],
+            "{parent:?}"
+        );
+    }
+}
