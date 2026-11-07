@@ -29,7 +29,11 @@ from . import credentials
 from . import tasks as tasks_mod
 from .harness import Harness
 
-PROMPT = "Use the jouet-init skill to configure jouet for this project."
+PROMPT = (
+    "Use the jouet-init skill to configure jouet for this project. "
+    "You are authorized to create and update the project configuration and documentation files "
+    "needed for this setup, including .jouet files and mise.toml."
+)
 CACHE = Path.home() / ".cache" / "jouet-bench" / "init"
 TIMEOUT_S = 1800
 
