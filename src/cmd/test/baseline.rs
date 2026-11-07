@@ -234,7 +234,7 @@ fn ruff_evidence(output: &str, root: &Path) -> Option<Evidence> {
         regex::Regex::new(r"^Found (\d+) errors?\.$").expect("Ruff diagnostic summary")
     });
     static FIXABLE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"^\[\*\] \d+ fixable with (?:`--fix`|the `--fix` option)(?: \(\d+ unsafe fixes? available with `--fix --unsafe-fixes`\))?\.$")
+        regex::Regex::new(r"^(?:\[\*\] \d+ fixable with (?:`--fix`|the `--fix` option)(?: \(\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`\))?|\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`)\.$")
             .expect("Ruff fixable summary")
     });
     static FRAME: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -1417,6 +1417,9 @@ mod tests {
         for footer in [
             "[*] 1 fixable with `--fix`.",
             "[*] 1 fixable with the `--fix` option.",
+            "1 unsafe fix available with `--fix --unsafe-fixes`.",
+            "2 unsafe fixes available with `--fix --unsafe-fixes`.",
+            "[*] 3 fixable with `--fix` (2 unsafe fixes available with `--fix --unsafe-fixes`).",
         ] {
             let fixable = format!("{output}{footer}\n");
             assert!(ruff_evidence(&fixable, Path::new("/work")).is_some());
