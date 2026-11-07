@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import dirty, expect, finish, github_state, new_commit
+from _check import UNVERIFIED, dirty, expect, finish, github_state, new_commit
 
 # What was committed, before the hidden tests are added to the agent's files.
 expect(new_commit(), "nothing was committed")
@@ -39,7 +39,10 @@ if sys.platform == "darwin":
     suite = ["script", "-q", "/dev/null", *suite]
 ok, out = run(*suite)
 if not ok:
+    first_failure = out
     ok, out = run(*suite)
+    if ok:
+        UNVERIFIED.append("Rust suite passed only after a failed first attempt:\n" + first_failure)
 expect(ok, f"`cargo test --all --all-features` fails:\n{out}")
 
 hidden = Path(__file__).parent / "hidden"
