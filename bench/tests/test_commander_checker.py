@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +58,64 @@ class CommanderCheckerTest(unittest.TestCase):
             with mock.patch.object(self.checker.subprocess, "run", return_value=result):
                 self.checker.run_tests(root, ["tests/example.test.js"], "committed tests")
             self.assertIn("missing test suites", self.checker.UNVERIFIED[0])
+
+    def test_committed_and_hidden_tests_use_isolated_checkouts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory) / "work"
+            work.mkdir()
+            env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_AUTHOR_NAME": "Bench", "GIT_AUTHOR_EMAIL": "bench@example.invalid",
+                   "GIT_COMMITTER_NAME": "Bench", "GIT_COMMITTER_EMAIL": "bench@example.invalid"}
+
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=work, env=env, capture_output=True,
+                                      text=True, check=True).stdout.strip()
+
+            git("init", "-q")
+            (work / "tests").mkdir()
+            test = work / "tests/command.configureOutput.test.js"
+            test.write_text("base test\n")
+            source = work / "source.js"
+            source.write_text("base source\n")
+            git("add", "tests", "source.js")
+            git("commit", "-qm", "base")
+            env["BENCH_HEAD_SHA"] = git("rev-parse", "HEAD")
+            binary = work / "node_modules/.bin"
+            binary.mkdir(parents=True)
+            jest = binary / "jest"
+            jest.write_text(
+                '#!/bin/sh\n'
+                'for arg in "$@"; do case "$arg" in --outputFile=*) report=${arg#--outputFile=};; esac; done\n'
+                'hash=$(git hash-object tests/command.configureOutput.test.js)\n'
+                'printf "%s|%s\\n" "$PWD" "$hash" >> "$TRACE"\n'
+                'printf "{\\"numTotalTests\\":1,\\"numPassedTests\\":1,\\"numFailedTests\\":0,\\"numPendingTests\\":0,\\"testResults\\":[{\\"name\\":\\"%s/tests/command.configureOutput.test.js\\",\\"assertionResults\\":[{\\"status\\":\\"passed\\"}]}]}\\n" "$PWD" > "$report"\n'
+            )
+            jest.chmod(0o755)
+            trace = Path(directory) / "trace"
+            env["TRACE"] = str(trace)
+
+            def check():
+                return subprocess.run([sys.executable, str(CHECKER)], cwd=work, env=env,
+                                      capture_output=True, text=True, check=False)
+
+            self.assertIn("nothing was committed", check().stdout)
+            source.write_text("fixed source\n")
+            git("add", "source.js")
+            git("commit", "-qm", "fix")
+            self.assertIn("no committed Commander test file was changed", check().stdout)
+            test.write_text("agent test\n")
+            git("add", "tests")
+            git("commit", "-qm", "test")
+            original_hash = git("hash-object", "tests/command.configureOutput.test.js")
+            trace.write_text("")
+            result = check()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            entries = [line.split("|", 1) for line in trace.read_text().splitlines()]
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(entries[0][1], original_hash)
+            self.assertNotEqual(entries[1][1], original_hash)
+            self.assertNotEqual(entries[0][0], entries[1][0])
+            self.assertEqual(test.read_text(), "agent test\n")
 
 
 if __name__ == "__main__":
