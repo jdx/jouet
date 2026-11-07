@@ -68,6 +68,9 @@ pub(super) struct Baseline {
     /// fewer tests, so a test missing from its failures may not have run.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) unknown: Vec<String>,
+    /// Logs of fresh baseline runs that produced uncomparable failures.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) logs: Vec<PathBuf>,
 }
 
 impl Baseline {
@@ -93,7 +96,7 @@ impl Baseline {
             };
             format!("{}{more}", shown.join(", "))
         };
-        if self.none_new() {
+        let mut text = if self.none_new() {
             let all = match self.pre_existing.len() {
                 1 => "the failure also fails".to_string(),
                 n => format!("all {n} failures also fail"),
@@ -140,7 +143,11 @@ impl Baseline {
                 ));
             }
             text
+        };
+        for log in &self.logs {
+            text.push_str(&format!("  baseline log: {}\n", log.display()));
         }
+        text
     }
 }
 
@@ -755,6 +762,7 @@ pub(super) fn compare(
     let mut pre_existing = BTreeSet::new();
     let mut new = BTreeSet::new();
     let mut unknown = BTreeSet::new();
+    let mut logs = Vec::new();
     let mut prepared = false;
     for (i, (job, now, ran, not_failed)) in failed.iter().enumerate() {
         let key = command_key(job, root);
@@ -792,6 +800,7 @@ pub(super) fn compare(
             pre_existing.extend(found);
             continue;
         }
+        let mut run_log = None;
         let outcome = match (kept, mode) {
             (_, Mode::Fresh)
             | (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
@@ -842,6 +851,7 @@ pub(super) fn compare(
                     }
                 })?;
                 let output = std::fs::read(&log).unwrap_or_default();
+                run_log = Some(log.clone());
                 let output = String::from_utf8_lossy(&output);
                 if code == 0
                     && testlog::digest_with(&output, false, 0, formats).failed > 0
@@ -952,6 +962,7 @@ pub(super) fn compare(
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;
+        let mut job_unknown = false;
         for name in now.iter().flat_map(|e| &e.names) {
             if at_base.contains(name) {
                 let current = now.as_ref().and_then(|e| e.details.get(name));
@@ -959,12 +970,17 @@ pub(super) fn compare(
                     pre_existing.insert(name.clone());
                 } else {
                     unknown.insert(name.clone());
+                    job_unknown = true;
                 }
             } else if short {
                 unknown.insert(name.clone());
+                job_unknown = true;
             } else {
                 new.insert(name.clone());
             }
+        }
+        if job_unknown && let Some(log) = run_log {
+            logs.push(log);
         }
     }
     drop(checkout);
@@ -973,6 +989,7 @@ pub(super) fn compare(
         pre_existing: pre_existing.into_iter().collect(),
         new: new.into_iter().collect(),
         unknown: unknown.into_iter().collect(),
+        logs,
     }))
 }
 
