@@ -18,9 +18,8 @@ class RequestsCheckerTest(unittest.TestCase):
         for report in (
             '<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase/></testsuite>',
             '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase/><testcase/></testsuite>',
-            '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase><failure/></testcase></testsuite>',
-            ('<testsuite tests="1" failures="1" errors="0" skipped="1">'
-             '<testcase><failure/><skipped/></testcase></testsuite>'),
+            ('<testsuite tests="1" failures="0" errors="1" skipped="1">'
+             '<testcase><error/><skipped/></testcase></testsuite>'),
             '<testsuite><testcase/></testsuite>',
         ):
             with self.subTest(report=report):
@@ -37,6 +36,14 @@ class RequestsCheckerTest(unittest.TestCase):
         self.assertFalse(failures)
         self.assertIn("test_https_warnings", unverified[0])
         self.assertIn("urllib3 warning unavailable", unverified[0])
+
+    def test_failure_with_split_teardown_is_a_failure_even_if_totals_disagree(self):
+        report = ('<testsuite tests="1" failures="1" errors="1" skipped="0">'
+                  '<testcase classname="suite" name="test_one"><failure/></testcase>'
+                  '<testcase classname="suite" name="test_one"><error/></testcase></testsuite>')
+        unverified, failures = self.check_report(report, 1)
+        self.assertFalse(unverified)
+        self.assertEqual(failures[0].args[0], False)
 
     def test_long_skip_list_is_explicitly_truncated(self):
         report = ('<testsuite tests="11" failures="0" errors="0" skipped="11">'

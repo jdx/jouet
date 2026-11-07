@@ -21,9 +21,10 @@ def check_tests(paths):
         check_test_file(path, remaining)
 
 
-def read_report(report):
+def read_report(report, root=None):
     """Require complete pytest suite totals before accepting its cases."""
-    root = ET.parse(report).getroot()
+    if root is None:
+        root = ET.parse(report).getroot()
     suites = [root] if root.tag == "testsuite" else list(root) if root.tag == "testsuites" else []
     if not suites or any(suite.tag != "testsuite" for suite in suites):
         raise ValueError("missing pytest suites")
@@ -78,10 +79,14 @@ def check_test_file(path, timeout):
             return
         output = (proc.stdout + proc.stderr)[-3000:]
         try:
-            cases = read_report(report)
-            if any(case.find("failure") is not None for case in cases):
+            root = ET.parse(report).getroot()
+            suites = [root] if root.tag == "testsuite" else list(root) if root.tag == "testsuites" else []
+            if any(suite.tag == "testsuite" and case.find("failure") is not None
+                   for suite in suites for case in suite.findall("testcase")):
                 expect(False, f"committed tests failed for {path}:\n{output}")
-            elif proc.returncode != 0 or any(case.find("error") is not None for case in cases):
+                return
+            cases = read_report(report, root)
+            if proc.returncode != 0 or any(case.find("error") is not None for case in cases):
                 UNVERIFIED.append(f"committed tests could not complete for {path} (exit {proc.returncode}):\n{output}")
             elif not cases:
                 UNVERIFIED.append(f"committed tests reported no test cases for {path}")
