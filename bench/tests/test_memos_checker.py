@@ -175,6 +175,14 @@ sys.exit(1 if not browser and os.environ.get('FAIL_DOM') else 0)
         with self.assertRaises(checker['IncompleteEvidence']):
             checker['safe_test_path'](web, 'tests/linked/new.test.tsx', required=False)
 
+    def test_timeout_output_accepts_bytes_and_text(self):
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            checker = runpy.run_path(str(CHECK))
+        error = subprocess.TimeoutExpired(['node'], 90, output=b'partial output', stderr=b' runner error')
+        self.assertEqual(checker['timeout_output'](error), 'partial output runner error')
+        error = subprocess.TimeoutExpired(['git'], 30, output='text output')
+        self.assertEqual(checker['timeout_output'](error), 'text output')
+
     def test_missing_sidebar_browser_case_is_unverified(self):
         result = self.check(MISSING_TIMELINE='1')
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)

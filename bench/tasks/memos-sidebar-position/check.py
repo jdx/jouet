@@ -85,6 +85,13 @@ def checkout_state(checkout):
             git('status', '--porcelain', '-z', '--untracked-files=all'))
 
 
+def timeout_output(error):
+    """TimeoutExpired may hold bytes even when text mode was requested."""
+    def text(value):
+        return value.decode(errors='replace') if isinstance(value, bytes) else value or ''
+    return text(error.stdout) + text(error.stderr)
+
+
 def check_authored_regression(checkout, changed, directory):
     """Check changed tests on the fix, the original, and the original tests."""
     test_paths = [path for path in changed if path.startswith('web/tests/')]
@@ -251,6 +258,9 @@ def check():
         if not PROBLEMS and not UNVERIFIED:
             try:
                 check_authored_regression(checkout, changed, Path(directory))
+            except subprocess.TimeoutExpired as error:
+                print(f'Authored regression timeout output:\n{timeout_output(error)}')
+                UNVERIFIED.append(f'authored regression unverified: {error}')
             except (IncompleteEvidence, OSError, subprocess.SubprocessError) as error:
                 UNVERIFIED.append(f'authored regression unverified: {error}')
 
