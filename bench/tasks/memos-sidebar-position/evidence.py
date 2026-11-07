@@ -53,7 +53,7 @@ def distinguishes(fixed, original_with_changes, pristine):
     if not fixed or set(fixed) != set(original_with_changes):
         raise IncompleteEvidence('fixed and baseline test inventories differ')
     if not set(pristine).issubset(fixed):
-        raise IncompleteEvidence('the changed test files removed original cases')
+        raise IncompleteEvidence('original test cases are missing or renamed in the changed files')
     if any(status != 'passed' for status in fixed.values()):
         raise IncompleteEvidence('a changed test did not pass on the fix')
     if any(status != 'passed' for status in pristine.values()):
