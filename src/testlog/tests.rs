@@ -517,6 +517,62 @@ fn go_subtests_replace_their_parent_and_build_errors_are_grouped() {
 }
 
 #[test]
+fn go_json_keeps_parallel_failures_with_their_own_package_and_output() {
+    let output = r#"{"Action":"run","Package":"example/a","Test":"TestSame"}
+{"Action":"run","Package":"example/b","Test":"TestSame"}
+{"Action":"output","Package":"example/a","Test":"TestSame","Output":"    a_test.go:5: expected alpha\n"}
+{"Action":"output","Package":"example/b","Test":"TestSame","Output":"    b_test.go:7: expected beta\n"}
+{"Action":"fail","Package":"example/b","Test":"TestSame"}
+{"Action":"fail","Package":"example/a","Test":"TestSame"}
+{"Action":"fail","Package":"example/b"}
+{"Action":"run","Package":"example/a","Test":"TestGood"}
+{"Action":"pass","Package":"example/a","Test":"TestGood"}
+{"Action":"run","Package":"example/a","Test":"TestSkip"}
+{"Action":"skip","Package":"example/a","Test":"TestSkip"}
+{"Action":"fail","Package":"example/a"}"#;
+    let d = digest(output, true, DEFAULT_BUDGET);
+    assert_eq!(counts(&d), [1, 2, 1]);
+    let details = failure_details(output, &[]);
+    assert_eq!(details.len(), 2);
+    assert!(
+        details
+            .iter()
+            .any(|d| d.qualified.as_deref() == Some("example/a::TestSame")
+                && d.lines == ["    a_test.go:5: expected alpha"])
+    );
+    assert!(
+        details
+            .iter()
+            .any(|d| d.qualified.as_deref() == Some("example/b::TestSame")
+                && d.lines == ["    b_test.go:7: expected beta"])
+    );
+    let packages = go_failure_packages(output).unwrap();
+    assert_eq!(packages["example/a::TestSame"].len(), 1);
+    assert_eq!(packages["example/b::TestSame"].len(), 1);
+    assert_eq!(names(&d), ["example/b::TestSame", "example/a::TestSame"]);
+}
+
+#[test]
+fn go_json_refuses_ambiguous_failure_details() {
+    let late = r#"{"Action":"run","Package":"example/a","Test":"TestOne"}
+{"Action":"output","Package":"example/a","Test":"TestOne","Output":"first\n"}
+{"Action":"fail","Package":"example/a","Test":"TestOne"}
+{"Action":"output","Package":"example/a","Test":"TestOne","Output":"late\n"}"#;
+    assert_eq!(
+        names(&digest(late, true, DEFAULT_BUDGET)),
+        ["example/a::TestOne"]
+    );
+    assert!(failure_details(late, &[]).is_empty());
+    let missing_start = r#"{"Action":"output","Package":"example/a","Test":"TestOne","Output":"first\n"}
+{"Action":"fail","Package":"example/a","Test":"TestOne"}"#;
+    assert!(failure_details(missing_start, &[]).is_empty());
+    let out_of_order = r#"{"Action":"output","Package":"example/a","Test":"TestOne","Output":"first\n"}
+{"Action":"run","Package":"example/a","Test":"TestOne"}
+{"Action":"fail","Package":"example/a","Test":"TestOne"}"#;
+    assert!(failure_details(out_of_order, &[]).is_empty());
+}
+
+#[test]
 fn pytest_sections_merge_with_the_short_summary() {
     let d = digest(&fixture("pytest-q"), true, DEFAULT_BUDGET);
     assert_eq!(counts(&d), [2, 3, 1]);

@@ -51,7 +51,7 @@ static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
 static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)\b0 (?:errors?|failed|failures?)\b").expect("zero failures pattern")
 });
-const DETAILS_VERSION: u32 = 3;
+const DETAILS_VERSION: u32 = 4;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -157,22 +157,35 @@ pub(super) fn failure_names(
     // Not a digest: it names an output it recognises nothing in by a
     // stand-in that would match the merge base's, and shows a vitest test
     // that failed in several projects once.
-    let names: BTreeSet<String> = testlog::failure_names(output, formats)
+    let mut names: BTreeSet<String> = testlog::failure_names(output, formats)
         .into_iter()
         .map(|name| from_root(&name, checkout))
         .collect();
+    let go = testlog::go_failure_packages(output);
+    // A JSON parent may have its own assertion as well as a failing child.
+    // The display digest folds parents into children, but comparison must
+    // retain any independent parent output.
+    for detail in testlog::failure_details(output, formats) {
+        if let Some(qualified) = detail.qualified
+            && go.as_ref().is_some_and(|go| go.contains_key(&qualified))
+        {
+            names.insert(from_root(&qualified, checkout));
+        }
+    }
     if names.is_empty() {
         return None;
     }
     if scoped {
-        let go = testlog::go_failure_packages(output)?;
+        let go = go?;
         if !go.is_empty() {
             // Do not compare unqualified Go output, including panics or
             // build errors mixed with test failures.
-            return names
-                .iter()
-                .all(|name| go.contains_key(name))
-                .then(|| go.into_values().flatten().collect());
+            return names.iter().all(|name| go.contains_key(name)).then(|| {
+                go.into_iter()
+                    .filter(|(name, _)| !name.contains("::") || names.contains(name))
+                    .flat_map(|(_, qualified)| qualified)
+                    .collect()
+            });
         }
         let jest = testlog::jest_failure_files(output)?;
         if !jest.is_empty() {
@@ -360,7 +373,11 @@ pub(super) fn failure_evidence(
         }
     }
     let go = testlog::go_failure_packages(output)
-        .filter(|go| !go.is_empty() && names.iter().all(|name| go.contains_key(name)));
+        .filter(|go| !go.is_empty() && names.iter().all(|name| go.contains_key(name)))
+        .map(|mut go| {
+            go.retain(|name, _| !name.contains("::") || names.contains(name));
+            go
+        });
     Some(Evidence { names, details, go })
 }
 
@@ -495,7 +512,12 @@ fn targeted(
     let tests: BTreeSet<&str> = now
         .names
         .iter()
-        .map(|name| name.split('/').next().unwrap_or(name))
+        .map(|name| {
+            let test = name
+                .rsplit_once("::")
+                .map_or(name.as_str(), |(_, test)| test);
+            test.split('/').next().unwrap_or(test)
+        })
         .collect();
     let packages: BTreeSet<&str> = go
         .values()
@@ -507,12 +529,15 @@ fn targeted(
     }
     let tree = checkout.tree()?.to_path_buf();
     let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
-    let mut argv = vec![
-        "go".to_string(),
-        "test".into(),
-        "-run".into(),
-        format!("^({})$", tests.into_iter().collect::<Vec<_>>().join("|")),
-    ];
+    let mut argv = vec!["go".to_string(), "test".into()];
+    if now.names.iter().all(|name| name.contains("::")) {
+        argv.push("-json".into());
+    }
+    argv.push("-run".into());
+    argv.push(format!(
+        "^({})$",
+        tests.into_iter().collect::<Vec<_>>().join("|")
+    ));
     argv.extend(packages.into_iter().map(str::to_string));
     let at_base = Job {
         argv,
@@ -1262,6 +1287,117 @@ docs/README.md\n\
             evidence("/src/app", &long("first")).details,
             evidence("/src/app", &long("second")).details
         );
+    }
+
+    #[test]
+    fn go_json_baselines_compare_each_packages_failure_details() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestSame"}
+{"Action":"run","Package":"example/b","Test":"TestSame"}
+{"Action":"output","Package":"example/a","Test":"TestSame","Output":"a_test.go:5: expected alpha\n"}
+{"Action":"output","Package":"example/b","Test":"TestSame","Output":"b_test.go:7: expected beta\n"}
+{"Action":"fail","Package":"example/b","Test":"TestSame"}
+{"Action":"fail","Package":"example/a","Test":"TestSame"}
+{"Action":"fail","Package":"example/a"}
+{"Action":"fail","Package":"example/b"}"#;
+        let evidence = |text: &str| failure_evidence(text, &[], Path::new("/work"), true).unwrap();
+        let original = evidence(output);
+        assert_eq!(original.names.len(), 2);
+        assert_eq!(original.details.len(), 2);
+        let changed = evidence(&output.replace("expected beta", "expected different"));
+        assert_eq!(original.names, changed.names);
+        assert_eq!(
+            original.details["example/a::TestSame"],
+            changed.details["example/a::TestSame"]
+        );
+        assert_ne!(
+            original.details["example/b::TestSame"],
+            changed.details["example/b::TestSame"]
+        );
+        let truncated = output.replace(
+            "{\"Action\":\"run\",\"Package\":\"example/a\",\"Test\":\"TestSame\"}\n",
+            "",
+        );
+        assert!(failure_evidence(&truncated, &[], Path::new("/work"), true).is_none());
+    }
+
+    #[test]
+    fn go_json_unidentified_package_failure_cannot_be_a_baseline_pass() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestOne"}
+{"Action":"output","Package":"example/a","Test":"TestOne","Output":"assertion failed\n"}
+{"Action":"fail","Package":"example/a","Test":"TestOne"}
+{"Action":"fail","Package":"example/a"}
+{"Action":"fail","Package":"example/b"}"#;
+        assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.names.contains("package example/b"));
+        assert!(!evidence.details.contains_key("package example/b"));
+    }
+
+    #[test]
+    fn go_json_interrupted_test_is_not_hidden_by_an_ordinary_failure() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestKnown"}
+{"Action":"output","Package":"example/a","Test":"TestKnown","Output":"known failure\n"}
+{"Action":"fail","Package":"example/a","Test":"TestKnown"}
+{"Action":"run","Package":"example/a","Test":"TestCrash"}
+{"Action":"output","Package":"example/a","Output":"panic: unexpected exit\n"}
+{"Action":"fail","Package":"example/a"}"#;
+        let evidence = failure_evidence(output, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.names.contains("package example/a"));
+        assert!(!evidence.details.contains_key("package example/a"));
+        assert!(failure_evidence(output, &[], Path::new("/work"), true).is_none());
+        let digest = testlog::digest_with(output, true, 4096, &[]);
+        assert!(digest.failures.iter().any(|f| {
+            f.lines
+                .iter()
+                .any(|line| line.contains("panic: unexpected exit"))
+        }));
+    }
+
+    #[test]
+    fn go_json_scoped_baseline_does_not_require_parent_subtest_details() {
+        let output = r#"{"Action":"run","Package":"example/a","Test":"TestParent"}
+{"Action":"run","Package":"example/a","Test":"TestParent/child"}
+{"Action":"output","Package":"example/a","Test":"TestParent/child","Output":"expected 1, got 2\n"}
+{"Action":"fail","Package":"example/a","Test":"TestParent/child"}
+{"Action":"fail","Package":"example/a","Test":"TestParent"}
+{"Action":"fail","Package":"example/a"}"#;
+        let evidence = failure_evidence(output, &[], Path::new("/work"), true).unwrap();
+        assert_eq!(evidence.names.len(), 1);
+        assert!(evidence.names.contains("example/a::TestParent/child"));
+        assert_eq!(evidence.details.len(), 1);
+    }
+
+    #[test]
+    fn go_json_parent_assertion_and_repeated_failure_are_not_lost() {
+        let child = r#"{"Action":"run","Package":"example/a","Test":"TestParent"}
+{"Action":"run","Package":"example/a","Test":"TestParent/child"}
+{"Action":"output","Package":"example/a","Test":"TestParent/child","Output":"old child failure\n"}
+{"Action":"fail","Package":"example/a","Test":"TestParent/child"}
+{"Action":"fail","Package":"example/a","Test":"TestParent"}
+{"Action":"fail","Package":"example/a"}"#;
+        let parent = child.replace(
+            "{\"Action\":\"fail\",\"Package\":\"example/a\",\"Test\":\"TestParent\"}",
+            "{\"Action\":\"output\",\"Package\":\"example/a\",\"Test\":\"TestParent\",\"Output\":\"new parent assertion\\n\"}\n{\"Action\":\"fail\",\"Package\":\"example/a\",\"Test\":\"TestParent\"}",
+        );
+        for scoped in [false, true] {
+            let base = failure_evidence(child, &[], Path::new("/work"), scoped).unwrap();
+            let current = failure_evidence(&parent, &[], Path::new("/work"), scoped).unwrap();
+            assert!(!base.names.contains("example/a::TestParent"));
+            assert!(current.names.contains("example/a::TestParent"));
+            assert!(current.details.contains_key("example/a::TestParent"));
+        }
+        let repeated = r#"{"Action":"run","Package":"example/a","Test":"TestFlaky"}
+{"Action":"output","Package":"example/a","Test":"TestFlaky","Output":"first failed\n"}
+{"Action":"fail","Package":"example/a","Test":"TestFlaky"}
+{"Action":"fail","Package":"example/a"}
+{"Action":"run","Package":"example/a","Test":"TestFlaky"}
+{"Action":"pass","Package":"example/a","Test":"TestFlaky"}
+{"Action":"pass","Package":"example/a"}"#;
+        let evidence = failure_evidence(repeated, &[], Path::new("/work"), false).unwrap();
+        assert!(evidence.names.contains("example/a::TestFlaky"));
+        assert!(evidence.names.contains("package example/a"));
+        assert!(!evidence.details.contains_key("example/a::TestFlaky"));
+        assert!(failure_evidence(repeated, &[], Path::new("/work"), true).is_none());
     }
 
     #[test]

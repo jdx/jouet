@@ -1291,6 +1291,32 @@ SH
 	assert_equal "$(wc -l <"$GO_RUNS_FILE" | tr -d ' ')" 5
 }
 
+@test "--baseline compares Go JSON failure details" {
+	cat >check-go-json <<'SH'
+#!/bin/sh
+printf '%s\n' '{"Action":"run","Package":"example/a","Test":"TestBroken"}'
+printf '{"Action":"output","Package":"example/a","Test":"TestBroken","Output":"%s\\n"}\n' "$(cat detail.txt)"
+printf '%s\n' '{"Action":"fail","Package":"example/a","Test":"TestBroken"}'
+printf '%s\n' '{"Action":"fail","Package":"example/a"}'
+exit 1
+SH
+	chmod +x check-go-json
+	printf 'expected original\n' >detail.txt
+	git add check-go-json detail.txt
+	git commit -qm base
+	git checkout -qb work
+	printf 'unrelated\n' >change.txt
+	run --separate-stderr jouet test --baseline --cmd -- ./check-go-json
+	assert_success
+	assert_output --partial 'matching failure details'
+	assert_output --partial 'TestBroken'
+
+	printf 'different cause\n' >detail.txt
+	run --separate-stderr jouet test --baseline --cmd -- ./check-go-json
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+}
+
 @test "--baseline passes a run whose every failure also fails at the merge base" {
 	# The test file is rewritten within a second to the same size, which
 	# Python's bytecode cache cannot tell from the old one.
@@ -1923,6 +1949,35 @@ SCRIPT
 	PATH="$PWD/bin:$PATH" JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- ./check.sh
 	assert_failure 1
 	refute_output --partial 'also fails at main'
+}
+
+@test "Go JSON baseline reruns the failing test with its package and JSON output" {
+	cat >go.mod <<-'EOF'
+		module example.com/shop
+
+		go 1.22
+	EOF
+	cat >fail.json <<-'EOF'
+		{"Action":"run","Package":"example.com/shop/other","Test":"TestBroken"}
+		{"Action":"output","Package":"example.com/shop/other","Test":"TestBroken","Output":"other_test.go:5: boom\n"}
+		{"Action":"fail","Package":"example.com/shop/other","Test":"TestBroken"}
+		{"Action":"fail","Package":"example.com/shop/other"}
+	EOF
+	printf '#!/bin/sh\necho run >>"%s/checks"\ncat "%s/fail.json"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >check.sh
+	mkdir -p bin
+	printf '#!/bin/sh\necho "$*" >>"%s/go"\ncat "%s/fail.json"\nexit 1\n' "$BATS_TEST_TMPDIR" "$PWD" >bin/go
+	chmod +x check.sh bin/go
+	git add go.mod fail.json check.sh
+	git commit -q -m base
+	git checkout -q -b work
+	echo change >notes.md
+	git add notes.md
+	git commit -q -m change
+	PATH="$PWD/bin:$PATH" JOUET_TEST_BASELINE_CMD_UNDER_MS=0 run --separate-stderr jouet test --cmd -- ./check.sh
+	assert_success
+	assert_output --partial 'also fails at main'
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/go")" 'test -json -run ^(TestBroken)$ example.com/shop/other'
+	assert_equal "$(grep -c . "$BATS_TEST_TMPDIR/checks")" 1
 }
 
 @test "a large passing run names the tests the change adds, and only those" {

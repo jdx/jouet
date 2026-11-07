@@ -98,6 +98,8 @@ struct GoOutput<'a> {
     package: Option<std::borrow::Cow<'a, str>>,
     #[serde(rename = "Output", borrow)]
     output: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "Test", borrow)]
+    test: Option<std::borrow::Cow<'a, str>>,
 }
 
 /// Whether the output says a run selected no test: TAP's empty plan,
@@ -419,6 +421,7 @@ fn known_runners(lines: &[String], parsed: &mut Parsed) {
     rustfmt(lines, parsed);
     tsc(lines, parsed);
     go(lines, parsed);
+    go_json(lines, parsed);
     pytest(lines, parsed);
     unittest(lines, parsed);
     rspec(lines, parsed);
@@ -451,6 +454,12 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
                 || !f.lines.iter().any(|line| PLAYWRIGHT_TIMEOUT.is_match(line))
         })
         .filter(|f| f.lines.iter().any(|line| !line.trim().is_empty()))
+        // Package-level output is useful to diagnose a crash or build error,
+        // but cannot prove its cause is identical at the merge base.
+        .filter(|f| {
+            !serde_json::from_str::<GoOutput<'_>>(&lines[f.at])
+                .is_ok_and(|event| event.action.as_deref() == Some("fail") && event.test.is_none())
+        })
         .map(|f| {
             let binary = LIBTEST_BLOCK
                 .is_match(&lines[f.at])
@@ -469,7 +478,15 @@ pub(crate) fn failure_details(text: &str, formats: &[Format]) -> Vec<FailureDeta
                         })
                 })
                 .flatten();
-            let qualified = if GO_RESULT.is_match(&lines[f.at]) {
+            let go_event = serde_json::from_str::<GoOutput<'_>>(&lines[f.at]).ok();
+            let qualified = if let Some(event) =
+                go_event.filter(|event| event.action.as_deref() == Some("fail"))
+            {
+                event
+                    .package
+                    .filter(|package| !package.is_empty())
+                    .and_then(|package| event.test.map(|name| format!("{package}::{name}")))
+            } else if GO_RESULT.is_match(&lines[f.at]) {
                 lines[f.at + 1..]
                     .iter()
                     .find_map(|line| GO_PACKAGE.captures(line))
@@ -1010,6 +1027,143 @@ fn go(lines: &[String], out: &mut Parsed) {
     }
 }
 
+/// Parse `go test -json` by package and test: output from parallel tests can
+/// interleave, so each failure only receives its own structured output events.
+fn go_json(lines: &[String], out: &mut Parsed) {
+    #[derive(Default)]
+    struct Test {
+        started: bool,
+        finished: bool,
+        ambiguous: bool,
+        output: Vec<String>,
+        result: Option<(usize, String)>,
+    }
+    #[derive(Default)]
+    struct Package {
+        end: Option<(usize, String)>,
+        duplicate: bool,
+        output: Vec<String>,
+    }
+    let mut tests = std::collections::BTreeMap::<(String, String), Test>::new();
+    let mut packages = std::collections::BTreeMap::<String, Package>::new();
+    for (at, line) in lines.iter().enumerate() {
+        if !line.starts_with('{') || !line.contains("\"Action\"") {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<GoOutput<'_>>(line) else {
+            continue;
+        };
+        let (Some(package), Some(action)) = (event.package, event.action) else {
+            continue;
+        };
+        if package.is_empty() {
+            continue;
+        }
+        let Some(name) = event.test else {
+            let package = packages.entry(package.into_owned()).or_default();
+            if action == "output" {
+                if let Some(output) = event.output {
+                    package
+                        .output
+                        .extend(clean(&output).into_iter().filter(|line| !line.is_empty()));
+                }
+            } else if matches!(action.as_ref(), "pass" | "fail" | "skip") {
+                package.duplicate |= package.end.is_some();
+                package.end = Some((at, action.into_owned()));
+            }
+            continue;
+        };
+        if name.is_empty()
+            || !matches!(action.as_ref(), "run" | "output" | "pass" | "fail" | "skip")
+        {
+            continue;
+        }
+        let test = tests
+            .entry((package.into_owned(), name.into_owned()))
+            .or_default();
+        match action.as_ref() {
+            "run" => {
+                test.ambiguous |= test.started || test.finished;
+                test.started = true;
+            }
+            "output" => {
+                test.ambiguous |= !test.started || test.finished;
+                if let Some(output) = event.output {
+                    test.output
+                        .extend(clean(&output).into_iter().filter(|line| {
+                            !line.is_empty() && !GO_RUN.is_match(line) && !GO_RESULT.is_match(line)
+                        }));
+                }
+            }
+            result => {
+                test.ambiguous |= !test.started || test.finished;
+                test.finished = true;
+                let already_failed = test
+                    .result
+                    .as_ref()
+                    .is_some_and(|(_, result)| result == "fail");
+                if !already_failed {
+                    if result != "fail" {
+                        test.output.clear();
+                    }
+                    test.result = Some((at, result.to_string()));
+                }
+            }
+        }
+    }
+    let mut failed_packages = std::collections::BTreeSet::new();
+    let mut incomplete_packages = std::collections::BTreeSet::new();
+    for ((package, name), test) in tests {
+        let Some((at, result)) = test.result else {
+            if test.started {
+                incomplete_packages.insert(package);
+            }
+            continue;
+        };
+        if !name.contains('/') {
+            match result.as_str() {
+                "pass" => out.count(1, 0, 0),
+                "fail" => out.count(0, 1, 0),
+                "skip" => out.count(0, 0, 1),
+                _ => {}
+            }
+        }
+        if result == "fail" {
+            failed_packages.insert(package.clone());
+            if test.ambiguous {
+                incomplete_packages.insert(package.clone());
+            }
+            let complete = packages.get(&package).is_some_and(|package| {
+                package
+                    .end
+                    .as_ref()
+                    .is_some_and(|(end, result)| *end > at && result == "fail")
+                    && !package.duplicate
+            });
+            out.push(
+                at,
+                format!("{package}::{name}"),
+                if test.ambiguous || !complete {
+                    Vec::new()
+                } else {
+                    test.output
+                },
+            );
+        }
+    }
+    for (package, data) in packages {
+        let Some((at, result)) = data.end else {
+            continue;
+        };
+        if (result == "fail" && !failed_packages.contains(&package))
+            || incomplete_packages.contains(&package)
+        {
+            out.count(0, 1, 0);
+            out.push(at, format!("package {package}"), data.output);
+        }
+    }
+}
+
 /// Associate Go test failures with their package before comparing two runs.
 /// Go prints the package after its test output, and the same test name can
 /// occur in more than one package.
@@ -1019,7 +1173,19 @@ pub(crate) fn go_failure_packages(
     let mut pending = Vec::new();
     let mut names = std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     for line in clean(text) {
-        if let Some(c) = GO_RESULT.captures(&line) {
+        if line.starts_with('{')
+            && line.contains("\"Action\"")
+            && let Ok(event) = serde_json::from_str::<GoOutput<'_>>(&line)
+            && event.action.as_deref() == Some("fail")
+            && let (Some(package), Some(name)) = (event.package, event.test)
+            && !package.is_empty()
+            && !name.is_empty()
+        {
+            names
+                .entry(format!("{package}::{name}"))
+                .or_default()
+                .insert(format!("{package}::{name}"));
+        } else if let Some(c) = GO_RESULT.captures(&line) {
             if &c[2] == "FAIL" {
                 pending.push(c[3].to_string());
             }
