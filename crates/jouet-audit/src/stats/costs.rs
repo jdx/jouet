@@ -292,7 +292,7 @@ fn edit_cost(
 pub fn net(estimates: &[Estimate], costs: &[Cost]) -> Option<i64> {
     if estimates
         .iter()
-        .any(|e| e.kind == Kind::CiWait && e.input_tokens.is_none())
+        .any(|e| !e.outside_net && e.kind == Kind::CiWait && e.input_tokens.is_none())
         || costs
             .iter()
             .any(|c| !c.outside_net && c.kind.needed() && c.input_tokens.is_none())

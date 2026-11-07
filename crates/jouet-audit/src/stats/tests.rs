@@ -606,6 +606,22 @@ fn costs_are_priced_like_savings_and_the_net_may_be_negative() {
 }
 
 #[test]
+fn ci_wait_without_a_baseline_does_not_hide_another_harness_net() {
+    let measured = measure(&ledger().entries, &StatsFilter::default());
+    let without = estimate(&measured, &[]);
+    let ci = without.iter().find(|e| e.kind == Kind::CiWait).unwrap();
+    assert!(ci.outside_net);
+    assert!(ci.refused.as_deref().unwrap().contains("no claude history"));
+    assert_eq!(net(&without, &[]), Some(0));
+
+    let with = estimate(&measured, &[priced("claude", Vec::new())]);
+    let ci = with.iter().find(|e| e.kind == Kind::CiWait).unwrap();
+    assert!(!ci.outside_net);
+    assert!(ci.refused.as_deref().unwrap().contains("linked, avoidable"));
+    assert_eq!(net(&with, &[]), None);
+}
+
+#[test]
 fn an_unpriced_harness_leaves_the_net_unknown_and_warnings_are_counted_not_priced() {
     let m = measure(&ledger().entries, &StatsFilter::default());
     let baselines = [priced("claude", Vec::new())];

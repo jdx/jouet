@@ -600,7 +600,7 @@ fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
     let (fix, why, saving) = match category {
         Category::CiPolling => (
             "jouet wait ci",
-            "can wait until checks settle and show why any failed (built-in rule `sleep-poll`)",
+            "can wait for checks and show why one failed; use --all to wait for every check (built-in rule `sleep-poll`)",
             None,
         ),
         Category::ProcessPolling => (

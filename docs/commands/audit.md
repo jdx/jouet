@@ -71,7 +71,7 @@ Codex: 947 sessions (965 transcripts with subagents), 216,659 requests, 221,424 
   … 8 more categories (--top 0 lists all)
 
   what would cut it:
-  - CI polling (10.0%): jouet wait ci — can wait until checks settle and show why any failed (built-in rule `sleep-poll`)
+  - CI polling (10.0%): jouet wait ci — can wait for checks and show why one failed; use --all to wait for every check (built-in rule `sleep-poll`)
     top shapes:
       gh run view <n> --json <v> --jq <s> (896 calls, 110.1M tokens)
       gh run view <n> --repo <path> --json <v> --jq <s> (621 calls, 71.5M tokens)
