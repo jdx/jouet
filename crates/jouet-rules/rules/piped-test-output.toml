@@ -53,6 +53,7 @@ fires = [
   # `jouet test` itself cut with head or tail: warned once, never denied.
   { command = "jouet test --cmd -- mise run test:e2e test_a 2>&1 | tail -4 && cargo clippy", session = "s1", fired = 0, action = "warn" },
   { command = "cd app && jouet test --affected | head -20", action = "warn" },
+  { command = "jouet test --cmd -- cargo test 2>&1 | tee t.log | tail -3", action = "warn" },
   # No session to count in (or no ledger): it only warns.
   { command = "cargo build -q 2>&1 | tail -5", fired = 3, action = "warn" },
   { command = "cargo test | tail", session = "s1", action = "warn" },

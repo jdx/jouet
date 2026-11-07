@@ -269,19 +269,24 @@ local rule: JouetRule = {
 				-- failure is longer than a pass: the cut can drop the line naming
 				-- what failed, and its exit code, so a `&&` after it goes on.
 				-- That is said once, as a warning: most such runs pass.
-				local next_step = call.commands[i + 1]
-				if
-					command.op == "pipe"
-					and next_step
-					and not next_step.nested
-					and (next_step.program == "tail" or next_step.program == "head")
-				then
+				-- Down its pipeline, past `tee` or another filter.
+				local cut_by: JouetCommand? = nil
+				local j = i
+				while call.commands[j].op == "pipe" and call.commands[j + 1] and not call.commands[j + 1].nested do
+					j += 1
+					local step = call.commands[j]
+					if step.program == "tail" or step.program == "head" then
+						cut_by = step
+						break
+					end
+				end
+				if cut_by then
 					local fired = if call.session
 						then jouet.session.fired("piped-test-output", call.session, call.agent)
 						else nil
 					if not fired or fired == 0 then
 						return jouet.warn(
-							`\`jouet test\` keeps a passing run to one line and a failure within --budget bytes (default 4000); {next_step.program} can cut the line naming the failure, and the pipe hides its exit code from \`&&\`. Run it without the pipe, with \`--budget BYTES\` for a shorter failure.`
+							`\`jouet test\` keeps a passing run to one line and a failure within --budget bytes (default 4000); {cut_by.program} can cut the line naming the failure, and the pipe hides its exit code from \`&&\`. Run it without the pipe, with \`--budget BYTES\` for a shorter failure.`
 						)
 					end
 				end
