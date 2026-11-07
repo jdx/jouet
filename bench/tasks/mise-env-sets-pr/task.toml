@@ -51,6 +51,8 @@ commit = "cd57a6b40747c09f984e4dff27cb5fbe805096b3"
 # page, among them) into the run's home.
 [tools]
 mise = "mise"
+cargo = "~/.cargo/bin/cargo"
+rustc = "~/.cargo/bin/rustc"
 
 [env]
 RUSTUP_HOME = "~/.rustup"
