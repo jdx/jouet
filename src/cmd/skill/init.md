@@ -68,7 +68,14 @@ what is already there; add to it rather than rewriting it.
 - `[tools]`: the tools the checks need, at the versions the project already
   requires (its CI workflow, `go.mod`'s `toolchain`, `rust-toolchain.toml`,
   `.nvmrc`, `packageManager`, `.python-version`), never just the newest. Skip a
-  tool the project expects from the system, such as a C compiler.
+  tool the project expects from the system, such as a C compiler. A runtime
+  mise installs starts without the packages this machine already has for the
+  project (a virtualenv, site-packages, global gems), so run a check before
+  you add one and again after, through `mise run` or `mise x --` so it uses
+  the pin: if it passed before and now cannot import or find something, your
+  pin caused it. Leave that runtime out, or give it the packages through mise
+  (`_.python.venv` in `[env]` creates a virtualenv; a task still has to
+  install into it), and never record the check as broken.
 - `[env]`: only what a check needs to run here, such as a variable CI sets,
   and only once a run shows it is needed. Never secrets or tokens: those come
   from the user's environment or fnox.

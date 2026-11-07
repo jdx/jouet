@@ -77,10 +77,95 @@ pub(crate) struct Run {
     /// them, when it named each one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<String>,
+    /// How the runner's test names hold one another, when jouet knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nesting: Option<Nesting>,
+}
+
+/// How a runner's test names hold the ones below them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum Nesting {
+    /// A directory holds its files, a file its `::` tests:
+    /// `tests` holds `tests/a.py::t`.
+    Pytest,
+    /// A dotted label holds the labels below it: `admin_views` holds
+    /// `admin_views.tests.T`.
+    Django,
+}
+
+impl Nesting {
+    /// The nesting of the runner `argv` starts, through `python -m`.
+    fn of(argv: &[String]) -> Option<Self> {
+        let mut words: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let program = words.first()?.rsplit('/').next()?;
+        let python = program.starts_with("python");
+        // The interpreter's own flags (`-I`, `-W error`) come before `-m` or
+        // the script.
+        if python {
+            let mut end = 1;
+            while let Some(word) = words.get(end).filter(|w| w.starts_with('-') && **w != "-m") {
+                if *word == "-c" {
+                    return None;
+                }
+                end += if matches!(*word, "-W" | "-X" | "--check-hash-based-pycs") {
+                    2
+                } else {
+                    1
+                };
+            }
+            words.drain(1..end.min(words.len()));
+        }
+        match words.as_slice() {
+            _ if matches!(program, "pytest" | "py.test") => Some(Self::Pytest),
+            [_, "-m", "pytest", ..] if python => Some(Self::Pytest),
+            [_, script, ..] if python && script.rsplit('/').next() == Some("runtests.py") => {
+                Some(Self::Django)
+            }
+            [_, script, "test", ..] if python && script.ends_with("manage.py") => {
+                Some(Self::Django)
+            }
+            [_, "test", ..] if program == "django-admin" => Some(Self::Django),
+            _ => None,
+        }
+    }
+
+    /// The one mise task `command` runs, anywhere in it or through `jouet
+    /// test --cmd --`.
+    fn task(command: &str) -> Option<String> {
+        let runs = crate::wind::tasks::task_runs;
+        let mut names = runs(command);
+        if names.is_empty() {
+            names = runs(&runner_argv(command).join(" "));
+        }
+        let [name] = names.try_into().ok()?;
+        Some(name)
+    }
+
+    /// The nesting of the runner a mise task's last command starts.
+    fn of_task(tasks: &[crate::wind::tasks::Existing], name: &str) -> Option<Self> {
+        let script = tasks.iter().find(|t| t.name == name)?.run.last()?;
+        let parsed = jouet_rules::shell::parse(script);
+        Self::of(parsed.commands.last()?.argv())
+    }
+
+    /// Whether the name `ran` selects `wanted` and the tests beside it.
+    fn holds(self, ran: &str, wanted: &str) -> bool {
+        let Some(rest) = wanted.strip_prefix(ran) else {
+            return false;
+        };
+        match self {
+            Self::Pytest => {
+                rest.starts_with("::")
+                    || (rest.starts_with('/') && !rest.split('/').any(|part| part == ".."))
+            }
+            Self::Django => rest.starts_with('.') && !wanted.contains('/'),
+        }
+    }
 }
 
 impl Run {
     fn new(record: Record, tree: Option<&str>) -> Self {
+        let nesting = Nesting::of(&runner_argv(&record.command));
         Self {
             command: record.command,
             exit_code: record.exit_code,
@@ -90,6 +175,7 @@ impl Run {
             environment: None,
             unrelated: None,
             tests: Vec::new(),
+            nesting,
         }
     }
 
@@ -204,7 +290,21 @@ impl Run {
         let (Some(ran), Some(wanted)) = (words(ran), words(wanted)) else {
             return false;
         };
-        !ran.is_empty() && ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w))
+        if !same_runner(&self.command, &failed.command) || ran.is_empty() {
+            return false;
+        }
+        if ran.first() == wanted.first() && wanted.iter().all(|w| ran.contains(w)) {
+            return true;
+        }
+        // A name above each failed one, where the runner is known to run
+        // the tests below a name.
+        let Some(nesting) = self.nesting.filter(|n| failed.nesting == Some(*n)) else {
+            return false;
+        };
+        !wanted.is_empty()
+            && wanted
+                .iter()
+                .all(|w| ran.iter().any(|r| r == w || nesting.holds(r, w)))
     }
 }
 
@@ -1099,10 +1199,28 @@ impl State {
         records: impl IntoIterator<Item = Record>,
         tree: Option<&str>,
     ) {
+        // The runner under `mise run TASK`, read from the tasks only for a
+        // partial run, the kind a name above can cover.
+        let mut tasks = None;
+        let mut task_nesting = |command: &str| {
+            let name = Nesting::task(command)?;
+            let tasks = tasks
+                .get_or_insert_with(|| crate::mise::tasks(Path::new(root)).unwrap_or_default());
+            Nesting::of_task(tasks, &name)
+        };
+        let records: Vec<(Record, Option<Nesting>)> = records
+            .into_iter()
+            .map(|record| {
+                let nesting = (!record.full)
+                    .then(|| task_nesting(&record.command))
+                    .flatten();
+                (record, nesting)
+            })
+            .collect();
         self.trees
             .entry(root.to_string())
             .or_default()
-            .record(records, tree);
+            .record_nested(records, tree);
     }
 
     /// Notes who is running something in the work tree at `root`: the
@@ -1406,14 +1524,26 @@ pub(crate) fn root_of(dir: &Path) -> String {
 }
 
 impl Checks {
-    /// Adds runs that ran against `tree`.
+    /// Adds runs that ran against `tree`, through no task.
+    #[cfg(test)]
     pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>, tree: Option<&str>) {
-        for record in records {
+        self.record_nested(records.into_iter().map(|r| (r, None)), tree);
+    }
+
+    /// Adds runs that ran against `tree`, each with the nesting of a runner
+    /// its command reaches through a task.
+    fn record_nested(
+        &mut self,
+        records: impl IntoIterator<Item = (Record, Option<Nesting>)>,
+        tree: Option<&str>,
+    ) {
+        for (record, nesting) in records {
             // A run is something new to judge the next stop by.
             self.raised = None;
             self.last_run = Some(jouet_output::time::now());
             let kind = record.kind;
             let mut run = Run::new(record, tree);
+            run.nesting = run.nesting.or(nesting);
             let failures = self.failures.entry(kind).or_default();
             // `jouet test` records its own run, and the harness's hook the same
             // call after it: the same failure at the same tree keeps what
@@ -2785,6 +2915,109 @@ mod tests {
         state.record([test("pytest -k x", 1, "-k x")], Some("t1"));
         state.record([test("pytest -k not x", 0, "-k not x")], Some("t1"));
         assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_pass_of_a_label_or_path_above_a_name_clears_its_failure() {
+        let django = |names: &str, code| {
+            test(
+                &format!("python runtests.py {names}"),
+                code,
+                &format!("runtests.py {names}"),
+            )
+        };
+        let mut state = Checks::default();
+        state.record([test("mise run test", 0, "full")], Some("t1"));
+        state.record(
+            [django(
+                "delete admin_views.tests.AdminViewDeletedObjectsTest",
+                1,
+            )],
+            Some("t1"),
+        );
+        // A sibling label, or one that only starts the same, does not.
+        state.record(
+            [django("delete admin_views.forms admin_view", 0)],
+            Some("t1"),
+        );
+        assert!(reason(&state, "t1").is_some());
+        state.record([django("delete admin_views", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+
+        let pytest = |name: &str, code| test(&format!("python3 -m pytest {name}"), code, name);
+        state.record([pytest("tests/a.py::t", 1)], Some("t1"));
+        state.record([pytest("tests/a.py", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        state.record([pytest("tests/b.py", 1)], Some("t1"));
+        state.record([pytest("tests", 0)], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+        // A directory beside the file, a path out of it, or another runner
+        // that only shares the program, does not.
+        state.record([pytest("a.py::t", 1)], Some("t1"));
+        state.record([pytest("a", 0)], Some("t1"));
+        state.record([test("python3 -m unittest a.py", 0, "a.py")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        assert!(!Nesting::Pytest.holds("tests", "tests/../other/a.py"));
+        assert!(!Nesting::Django.holds("a", "a/b"));
+
+        // Nor does a runner jouet does not know nests, such as Go's packages.
+        let mut state = Checks::default();
+        state.record([test("go test ./a/b", 1, "./a/b")], Some("t1"));
+        state.record([test("go test ./a", 0, "./a")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+    }
+
+    #[test]
+    fn a_mise_task_nests_as_the_runner_it_starts() {
+        use crate::wind::tasks::Existing;
+        let task = |name: &str, run: &str| Existing {
+            name: name.into(),
+            run: vec![run.into()],
+        };
+        let tasks = [
+            task("test:unit", "cd tests && python runtests.py"),
+            task("test:py", "mise x -- pytest -q"),
+            task("test:go", "go test"),
+        ];
+        assert_eq!(Nesting::of_task(&tasks, "test:unit"), Some(Nesting::Django));
+        assert_eq!(Nesting::of_task(&tasks, "test:py"), Some(Nesting::Pytest));
+        assert_eq!(Nesting::of_task(&tasks, "test:go"), None);
+        assert_eq!(Nesting::of_task(&tasks, "missing"), None);
+        let argv = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+        assert_eq!(Nesting::of(&argv("py.test tests")), Some(Nesting::Pytest));
+        assert_eq!(
+            Nesting::of(&argv("python manage.py test a")),
+            Some(Nesting::Django)
+        );
+        assert_eq!(Nesting::of(&argv("python -m unittest a")), None);
+        assert_eq!(
+            Nesting::of(&argv("python3 -I -u -m pytest a")),
+            Some(Nesting::Pytest)
+        );
+        assert_eq!(
+            Nesting::of(&argv("python -I runtests.py a")),
+            Some(Nesting::Django)
+        );
+        assert_eq!(Nesting::of(&argv("python -c x -m pytest")), None);
+        assert_eq!(
+            Nesting::of(&argv("python -W error -X dev -m pytest a")),
+            Some(Nesting::Pytest)
+        );
+        assert_eq!(Nesting::of(&argv("python -W")), None);
+        assert_eq!(
+            Nesting::task("cd tests && mise run test:unit a").as_deref(),
+            Some("test:unit")
+        );
+        assert_eq!(
+            Nesting::task("jouet test --cmd -- mise run test:unit admin_views").as_deref(),
+            Some("test:unit")
+        );
+        assert_eq!(
+            Nesting::task("mise run test:unit a").as_deref(),
+            Some("test:unit")
+        );
+        assert_eq!(Nesting::task("mise run a ::: b"), None);
+        assert_eq!(Nesting::task("pytest tests"), None);
     }
 
     #[test]

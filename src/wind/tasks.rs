@@ -420,7 +420,7 @@ pub(crate) struct Recorded {
 
 /// The task names a command runs through mise: `mise run NAME`, `mise r
 /// NAME`, `mise run A ::: B`.
-fn task_runs(command: &str) -> Vec<String> {
+pub(crate) fn task_runs(command: &str) -> Vec<String> {
     let mut names = Vec::new();
     for c in shell::parse(command).all() {
         if c.program() != Some("mise") {

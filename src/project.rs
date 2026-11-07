@@ -53,12 +53,27 @@ pub(crate) struct Checks {
 
 impl Checks {
     /// Why `command` fails here before any change, when it is a broken
-    /// check: as written, or run through `jouet test --cmd --`.
+    /// check: as written, or run through `jouet test --cmd --`. A `NAME` in
+    /// the check stands for the one or more tests a run names there.
     pub(crate) fn broken(&self, command: &str) -> Option<&str> {
-        let ran = through_jouet_test(command);
+        let ran: Vec<&str> = through_jouet_test(command).split_whitespace().collect();
         self.broken
             .iter()
-            .find(|(check, _)| through_jouet_test(check) == ran)
+            .find(|(check, _)| {
+                let check: Vec<&str> = through_jouet_test(check).split_whitespace().collect();
+                match check.iter().position(|word| *word == "NAME") {
+                    Some(at) => {
+                        let after = &check[at + 1..];
+                        ran.len() > check.len() - 1
+                            && ran.starts_with(&check[..at])
+                            && ran.ends_with(after)
+                            && !ran[at..ran.len() - after.len()]
+                                .iter()
+                                .any(|word| word.starts_with('-'))
+                    }
+                    None => check == ran,
+                }
+            })
             .map(|(_, why)| why.as_str())
     }
 }
@@ -235,6 +250,25 @@ mod tests {
         );
         assert_eq!(checks.broken("mise run lint:go"), None);
         assert_eq!(checks.broken("mise run test"), None);
+    }
+
+    #[test]
+    fn a_broken_check_with_name_matches_the_tests_a_run_names() {
+        let project: Project = toml::from_str(
+            "[checks.broken]\n\"jouet test --cmd -- mise run test:unit NAME\" = \"asgiref is not installed\"\n",
+        )
+        .unwrap();
+        let checks = &project.checks;
+        let why = Some("asgiref is not installed");
+        assert_eq!(checks.broken("mise run test:unit forms_tests"), why);
+        assert_eq!(
+            checks.broken("jouet test --cmd -- mise run test:unit forms_tests admin_views.tests"),
+            why
+        );
+        // NAME is at least one test, and never an option that changes the run.
+        assert_eq!(checks.broken("mise run test:unit"), None);
+        assert_eq!(checks.broken("mise run test:unit --parallel 1 a"), None);
+        assert_eq!(checks.broken("mise run test:e2e a"), None);
     }
 
     #[test]
