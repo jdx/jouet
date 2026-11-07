@@ -43,6 +43,8 @@ if not ok:
     ok, out = run(*suite)
     if ok:
         UNVERIFIED.append("Rust suite passed only after a failed first attempt:\n" + first_failure)
+    else:
+        out = "first attempt:\n" + first_failure + "\nretry:\n" + out
 expect(ok, f"`cargo test --all --all-features` fails:\n{out}")
 
 hidden = Path(__file__).parent / "hidden"
