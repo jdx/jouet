@@ -430,6 +430,10 @@ pub struct Call {
     pub cwd: Option<String>,
     /// The agent session making the call, from the payload's `session_id`.
     pub session: Option<String>,
+    /// The subagent making the call within that session, from the
+    /// payload's `agent_id` (Claude Code's Agent tool); None for the
+    /// session's own agent.
+    pub agent: Option<String>,
     /// The command's exit code, for post-tool-use.
     pub exit_code: Option<i32>,
     /// The tool's input, as the harness sent it.
@@ -495,6 +499,7 @@ impl Call {
                 .find_map(|key| text(payload.get("tool_input").and_then(|i| i.get(*key)))),
             cwd: text(payload.get("cwd")),
             session: text(payload.get("session_id")),
+            agent: text(payload.get("agent_id")).filter(|id| !id.is_empty()),
             exit_code,
             input: payload.get("tool_input").cloned(),
             seen: None,
@@ -1904,6 +1909,7 @@ fn call_table(lua: &Lua, call: &Call, matched: &[bool]) -> mlua::Result<Table> {
     t.set("path", call.path.as_deref())?;
     t.set("cwd", call.cwd.as_deref())?;
     t.set("session", call.session.as_deref())?;
+    t.set("agent", call.agent.as_deref())?;
     t.set("exit_code", call.exit_code)?;
     let commands = match &call.command {
         Some(script) => commands_table(lua, script, call.exit_code, matched)?,

@@ -1007,6 +1007,14 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 
+	# So is a subagent of the warned session, which was never shown the
+	# warning; once warned itself, it is denied.
+	for verdict in warn deny; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.agent_id = "a7"')"
+		run jq -r '.hookSpecificOutput.permissionDecision // "warn"' <<<"$output"
+		assert_output "$verdict"
+	done
+
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
 	assert_output ""
 
