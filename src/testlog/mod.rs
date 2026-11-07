@@ -343,6 +343,7 @@ regexes! {
     VITEST_TESTS = r"^\s*Tests\s+(\d+ .*)$";
     VITEST_RUN = r"^\s*RUN\s+v\d";
     VITEST_UNHANDLED = r"^Vitest caught (\d+) unhandled errors? during the test run\.$";
+    VITEST_UNHANDLED_SECTION = r"^\s*⎯+ Unhandled [A-Za-z][A-Za-z ]* ⎯+\s*$";
     VITEST_SOURCE_ERROR = r"^\s*⎯+ Unhandled Source Error ⎯+\s*$";
     VITEST_TYPE_ERROR = r"^TypeCheckError: .+$";
     VITEST_LOCATION = r"^\s*❯ (.+:\d+:\d+)\s*$";
@@ -1415,7 +1416,7 @@ fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
         if counts.is_empty() {
             if run
                 .iter()
-                .any(|line| line.contains("Unhandled Errors") || VITEST_SOURCE_ERROR.is_match(line))
+                .any(|line| VITEST_UNHANDLED_SECTION.is_match(line))
             {
                 vitest_unhandled_fallback(lines, out);
                 return;
@@ -1464,7 +1465,7 @@ fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
 /// Keep unhandled output visible even when it cannot be named individually.
 fn vitest_unhandled_fallback(lines: &[String], out: &mut Parsed) {
     if let Some(at) = lines.iter().position(|line| {
-        line.contains("Unhandled Errors")
+        VITEST_UNHANDLED_SECTION.is_match(line)
             || VITEST_UNHANDLED.is_match(line)
             || VITEST_SOURCE_ERROR.is_match(line)
     }) {
@@ -1480,7 +1481,9 @@ fn vitest_unhandled_fallback(lines: &[String], out: &mut Parsed) {
 pub(crate) fn vitest_has_unhandled_errors(text: &str) -> bool {
     let lines = clean(text);
     lines.iter().any(|line| VITEST_RUN.is_match(line))
-        && lines.iter().any(|line| VITEST_UNHANDLED.is_match(line))
+        && lines
+            .iter()
+            .any(|line| VITEST_UNHANDLED.is_match(line) || VITEST_UNHANDLED_SECTION.is_match(line))
 }
 
 fn playwright(lines: &[String], out: &mut Parsed) {

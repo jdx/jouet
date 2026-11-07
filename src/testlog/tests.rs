@@ -1417,6 +1417,15 @@ Vitest caught 1 unhandled error during the test run.\n\
             .iter()
             .all(|name| !name.contains("unhandled"))
     );
+    // A truncated log may contain the error section but not its count.
+    let truncated = output.replace("Vitest caught 1 unhandled error during the test run.\n", "");
+    let d = digest(&truncated, true, DEFAULT_BUDGET);
+    assert!(
+        d.failures
+            .iter()
+            .any(|f| f.name.contains("Vitest unhandled errors"))
+    );
+    assert!(vitest_has_unhandled_errors(&truncated));
 }
 
 #[test]
